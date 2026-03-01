@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "0.2.0"
+version = "0.2.1"
 description = "Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required."
 authors = [
   { name="ShuKurenais"}
