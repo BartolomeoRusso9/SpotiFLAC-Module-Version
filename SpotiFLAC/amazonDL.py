@@ -22,6 +22,11 @@ class ProgressCallback:
 def sanitize_filename(value: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", value).strip()
 
+def get_first_artist(artist_str: str) -> str:
+    if not artist_str:
+        return "Unknown"
+    return artist_str.split(",")[0].strip()
+
 def get_ffmpeg_path() -> str:
     return "ffmpeg"
 
@@ -39,7 +44,7 @@ class AmazonDownloader:
         self.session = requests.Session()
         self.session.timeout = timeout
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
         })
         self.progress_callback: Callable[[int, int], None] = ProgressCallback()
 
@@ -97,7 +102,7 @@ class AmazonDownloader:
             raise Exception(f"Failed to extract ASIN from: {amazon_url}")
         asin = asin_match.group(1)
 
-        api_url = f"https://amazon.afkarxyz.fun/api/track/{asin}"
+        api_url = f"https://amzn.afkarxyz.fun/api/track/{asin}"
         print(f"Fetching from Amazon API (ASIN: {asin})...")
         
         resp = self.session.get(api_url)
@@ -166,26 +171,27 @@ class AmazonDownloader:
                         spotify_album_artist: str, spotify_release_date: str, spotify_cover_url: str, 
                         spotify_track_number: int, spotify_disc_number: int, spotify_total_tracks: int, 
                         embed_max_quality_cover: bool, spotify_total_discs: int, spotify_copyright: str, 
-                        spotify_publisher: str, spotify_url: str, use_album_track_number: bool = False):
+                        spotify_publisher: str, spotify_url: str, use_album_track_number: bool = False,
+                        use_first_artist_only: bool = False):
         
         os.makedirs(output_dir, exist_ok=True)
-
         print(f"Using Amazon URL: {amazon_url}")
-        
-        file_path = self.download_from_afkar_xyz(amazon_url, output_dir)
-        
+
+        # 1. Prepara os nomes otimizados
+        artist_to_use = get_first_artist(spotify_artist_name) if use_first_artist_only else spotify_artist_name
+        album_artist_to_use = get_first_artist(spotify_album_artist) if use_first_artist_only else spotify_album_artist
+
         safe_title = sanitize_filename(spotify_track_name)
-        safe_artist = sanitize_filename(spotify_artist_name)
+        safe_artist = sanitize_filename(artist_to_use)
         safe_album = sanitize_filename(spotify_album_name)
-        safe_album_artist = sanitize_filename(spotify_album_artist)
+        safe_album_artist = sanitize_filename(album_artist_to_use)
         year = spotify_release_date[:4] if len(spotify_release_date) >= 4 else ""
 
         track_num_for_filename = position
         if use_album_track_number and safe_int(spotify_track_number) > 0:
             track_num_for_filename = safe_int(spotify_track_number)
 
-        ext = os.path.splitext(file_path)[1] or ".flac"
-        
+        # 2. Gera o nome do arquivo ESPERADO ANTES de baixar (Idêntico ao Go)
         if "{" in filename_format:
             new_name = (filename_format.replace("{title}", safe_title)
                         .replace("{artist}", safe_artist)
@@ -211,6 +217,24 @@ class AmazonDownloader:
                 new_name = f"{track_num_for_filename:02d}. {new_name}"
 
         new_name = sanitize_filename(new_name)
+        
+        # Checa se o arquivo FLAC ou M4A já existe no disco antes de acionar a API
+        expected_path_flac = os.path.join(output_dir, new_name + ".flac")
+        expected_path_m4a = os.path.join(output_dir, new_name + ".m4a")
+
+        if os.path.exists(expected_path_flac) and os.path.getsize(expected_path_flac) > 0:
+            size_mb = os.path.getsize(expected_path_flac) / (1024 * 1024)
+            print(f"File already exists: {expected_path_flac} ({size_mb:.2f} MB)")
+            return expected_path_flac
+        
+        if os.path.exists(expected_path_m4a) and os.path.getsize(expected_path_m4a) > 0:
+            size_mb = os.path.getsize(expected_path_m4a) / (1024 * 1024)
+            print(f"File already exists: {expected_path_m4a} ({size_mb:.2f} MB)")
+            return expected_path_m4a
+
+        # 3. Baixa o arquivo apenas se não existir
+        file_path = self.download_from_afkar_xyz(amazon_url, output_dir)
+        ext = os.path.splitext(file_path)[1] or ".flac"
         new_path = os.path.join(output_dir, new_name + ext)
         
         if os.path.exists(new_path):
@@ -312,7 +336,7 @@ class AmazonDownloader:
             "spotify_release_date": "", "spotify_cover_url": "", "spotify_track_number": 1,
             "spotify_disc_number": 1, "spotify_total_tracks": 1, "embed_max_quality_cover": True,
             "spotify_total_discs": 1, "spotify_copyright": "", "spotify_publisher": "", "spotify_url": "",
-            "use_album_track_number": False
+            "use_album_track_number": False, "use_first_artist_only": False
         }
 
         for key in kwargs:
