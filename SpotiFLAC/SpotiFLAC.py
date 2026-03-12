@@ -10,6 +10,7 @@ from SpotiFLAC.tidalDL import TidalDownloader
 from SpotiFLAC.deezerDL import DeezerDownloader
 from SpotiFLAC.qobuzDL import QobuzDownloader
 from SpotiFLAC.amazonDL import AmazonDownloader
+from SpotiFLAC.progress import DownloadManager, RichProgressCallback
 
 
 @dataclass
@@ -299,6 +300,18 @@ def download_tracks(indices):
         outpath = os.path.join(outpath, folder_name)
         os.makedirs(outpath, exist_ok=True)
 
+    # --- INTEGRAÇÃO: Adicionando à fila global do DownloadManager ---
+    manager = DownloadManager()
+    for track in tracks_to_download:
+        manager.add_to_queue(
+            item_id=track.id,
+            track_name=track.title,
+            artist_name=track.artists,
+            album_name=track.album,
+            spotify_id=track.id
+        )
+    # ----------------------------------------------------------------
+
     try:
         start_download_worker(tracks_to_download, outpath)
     except Exception as e:
@@ -455,15 +468,18 @@ class DownloadWorker:
         try:
             total_tracks = len(self.tracks)
             start = time.perf_counter()
-
-            def progress_update(current, total):
-                if total <= 0:
-                    update_progress("Processing metadata...")
+            manager = DownloadManager() # Instancia o gerenciador global
 
             for i, track in enumerate(self.tracks):
-                if track.downloaded: continue
+                if track.downloaded: 
+                    # Se já foi baixada anteriormente na sessão
+                    manager.complete_download(track.id, "Already downloaded", 0.0)
+                    continue
 
                 update_progress(f"[{i + 1}/{total_tracks}] Starting download: {track.title} - {track.artists}")
+                
+                # --- INTEGRAÇÃO: Avisa o manager que a música começou ---
+                manager.start_download(track.id)
 
                 track_outpath = self.outpath
                 if self.is_playlist:
@@ -481,6 +497,9 @@ class DownloadWorker:
                 if os.path.exists(new_filepath) and os.path.getsize(new_filepath) > 0:
                     update_progress(f"File already exists: {new_filename}. Skipping download.")
                     track.downloaded = True
+                    # --- INTEGRAÇÃO: Finaliza no manager se o arquivo já existir no disco ---
+                    size_mb = os.path.getsize(new_filepath) / (1024 * 1024)
+                    manager.complete_download(track.id, new_filepath, size_mb)
                     continue
 
                 download_success = False
@@ -495,7 +514,9 @@ class DownloadWorker:
                     elif svc == "amazon": downloader = AmazonDownloader()
                     else: downloader = TidalDownloader()
 
-                    downloader.set_progress_callback(progress_update)
+                    # --- INTEGRAÇÃO: Anexa o novo RichProgressCallback apontando pro track.id ---
+                    progress_cb = RichProgressCallback(item_id=track.id)
+                    downloader.set_progress_callback(progress_cb)
 
                     try:
                         downloaded_file = None
@@ -517,7 +538,7 @@ class DownloadWorker:
                                 spotify_cover_url=track.cover_url
                             )
 
-                        # --- DEEZER(NO WORKING) ---
+                        # --- DEEZER ---
                         elif svc == "deezer":
                             if not track.isrc: raise Exception("No ISRC for Deezer")
                             ok = asyncio.run(downloader.download_by_isrc(track.isrc, track_outpath))
@@ -569,9 +590,15 @@ class DownloadWorker:
                                     os.rename(downloaded_file, new_filepath)
                                 except OSError as e:
                                     update_progress(f"[!] Rename failed: {e}")
+                            
                             update_progress(f"Successfully downloaded using: {svc}")
                             track.downloaded = True
                             download_success = True
+                            
+                            # --- INTEGRAÇÃO: Finaliza a música com sucesso no manager ---
+                            final_size = os.path.getsize(new_filepath) / (1024 * 1024)
+                            manager.complete_download(track.id, new_filepath, final_size)
+                            
                             break
                         else:
                             raise Exception("File missing after download")
@@ -584,6 +611,8 @@ class DownloadWorker:
                 if not download_success:
                     self.failed_tracks.append((track.title, track.artists, last_error))
                     update_progress(f"[X] Failed all services")
+                    # --- INTEGRAÇÃO: Marca como falha no manager ---
+                    manager.fail_download(track.id, last_error or "All services failed")
 
             total_elapsed = time.perf_counter() - start
             on_download_finished(True, "Download completed!", self.failed_tracks, total_elapsed)
