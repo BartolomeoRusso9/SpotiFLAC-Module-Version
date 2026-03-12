@@ -135,8 +135,8 @@ jobs:
               
               ```bash
               chmod +x SpotiFLAC-Linux-*
-              ./SpotiFLAC-Linux-x86_64 --service tidal [url] ./out
-              ./SpotiFLAC-Linux-arm64  --service tidal [url] ./out
+              ./SpotiFLAC [url] ./out --service tidal
+              SpotiFLAC [url] ./out --service tidal
               ```
               </details>
           env:
