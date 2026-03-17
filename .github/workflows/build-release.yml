@@ -4,9 +4,6 @@ permissions:
   contents: write
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       version_tag:
@@ -125,19 +122,26 @@ jobs:
               
               [![Windows](https://img.shields.io/badge/Windows-[SPOTIFLAC.EXE]-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-[SPOTIFLAC]-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-macOS) [![Linux](https://img.shields.io/badge/Linux-[SPOTIFLAC]-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-Linux-x86_64)
 
-              * **SpotiFLAC-Windows.exe** - Windows
-              * **SpotiFLAC-macOS** - macOS
-              * **SpotiFLAC-Linux-x86_64** - Linux (AMD64)
-              * **SpotiFLAC-Linux-arm64** - Linux (ARM64 / Raspberry Pi)
-
               <details>
-              <summary><b>Linux Requirements / Usage</b></summary>
+              <summary><b>💻 Usage Instructions</b></summary>
               
-              ```bash
-              chmod +x SpotiFLAC-Linux-*
-              ./SpotiFLAC [url] ./out --service tidal
-              SpotiFLAC [url] ./out --service tidal
+              ### Windows (PowerShell ou CMD)
+              ```cmd
+              SpotiFLAC-Windows.exe --service tidal https://open.spotify.com/track/ ./out 
               ```
+
+              ### 🍏 macOS
+              ```bash
+              chmod +x SpotiFLAC-macOS
+              ./SpotiFLAC-macOS --service tidal https://open.spotify.com/track/ ./out 
+              ```
+
+              ### 🐧 Linux
+              ```bash
+              chmod +x SpotiFLAC-Linux-x86_64
+              ./SpotiFLAC-Linux-x86_64 --service tidal https://open.spotify.com/track/ ./out 
+              ```
+              *(For ARM devices like Raspberry Pi, replace `x86_64` with `arm64`)*
               </details>
           env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
