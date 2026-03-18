@@ -5,7 +5,6 @@ import re
 import subprocess
 from typing import Callable, Dict
 from urllib.parse import quote
-
 import requests
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import PictureType
@@ -52,30 +51,41 @@ class AmazonDownloader:
         self.progress_callback = callback
 
     def get_amazon_url_from_spotify(self, spotify_track_id: str) -> str:
-        print("Getting Amazon URL via Songlink...")
-        spotify_url = f"https://open.spotify.com/track/{spotify_track_id}"
-        api_url = f"https://api.song.link/v1-alpha.1/links?url={quote(spotify_url)}"
-        
-        try:
-            resp = self.session.get(api_url)
-            resp.raise_for_status()
-            data = resp.json()
-            
-            links = data.get("linksByPlatform", {})
-            if "amazonMusic" not in links:
-                raise Exception("Amazon Music link not found")
-            
-            amazon_url = links["amazonMusic"]["url"]
+        print("Getting Amazon URL via Songlink HTML...")
 
-            if "trackAsin=" in amazon_url:
-                asin_match = re.search(r'trackAsin=([^&]+)', amazon_url)
-                if asin_match:
-                    asin = asin_match.group(1)
-                    base = base64.b64decode("aHR0cHM6Ly9tdXNpYy5hbWF6b24uY29tL3RyYWNrcy8=").decode()
-                    amazon_url = f"{base}{asin}?musicTerritory=US"
-            
+        url = f"https://song.link/s/{spotify_track_id}"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept-Language": "en-US,en;q=0.9"
+        }
+
+        try:
+            resp = self.session.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+
+            html = resp.text
+
+            match = re.search(
+                r'https://music\.amazon\.com/(tracks|albums)/([A-Z0-9]{10})',
+                html
+            )
+
+            if not match:
+                raise Exception("Amazon link not found in HTML")
+
+            asin = match.group(2)
+
+            base = base64.b64decode(
+                "aHR0cHM6Ly9tdXNpYy5hbWF6b24uY29tL3RyYWNrcy8="
+            ).decode()
+
+            amazon_url = f"{base}{asin}?musicTerritory=US"
+
             print(f"Found Amazon URL: {amazon_url}")
+
             return amazon_url
+
         except Exception as e:
             raise Exception(f"Error resolving Amazon URL: {e}")
 

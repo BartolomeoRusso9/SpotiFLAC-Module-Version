@@ -20,7 +20,7 @@ def parse_args():
         "--service",
         choices=["tidal", "qobuz", "amazon"],
         nargs="+",
-        default=["tidal","amazon"],
+        default=["tidal", "qobuz", "amazon"],
         help="One or more services to try in order",
     )
     parser.add_argument(
@@ -34,8 +34,22 @@ def parse_args():
     parser.add_argument("--loop", type=int, help="Loop delay in minutes")
     return parser.parse_args()
 
-if __name__ == '__main__':
+# --- CRIAMOS A FUNÇÃO MAIN AQUI ---
+def main():
+    # A importação fica aqui dentro para evitar problemas de caminho
     from SpotiFLAC.SpotiFLAC import SpotiFLAC
 
     args = parse_args()
-    SpotiFLAC(args.url, args.output_dir, args.service, args.filename_format, args.use_track_numbers, args.use_artist_subfolders, args.use_album_subfolders, args.loop)
+    SpotiFLAC(
+        args.url, 
+        args.output_dir, 
+        args.service, 
+        args.filename_format, 
+        args.use_track_numbers, 
+        args.use_artist_subfolders, 
+        args.use_album_subfolders, 
+        args.loop
+    )
+
+if __name__ == '__main__':
+    main()

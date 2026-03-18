@@ -172,20 +172,38 @@ class TidalDownloader:
         self.progress_callback = callback
 
     def get_tidal_url_from_spotify(self, spotify_track_id: str) -> str:
-        print("Getting Tidal URL via Songlink...")
-        spotify_url = f"https://open.spotify.com/track/{spotify_track_id}"
-        api_url = f"https://api.song.link/v1-alpha.1/links?url={quote(spotify_url)}"
-        
-        resp = self.session.get(api_url)
-        resp.raise_for_status()
-        data = resp.json()
-        
-        tidal_link = data.get("linksByPlatform", {}).get("tidal", {}).get("url")
-        if not tidal_link:
-            raise Exception("tidal link not found")
-            
-        print(f"Found Tidal URL: {tidal_link}")
-        return tidal_link
+
+        print("Getting Tidal URL via Songlink HTML...")
+
+        url = f"https://song.link/s/{spotify_track_id}"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept-Language": "en-US,en;q=0.9"
+        }
+
+        try:
+            resp = self.session.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+
+            html = resp.text
+
+            match = re.search(
+                r'https://listen\.tidal\.com/(track|album)/([0-9]+)',
+                html
+            )
+
+            if not match:
+                raise Exception("Tidal link not found in HTML")
+
+            tidal_url = match.group(0)
+
+            print(f"Found Tidal URL: {tidal_url}")
+
+            return tidal_url
+
+        except Exception as e:
+            raise Exception(f"Error resolving Tidal URL: {e}")
 
     def get_track_id_from_url(self, tidal_url: str) -> int:
         parts = tidal_url.split("/track/")

@@ -29,12 +29,14 @@ from SpotiFLAC import SpotiFLAC
 
 # Simple Download
 SpotiFLAC(
-    url="[https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT](https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT)",
+    url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
     output_dir="./downloads"
 )
-
 ```
-
+New use:
+```spotiflac 
+> spotiflac --service qobuz tidal --use-artist-subfolders url ./out 
+```
 ---
 
 ## Advanced Configuration
@@ -45,7 +47,7 @@ You can customize the download behavior, prioritize specific streaming services,
 from SpotiFLAC import SpotiFLAC
 
 SpotiFLAC(
-    url="[https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ](https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ)",
+    url="https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ",
     output_dir="./MusicLibrary",
     services=["qobuz", "amazon", "tidal", "deezer"],
     filename_format="{year} - {album}/{track}. {title}",
@@ -62,26 +64,25 @@ Program can also be ran by downloading the python files and calling <code>python
 <h4>Windows example usage:</h4>
 
 ```bash
-./SpotiFLAC-Windows.exe [url]
-                        [output_dir]
-                        [--service tidal qobuz deezer amazon]
+./SpotiFLAC-Windows.exe [--service tidal qobuz deezer amazon]
                         [--filename-format "{title} - {artist}"]
                         [--use-track-numbers] [--use-artist-subfolders]
                         [--use-album-subfolders]
                         [--loop minutes]
+                        url
+                        output_dir
 ```
 
 <h4>Linux / Mac example usage:</h4>
 
 ```bash
 chmod +x SpotiFLAC-Linux-arm64
-./SpotiFLAC-Linux-arm64 [url]
-                        [output_dir]
-                        [--service tidal qobuz deezer amazon]
-                        [--filename-format "{title} - {artist}"]
+./SpotiFLAC-Linux-arm64 [--filename-format "{title} - {artist}"]
                         [--use-track-numbers] [--use-artist-subfolders]
                         [--use-album-subfolders]
                         [--loop minutes]
+                        url
+                        output_dir
 ```
 ---
 

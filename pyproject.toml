@@ -4,13 +4,34 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "0.2.2"
+version = "0.2.3"
 description = "Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required."
-authors = [
-  { name="ShuKurenais"}
-]
 readme = "README.md"
 requires-python = ">=3.9"
+license = {text = "MIT"} # Mude para a sua licença real se não for MIT
+authors = [
+  { name="ShuKurenais" }
+]
+
+keywords = [
+    "spotify", "flac", "downloader", "music", "lossless", 
+    "tidal", "qobuz", "amazon-music", "audio"
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Developers",
+    "Topic :: Multimedia :: Sound/Audio",
+    "License :: OSI Approved :: MIT License", # Mude se usar outra licença
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 
 dependencies = [
   "requests~=2.32.3",
@@ -19,4 +40,12 @@ dependencies = [
 ]
 
 [project.urls]
+"Homepage" = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
 "Repository" = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
+"Bug Tracker" = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/issues"
+
+[project.scripts]
+spotiflac = "launcher:main"
+
+[tool.setuptools]
+py-modules = ["launcher"]

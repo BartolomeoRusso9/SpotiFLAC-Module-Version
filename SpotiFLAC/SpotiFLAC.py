@@ -3,6 +3,7 @@ import re
 import time
 import argparse
 import asyncio
+import shutil 
 from dataclasses import dataclass, field
 
 from SpotiFLAC.getMetadata import get_filtered_data, parse_uri, SpotifyInvalidUrlException
@@ -39,7 +40,7 @@ class Track:
     title: str
     artists: str
     album: str
-    album_artist: str # NOVO CAMPO
+    album_artist: str 
     track_number: int
     duration_ms: int
     id: str
@@ -69,6 +70,7 @@ def extract_cover_art(data, key_primary="images", key_secondary="album"):
             return extract_cover_art(album_data, "images", None)
             
     return ""
+
 
 def format_artists(artists_list):
     if isinstance(artists_list, list):
@@ -136,12 +138,9 @@ def handle_track_metadata(track_data):
         return
 
     cover = extract_cover_art(track_data)
-    if cover:
-        print(f"[DEBUG] Cover found for track: {cover[:30]}...")
-
+    
     artist_names = format_artists(track_data.get("artists", []))
     
-    # Tenta pegar o artista do álbum. Se falhar, usa o artista da faixa.
     album_obj = track_data.get("album", {})
     if isinstance(album_obj, dict) and album_obj.get("artists"):
         album_artist = format_artists(album_obj.get("artists"))
@@ -170,23 +169,18 @@ def handle_track_metadata(track_data):
 
 def handle_album_metadata(album_data):
     config.album_or_playlist_name = album_data.get("album_info", {}).get("name", album_data.get("name", "Unknown Album"))
-    
-    # Data de lançamento do álbum
     album_release_date = album_data.get("album_info", {}).get("release_date", album_data.get("release_date", ""))
     
-    # Artista do Álbum (Geralmente no topo do objeto album)
     raw_album_artists = album_data.get("album_info", {}).get("artists", [])
     if not raw_album_artists:
          raw_album_artists = album_data.get("artists", [])
     
-    # Se raw_album_artists for string (já formatada), usa direto, senão formata
     if isinstance(raw_album_artists, str):
         main_album_artist = raw_album_artists
     else:
         main_album_artist = format_artists(raw_album_artists)
 
     album_cover = extract_cover_art(album_data.get("album_info", album_data))
-    
     tracks_raw = album_data.get("track_list", album_data.get("tracks", {}).get("items", []))
 
     for track in tracks_raw:
@@ -210,7 +204,7 @@ def handle_album_metadata(album_data):
             title=track.get("name", "Unknown Title"),
             artists=artist_names,
             album=config.album_or_playlist_name,
-            album_artist=main_album_artist, # Usa o artista do álbum extraído acima
+            album_artist=main_album_artist,
             track_number=track.get("track_number", 0),
             duration_ms=track.get("duration_ms", 0),
             id=track_id,
@@ -252,14 +246,13 @@ def handle_playlist_metadata(playlist_data):
         
         artist_names = format_artists(track.get("artists", []))
         
-        # Pega album artist e release date do objeto album aninhado na track
         alb = track.get("album", {})
         album_name = alb.get("name", track.get("album_name", "Unknown Album"))
         
         if alb.get("artists"):
             album_artist = format_artists(alb.get("artists"))
         else:
-            album_artist = artist_names # Fallback
+            album_artist = artist_names
 
         release_date = alb.get("release_date", "")
 
@@ -300,7 +293,6 @@ def download_tracks(indices):
         outpath = os.path.join(outpath, folder_name)
         os.makedirs(outpath, exist_ok=True)
 
-    # --- INTEGRAÇÃO: Adicionando à fila global do DownloadManager ---
     manager = DownloadManager()
     for track in tracks_to_download:
         manager.add_to_queue(
@@ -310,7 +302,6 @@ def download_tracks(indices):
             album_name=track.album,
             spotify_id=track.id
         )
-    # ----------------------------------------------------------------
 
     try:
         start_download_worker(tracks_to_download, outpath)
@@ -468,17 +459,15 @@ class DownloadWorker:
         try:
             total_tracks = len(self.tracks)
             start = time.perf_counter()
-            manager = DownloadManager() # Instancia o gerenciador global
+            manager = DownloadManager() 
 
             for i, track in enumerate(self.tracks):
                 if track.downloaded: 
-                    # Se já foi baixada anteriormente na sessão
                     manager.complete_download(track.id, "Already downloaded", 0.0)
                     continue
 
-                update_progress(f"[{i + 1}/{total_tracks}] Starting download: {track.title} - {track.artists}")
+                update_progress(f"\n[{i + 1}/{total_tracks}] Starting download: {track.title} - {track.artists}")
                 
-                # --- INTEGRAÇÃO: Avisa o manager que a música começou ---
                 manager.start_download(track.id)
 
                 track_outpath = self.outpath
@@ -497,7 +486,6 @@ class DownloadWorker:
                 if os.path.exists(new_filepath) and os.path.getsize(new_filepath) > 0:
                     update_progress(f"File already exists: {new_filename}. Skipping download.")
                     track.downloaded = True
-                    # --- INTEGRAÇÃO: Finaliza no manager se o arquivo já existir no disco ---
                     size_mb = os.path.getsize(new_filepath) / (1024 * 1024)
                     manager.complete_download(track.id, new_filepath, size_mb)
                     continue
@@ -514,17 +502,16 @@ class DownloadWorker:
                     elif svc == "amazon": downloader = AmazonDownloader()
                     else: downloader = TidalDownloader()
 
-                    # --- INTEGRAÇÃO: Anexa o novo RichProgressCallback apontando pro track.id ---
                     progress_cb = RichProgressCallback(item_id=track.id)
                     downloader.set_progress_callback(progress_cb)
 
                     try:
                         downloaded_file = None
                         
-                        # --- TIDAL ---
                         if svc == "tidal":
                             downloaded_file = downloader.download_by_spotify_id(
                                 spotify_track_id=track.id,
+                                isrc=track.isrc,
                                 output_dir=track_outpath,
                                 filename_format=self.filename_format,
                                 include_track_number=self.use_track_numbers,
@@ -537,8 +524,6 @@ class DownloadWorker:
                                 use_album_track_number=self.use_track_numbers,
                                 spotify_cover_url=track.cover_url
                             )
-
-                        # --- DEEZER ---
                         elif svc == "deezer":
                             if not track.isrc: raise Exception("No ISRC for Deezer")
                             ok = asyncio.run(downloader.download_by_isrc(track.isrc, track_outpath))
@@ -546,8 +531,6 @@ class DownloadWorker:
                             import glob
                             flac_files = glob.glob(os.path.join(track_outpath, "*.flac"))
                             if flac_files: downloaded_file = max(flac_files, key=os.path.getctime)
-
-                        # --- QOBUZ ---
                         elif svc == "qobuz":
                             if not track.isrc: raise Exception("No ISRC for Qobuz")
                             downloaded_file = downloader.download_by_isrc(
@@ -565,12 +548,11 @@ class DownloadWorker:
                                 use_album_track_number=self.use_track_numbers,
                                 spotify_cover_url=track.cover_url
                             )
-
-                        # --- AMAZON ---
                         elif svc == "amazon":
                             downloaded_file = downloader.download_by_spotify_id(
                                 spotify_track_id=track.id,
                                 output_dir=track_outpath,
+                                isrc=track.isrc,
                                 filename_format="temp_amazon",
                                 include_track_number=self.use_track_numbers,
                                 position=track.track_number or i + 1,
@@ -587,15 +569,16 @@ class DownloadWorker:
                             if downloaded_file != new_filepath:
                                 try:
                                     if os.path.exists(new_filepath): os.remove(new_filepath)
-                                    os.rename(downloaded_file, new_filepath)
+                                    shutil.move(downloaded_file, new_filepath)
                                 except OSError as e:
-                                    update_progress(f"[!] Rename failed: {e}")
+                                    print() 
+                                    update_progress(f"[!] Rename/Move failed: {e}")
                             
+                            print()
                             update_progress(f"Successfully downloaded using: {svc}")
                             track.downloaded = True
                             download_success = True
                             
-                            # --- INTEGRAÇÃO: Finaliza a música com sucesso no manager ---
                             final_size = os.path.getsize(new_filepath) / (1024 * 1024)
                             manager.complete_download(track.id, new_filepath, final_size)
                             
@@ -605,14 +588,18 @@ class DownloadWorker:
 
                     except Exception as e:
                         last_error = str(e)
+                        print()
                         update_progress(f"[X] {svc} failed: {e}")
                         continue
 
                 if not download_success:
                     self.failed_tracks.append((track.title, track.artists, last_error))
+                    print()
                     update_progress(f"[X] Failed all services")
-                    # --- INTEGRAÇÃO: Marca como falha no manager ---
                     manager.fail_download(track.id, last_error or "All services failed")
+
+                if i < total_tracks - 1:
+                    time.sleep(1.5)
 
             total_elapsed = time.perf_counter() - start
             on_download_finished(True, "Download completed!", self.failed_tracks, total_elapsed)
@@ -641,7 +628,7 @@ def SpotiFLAC(url, output_dir, services=["tidal"], filename_format="{title} - {a
         fetch_tracks(config.url)
         download_tracks(range(len(config.tracks)))
     except KeyboardInterrupt:
-        print("\nDownload stopped by user.")
+        print("\n\n[!] Download stopped by user. Partial files were cleaned up.")
 
 
 def main():
