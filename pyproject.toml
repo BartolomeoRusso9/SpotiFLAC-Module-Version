@@ -15,7 +15,7 @@ authors = [
 
 keywords = [
     "spotify", "flac", "downloader", "music", "lossless", 
-    "tidal", "qobuz", "amazon-music", "audio", "SpotiFLAC", "spotify-downloader,
+    "tidal", "qobuz", "amazon-music", "audio", "SpotiFLAC", "spotify-downloader",
     "no-account"
 ]
 
