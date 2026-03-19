@@ -304,6 +304,7 @@ class QobuzDownloader:
             "COPYRIGHT": spotify_copyright,
             "ORGANIZATION": spotify_publisher,
             "URL": spotify_url,
+            "DESCRIPTION": "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
         }
 
         self._embed_metadata(filepath, metadata, cover_path)

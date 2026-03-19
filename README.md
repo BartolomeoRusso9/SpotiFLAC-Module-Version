@@ -1,8 +1,7 @@
 
 # SpotiFLAC Python Module
 
-[![PyPI version](https://img.shields.io/pypi/v/SpotiFLAC.svg)](https://pypi.org/project/SpotiFLAC)
-[![Python Versions](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
+[![PyPI - Version](https://img.shields.io/pypi/v/spotiflac?style=for-the-badge&logo=pypi&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/spotiflac?style=for-the-badge&logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/) [![Pepy Total Downloads](https://img.shields.io/pepy/dt/spotiflac?style=for-the-badge&logo=pypi&logoColor=ffffff&labelColor=000000)](https://pypi.org/project/SpotiFLAC/)
 
 
 Integrate **SpotiFLAC** directly into your Python projects. Perfect for building custom Telegram bots, automation tools, bulk downloaders, or web interfaces.

@@ -91,7 +91,7 @@ jobs:
       with:
         name: bin-${{ matrix.build_name }}
         path: SpotiFLAC/dist/${{ matrix.artifact_name }}
-        retention-days: 1
+        retention-days: 7
 
   release:
       needs: build
@@ -121,7 +121,7 @@ jobs:
 
               ## Downloads
               
-              [![Windows](https://img.shields.io/badge/Windows-[SPOTIFLAC.EXE]-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-[SPOTIFLAC]-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-macOS) [![Linux](https://img.shields.io/badge/Linux-[SPOTIFLAC]-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-Linux-x86_64)
+              [![Windows](https://img.shields.io/badge/Windows-[SPOTIFLAC.EXE]-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-[SpotiFLAC-macOS]-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-macOS) [![Linux](https://img.shields.io/badge/Linux-[SpotiFLAC-Linux]-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-Linux-x86_64)
 
               <details>
               <summary><b>💻 Usage Instructions</b></summary>

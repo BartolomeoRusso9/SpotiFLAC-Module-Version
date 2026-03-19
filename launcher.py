@@ -18,7 +18,7 @@ def parse_args():
     parser.add_argument("output_dir", help="Output directory")
     parser.add_argument(
         "--service",
-        choices=["tidal", "qobuz", "amazon"],
+        choices=["tidal", "qobuz", "amazon", "youtube"],
         nargs="+",
         default=["tidal", "qobuz", "amazon"],
         help="One or more services to try in order",
@@ -34,9 +34,7 @@ def parse_args():
     parser.add_argument("--loop", type=int, help="Loop delay in minutes")
     return parser.parse_args()
 
-# --- CRIAMOS A FUNÇÃO MAIN AQUI ---
 def main():
-    # A importação fica aqui dentro para evitar problemas de caminho
     from SpotiFLAC.SpotiFLAC import SpotiFLAC
 
     args = parse_args()

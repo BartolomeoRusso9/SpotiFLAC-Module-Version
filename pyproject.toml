@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "0.2.5"
+version = "0.2.6"
 description = "Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -15,7 +15,8 @@ authors = [
 
 keywords = [
     "spotify", "flac", "downloader", "music", "lossless", 
-    "tidal", "qobuz", "amazon-music", "audio"
+    "tidal", "qobuz", "amazon-music", "audio", "SpotiFLAC", "spotify-downloader,
+    "no-account"
 ]
 
 classifiers = [
@@ -23,7 +24,7 @@ classifiers = [
     "Intended Audience :: End Users/Desktop",
     "Intended Audience :: Developers",
     "Topic :: Multimedia :: Sound/Audio",
-    "License :: OSI Approved :: MIT License", # Mude se usar outra licença
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",

@@ -299,7 +299,7 @@ class AmazonDownloader:
                 if copyright: audio["COPYRIGHT"] = copyright
                 if publisher: audio["ORGANIZATION"] = publisher
                 if url: audio["URL"] = url
-                audio["DESCRIPTION"] = "https://github.com/afkarxyz/SpotiFLAC"
+                audio["DESCRIPTION"] = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
 
                 if cover_data:
                     pic = Picture()

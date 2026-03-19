@@ -157,7 +157,6 @@ class TidalDownloader:
         })
         self.progress_callback: Callable[[int, int], None] = ProgressCallback()
         
-        # Lista de APIs atualizada para espelhar o código Go
         self.apis = [
             "https://hifi-one.spotisaver.net",
             "https://hifi-two.spotisaver.net",
@@ -373,7 +372,7 @@ class TidalDownloader:
             if copyright: audio["COPYRIGHT"] = copyright
             if publisher: audio["ORGANIZATION"] = publisher
             if url: audio["URL"] = url
-            audio["DESCRIPTION"] = "https://github.com/afkarxyz/SpotiFLAC"
+            audio["DESCRIPTION"] = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
 
             if cover_data:
                 pic = Picture()

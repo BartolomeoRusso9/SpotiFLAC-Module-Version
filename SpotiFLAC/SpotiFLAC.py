@@ -1,11 +1,12 @@
 import os
 import re
+from tempfile import template
 import time
 import argparse
 import asyncio
 import shutil 
 from dataclasses import dataclass, field
-
+from SpotiFLAC.youtubeDL import YouTubeDownloader
 from SpotiFLAC.getMetadata import get_filtered_data, parse_uri, SpotifyInvalidUrlException
 from SpotiFLAC.tidalDL import TidalDownloader
 from SpotiFLAC.deezerDL import DeezerDownloader
@@ -392,7 +393,7 @@ def sanitize_filename_component(value: str) -> str:
     return sanitized
 
 
-def format_custom_filename(template: str, track, position: int = 1) -> str:
+def format_custom_filename(template: str, track, position: int = 1, ext: str = ".flac") -> str:
     year = ""
     if track.release_date:
         year = track.release_date.split("-")[0] if "-" in track.release_date else track.release_date
@@ -421,8 +422,9 @@ def format_custom_filename(template: str, track, position: int = 1) -> str:
     for key, value in replacements.items():
         result = result.replace(f"{{{key}}}", value)
 
-    if not result.lower().endswith('.flac'):
-        result += '.flac'
+    # Troque a checagem fixa pela extensão que veio no parâmetro
+    if not result.lower().endswith(ext):
+        result += ext
     return re.sub(r'\s+', ' ', result).strip()
 
 
@@ -444,16 +446,16 @@ class DownloadWorker:
         self.services = services
         self.failed_tracks = []
 
-    def get_formatted_filename(self, track, position=1):
+    def get_formatted_filename(self, track, position=1, ext=".flac"):
         if self.filename_format in ["title_artist", "artist_title", "title_only"]:
             if self.filename_format == "artist_title":
-                filename = f"{track.artists} - {track.title}.flac"
+                filename = f"{track.artists} - {track.title}{ext}"
             elif self.filename_format == "title_only":
-                filename = f"{track.title}.flac"
+                filename = f"{track.title}{ext}"
             else:
-                filename = f"{track.title} - {track.artists}.flac"
+                filename = f"{track.title} - {track.artists}{ext}"
             return re.sub(r'[<>:"/\\|?*]', lambda m: "'" if m.group() == '"' else '_', filename)
-        return format_custom_filename(self.filename_format, track, position)
+        return format_custom_filename(self.filename_format, track, position, ext)
 
     def run(self):
         try:
@@ -496,14 +498,17 @@ class DownloadWorker:
                 for svc in self.services:
                     update_progress(f"Trying service: {svc}")
                     
+                    current_ext = ".mp3" if svc == "youtube" else ".m4a" if svc == "amazon" else ".flac"
+                    
+                    new_filename = self.get_formatted_filename(track, i + 1, current_ext)
+                    new_filepath = os.path.join(track_outpath, new_filename)
+                    
                     if svc == "tidal": downloader = TidalDownloader()
                     elif svc == "deezer": downloader = DeezerDownloader()
                     elif svc == "qobuz": downloader = QobuzDownloader()
                     elif svc == "amazon": downloader = AmazonDownloader()
+                    elif svc == "youtube": downloader = YouTubeDownloader()
                     else: downloader = TidalDownloader()
-
-                    progress_cb = RichProgressCallback(item_id=track.id)
-                    downloader.set_progress_callback(progress_cb)
 
                     try:
                         downloaded_file = None
@@ -564,6 +569,22 @@ class DownloadWorker:
                                 use_album_track_number=self.use_track_numbers,
                                 spotify_cover_url=track.cover_url
                             )
+                        elif svc == "youtube":
+                            yt_downloader = YouTubeDownloader()
+                            downloaded_file = yt_downloader.download_by_spotify_id(
+                                spotify_track_id=track.id,
+                                output_dir=track_outpath,
+                                spotify_track_name=track.title,
+                                spotify_artist_name=track.artists,
+                                spotify_album_name=track.album,
+                                spotify_album_artist=track.album_artist, 
+                                spotify_release_date=track.release_date, 
+                                spotify_track_number=track.track_number or i + 1,
+                                spotify_total_tracks=len(self.tracks),
+                                spotify_disc_number=1,
+                                spotify_total_discs=1,
+                                spotify_cover_url=track.cover_url
+                            )
 
                         if downloaded_file and os.path.exists(downloaded_file):
                             if downloaded_file != new_filepath:
@@ -618,7 +639,7 @@ def parse_args():
 
     parser.add_argument("url", help="Spotify URL")
     parser.add_argument("output_dir", help="Output directory")
-    parser.add_argument("--service", choices=["tidal", "deezer", "qobuz", "amazon"], nargs="+", default=["tidal"])
+    parser.add_argument("--service", choices=["tidal", "deezer", "qobuz", "amazon", "youtube"], nargs="+", default=["tidal"])
     parser.add_argument("--filename-format", default="{title} - {artist}")
     parser.add_argument("--use-track-numbers", action="store_true")
     parser.add_argument("--use-artist-subfolders", action="store_true")
