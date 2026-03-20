@@ -6,7 +6,10 @@
 
 Integrate **SpotiFLAC** directly into your Python projects. Perfect for building custom Telegram bots, automation tools, bulk downloaders, jellyfin downloader musics or web interfaces.
 
-> **Looking for a standalone app?** > Check out the [CLI tool](https://github.com/jelte1/SpotiFLAC-Command-Line-Interface) or the [GUI tool](https://github.com/afkarxyz/SpotiFLAC).
+> **Looking for a standalone app?**
+### [SpotiFLAC (Desktop)](https://github.com/afkarxyz/SpotiFLAC)
+
+Download music in true lossless FLAC from Tidal, Qobuz & Amazon Music for Windows, macOS & Linux
 
 ---
 
