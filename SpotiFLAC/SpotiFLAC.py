@@ -510,6 +510,10 @@ class DownloadWorker:
                     elif svc == "youtube": downloader = YouTubeDownloader()
                     else: downloader = TidalDownloader()
 
+                    progress_cb = RichProgressCallback(item_id=track.id)
+                    if hasattr(downloader, "set_progress_callback"):
+                        downloader.set_progress_callback(progress_cb)
+
                     try:
                         downloaded_file = None
                         
@@ -570,8 +574,7 @@ class DownloadWorker:
                                 spotify_cover_url=track.cover_url
                             )
                         elif svc == "youtube":
-                            yt_downloader = YouTubeDownloader()
-                            downloaded_file = yt_downloader.download_by_spotify_id(
+                            downloaded_file = downloader.download_by_spotify_id(
                                 spotify_track_id=track.id,
                                 output_dir=track_outpath,
                                 spotify_track_name=track.title,

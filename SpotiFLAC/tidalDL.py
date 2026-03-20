@@ -13,14 +13,6 @@ import requests
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import PictureType
 
-class ProgressCallback:
-    def __call__(self, current: int, total: int) -> None:
-        if total > 0:
-            percent = (current / total) * 100
-            print(f"\r{percent:.2f}% ({current}/{total})", end="")
-        else:
-            print(f"\r{current / (1024 * 1024):.2f} MB", end="")
-
 def sanitize_filename(value: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", value).strip()
 
@@ -155,7 +147,7 @@ class TidalDownloader:
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
         })
-        self.progress_callback: Callable[[int, int], None] = ProgressCallback()
+        self.progress_callback: Callable[[int, int], None] = None
         
         self.apis = [
             "https://hifi-one.spotisaver.net",

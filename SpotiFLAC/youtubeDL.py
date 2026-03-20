@@ -6,14 +6,6 @@ from urllib.parse import quote
 from mutagen.id3 import ID3, ID3NoHeaderError, TIT2, TPE1, TALB, TPE2, TDRC, TRCK, TPOS, APIC, TPUB, WXXX, COMM
 from mutagen.mp3 import MP3
 
-class ProgressCallback:
-    def __call__(self, current: int, total: int) -> None:
-        if total > 0:
-            percent = (current / total) * 100
-            print(f"\r{percent:.2f}% ({current}/{total})", end="")
-        else:
-            print(f"\r{current / (1024 * 1024):.2f} MB", end="")
-
 def sanitize_filename(value: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", value).strip()
 
@@ -30,7 +22,7 @@ class YouTubeDownloader:
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         })
-        self.progress_callback: Callable[[int, int], None] = ProgressCallback()
+        self.progress_callback: Callable[[int, int], None] = None
 
     def set_progress_callback(self, callback: Callable[[int, int], None]) -> None:
         self.progress_callback = callback
