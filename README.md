@@ -41,7 +41,7 @@ SpotiFLAC(
 ```
 New use:
 ```spotiflac 
-> spotiflac url ./out --service qobuz tidal --use-artist-subfolders
+> spotiflac url ./out --service tidal spoti --use-artist-subfolders
 ```
 ---
 
@@ -55,7 +55,7 @@ from SpotiFLAC import SpotiFLAC
 SpotiFLAC(
     url="https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ",
     output_dir="./MusicLibrary",
-    services=["qobuz", "amazon", "tidal", "deezer"],
+    services=["qobuz", "amazon", "tidal", "spoti", "youtube"],
     filename_format="{year} - {album}/{track}. {title}",
     use_artist_subfolders=True,
     use_album_subfolders=True,
@@ -72,7 +72,7 @@ Program can also be ran by downloading the python files and calling <code>python
 ```bash
 ./SpotiFLAC-Windows.exe url
                         output_dir
-                        [--service tidal qobuz deezer amazon]
+                        [--service tidal qobuz spoti youtube amazon]
                         [--filename-format "{title} - {artist}"]
                         [--use-track-numbers] [--use-artist-subfolders]
                         [--use-album-subfolders]
@@ -86,6 +86,7 @@ Program can also be ran by downloading the python files and calling <code>python
 chmod +x SpotiFLAC-Linux-arm64
 ./SpotiFLAC-Linux-arm64 url
                         output_dir
+                        [--service tidal qobuz spoti youtube amazon]
                         [--filename-format "{title} - {artist}"]
                         [--use-track-numbers] [--use-artist-subfolders]
                         [--use-album-subfolders]
@@ -102,7 +103,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | --- | --- | --- | --- |
 | **`url`** | `str` | *Required* | The Spotify URL (Track, Album, or Playlist) you want to download. |
 | **`output_dir`** | `str` | *Required* | The destination directory path where the audio files will be saved. |
-| **`services`** | `list` | `["tidal", "deezer", "qobuz", "amazon"]` | Specifies which services to use and their priority order. |
+| **`services`** | `list` | `["tidal", "deezer", "qobuz", "spoti", "youtube", "amazon"]` | Specifies which services to use and their priority order. |
 | **`filename_format`** | `str` | `"{title} - {artist}"` | Format for naming downloaded files. See placeholders below. |
 | **`use_track_numbers`** | `bool` | `False` | Prefixes the filename with the track number. |
 | **`use_artist_subfolders`** | `bool` | `False` | Automatically organizes downloaded files into subfolders by artist. |
@@ -132,7 +133,7 @@ Your support helps keep development going._
 
 ## API Credits
 
-[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [dabmusic.xyz](https://dabmusic.xyz) · [yoinkify.lol](https://github.com/chasemarshall/yoink)
+[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [dabmusic.xyz](https://dabmusic.xyz) · [spotidownloader](https://spotidownloader.com) · [SpotubeDL](spotubedl.com) · [afkarxyz](https://github.com/afkarxyz)
 
 > [!TIP]
 >

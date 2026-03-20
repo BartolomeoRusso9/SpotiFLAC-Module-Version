@@ -139,7 +139,7 @@ class RichProgressCallback:
         now = time.time()
         time_diff = now - self.last_time
         
-        # Atualiza a tela a cada 0.25s para não piscar (flickering), igual no Go
+        # Atualiza a tela a cada 0.25s para não piscar (flickering)
         if time_diff >= 0.25 or current_bytes == total_bytes:
             bytes_diff = current_bytes - self.last_bytes
             
@@ -165,6 +165,5 @@ class RichProgressCallback:
             self.last_time = now
             self.last_bytes = current_bytes
 
-        # Se terminou, quebra a linha
         if current_bytes == total_bytes and total_bytes > 0:
             print()
