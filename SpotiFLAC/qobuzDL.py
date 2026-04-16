@@ -19,7 +19,7 @@ QOBUZ_API_BASE_URL              = "https://www.qobuz.com/api.json/0.2"
 QOBUZ_DEFAULT_APP_ID            = "712109809"
 QOBUZ_DEFAULT_APP_SECRET        = "589be88e4538daea11f509d29e4a23b1"
 QOBUZ_DEFAULT_UA                = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-QOBUZ_CREDENTIALS_CACHE_TTL     = 24 * 3600          # secondi
+QOBUZ_CREDENTIALS_CACHE_TTL     = 24 * 3600          # seconds
 QOBUZ_CREDENTIALS_PROBE_ISRC   = "USUM71703861"
 QOBUZ_OPEN_TRACK_PROBE_URL     = "https://open.qobuz.com/track/1"
 QOBUZ_CREDENTIALS_CACHE_FILE   = "qobuz-api-credentials.json"
@@ -87,8 +87,6 @@ def build_qobuz_api_url(api_base: str, track_id: int, quality: str) -> str:
     return f"{api_base}{track_id}&quality={quality}"
 
 # ---------------------------------------------------------------------------
-# Gestione credenziali (scraping + cache + fallback)
-# ---------------------------------------------------------------------------
 
 class QobuzCredentials:
     def __init__(self, app_id: str, app_secret: str,
@@ -152,10 +150,6 @@ def _save_cached_credentials(creds: QobuzCredentials) -> None:
         print(f"Warning: failed to write Qobuz credentials cache: {e}")
 
 def _scrape_open_qobuz_credentials(session: requests.Session) -> QobuzCredentials:
-    """
-    Recupera app_id e app_secret dal bundle JS di open.qobuz.com,
-    replicando la logica di scrapeQobuzOpenCredentials in Go.
-    """
     headers = {"User-Agent": QOBUZ_DEFAULT_UA}
 
     resp = session.get(QOBUZ_OPEN_TRACK_PROBE_URL, headers=headers, timeout=15)
@@ -183,7 +177,6 @@ def _scrape_open_qobuz_credentials(session: requests.Session) -> QobuzCredential
     )
 
 def _probe_credentials(session: requests.Session, creds: QobuzCredentials) -> bool:
-    """Verifica che le credenziali funzionino realmente con una ricerca di prova."""
     try:
         resp = _do_signed_request(
             "track/search",
@@ -195,8 +188,6 @@ def _probe_credentials(session: requests.Session, creds: QobuzCredentials) -> bo
     except Exception:
         return False
 
-
-# Stato globale credenziali (thread-safe)
 _creds_lock             = threading.Lock()
 _cached_creds: Optional[QobuzCredentials] = None
 
@@ -207,13 +198,11 @@ def _get_credentials(force_refresh: bool = False) -> QobuzCredentials:
         if not force_refresh and _cached_creds and _cached_creds.is_fresh():
             return _cached_creds
 
-        # Prova dal disco
         disk = _load_cached_credentials()
         if not force_refresh and disk and disk.is_fresh():
             _cached_creds = disk
             return _cached_creds
 
-        # Prova scraping
         try:
             session = requests.Session()
             scraped = _scrape_open_qobuz_credentials(session)
@@ -226,35 +215,24 @@ def _get_credentials(force_refresh: bool = False) -> QobuzCredentials:
         except Exception as e:
             print(f"Warning: failed to refresh Qobuz credentials: {e}")
 
-        # Fallback: cache disco scaduta
         if disk:
             _cached_creds = disk
             print("Warning: using stale cached Qobuz credentials")
             return _cached_creds
 
-        # Fallback: in-memory precedente
         if _cached_creds:
             return _cached_creds
 
-        # Fallback: credenziali hardcoded
         fallback = QobuzCredentials.default()
         _cached_creds = fallback
         print("Warning: using embedded fallback Qobuz credentials")
         return fallback
 
 # ---------------------------------------------------------------------------
-# Firma delle richieste (replica esatta di qobuzSignaturePayload in Go)
-# ---------------------------------------------------------------------------
 
 def _build_signature_payload(path: str, params: dict,
                               timestamp: str, secret: str) -> str:
-    """
-    Replica identica di qobuzSignaturePayload:
-      1. Normalizza il path (strip slash, rimuove slash interni)
-      2. Esclude app_id, request_ts, request_sig
-      3. Ordina i parametri rimanenti alfabeticamente
-      4. Concatena: normalized_path + key+value (per ogni param) + timestamp + secret
-    """
+
     normalized = path.strip("/").replace("/", "")
     excluded   = {"app_id", "request_ts", "request_sig"}
     sorted_keys = sorted(k for k in params if k not in excluded)
@@ -262,7 +240,6 @@ def _build_signature_payload(path: str, params: dict,
     payload = normalized
     for key in sorted_keys:
         val = params[key]
-        # Supporta sia stringa che lista (come url.Values in Go)
         if isinstance(val, list):
             for v in val:
                 payload += key + str(v)
@@ -280,7 +257,6 @@ def _compute_signature(path: str, params: dict,
 def _do_signed_request(path: str, params: dict,
                         session: requests.Session,
                         creds: QobuzCredentials) -> requests.Response:
-    """Costruisce ed esegue una richiesta firmata, come doQobuzSignedRequest in Go."""
     timestamp = str(int(time.time()))
     signature = _compute_signature(path, params, timestamp, creds.app_secret)
 
@@ -298,8 +274,6 @@ def _do_signed_request(path: str, params: dict,
     return session.get(url, params=req_params, headers=headers, timeout=20)
 
 # ---------------------------------------------------------------------------
-# Classe principale
-# ---------------------------------------------------------------------------
 
 class QobuzDownloader:
     def __init__(self, timeout: float = 60.0):
@@ -312,14 +286,9 @@ class QobuzDownloader:
         self.progress_callback = callback
 
     # ------------------------------------------------------------------
-    # Richieste firmate con retry automatico sulle credenziali
-    # ------------------------------------------------------------------
 
     def _signed_request(self, path: str, params: dict) -> requests.Response:
-        """
-        Esegue una richiesta firmata. Se l'API risponde 400/401,
-        forza il refresh delle credenziali e riprova (come in Go).
-        """
+
         creds = _get_credentials(force_refresh=False)
         resp  = _do_signed_request(path, params, self.session, creds)
 
@@ -331,14 +300,8 @@ class QobuzDownloader:
         return resp
 
     # ------------------------------------------------------------------
-    # Ricerca traccia per ISRC
-    # ------------------------------------------------------------------
 
     def _search_by_isrc(self, isrc: str) -> Dict:
-        """
-        Cerca una traccia tramite ISRC oppure recupera direttamente
-        per ID se il formato è 'qobuz_<track_id>'.
-        """
         if isrc.startswith("qobuz_"):
             track_id = isrc.removeprefix("qobuz_")
             resp = self._signed_request("track/get", {"track_id": track_id})
@@ -353,7 +316,7 @@ class QobuzDownloader:
 
             return resp.json()
 
-        # Ricerca standard per ISRC
+        # Standard search for ISRC
         resp = self._signed_request("track/search", {"query": isrc, "limit": "1"})
 
         if resp.status_code != 200:
@@ -381,7 +344,7 @@ class QobuzDownloader:
         return items[0]
 
     # ------------------------------------------------------------------
-    # Download URL dai provider terzi
+    # Download URL from other providers
     # ------------------------------------------------------------------
 
     def _download_from_standard(self, api_base: str, track_id: int,
@@ -468,7 +431,7 @@ class QobuzDownloader:
         raise Exception(f"all APIs and fallbacks failed. Last error: {last_err}")
 
     # ------------------------------------------------------------------
-    # Download del file FLAC con progress
+    # Download FLAC file with progress
     # ------------------------------------------------------------------
 
     def _stream_download(self, url: str, filepath: str) -> None:
@@ -502,8 +465,6 @@ class QobuzDownloader:
                 except Exception:
                     pass
 
-    # ------------------------------------------------------------------
-    # Entry point principale
     # ------------------------------------------------------------------
 
     def download_by_isrc(self, isrc, output_dir, quality, filename_format,
@@ -613,8 +574,6 @@ class QobuzDownloader:
 
         return filepath
 
-    # ------------------------------------------------------------------
-    # Embedding metadati
     # ------------------------------------------------------------------
 
     def _embed_metadata(self, filepath: str, metadata: dict,

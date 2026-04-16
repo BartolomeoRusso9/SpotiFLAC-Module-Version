@@ -7,7 +7,6 @@ from mutagen.flac import FLAC, Picture
 from mutagen.id3 import PictureType
 
 def sanitize_filename(value: str) -> str:
-    """Rimuove i caratteri non validi per i nomi di file su vari OS."""
     return re.sub(r'[\\/*?:"<>|]', "", value).strip()
 
 def safe_int(value) -> int:
@@ -21,7 +20,6 @@ class SpotiDownloader:
 
     def __init__(self, timeout: float = 15.0):
         self.session = requests.Session()
-        # Salvataggio globale del timeout
         self.timeout = timeout 
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -49,10 +47,10 @@ class SpotiDownloader:
                     return token
             except Exception as e:
                 if attempt == 3:
-                    raise Exception(f"Impossibile ottenere il token dopo 3 tentativi: {e}")
+                    raise Exception(f"Impossible to obtain token after 3 attempts: {e}")
                 time.sleep(1)
                 
-        raise Exception("Token non trovato nella risposta API")
+        raise Exception("Token not found in API's answer")
 
     def get_flac_download_link(self, track_id: str, token: str) -> str:
         print(f"Richiesta link di download FLAC per ID: {track_id}...")
@@ -68,8 +66,7 @@ class SpotiDownloader:
         payload = {"id": track_id, "flac": True}
         
         resp = self.session.post(url, json=payload, headers=headers, timeout=self.timeout)
-        
-        # Invalida il token se c'è un 401/403 e riprova
+
         if resp.status_code in (401, 403):
             print("Token scaduto, rigenerazione in corso...")
             SpotiDownloader._cached_token = None
@@ -99,7 +96,7 @@ class SpotiDownloader:
             final_link = standard_link
             
         if not final_link:
-            raise Exception("L'API non ha restituito un link FLAC (disponibile solo MP3). Elaborazione annullata.")
+            raise Exception("FLAC not found (Only MP3 file found).")
             
         return final_link
 
@@ -120,7 +117,6 @@ class SpotiDownloader:
         }
         
         try:
-            # (timeout_connessione, timeout_lettura_stream)
             stream_timeout = (self.timeout, 120.0)
             
             with self.session.get(url, headers=headers, stream=True, timeout=stream_timeout) as resp:
@@ -133,13 +129,11 @@ class SpotiDownloader:
                         if chunk:
                             f.write(chunk)
                             downloaded += len(chunk)
-                            # Gestione progress callback quando total=0
                             if self.progress_callback:
                                 self.progress_callback(downloaded, total if total > 0 else downloaded)
                                 
             os.replace(temp_path, filepath)
         except Exception:
-            # Pulizia del file .part in caso di interruzione
             if os.path.exists(temp_path):
                 os.remove(temp_path)
             raise
@@ -151,7 +145,6 @@ class SpotiDownloader:
         track_id = spotify_track_id.split("/")[-1].split("?")[0]
         
         title = kwargs.get("spotify_track_name", "Unknown")
-        # Rimosso il .split(",")[0] per supportare nomi con virgole ("Tyler, The Creator")
         artist = kwargs.get("spotify_artist_name", "Unknown")
         track_num = safe_int(kwargs.get("spotify_track_number", 1))
         
@@ -192,7 +185,6 @@ class SpotiDownloader:
                     resp = self.session.get(cover_url, timeout=self.timeout)
                     if resp.status_code == 200: 
                         cover_data = resp.content
-                        # Lettura del MIME corretto dagli header della risposta
                         mime = resp.headers.get("Content-Type", "").split(";")[0].strip()
                         if mime in ("image/jpeg", "image/png"):
                             cover_mime = mime
@@ -200,9 +192,7 @@ class SpotiDownloader:
                     print(f"Attenzione: Impossibile scaricare la copertina: {e}")
 
             audio = FLAC(filepath)
-            
-            # ATTENZIONE: Questo cancella tutti i tag preesistenti.
-            # È utile per pulire la spazzatura lasciata dalle API prima di scrivere i nostri.
+
             audio.delete() 
             
             audio["TITLE"] = kwargs.get("spotify_track_name", "Unknown")
@@ -223,7 +213,7 @@ class SpotiDownloader:
             if kwargs.get("spotify_upc"): audio["BARCODE"] = kwargs.get("spotify_upc")
             if kwargs.get("spotify_genre"): audio["GENRE"] = kwargs.get("spotify_genre")
             
-            audio["DESCRIPTION"] = "Scaricato tramite SpotiFLAC (Python Porting)"
+            audio["DESCRIPTION"] = ""
 
             if cover_data:
                 pic = Picture()
@@ -233,7 +223,7 @@ class SpotiDownloader:
                 audio.add_picture(pic)
             
             audio.save()
-            print("Metadati applicati con successo! ✓")
+            print("Metadata applicati con successo! ✓")
 
         except Exception as e:
             print(f"Attenzione: Errore durante la scrittura dei metadati: {e}")
