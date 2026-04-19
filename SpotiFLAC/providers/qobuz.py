@@ -71,6 +71,7 @@ _STREAM_APIS = [
     "https://dab.yeet.su/api/stream?trackId=",
     "https://dabmusic.xyz/api/stream?trackId=",
     "https://qbz.afkarxyz.qzz.io/api/track/",
+    "https://qobuz.spotbye.qzz.io/api/track/"
 ]
 
 # Qualità fallback chain (identica al Go)
@@ -202,10 +203,18 @@ def _compute_signature(path: str, params: dict, timestamp: str, secret: str) -> 
 
 
 def _build_stream_url(api_base: str, track_id: int, quality: str) -> str:
-    """Equivalente a buildQobuzAPIURL() del Go."""
-    if "qbz.afkarxyz" in api_base:
-        return f"{api_base}{track_id}?quality={quality}"
-    return f"{api_base}{track_id}&quality={quality}"
+    """
+    Equivalente a buildQobuzAPIURL() del Go, ma reso dinamico.
+    Gestisce automaticamente sia i server che usano '?trackId='
+    sia quelli che usano '/track/'.
+    """
+    # Se l'URL di base finisce già con "=", significa che stiamo aggiungendo
+    # a un parametro esistente (es. ?trackId=), quindi la qualità va concatenata con '&'
+    if api_base.endswith("="):
+        return f"{api_base}{track_id}&quality={quality}"
+
+    # la qualità sarà il primo parametro, quindi si usa '?'
+    return f"{api_base}{track_id}?quality={quality}"
 
 
 # ---------------------------------------------------------------------------
