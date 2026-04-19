@@ -87,6 +87,7 @@ class QobuzCredentials:
     app_secret: str
     source:     str   = "embedded-default"
     fetched_at: float = field(default_factory=time.time)
+    user_auth_token: str | None = None
 
     def is_fresh(self) -> bool:
         return (
@@ -101,15 +102,18 @@ class QobuzCredentials:
             "app_secret":      self.app_secret,
             "source":          self.source,
             "fetched_at_unix": int(self.fetched_at),
+            "user_auth_token": self.user_auth_token,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "QobuzCredentials":
+        token = d.get("user_auth_token") or os.environ.get("QOBUZ_AUTH_TOKEN")
         return cls(
             app_id     = d.get("app_id", ""),
             app_secret = d.get("app_secret", ""),
             source     = d.get("source", ""),
             fetched_at = float(d.get("fetched_at_unix", 0)),
+            user_auth_token = token,
         )
 
     @classmethod
@@ -288,9 +292,14 @@ class QobuzProvider(BaseProvider):
             "request_sig": signature,
         }
         url  = f"{_API_BASE}/{path.strip('/')}"
+
+        headers = {"X-App-Id": creds.app_id}
+        if creds.user_auth_token:
+            headers["X-User-Auth-Token"] = creds.user_auth_token
+
         resp = self._session.get(
             url, params=req_params,
-            headers={"X-App-Id": creds.app_id},
+            headers=headers,
             timeout=20,
         )
 
@@ -336,6 +345,28 @@ class QobuzProvider(BaseProvider):
     # Stream URL — con prioritize() invece di shuffle casuale
     # Equivalente a GetDownloadURL() del Go
     # ------------------------------------------------------------------
+
+    def _get_official_stream(self, track_id: int, quality: str) -> str:
+        """Ottiene l'URL dello stream usando l'API ufficiale e il token utente."""
+        resp = self._do_signed_get(
+            "track/getFileUrl",
+            {
+                "track_id": str(track_id),
+                "format_id": quality,
+                "intent": "stream"
+            }
+        )
+        if resp.status_code != 200:
+            self._raise_api_error(resp, "track/getFileUrl")
+
+        data = resp.json()
+        if "url" not in data:
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"No stream URL returned by official API for track {track_id}",
+                self.name
+            )
+        return data["url"]
 
     def _try_quality(self, track_id: int, quality: str) -> str:
         """
@@ -389,14 +420,33 @@ class QobuzProvider(BaseProvider):
         if not allow_fallback:
             chain = [chain[0]]
 
+        creds = self._get_credentials()
+        has_token = bool(creds.user_auth_token)
+
         last_exc: SpotiflacError | None = None
         for q in chain:
             try:
+                logger.debug("[qobuz] Trying public APIs for track %s (quality=%s)", track_id, q)
                 return self._try_quality(track_id, q)
-            except SpotiflacError as exc:
-                last_exc = exc
-                logger.warning("[qobuz] Quality %s unavailable, trying next fallback", q)
+            except Exception as public_exc:
+                logger.debug("[qobuz] Public APIs failed for quality %s: %s", q, public_exc)
+                if has_token:
+                    try:
+                        logger.info("[qobuz] Public APIs failed, falling back to OFFICIAL API for quality %s", q)
+                        return self._get_official_stream(track_id, q)
+                    except Exception as official_exc:
+                        logger.warning("[qobuz] Official API also failed for quality %s: %s", q, official_exc)
+                        if isinstance(official_exc, SpotiflacError):
+                            last_exc = official_exc
+                        else:
+                            last_exc = SpotiflacError(ErrorKind.UNAVAILABLE, str(official_exc), self.name)
+                else:
+                    if isinstance(public_exc, SpotiflacError):
+                        last_exc = public_exc
+                    else:
+                        last_exc = SpotiflacError(ErrorKind.UNAVAILABLE, str(public_exc), self.name)
 
+                logger.warning("[qobuz] Quality %s completely unavailable, trying next fallback", q)
         raise last_exc  # type: ignore[misc]
 
     # ------------------------------------------------------------------
