@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -25,7 +26,7 @@ from urllib.parse import quote
 import requests
 
 from ..core.errors import (
-    TrackNotFoundError, NetworkError, ParseError,
+    TrackNotFoundError, ParseError,
     SpotiflacError, ErrorKind,
 )
 from ..core.http import HttpClient, RetryConfig
@@ -58,6 +59,195 @@ _TIDAL_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/145.0.0.0 Safari/537.36"
 )
+
+# ---------------------------------------------------------------------------
+# Tidal API List Manager (port del modulo Go)
+# ---------------------------------------------------------------------------
+
+_TIDAL_API_GIST_URL   = "https://gist.githubusercontent.com/afkarxyz/2ce772b943321b9448b454f39403ce25/raw"
+_TIDAL_API_CACHE_FILE = "tidal-api-urls.json"
+
+_tidal_api_list_mu:    threading.Lock              = threading.Lock()
+_tidal_api_list_state: dict | None                 = None  # equivalente a tidalAPIListState
+
+
+def _get_cache_path() -> Path:
+    cache_dir = Path.home() / ".cache" / "spotiflac"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / _TIDAL_API_CACHE_FILE
+
+
+def _clone_state(state: dict) -> dict:
+    return {
+        "urls":          list(state.get("urls", [])),
+        "last_used_url": state.get("last_used_url", ""),
+        "updated_at":    state.get("updated_at", 0),
+        "source":        state.get("source", ""),
+    }
+
+
+def _normalize_tidal_api_urls(urls: list[str]) -> list[str]:
+    """Rimuove duplicati e slash finali — equivalente a normalizeTidalAPIURLs."""
+    seen:       set[str]  = set()
+    normalized: list[str] = []
+    for raw in urls:
+        url = raw.strip().rstrip("/")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        normalized.append(url)
+    return normalized
+
+
+def _load_tidal_api_list_state_locked() -> dict:
+    """Equivalente a loadTidalAPIListStateLocked."""
+    global _tidal_api_list_state
+
+    if _tidal_api_list_state is not None:
+        return _clone_state(_tidal_api_list_state)
+
+    cache_path = _get_cache_path()
+    if not cache_path.exists():
+        empty = {"urls": [], "last_used_url": "", "updated_at": 0, "source": ""}
+        _tidal_api_list_state = _clone_state(empty)
+        return _clone_state(empty)
+
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        state["urls"] = _normalize_tidal_api_urls(state.get("urls", []))
+        _tidal_api_list_state = _clone_state(state)
+        return _clone_state(state)
+    except Exception as exc:
+        logger.warning("[tidal] Failed to read API list cache: %s", exc)
+        empty = {"urls": [], "last_used_url": "", "updated_at": 0, "source": ""}
+        _tidal_api_list_state = _clone_state(empty)
+        return _clone_state(empty)
+
+
+def _save_tidal_api_list_state_locked(state: dict) -> None:
+    """Equivalente a saveTidalAPIListStateLocked."""
+    global _tidal_api_list_state
+    cache_path = _get_cache_path()
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        _tidal_api_list_state = _clone_state(state)
+    except Exception as exc:
+        logger.warning("[tidal] Failed to write API list cache: %s", exc)
+
+
+def _fetch_tidal_api_urls_from_gist() -> list[str]:
+    """Equivalente a fetchTidalAPIURLsFromGist."""
+    resp = requests.get(_TIDAL_API_GIST_URL, timeout=12, headers={
+        "User-Agent": _TIDAL_USER_AGENT,
+    })
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"Tidal API gist returned status {resp.status_code}: {resp.text[:200]}"
+        )
+    urls = resp.json()
+    if not isinstance(urls, list):
+        raise RuntimeError("Tidal API gist did not return a JSON array")
+    urls = _normalize_tidal_api_urls(urls)
+    if not urls:
+        raise RuntimeError("Tidal API gist returned no valid URLs")
+    return urls
+
+
+def _rotate_tidal_api_urls(urls: list[str], last_used_url: str) -> list[str]:
+    """Equivalente a rotateTidalAPIURLs — round-robin partendo dal successivo."""
+    normalized    = _normalize_tidal_api_urls(urls)
+    last_used_url = last_used_url.strip().rstrip("/")
+
+    if len(normalized) < 2 or not last_used_url:
+        return normalized
+
+    try:
+        last_index = normalized.index(last_used_url)
+    except ValueError:
+        return normalized
+
+    return normalized[last_index + 1:] + normalized[:last_index + 1]
+
+
+def prime_tidal_api_list() -> None:
+    """
+    Chiamato all'avvio — aggiorna la lista dal Gist e verifica la cache.
+    Equivalente a PrimeTidalAPIList.
+    """
+    try:
+        refresh_tidal_api_list(force=True)
+    except Exception as exc:
+        logger.warning("[tidal] Failed to refresh API list from gist: %s", exc)
+
+    with _tidal_api_list_mu:
+        state = _load_tidal_api_list_state_locked()
+        if not state["urls"]:
+            logger.error("[tidal] API cache is empty after prime")
+            return
+        if state["updated_at"] == 0:
+            state["updated_at"] = int(time.time())
+            _save_tidal_api_list_state_locked(state)
+
+
+def refresh_tidal_api_list(force: bool = False) -> list[str]:
+    """
+    Scarica la lista dal Gist e aggiorna la cache.
+    Equivalente a RefreshTidalAPIList.
+    """
+    with _tidal_api_list_mu:
+        state = _load_tidal_api_list_state_locked()
+
+        if not force and state["urls"]:
+            return list(state["urls"])
+
+        try:
+            urls = _fetch_tidal_api_urls_from_gist()
+        except Exception as exc:
+            logger.warning("[tidal] Gist fetch failed: %s", exc)
+            if state["urls"]:
+                return list(state["urls"])
+            raise
+
+        state["urls"]       = urls
+        state["updated_at"] = int(time.time())
+        state["source"]     = "gist"
+
+        # invalida last_used_url se non è più nella lista
+        if state["last_used_url"] not in state["urls"]:
+            state["last_used_url"] = ""
+
+        _save_tidal_api_list_state_locked(state)
+        return list(state["urls"])
+
+
+def get_tidal_api_list() -> list[str]:
+    """Equivalente a GetTidalAPIList."""
+    with _tidal_api_list_mu:
+        state = _load_tidal_api_list_state_locked()
+        if not state["urls"]:
+            raise RuntimeError("No cached Tidal API URLs")
+        return list(state["urls"])
+
+
+def get_rotated_tidal_api_list() -> list[str]:
+    """Equivalente a GetRotatedTidalAPIList — round-robin basato su last_used."""
+    with _tidal_api_list_mu:
+        state = _load_tidal_api_list_state_locked()
+        if not state["urls"]:
+            raise RuntimeError("No cached Tidal API URLs")
+        return _rotate_tidal_api_urls(state["urls"], state["last_used_url"])
+
+
+def remember_tidal_api_usage(api_url: str) -> None:
+    """Equivalente a RememberTidalAPIUsage — persiste l'ultimo URL usato."""
+    with _tidal_api_list_mu:
+        state = _load_tidal_api_list_state_locked()
+        state["last_used_url"] = api_url.strip().rstrip("/")
+        if state["updated_at"] == 0:
+            state["updated_at"] = int(time.time())
+        _save_tidal_api_list_state_locked(state)
 
 # ---------------------------------------------------------------------------
 # Manifest parsing (pure function, testabile)
@@ -154,9 +344,16 @@ class TidalProvider(BaseProvider):
             timeout_s: int              = 15,
     ) -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
-        self._apis    = list(apis or _TIDAL_APIS)
         self._session = self._http._session
         self._session.headers.update({"User-Agent": self._random_ua()})
+
+        # Carica la lista dal Gist all'avvio; fallback sugli hard-coded
+        try:
+            prime_tidal_api_list()
+            self._apis = apis or get_tidal_api_list()
+        except Exception as exc:
+            logger.warning("[tidal] API list unavailable, using built-in fallback: %s", exc)
+            self._apis = list(apis or _TIDAL_APIS)
 
     # ------------------------------------------------------------------
     # Spotify → Tidal resolution
@@ -250,7 +447,14 @@ class TidalProvider(BaseProvider):
 
     def _get_download_url(self, track_id: int, quality: str) -> str:
         from ..core.provider_stats import prioritize_providers, record_success, record_failure
-        ordered = prioritize_providers("tidal", self._apis)
+
+        # Usa la rotazione round-robin dal gestore dinamico
+        try:
+            rotated = get_rotated_tidal_api_list()
+        except Exception:
+            rotated = self._apis
+
+        ordered = prioritize_providers("tidal", rotated)
 
         last_err: str = ""
         for api in ordered:
@@ -269,12 +473,14 @@ class TidalProvider(BaseProvider):
                 body = resp.json()
                 if isinstance(body, dict) and body.get("data", {}).get("manifest"):
                     record_success("tidal", api)
+                    remember_tidal_api_usage(api)  # ← persiste per il round-robin
                     print_source_banner("tidal", api, quality)
                     return "MANIFEST:" + body["data"]["manifest"]
                 if isinstance(body, list):
                     for item in body:
                         if item.get("OriginalTrackUrl"):
                             record_success("tidal", api)
+                            remember_tidal_api_usage(api)  # ← persiste per il round-robin
                             print_source_banner("tidal", api, quality)
                             return item["OriginalTrackUrl"]
 
