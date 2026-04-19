@@ -10,7 +10,7 @@ Uso avanzato:
     SpotiFLAC(
         url="https://open.spotify.com/album/...",
         output_dir="./Music",
-        services=["qobuz", "tidal", "spoti"],
+        services=["qobuz", "tidal"],
         filename_format="{year} - {album}/{track}. {title}",
         use_artist_subfolders=True,
         use_album_subfolders=True,
@@ -37,7 +37,6 @@ __all__ = [
     "DownloadOptions",
     "QobuzProvider",
     "TidalProvider",
-    "SpotiDownloaderProvider",
     "SpotifyMetadataClient",
     "TrackMetadata",
     "DownloadResult",
