@@ -1,52 +1,90 @@
+#!/usr/bin/env python3
 """
-Launcher script for SpotiFLAC CLI
+CLI entry point per SpotiFLAC.
+
+Esempio:
+    python launcher.py "https://open.spotify.com/album/..." ./Music \
+        --service qobuz tidal spoti \
+        --filename-format "{year} - {album}/{track}. {title}" \
+        --use-artist-subfolders --use-album-subfolders \
+        --loop 60
 """
 import argparse
+import logging
 import sys
-import os
-from SpotiFLAC.SpotiFLAC import SpotiFLAC
 
-if getattr(sys, 'frozen', False):
-    application_path = sys._MEIPASS
-else:
-    application_path = os.path.dirname(os.path.abspath(__file__))
+from SpotiFLAC import SpotiFLAC
 
-sys.path.insert(0, application_path)
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("url", help="Spotify URL")
-    parser.add_argument("output_dir", help="Output directory")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog        = "spotiflac",
+        description = "Download Spotify tracks in true FLAC via Tidal, Qobuz, and more.",
+        formatter_class = argparse.RawDescriptionHelpFormatter,
+    )
+
+    parser.add_argument("url",        help="Spotify URL (track, album, or playlist)")
+    parser.add_argument("output_dir", help="Destination directory")
+
     parser.add_argument(
-        "--service",
-        choices=["tidal", "qobuz", "amazon","spoti", "youtube"],
-        nargs="+",
-        default=["tidal", "spoti", "qobuz", "amazon"],
-        help="One or more services to try in order",
+        "--service", "-s",
+        choices = ["tidal", "qobuz", "spoti", "deezer", "amazon", "youtube"],
+        nargs   = "+",
+        default = ["tidal"],
+        metavar = "SERVICE",
+        help    = "Provider priority list (default: tidal)",
     )
     parser.add_argument(
-        "--filename-format",
-        default="{title} - {artist}",
-        help="Custom filename format using placeholders (see examples below)"
+        "--filename-format", "-f",
+        default = "{title} - {artist}",
+        dest    = "filename_format",
+        help    = "Filename template. Placeholders: {title} {artist} {album} "
+                  "{album_artist} {year} {date} {track} {disc} {isrc}",
     )
-    parser.add_argument("--use-track-numbers", action="store_true", help="(Deprecated - use {track} in format)")
-    parser.add_argument("--use-artist-subfolders", action="store_true")
-    parser.add_argument("--use-album-subfolders", action="store_true")
-    parser.add_argument("--loop", type=int, help="Loop delay in minutes")
+    parser.add_argument(
+        "--quality", "-q",
+        default = "LOSSLESS",
+        help    = "Quality: LOSSLESS or HI_RES (Tidal), 6/7/27 (Qobuz). Default: LOSSLESS",
+    )
+    parser.add_argument("--use-track-numbers",     action="store_true", dest="use_track_numbers")
+    parser.add_argument("--use-artist-subfolders", action="store_true", dest="use_artist_subfolders")
+    parser.add_argument("--use-album-subfolders",  action="store_true", dest="use_album_subfolders")
+    parser.add_argument("--first-artist-only",     action="store_true", dest="first_artist_only",
+                        help="Use only the first artist in tags and filename")
+    parser.add_argument(
+        "--loop", "-l",
+        type    = int,
+        default = None,
+        metavar = "MINUTES",
+        help    = "Re-run every N minutes (default: single run)",
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action  = "store_true",
+        help    = "Enable verbose logging (DEBUG level)",
+    )
+
     return parser.parse_args()
 
-def main():
-    args = parse_args()
+
+def main() -> None:
+    args      = parse_args()
+    log_level = logging.DEBUG if args.verbose else logging.WARNING
+
     SpotiFLAC(
-        args.url, 
-        args.output_dir, 
-        args.service, 
-        args.filename_format, 
-        args.use_track_numbers, 
-        args.use_artist_subfolders, 
-        args.use_album_subfolders, 
-        args.loop
+        url                   = args.url,
+        output_dir            = args.output_dir,
+        services              = args.service,
+        filename_format       = args.filename_format,
+        use_track_numbers     = args.use_track_numbers,
+        use_artist_subfolders = args.use_artist_subfolders,
+        use_album_subfolders  = args.use_album_subfolders,
+        loop                  = args.loop,
+        quality               = args.quality,
+        first_artist_only     = args.first_artist_only,
+        log_level             = log_level,
     )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

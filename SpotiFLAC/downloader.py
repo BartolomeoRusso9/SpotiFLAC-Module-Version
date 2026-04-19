@@ -1,0 +1,318 @@
+"""
+Downloader — orchestratore principale.
+
+Gestisce la fallback chain tra provider, la struttura cartelle,
+il loop retry e la pipeline completa download → tag.
+Ispirato al rotation system Go: nessuna eccezione sale al chiamante,
+ogni risultato è un DownloadResult tipato.
+"""
+from __future__ import annotations
+import logging
+import os
+import re
+import shutil
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .core.models import TrackMetadata, DownloadResult
+from .core.progress import DownloadManager, ProgressCallback
+from .core.errors import SpotiflacError
+from .providers.base import BaseProvider
+from .providers.spotify_metadata import SpotifyMetadataClient
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Config dataclasses
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DownloadOptions:
+    output_dir:           str
+    services:             list[str]       = field(default_factory=lambda: ["tidal"])
+    filename_format:      str             = "{title} - {artist}"
+    use_track_numbers:    bool            = False
+    use_artist_subfolders: bool           = False
+    use_album_subfolders:  bool           = False
+    first_artist_only:    bool            = False
+    quality:              str             = "LOSSLESS"
+    allow_fallback:       bool            = True
+    inter_track_delay_s:  float           = 1.5
+
+
+# ---------------------------------------------------------------------------
+# Provider factory
+# ---------------------------------------------------------------------------
+
+def _build_provider(name: str) -> BaseProvider | None:
+    """
+    Factory centralizzata per i provider.
+    Provider nativi implementano BaseProvider direttamente.
+    Provider legacy (amazon, deezer, youtube) sono avvolti da adapter.
+    """
+    from .providers.tidal import TidalProvider
+    from .providers.qobuz import QobuzProvider
+    from .providers.spotidownloader import SpotiDownloaderProvider
+
+    native = {"tidal": TidalProvider, "qobuz": QobuzProvider, "spoti": SpotiDownloaderProvider}
+    if name in native:
+        return native[name]()
+
+    adapters = {
+        "amazon":  ("providers.amazon_adapter",  "AmazonProvider"),
+        "deezer":  ("providers.deezer_adapter",  "DeezerProvider"),
+        "youtube": ("providers.youtube_adapter", "YouTubeProvider"),
+    }
+    if name not in adapters:
+        logger.warning("Unknown provider: %s", name)
+        return None
+
+    module_path, class_name = adapters[name]
+    try:
+        import importlib
+        pkg = __name__.rsplit(".", 1)[0]
+        mod = importlib.import_module(f".{module_path}", package=pkg)
+        return getattr(mod, class_name)()
+    except Exception as exc:
+        logger.warning("Provider %s unavailable: %s", name, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Single-track download logic
+# ---------------------------------------------------------------------------
+
+def download_one(
+    metadata:   TrackMetadata,
+    output_dir: str,
+    providers:  list[BaseProvider],
+    opts:       DownloadOptions,
+    position:   int = 1,
+) -> DownloadResult:
+    """
+    Prova i provider in ordine.
+    Ritorna il primo DownloadResult con success=True,
+    oppure DownloadResult.fail() se tutti falliscono.
+    """
+    errors: dict[str, str] = {}
+    manager = DownloadManager()
+
+    for provider in providers:
+        logger.info("[%s] Trying: %s — %s", provider.name, metadata.artists, metadata.title)
+
+        cb = ProgressCallback(item_id=metadata.id)
+        provider.set_progress_callback(cb)
+
+        ext = _provider_extension(provider.name)
+
+        result = provider.download_track(
+            metadata,
+            output_dir,
+            filename_format     = opts.filename_format,
+            position            = position,
+            include_track_num   = opts.use_track_numbers,
+            use_album_track_num = opts.use_track_numbers,
+            first_artist_only   = opts.first_artist_only,
+            allow_fallback      = opts.allow_fallback,
+        )
+
+        if result.success:
+            logger.info("[%s] ✓ %s — %s", provider.name, metadata.artists, metadata.title)
+            return result
+
+        errors[provider.name] = result.error or "unknown error"
+        logger.warning("[%s] ✗ %s", provider.name, result.error)
+
+    summary = "; ".join(f"{k}: {v}" for k, v in errors.items())
+    return DownloadResult.fail("none", f"All providers failed — {summary}")
+
+
+def _provider_extension(name: str) -> str:
+    return {
+        "youtube": ".mp3",
+        "amazon":  ".m4a",
+    }.get(name, ".flac")
+
+
+# ---------------------------------------------------------------------------
+# Batch download worker
+# ---------------------------------------------------------------------------
+
+class DownloadWorker:
+    """
+    Esegue il download di una lista di tracce in sequenza,
+    gestendo subfolders, skip, e failure tracking.
+    """
+
+    def __init__(
+        self,
+        tracks:   list[TrackMetadata],
+        opts:     DownloadOptions,
+        collection_name: str = "",
+        is_album:     bool = False,
+        is_playlist:  bool = False,
+    ) -> None:
+        self._tracks          = tracks
+        self._opts            = opts
+        self._collection_name = collection_name
+        self._is_album        = is_album
+        self._is_playlist     = is_playlist
+        self._failed:  list[tuple[str, str, str]] = []  # (title, artists, error)
+        self._providers: list[BaseProvider] = self._build_providers()
+
+    def _build_providers(self) -> list[BaseProvider]:
+        result = []
+        for name in self._opts.services:
+            p = _build_provider(name)
+            if p:
+                result.append(p)
+        if not result:
+            raise ValueError(f"No valid providers found in: {self._opts.services}")
+        return result
+
+    def run(self) -> list[tuple[str, str, str]]:
+        """Esegue tutti i download. Ritorna la lista dei falliti."""
+        manager   = DownloadManager()
+        total     = len(self._tracks)
+        start     = time.perf_counter()
+        base_out  = self._resolve_output_dir()
+
+        for i, track in enumerate(self._tracks):
+            position = i + 1
+            print(f"\n[{position}/{total}] {track.title} — {track.artists}")
+
+            manager.start_download(track.id)
+
+            out_dir = self._track_output_dir(base_out, track)
+            result  = download_one(
+                track, out_dir, self._providers, self._opts, position
+            )
+
+            if result.success:
+                size_mb = (
+                    os.path.getsize(result.file_path) / (1024 * 1024)
+                    if result.file_path and os.path.exists(result.file_path)
+                    else 0.0
+                )
+                manager.complete_download(track.id, result.file_path or "", size_mb)
+            else:
+                err = result.error or "unknown"
+                self._failed.append((track.title, track.artists, err))
+                logger.error("[worker] Failed: %s — %s: %s", track.title, track.artists, err)
+                manager.fail_download(track.id, err)
+
+            if i < total - 1:
+                time.sleep(self._opts.inter_track_delay_s)
+
+        elapsed = time.perf_counter() - start
+        self._print_summary(elapsed)
+        return self._failed
+
+    def _resolve_output_dir(self) -> str:
+        out = os.path.normpath(self._opts.output_dir)
+        if (self._is_album or self._is_playlist) and self._collection_name:
+            safe_name = re.sub(r'[<>:"/\\|?*]', "_", self._collection_name.strip())
+            out = os.path.join(out, safe_name)
+        os.makedirs(out, exist_ok=True)
+        return out
+
+    def _track_output_dir(self, base: str, track: TrackMetadata) -> str:
+        out = base
+        if self._is_playlist:
+            if self._opts.use_artist_subfolders:
+                folder = re.sub(r'[<>:"/\\|?*]', "_", track.first_artist)
+                out = os.path.join(out, folder)
+            if self._opts.use_album_subfolders:
+                folder = re.sub(r'[<>:"/\\|?*]', "_", track.album)
+                out = os.path.join(out, folder)
+        os.makedirs(out, exist_ok=True)
+        return out
+
+    def _print_summary(self, elapsed: float) -> None:
+        print(f"\n{'='*40}")
+        if self._failed:
+            print(f"Completed with {len(self._failed)} failure(s):")
+            for title, artists, err in self._failed:
+                print(f"  ✗ {title} — {artists}: {err}")
+        else:
+            print("All tracks downloaded successfully ✓")
+        print(f"Elapsed: {_format_seconds(elapsed)}")
+
+
+# ---------------------------------------------------------------------------
+# Top-level entry point
+# ---------------------------------------------------------------------------
+
+class SpotiflacDownloader:
+    """
+    Entry point principale per uso come libreria o CLI.
+
+    Esempio:
+        downloader = SpotiflacDownloader(opts)
+        downloader.run("https://open.spotify.com/album/...")
+    """
+
+    def __init__(self, opts: DownloadOptions) -> None:
+        self._opts   = opts
+        self._client = SpotifyMetadataClient()
+
+    def run(self, spotify_url: str, loop_minutes: int | None = None) -> None:
+        """
+        Scarica tutti i brani dall'URL Spotify.
+        Se loop_minutes > 0, ripete il ciclo dopo l'attesa specificata.
+        """
+        while True:
+            self._run_once(spotify_url)
+            if not loop_minutes or loop_minutes <= 0:
+                break
+            print(f"\nNext run in {loop_minutes} minutes…")
+            time.sleep(loop_minutes * 60)
+
+    def _run_once(self, spotify_url: str) -> None:
+        print("Fetching metadata…")
+        try:
+            collection_name, tracks = self._client.get_url(spotify_url)
+        except SpotiflacError as exc:
+            logger.error("Metadata fetch failed: %s", exc)
+            print(f"Error: {exc}")
+            return
+
+        if not tracks:
+            print("No tracks found.")
+            return
+
+        print(f"Found {len(tracks)} track(s) in: {collection_name}")
+
+        from .providers.spotify_metadata import parse_spotify_url
+        info        = parse_spotify_url(spotify_url)
+        is_album    = info["type"] == "album"
+        is_playlist = info["type"] == "playlist"
+
+        manager = DownloadManager()
+        for t in tracks:
+            manager.add_to_queue(t.id, t.title, t.artists, t.album, t.id)
+
+        worker = DownloadWorker(
+            tracks          = tracks,
+            opts            = self._opts,
+            collection_name = collection_name,
+            is_album        = is_album,
+            is_playlist     = is_playlist,
+        )
+        worker.run()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _format_seconds(seconds: float) -> str:
+    s = int(round(seconds))
+    parts = []
+    for unit, div in [("d", 86400), ("h", 3600), ("m", 60), ("s", 1)]:
+        val, s = divmod(s, div)
+        if val:
+            parts.append(f"{val}{unit}")
+    return " ".join(parts) or "0s"
