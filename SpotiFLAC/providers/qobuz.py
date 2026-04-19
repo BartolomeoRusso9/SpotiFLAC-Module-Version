@@ -19,6 +19,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import requests
 
@@ -31,6 +32,7 @@ from ..core.models import TrackMetadata, DownloadResult
 from ..core.tagger import embed_metadata
 from ..core.provider_stats import record_success, record_failure, prioritize_providers
 from .base import BaseProvider
+from ..core.musicbrainz import AsyncGenreFetch
 
 from ..core.console import (
     print_source_banner, print_api_failure, print_quality_fallback,
@@ -352,8 +354,8 @@ class QobuzProvider(BaseProvider):
         Registra successi/fallimenti per il sistema di scoring.
         """
         ordered_apis = prioritize_providers("qobuz", _STREAM_APIS)
-
         last_err = ""
+
         for api in ordered_apis:
             url = _build_stream_url(api, track_id, quality)
             try:
@@ -365,6 +367,7 @@ class QobuzProvider(BaseProvider):
                 if resp.status_code != 200 or not resp.text.strip():
                     last_err = f"HTTP {resp.status_code} or empty body"
                     record_failure("qobuz", api)
+                    print_api_failure("qobuz", api, last_err)
                     continue
 
                 data = resp.json()
@@ -417,6 +420,7 @@ class QobuzProvider(BaseProvider):
     # Public download interface
     # ------------------------------------------------------------------
 
+
     def download_track(
         self,
         metadata:   TrackMetadata,
@@ -429,10 +433,19 @@ class QobuzProvider(BaseProvider):
         first_artist_only:   bool = False,
         allow_fallback:      bool = True,
         quality:             str  = "6",
+        embed_genre:         bool = True,
+        single_genre:        bool = True,
     ) -> DownloadResult:
         try:
             if not metadata.isrc:
                 raise TrackNotFoundError(self.name, "no ISRC provided")
+            genre_fetch = (
+                AsyncGenreFetch().start(
+                    metadata.isrc, metadata.title,
+                    metadata.first_artist, single_genre,
+                )
+                if embed_genre else None
+            )
 
             track    = self._search_by_isrc(metadata.isrc)
             track_id = track.get("id")
@@ -449,12 +462,17 @@ class QobuzProvider(BaseProvider):
             stream_url = self._get_stream_url(track_id, quality, allow_fallback)
 
             self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
+            genre = genre_fetch.result() if genre_fetch else ""
+            if genre:
+                logger.debug("[qobuz] Genre from MusicBrainz: %s", genre)
+
 
             embed_metadata(
                 dest, metadata,
                 first_artist_only = first_artist_only,
                 cover_url         = metadata.cover_url,
                 session           = self._session,
+                extra_tags        = {"GENRE": genre} if genre else None,
             )
 
             return DownloadResult.ok(self.name, str(dest))

@@ -26,6 +26,7 @@ def embed_metadata(
     cover_url:         str   = "",
     cover_data:        bytes | None = None,
     session:           requests.Session | None = None,
+    extra_tags:        dict[str, str] | None = None,
 ) -> None:
     """
     Scrive i tag Vorbis Comment in un file FLAC e opzionalmente
@@ -47,6 +48,8 @@ def embed_metadata(
 
         tags = metadata.as_flac_tags(first_artist_only=first_artist_only)
         tags["DESCRIPTION"] = SOURCE_TAG
+        if extra_tags:
+            tags.update(extra_tags)
         for key, val in tags.items():
             audio[key] = val
 
