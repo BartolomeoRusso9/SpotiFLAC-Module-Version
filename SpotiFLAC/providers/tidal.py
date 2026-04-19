@@ -44,15 +44,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _TIDAL_APIS = [
-    "https://wolf.qqdl.site",
-    "https://triton.squid.wtf",
-    "https://hifi-one.spotisaver.net",
-    "https://hifi-two.spotisaver.net",
+    "https://tidal-api.binimum.org",
     "https://eu-central.monochrome.tf",
-    "https://us-west.monochrome.tf",
-    "https://api.monochrome.tf",
+    "https://triton.squid.wtf",
     "https://monochrome-api.samidy.com",
-    "https://tidal.kinoplus.online",
+    "https://hifi-two.spotisaver.net",
+    "https://hifi.geeked.wtf",
+    "https://us-west.monochrome.tf"
 ]
 
 _TIDAL_USER_AGENT = (
