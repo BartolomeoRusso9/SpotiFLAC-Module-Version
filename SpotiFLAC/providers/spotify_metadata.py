@@ -19,6 +19,7 @@ import requests
 
 from ..core.errors import AuthError, NetworkError, InvalidUrlError, SpotiflacError, ErrorKind
 from ..core.models import TrackMetadata
+from ..core.isrc_cache import get_cached_isrc, put_cached_isrc
 
 logger = logging.getLogger(__name__)
 
@@ -161,14 +162,17 @@ class SpotifyMetadataClient:
         album = self._get(f"/albums/{album_id}")
         tracks: list[TrackMetadata] = []
 
-        for item in self._paginate(f"{_API_BASE}/albums/{album_id}/tracks?limit=50"):
-            # L'endpoint /albums/:id/tracks non include external_ids → fetch separato
-            isrc = ""
-            try:
-                full = self._get(f"/tracks/{item['id']}")
-                isrc = full.get("external_ids", {}).get("isrc", "")
-            except Exception:
-                pass
+        for item in self._paginate(...):
+            track_id = item["id"]
+            isrc = get_cached_isrc(track_id)      # ← prima controlla cache
+            if not isrc:
+                try:
+                    full = self._get(f"/tracks/{track_id}")
+                    isrc = full.get("external_ids", {}).get("isrc", "")
+                    if isrc:
+                        put_cached_isrc(track_id, isrc)   # ← poi salva
+                except Exception:
+                    pass
 
             tracks.append(self._track_from_album_item(item, album, isrc))
 

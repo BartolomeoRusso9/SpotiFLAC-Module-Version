@@ -33,6 +33,7 @@ from ..core.tagger import embed_metadata
 from ..core.provider_stats import record_success, record_failure, prioritize_providers
 from .base import BaseProvider
 from ..core.musicbrainz import AsyncGenreFetch
+from ..core.download_validation import validate_downloaded_track
 
 from ..core.console import (
     print_source_banner, print_api_failure, print_quality_fallback,
@@ -468,6 +469,10 @@ class QobuzProvider(BaseProvider):
             stream_url = self._get_stream_url(track_id, quality, allow_fallback)
 
             self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
+            expected_s = metadata.duration_ms // 1000
+            valid, err = validate_downloaded_track(str(dest), expected_s)
+            if not valid:
+                raise SpotiflacError(ErrorKind.UNAVAILABLE, err, self.name)
             genre = genre_fetch.result() if genre_fetch else ""
             if genre:
                 logger.debug("[qobuz] Genre from MusicBrainz: %s", genre)

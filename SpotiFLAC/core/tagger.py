@@ -27,6 +27,8 @@ def embed_metadata(
     cover_data:        bytes | None = None,
     session:           requests.Session | None = None,
     extra_tags:        dict[str, str] | None = None,
+    multi_artist:      bool  = True,
+    embed_lyrics:      bool = False,
 ) -> None:
     """
     Scrive i tag Vorbis Comment in un file FLAC e opzionalmente
@@ -48,10 +50,28 @@ def embed_metadata(
 
         tags = metadata.as_flac_tags(first_artist_only=first_artist_only)
         tags["DESCRIPTION"] = SOURCE_TAG
+
+        if embed_lyrics and metadata.title and metadata.first_artist:
+            from .lyrics import fetch_lyrics
+        lyrics = fetch_lyrics(
+            metadata.title,
+            metadata.first_artist,
+            metadata.album,
+            metadata.duration_ms // 1000,
+            )
+        if lyrics:
+            tags["LYRICS"] = lyrics
+            logger.debug("Lyrics embedded: %s chars", len(lyrics))
+
         if extra_tags:
             tags.update(extra_tags)
         for key, val in tags.items():
-            audio[key] = val
+        # ARTIST e ALBUMARTIST: scrivi un tag per artista se multi_artist=True
+            if multi_artist and key in ("ARTIST", "ALBUMARTIST") and "," in val:
+                artists = [a.strip() for a in val.split(",") if a.strip()]
+                audio[key] = artists      # mutagen accetta lista → tag multipli
+            else:
+                audio[key] = val
 
         if cover_data:
             pic          = Picture()

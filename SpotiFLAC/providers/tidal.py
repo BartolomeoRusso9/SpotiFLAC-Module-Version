@@ -37,6 +37,7 @@ from ..core.console import (
     print_source_banner, print_api_failure,
     print_quality_fallback,
 )
+from ..core.download_validation import validate_downloaded_track
 
 logger = logging.getLogger(__name__)
 
@@ -633,6 +634,11 @@ class TidalProvider(BaseProvider):
             )
 
             self._download_file(dl_url, dest)
+
+            expected_s = metadata.duration_ms // 1000
+            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
+            if not valid:
+                raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
 
             embed_metadata(
                 dest, metadata,
