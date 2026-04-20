@@ -61,8 +61,102 @@ SpotiFLAC(
     use_album_subfolders=True,
     loop=60 # Retry duration in minutes
 )
-
 ```
+
+
+## Qobuz Token (Optional)
+
+Setting a personal Qobuz token improves metadata resolution reliability. The token is used as a **last resort fallback** — requests are first attempted anonymously, and only if they fail (HTTP 400/401) the token is injected. A **free Qobuz account** is sufficient.
+
+> **Important:** Use throwaway credentials (random email + password you won't forget). You'll need them again if the token expires and needs to be regenerated.
+
+### How to Create a Free Account
+
+Go to [qobuz.com](https://www.qobuz.com) and register. No payment method required for the free tier.
+
+### How to Extract Your Token
+
+1. Log in to [play.qobuz.com](https://play.qobuz.com)
+2. Open DevTools with **F12** → go to the **Network** tab
+3. Play any track or perform any search to trigger API calls
+4. Filter requests by typing `api.json` in the search bar
+5. Click on any request to `www.qobuz.com/api.json/...`
+6. In the **Request Headers** panel, look for: **x-user-auth-token: your_token_here**
+7. Copy the value — that is your token
+
+---
+
+### Setting the Token
+
+#### Environment Variable (all platforms)
+
+The recommended approach across all systems:
+
+```bash
+export QOBUZ_AUTH_TOKEN="your_token_here"
+```
+On Windows (Command Prompt):
+```bash
+set QOBUZ_AUTH_TOKEN=your_token_here
+```
+On Windows (PowerShell):
+```bash
+$env:QOBUZ_AUTH_TOKEN="your_token_here"
+```
+To make it permanent on Linux/macOS, add the export line to your **~/.bashrc, ~/.zshrc**, or equivalent shell config file.
+
+**Python**
+```python
+from SpotiFLAC import SpotiFLAC
+
+SpotiFLAC(
+    url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
+    output_dir="./downloads",
+    qobuz_token="your_token_here"
+)
+```
+Alternatively, set the environment variable before running and omit the parameter entirely.
+**Docker**
+Pass the token as an environment variable at runtime:
+```bash
+docker run \
+  -e QOBUZ_AUTH_TOKEN="your_token_here" \
+  -v ./downloads:/downloads \
+  your-spotiflac-image
+```
+
+Or define it in your **docker-compose.yml**:
+```yaml
+services:
+    spotiflac:
+        image: your-spotiflac-image
+        environment:
+            - QOBUZ_AUTH_TOKEN=your_token_here
+        volumes:
+            - ./downloads:/downloads
+```
+
+> **Never hardcode the token in a Dockerfile**: use environment variables or a .env file (excluded from version control via .gitignore).
+
+**.env File**
+If you prefer a local config file (useful for development):
+```env
+QOBUZ_AUTH_TOKEN=your_token_here
+```
+Load it before running:
+```bash
+export $(cat .env | xargs) && python launcher.py ...
+```
+Or with Docker Compose:
+```yaml
+services:
+  spotiflac:
+    env_file:
+      - .env
+```
+> Add **.env** to your **.gitignore** to avoid accidentally committing your token.
+
+
 <h2>CLI program usage</h2>
 <p>Program can be downloaded for <b>Windows</b>, <b>Linux (x86 and ARM)</b> and <b>MacOS</b>. The downloads are available under the releases.<br>
 Program can also be ran by downloading the python files and calling <code>python launcher.py</code> with the arguments.</p>
@@ -109,6 +203,8 @@ chmod +x SpotiFLAC-Linux-arm64
 | **`use_artist_subfolders`** | `bool` | `False` | Automatically organizes downloaded files into subfolders by artist. |
 | **`use_album_subfolders`** | `bool` | `False` | Automatically organizes downloaded files into subfolders by album. |
 | **`loop`** | `int` | `None` | Duration in minutes to keep retrying failed downloads. |
+| **`qobuz_token`** | `str` | `None` | Optional Qobuz user auth token used as fallback for metadata resolution. |
+
 
 ### Filename Format Placeholders
 

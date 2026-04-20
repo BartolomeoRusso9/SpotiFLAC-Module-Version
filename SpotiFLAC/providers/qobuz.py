@@ -99,9 +99,9 @@ class QobuzCredentials:
 
     def is_fresh(self) -> bool:
         return (
-            bool(self.app_id)
-            and bool(self.app_secret)
-            and (time.time() - self.fetched_at) < _CREDS_TTL
+                bool(self.app_id)
+                and bool(self.app_secret)
+                and (time.time() - self.fetched_at) < _CREDS_TTL
         )
 
     def to_dict(self) -> dict:
@@ -289,11 +289,12 @@ class QobuzProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def _do_signed_get(
-        self,
-        path:          str,
-        params:        dict,
-        creds:         QobuzCredentials | None = None,
-        force_refresh: bool = False,
+            self,
+            path:               str,
+            params:             dict,
+            creds:              QobuzCredentials | None = None,
+            force_refresh:      bool = False,
+            use_fallback_token: bool = False,
     ) -> requests.Response:
         if creds is None:
             creds = self._get_credentials(force_refresh=force_refresh)
@@ -307,24 +308,37 @@ class QobuzProvider(BaseProvider):
             "request_ts":  timestamp,
             "request_sig": signature,
         }
-        url  = f"{_API_BASE}/{path.strip('/')}"
-
+        url     = f"{_API_BASE}/{path.strip('/')}"
         headers = {"X-App-Id": creds.app_id}
-        if creds.user_auth_token:
+
+        if creds.user_auth_token and use_fallback_token:
             headers["X-User-Auth-Token"] = creds.user_auth_token
 
-        resp = self._session.get(
-            url, params=req_params,
-            headers=headers,
-            timeout=20,
-        )
+        resp = self._session.get(url, params=req_params, headers=headers, timeout=20)
 
-        # qobuzShouldRefreshCredentials: 400 o 401 → refresh e riprova
-        if resp.status_code in (400, 401) and not force_refresh:
-            logger.info("[qobuz] HTTP %s — forcing credential refresh", resp.status_code)
-            return self._do_signed_get(path, params, force_refresh=True)
+        if resp.status_code in (400, 401):
+            # Step 1 — prova con token personale (se disponibile e non ancora usato)
+            if creds.user_auth_token and not use_fallback_token and not force_refresh:
+                logger.info("[qobuz] HTTP %s — retry con token personale", resp.status_code)
+                return self._do_signed_get(
+                    path, params, creds=creds,
+                    force_refresh=False, use_fallback_token=True,
+                )
+
+            # Step 2 — token usato ma ancora 401: forza refresh credenziali
+            #           Propaga use_fallback_token=True per riusare il token
+            #           con le credenziali fresche
+            if not force_refresh:
+                logger.info("[qobuz] HTTP %s — credential refresh (token=%s)",
+                            resp.status_code, use_fallback_token)
+                return self._do_signed_get(
+                    path, params,
+                    force_refresh=True,
+                    use_fallback_token=use_fallback_token,  # ← propagato
+                )
 
         return resp
+
 
     # ------------------------------------------------------------------
     # Track lookup
@@ -432,19 +446,19 @@ class QobuzProvider(BaseProvider):
 
 
     def download_track(
-        self,
-        metadata:   TrackMetadata,
-        output_dir: str,
-        *,
-        filename_format:     str  = "{title} - {artist}",
-        position:            int  = 1,
-        include_track_num:   bool = False,
-        use_album_track_num: bool = False,
-        first_artist_only:   bool = False,
-        allow_fallback:      bool = True,
-        quality:             str  = "6",
-        embed_genre:         bool = True,
-        single_genre:        bool = True,
+            self,
+            metadata:   TrackMetadata,
+            output_dir: str,
+            *,
+            filename_format:     str  = "{title} - {artist}",
+            position:            int  = 1,
+            include_track_num:   bool = False,
+            use_album_track_num: bool = False,
+            first_artist_only:   bool = False,
+            allow_fallback:      bool = True,
+            quality:             str  = "6",
+            embed_genre:         bool = True,
+            single_genre:        bool = True,
     ) -> DownloadResult:
         try:
             if not metadata.isrc:
