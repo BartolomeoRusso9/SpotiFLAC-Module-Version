@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _TIDAL_APIS = [
+    "https://api.monochrome.tf",
     "https://tidal-api.binimum.org",
     "https://eu-central.monochrome.tf",
     "https://triton.squid.wtf",
@@ -427,19 +428,23 @@ class TidalProvider(BaseProvider):
         return None
 
     def _resolve_via_songlink(self, spotify_track_id: str) -> str:
-        url = (
-            f"https://api.song.link/v1-alpha.1/links?"
-            f"url=https://open.spotify.com/track/{spotify_track_id}&userCountry=IT"
-        )
-        try:
-            resp = self._session.get(url, timeout=10)
-            resp.raise_for_status()
-            tidal = resp.json().get("linksByPlatform", {}).get("tidal")
-            if tidal and tidal.get("url"):
-                return tidal["url"]
-        except Exception as exc:
-            raise TrackNotFoundError(self.name, spotify_track_id) from exc
-
+        spotify_url = f"https://open.spotify.com/track/{spotify_track_id}"
+        for country in ("US", "BR", "IT"):
+            url = (
+                "https://api.song.link/v1-alpha.1/links?"
+                f"url={quote(spotify_url, safe='')}&userCountry={country}"
+            )
+            try:
+                resp = self._session.get(url, timeout=10)
+                resp.raise_for_status()
+                links = resp.json().get("linksByPlatform", {})
+                for platform in ("tidal", "tidalAlt"):
+                    tidal = links.get(platform) or {}
+                    link = str(tidal.get("url", "")).strip()
+                    if link:
+                        return link
+            except Exception as exc:
+                logger.debug("[tidal] song.link resolve failed (%s): %s", country, exc)
         raise TrackNotFoundError(self.name, spotify_track_id)
 
     # ------------------------------------------------------------------

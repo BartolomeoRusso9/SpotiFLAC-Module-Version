@@ -4,7 +4,7 @@ import os
 import re
 import subprocess
 from typing import Callable, Dict
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 import requests
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import PictureType
@@ -38,6 +38,22 @@ def safe_int(value) -> int:
     except (ValueError, TypeError):
         return 0
 
+
+def _normalize_amazon_music_url(raw_url: str) -> str:
+    if not raw_url:
+        return ""
+    raw_url = raw_url.strip()
+    m = re.search(r"(B[0-9A-Z]{9})", raw_url)
+    if m:
+        return f"https://music.amazon.com/tracks/{m.group(1)}?musicTerritory=US"
+
+    parsed = urlparse(raw_url)
+    if "music.amazon." not in parsed.netloc.lower():
+        return ""
+    if "/tracks/" in parsed.path or "/albums/" in parsed.path:
+        return raw_url
+    return ""
+
 class AmazonDownloader:
     def __init__(self, timeout: float = 120.0):
         self.session = requests.Session()
@@ -51,43 +67,48 @@ class AmazonDownloader:
         self.progress_callback = callback
 
     def get_amazon_url_from_spotify(self, spotify_track_id: str) -> str:
-        print("Getting Amazon URL via Songlink HTML...")
+        print("Getting Amazon URL...")
+        spotify_url = f"https://open.spotify.com/track/{spotify_track_id}"
 
-        url = f"https://song.link/s/{spotify_track_id}"
-
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-
+        # 1) Tenta API song.link (mais estável que scraping HTML)
+        resolver_url = (
+            "https://api.song.link/v1-alpha.1/links"
+            f"?url={quote(spotify_url, safe='')}&userCountry=US"
+        )
         try:
-            resp = self.session.get(url, headers=headers, timeout=10)
+            resp = self.session.get(resolver_url, timeout=10)
+            if resp.status_code == 200:
+                payload = resp.json()
+                link = (
+                    payload.get("linksByPlatform", {})
+                    .get("amazon", {})
+                    .get("url", "")
+                ).strip()
+                normalized = _normalize_amazon_music_url(link)
+                if normalized:
+                    print(f"Found Amazon URL: {normalized}")
+                    return normalized
+        except Exception:
+            pass
+
+        # 2) Fallback para HTML público do song.link
+        html_url = f"https://song.link/s/{spotify_track_id}"
+        headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9"}
+        try:
+            resp = self.session.get(html_url, headers=headers, timeout=10)
             resp.raise_for_status()
-
-            html = resp.text
-
-            match = re.search(
-                r'https://music\.amazon\.com/(tracks|albums)/([A-Z0-9]{10})',
-                html
-            )
-
+            match = re.search(r'https://music\.amazon\.com/(tracks|albums)/([A-Z0-9]{10})', resp.text)
             if not match:
                 raise Exception("Amazon link not found in HTML")
-
             asin = match.group(2)
-
-            base = base64.b64decode(
-                "aHR0cHM6Ly9tdXNpYy5hbWF6b24uY29tL3RyYWNrcy8="
-            ).decode()
-
-            amazon_url = f"{base}{asin}?musicTerritory=US"
-
-            print(f"Found Amazon URL: {amazon_url}")
-
-            return amazon_url
-
+            normalized = _normalize_amazon_music_url(f"https://music.amazon.com/tracks/{asin}")
+            if normalized:
+                print(f"Found Amazon URL: {normalized}")
+                return normalized
         except Exception as e:
             raise Exception(f"Error resolving Amazon URL: {e}")
+
+        raise Exception("Amazon Music link not found")
 
     def _get_codec(self, filepath: str) -> str:
         try:
@@ -112,19 +133,38 @@ class AmazonDownloader:
             raise Exception(f"Failed to extract ASIN from: {amazon_url}")
         asin = asin_match.group(1)
 
-        api_url = f"https://amzn.afkarxyz.qzz.io/api/track/{asin}"
-        print(f"Fetching from Amazon API (ASIN: {asin})...")
-        
-        resp = self.session.get(api_url)
-        if resp.status_code != 200:
-             raise Exception(f"Amazon API returned status {resp.status_code}")
+        api_bases = [
+            "https://amzn.afkarxyz.qzz.io",
+            "https://amazon.spotbye.qzz.io",
+        ]
+        stream_url = ""
+        decryption_key = ""
+        last_err = ""
 
-        data = resp.json()
-        stream_url = data.get("streamUrl")
-        decryption_key = data.get("decryptionKey")
+        for base in api_bases:
+            api_url = f"{base}/api/track/{asin}"
+            print(f"Fetching from Amazon API (ASIN: {asin})...")
+            try:
+                resp = self.session.get(api_url, timeout=20)
+                if resp.status_code != 200:
+                    last_err = f"HTTP {resp.status_code} from {base}"
+                    continue
+                data = resp.json()
+                stream_url = (data.get("streamUrl") or data.get("stream_url") or "").strip()
+                decryption_key = (data.get("decryptionKey") or data.get("decryption_key") or "").strip()
+                if stream_url:
+                    break
+                nested = data.get("data", {}) if isinstance(data, dict) else {}
+                stream_url = (nested.get("streamUrl") or nested.get("url") or "").strip()
+                decryption_key = (decryption_key or nested.get("decryptionKey") or "").strip()
+                if stream_url:
+                    break
+                last_err = f"No stream URL in response from {base}"
+            except Exception as exc:
+                last_err = f"{base}: {exc}"
 
         if not stream_url:
-            raise Exception("No stream URL found in API response")
+            raise Exception(f"No stream URL found in API responses ({last_err})")
 
         temp_file = os.path.join(output_dir, f"{asin}.enc")
         print(f"Downloading track...")

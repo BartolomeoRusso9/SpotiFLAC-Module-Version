@@ -51,14 +51,18 @@ def embed_metadata(
         tags = metadata.as_flac_tags(first_artist_only=first_artist_only)
         tags["DESCRIPTION"] = SOURCE_TAG
 
+        lyrics: str | None = None
         if embed_lyrics and metadata.title and metadata.first_artist:
             from .lyrics import fetch_lyrics
-            lyrics = fetch_lyrics(
-            metadata.title,
-            metadata.first_artist,
-            metadata.album,
-            metadata.duration_ms // 1000,
-            )
+            try:
+                lyrics = fetch_lyrics(
+                    metadata.title,
+                    metadata.first_artist,
+                    metadata.album,
+                    metadata.duration_ms // 1000,
+                )
+            except Exception as exc:
+                logger.warning("Lyrics fetch failed for %s: %s", path.name, exc)
         if lyrics:
             tags["LYRICS"] = lyrics
             logger.debug("Lyrics embedded: %s chars", len(lyrics))
