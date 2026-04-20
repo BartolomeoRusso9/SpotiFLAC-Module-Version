@@ -53,7 +53,7 @@ def embed_metadata(
 
         if embed_lyrics and metadata.title and metadata.first_artist:
             from .lyrics import fetch_lyrics
-        lyrics = fetch_lyrics(
+            lyrics = fetch_lyrics(
             metadata.title,
             metadata.first_artist,
             metadata.album,

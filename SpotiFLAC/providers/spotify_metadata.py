@@ -162,7 +162,7 @@ class SpotifyMetadataClient:
         album = self._get(f"/albums/{album_id}")
         tracks: list[TrackMetadata] = []
 
-        for item in self._paginate(...):
+        for item in self._paginate(f"{_API_BASE}/albums/{album_id}/tracks?limit=50"):
             track_id = item["id"]
             isrc = get_cached_isrc(track_id)      # ← prima controlla cache
             if not isrc:
