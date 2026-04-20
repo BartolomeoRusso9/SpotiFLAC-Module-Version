@@ -1,52 +1,33 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires      = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "SpotiFLAC"
-version = "0.2.8"
-description = "Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required."
-readme = "README.md"
-requires-python = ">=3.9"
-license = {text = "MIT"} # Mude para a sua licença real se não for MIT
-authors = [
-  { name="ShuKurenais" }
-]
-
-keywords = [
-    "spotify", "flac", "downloader", "music", "lossless", "lossless-music",
-    "tidal", "qobuz", "amazon-music", "audio", "SpotiFLAC", "spotify-downloader",
-    "no-account", "hi-res"
-]
-
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: End Users/Desktop",
-    "Intended Audience :: Developers",
-    "Topic :: Multimedia :: Sound/Audio",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
-]
+name        = "SpotiFLAC"
+version     = "2.0.0"
+description = "Download Spotify tracks in true FLAC from Tidal, Qobuz, and more — production-ready."
+readme      = "README.md"
+license     = { file = "LICENSE" }
+requires-python = ">=3.10"
 
 dependencies = [
-  "requests>=2.32.3",
-  "mutagen>=1.47.0",
-  "pyotp>=2.9.0"
+    "requests>=2.31",
+    "mutagen>=1.47",
+    "pydantic>=2.0",
 ]
 
-[project.urls]
-"Homepage" = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
-"Repository" = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
-"Bug Tracker" = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/issues"
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov", "ruff", "mypy"]
 
 [project.scripts]
 spotiflac = "launcher:main"
 
-[tool.setuptools]
-packages = ["SpotiFLAC"]
-py-modules = ["launcher"]
+[tool.ruff]
+target-version = "py310"
+line-length    = 100
+select         = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.mypy]
+python_version         = "3.10"
+strict                 = true
+ignore_missing_imports = true

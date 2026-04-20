@@ -112,7 +112,7 @@ class AmazonDownloader:
             raise Exception(f"Failed to extract ASIN from: {amazon_url}")
         asin = asin_match.group(1)
 
-        api_url = f"https://amzn.afkarxyz.fun/api/track/{asin}"
+        api_url = f"https://amzn.afkarxyz.qzz.io/api/track/{asin}"
         print(f"Fetching from Amazon API (ASIN: {asin})...")
         
         resp = self.session.get(api_url)
