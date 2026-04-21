@@ -180,56 +180,21 @@ class _AppleMusicMeta:
 # Provider: Tidal (via API mirror — stesso sistema di tidal.py)               #
 # --------------------------------------------------------------------------- #
 
-# --------------------------------------------------------------------------- #
-# Provider: Tidal (via API mirror — stesso sistema di tidal.py)               #
-# --------------------------------------------------------------------------- #
-
 class _TidalMeta:
     """
     Recupera metadati extra da Tidal tramite le API mirror già usate
     per il download (ricerca per track_name/artist).
-    Unisce le API hardcoded con quelle scaricate dal gist raw.
     """
 
     _APIS = [
         "https://eu-central.monochrome.tf",
-        "https://us-west.monochrome.tf",
         "https://api.monochrome.tf",
-        "https://monochrome-api.samidy.com",
         "https://tidal-api.binimum.org",
-        "https://tidal.kinoplus.online",
-        "https://triton.squid.wtf",
-        "https://vogel.qqdl.site",
-        "https://maus.qqdl.site",
-        "https://hund.qqdl.site",
-        "https://katze.qqdl.site",
-        "https://wolf.qqdl.site",
-        "https://hifi-one.spotisaver.net",
-        "https://hifi-two.spotisaver.net",
     ]
-
-    _GIST_URL = "https://gist.githubusercontent.com/afkarxyz/2ce772b943321b9448b454f39403ce25/raw"
 
     def __init__(self) -> None:
         self._s = requests.Session()
         self._s.headers["User-Agent"] = _UA
-        self._merged_apis = list(self._APIS)
-        self._fetch_and_merge_apis()
-
-    def _fetch_and_merge_apis(self) -> None:
-        """Scarica le API dal gist e le unisce a quelle di base senza duplicati."""
-        try:
-            r = self._s.get(self._GIST_URL, timeout=8)
-            if r.ok:
-                gist_urls = r.json()
-                if isinstance(gist_urls, list):
-                    for url in gist_urls:
-                        clean_url = url.strip().rstrip("/")
-                        if clean_url and clean_url not in self._merged_apis:
-                            self._merged_apis.append(clean_url)
-            logger.debug("[meta/tidal] Total APIs loaded: %d", len(self._merged_apis))
-        except Exception as exc:
-            logger.debug("[meta/tidal] Failed to fetch gist APIs: %s", exc)
 
     def fetch(self, track_name: str, artist_name: str) -> EnrichedMetadata:
         out = EnrichedMetadata()
@@ -247,10 +212,10 @@ class _TidalMeta:
     def _search_track(self, title: str, artist: str) -> dict | None:
         from urllib.parse import quote
         q = quote(f"{artist} {title}")
-        for api in self._merged_apis:
+        for api in self._APIS:
             for endpoint in (
-                    f"{api}/search/?s={q}&limit=5",
-                    f"{api}/search?s={q}&limit=5",
+                    f"{api.rstrip('/')}/search/?s={q}&limit=5",
+                    f"{api.rstrip('/')}/search?s={q}&limit=5",
             ):
                 try:
                     r = self._s.get(endpoint, timeout=8)
@@ -282,7 +247,7 @@ class _QobuzMeta:
     def _get_provider(self) -> Any:
         if self._provider is None:
             try:
-                from SpotiFLAC.providers.qobuz import QobuzProvider
+                from ..providers.qobuz import QobuzProvider
                 self._provider = QobuzProvider()
             except Exception as exc:
                 logger.debug("[meta/qobuz] cannot init provider: %s", exc)
@@ -328,11 +293,11 @@ _PROVIDERS = {
 
 
 def enrich_metadata(
-    track_name:  str,
-    artist_name: str,
-    isrc:        str = "",
-    providers:   list[str] | None = None,
-    timeout_s:   float = 10.0,
+        track_name:  str,
+        artist_name: str,
+        isrc:        str = "",
+        providers:   list[str] | None = None,
+        timeout_s:   float = 10.0,
 ) -> EnrichedMetadata:
     """
     Interroga i provider in parallelo e unisce i risultati.
@@ -349,7 +314,7 @@ def enrich_metadata(
         EnrichedMetadata con i campi trovati (quelli non trovati restano "").
     """
     if providers is None:
-        providers = ["qobuz", "tidal", "deezer", "apple"]
+        providers = ["deezer", "apple", "qobuz", "tidal"]
 
     merged = EnrichedMetadata()
 

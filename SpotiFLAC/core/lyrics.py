@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import time
 import urllib.parse
-from typing import Callable
+from typing import Any, Callable
 
 import requests
 
@@ -408,10 +408,6 @@ def _lrclib_search(track: str, artist: str, timeout: int) -> str:
 # --------------------------------------------------------------------------- #
 # Public API                                                                   #
 # --------------------------------------------------------------------------- #
-
-# Type alias per evitare import Any a livello modulo
-from typing import Any
-
 
 def fetch_lyrics(
         track_name:       str,
