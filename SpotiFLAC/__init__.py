@@ -62,7 +62,7 @@ def SpotiFLAC(
         url:                   URL Spotify (track, album, playlist).
         output_dir:            Directory di destinazione.
         services:              Lista provider in ordine di priorità.
-                               Valori: "tidal", "qobuz", "spoti", "deezer", "amazon", "youtube".
+                               Valori: "tidal", "qobuz", "deezer", "amazon", "youtube".
         filename_format:       Template nome file. Placeholder: {title}, {artist}, {album},
                                {album_artist}, {year}, {date}, {track}, {disc}, {isrc}.
         use_track_numbers:     Prefissa il filename con il numero traccia.
