@@ -86,68 +86,85 @@ Go to [qobuz.com](https://www.qobuz.com) and register. No payment method require
 
 ---
 
-### Setting the Token
+## Spotify Token (sp_dc) for Synced Lyrics (Optional)
+Spotify requires a session cookie called sp_dc to access its internal synced lyrics API.
 
-#### Environment Variable (all platforms)
+### How to Extract Your Token
+1. Open your web browser and go to open.spotify.com
+2. Log in to your Spotify account.
+3. Open DevTools (F12 or Ctrl+Shift+I / Cmd+Option+I).
+4. Navigate to the Application tab (or "Storage" in Firefox).
+5. On the left sidebar, expand Cookies and select https://open.spotify.com.
+6. Search for the row named sp_dc.
+7. Double-click its Value, copy it, and keep it safe. (Do not share this token!)
+
+## Musixmatch Token (usertoken) for Rich-Synced Lyrics (Optional)
+Musixmatch offers highly accurate word-level synchronized lyrics. To use it, you need a user token from their desktop app.
+
+### How to Extrack Your Token
+1. Download and install the official Musixmatch Desktop App (Windows/Mac).
+2. Log in to your account.
+3. Open DevTools inside the app (usually Ctrl+Shift+I on Windows or Cmd+Option+I on Mac).
+4. Go to **Network**  tab.
+5. Play a song or view lyrics in the app to generate network traffic.
+6. Look at the requests being made and inspect their Headers or Payload.
+7. Find the usertoken parameter and copy its alphanumeric value.
+
+## Apple Music Token (MusicKit JS Key) (Optional)
+Apple Music lyrics require an official Apple Developer Account.
+
+### How to Extract Your Token
+1. You must be enrolled in the Apple Developer Program (paid).
+2. Go to the Apple Developer Console.
+3. Create a **MusicKit JS Key**.
+4. Generate the developer token using your Key ID and Team ID.
+
+## How to Apply Tokens in SpotiFLAC
+Once you have your Spotify or Musixmatch tokens, you can pass them to SpotiFLAC in several ways:
+
+### Environment Variable (all platforms)
 
 The recommended approach across all systems:
 
 ```bash
-export QOBUZ_AUTH_TOKEN="your_token_here"
+export QOBUZ_AUTH_TOKEN="YOUR_TOKEN_HERE"
+export SPOTIFY_TOKEN="YOUR_SP_DC_COOKIE"
+export MUSIXMATCH_TOKEN="YOUR_USERTOKEN"
+export APPLE_TOKEN="YOUR_MUSICKIT_TOKEN"
 ```
-On Windows (Command Prompt):
+### On Windows (Command Prompt):
 ```bash
-set QOBUZ_AUTH_TOKEN=your_token_here
+set QOBUZ_AUTH_TOKEN="YOUR_TOKEN_HERE"
+set SPOTIFY_TOKEN="YOUR_SP_DC_COOKIE"
+set MUSIXMATCH_TOKEN="YOUR_USERTOKEN"
+set APPLE_TOKEN="YOUR_MUSICKIT_TOKEN"
 ```
-On Windows (PowerShell):
+### On Windows (PowerShell):
 ```bash
-$env:QOBUZ_AUTH_TOKEN="your_token_here"
+$env:QOBUZ_AUTH_TOKEN="YOUR_TOKEN_HERE"
+$env:SPOTIFY_TOKEN="YOUR_SP_DC_COOKIE"
+$env:MUSIXMATCH_TOKEN="YOUR_USERTOKEN"
+$env:APPLE_TOKEN="YOUR_MUSICKIT_TOKEN"
 ```
-To make it permanent on Linux/macOS, add the export line to your **~/.bashrc, ~/.zshrc**, or equivalent shell config file.
+> To make it permanent on Linux/macOS, add the export line to your **~/.bashrc, ~/.zshrc**, or equivalent shell config file.
 
-**Python**
-```python
-from SpotiFLAC import SpotiFLAC
 
-SpotiFLAC(
-    url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
-    output_dir="./downloads",
-    qobuz_token="your_token_here"
-)
-```
-Alternatively, set the environment variable before running and omit the parameter entirely.
-**Docker**
-Pass the token as an environment variable at runtime:
-```bash
-docker run \
-  -e QOBUZ_AUTH_TOKEN="your_token_here" \
-  -v ./downloads:/downloads \
-  your-spotiflac-image
-```
+### .env file (Environment Variables)
 
-Or define it in your **docker-compose.yml**:
-```yaml
-services:
-    spotiflac:
-        image: your-spotiflac-image
-        environment:
-            - QOBUZ_AUTH_TOKEN=your_token_here
-        volumes:
-            - ./downloads:/downloads
-```
-
-> **Never hardcode the token in a Dockerfile**: use environment variables or a .env file (excluded from version control via .gitignore).
-
-**.env File**
-If you prefer a local config file (useful for development):
+If you prefer using a local configuration file for environment variables (highly recommended for development or Docker), you can create a file named .env in the root folder of your project:
 ```env
-QOBUZ_AUTH_TOKEN=your_token_here
+QOBUZ_AUTH_TOKEN=YOUR_QOBUZ_TOKEN
+SPOTIFY_TOKEN=YOUR_SP_DC_COOKIE
+MUSIXMATCH_TOKEN=YOUR_USERTOKEN
+APPLE_TOKEN=YOUR_MUSICKIT_TOKEN
 ```
-Load it before running:
+
+You can load this file before running the script from the terminal:
 ```bash
-export $(cat .env | xargs) && python launcher.py ...
+export $(cat .env | xargs) && python launcher.py "URL" ./downloads --embed-lyrics
 ```
-Or with Docker Compose:
+
+Or, if you use Docker Compose, you can easily integrate it:
 ```yaml
 services:
   spotiflac:
@@ -155,7 +172,39 @@ services:
       - .env
 ```
 > Add **.env** to your **.gitignore** to avoid accidentally committing your token.
+### CLI (Terminal)
+```bash
+python launcher.py "URL" ./downloads \
+    --embed-lyrics \
+    --spotify-token "YOUR_SP_DC_COOKIE" \
+    --musixmatch-token "YOUR_MUSIXMATCH_USERTOKEN" \
+    --apple-token "YOUR_MUSICKIT_TOKEN"
+```
 
+### Python
+```python
+from SpotiFLAC import SpotiFLAC
+
+SpotiFLAC(
+    url="URL",
+    output_dir="./downloads",
+    embed_lyrics=True,
+    lyrics_spotify_token="YOUR_SP_DC_COOKIE",
+    lyrics_musixmatch_token="YOUR_MUSIXMATCH_USERTOKEN",
+lyrics_apple_token="YOUR_MUSICKIT_TOKEN"
+)
+```
+
+### config.json
+```json
+{
+    "qobuz_token": "IL_TUO_TOKEN_QOBUZ",
+    "spotify_token": "IL_TUO_COOKIE_SP_DC",
+    "musixmatch_token": "IL_TUO_USERTOKEN",
+    "apple_token": "IL_TUO_MUSICKIT_TOKEN",
+    "embed_lyrics": true
+}
+```
 
 <h2>CLI program usage</h2>
 <p>Program can be downloaded for <b>Windows</b>, <b>Linux (x86 and ARM)</b> and <b>MacOS</b>. The downloads are available under the releases.<br>
@@ -197,14 +246,21 @@ chmod +x SpotiFLAC-Linux-arm64
 | --- | --- | --- | --- |
 | **`url`** | `str` | *Required* | The Spotify URL (Track, Album, or Playlist) you want to download. |
 | **`output_dir`** | `str` | *Required* | The destination directory path where the audio files will be saved. |
-| **`services`** | `list` | `["tidal", "deezer", "qobuz", "spoti", "youtube", "amazon"]` | Specifies which services to use and their priority order. |
+| **`services`** | `list` | `["tidal", "qobuz", "amazon", "deezer", "youtube"]` | Specifies which services to use and their priority order. |
 | **`filename_format`** | `str` | `"{title} - {artist}"` | Format for naming downloaded files. See placeholders below. |
 | **`use_track_numbers`** | `bool` | `False` | Prefixes the filename with the track number. |
 | **`use_artist_subfolders`** | `bool` | `False` | Automatically organizes downloaded files into subfolders by artist. |
 | **`use_album_subfolders`** | `bool` | `False` | Automatically organizes downloaded files into subfolders by album. |
 | **`loop`** | `int` | `None` | Duration in minutes to keep retrying failed downloads. |
+| **`quality`** | `str` | `"LOSSLESS"` | Download quality (e.g., "LOSSLESS", "HI_RES"). |
+| **`embed_lyrics`** | `bool` | `False` | Whether to fetch and embed synchronized lyrics (LRC) into the audio file. |
+| **`lyrics_providers`** | `list` | `["spotify", "musixmatch", "apple", "amazon", "lrclib"]` | Priority order of lyrics providers to attempt. |
+| **`lyrics_spotify_token`** | `str` | `""` | Spotify `sp_dc` cookie required for Spotify lyrics. |
+| **`lyrics_musixmatch_token`** | `str` | `""` | Musixmatch `usertoken` required for Musixmatch lyrics. |
+| **`lyrics_apple_token`** | `str` | `""` | Apple MusicKit developer token required for Apple lyrics. |
+| **`enrich_metadata`** | `bool` | `False` | Enables multi-provider metadata enrichment (High-res covers, BPM, Labels, etc.). |
+| **`enrich_providers`** | `list` | `["deezer", "apple", "qobuz", "tidal"]` | Priority order of metadata providers to attempt. |
 | **`qobuz_token`** | `str` | `None` | Optional Qobuz user auth token used as fallback for metadata resolution. |
-
 
 ### Filename Format Placeholders
 
@@ -229,7 +285,7 @@ Your support helps keep development going._
 
 ## API Credits
 
-[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [dabmusic.xyz](https://dabmusic.xyz) · [spotidownloader](https://spotidownloader.com) · [SpotubeDL](spotubedl.com) · [afkarxyz](https://github.com/afkarxyz)
+[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [dabmusic.xyz](https://dabmusic.xyz) · [SpotubeDL](spotubedl.com) · [afkarxyz](https://github.com/afkarxyz)
 
 > [!TIP]
 >
