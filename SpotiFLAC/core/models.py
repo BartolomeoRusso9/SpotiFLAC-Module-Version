@@ -5,7 +5,7 @@ Sostituiscono i dict raw per garantire validazione, coercizione e zero KeyError.
 from __future__ import annotations
 import re
 from typing import Literal
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, field_validator, model_validator, ValidationInfo
 
 
 # ---------------------------------------------------------------------------
@@ -33,9 +33,25 @@ class TrackMetadata(BaseModel):
 
     @field_validator("title", "artists", "album", "album_artist", mode="before")
     @classmethod
-    def strip_str(cls, v: object) -> str:
+    def strip_str(cls, v: object, info: any) -> str:
         """Pulisce le stringhe da spazi bianchi superflui."""
-        return str(v).strip() if v else "Unknown"
+        if not v:
+            return "Unknown"
+
+        s = str(v).strip()
+        
+        if info.field_name in ("artists", "album_artist"):
+        # Sostituzioni dei separatori comuni con la virgola
+            s = s.replace(" & ", ", ")
+            s = s.replace(" / ", ", ")
+            s = s.replace(" feat. ", ", ")
+            s = s.replace(" ft. ", ", ")
+
+        # Pulizia profonda: evita doppie virgole e spazi residui
+        # Esempio: "Artist A, Artist B & Artist C" -> "Artist A, Artist B, Artist C"
+            parts = [p.strip() for p in s.split(",") if p.strip()]
+            s = ", ".join(parts)
+        return s or "Unknown"
 
     @property
     def year(self) -> str:

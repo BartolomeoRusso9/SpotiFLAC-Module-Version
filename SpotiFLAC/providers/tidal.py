@@ -676,7 +676,7 @@ class TidalProvider(BaseProvider):
             use_album_track_num: bool = False,
             first_artist_only:   bool = False,
             allow_fallback:      bool = True,
-            quality:             str  = "LOSSLESS",
+            quality:             str  = "HI-RES",
             embed_lyrics:            bool = False,
             lyrics_providers:        list[str] | None = None,
             lyrics_spotify_token:    str = "",
