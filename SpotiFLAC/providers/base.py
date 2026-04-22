@@ -86,8 +86,8 @@ class BaseProvider(ABC):
             metadata,
             fmt                  = filename_format,
             position             = position,
-            include_track_num    = include_track_num,
-            use_album_track_num  = use_album_track_num,
+            include_track_number    = include_track_num,
+            use_album_track_number  = use_album_track_num,
             first_artist_only    = first_artist_only,
             extension            = extension,
         )
