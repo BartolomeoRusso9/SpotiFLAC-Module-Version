@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -375,9 +375,14 @@ def enrich_metadata(
     with ThreadPoolExecutor(max_workers=len(providers)) as pool:
         futs = {pool.submit(_run_provider, p): p for p in providers}
         deadline = time.time() + timeout_s
-        for fut in as_completed(futs, timeout=max(1.0, deadline - time.time())):
-            name, data = fut.result()
-            results[name] = data
+        try:
+            for fut in as_completed(futs, timeout=max(1.0, deadline - time.time())):
+                name, data = fut.result()
+                results[name] = data
+        except TimeoutError:
+            # Trova quali provider non hanno finito in tempo
+            unfinished = [futs[fut] for fut in futs if not fut.done()]
+            logger.warning("[meta/enrich] Timeout! Provider lenti ignorati: %s", ", ".join(unfinished))
 
     # Merge in ordine di priorità
     for name in providers:
