@@ -83,6 +83,13 @@ def embed_metadata(
             )
             enriched_tags      = enriched.as_tags()
             enriched_cover_url = enriched.cover_url_hd
+            if enriched._sources:
+                nomi_campi = {"cover_url_hd": "cover", "explicit": "advisory"}
+                dettagli = ", ".join(
+                    f"{nomi_campi.get(campo, campo)} ({provider})"
+                    for campo, provider in enriched._sources.items()
+                )
+                print(f"Arricchito con: {dettagli}")
             logger.debug("[tagger] enriched: %s", list(enriched_tags.keys()))
         except Exception as exc:
             logger.warning("[tagger] enrichment failed: %s", exc)
