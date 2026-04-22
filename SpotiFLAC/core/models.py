@@ -131,8 +131,8 @@ def build_filename(
         metadata:            TrackMetadata,
         fmt:                 str,
         position:            int   = 1,
-        include_track_num:   bool  = False,
-        use_album_track_num: bool  = False,
+        include_track_number:   bool  = False,
+        use_album_track_number: bool  = False,
         first_artist_only:   bool  = False,
         extension:           str   = ".flac",
 ) -> str:
@@ -150,9 +150,9 @@ def build_filename(
     disc         = metadata.disc_number
 
     # Determina il numero traccia (sequenziale o da album)
-    track_num = (
+    track_number = (
         metadata.track_number
-        if (use_album_track_num and metadata.track_number > 0)
+        if (use_album_track_number and metadata.track_number > 0)
         else position
     )
 
@@ -171,8 +171,8 @@ def build_filename(
             .replace("{position}",     f"{position:02d}")
         )
 
-        if metadata.track_num > 0:
-            result = result.replace("{track}", f"{metadata.track_num:02d}")
+        if metadata.track_number > 0:
+            result = result.replace("{track}", f"{metadata.track_number:02d}")
         else:
             # Rimuove {track} e separatori pendenti se il numero non esiste
             result = re.sub(r"\{track\}[\.\s-]*", "", result)
@@ -185,9 +185,9 @@ def build_filename(
         else:  # default: title-artist
             result = f"{title} - {artist}"
 
-        track_num = metadata.track_number if use_album_track_num else position
-        if include_track_num and track_num > 0:
-            result = f"{track_num:02d}. {result}"
+        track_number = metadata.track_number if use_album_track_number else position
+        if include_track_number and track_number > 0:
+            result = f"{track_number:02d}. {result}"
 
     # Pulizia finale e aggiunta estensione
     result = sanitize(result)
