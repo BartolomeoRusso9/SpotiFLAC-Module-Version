@@ -521,7 +521,7 @@ class QobuzProvider(BaseProvider):
             use_album_track_num: bool = False,
             first_artist_only:   bool = False,
             allow_fallback:      bool = True,
-            quality:             str  = "27",
+            quality:             str  = "6",
             embed_genre:         bool = True,
             single_genre:        bool = True,
             embed_lyrics:            bool = False,
