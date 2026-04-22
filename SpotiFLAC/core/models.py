@@ -168,10 +168,11 @@ def build_filename(
             .replace("{date}",         date)
             .replace("{disc}",         str(disc) if disc > 0 else "")
             .replace("{isrc}",         sanitize(metadata.isrc))
+            .replace("{position}",     f"{position:02d}")
         )
 
-        if track_num > 0:
-            result = result.replace("{track}", f"{track_num:02d}")
+        if metadata.track_num > 0:
+            result = result.replace("{track}", f"{metadata.track_num:02d}")
         else:
             # Rimuove {track} e separatori pendenti se il numero non esiste
             result = re.sub(r"\{track\}[\.\s-]*", "", result)
@@ -184,6 +185,7 @@ def build_filename(
         else:  # default: title-artist
             result = f"{title} - {artist}"
 
+        track_num = metadata.track_number if use_album_track_num else position
         if include_track_num and track_num > 0:
             result = f"{track_num:02d}. {result}"
 

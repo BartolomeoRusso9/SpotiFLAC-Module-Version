@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
         default = "{title} - {artist}",
         dest    = "filename_format",
         help    = "Template filename. Placeholder: {title} {artist} {album} "
-                  "{album_artist} {year} {date} {track} {disc} {isrc}",
+                  "{album_artist} {year} {date} {track} {disc} {isrc} {position}",
     )
     parser.add_argument(
         "--quality", "-q",

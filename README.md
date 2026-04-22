@@ -256,7 +256,8 @@ When customizing the `filename_format` string, you can use the following dynamic
 * `{album}` - Album name
 * `{album_artists}` - The artists of the entire album
 * `{disc}` - The disc number
-* `{track}` - Track number
+* `{track}` - The track's original number in the album
+* `{position}` - Download queue / Playlist position
 * `{date}` - Full release date (e.g., YYYY-MM-DD)
 * `{year}` - Release year (e.g., YYYY)
 * `{isrc}` - Track ISRC code
