@@ -254,12 +254,12 @@ When customizing the `filename_format` string, you can use the following dynamic
 * `{title}` - Track title
 * `{artist}` - Track artist
 * `{album}` - Album name
+* `{album_artists}` - The artists of the entire album
+* `{disc}` - The disc number
 * `{track}` - Track number
 * `{date}` - Full release date (e.g., YYYY-MM-DD)
 * `{year}` - Release year (e.g., YYYY)
-* `{position}` - Playlist position
 * `{isrc}` - Track ISRC code
-* `{duration}` - Track duration (MM:SS)
 ### Want to support the project?
 
 _If this software is useful and brings you value,
