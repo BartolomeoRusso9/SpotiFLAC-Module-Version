@@ -36,38 +36,43 @@ def _print_mb_summary(mb_tags: dict) -> None:
     if not mb_tags:
         return
 
+    # Mappatura unificata sia per i tag FLAC (UPPERCASE) sia per i dizionari raw (lowercase)
     _TAG_LABELS = {
-        "GENRE":                      "genere",
-        "BPM":                        "BPM",
-        "LABEL":                      "label",
-        "CATALOGNUMBER":              "catalogo",               # FIX: Aggiunto Numero di Catalogo
-        "ORGANIZATION":               "etichetta",
-        "DATE":                       "data originale",
-        "ORIGINALDATE":               "data originale",
-        "MUSICBRAINZ_TRACKID":        "MB track",               # FIX: ID Traccia
-        "MUSICBRAINZ_ALBUMID":        "MB album",
-        "MUSICBRAINZ_ARTISTID":       "MB artist",
-        "MUSICBRAINZ_ALBUMARTISTID":  "MB album artist",        # FIX: Aggiunto ID Album Artist
-        "MUSICBRAINZ_RELEASEGROUPID": "MB rel.group",
-        "BARCODE":                    "barcode",
-        "RELEASECOUNTRY":             "paese",
-        "RELEASESTATUS":              "stato release",
-        "MEDIA":                      "supporto",
-        "RELEASETYPE":                "tipo release",
-        "ARTISTSORT":                 "artista (sort)",
-        "ALBUMARTISTSORT":            "artista album (sort)",   # FIX: Aggiunto Album Artist Sort Name
-        "SCRIPT":                     "script",                 # FIX: Sistema di scrittura
+        "GENRE": "genere", "genre": "genere",
+        "BPM": "BPM", "bpm": "BPM",
+        "LABEL": "etichetta", "label": "etichetta",
+        "CATALOGNUMBER": "n. catalogo", "catalognumber": "n. catalogo",
+        "BARCODE": "barcode", "barcode": "barcode",
+        "ORIGINALDATE": "data", "original_date": "data",
+        "RELEASECOUNTRY": "paese", "country": "paese",
+        "RELEASESTATUS": "stato release", "status": "stato release",
+        "MEDIA": "supporto", "media": "supporto",
+        "RELEASETYPE": "tipo release", "type": "tipo release",
+        "ARTISTSORT": "artista (sort)", "artist_sort": "artista (sort)",
+        "ALBUMARTISTSORT": "artista album (sort)", "albumartist_sort": "artista album (sort)",
+        "SCRIPT": "scrittura", "script": "scrittura",
     }
 
-    mb_ids     = {k: v for k, v in mb_tags.items() if k.startswith("MUSICBRAINZ_")}
-    skip_dupes = {"ORIGINALDATE", "ORIGINALYEAR"}  # alias di DATE, già mostrati tramite DATE
-    important  = {k: v for k, v in mb_tags.items()
-                  if k not in mb_ids and k not in skip_dupes}
+    # Raggruppa tutti gli ID per mostrarli in un unico conteggio finale
+    mb_ids = {
+        k: v for k, v in mb_tags.items()
+        if str(k).startswith("MUSICBRAINZ_") or str(k).startswith("mbid_")
+    }
+
+    # Ignoriamo l'anno per evitare il duplicato a schermo (teniamo solo ORIGINALDATE/data)
+    skip_dupes = {"ORIGINALYEAR", "original_year", "DATE", "date"}
+
+    # Selezioniamo solo i campi che hanno effettivamente un valore e non sono ID o duplicati
+    important = {
+        k: v for k, v in mb_tags.items()
+        if k not in mb_ids and k not in skip_dupes and v
+    }
 
     parts = []
     for tag, val in important.items():
-        label     = _TAG_LABELS.get(tag, tag.lower())
-        short_val = str(val)[:35] + ("…" if len(str(val)) > 35 else "")
+        label = _TAG_LABELS.get(tag, str(tag).lower())
+        # Tronchiamo i valori troppo lunghi a 40 caratteri (es. per stringhe lunghissime)
+        short_val = str(val)[:40] + ("…" if len(str(val)) > 40 else "")
         parts.append(f"{label}: {short_val}")
 
     if mb_ids:
