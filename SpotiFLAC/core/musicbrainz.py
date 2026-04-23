@@ -134,9 +134,21 @@ def fetch_mb_metadata(isrc: str) -> dict:
 
         credits = rec.get("artist-credit", [])
         if credits:
-            artist_obj = credits[0].get("artist", {})
-            res["mbid_artist"] = artist_obj.get("id", "")
-            res["artist_sort"] = artist_obj.get("sort-name", "")
+            artist_ids = []
+            sort_names = []
+            for c in credits:
+                artist_obj = c.get("artist", {})
+                a_id = artist_obj.get("id")
+                a_sort = artist_obj.get("sort-name", "")
+                phrase = c.get("joinphrase", "")
+
+                if a_id:
+                    artist_ids.append(a_id)
+                if a_sort:
+                    sort_names.append(a_sort + phrase)
+
+            res["mbid_artist"] = "; ".join(artist_ids)
+            res["artist_sort"] = "".join(sort_names)
 
         # Generi
         all_tags = rec.get("tags", [])
@@ -156,17 +168,26 @@ def fetch_mb_metadata(isrc: str) -> dict:
             rel = releases[0]
             res["mbid_album"] = rel.get("id", "")
             res["mbid_relgroup"] = rel.get("release-group", {}).get("id", "")
-            res["barcode"] = rel.get("barcode", "")
             res["status"] = rel.get("status", "")
             res["type"] = rel.get("release-group", {}).get("primary-type", "")
-            lbl_info = rel.get("label-info", [])
-            if lbl_info:
-                res["label"] = lbl_info[0].get("label", {}).get("name", "")
-                res["organization"] = res["label"]
             res["country"] = rel.get("country", "")
             res["script"] = rel.get("text-representation", {}).get("script", "")
             media = rel.get("media", [])
             if media: res["media"] = media[0].get("format", "")
+
+            # Cerca il primo codice a barre valido in tutte le edizioni (releases)
+            for r in releases:
+                if r.get("barcode"):
+                    res["barcode"] = r.get("barcode")
+                    break
+
+            # Cerca la prima etichetta valida in tutte le edizioni
+            for r in releases:
+                lbl_info = r.get("label-info", [])
+                if lbl_info and lbl_info[0].get("label", {}).get("name"):
+                    res["label"] = lbl_info[0].get("label", {}).get("name", "")
+                    res["organization"] = res["label"]
+                    break
 
         _mb_cache[cache_key] = res
     except Exception as e:

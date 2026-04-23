@@ -748,7 +748,6 @@ class TidalProvider(BaseProvider):
             # Gestione speciale DATA ORIGINALE
             # Come richiesto, l'anno originale va nel campo DATE (sovrascrivendo quello Spotify)
             if res.get("original_date"):
-                mb_tags["DATE"]         = res["original_date"]
                 mb_tags["ORIGINALDATE"] = res["original_date"]
                 mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
             _print_mb_summary(mb_tags)

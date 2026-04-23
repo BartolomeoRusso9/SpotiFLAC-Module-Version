@@ -181,7 +181,6 @@ def embed_metadata(
 
         if merged_extra:
             if "original_date" in merged_extra and merged_extra["original_date"]:
-                tags["DATE"]         = merged_extra["original_date"]
                 tags["ORIGINALDATE"] = merged_extra["original_date"]
                 tags["ORIGINALYEAR"] = merged_extra["original_date"][:4]
 

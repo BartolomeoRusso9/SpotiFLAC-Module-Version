@@ -594,7 +594,6 @@ class QobuzProvider(BaseProvider):
                             mb_tags[tag_name] = str(val)
 
                     if res.get("original_date"):
-                        mb_tags["DATE"]         = res["original_date"]
                         mb_tags["ORIGINALDATE"] = res["original_date"]
                         mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
             _print_mb_summary(mb_tags)
