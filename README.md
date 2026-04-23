@@ -163,7 +163,7 @@ services:
 ```bash
 python launcher.py "URL" ./downloads \
     --embed-lyrics \
-    --qobuz-auth-token "YOUR_QOBUZ_TOKEN" \
+    --qobuz-token "YOUR_QOBUZ_TOKEN" \
     --spotify-token "YOUR_SP_DC_COOKIE" \
     --musixmatch-token "YOUR_MUSIXMATCH_USERTOKEN" \
 ```
@@ -176,7 +176,7 @@ SpotiFLAC(
     url="URL",
     output_dir="./downloads",
     embed_lyrics=True,
-    qobuz-auth-token="YOUR_QOBUZ_TOKEN",
+    qobuz_auth_token="YOUR_QOBUZ_TOKEN",
     lyrics_spotify_token="YOUR_SP_DC_COOKIE",
     lyrics_musixmatch_token="YOUR_MUSIXMATCH_USERTOKEN",
 )

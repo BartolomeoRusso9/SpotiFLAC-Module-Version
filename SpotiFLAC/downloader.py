@@ -144,14 +144,6 @@ def download_one(
     summary = "; ".join(f"{k}: {v}" for k, v in errors.items())
     return DownloadResult.fail("none", f"All providers failed — {summary}")
 
-
-def _provider_extension(name: str) -> str:
-    return {
-        "youtube": ".mp3",
-        "amazon":  ".m4a",
-    }.get(name, ".flac")
-
-
 # ---------------------------------------------------------------------------
 # Batch download worker
 # ---------------------------------------------------------------------------

@@ -474,6 +474,7 @@ class TidalProvider(BaseProvider):
             self._apis = list(apis or _TIDAL_APIS)
 
         self._qobuz_token: str | None = None
+
     # ------------------------------------------------------------------
     # Spotify → Tidal resolution (invariata)
     # ------------------------------------------------------------------

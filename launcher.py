@@ -44,6 +44,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-album-subfolders",  action="store_true", dest="use_album_subfolders")
     parser.add_argument("--first-artist-only",     action="store_true", dest="first_artist_only")
     parser.add_argument(
+        "--qobuz-token",
+        default = None,
+        dest    = "qobuz_token",
+        metavar = "TOKEN",
+        help    = "Token utente Qobuz (x-user-auth-token)",
+    )
+    parser.add_argument(
         "--loop", "-l",
         type    = int,
         default = None,
@@ -129,6 +136,7 @@ def main() -> None:
         # Enrichment
         enrich_metadata          = args.enrich,
         enrich_providers         = args.enrich_providers,
+        qobuz_token              = args.qobuz_token,
     )
 
 
