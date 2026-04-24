@@ -22,6 +22,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from ..core.tagger import _print_mb_summary
+from ..core.link_resolver import LinkResolver
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote
@@ -537,7 +538,6 @@ class TidalProvider(BaseProvider):
         return None
 
     def _resolve_via_songlink(self, spotify_track_id: str) -> str:
-        from ..core.link_resolver import LinkResolver
         resolver = LinkResolver(self._http)
         links = resolver.resolve_all(spotify_track_id)
         tidal_url = links.get("tidal")

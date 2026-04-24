@@ -26,22 +26,16 @@ _MAX_RETRIES   = 2
 _RETRY_DELAY_S = 0.5
 _API_TIMEOUT_S = 15
 
-# Cache (porta deezerCacheTTL / deezerCacheCleanupInterval dal Go)
-_CACHE_TTL_S             = 10 * 60   # 10 minuti
-_CACHE_CLEANUP_INTERVAL_S = 5 * 60   # 5 minuti
-_MAX_TRACK_CACHE         = 4000
-_MAX_SEARCH_CACHE        = 300
+_CACHE_TTL_S              = 10 * 60
+_CACHE_CLEANUP_INTERVAL_S = 5  * 60
+_MAX_TRACK_CACHE          = 4000
+_MAX_SEARCH_CACHE         = 300
 
-# Errori retryable (porta isRetryable da getJSON nel Go)
 _RETRYABLE_SUBSTRINGS = (
     "timeout", "connection reset", "connection refused", "EOF",
     "status 5", "status 429", "RemoteDisconnected",
 )
 
-
-# ---------------------------------------------------------------------------
-# Cache entry (porta cacheEntry dal Go)
-# ---------------------------------------------------------------------------
 
 class _CacheEntry:
     __slots__ = ("data", "expires_at")
@@ -54,10 +48,6 @@ class _CacheEntry:
         return time.monotonic() > self.expires_at
 
 
-# ---------------------------------------------------------------------------
-# DeezerProvider
-# ---------------------------------------------------------------------------
-
 class DeezerProvider(BaseProvider):
     name = "deezer"
 
@@ -66,29 +56,24 @@ class DeezerProvider(BaseProvider):
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": _DEFAULT_UA})
 
-        # Cache (porta searchCache / isrcCache / cacheMu / lastCacheCleanup dal Go)
-        self._track_cache:  dict[str, _CacheEntry] = {}   # isrc  → track_data dict
-        self._search_cache: dict[str, _CacheEntry] = {}   # url   → json dict
+        self._track_cache:  dict[str, _CacheEntry] = {}
+        self._search_cache: dict[str, _CacheEntry] = {}
         self._cache_mu              = threading.Lock()
         self._last_cache_cleanup    = 0.0
 
     # ------------------------------------------------------------------
-    # Cache helpers (porta maybeCleanupCachesLocked / trimStringCache dal Go)
+    # Cache helpers
     # ------------------------------------------------------------------
 
     def _maybe_cleanup_cache(self) -> None:
-        """Rimuove entry scadute periodicamente. Chiamare con _cache_mu acquisito."""
         now = time.monotonic()
         if now - self._last_cache_cleanup < _CACHE_CLEANUP_INTERVAL_S:
             return
         self._last_cache_cleanup = now
-
         for cache in (self._track_cache, self._search_cache):
             expired = [k for k, v in cache.items() if v.is_expired()]
             for k in expired:
                 del cache[k]
-
-        # Trim per dimensione massima (porta trimStringCacheEntriesLocked dal Go)
         self._trim_cache(self._track_cache,  _MAX_TRACK_CACHE)
         self._trim_cache(self._search_cache, _MAX_SEARCH_CACHE)
 
@@ -96,13 +81,12 @@ class DeezerProvider(BaseProvider):
     def _trim_cache(cache: dict, max_entries: int) -> None:
         if len(cache) <= max_entries:
             return
-        # Rimuove le entry con expires_at più basso (le più vecchie)
         sorted_keys = sorted(cache, key=lambda k: cache[k].expires_at)
         for k in sorted_keys[:len(cache) - max_entries]:
             del cache[k]
 
     # ------------------------------------------------------------------
-    # HTTP con retry (porta getJSON + isRetryable dal Go)
+    # HTTP con retry
     # ------------------------------------------------------------------
 
     def _get_json(self, url: str) -> dict:
@@ -111,53 +95,39 @@ class DeezerProvider(BaseProvider):
 
         for attempt in range(_MAX_RETRIES + 1):
             if attempt > 0:
-                logger.debug("[deezer] retry %d/%d after %.1fs: %s", attempt, _MAX_RETRIES, delay, url)
                 time.sleep(delay)
                 delay *= 2
             try:
                 resp = self._session.get(url, timeout=_API_TIMEOUT_S)
-
                 if resp.status_code == 429:
                     delay    = max(delay, 2.0)
                     last_err = RuntimeError("rate limited (429)")
                     continue
                 if resp.status_code >= 500:
                     last_err = RuntimeError(f"HTTP {resp.status_code}")
-                    # Retryable: continua
                     continue
-
                 resp.raise_for_status()
                 return resp.json()
-
             except (requests.Timeout, requests.ConnectionError) as exc:
-                # Sempre retryable
                 last_err = exc
                 continue
             except Exception as exc:
-                err_str = str(exc)
-                # Porta isRetryable dal Go: controlla substring
-                if any(s in err_str for s in _RETRYABLE_SUBSTRINGS):
+                if any(s in str(exc) for s in _RETRYABLE_SUBSTRINGS):
                     last_err = exc
                     continue
-                # Non retryable: rilancia subito
                 raise RuntimeError(f"Deezer request failed: {exc}") from exc
 
         raise RuntimeError(f"All {_MAX_RETRIES + 1} attempts failed: {last_err}")
 
     def _get_json_cached(self, url: str) -> dict:
-        """Wrapper con cache in-memory (porta searchCache dal Go)."""
         with self._cache_mu:
             entry = self._search_cache.get(url)
             if entry and not entry.is_expired():
                 return entry.data
             self._maybe_cleanup_cache()
-
         data = self._get_json(url)
-
         with self._cache_mu:
             self._search_cache[url] = _CacheEntry(data)
-            self._maybe_cleanup_cache()
-
         return data
 
     # ------------------------------------------------------------------
@@ -165,23 +135,18 @@ class DeezerProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def _get_track_by_isrc(self, isrc: str) -> dict | None:
-        # Porta isrcCache dal Go: controlla cache prima della chiamata HTTP
         with self._cache_mu:
             entry = self._track_cache.get(isrc)
             if entry and not entry.is_expired():
-                logger.debug("[deezer] ISRC cache hit: %s", isrc)
                 return entry.data
-
         try:
             data = self._get_json(f"https://api.deezer.com/2.0/track/isrc:{isrc}")
             if "error" in data:
                 logger.warning("[deezer] API error: %s", data["error"].get("message", "?"))
                 return None
-
             with self._cache_mu:
                 self._track_cache[isrc] = _CacheEntry(data)
                 self._maybe_cleanup_cache()
-
             return data
         except Exception as exc:
             logger.warning("[deezer] get_track_by_isrc failed: %s", exc)
@@ -194,11 +159,8 @@ class DeezerProvider(BaseProvider):
     @staticmethod
     def _best_cover(album: dict) -> str:
         return (
-                album.get("cover_xl")
-                or album.get("cover_big")
-                or album.get("cover_medium")
-                or album.get("cover")
-                or ""
+                album.get("cover_xl") or album.get("cover_big") or
+                album.get("cover_medium") or album.get("cover") or ""
         )
 
     @staticmethod
@@ -241,49 +203,18 @@ class DeezerProvider(BaseProvider):
             return None
 
     # ------------------------------------------------------------------
-    # Tag embedding
-    # ------------------------------------------------------------------
-
-    def _embed_metadata(self, file_path: str, meta: dict, cover_path: str | None) -> None:
-        try:
-            audio = FLAC(file_path)
-            audio.clear()
-
-            for tag, value in {
-                "TITLE":       meta.get("title"),
-                "ARTIST":      meta.get("artists") or meta.get("artist"),
-                "ALBUM":       meta.get("album"),
-                "DATE":        meta.get("release_date"),
-                "TRACKNUMBER": str(meta["track_position"]) if meta.get("track_position") else None,
-                "DISCNUMBER":  str(meta["disk_number"])    if meta.get("disk_number")    else None,
-                "ISRC":        meta.get("isrc"),
-            }.items():
-                if value:
-                    audio[tag] = value
-
-            if cover_path and os.path.exists(cover_path):
-                from mutagen.flac import Picture
-                pic      = Picture()
-                pic.type = 3
-                pic.mime = "image/jpeg"
-                pic.desc = "Cover"
-                with open(cover_path, "rb") as f:
-                    pic.data = f.read()
-                audio.add_picture(pic)
-
-            audio.save()
-        except Exception as exc:
-            logger.warning("[deezer] embed_metadata failed: %s", exc)
-
-    # ------------------------------------------------------------------
-    # Download
+    # Download raw FLAC (senza embedding — il tagger centrale lo farà dopo)
     # ------------------------------------------------------------------
 
     @staticmethod
     def _safe(s: str) -> str:
         return "".join(c for c in s if c.isalnum() or c in " -_").strip()
 
-    def _download_flac(self, isrc: str, output_dir: str) -> str | None:
+    def _download_flac_raw(self, isrc: str, output_dir: str) -> str | None:
+        """
+        Scarica il file FLAC grezzo senza embedding di metadati.
+        I tag vengono scritti dopo da embed_metadata (core/tagger.py).
+        """
         track_data = self._get_track_by_isrc(isrc)
         if not track_data:
             return None
@@ -291,21 +222,16 @@ class DeezerProvider(BaseProvider):
         meta     = self._extract_metadata(track_data)
         track_id = track_data.get("id")
         if not track_id:
-            logger.warning("[deezer] No track ID in response")
             return None
 
         logger.info("[deezer] Found: %s - %s", meta["artists"], meta["title"])
 
         try:
-            # Anche questo è cacheable: stessa traccia richiesta due volte
-            # nella stessa sessione non rifà la chiamata HTTP
             api_data = self._get_json_cached(f"https://api.deezmate.com/dl/{track_id}")
             if not api_data.get("success"):
-                logger.warning("[deezer] deezmate returned success=false")
                 return None
             flac_url = api_data.get("links", {}).get("flac")
             if not flac_url:
-                logger.warning("[deezer] No FLAC URL in deezmate response")
                 return None
         except Exception as exc:
             logger.warning("[deezer] Failed to get download URL: %s", exc)
@@ -327,18 +253,11 @@ class DeezerProvider(BaseProvider):
                             received += len(chunk)
                             if self._progress_cb and total:
                                 self._progress_cb(received, total)
-            logger.info("[deezer] Downloaded %.2f MB", received / (1024 * 1024))
         except Exception as exc:
             logger.warning("[deezer] Download failed: %s", exc)
             if os.path.exists(file_path):
                 os.remove(file_path)
             return None
-
-        base       = os.path.join(output_dir, f"{self._safe(meta['artists'])} - {self._safe(meta['title'])}")
-        cover_path = self._download_cover(meta.get("cover_url", ""), base)
-        self._embed_metadata(file_path, meta, cover_path)
-        if cover_path and os.path.exists(cover_path):
-            os.remove(cover_path)
 
         return file_path
 
@@ -360,12 +279,19 @@ class DeezerProvider(BaseProvider):
             metadata:            TrackMetadata,
             output_dir:          str,
             *,
-            filename_format:     str  = "{title} - {artist}",
-            position:            int  = 1,
-            include_track_num:   bool = False,
-            use_album_track_num: bool = False,
-            first_artist_only:   bool = False,
-            allow_fallback:      bool = True,
+            filename_format:     str             = "{title} - {artist}",
+            position:            int             = 1,
+            include_track_num:   bool            = False,
+            use_album_track_num: bool            = False,
+            first_artist_only:   bool            = False,
+            allow_fallback:      bool            = True,
+            # ── parametri lyrics e enrich (erano ignorati con **kwargs) ──
+            embed_lyrics:            bool            = False,
+            lyrics_providers:        list[str] | None = None,
+            lyrics_spotify_token:    str             = "",
+            lyrics_musixmatch_token: str             = "",
+            enrich_metadata:         bool            = False,
+            enrich_providers:        list[str] | None = None,
             **kwargs,
     ) -> DownloadResult:
         if not metadata.isrc:
@@ -379,8 +305,12 @@ class DeezerProvider(BaseProvider):
             if self._file_exists(dest):
                 return DownloadResult.ok(self.name, str(dest))
 
+            # Avvia MusicBrainz in parallelo mentre si scarica
+            from ..core.musicbrainz import AsyncMBFetch
+            mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
+
             before     = self._snapshot(output_dir)
-            downloaded = self._download_flac(metadata.isrc, output_dir)
+            downloaded = self._download_flac_raw(metadata.isrc, output_dir)
 
             if not downloaded:
                 new_files = self._snapshot(output_dir) - before
@@ -392,6 +322,55 @@ class DeezerProvider(BaseProvider):
                 import shutil
                 os.makedirs(os.path.dirname(str(dest)), exist_ok=True)
                 shutil.move(downloaded, str(dest))
+
+            # ── MusicBrainz tags ──────────────────────────────────────────
+            mb_tags: dict[str, str] = {}
+            if mb_fetcher:
+                res = mb_fetcher.result()
+                if res:
+                    mapping = {
+                        "mbid_track":    "MUSICBRAINZ_TRACKID",
+                        "mbid_album":    "MUSICBRAINZ_ALBUMID",
+                        "mbid_artist":   "MUSICBRAINZ_ARTISTID",
+                        "mbid_relgroup": "MUSICBRAINZ_RELEASEGROUPID",
+                        "barcode":       "BARCODE",
+                        "label":         "LABEL",
+                        "organization":  "ORGANIZATION",
+                        "country":       "RELEASECOUNTRY",
+                        "script":        "SCRIPT",
+                        "status":        "RELEASESTATUS",
+                        "media":         "MEDIA",
+                        "type":          "RELEASETYPE",
+                        "artist_sort":   "ARTISTSORT",
+                        "bpm":           "BPM",
+                        "genre":         "GENRE",
+                    }
+                    for mb_key, tag_name in mapping.items():
+                        val = res.get(mb_key)
+                        if val:
+                            mb_tags[tag_name] = str(val)
+                    if res.get("original_date"):
+                        mb_tags["ORIGINALDATE"] = res["original_date"]
+                        mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
+
+                from ..core.tagger import _print_mb_summary
+                _print_mb_summary(mb_tags)
+
+            # ── Pipeline centrale (enrich + lyrics + copertina HD) ────────
+            from ..core.tagger import embed_metadata as _embed
+            _embed(
+                str(dest), metadata,
+                first_artist_only       = first_artist_only,
+                cover_url               = metadata.cover_url,
+                session                 = self._session,
+                extra_tags              = mb_tags,
+                embed_lyrics            = embed_lyrics,
+                lyrics_providers        = lyrics_providers,
+                lyrics_spotify_token    = lyrics_spotify_token,
+                lyrics_musixmatch_token = lyrics_musixmatch_token,
+                enrich                  = enrich_metadata,
+                enrich_providers        = enrich_providers,
+            )
 
             return DownloadResult.ok(self.name, str(dest))
 

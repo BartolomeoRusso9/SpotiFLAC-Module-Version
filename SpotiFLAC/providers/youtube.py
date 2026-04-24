@@ -11,6 +11,7 @@ import requests
 from mutagen.id3 import (
     ID3, ID3NoHeaderError,
     TIT2, TPE1, TALB, TPE2, TDRC, TRCK, TPOS, APIC, TPUB, WXXX, COMM,
+    USLT, TCON, TBPM,
 )
 
 from ..core.models import TrackMetadata, DownloadResult
@@ -26,10 +27,6 @@ _DEFAULT_UA = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Utilities
-# ---------------------------------------------------------------------------
-
 def _sanitize(value: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", value).strip()
 
@@ -39,10 +36,6 @@ def _safe_int(value) -> int:
     except (ValueError, TypeError):
         return 0
 
-
-# ---------------------------------------------------------------------------
-# YouTubeProvider
-# ---------------------------------------------------------------------------
 
 class YouTubeProvider(BaseProvider):
     name = "youtube"
@@ -75,7 +68,6 @@ class YouTubeProvider(BaseProvider):
                 yt_url = f"https://music.youtube.com/watch?v={match.group(1)}"
                 logger.info("[youtube] Resolved via Songlink: %s", yt_url)
                 return yt_url
-            logger.warning("[youtube] Songlink has no YouTube link, trying direct search")
         except Exception as exc:
             logger.warning("[youtube] Songlink failed: %s", exc)
 
@@ -94,9 +86,7 @@ class YouTubeProvider(BaseProvider):
             resp.raise_for_status()
             match = re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp.text)
             if match:
-                yt_url = f"https://music.youtube.com/watch?v={match.group(1)}"
-                logger.info("[youtube] Resolved via direct search: %s", yt_url)
-                return yt_url
+                return f"https://music.youtube.com/watch?v={match.group(1)}"
         except Exception as exc:
             logger.warning("[youtube] Direct search failed: %s", exc)
         return None
@@ -152,7 +142,11 @@ class YouTubeProvider(BaseProvider):
         return None
 
     # ------------------------------------------------------------------
-    # Metadata embedding
+    # Metadata embedding per MP3 (ID3)
+    # Nota: YouTube produce MP3 → il tagger FLAC centrale non è applicabile.
+    # I tag supportati sono: titolo, artista, album, copertina, lyrics (USLT),
+    # genere (TCON), BPM (TBPM). Enrich multi-provider viene applicato
+    # tramite fetch manuale e scrittura ID3 nativa.
     # ------------------------------------------------------------------
 
     def _embed_metadata(
@@ -170,6 +164,9 @@ class YouTubeProvider(BaseProvider):
             cover_url:    str = "",
             publisher:    str = "",
             url:          str = "",
+            lyrics:       str = "",
+            genre:        str = "",
+            bpm:          str = "",
     ) -> None:
         try:
             try:
@@ -183,6 +180,8 @@ class YouTubeProvider(BaseProvider):
             if album:        audio.add(TALB(encoding=3, text=str(album)))
             if album_artist: audio.add(TPE2(encoding=3, text=str(album_artist)))
             if date:         audio.add(TDRC(encoding=3, text=str(date)))
+            if genre:        audio.add(TCON(encoding=3, text=str(genre)))
+            if bpm:          audio.add(TBPM(encoding=3, text=str(bpm)))
 
             audio.add(TRCK(encoding=3, text=f"{_safe_int(track_num)}/{_safe_int(total_tracks)}"))
             audio.add(TPOS(encoding=3, text=f"{_safe_int(disc_num)}/{_safe_int(total_discs)}"))
@@ -193,6 +192,12 @@ class YouTubeProvider(BaseProvider):
             audio.add(COMM(encoding=3, lang="eng", desc="",
                            text=["https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"]))
 
+            # Lyrics in ID3 (tag USLT — Unicode Synchronized Lyrics Text)
+            # Anche i formati LRC vengono memorizzati qui come testo plain.
+            if lyrics:
+                audio.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
+                logger.debug("[youtube] lyrics embedded (%d chars)", len(lyrics))
+
             if cover_url:
                 try:
                     r = self._session.get(cover_url, timeout=10)
@@ -202,7 +207,6 @@ class YouTubeProvider(BaseProvider):
                     logger.warning("[youtube] Cover download failed: %s", exc)
 
             audio.save(filepath, v2_version=3)
-            logger.info("[youtube] Metadata embedded: %s", os.path.basename(filepath))
         except Exception as exc:
             logger.warning("[youtube] embed_metadata failed: %s", exc)
 
@@ -215,12 +219,19 @@ class YouTubeProvider(BaseProvider):
             metadata:            TrackMetadata,
             output_dir:          str,
             *,
-            filename_format:     str  = "{title} - {artist}",
-            position:            int  = 1,
-            include_track_num:   bool = False,
-            use_album_track_num: bool = False,
-            first_artist_only:   bool = False,
-            allow_fallback:      bool = True,
+            filename_format:     str             = "{title} - {artist}",
+            position:            int             = 1,
+            include_track_num:   bool            = False,
+            use_album_track_num: bool            = False,
+            first_artist_only:   bool            = False,
+            allow_fallback:      bool            = True,
+            # ── parametri lyrics e enrich (erano ignorati con **kwargs) ──
+            embed_lyrics:            bool            = False,
+            lyrics_providers:        list[str] | None = None,
+            lyrics_spotify_token:    str             = "",
+            lyrics_musixmatch_token: str             = "",
+            enrich_metadata:         bool            = False,
+            enrich_providers:        list[str] | None = None,
             **kwargs,
     ) -> DownloadResult:
         try:
@@ -230,7 +241,7 @@ class YouTubeProvider(BaseProvider):
                 first_artist_only, extension=".mp3",
             )
             if self._file_exists(dest):
-                return DownloadResult.ok(self.name, str(dest))
+                return DownloadResult.ok(self.name, str(dest), fmt="mp3")
 
             yt_url   = self._get_youtube_url(metadata.id, metadata.title, metadata.artists)
             video_id = self._extract_video_id(yt_url)
@@ -241,7 +252,6 @@ class YouTubeProvider(BaseProvider):
             if not dl_url:
                 return DownloadResult.fail(self.name, "All YouTube download APIs failed")
 
-            logger.info("[youtube] Downloading: %s", os.path.basename(str(dest)))
             with self._session.get(dl_url, stream=True, timeout=120) as r:
                 r.raise_for_status()
                 total      = int(r.headers.get("Content-Length") or 0)
@@ -257,6 +267,44 @@ class YouTubeProvider(BaseProvider):
             artist       = metadata.artists.split(",")[0].strip() if first_artist_only else metadata.artists
             album_artist = metadata.album_artist.split(",")[0].strip() if first_artist_only else metadata.album_artist
 
+            # ── Lyrics per MP3 (USLT ID3 tag) ────────────────────────────
+            lyrics_text = ""
+            if embed_lyrics and metadata.title and metadata.first_artist:
+                try:
+                    from ..core.lyrics import fetch_lyrics
+                    lyrics_text = fetch_lyrics(
+                        track_name       = metadata.title,
+                        artist_name      = metadata.first_artist,
+                        album_name       = metadata.album,
+                        duration_s       = metadata.duration_ms // 1000,
+                        track_id         = metadata.id,
+                        isrc             = metadata.isrc,
+                        providers        = lyrics_providers,
+                        spotify_token    = lyrics_spotify_token,
+                        musixmatch_token = lyrics_musixmatch_token,
+                    )
+                except Exception as exc:
+                    logger.warning("[youtube] lyrics fetch failed: %s", exc)
+
+            # ── Metadata enrichment per MP3 (ID3 TCON/TBPM) ──────────────
+            genre_tag = ""
+            bpm_tag   = ""
+            if enrich_metadata and metadata.isrc:
+                try:
+                    from ..core.metadata_enrichment import enrich_metadata as _enrich
+                    enriched  = _enrich(
+                        track_name  = metadata.title,
+                        artist_name = metadata.first_artist,
+                        isrc        = metadata.isrc,
+                        providers   = enrich_providers,
+                    )
+                    genre_tag = enriched.genre
+                    bpm_tag   = str(enriched.bpm) if enriched.bpm else ""
+                    if enriched._sources:
+                        print(f"  [youtube] Arricchito: {enriched._sources}")
+                except Exception as exc:
+                    logger.warning("[youtube] enrich failed: %s", exc)
+
             self._embed_metadata(
                 filepath     = str(dest),
                 title        = metadata.title,
@@ -269,6 +317,9 @@ class YouTubeProvider(BaseProvider):
                 disc_num     = _safe_int(metadata.disc_number),
                 total_discs  = _safe_int(metadata.total_discs),
                 cover_url    = metadata.cover_url,
+                lyrics       = lyrics_text,
+                genre        = genre_tag,
+                bpm          = bpm_tag,
             )
 
             return DownloadResult.ok(self.name, str(dest), fmt="mp3")
