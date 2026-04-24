@@ -4,10 +4,11 @@ CLI entry point per SpotiFLAC — con supporto provider lyrics e metadata enrich
 """
 import argparse
 import logging
+from SpotiFLAC.check_update import check_for_updates
 
 from SpotiFLAC import SpotiFLAC
 
-
+check_for_updates()
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog            = "spotiflac",
@@ -21,7 +22,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--service", "-s",
-        choices = ["tidal", "qobuz", "deezer", "amazon", "youtube"],
+        choices = ["tidal", "qobuz", "amazon"],
         nargs   = "+",
         default = ["tidal"],
         metavar = "SERVICE",
