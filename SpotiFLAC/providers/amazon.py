@@ -176,7 +176,7 @@ class AmazonProvider(BaseProvider):
         return final
 
     # ------------------------------------------------------------------
-    # Metadata embedding
+    # Metadata embedding (fallback for .m4a only)
     # ------------------------------------------------------------------
 
     def _embed_metadata(
@@ -262,22 +262,22 @@ class AmazonProvider(BaseProvider):
             metadata:            TrackMetadata,
             output_dir:          str,
             *,
-            filename_format:     str  = "{title} - {artist}",
-            position:            int  = 1,
-            include_track_num:   bool = False,
-            use_album_track_num: bool = False,
-            first_artist_only:   bool = False,
-            allow_fallback:      bool = True,
+            filename_format:     str             = "{title} - {artist}",
+            position:            int             = 1,
+            include_track_num:   bool            = False,
+            use_album_track_num: bool            = False,
+            first_artist_only:   bool            = False,
+            allow_fallback:      bool            = True,
+            # ── parametri lyrics e enrich (stessa firma di Tidal/Qobuz) ──
+            embed_lyrics:            bool            = False,
+            lyrics_providers:        list[str] | None = None,
+            lyrics_spotify_token:    str             = "",
+            lyrics_musixmatch_token: str             = "",
+            enrich_metadata:         bool            = False,
+            enrich_providers:        list[str] | None = None,
             **kwargs,
     ) -> DownloadResult:
         try:
-            artist       = _first_artist(metadata.artists) if first_artist_only else metadata.artists
-            album_artist = _first_artist(metadata.album_artist) if first_artist_only else metadata.album_artist
-
-            track_num = position
-            if use_album_track_num and _safe_int(metadata.track_number) > 0:
-                track_num = _safe_int(metadata.track_number)
-
             dest = self._build_output_path(
                 metadata, output_dir, filename_format,
                 position, include_track_num, use_album_track_num, first_artist_only,
@@ -285,8 +285,12 @@ class AmazonProvider(BaseProvider):
             if self._file_exists(dest):
                 return DownloadResult.ok(self.name, str(dest))
 
-            amazon_url   = self._get_amazon_url(metadata.id)
-            downloaded   = self._download_from_afkar(amazon_url, output_dir)
+            # Avvia MusicBrainz in parallelo mentre il file viene scaricato
+            from ..core.musicbrainz import AsyncMBFetch
+            mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
+
+            amazon_url = self._get_amazon_url(metadata.id)
+            downloaded = self._download_from_afkar(amazon_url, output_dir)
 
             ext      = os.path.splitext(downloaded)[1] or ".m4a"
             dest_ext = str(dest).rsplit(".", 1)[0] + ext
@@ -296,21 +300,86 @@ class AmazonProvider(BaseProvider):
                     os.remove(dest_ext)
                 os.replace(downloaded, dest_ext)
 
-            self._embed_metadata(
-                filepath     = dest_ext,
-                title        = metadata.title,
-                artist       = artist,
-                album        = metadata.album,
-                album_artist = album_artist,
-                date         = metadata.release_date,
-                track_num    = track_num,
-                total_tracks = _safe_int(metadata.total_tracks),
-                disc_num     = _safe_int(metadata.disc_number),
-                total_discs  = _safe_int(metadata.total_discs),
-                cover_url    = metadata.cover_url,
-            )
+            # ── MusicBrainz tags ──────────────────────────────────────────
+            mb_tags: dict[str, str] = {}
+            if mb_fetcher:
+                res = mb_fetcher.result()
+                if res:
+                    mapping = {
+                        "mbid_track":    "MUSICBRAINZ_TRACKID",
+                        "mbid_album":    "MUSICBRAINZ_ALBUMID",
+                        "mbid_artist":   "MUSICBRAINZ_ARTISTID",
+                        "mbid_relgroup": "MUSICBRAINZ_RELEASEGROUPID",
+                        "barcode":       "BARCODE",
+                        "label":         "LABEL",
+                        "organization":  "ORGANIZATION",
+                        "country":       "RELEASECOUNTRY",
+                        "script":        "SCRIPT",
+                        "status":        "RELEASESTATUS",
+                        "media":         "MEDIA",
+                        "type":          "RELEASETYPE",
+                        "artist_sort":   "ARTISTSORT",
+                        "bpm":           "BPM",
+                        "genre":         "GENRE",
+                    }
+                    for mb_key, tag_name in mapping.items():
+                        val = res.get(mb_key)
+                        if val:
+                            mb_tags[tag_name] = str(val)
+                    if res.get("original_date"):
+                        mb_tags["ORIGINALDATE"] = res["original_date"]
+                        mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
 
-            return DownloadResult.ok(self.name, dest_ext)
+                from ..core.tagger import _print_mb_summary
+                _print_mb_summary(mb_tags)
+
+            # ── Embedding ────────────────────────────────────────────────
+            # FLAC → pipeline centrale (enrich, lyrics, MusicBrainz, copertina HD)
+            # M4A  → embedding base (mutagen MP4 non supporta enrich/lyrics FLAC)
+            if dest_ext.endswith(".flac"):
+                from ..core.tagger import embed_metadata as _embed
+                _embed(
+                    dest_ext, metadata,
+                    first_artist_only       = first_artist_only,
+                    cover_url               = metadata.cover_url,
+                    session                 = self._session,
+                    extra_tags              = mb_tags,
+                    embed_lyrics            = embed_lyrics,
+                    lyrics_providers        = lyrics_providers,
+                    lyrics_spotify_token    = lyrics_spotify_token,
+                    lyrics_musixmatch_token = lyrics_musixmatch_token,
+                    enrich                  = enrich_metadata,
+                    enrich_providers        = enrich_providers,
+                )
+            else:
+                # Fallback .m4a: tag base senza enrich/lyrics
+                track_num    = position
+                if use_album_track_num and _safe_int(metadata.track_number) > 0:
+                    track_num = _safe_int(metadata.track_number)
+                artist       = _first_artist(metadata.artists) if first_artist_only else metadata.artists
+                album_artist = _first_artist(metadata.album_artist) if first_artist_only else metadata.album_artist
+
+                self._embed_metadata(
+                    filepath     = dest_ext,
+                    title        = metadata.title,
+                    artist       = artist,
+                    album        = metadata.album,
+                    album_artist = album_artist,
+                    date         = metadata.release_date,
+                    track_num    = track_num,
+                    total_tracks = _safe_int(metadata.total_tracks),
+                    disc_num     = _safe_int(metadata.disc_number),
+                    total_discs  = _safe_int(metadata.total_discs),
+                    cover_url    = metadata.cover_url,
+                )
+                if enrich_metadata or embed_lyrics:
+                    logger.warning(
+                        "[amazon] enrich/lyrics non supportati per file .m4a — "
+                        "il file deve essere FLAC per abilitarli"
+                    )
+
+            fmt = "flac" if dest_ext.endswith(".flac") else "m4a"
+            return DownloadResult.ok(self.name, dest_ext, fmt=fmt)
 
         except SpotiflacError as exc:
             logger.error("[amazon] %s", exc)
