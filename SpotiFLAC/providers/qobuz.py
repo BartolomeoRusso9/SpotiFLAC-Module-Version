@@ -71,7 +71,7 @@ _STREAM_APIS: list[str] = [
 ]
 
 _MUSICDL_APIS = {
-    "https://www.musicdl.me/api/qobuz/download"
+    "https://www.musicdl.me/api/qobuz/download",
     "https://dl.musicdl.me/qobuz/download",
     "https://api.zarz.moe/dl/qbz",
 }
@@ -298,13 +298,9 @@ def _fetch_stream_url_once(
                 )
             else:
                 url = _build_stream_url(api_base, track_id, quality)
-                resp = requests.post(
-                    api_base,
-                    json=payload,
-                    headers={
-                        "User-Agent":  _DEFAULT_UA,
-                        "X-Debug-Key": _get_qobuz_musicdl_key(),  # ← FIX
-                    },
+                resp = requests.get(
+                    url,
+                    headers={"User-Agent":  _DEFAULT_UA},
                     timeout=timeout_s,
                 )
 

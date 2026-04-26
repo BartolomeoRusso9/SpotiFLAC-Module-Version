@@ -21,7 +21,6 @@ _MB_RETRIES              = 2
 _MB_RETRY_WAIT           = 1.5
 _MB_MIN_REQ_INTERVAL     = 1.1  # 1100ms
 _MB_THROTTLE_COOLDOWN    = 5.0  # 5s su errore 503
-_MB_STATUS_SKIP_WINDOW   = 300  # 5 minuti
 
 _USER_AGENT = "SpotiFLAC/2.0 ( support@spotbye.qzz.io )"
 
@@ -35,13 +34,10 @@ _mb_throttle_mu = threading.Lock()
 _mb_next_request: float = 0.0
 _mb_blocked_till: float = 0.0
 
-_mb_status_mu = threading.Lock()
-_mb_last_checked_at: float = 0.0
-_mb_last_checked_online: bool = True
 _mb_status_lock        = _threading.Lock()
 _mb_last_checked_at:   float = 0.0
 _mb_last_online:       bool  = True
-_MB_STATUS_SKIP_WINDOW = 300.0  # 5 minuti, identico al Go
+_MB_STATUS_SKIP_WINDOW = 300.0
 
 
 def set_mb_status(online: bool) -> None:
