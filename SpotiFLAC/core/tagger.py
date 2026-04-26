@@ -169,6 +169,7 @@ def embed_metadata(
         except Exception as exc:
             logger.warning("[tagger] lyrics fetch failed: %s", exc)
 
+
     # ------------------------------------------------------------------ #
     # 4. Write FLAC tags                                                   #
     # ------------------------------------------------------------------ #
@@ -179,18 +180,33 @@ def embed_metadata(
         tags = metadata.as_flac_tags(first_artist_only=first_artist_only)
         tags["DESCRIPTION"] = SOURCE_TAG
 
+        # Uniamo i tag dell'arricchimento (Deezer/Apple) con quelli MusicBrainz
         merged_extra: dict[str, str] = {**enriched_tags}
+
         if extra_tags:
+            # --- LOGICA SINGOLI CENTRALE ---
+            # Se è un singolo (1 o 2 tracce), evitiamo che MusicBrainz sovrascriva
+            # il genere trovato dai provider di enrichment (più precisi sui singoli)
+            if 0 < metadata.total_tracks <= 2 and "GENRE" in extra_tags:
+                # Escludiamo il genere da MusicBrainz se lo abbiamo già trovato
+                if "GENRE" in enriched_tags:
+                    extra_tags = {k: v for k, v in extra_tags.items() if k != "GENRE"}
+
+            # Applichiamo i tag di MusicBrainz
             merged_extra.update(extra_tags)
 
+        # Scriviamo tutti i tag extra (Enrichment + MusicBrainz)
         if merged_extra:
-            if "original_date" in merged_extra and merged_extra["original_date"]:
-                tags["ORIGINALDATE"] = merged_extra["original_date"]
-                tags["ORIGINALYEAR"] = merged_extra["original_date"][:4]
+            # Gestione date originali
+            orig_date = merged_extra.get("original_date") or merged_extra.get("ORIGINALDATE")
+            if orig_date:
+                tags["ORIGINALDATE"] = str(orig_date)
+                tags["ORIGINALYEAR"] = str(orig_date)[:4]
 
             for key, val in merged_extra.items():
-                if key not in ("original_date", "original_year"):
-                    tags[key] = str(val)
+                # Evitiamo doppioni per le date e scriviamo il resto
+                if key.upper() not in ("ORIGINAL_DATE", "ORIGINAL_YEAR", "ORIGINALDATE", "ORIGINALYEAR"):
+                    tags[key.upper()] = str(val)
 
         if lyrics:
             tags["LYRICS"] = lyrics

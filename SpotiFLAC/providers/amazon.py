@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import base64
+import hashlib
 from typing import Callable
 
 import requests
@@ -16,6 +17,8 @@ from mutagen.mp4 import MP4, MP4Cover
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError
 from .base import BaseProvider
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from ..core.console import print_source_banner
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +28,42 @@ _DEFAULT_UA = (
     "Chrome/145.0.0.0 Safari/537.36"
 )
 
-
+AMAZON_API_BASE = "https://amazon.spotbye.qzz.io/api"
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
+
+_AMAZON_DEBUG_KEY_SEED = b"spotif" + b"lac:am" + b"azon:spotbye:api:v1"
+_AMAZON_DEBUG_KEY_AAD  = bytes([
+    0x61,0x6d,0x61,0x7a,0x6f,0x6e,0x7c,0x73,0x70,0x6f,0x74,0x62,
+    0x79,0x65,0x7c,0x64,0x65,0x62,0x75,0x67,0x7c,0x76,0x31,
+])
+_AMAZON_DEBUG_KEY_NONCE = bytes([
+    0x52,0x1f,0xa4,0x9c,0x13,0x77,0x5b,0xe2,0x81,0x44,0x90,0x6d,
+])
+_AMAZON_DEBUG_KEY_CIPHERTEXT_TAG = bytes([
+    0x5b,0xf9,0xc1,0x2e,0x58,0xf8,0x5b,0xc0,0x04,0x68,0x7e,0xff,
+    0x3d,0xd6,0x8b,0xe3,0x86,0x49,0x6c,0xfd,0xc1,0x49,0x0b,0xfb,
+    0x6c,0x21,0x98,0x51,0xf2,0x38,0x4b,0x4a,0x23,0xe1,0xc6,0xd7,
+    0x65,0x7f,0xfb,0xa1,
+])
+
+_amazon_debug_key: str | None = None
+
+def _get_amazon_debug_key() -> str:
+    global _amazon_debug_key
+    if _amazon_debug_key is not None:
+        return _amazon_debug_key
+    key = hashlib.sha256(_AMAZON_DEBUG_KEY_SEED).digest()
+    aesgcm = AESGCM(key)
+    plaintext = aesgcm.decrypt(
+        _AMAZON_DEBUG_KEY_NONCE,
+        _AMAZON_DEBUG_KEY_CIPHERTEXT_TAG,
+        _AMAZON_DEBUG_KEY_AAD,
+    )
+    _amazon_debug_key = plaintext.decode()
+    return _amazon_debug_key
+
 
 def _sanitize(value: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", value).strip()
@@ -76,7 +111,7 @@ class AmazonProvider(BaseProvider):
             resp = self._session.get(
                 url,
                 headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9"},
-                timeout=10,
+                timeout=20,
             )
             resp.raise_for_status()
             match = re.search(
@@ -113,16 +148,23 @@ class AmazonProvider(BaseProvider):
         except Exception:
             return "m4a"
 
-    def _download_from_afkar(self, amazon_url: str, output_dir: str) -> str:
+    def _download_from_api(self, amazon_url: str, output_dir: str, quality: str) -> str:
         asin_match = re.search(r"(B[0-9A-Z]{9})", amazon_url)
         if not asin_match:
             raise RuntimeError(f"Cannot extract ASIN from: {amazon_url}")
         asin = asin_match.group(1)
 
-        api_url = f"https://amazon.spotbye.qzz.io/api/track/{asin}"
+        api_url = f"{AMAZON_API_BASE}/track/{asin}"
         logger.info("[amazon] Fetching track (ASIN: %s)", asin)
 
-        resp = self._session.get(api_url, timeout=30)
+        print_source_banner("amazon", api_url, quality)
+
+        debug_key = _get_amazon_debug_key()
+        resp = self._session.get(
+            api_url,
+            headers={"X-Debug-Key": debug_key},
+            timeout=30,
+        )
         if resp.status_code != 200:
             raise RuntimeError(f"Amazon API returned status {resp.status_code}")
 
@@ -268,6 +310,7 @@ class AmazonProvider(BaseProvider):
             use_album_track_num: bool            = False,
             first_artist_only:   bool            = False,
             allow_fallback:      bool            = True,
+            quality:             str             = "LOSSLESS",
             # ── parametri lyrics e enrich (stessa firma di Tidal/Qobuz) ──
             embed_lyrics:            bool            = False,
             lyrics_providers:        list[str] | None = None,
@@ -290,7 +333,7 @@ class AmazonProvider(BaseProvider):
             mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
 
             amazon_url = self._get_amazon_url(metadata.id)
-            downloaded = self._download_from_afkar(amazon_url, output_dir)
+            downloaded = self._download_from_api(amazon_url, output_dir, quality)
 
             ext      = os.path.splitext(downloaded)[1] or ".m4a"
             dest_ext = str(dest).rsplit(".", 1)[0] + ext
@@ -306,21 +349,24 @@ class AmazonProvider(BaseProvider):
                 res = mb_fetcher.result()
                 if res:
                     mapping = {
-                        "mbid_track":    "MUSICBRAINZ_TRACKID",
-                        "mbid_album":    "MUSICBRAINZ_ALBUMID",
-                        "mbid_artist":   "MUSICBRAINZ_ARTISTID",
-                        "mbid_relgroup": "MUSICBRAINZ_RELEASEGROUPID",
-                        "barcode":       "BARCODE",
-                        "label":         "LABEL",
-                        "organization":  "ORGANIZATION",
-                        "country":       "RELEASECOUNTRY",
-                        "script":        "SCRIPT",
-                        "status":        "RELEASESTATUS",
-                        "media":         "MEDIA",
-                        "type":          "RELEASETYPE",
-                        "artist_sort":   "ARTISTSORT",
-                        "bpm":           "BPM",
-                        "genre":         "GENRE",
+                        "mbid_track":       "MUSICBRAINZ_TRACKID",
+                        "mbid_album":       "MUSICBRAINZ_ALBUMID",
+                        "mbid_artist":      "MUSICBRAINZ_ARTISTID",
+                        "mbid_relgroup":    "MUSICBRAINZ_RELEASEGROUPID",
+                        "mbid_albumartist": "MUSICBRAINZ_ALBUMARTISTID",
+                        "barcode":          "BARCODE",
+                        "label":            "LABEL",
+                        "organization":     "ORGANIZATION",
+                        "country":          "RELEASECOUNTRY",
+                        "script":           "SCRIPT",
+                        "status":           "RELEASESTATUS",
+                        "media":            "MEDIA",
+                        "type":             "RELEASETYPE",
+                        "artist_sort":      "ARTISTSORT",
+                        "albumartist_sort": "ALBUMARTISTSORT",
+                        "catalognumber":    "CATALOGNUMBER",
+                        "bpm":              "BPM",
+                        "genre":            "GENRE"
                     }
                     for mb_key, tag_name in mapping.items():
                         val = res.get(mb_key)
@@ -329,6 +375,8 @@ class AmazonProvider(BaseProvider):
                     if res.get("original_date"):
                         mb_tags["ORIGINALDATE"] = res["original_date"]
                         mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
+                    if res.get("catalognumber"):
+                        mb_tags["CATALOGNUMBER"] = res["catalognumber"]
 
                 from ..core.tagger import _print_mb_summary
                 _print_mb_summary(mb_tags)

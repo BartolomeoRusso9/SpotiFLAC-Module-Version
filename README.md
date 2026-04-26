@@ -98,20 +98,8 @@ Spotify requires a session cookie called sp_dc to access its internal synced lyr
 6. Search for the row named sp_dc.
 7. Double-click its Value, copy it, and keep it safe. (Do not share this token!)
 
-## Musixmatch Token (usertoken) for Rich-Synced Lyrics (Optional)
-Musixmatch offers highly accurate word-level synchronized lyrics. To use it, you need a user token from their desktop app.
-
-### How to Extract Your Token
-1. Download and install the official Musixmatch Desktop App (Windows/Mac).
-2. Log in to your account.
-3. Open DevTools inside the app (usually Ctrl+Shift+I on Windows or Cmd+Option+I on Mac).
-4. Go to **Network** tab.
-5. Play a song or view lyrics in the app to generate network traffic.
-6. Look at the requests being made and inspect their Headers or Payload.
-7. Find the usertoken parameter and copy its alphanumeric value.
-
 ## How to Apply Tokens in SpotiFLAC
-Once you have your Spotify or Musixmatch tokens, you can pass them to SpotiFLAC in several ways:
+Once you have your Qobuz or Spotify tokens, you can pass them to SpotiFLAC in several ways:
 
 ### Environment Variable (all platforms)
 
@@ -120,19 +108,16 @@ The recommended approach across all systems:
 ```bash
 export QOBUZ_AUTH_TOKEN="YOUR_TOKEN_HERE"
 export SPOTIFY_TOKEN="YOUR_SP_DC_COOKIE"
-export MUSIXMATCH_TOKEN="YOUR_USERTOKEN"
 ```
 ### On Windows (Command Prompt):
 ```bash
 set QOBUZ_AUTH_TOKEN="YOUR_TOKEN_HERE"
 set SPOTIFY_TOKEN="YOUR_SP_DC_COOKIE"
-set MUSIXMATCH_TOKEN="YOUR_USERTOKEN"
 ```
 ### On Windows (PowerShell):
 ```bash
 $env:QOBUZ_AUTH_TOKEN="YOUR_TOKEN_HERE"
 $env:SPOTIFY_TOKEN="YOUR_SP_DC_COOKIE"
-$env:MUSIXMATCH_TOKEN="YOUR_USERTOKEN"
 ```
 > To make it permanent on Linux/macOS, add the export line to your **~/.bashrc, ~/.zshrc**, or equivalent shell config file.
 
@@ -143,7 +128,6 @@ If you prefer using a local configuration file for environment variables (highly
 ```env
 QOBUZ_AUTH_TOKEN=YOUR_QOBUZ_TOKEN
 SPOTIFY_TOKEN=YOUR_SP_DC_COOKIE
-MUSIXMATCH_TOKEN=YOUR_USERTOKEN
 ```
 
 You can load this file before running the script from the terminal:
@@ -165,8 +149,7 @@ services:
 python launcher.py "URL" ./downloads \
     --embed-lyrics \
     --qobuz-token "YOUR_QOBUZ_TOKEN" \
-    --spotify-token "YOUR_SP_DC_COOKIE" \
-    --musixmatch-token "YOUR_MUSIXMATCH_USERTOKEN"
+    --spotify-token "YOUR_SP_DC_COOKIE"
 ```
 
 ### Python
@@ -179,7 +162,6 @@ SpotiFLAC(
     embed_lyrics=True,
     qobuz_token="YOUR_QOBUZ_TOKEN",
     lyrics_spotify_token="YOUR_SP_DC_COOKIE",
-    lyrics_musixmatch_token="YOUR_MUSIXMATCH_USERTOKEN",
 )
 ```
 
@@ -188,7 +170,6 @@ SpotiFLAC(
 {
     "qobuz_token": "YOUR_QOBUZ_TOKEN",
     "spotify_token": "YOUR_SP_DC_COOKIE",
-    "musixmatch_token": "YOUR_MUSIXMATCH_USERTOKEN",
     "embed_lyrics": true
 }
 ```
@@ -213,9 +194,8 @@ Program can also be ran by downloading the python files and calling <code>python
                         [--loop minutes]
                         [--verbose]
                         [--embed-lyrics]
-                        [--lyrics-providers spotify musixmatch amazon lrclib]
+                        [--lyrics-providers spotify apple musixmatch amazon lrclib]
                         [--spotify-token SP_DC]
-                        [--musixmatch-token TOKEN]
                         [--enrich]
                         [--enrich-providers deezer apple qobuz tidal]
 ```
@@ -237,9 +217,8 @@ chmod +x SpotiFLAC-Linux-arm64
                         [--loop minutes]
                         [--verbose]
                         [--embed-lyrics]
-                        [--lyrics-providers spotify musixmatch amazon lrclib]
+                        [--lyrics-providers spotify apple musixmatch amazon lrclib]
                         [--spotify-token SP_DC]
-                        [--musixmatch-token TOKEN]
                         [--enrich]
                         [--enrich-providers deezer apple qobuz tidal]
 ```
@@ -251,26 +230,25 @@ chmod +x SpotiFLAC-Linux-arm64
 
 ### `SpotiFLAC()` Parameters
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| **`url`** | `str` | *Required* | The Spotify URL (Track, Album, or Playlist) you want to download. |
-| **`output_dir`** | `str` | *Required* | The destination directory path where the audio files will be saved. |
-| **`services`** | `list` | `["tidal"]` | Specifies which services to use and their priority order. |
-| **`filename_format`** | `str` | `"{title} - {artist}"` | Format for naming downloaded files. See placeholders below. |
-| **`use_track_numbers`** | `bool` | `False` | Prefixes the filename with the track number. |
-| **`use_artist_subfolders`** | `bool` | `False` | Automatically organizes downloaded files into subfolders by artist. |
-| **`use_album_subfolders`** | `bool` | `False` | Automatically organizes downloaded files into subfolders by album. |
-| **`first_artist_only`** | `bool` | `False` | Uses only the first artist in tags and filename (e.g. `"Artist A"` instead of `"Artist A, Artist B"`). |
-| **`loop`** | `int` | `None` | Duration in minutes to keep retrying failed downloads. |
-| **`quality`** | `str` | `"LOSSLESS"` | Download quality. Tidal: `"LOSSLESS"` or `"HI_RES"`. Qobuz: `"6"` (CD), `"7"` (Hi-Res), `"27"` (Hi-Res Max). |
-| **`log_level`** | `int` | `logging.WARNING` | Python logging level (e.g. `logging.DEBUG` for verbose output). |
-| **`embed_lyrics`** | `bool` | `False` | Whether to fetch and embed synchronized lyrics (LRC) into the audio file. |
-| **`lyrics_providers`** | `list` | `["spotify", "musixmatch", "amazon", "lrclib"]` | Priority order of lyrics providers to attempt. |
-| **`lyrics_spotify_token`** | `str` | `""` | Spotify `sp_dc` cookie required for Spotify lyrics. |
-| **`lyrics_musixmatch_token`** | `str` | `""` | Musixmatch `usertoken` required for Musixmatch lyrics. |
-| **`enrich_metadata`** | `bool` | `False` | Enables multi-provider metadata enrichment (High-res covers, BPM, Labels, etc.). |
-| **`enrich_providers`** | `list` | `["deezer", "apple", "qobuz", "tidal"]` | Priority order of metadata providers to attempt. |
-| **`qobuz_token`** | `str` | `None` | Optional Qobuz user auth token used as fallback for metadata resolution. Fallback: env `QOBUZ_AUTH_TOKEN`. |
+| Parameter | Type | Default                                                  | Description |
+| --- | --- |----------------------------------------------------------| --- |
+| **`url`** | `str` | *Required*                                               | The Spotify URL (Track, Album, or Playlist) you want to download. |
+| **`output_dir`** | `str` | *Required*                                               | The destination directory path where the audio files will be saved. |
+| **`services`** | `list` | `["tidal"]`                                              | Specifies which services to use and their priority order. |
+| **`filename_format`** | `str` | `"{title} - {artist}"`                                   | Format for naming downloaded files. See placeholders below. |
+| **`use_track_numbers`** | `bool` | `False`                                                  | Prefixes the filename with the track number. |
+| **`use_artist_subfolders`** | `bool` | `False`                                                  | Automatically organizes downloaded files into subfolders by artist. |
+| **`use_album_subfolders`** | `bool` | `False`                                                  | Automatically organizes downloaded files into subfolders by album. |
+| **`first_artist_only`** | `bool` | `False`                                                  | Uses only the first artist in tags and filename (e.g. `"Artist A"` instead of `"Artist A, Artist B"`). |
+| **`loop`** | `int` | `None`                                                   | Duration in minutes to keep retrying failed downloads. |
+| **`quality`** | `str` | `"LOSSLESS"`                                             | Download quality. Tidal: `"LOSSLESS"` or `"HI_RES"`. Qobuz: `"6"` (CD), `"7"` (Hi-Res), `"27"` (Hi-Res Max). |
+| **`log_level`** | `int` | `logging.WARNING`                                        | Python logging level (e.g. `logging.DEBUG` for verbose output). |
+| **`embed_lyrics`** | `bool` | `False`                                                  | Whether to fetch and embed synchronized lyrics (LRC) into the audio file. |
+| **`lyrics_providers`** | `list` | `["spotify", "apple", "musixmatch", "amazon", "lrclib"]` | Priority order of lyrics providers to attempt. |
+| **`lyrics_spotify_token`** | `str` | `""`                                                     | Spotify `sp_dc` cookie required for Spotify lyrics. |
+| **`enrich_metadata`** | `bool` | `False`                                                  | Enables multi-provider metadata enrichment (High-res covers, BPM, Labels, etc.). |
+| **`enrich_providers`** | `list` | `["deezer", "apple", "qobuz", "tidal"]`                  | Priority order of metadata providers to attempt. |
+| **`qobuz_token`** | `str` | `None`                                                   | Optional Qobuz user auth token used as fallback for metadata resolution. Fallback: env `QOBUZ_AUTH_TOKEN`. |
 
 ### Filename Format Placeholders
 
@@ -312,7 +290,7 @@ SpotiFLAC automatically queries **MusicBrainz** in the background (when an ISRC 
 | `MUSICBRAINZ_ARTISTID` | MusicBrainz artist ID |
 | `MUSICBRAINZ_RELEASEGROUPID` | MusicBrainz release group ID |
 
-This is enabled automatically for **Tidal** and **Qobuz** providers. No configuration required.
+This is enabled automatically for **Tidal**,  **Qobuz** and **Amazon** providers. No configuration required.
 
 ---
 
@@ -327,24 +305,23 @@ After each download, SpotiFLAC validates the file to detect common issues:
 
 ## CLI Flag Reference
 
-| Flag | Short | Default | Description |
-| --- | --- | --- | --- |
-| `--service` | `-s` | `tidal` | One or more providers in priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `youtube`. |
-| `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
-| `--quality` | `-q` | `LOSSLESS` | Audio quality (see Quality table above). |
-| `--use-track-numbers` | | `False` | Prefix filenames with track numbers. |
-| `--use-artist-subfolders` | | `False` | Organise files into per-artist subfolders. |
-| `--use-album-subfolders` | | `False` | Organise files into per-album subfolders. |
-| `--first-artist-only` | | `False` | Use only the first artist in tags and filename. |
-| `--qobuz-token` | | `None` | Qobuz user auth token (`x-user-auth-token`). |
-| `--loop` | `-l` | `None` | Repeat every N minutes. |
-| `--verbose` | `-v` | `False` | Enable debug logging. |
-| `--embed-lyrics` | | `False` | Fetch and embed synced lyrics into the file. |
-| `--lyrics-providers` | | `spotify musixmatch amazon lrclib` | Lyrics provider priority order. |
-| `--spotify-token` | | `""` | Spotify `sp_dc` cookie for synced lyrics. |
-| `--musixmatch-token` | | `""` | Musixmatch desktop usertoken. |
-| `--enrich` | | `False` | Enable multi-provider metadata enrichment. |
-| `--enrich-providers` | | `deezer apple qobuz tidal` | Metadata enrichment provider priority order. |
+| Flag | Short | Default                                  | Description |
+| --- | --- |------------------------------------------| --- |
+| `--service` | `-s` | `tidal`                                  | One or more providers in priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `youtube`. |
+| `--filename-format` | `-f` | `{title} - {artist}`                     | Filename template with placeholders. |
+| `--quality` | `-q` | `LOSSLESS`                               | Audio quality (see Quality table above). |
+| `--use-track-numbers` | | `False`                                  | Prefix filenames with track numbers. |
+| `--use-artist-subfolders` | | `False`                                  | Organise files into per-artist subfolders. |
+| `--use-album-subfolders` | | `False`                                  | Organise files into per-album subfolders. |
+| `--first-artist-only` | | `False`                                  | Use only the first artist in tags and filename. |
+| `--qobuz-token` | | `None`                                   | Qobuz user auth token (`x-user-auth-token`). |
+| `--loop` | `-l` | `None`                                   | Repeat every N minutes. |
+| `--verbose` | `-v` | `False`                                  | Enable debug logging. |
+| `--embed-lyrics` | | `False`                                  | Fetch and embed synced lyrics into the file. |
+| `--lyrics-providers` | | `spotify apple musixmatch amazon lrclib` | Lyrics provider priority order. |
+| `--spotify-token` | | `""`                                     | Spotify `sp_dc` cookie for synced lyrics. |
+| `--enrich` | | `False`                                  | Enable multi-provider metadata enrichment. |
+| `--enrich-providers` | | `deezer apple qobuz tidal`               | Metadata enrichment provider priority order. |
 
 ---
 

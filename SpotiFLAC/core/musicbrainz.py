@@ -10,6 +10,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
+import threading as _threading
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,6 @@ _MB_RETRIES              = 2
 _MB_RETRY_WAIT           = 1.5
 _MB_MIN_REQ_INTERVAL     = 1.1  # 1100ms
 _MB_THROTTLE_COOLDOWN    = 5.0  # 5s su errore 503
-_MB_STATUS_SKIP_WINDOW   = 300  # 5 minuti
 
 _USER_AGENT = "SpotiFLAC/2.0 ( support@spotbye.qzz.io )"
 
@@ -34,9 +34,27 @@ _mb_throttle_mu = threading.Lock()
 _mb_next_request: float = 0.0
 _mb_blocked_till: float = 0.0
 
-_mb_status_mu = threading.Lock()
-_mb_last_checked_at: float = 0.0
-_mb_last_checked_online: bool = True
+_mb_status_lock        = _threading.Lock()
+_mb_last_checked_at:   float = 0.0
+_mb_last_online:       bool  = True
+_MB_STATUS_SKIP_WINDOW = 300.0
+
+
+def set_mb_status(online: bool) -> None:
+    global _mb_last_checked_at, _mb_last_online
+    with _mb_status_lock:
+        _mb_last_checked_at = time.time()
+        _mb_last_online     = online
+
+
+def should_skip_mb() -> bool:
+    with _mb_status_lock:
+        if _mb_last_checked_at == 0.0:
+            return False
+        if _mb_last_online:
+            return False
+        return (time.time() - _mb_last_checked_at) < _MB_STATUS_SKIP_WINDOW
+
 
 def _wait_for_request_slot() -> None:
     """Accoda le richieste rispettando il limite di 1.1s (1100ms) tra l'una e l'altra."""
@@ -113,6 +131,10 @@ def fetch_mb_metadata(isrc: str) -> dict:
     if cache_key in _mb_cache:
         return _mb_cache[cache_key]
 
+    if should_skip_mb():                              # ← FIX
+        logger.debug("[musicbrainz] skipped (offline recently)")
+        return {}
+
     # Inizializza dizionario con i nuovi campi richiesti
     res = {
         "genre": "", "original_date": "", "bpm": "", "mbid_track": "",
@@ -125,6 +147,7 @@ def fetch_mb_metadata(isrc: str) -> dict:
 
     try:
         data = _query_recordings(f"isrc:{isrc}")
+        set_mb_status(True)
         recs = data.get("recordings", [])
         if not recs:
             return {}
@@ -219,7 +242,9 @@ def fetch_mb_metadata(isrc: str) -> dict:
 
         _mb_cache[cache_key] = res
     except Exception as e:
+        set_mb_status(False)
         logger.debug("[musicbrainz] lookup failed: %s", e)
+        return {}
 
     return res
 

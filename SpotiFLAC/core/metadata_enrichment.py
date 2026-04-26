@@ -325,7 +325,7 @@ def enrich_metadata(
         artist_name: str,
         isrc:        str = "",
         providers:   list[str] | None = None,
-        timeout_s:   float = 10.0,
+        timeout_s:   float = 15.0,
         qobuz_token: str | None = None,
 ) -> EnrichedMetadata:
     """

@@ -329,22 +329,26 @@ class DeezerProvider(BaseProvider):
                 res = mb_fetcher.result()
                 if res:
                     mapping = {
-                        "mbid_track":    "MUSICBRAINZ_TRACKID",
-                        "mbid_album":    "MUSICBRAINZ_ALBUMID",
-                        "mbid_artist":   "MUSICBRAINZ_ARTISTID",
-                        "mbid_relgroup": "MUSICBRAINZ_RELEASEGROUPID",
-                        "barcode":       "BARCODE",
-                        "label":         "LABEL",
-                        "organization":  "ORGANIZATION",
-                        "country":       "RELEASECOUNTRY",
-                        "script":        "SCRIPT",
-                        "status":        "RELEASESTATUS",
-                        "media":         "MEDIA",
-                        "type":          "RELEASETYPE",
-                        "artist_sort":   "ARTISTSORT",
-                        "bpm":           "BPM",
-                        "genre":         "GENRE",
+                        "mbid_track":       "MUSICBRAINZ_TRACKID",
+                        "mbid_album":       "MUSICBRAINZ_ALBUMID",
+                        "mbid_artist":      "MUSICBRAINZ_ARTISTID",
+                        "mbid_relgroup":    "MUSICBRAINZ_RELEASEGROUPID",
+                        "mbid_albumartist": "MUSICBRAINZ_ALBUMARTISTID",
+                        "barcode":          "BARCODE",
+                        "label":            "LABEL",
+                        "organization":     "ORGANIZATION",
+                        "country":          "RELEASECOUNTRY",
+                        "script":           "SCRIPT",
+                        "status":           "RELEASESTATUS",
+                        "media":            "MEDIA",
+                        "type":             "RELEASETYPE",
+                        "artist_sort":      "ARTISTSORT",
+                        "albumartist_sort": "ALBUMARTISTSORT",
+                        "catalognumber":    "CATALOGNUMBER",
+                        "bpm":              "BPM",
+                        "genre":            "GENRE"
                     }
+
                     for mb_key, tag_name in mapping.items():
                         val = res.get(mb_key)
                         if val:
@@ -352,6 +356,8 @@ class DeezerProvider(BaseProvider):
                     if res.get("original_date"):
                         mb_tags["ORIGINALDATE"] = res["original_date"]
                         mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
+                    if res.get("catalognumber"):                         # ← FIX
+                        mb_tags["CATALOGNUMBER"] = res["catalognumber"]
 
                 from ..core.tagger import _print_mb_summary
                 _print_mb_summary(mb_tags)
