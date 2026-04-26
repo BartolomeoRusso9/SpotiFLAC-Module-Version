@@ -184,29 +184,32 @@ def embed_metadata(
         merged_extra: dict[str, str] = {**enriched_tags}
 
         if extra_tags:
-            # --- LOGICA SINGOLI CENTRALE ---
-            # Se è un singolo (1 o 2 tracce), evitiamo che MusicBrainz sovrascriva
-            # il genere trovato dai provider di enrichment (più precisi sui singoli)
-            if 0 < metadata.total_tracks <= 2 and "GENRE" in extra_tags:
-                # Escludiamo il genere da MusicBrainz se lo abbiamo già trovato
-                if "GENRE" in enriched_tags:
-                    extra_tags = {k: v for k, v in extra_tags.items() if k != "GENRE"}
-
-            # Applichiamo i tag di MusicBrainz
             merged_extra.update(extra_tags)
+
+        # --- LOGICA SINGOLI ---
+        if metadata.total_tracks <= 2:
+            enrich_genre = enriched_tags.get("GENRE")
+            if enrich_genre:
+                tags["GENRE"] = enrich_genre
+                # Rimuoviamo GENRE in qualsiasi forma (maiuscolo/minuscolo)
+                keys_to_remove = [k for k in merged_extra if k.upper() == "GENRE"]
+                for k in keys_to_remove:
+                    del merged_extra[k]
 
         # Scriviamo tutti i tag extra (Enrichment + MusicBrainz)
         if merged_extra:
-            # Gestione date originali
             orig_date = merged_extra.get("original_date") or merged_extra.get("ORIGINALDATE")
             if orig_date:
                 tags["ORIGINALDATE"] = str(orig_date)
                 tags["ORIGINALYEAR"] = str(orig_date)[:4]
 
+            _date_keys = {"ORIGINAL_DATE", "ORIGINAL_YEAR", "ORIGINALDATE", "ORIGINALYEAR",
+                          "original_date", "original_year"}
+
             for key, val in merged_extra.items():
-                # Evitiamo doppioni per le date e scriviamo il resto
-                if key.upper() not in ("ORIGINAL_DATE", "ORIGINAL_YEAR", "ORIGINALDATE", "ORIGINALYEAR"):
+                if key not in _date_keys and key.upper() not in _date_keys:
                     tags[key.upper()] = str(val)
+
 
         if lyrics:
             tags["LYRICS"] = lyrics
