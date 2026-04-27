@@ -58,7 +58,6 @@ _API_CONFIG_RE = re.compile(
     r'app_id:"(?P<app_id>\d{9})",app_secret:"(?P<app_secret>[a-f0-9]{32})"'
 )
 
-# Lista completa delle API (GET + POST)
 _STREAM_APIS: list[str] = [
     "https://dab.yeet.su/api/stream?trackId=",
     "https://dabmusic.xyz/api/stream?trackId=",
@@ -82,6 +81,12 @@ _QUALITY_FALLBACK: dict[str, list[str]] = {
     "6":  ["6"],
     "5":  ["6"],
     "":   ["6"],
+}
+
+# FIX #3: mappa i valori Tidal-style verso i codici numerici Qobuz
+_TIDAL_TO_QOBUZ_QUALITY: dict[str, str] = {
+    "HI_RES":  "27",
+    "LOSSLESS": "6",
 }
 
 _API_TIMEOUT_S = 8
@@ -422,16 +427,15 @@ class QobuzProvider(BaseProvider):
         with self._creds_lock:
             if not force_refresh and self._creds and self._creds.is_fresh():
                 if self._qobuz_token and not self._creds.user_auth_token:
-                    self._creds.user_auth_token = self._qobuz_token  # ← aggiunto
+                    self._creds.user_auth_token = self._qobuz_token
                 return self._creds
             disk = _load_cached_credentials()
             if not force_refresh and disk and disk.is_fresh():
                 self._creds = disk
                 if self._qobuz_token and not self._creds.user_auth_token:
-                    self._creds.user_auth_token = self._qobuz_token  # ← aggiunto
+                    self._creds.user_auth_token = self._qobuz_token
                 return self._creds
 
-        # Scrape fuori dal lock (può essere lento)
         scraped: QobuzCredentials | None = None
         try:
             candidate = _scrape_credentials(self._session)
@@ -452,7 +456,7 @@ class QobuzProvider(BaseProvider):
                 self._creds = QobuzCredentials.default()
 
             if self._qobuz_token and not self._creds.user_auth_token:
-                self._creds.user_auth_token = self._qobuz_token  # ← aggiunto
+                self._creds.user_auth_token = self._qobuz_token
             return self._creds
 
     def _probe_credentials(self, creds: QobuzCredentials) -> bool:
@@ -469,7 +473,7 @@ class QobuzProvider(BaseProvider):
             creds:              QobuzCredentials | None = None,
             force_refresh:      bool = False,
             use_fallback_token: bool = False,
-            _depth:             int  = 0,         # Fix 4: guardia anti-loop
+            _depth:             int  = 0,
     ) -> requests.Response:
         if creds is None:
             creds = self._get_credentials(force_refresh=force_refresh)
@@ -489,7 +493,6 @@ class QobuzProvider(BaseProvider):
 
         resp = self._session.get(url, params=req_params, headers=headers, timeout=20)
 
-        # Fix 4: controllo _depth
         if resp.status_code in (400, 401) and _depth < 2:
             if creds.user_auth_token and not use_fallback_token and not force_refresh:
                 return self._do_signed_get(
@@ -531,7 +534,6 @@ class QobuzProvider(BaseProvider):
 
     def _get_stream_url(self, track_id: int, quality: str, allow_fallback: bool) -> str:
         chain = _QUALITY_FALLBACK.get(quality, [quality])
-        # Fix 2: Copia difensiva list(_STREAM_APIS)
         ordered_apis = prioritize_providers("qobuz", list(_STREAM_APIS))
         if not allow_fallback:
             chain = chain[:1]
@@ -571,26 +573,27 @@ class QobuzProvider(BaseProvider):
             embed_lyrics:            bool = False,
             lyrics_providers:        list[str] | None = None,
             lyrics_spotify_token:    str = "",
-            lyrics_musixmatch_token: str = "",
             enrich_metadata:         bool = False,
             enrich_providers:        list[str] | None = None,
     ) -> DownloadResult:
+        # FIX #3: normalizza la quality Tidal-style verso i codici numerici Qobuz.
+        # Se quality è "LOSSLESS" o "HI_RES" (passata da downloader.py dopo il Fix #1),
+        # la convertiamo nel formato atteso da Qobuz prima di qualsiasi uso.
+        quality = _TIDAL_TO_QOBUZ_QUALITY.get(quality, quality)
+
         try:
             if not metadata.isrc:
                 raise TrackNotFoundError(self.name, "no ISRC provided")
 
-            # 1. Avvio Fetch MusicBrainz in parallelo (se richiesto l'arricchimento)
             mb_fetcher = None
             if (enrich_metadata or embed_genre) and metadata.isrc:
                 mb_fetcher = AsyncMBFetch(metadata.isrc)
 
-            # 2. Ricerca traccia su Qobuz
             track    = self._search_by_isrc(metadata.isrc)
             track_id = track.get("id")
             if not track_id:
                 raise TrackNotFoundError(self.name, metadata.isrc)
 
-            # 3. Costruzione percorso e controllo esistenza
             dest = self._build_output_path(
                 metadata, output_dir, filename_format,
                 position, include_track_num, use_album_track_num, first_artist_only,
@@ -598,17 +601,14 @@ class QobuzProvider(BaseProvider):
             if self._file_exists(dest):
                 return DownloadResult.ok(self.name, str(dest))
 
-            # 4. Ottenimento URL e download effettivo
             stream_url = self._get_stream_url(track_id, quality, allow_fallback)
             self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
 
-            # 5. Validazione integrità file
             expected_s = metadata.duration_ms // 1000
             valid, err = validate_downloaded_track(str(dest), expected_s)
             if not valid:
                 raise SpotiflacError(ErrorKind.UNAVAILABLE, err, self.name)
 
-            # 6. RECUPERO DATI MUSICBRAINZ E MAPPATURA TAG
             mb_tags = {}
             if mb_fetcher:
                 res = mb_fetcher.result()
@@ -634,7 +634,6 @@ class QobuzProvider(BaseProvider):
                         "genre":            "GENRE"
                     }
 
-
                     for mb_key, tag_name in mapping.items():
                         val = res.get(mb_key)
                         if val:
@@ -643,11 +642,10 @@ class QobuzProvider(BaseProvider):
                     if res.get("original_date"):
                         mb_tags["ORIGINALDATE"] = res["original_date"]
                         mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
-                    if res.get("catalognumber"):                         # ← FIX
+                    if res.get("catalognumber"):
                         mb_tags["CATALOGNUMBER"] = res["catalognumber"]
             _print_mb_summary(mb_tags)
 
-            # 7. Scrittura Metadati finali
             embed_metadata(
                 dest, metadata,
                 first_artist_only       = first_artist_only,
@@ -657,7 +655,6 @@ class QobuzProvider(BaseProvider):
                 embed_lyrics            = embed_lyrics,
                 lyrics_providers        = lyrics_providers,
                 lyrics_spotify_token    = lyrics_spotify_token,
-                lyrics_musixmatch_token = lyrics_musixmatch_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
                 enrich_qobuz_token      = self._qobuz_token or "",

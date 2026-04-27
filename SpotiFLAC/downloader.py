@@ -21,23 +21,23 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DownloadOptions:
-    output_dir:           str
-    services:             list[str]       = field(default_factory=lambda: ["tidal"])
-    filename_format:      str             = "{title} - {artist}"
-    use_track_numbers:    bool            = False
-    use_artist_subfolders: bool           = False
-    use_album_subfolders:  bool           = False
-    first_artist_only:    bool            = False
-    quality:              str             = "LOSSLESS"
-    allow_fallback:       bool            = True
-    inter_track_delay_s:  float           = 0.5
+    output_dir:              str
+    services:                list[str]       = field(default_factory=lambda: ["tidal"])
+    filename_format:         str             = "{title} - {artist}"
+    use_track_numbers:       bool            = False
+    use_album_track_numbers: bool         = False
+    use_artist_subfolders:   bool           = False
+    use_album_subfolders:    bool           = False
+    first_artist_only:       bool            = False
+    quality:                 str             = "LOSSLESS"
+    allow_fallback:          bool            = True
+    inter_track_delay_s:     float           = 0.5
 
     embed_lyrics:            bool          = False
     lyrics_providers:        list[str]     = field(
         default_factory=lambda: ["spotify", "musixmatch", "amazon", "lrclib"]
     )
     lyrics_spotify_token:    str           = ""
-    lyrics_musixmatch_token: str           = ""
 
     enrich_metadata:    bool           = False
     enrich_providers:   list[str]      = field(
@@ -97,13 +97,13 @@ def download_one(
             filename_format     = opts.filename_format,
             position            = position,
             include_track_num   = opts.use_track_numbers,
-            use_album_track_num = opts.use_track_numbers,
+            use_album_track_num = opts.use_album_track_numbers,
             first_artist_only   = opts.first_artist_only,
             allow_fallback      = opts.allow_fallback,
+            quality             = opts.quality,          # FIX #1: quality ora propagata
             embed_lyrics            = opts.embed_lyrics,
             lyrics_providers        = opts.lyrics_providers,
             lyrics_spotify_token    = opts.lyrics_spotify_token,
-            lyrics_musixmatch_token = opts.lyrics_musixmatch_token,
             enrich_metadata         = opts.enrich_metadata,
             enrich_providers        = opts.enrich_providers,
         )
@@ -234,11 +234,6 @@ class SpotiflacDownloader:
             print("No tracks found.")
             return
 
-        # ── Risoluzione ISRC mancanti ─────────────────────────────────────
-        # IsrcHelper era definito (isrc_helper.py → isrc_finder + soundplate
-        # + songstats) ma non veniva mai istanziato nel flusso principale.
-        # I provider Tidal e Qobuz richiedono ISRC: senza questa chiamata
-        # tutti i brani con ISRC vuoto vengono scartati silenziosamente.
         missing_isrc = [t for t in tracks if not t.isrc]
         if missing_isrc:
             print(f"Resolving ISRC for {len(missing_isrc)} track(s)…")

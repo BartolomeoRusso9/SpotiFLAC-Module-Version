@@ -1,12 +1,5 @@
 """
 TidalProvider — migliorato rispetto all'implementazione Go di riferimento.
-
-Principali miglioramenti vs versione originale:
-1. Fetch parallelo degli URL di download (ThreadPoolExecutor, prima risposta vince)
-2. Retry con backoff esponenziale per ogni singola API (allineato a fetchTidalURLWithRetry Go)
-3. Rilevamento risposta v2 (manifest) e v1 (OriginalTrackUrl) nel worker parallelo
-4. Fallback qualità HI_RES → LOSSLESS invariato ma con errore tipato
-5. Tutti i pattern go (remember_tidal_api_usage, round-robin) mantenuti
 """
 from __future__ import annotations
 
@@ -75,13 +68,12 @@ _TIDAL_USER_AGENT = (
 _TIDAL_API_GIST_URL   = "https://gist.githubusercontent.com/afkarxyz/2ce772b943321b9448b454f39403ce25/raw"
 _TIDAL_API_CACHE_FILE = "tidal-api-urls.json"
 
-# Timeout e retry allineati al Go (tidalAPITimeoutMobile, tidalMaxRetries)
 _API_TIMEOUT_S = 8
 _MAX_RETRIES   = 1
 _RETRY_DELAY_S = 0.3
 
 # ---------------------------------------------------------------------------
-# API list manager (invariato rispetto alla versione originale)
+# API list manager
 # ---------------------------------------------------------------------------
 
 _tidal_api_list_mu:    threading.Lock = threading.Lock()
@@ -180,7 +172,6 @@ def prime_tidal_api_list() -> None:
         refresh_tidal_api_list(force=True)
     except Exception as exc:
         logger.warning("[tidal] failed to refresh API list: %s", exc)
-        # Fallback: salva almeno i builtin
         with _tidal_api_list_mu:
             state = _load_tidal_api_list_state_locked()
             if not state["urls"]:
@@ -204,7 +195,6 @@ def refresh_tidal_api_list(force: bool = False) -> list[str]:
             logger.warning("[tidal] gist fetch failed: %s", exc)
             gist_urls = []
 
-        # Merge: builtin + gist, deduplicati, builtin prima
         merged = _normalize_tidal_api_urls(_TIDAL_APIS + gist_urls)
 
         if not merged:
@@ -247,7 +237,7 @@ def remember_tidal_api_usage(api_url: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Manifest parsing (invariato)
+# Manifest parsing
 # ---------------------------------------------------------------------------
 
 class ManifestResult(NamedTuple):
@@ -320,8 +310,7 @@ def _parse_dash_manifest(text: str) -> ManifestResult:
 
 
 # ---------------------------------------------------------------------------
-# NUOVO: fetch singola API Tidal con retry + backoff esponenziale
-# Porta fetchTidalURLWithRetry dal Go
+# Fetch singola API Tidal con retry + backoff esponenziale
 # ---------------------------------------------------------------------------
 
 def _fetch_tidal_url_once(
@@ -330,13 +319,6 @@ def _fetch_tidal_url_once(
         quality:   str,
         timeout_s: int = _API_TIMEOUT_S,
 ) -> str:
-    """
-    Interroga una singola API Tidal con retry esponenziale.
-    Porta fetchTidalURLWithRetry dal Go:
-      - v2 response: ritorna 'MANIFEST:' + base64
-      - v1 response: ritorna OriginalTrackUrl direttamente
-      - retry su 5xx, 429, timeout, EOF
-    """
     url       = f"{api.rstrip('/')}/track/?id={track_id}&quality={quality}"
     delay     = _RETRY_DELAY_S
     last_err: Exception = RuntimeError("no attempts made")
@@ -375,7 +357,6 @@ def _fetch_tidal_url_once(
                 last_err = RuntimeError("invalid JSON")
                 continue
 
-            # Risposta v2 con manifest
             if isinstance(data, dict):
                 manifest = data.get("data", {}).get("manifest", "")
                 if manifest:
@@ -384,7 +365,6 @@ def _fetch_tidal_url_once(
                         raise RuntimeError("returned PREVIEW instead of FULL")
                     return "MANIFEST:" + manifest
 
-            # Risposta v1 con lista di URL diretti
             if isinstance(data, list):
                 for item in data:
                     if isinstance(item, dict) and item.get("OriginalTrackUrl"):
@@ -403,11 +383,6 @@ def _fetch_tidal_url_once(
 
     raise last_err
 
-
-# ---------------------------------------------------------------------------
-# NUOVO: fetch parallelo di tutte le API Tidal (prima risposta vince)
-# Porta getDownloadURLParallel dal Go
-# ---------------------------------------------------------------------------
 
 def _fetch_tidal_url_parallel(
         apis:      list[str],
@@ -432,7 +407,6 @@ def _fetch_tidal_url_parallel(
             try:
                 dl_url = fut.result()
                 logger.debug("[tidal] parallel: got URL from %s in %.2fs", api, time.time() - start)
-                # Shutdown senza aspettare i thread in esecuzione (Python 3.9+)
                 pool.shutdown(wait=False, cancel_futures=True)
                 return api, dl_url
             except Exception as exc:
@@ -460,8 +434,9 @@ class TidalProvider(BaseProvider):
 
     def __init__(
             self,
-            apis:      list[str] | None = None,
-            timeout_s: int              = 15,
+            apis:          list[str] | None = None,
+            timeout_s:     int              = 15,
+            qobuz_token:   str | None       = None,   # FIX #6: aggiunto parametro mancante
     ) -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
         self._session = self._http._session
@@ -474,10 +449,12 @@ class TidalProvider(BaseProvider):
             logger.warning("[tidal] API list unavailable, using built-in fallback: %s", exc)
             self._apis = list(apis or _TIDAL_APIS)
 
-        self._qobuz_token: str | None = None
+        # FIX #6: _qobuz_token non era mai settabile — ora accetta il parametro
+        # e fallback a variabile d'ambiente, come QobuzProvider.
+        self._qobuz_token: str | None = qobuz_token or os.environ.get("QOBUZ_AUTH_TOKEN")
 
     # ------------------------------------------------------------------
-    # Spotify → Tidal resolution (invariata)
+    # Spotify → Tidal resolution
     # ------------------------------------------------------------------
 
     def resolve_spotify_to_tidal(
@@ -546,15 +523,10 @@ class TidalProvider(BaseProvider):
         raise TrackNotFoundError(self.name, spotify_track_id)
 
     # ------------------------------------------------------------------
-    # NUOVO: download URL con fetch parallelo + fallback qualità
-    # Porta GetDownloadURL + getDownloadURLParallel dal Go
+    # Download URL
     # ------------------------------------------------------------------
 
     def _get_download_url(self, track_id: int, quality: str) -> str:
-        """
-        Interroga tutte le API in parallelo con round-robin e provider_stats.
-        Porta getDownloadURLParallel dal Go.
-        """
         from ..core.provider_stats import prioritize_providers, record_success, record_failure
 
         try:
@@ -571,7 +543,6 @@ class TidalProvider(BaseProvider):
         return dl_url
 
     def _get_download_url_with_fallback(self, track_id: int, quality: str) -> str:
-        """Fallback HI_RES → LOSSLESS identico al Go."""
         try:
             return self._get_download_url(track_id, quality)
         except SpotiflacError:
@@ -582,7 +553,7 @@ class TidalProvider(BaseProvider):
             raise
 
     # ------------------------------------------------------------------
-    # File download (invariato)
+    # File download
     # ------------------------------------------------------------------
 
     def _download_file(self, url_or_manifest: str, dest: Path) -> None:
@@ -675,7 +646,6 @@ class TidalProvider(BaseProvider):
             embed_lyrics:            bool = False,
             lyrics_providers:        list[str] | None = None,
             lyrics_spotify_token:    str = "",
-            lyrics_musixmatch_token: str = "",
             enrich_metadata:         bool = False,
             enrich_providers:        list[str] | None = None,
     ) -> DownloadResult:
@@ -687,7 +657,6 @@ class TidalProvider(BaseProvider):
 
             mb_fetcher = None
             if metadata.isrc:
-                # Avviamo la ricerca mentre Tidal si prepara al download
                 mb_fetcher = AsyncMBFetch(metadata.isrc)
 
             dest = self._build_output_path(
@@ -736,21 +705,19 @@ class TidalProvider(BaseProvider):
                 "genre":            "GENRE"
             }
 
-
             for mb_key, tag_name in mapping.items():
                 val = res.get(mb_key)
                 if val:
                     mb_tags[tag_name] = str(val)
 
-            # Gestione speciale DATA ORIGINALE
-            # Come richiesto, l'anno originale va nel campo DATE (sovrascrivendo quello Spotify)
             if res.get("original_date"):
                 mb_tags["ORIGINALDATE"] = res["original_date"]
                 mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
-            if res.get("catalognumber"):                         # ← FIX
+            if res.get("catalognumber"):
                 mb_tags["CATALOGNUMBER"] = res["catalognumber"]
             _print_mb_summary(mb_tags)
-            # 6. Scrittura Metadati finali
+
+            # FIX #6: self._qobuz_token ora è correttamente propagato
             embed_metadata(
                 dest, metadata,
                 first_artist_only       = first_artist_only,
@@ -760,7 +727,6 @@ class TidalProvider(BaseProvider):
                 embed_lyrics            = embed_lyrics,
                 lyrics_providers        = lyrics_providers,
                 lyrics_spotify_token    = lyrics_spotify_token,
-                lyrics_musixmatch_token = lyrics_musixmatch_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
                 enrich_qobuz_token      = self._qobuz_token or "",

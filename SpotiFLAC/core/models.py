@@ -30,6 +30,7 @@ class TrackMetadata(BaseModel):
     external_url: str        = ""
     copyright:    str        = ""
     publisher:    str        = ""
+    composer:     str        = ""
 
     @field_validator("title", "artists", "album", "album_artist", mode="before")
     @classmethod
@@ -86,6 +87,7 @@ class TrackMetadata(BaseModel):
         for key, val in [
             ("ISRC",         self.isrc),
             ("COPYRIGHT",    self.copyright),
+            ("COMPOSER",     self.composer),
             ("ORGANIZATION", self.publisher),
             ("URL",          self.external_url),
         ]:

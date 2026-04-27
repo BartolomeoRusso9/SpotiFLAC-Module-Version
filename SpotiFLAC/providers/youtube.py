@@ -143,10 +143,6 @@ class YouTubeProvider(BaseProvider):
 
     # ------------------------------------------------------------------
     # Metadata embedding per MP3 (ID3)
-    # Nota: YouTube produce MP3 → il tagger FLAC centrale non è applicabile.
-    # I tag supportati sono: titolo, artista, album, copertina, lyrics (USLT),
-    # genere (TCON), BPM (TBPM). Enrich multi-provider viene applicato
-    # tramite fetch manuale e scrittura ID3 nativa.
     # ------------------------------------------------------------------
 
     def _embed_metadata(
@@ -192,8 +188,6 @@ class YouTubeProvider(BaseProvider):
             audio.add(COMM(encoding=3, lang="eng", desc="",
                            text=["https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"]))
 
-            # Lyrics in ID3 (tag USLT — Unicode Synchronized Lyrics Text)
-            # Anche i formati LRC vengono memorizzati qui come testo plain.
             if lyrics:
                 audio.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
                 logger.debug("[youtube] lyrics embedded (%d chars)", len(lyrics))
@@ -225,11 +219,9 @@ class YouTubeProvider(BaseProvider):
             use_album_track_num: bool            = False,
             first_artist_only:   bool            = False,
             allow_fallback:      bool            = True,
-            # ── parametri lyrics e enrich (erano ignorati con **kwargs) ──
             embed_lyrics:            bool            = False,
             lyrics_providers:        list[str] | None = None,
             lyrics_spotify_token:    str             = "",
-            lyrics_musixmatch_token: str             = "",
             enrich_metadata:         bool            = False,
             enrich_providers:        list[str] | None = None,
             **kwargs,
@@ -267,12 +259,13 @@ class YouTubeProvider(BaseProvider):
             artist       = metadata.artists.split(",")[0].strip() if first_artist_only else metadata.artists
             album_artist = metadata.album_artist.split(",")[0].strip() if first_artist_only else metadata.album_artist
 
-            # ── Lyrics per MP3 (USLT ID3 tag) ────────────────────────────
+            # FIX #2: fetch_lyrics ritorna tuple[str, str] — unpacking corretto
             lyrics_text = ""
+            lyrics_prov = ""
             if embed_lyrics and metadata.title and metadata.first_artist:
                 try:
                     from ..core.lyrics import fetch_lyrics
-                    lyrics_text = fetch_lyrics(
+                    result = fetch_lyrics(
                         track_name       = metadata.title,
                         artist_name      = metadata.first_artist,
                         album_name       = metadata.album,
@@ -281,12 +274,20 @@ class YouTubeProvider(BaseProvider):
                         isrc             = metadata.isrc,
                         providers        = lyrics_providers,
                         spotify_token    = lyrics_spotify_token,
-                        musixmatch_token = lyrics_musixmatch_token,
                     )
+                    # fetch_lyrics restituisce sempre una tupla (lyrics, provider)
+                    if isinstance(result, tuple):
+                        lyrics_text, lyrics_prov = result
+                    else:
+                        lyrics_text = result or ""
+
+                    if lyrics_text:
+                        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
+                        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
                 except Exception as exc:
                     logger.warning("[youtube] lyrics fetch failed: %s", exc)
 
-            # ── Metadata enrichment per MP3 (ID3 TCON/TBPM) ──────────────
+            # Metadata enrichment per MP3 (ID3 TCON/TBPM)
             genre_tag = ""
             bpm_tag   = ""
             if enrich_metadata and metadata.isrc:

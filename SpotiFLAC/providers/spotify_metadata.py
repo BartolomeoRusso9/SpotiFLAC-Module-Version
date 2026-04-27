@@ -1,12 +1,5 @@
 """
 SpotifyMetadataProvider — refactored.
-
-Cambiamenti rispetto a getMetadata.py:
-- Token con scadenza (expires_in) gestita correttamente
-- Nessuna variabile globale mutable
-- Paginazione playlist/album estratta in _paginate()
-- Ritorna TrackMetadata typed invece di raw dict
-- Errori tipati (AuthError, NetworkError, InvalidUrlError)
 """
 from __future__ import annotations
 import base64
@@ -23,25 +16,13 @@ from ..core.isrc_cache import get_cached_isrc, put_cached_isrc
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 _CLIENT_ID     = base64.b64decode("ODNlNDQzMGI0NzAwNDM0YmFhMjEyMjhhOWM3ZDExYzU=").decode()
 _CLIENT_SECRET = base64.b64decode("OWJiOWUxMzFmZjI4NDI0Y2I2YTQyMGFmZGY0MWQ0NGE=").decode()
 _TOKEN_URL     = "https://accounts.spotify.com/api/token"
 _API_BASE      = "https://api.spotify.com/v1"
 
 
-# ---------------------------------------------------------------------------
-# URL parser (pure function)
-# ---------------------------------------------------------------------------
-
 def parse_spotify_url(uri: str) -> dict[str, str]:
-    """
-    Ritorna {"type": "track"|"album"|"playlist"|"artist", "id": "..."}.
-    Raise InvalidUrlError se l'URL non è supportato.
-    """
     u = urlparse(uri)
 
     if u.netloc == "embed.spotify.com":
@@ -74,25 +55,12 @@ def parse_spotify_url(uri: str) -> dict[str, str]:
     raise InvalidUrlError(uri)
 
 
-# ---------------------------------------------------------------------------
-# SpotifyMetadataClient
-# ---------------------------------------------------------------------------
-
 class SpotifyMetadataClient:
-    """
-    Wrappa le Spotify Web API per recuperare metadati di tracce,
-    album e playlist. Gestisce autonomamente token + refresh.
-    """
-
     def __init__(self, timeout_s: int = 10) -> None:
         self._timeout    = timeout_s
         self._session    = requests.Session()
         self._token      = ""
         self._token_exp  = 0.0
-
-    # ------------------------------------------------------------------
-    # Auth
-    # ------------------------------------------------------------------
 
     def _ensure_token(self) -> str:
         if self._token and time.time() < self._token_exp - 60:
@@ -135,12 +103,7 @@ class SpotifyMetadataClient:
             raise NetworkError("spotify", f"HTTP {resp.status_code} from {path}")
         return resp.json()
 
-    # ------------------------------------------------------------------
-    # Pagination
-    # ------------------------------------------------------------------
-
     def _paginate(self, url: str, delay: float = 0.5) -> Iterator[dict]:
-        """Itera su tutte le pagine di una Spotify API paginata."""
         while url:
             data  = self._get(url.replace(f"{_API_BASE}/", ""))
             items = data.get("items", [])
@@ -149,28 +112,23 @@ class SpotifyMetadataClient:
             if url and delay > 0:
                 time.sleep(delay)
 
-    # ------------------------------------------------------------------
-    # Public methods → TrackMetadata
-    # ------------------------------------------------------------------
-
     def get_track(self, track_id: str) -> TrackMetadata:
         data = self._get(f"/tracks/{track_id}")
         return self._track_from_raw(data)
 
     def get_album_tracks(self, album_id: str) -> tuple[dict, list[TrackMetadata]]:
-        """Ritorna (album_info dict, lista TrackMetadata)."""
         album = self._get(f"/albums/{album_id}")
         tracks: list[TrackMetadata] = []
 
         for item in self._paginate(f"{_API_BASE}/albums/{album_id}/tracks?limit=50"):
             track_id = item["id"]
-            isrc = get_cached_isrc(track_id)      # ← prima controlla cache
+            isrc = get_cached_isrc(track_id)
             if not isrc:
                 try:
                     full = self._get(f"/tracks/{track_id}")
                     isrc = full.get("external_ids", {}).get("isrc", "")
                     if isrc:
-                        put_cached_isrc(track_id, isrc)   # ← poi salva
+                        put_cached_isrc(track_id, isrc)
                 except Exception:
                     pass
 
@@ -191,10 +149,6 @@ class SpotifyMetadataClient:
         return playlist, tracks
 
     def get_url(self, spotify_url: str) -> tuple[str, list[TrackMetadata]]:
-        """
-        Entry-point principale.
-        Ritorna (collection_name, [TrackMetadata]).
-        """
         info = parse_spotify_url(spotify_url)
         t    = info["type"]
 
@@ -217,10 +171,6 @@ class SpotifyMetadataClient:
             f"Unsupported Spotify URL type: {t}",
         )
 
-    # ------------------------------------------------------------------
-    # Parsing helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _format_artists(artists: list[dict] | str) -> str:
         if isinstance(artists, str):
@@ -235,13 +185,18 @@ class SpotifyMetadataClient:
         return images[0].get("url", "") if images else ""
 
     def _track_from_raw(self, data: dict) -> TrackMetadata:
-        """Costruisce TrackMetadata da una risposta /tracks/:id completa."""
+        """
+        Costruisce TrackMetadata da una risposta /tracks/:id completa.
+        FIX #5: aggiunto total_tracks estratto dall'album.
+        """
         album       = data.get("album", {})
         artists     = self._format_artists(data.get("artists", []))
         album_artists = self._format_artists(album.get("artists", []) or data.get("artists", []))
         cover       = self._best_image(
             album.get("images") or data.get("images", [])
         )
+        copyrights = album.get("copyrights", [])
+        copyright_text = copyrights[0].get("text", "") if copyrights else ""
         return TrackMetadata(
             id           = data.get("id", ""),
             title        = data.get("name", "Unknown"),
@@ -251,22 +206,26 @@ class SpotifyMetadataClient:
             isrc         = data.get("external_ids", {}).get("isrc", ""),
             track_number = data.get("track_number", 0),
             disc_number  = data.get("disc_number", 1),
+            total_tracks = album.get("total_tracks", 0),   # FIX #5: era mancante
             duration_ms  = data.get("duration_ms", 0),
             release_date = album.get("release_date", ""),
             cover_url    = cover,
             external_url = data.get("external_urls", {}).get("spotify", ""),
+            copyright    = copyright_text,
+            composer     = ""
         )
 
     def _track_from_album_item(
-        self,
-        item:  dict,
-        album: dict,
-        isrc:  str,
+            self,
+            item:  dict,
+            album: dict,
+            isrc:  str,
     ) -> TrackMetadata:
-        """Costruisce TrackMetadata da un item dell'endpoint /albums/:id/tracks."""
         artists       = self._format_artists(item.get("artists", []))
         album_artists = self._format_artists(album.get("artists", []))
         cover         = self._best_image(album.get("images", []))
+        copyrights = album.get("copyrights", [])
+        copyright_text = copyrights[0].get("text", "") if copyrights else ""
 
         return TrackMetadata(
             id           = item.get("id", ""),
@@ -282,4 +241,6 @@ class SpotifyMetadataClient:
             release_date = album.get("release_date", ""),
             cover_url    = cover,
             external_url = item.get("external_urls", {}).get("spotify", ""),
+            copyright    = copyright_text,
+            composer     = ""
         )
