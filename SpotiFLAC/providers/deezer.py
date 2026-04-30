@@ -311,6 +311,7 @@ class DeezerProvider(BaseProvider):
             lyrics_spotify_token:    str             = "",
             enrich_metadata:         bool            = False,
             enrich_providers:        list[str] | None = None,
+            is_album:                bool            = False,
             **kwargs,
     ) -> DownloadResult:
         if not metadata.isrc:
@@ -394,6 +395,7 @@ class DeezerProvider(BaseProvider):
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
+                is_album                = is_album,
             )
 
             return DownloadResult.ok(self.name, str(dest))

@@ -32,6 +32,7 @@ class DownloadOptions:
     quality:                 str             = "LOSSLESS"
     allow_fallback:          bool            = True
     inter_track_delay_s:     float           = 0.5
+    is_album:                bool            = False
 
     embed_lyrics:            bool          = False
     lyrics_providers:        list[str]     = field(
@@ -107,6 +108,7 @@ def download_one(
             lyrics_spotify_token    = opts.lyrics_spotify_token,
             enrich_metadata         = opts.enrich_metadata,
             enrich_providers        = opts.enrich_providers,
+            is_album                = opts.is_album
         )
 
         if result.success:
@@ -154,6 +156,7 @@ class DownloadWorker:
         base_out  = self._resolve_output_dir()
 
         for i, track in enumerate(self._tracks):
+            self._opts.is_album = self._is_album
             position = i + 1
             print_track_header(position, total, track.title, track.artists, track.album)
 
@@ -257,6 +260,7 @@ class SpotiflacDownloader:
         info        = parse_spotify_url(spotify_url)
         is_album    = info["type"] == "album"
         is_playlist = info["type"] == "playlist"
+        self._opts.is_album = is_album
 
         manager = DownloadManager()
         for t in tracks:

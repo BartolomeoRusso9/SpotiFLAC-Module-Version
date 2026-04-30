@@ -23,7 +23,7 @@ _MB_THROTTLE_COOLDOWN    = 5.0
 
 _USER_AGENT = "SpotiFLAC/2.0 ( support@spotbye.qzz.io )"
 
-_mb_cache: dict[str, str] = {}
+_mb_cache: dict[str, dict] = {}
 _mb_inflight: dict[str, threading.Event] = {}
 # FIX #4: rimossa _mb_inflight_results — era definita ma mai letta né scritta (codice morto)
 _mb_inflight_mu = threading.Lock()

@@ -155,6 +155,7 @@ class SpotiDownloaderProvider(BaseProvider):
             lyrics_spotify_token: str = "",
             enrich_metadata: bool = False,
             enrich_providers=None,
+            is_album:                bool            = False,
             **kwargs,
     ) -> DownloadResult:
 
@@ -254,6 +255,7 @@ class SpotiDownloaderProvider(BaseProvider):
                 enrich=enrich_metadata,
                 enrich_providers=enrich_providers,
                 enrich_qobuz_token=qobuz_token,
+                is_album                = is_album,
             )
 
             return DownloadResult.ok(self.name, str(dest), fmt="flac")

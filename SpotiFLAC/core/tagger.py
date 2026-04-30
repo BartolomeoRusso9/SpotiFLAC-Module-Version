@@ -96,6 +96,7 @@ def embed_metadata(
         session:           requests.Session | None = None,
         extra_tags:        dict[str, str] | None = None,
         multi_artist:      bool  = True,
+        is_album:          bool  = False,
         # Lyrics options
         embed_lyrics:         bool = False,
         lyrics_providers:     list[str] | None = None,
@@ -191,11 +192,10 @@ def embed_metadata(
             merged_extra.update(extra_tags)
 
         # --- LOGICA SINGOLI ---
-        if metadata.total_tracks <= 2:
+        if not is_album:
             enrich_genre = enriched_tags.get("GENRE")
             if enrich_genre:
                 tags["GENRE"] = enrich_genre
-                # Rimuoviamo GENRE in qualsiasi forma (maiuscolo/minuscolo)
                 keys_to_remove = [k for k in merged_extra if k.upper() == "GENRE"]
                 for k in keys_to_remove:
                     del merged_extra[k]

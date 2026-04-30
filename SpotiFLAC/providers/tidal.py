@@ -648,6 +648,7 @@ class TidalProvider(BaseProvider):
             lyrics_spotify_token:    str = "",
             enrich_metadata:         bool = False,
             enrich_providers:        list[str] | None = None,
+            is_album:                bool            = False,
     ) -> DownloadResult:
         try:
             tidal_url = self.resolve_spotify_to_tidal(
@@ -730,6 +731,7 @@ class TidalProvider(BaseProvider):
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
                 enrich_qobuz_token      = self._qobuz_token or "",
+                is_album                = is_album,
             )
             return DownloadResult.ok(self.name, str(dest))
 
