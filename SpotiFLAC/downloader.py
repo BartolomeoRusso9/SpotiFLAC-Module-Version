@@ -36,13 +36,13 @@ class DownloadOptions:
     # Exact output file path (overrides output_dir + filename_format for single tracks)
     output_path:             str | None      = None
 
-    embed_lyrics:            bool            = False
+    embed_lyrics:            bool            = True
     lyrics_providers:        list[str]       = field(
         default_factory=lambda: ["spotify", "musixmatch", "amazon", "lrclib"]
     )
     lyrics_spotify_token:    str             = ""
 
-    enrich_metadata:         bool            = False
+    enrich_metadata:         bool            = True
     enrich_providers:        list[str]       = field(
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"]
     )
@@ -110,18 +110,24 @@ def download_one(
             lyrics_spotify_token    = opts.lyrics_spotify_token,
             enrich_metadata         = opts.enrich_metadata,
             enrich_providers        = opts.enrich_providers,
+            qobuz_token             = opts.qobuz_token,
             is_album                = opts.is_album
         )
 
         if result.success:
             # If an exact output path was requested, move the file there now.
             if opts.output_path and result.file_path:
+                import shutil
+                import os
+                # FIX Estensione: Assicurati che l'estensione finale corrisponda al formato reale
+                _, ext = os.path.splitext(result.file_path)
+                base_target, _ = os.path.splitext(opts.output_path)
                 target = opts.output_path
                 os.makedirs(os.path.dirname(os.path.abspath(target)) or ".", exist_ok=True)
                 if os.path.abspath(result.file_path) != os.path.abspath(target):
                     if os.path.exists(target):
                         os.remove(target)
-                    os.replace(result.file_path, target)
+                    shutil.move(result.file_path, target)
                 result = DownloadResult.ok(result.provider, target, result.format or "flac")
 
             logger.info("[%s] ✓ %s — %s", provider.name, metadata.artists, metadata.title)

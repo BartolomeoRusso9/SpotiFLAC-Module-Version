@@ -336,7 +336,7 @@ class DeezerProvider(BaseProvider):
                 new_files = self._snapshot(output_dir) - before
                 if not new_files:
                     return DownloadResult.fail(self.name, "No FLAC file downloaded")
-                downloaded = max(new_files, key=os.path.getctime)
+                downloaded = max(new_files, key=os.path.getmtime)
 
             if os.path.abspath(downloaded) != os.path.abspath(str(dest)):
                 import shutil

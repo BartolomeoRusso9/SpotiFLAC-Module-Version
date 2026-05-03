@@ -4,7 +4,6 @@ Port di download_validation.go — rileva preview da 30s e mismatch di durata.
 """
 from __future__ import annotations
 import logging
-import math
 import os
 import subprocess
 

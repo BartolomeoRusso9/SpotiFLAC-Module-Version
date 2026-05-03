@@ -263,8 +263,8 @@ def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", durat
         try:
             r = requests.get(f"{_LRCLIB}/get", params=params, timeout=timeout)
             if r.status_code == 200:
-                d = r.json()
-                return d.get("syncedLyrics") or d.get("plainLyrics") or ""
+                data = r.json()
+                return data.get("syncedLyrics") or data.get("plainLyrics") or ""
         except Exception: pass
         return ""
 
