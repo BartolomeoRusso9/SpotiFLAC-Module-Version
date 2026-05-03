@@ -16,6 +16,47 @@ import urllib.parse
 from typing import Any
 
 import requests
+import re
+import unicodedata
+
+def simplify_track_name(name: str) -> str:
+    """Rimuove suffissi come (feat. ...), - Remastered, (Radio Edit), ecc."""
+    patterns = [
+        r'\s*\(feat\..*?\)', r'\s*\(ft\..*?\)', r'\s*\(featuring.*?\)', r'\s*\(with.*?\)',
+        r'\s*-\s*Remaster(ed)?.*$', r'\s*-\s*\d{4}\s*Remaster.*$',
+        r'\s*\(Remaster(ed)?.*?\)', r'\s*\(Deluxe.*?\)', r'\s*\(Bonus.*?\)',
+        r'\s*\(Live.*?\)', r'\s*\(Acoustic.*?\)', r'\s*\(Radio Edit\)', r'\s*\(Single Version\)'
+    ]
+    result = name
+    for pattern in patterns:
+        result = re.sub(pattern, "", result, flags=re.IGNORECASE)
+    return result.strip() or name
+
+def get_primary_artist(name: str) -> str:
+    """Estrae solo l'artista principale rimuovendo collaboratori."""
+    separators = [", ", "; ", " & ", " feat. ", " ft. ", " featuring ", " with "]
+    result = name
+    for sep in separators:
+        idx = result.lower().find(sep)
+        if idx > 0:
+            result = result[:idx]
+            break
+    return result.strip()
+
+def normalize_loose_string(text: str) -> str:
+    """Rimuove accenti e caratteri speciali per confronti morbidi."""
+    text = text.lower().strip()
+    text = text.replace('ß', 'ss').replace('đ', 'dj').replace('æ', 'ae').replace('œ', 'oe')
+    text = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+    text = re.sub(r'[/\\_\-|.&+]', ' ', text)
+    return ' '.join(text.split())
+
+def add_lrc_metadata(lrc_text: str, track_name: str, artist_name: str) -> str:
+    """Aggiunge i tag LRC standard se non sono presenti."""
+    if not lrc_text or "[ti:" in lrc_text:
+        return lrc_text
+    headers = f"[ti:{track_name}]\n[ar:{artist_name}]\n[by:SpotiFLAC]\n\n"
+    return headers + lrc_text
 
 logger = logging.getLogger(__name__)
 
@@ -116,10 +157,11 @@ def _spotify_client_token(sp_dc: str, timeout: int) -> str:
 
 def _score_apple_result(res: dict, t_name: str, a_name: str, duration_s: int) -> int:
     score = 0
-    r_t = res.get("songName", "").lower().strip()
-    r_a = res.get("artistName", "").lower().strip()
-    t_t = t_name.lower().strip()
-    t_a = a_name.lower().strip()
+    # Usa la nuova normalizzazione invece di un semplice .lower().strip()
+    r_t = normalize_loose_string(res.get("songName", ""))
+    r_a = normalize_loose_string(res.get("artistName", ""))
+    t_t = normalize_loose_string(t_name)
+    t_a = normalize_loose_string(a_name)
 
     if r_t == t_t: score += 50
     elif t_t in r_t or r_t in t_t: score += 25
@@ -256,6 +298,7 @@ def _fetch_amazon(isrc: str, timeout: int = 15) -> str:
 # --------------------------------------------------------------------------- #
 
 def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", duration_s: int = 0, timeout: int = 10) -> str:
+    # 1. Tenta prima la richiesta ESATTA (endpoint /get)
     def _lrclib_exact(t, a, al, d):
         params = {"artist_name": a, "track_name": t}
         if al: params["album_name"] = al
@@ -267,6 +310,34 @@ def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", durat
                 return data.get("syncedLyrics") or data.get("plainLyrics") or ""
         except Exception: pass
         return ""
+
+    result = _lrclib_exact(track_name, artist_name, album_name, duration_s)
+    if result: return result
+    if album_name:
+        result = _lrclib_exact(track_name, artist_name, "", duration_s)
+        if result: return result
+
+    # 2. Se fallisce, usa la ricerca MORBIDA (endpoint /search)
+    try:
+        r = requests.get(f"{_LRCLIB}/search", params={"artist_name": artist_name, "track_name": track_name}, timeout=timeout)
+        if r.status_code == 200:
+            results = r.json()
+            if results:
+                best_synced = None
+                best_plain = None
+
+                for item in results:
+                    item_duration = item.get("duration", 0)
+                    # Tollera una differenza di 10 secondi come nel Go
+                    if duration_s == 0 or abs(item_duration - duration_s) <= 10.0:
+                        if item.get("syncedLyrics") and not best_synced:
+                            best_synced = item["syncedLyrics"]
+                        elif item.get("plainLyrics") and not best_plain:
+                            best_plain = item["plainLyrics"]
+
+                return best_synced or best_plain or ""
+    except Exception: pass
+    return ""
 
     result = _lrclib_exact(track_name, artist_name, album_name, duration_s)
     if result: return result
@@ -303,19 +374,25 @@ def fetch_lyrics(
     if providers is None:
         providers = _DEFAULT_PROVIDERS
 
+    clean_track = simplify_track_name(track_name)
+    clean_artist = get_primary_artist(artist_name)
+
     for provider in providers:
         result = ""
         try:
             if provider == "spotify":
                 result = _fetch_spotify(track_id, spotify_token)
             elif provider == "apple":
-                result = _fetch_apple(track_name, artist_name, duration_s)
+                # Uso i nomi puliti per la ricerca su Apple Music
+                result = _fetch_apple(clean_track, clean_artist, duration_s)
             elif provider == "musixmatch":
-                result = _fetch_musixmatch(track_name, artist_name, duration_s)
+                # Uso i nomi puliti per la ricerca su Musixmatch
+                result = _fetch_musixmatch(clean_track, clean_artist, duration_s)
             elif provider == "amazon":
                 result = _fetch_amazon(isrc)
             elif provider == "lrclib":
-                result = _fetch_lrclib(track_name, artist_name, album_name, duration_s)
+                # LRCLIB riceve i nomi originali prima, poi in caso farà fall-back interno
+                result = _fetch_lrclib(clean_track, clean_artist, album_name, duration_s)
             else:
                 logger.warning("[lyrics] unknown provider: %s", provider)
         except Exception as exc:
@@ -323,7 +400,9 @@ def fetch_lyrics(
 
         if result and result.strip():
             logger.debug("[lyrics] found via %s (%d chars)", provider, len(result))
-            return result.strip(), provider
+            # Aggiungo i metadati LRC standard al risultato finale!
+            final_lrc = add_lrc_metadata(result.strip(), track_name, artist_name)
+            return final_lrc, provider
 
     logger.debug("[lyrics] not found for '%s' by '%s'", track_name, artist_name)
     return "", ""
