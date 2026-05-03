@@ -338,25 +338,6 @@ def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", durat
                 return best_synced or best_plain or ""
     except Exception: pass
     return ""
-
-    result = _lrclib_exact(track_name, artist_name, album_name, duration_s)
-    if result: return result
-    if album_name:
-        result = _lrclib_exact(track_name, artist_name, "", duration_s)
-        if result: return result
-
-    try:
-        r = requests.get(f"{_LRCLIB}/search", params={"artist_name": artist_name, "track_name": track_name}, timeout=timeout)
-        if r.status_code == 200:
-            results = r.json()
-            if results:
-                for item in results:
-                    if item.get("syncedLyrics"): return item["syncedLyrics"]
-                return results[0].get("plainLyrics", "")
-    except Exception: pass
-    return ""
-
-
 # --------------------------------------------------------------------------- #
 # Public API                                                                   #
 # --------------------------------------------------------------------------- #
