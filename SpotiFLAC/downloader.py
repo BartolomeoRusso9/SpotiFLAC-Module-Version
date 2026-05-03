@@ -122,7 +122,7 @@ def download_one(
                 # FIX Estensione: Assicurati che l'estensione finale corrisponda al formato reale
                 _, ext = os.path.splitext(result.file_path)
                 base_target, _ = os.path.splitext(opts.output_path)
-                target = opts.output_path
+                target = base_target + ext
                 os.makedirs(os.path.dirname(os.path.abspath(target)) or ".", exist_ok=True)
                 if os.path.abspath(result.file_path) != os.path.abspath(target):
                     if os.path.exists(target):
