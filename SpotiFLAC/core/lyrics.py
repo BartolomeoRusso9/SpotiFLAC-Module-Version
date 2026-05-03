@@ -157,7 +157,7 @@ def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: in
 
         lrc_lines = []
         for line in content:
-            ts = line.get("timestamp", 0)
+            ts = int(line.get("timestamp", 0))
             m, s = divmod(ts // 1000, 60)
             cs = (ts % 1000) // 10
 
