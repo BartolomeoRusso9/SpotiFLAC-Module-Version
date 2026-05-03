@@ -25,26 +25,28 @@ class DownloadOptions:
     services:                list[str]       = field(default_factory=lambda: ["tidal"])
     filename_format:         str             = "{title} - {artist}"
     use_track_numbers:       bool            = False
-    use_album_track_numbers: bool         = False
-    use_artist_subfolders:   bool           = False
-    use_album_subfolders:    bool           = False
+    use_album_track_numbers: bool            = False
+    use_artist_subfolders:   bool            = False
+    use_album_subfolders:    bool            = False
     first_artist_only:       bool            = False
     quality:                 str             = "LOSSLESS"
     allow_fallback:          bool            = True
     inter_track_delay_s:     float           = 0.5
     is_album:                bool            = False
+    # Exact output file path (overrides output_dir + filename_format for single tracks)
+    output_path:             str | None      = None
 
-    embed_lyrics:            bool          = False
-    lyrics_providers:        list[str]     = field(
+    embed_lyrics:            bool            = False
+    lyrics_providers:        list[str]       = field(
         default_factory=lambda: ["spotify", "musixmatch", "amazon", "lrclib"]
     )
-    lyrics_spotify_token:    str           = ""
+    lyrics_spotify_token:    str             = ""
 
-    enrich_metadata:    bool           = False
-    enrich_providers:   list[str]      = field(
+    enrich_metadata:         bool            = False
+    enrich_providers:        list[str]       = field(
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"]
     )
-    qobuz_token:        str | None     = None
+    qobuz_token:             str | None      = None
 
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
@@ -60,7 +62,7 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
         "amazon":  ("providers.amazon",  "AmazonProvider"),
         "deezer":  ("providers.deezer",  "DeezerProvider"),
         "youtube": ("providers.youtube", "YouTubeProvider"),
-        "spoti":  ("providers.spotidownloader", "SpotiDownloaderProvider"),
+        "spoti":   ("providers.spotidownloader", "SpotiDownloaderProvider"),
     }
     if name not in adapters:
         logger.warning("Unknown provider: %s", name)
@@ -102,7 +104,7 @@ def download_one(
             use_album_track_num     = opts.use_album_track_numbers,
             first_artist_only       = opts.first_artist_only,
             allow_fallback          = opts.allow_fallback,
-            quality                 = opts.quality,          # FIX #1: quality ora propagata
+            quality                 = opts.quality,
             embed_lyrics            = opts.embed_lyrics,
             lyrics_providers        = opts.lyrics_providers,
             lyrics_spotify_token    = opts.lyrics_spotify_token,
@@ -112,6 +114,16 @@ def download_one(
         )
 
         if result.success:
+            # If an exact output path was requested, move the file there now.
+            if opts.output_path and result.file_path:
+                target = opts.output_path
+                os.makedirs(os.path.dirname(os.path.abspath(target)) or ".", exist_ok=True)
+                if os.path.abspath(result.file_path) != os.path.abspath(target):
+                    if os.path.exists(target):
+                        os.remove(target)
+                    os.replace(result.file_path, target)
+                result = DownloadResult.ok(result.provider, target, result.format or "flac")
+
             logger.info("[%s] ✓ %s — %s", provider.name, metadata.artists, metadata.title)
             return result
 
@@ -125,11 +137,11 @@ def download_one(
 class DownloadWorker:
     def __init__(
             self,
-            tracks:   list[TrackMetadata],
-            opts:     DownloadOptions,
-            collection_name: str = "",
-            is_album:     bool = False,
-            is_playlist:  bool = False,
+            tracks:          list[TrackMetadata],
+            opts:            DownloadOptions,
+            collection_name: str  = "",
+            is_album:        bool = False,
+            is_playlist:     bool = False,
     ) -> None:
         self._tracks          = tracks
         self._opts            = opts
@@ -188,6 +200,16 @@ class DownloadWorker:
         return self._failed
 
     def _resolve_output_dir(self) -> str:
+        # When output_path is set (only possible for single tracks — albums/playlists
+        # have it nullified already in SpotiflacDownloader._run_once), use its
+        # parent directory so the provider writes nearby and os.replace is fast.
+        if self._opts.output_path:
+            out = os.path.normpath(
+                os.path.dirname(os.path.abspath(self._opts.output_path))
+            )
+            os.makedirs(out, exist_ok=True)
+            return out
+
         out = os.path.normpath(self._opts.output_dir)
         if (self._is_album or self._is_playlist) and self._collection_name:
             safe_name = re.sub(r'[<>:"/\\|?*]', "_", self._collection_name.strip())
@@ -261,6 +283,21 @@ class SpotiflacDownloader:
         is_album    = info["type"] == "album"
         is_playlist = info["type"] == "playlist"
         self._opts.is_album = is_album
+
+        # output_path ha senso solo per tracce singole: se il link è un album
+        # o una playlist lo azzeriamo subito, prima che il Worker venga creato,
+        # così il resto del codice non deve preoccuparsene affatto.
+        if (is_album or is_playlist) and self._opts.output_path:
+            logger.warning(
+                "[downloader] output_path ignorato: il link è un %s, "
+                "i file verranno salvati normalmente in output_dir.",
+                info["type"],
+            )
+            print(
+                f"Avviso: --output-path viene ignorato per {info['type']}. "
+                "I file verranno salvati seguendo la normale rinominazione."
+            )
+            self._opts.output_path = None
 
         manager = DownloadManager()
         for t in tracks:
