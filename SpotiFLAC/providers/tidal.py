@@ -649,6 +649,7 @@ class TidalProvider(BaseProvider):
             enrich_metadata:         bool = False,
             enrich_providers:        list[str] | None = None,
             is_album:                bool            = False,
+            **kwargs,
     ) -> DownloadResult:
         try:
             tidal_url = self.resolve_spotify_to_tidal(

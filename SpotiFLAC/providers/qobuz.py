@@ -576,6 +576,7 @@ class QobuzProvider(BaseProvider):
             enrich_metadata:         bool = False,
             enrich_providers:        list[str] | None = None,
             is_album:                bool            = False,
+            **kwargs,
     ) -> DownloadResult:
         # FIX #3: normalizza la quality Tidal-style verso i codici numerici Qobuz.
         # Se quality è "LOSSLESS" o "HI_RES" (passata da downloader.py dopo il Fix #1),
