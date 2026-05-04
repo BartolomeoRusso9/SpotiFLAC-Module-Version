@@ -105,8 +105,14 @@ class AmazonProvider(BaseProvider):
     # Songlink → Amazon URL
     # ------------------------------------------------------------------
 
-    def _get_amazon_url(self, spotify_track_id: str) -> str:
-        url = f"https://song.link/s/{spotify_track_id}"
+    def _get_amazon_url(self, track_id: str) -> str:
+        # Supporto ID Tidal (prefisso "tidal_") e ID Spotify
+        if track_id.startswith("tidal_"):
+            tidal_id = track_id.removeprefix("tidal_")
+            url = f"https://song.link/t/{tidal_id}"
+        else:
+            url = f"https://song.link/s/{track_id}"
+
         try:
             resp = self._session.get(
                 url,
