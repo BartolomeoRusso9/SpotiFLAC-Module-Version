@@ -1,5 +1,4 @@
 import logging
-import binascii
 from typing import Optional
 from .http import HttpClient
 

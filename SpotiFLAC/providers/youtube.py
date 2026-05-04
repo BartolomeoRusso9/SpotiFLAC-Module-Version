@@ -224,6 +224,7 @@ class YouTubeProvider(BaseProvider):
             lyrics_spotify_token:    str             = "",
             enrich_metadata:         bool            = False,
             enrich_providers:        list[str] | None = None,
+            is_album:                bool            = False,
             **kwargs,
     ) -> DownloadResult:
         try:

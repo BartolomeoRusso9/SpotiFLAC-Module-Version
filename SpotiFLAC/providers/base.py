@@ -62,6 +62,7 @@ class BaseProvider(ABC):
         lyrics_spotify_token: str = "",
         enrich_metadata: bool = False,
         enrich_providers: list[str] | None = None,
+        is_album: bool = False,
     ) -> DownloadResult:
         """Scarica la traccia e ritorna un DownloadResult (mai eccezioni al caller)."""
         raise NotImplementedError

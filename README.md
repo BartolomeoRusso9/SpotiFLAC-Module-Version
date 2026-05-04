@@ -55,7 +55,7 @@ from SpotiFLAC import SpotiFLAC
 SpotiFLAC(
     url="https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ",
     output_dir="./MusicLibrary",
-    services=["qobuz", "amazon", "tidal", "youtube"],
+    services=["qobuz", "amazon", "tidal", "spoti"],
     filename_format="{year} - {album}/{track}. {title}",
     use_artist_subfolders=True,
     use_album_subfolders=True,
@@ -63,6 +63,31 @@ SpotiFLAC(
 )
 ```
 
+---
+
+## Custom Output Path (single tracks)
+
+For single track downloads you can specify the **exact file path** instead of relying on `output_dir` + `filename_format`. This is useful when you need full control over the filename from an external script, a Telegram bot, or any automation tool.
+
+```python
+from SpotiFLAC import SpotiFLAC
+
+SpotiFLAC(
+    url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
+    output_dir="./downloads",          # fallback if output_path is not set
+    output_path="files/song.flac"      # exact destination path
+)
+```
+
+CLI equivalent:
+
+```bash
+spotiflac https://open.spotify.com/track/... ./downloads --output-path files/song.flac
+```
+
+> **Note:** `output_path` is automatically ignored when the URL points to an **album** or **playlist** — a warning will be printed and files will be saved normally into `output_dir`. Non-existent parent directories are created automatically.
+
+---
 
 ## Qobuz Token (Optional)
 
@@ -185,6 +210,7 @@ Program can also be ran by downloading the python files and calling <code>python
                         output_dir
                         [--service tidal qobuz deezer amazon youtube]
                         [--filename-format "{title} - {artist}"]
+                        [--output-path "files/song.flac"]
                         [--quality LOSSLESS]
                         [--use-track-numbers]
                         [--use-artist-subfolders]
@@ -208,6 +234,7 @@ chmod +x SpotiFLAC-Linux-arm64
                         output_dir
                         [--service tidal qobuz deezer amazon youtube]
                         [--filename-format "{title} - {artist}"]
+                        [--output-path "files/song.flac"]
                         [--quality LOSSLESS]
                         [--use-track-numbers]
                         [--use-artist-subfolders]
@@ -234,6 +261,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | --- | --- |----------------------------------------------------------| --- |
 | **`url`** | `str` | *Required*                                               | The Spotify URL (Track, Album, or Playlist) you want to download. |
 | **`output_dir`** | `str` | *Required*                                               | The destination directory path where the audio files will be saved. |
+| **`output_path`** | `str` | `None`                                                   | Exact destination file path for **single track** downloads (e.g. `"files/song.flac"`). Overrides `output_dir` + `filename_format`. Automatically ignored for albums and playlists. |
 | **`services`** | `list` | `["tidal"]`                                              | Specifies which services to use and their priority order. |
 | **`filename_format`** | `str` | `"{title} - {artist}"`                                   | Format for naming downloaded files. See placeholders below. |
 | **`use_track_numbers`** | `bool` | `False`                                                  | Prefixes the filename with the track number. |
@@ -309,6 +337,7 @@ After each download, SpotiFLAC validates the file to detect common issues:
 | --- | --- |------------------------------------------| --- |
 | `--service` | `-s` | `tidal`                                  | One or more providers in priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `youtube`. |
 | `--filename-format` | `-f` | `{title} - {artist}`                     | Filename template with placeholders. |
+| `--output-path` | `-o` | `None`                                   | Exact output file path for single track downloads (e.g. `files/song.flac`). Ignored for albums and playlists. |
 | `--quality` | `-q` | `LOSSLESS`                               | Audio quality (see Quality table above). |
 | `--use-track-numbers` | | `False`                                  | Prefix filenames with track numbers. |
 | `--use-artist-subfolders` | | `False`                                  | Organise files into per-artist subfolders. |
