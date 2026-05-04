@@ -571,7 +571,7 @@ class TidalProvider(BaseProvider):
         tmp = dest.with_suffix(".m4a.tmp")
         try:
             if result.direct_url:
-                self._http.stream_to_file(result.direct_url, str(tmp))
+                self._http.stream_to_file(result.direct_url, str(tmp), self._progress_cb)
             else:
                 self._download_segments(result.init_url, result.media_urls, tmp)
             self._ffmpeg_to_flac(tmp, dest)
