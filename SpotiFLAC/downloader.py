@@ -245,18 +245,33 @@ class SpotiflacDownloader:
         self._opts   = opts
         self._client = SpotifyMetadataClient()
 
-    def run(self, spotify_url: str, loop_minutes: int | None = None) -> None:
+    def run(self, input_url: str, loop_minutes: int | None = None) -> None:
         while True:
-            self._run_once(spotify_url)
+            self._run_once(input_url)
             if not loop_minutes or loop_minutes <= 0:
                 break
             print(f"\nNext run in {loop_minutes} minutes…")
             time.sleep(loop_minutes * 60)
 
-    def _run_once(self, spotify_url: str) -> None:
+    def _run_once(self, input_url: str) -> None:
         print("Fetching metadata…")
+
+        # Rilevamento Tidal vs Spotify
+        is_tidal = False
         try:
-            collection_name, tracks = self._client.get_url(spotify_url)
+            from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
+            if is_tidal_url(input_url):
+                is_tidal = True
+        except ImportError:
+            pass
+
+        try:
+            if is_tidal:
+                from .providers.tidal_metadata import TidalMetadataClient
+                client = TidalMetadataClient()
+                collection_name, tracks = client.get_url(input_url)
+            else:
+                collection_name, tracks = self._client.get_url(input_url)
         except SpotiflacError as exc:
             logger.error("Metadata fetch failed: %s", exc)
             print(f"Error: {exc}")
@@ -284,8 +299,12 @@ class SpotiflacDownloader:
 
         print(f"Found {len(tracks)} track(s) in: {collection_name}")
 
-        from .providers.spotify_metadata import parse_spotify_url
-        info        = parse_spotify_url(spotify_url)
+        if is_tidal:
+            info = parse_tidal_url(input_url)
+        else:
+            from .providers.spotify_metadata import parse_spotify_url
+            info = parse_spotify_url(input_url)
+
         is_album    = info["type"] == "album"
         is_playlist = info["type"] == "playlist"
         self._opts.is_album = is_album
