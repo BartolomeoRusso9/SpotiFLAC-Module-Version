@@ -159,6 +159,12 @@ class SpotiDownloaderProvider(BaseProvider):
             **kwargs,
     ) -> DownloadResult:
 
+        if metadata.id.startswith("tidal_"):
+            return DownloadResult.fail(
+                self.name,
+                "SpotiDownloader non supporta ID Tidal — provider saltato",
+            )
+
         try:
             # 1. Avvia MusicBrainz in background per il fetching parallelo
             mb_fetcher = None

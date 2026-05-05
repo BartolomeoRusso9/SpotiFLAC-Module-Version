@@ -205,24 +205,6 @@ class DeezerProvider(BaseProvider):
         }
 
     # ------------------------------------------------------------------
-    # Cover art
-    # ------------------------------------------------------------------
-
-    def _download_cover(self, cover_url: str, dest_base: str) -> str | None:
-        if not cover_url:
-            return None
-        try:
-            resp = self._session.get(cover_url, timeout=15)
-            resp.raise_for_status()
-            path = f"{dest_base}_cover.jpg"
-            with open(path, "wb") as f:
-                f.write(resp.content)
-            return path
-        except Exception as exc:
-            logger.warning("[deezer] Cover download failed: %s", exc)
-            return None
-
-    # ------------------------------------------------------------------
     # Download raw FLAC (senza embedding — il tagger centrale lo farà dopo)
     # ------------------------------------------------------------------
 
@@ -336,12 +318,18 @@ class DeezerProvider(BaseProvider):
                 new_files = self._snapshot(output_dir) - before
                 if not new_files:
                     return DownloadResult.fail(self.name, "No FLAC file downloaded")
-                downloaded = max(new_files, key=os.path.getctime)
+                downloaded = max(new_files, key=os.path.getmtime)
 
             if os.path.abspath(downloaded) != os.path.abspath(str(dest)):
                 import shutil
                 os.makedirs(os.path.dirname(str(dest)), exist_ok=True)
                 shutil.move(downloaded, str(dest))
+
+            from ..core.download_validation import validate_downloaded_track
+            expected_s = metadata.duration_ms // 1000
+            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
+            if not valid:
+                return DownloadResult.fail(self.name, f"Validazione fallita: {err_msg}")
 
             # ── MusicBrainz tags ──────────────────────────────────────────
             mb_tags: dict[str, str] = {}

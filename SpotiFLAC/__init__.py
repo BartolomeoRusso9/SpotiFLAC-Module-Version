@@ -14,6 +14,13 @@ Uso avanzato:
         embed_lyrics=True,
         quality="HI_RES"
     )
+
+Output path (single track):
+    SpotiFLAC(
+        url="URL_SPOTIFY",
+        output_dir="./Music",   # fallback if output_path is not set
+        output_path="files/song.flac"
+    )
 """
 from __future__ import annotations
 import logging
@@ -28,7 +35,7 @@ from .providers import (
 )
 from .core import TrackMetadata, DownloadResult
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 __all__ = [
     "SpotiFLAC",
@@ -66,6 +73,8 @@ def SpotiFLAC(
         quality:               str              = "LOSSLESS",
         first_artist_only:     bool             = False,
         log_level:             int              = logging.WARNING,
+        # Exact output file path for single-track downloads
+        output_path:             str | None     = None,
         # Opzioni Lyrics (Attive di default)
         embed_lyrics:            bool           = True,
         lyrics_providers:        list[str] | None = None,
@@ -80,7 +89,7 @@ def SpotiFLAC(
 
     Args:
         url: URL Spotify (track, album, playlist).
-        output_dir: Cartella di destinazione.
+        output_dir: Cartella di destinazione (usata quando output_path non è specificato).
         services: Provider audio in ordine di priorità ("tidal", "qobuz", "amazon").
         filename_format: Template per il nome file.
         use_track_numbers: Aggiunge il numero traccia all'inizio del nome file.
@@ -90,6 +99,9 @@ def SpotiFLAC(
         quality: Qualità audio desiderata ("LOSSLESS" o "HI_RES").
         first_artist_only: Usa solo il primo artista nei tag e nel nome file.
         log_level: Livello di dettaglio log (logging.INFO, DEBUG, WARNING).
+        output_path: Percorso esatto del file di output per tracce singole
+                     (es. "files/song.flac"). Sovrascrive output_dir + filename_format.
+                     Ignorato silenziosamente per album/playlist.
         embed_lyrics: Scarica e inserisce i testi nel file FLAC.
         lyrics_providers: Lista provider testi.
         enrich_metadata: Arricchisce i tag con dati extra (BPM, Label, Genre, ecc.).
@@ -101,15 +113,16 @@ def SpotiFLAC(
 
     # 2. Preparazione opzioni con gestione dei default
     opts = DownloadOptions(
-        output_dir            = output_dir,
-        services              = services or ["tidal"],
-        filename_format       = filename_format,
-        use_track_numbers     = use_track_numbers,
+        output_dir              = output_dir,
+        services                = services or ["tidal"],
+        filename_format         = filename_format,
+        use_track_numbers       = use_track_numbers,
         use_album_track_numbers = use_album_track_numbers,
-        use_artist_subfolders = use_artist_subfolders,
-        use_album_subfolders  = use_album_subfolders,
-        quality               = quality,
-        first_artist_only     = first_artist_only,
+        use_artist_subfolders   = use_artist_subfolders,
+        use_album_subfolders    = use_album_subfolders,
+        quality                 = quality,
+        first_artist_only       = first_artist_only,
+        output_path             = output_path,
         # Lyrics
         embed_lyrics            = embed_lyrics,
         lyrics_providers        = lyrics_providers or ["spotify", "musixmatch", "lrclib", "apple"],

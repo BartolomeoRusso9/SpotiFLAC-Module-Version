@@ -4,7 +4,6 @@ Port di download_validation.go — rileva preview da 30s e mismatch di durata.
 """
 from __future__ import annotations
 import logging
-import math
 import os
 import subprocess
 
@@ -72,6 +71,15 @@ def validate_downloaded_track(
             _remove_file(filepath)
             return False, msg
 
+    if expected_seconds > 0 and expected_seconds < _PREVIEW_EXPECTED_MIN:
+        # Se il file scaricato dura meno del 60% della durata attesa, è chiaramente troncato
+        if actual_s < (expected_seconds * 0.6):
+            msg = (
+                f"Durata errata (brano corto troncato): file è {actual_s}s, "
+                f"attesi ~{expected_seconds}s — file rimosso"
+            )
+            _remove_file(filepath)
+            return False, msg
     return True, ""
 
 

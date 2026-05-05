@@ -34,15 +34,23 @@ def parse_args() -> argparse.Namespace:
                   "{album_artist} {year} {date} {track} {disc} {isrc} {position}",
     )
     parser.add_argument(
+        "--output-path", "-o",
+        default = None,
+        dest    = "output_path",
+        metavar = "FILE",
+        help    = "Percorso esatto del file di output per tracce singole "
+                  "(es. files/song.flac). Sovrascrive output_dir + filename_format.",
+    )
+    parser.add_argument(
         "--quality", "-q",
         default = "LOSSLESS",
         help    = "Quality: LOSSLESS or HI_RES. Default: LOSSLESS",
     )
-    parser.add_argument("--use-track-numbers",     action="store_true", dest="use_track_numbers")
+    parser.add_argument("--use-track-numbers",       action="store_true", dest="use_track_numbers")
     parser.add_argument("--use-album-track-numbers", action="store_true", dest="use_album_track_numbers")
-    parser.add_argument("--use-artist-subfolders", action="store_true", dest="use_artist_subfolders")
-    parser.add_argument("--use-album-subfolders",  action="store_true", dest="use_album_subfolders")
-    parser.add_argument("--first-artist-only",     action="store_true", dest="first_artist_only")
+    parser.add_argument("--use-artist-subfolders",   action="store_true", dest="use_artist_subfolders")
+    parser.add_argument("--use-album-subfolders",    action="store_true", dest="use_album_subfolders")
+    parser.add_argument("--first-artist-only",       action="store_true", dest="first_artist_only")
     parser.add_argument("--qobuz-token", default=None, dest="qobuz_token", help="Token Qobuz")
     parser.add_argument("--loop", "-l", type=int, default=None, help="Ripeti ogni N minuti")
     parser.add_argument("--verbose", "-v", action="store_true")
@@ -95,12 +103,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def main() -> None:
-    # Eseguito solo all'avvio reale del programma
     check_for_updates()
 
     args = parse_args()
 
-    # Configurazione logging
     log_level = logging.DEBUG if args.verbose else logging.WARNING
     logging.basicConfig(
         level=log_level,
@@ -120,6 +126,7 @@ def main() -> None:
         quality                  = args.quality,
         first_artist_only        = args.first_artist_only,
         log_level                = log_level,
+        output_path              = args.output_path,
         # Lyrics
         embed_lyrics             = args.embed_lyrics,
         lyrics_providers         = args.lyrics_providers,

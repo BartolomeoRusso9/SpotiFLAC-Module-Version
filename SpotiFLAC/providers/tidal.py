@@ -571,7 +571,7 @@ class TidalProvider(BaseProvider):
         tmp = dest.with_suffix(".m4a.tmp")
         try:
             if result.direct_url:
-                self._http.stream_to_file(result.direct_url, str(tmp))
+                self._http.stream_to_file(result.direct_url, str(tmp), self._progress_cb)
             else:
                 self._download_segments(result.init_url, result.media_urls, tmp)
             self._ffmpeg_to_flac(tmp, dest)
@@ -649,11 +649,16 @@ class TidalProvider(BaseProvider):
             enrich_metadata:         bool = False,
             enrich_providers:        list[str] | None = None,
             is_album:                bool            = False,
+            **kwargs,
     ) -> DownloadResult:
         try:
-            tidal_url = self.resolve_spotify_to_tidal(
-                metadata.id, metadata.title, metadata.artists
-            )
+            if metadata.id.startswith("tidal_"):
+                tidal_url = f"https://listen.tidal.com/track/{metadata.id.removeprefix('tidal_')}"
+                logger.info("[tidal] Direct Tidal ID detected: %s", metadata.id)
+            else:
+                tidal_url = self.resolve_spotify_to_tidal(
+                    metadata.id, metadata.title, metadata.artists
+                )
             track_id = self._parse_track_id(tidal_url)
 
             mb_fetcher = None
