@@ -143,7 +143,11 @@ def _summary(cfg: dict) -> None:
         print(f"  {BOLD(label + ':'): <30} {GREEN(value)}")
 
     row("URL", cfg["url"])
-    row("Output", cfg["output_dir"])
+    row("Output Dir", cfg["output_dir"])
+
+    # Add this check for the custom path
+    if cfg.get("output_path"):
+        row("Exact File Path", cfg["output_path"])
     row("Services", " → ".join(cfg["services"]))
     row("Quality", cfg["quality"])
     row("Filename format", cfg["filename_format"])
@@ -203,7 +207,7 @@ def run_interactive() -> dict:
 
         use_custom = _ask_bool("Do you want to set a custom output path?", False)
         if use_custom:
-            cfg["output_path"] = _ask("Full file path (overrides format)")
+            cfg["output_path"] = _ask("Full file path including .flac " + DIM("(e.g., /Users/Name/Desktop/song.flac)"))
         else:
             cfg["output_path"] = None
     else:
@@ -369,6 +373,8 @@ def run_interactive() -> dict:
 def _print_cli_command(cfg: dict) -> None:
     """Prints the CLI command equivalent to the chosen configuration."""
     parts = [f'spotiflac "{cfg["url"]}" "{cfg["output_dir"]}"']
+    if cfg.get("output_path"):
+        parts.append(f'-o "{cfg["output_path"]}"')
     parts.append(f'-s {" ".join(cfg["services"])}')
     if cfg["quality"] != "LOSSLESS":
         parts.append(f'-q {cfg["quality"]}')
