@@ -145,7 +145,7 @@ def main() -> None:
             quality                  = cfg["quality"],
             first_artist_only        = cfg["first_artist_only"],
             log_level                = log_level,
-            output_path              = None, # Non gestito dal wizard
+            output_path              = cfg.get("output_path"),
             # Lyrics
             embed_lyrics             = cfg["embed_lyrics"],
             lyrics_providers         = cfg["lyrics_providers"],
