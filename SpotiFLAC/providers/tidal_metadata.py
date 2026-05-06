@@ -1,5 +1,5 @@
 """
-TidalMetadataClient — recupera metadati di tracce/album/playlist direttamente
+TidalMetadataClient — recupera metadati di tracce/album/playlist/artisti direttamente
 dall'API pubblica di Tidal quando l'URL di input è un link Tidal (non Spotify).
 
 URL supportati:
@@ -9,6 +9,10 @@ URL supportati:
   - https://tidal.com/browse/album/12345678
   - https://listen.tidal.com/playlist/a1b2c3d4-e5f6-7890-abcd-ef1234567890
   - https://tidal.com/browse/playlist/a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  - https://listen.tidal.com/artist/12345678
+  - https://tidal.com/browse/artist/12345678
+  - https://listen.tidal.com/artist/12345678/discography/albums
+  - https://listen.tidal.com/artist/12345678/discography/singles
 
 L'ID della traccia viene inserito nel campo `TrackMetadata.id` con il prefisso
 "tidal_" (es. "tidal_12345678") in modo che TidalProvider possa riconoscerlo
@@ -58,7 +62,7 @@ def parse_tidal_url(url: str) -> dict[str, str]:
     """
     Analizza un URL Tidal e restituisce {"type": ..., "id": ...}.
 
-    Tipi supportati: "track", "album", "playlist".
+    Tipi supportati: "track", "album", "playlist", "artist", "artist_discography".
     Raises InvalidUrlError se il formato non è riconoscuto.
     """
     u    = urlparse(url)
@@ -69,8 +73,16 @@ def parse_tidal_url(url: str) -> dict[str, str]:
 
     parts = [p for p in path.split("/") if p]
 
-    if len(parts) >= 2 and parts[0] in ("track", "album", "playlist"):
-        return {"type": parts[0], "id": parts[1].split("?")[0]}
+    if len(parts) >= 2 and parts[0] in ("track", "album", "playlist", "artist"):
+        entity_type = parts[0]
+        entity_id   = parts[1].split("?")[0]
+
+        # https://listen.tidal.com/artist/123/discography/albums
+        if entity_type == "artist" and len(parts) >= 3 and parts[2] == "discography":
+            group = parts[3] if len(parts) >= 4 else "all"
+            return {"type": "artist_discography", "id": entity_id, "group": group}
+
+        return {"type": entity_type, "id": entity_id}
 
     raise InvalidUrlError(url)
 
@@ -210,11 +222,68 @@ class TidalMetadataClient:
                 )
                 continue
 
-            # Per le playlist non facciamo una fetch separata per album:
-            # i dati base sono già nell'oggetto traccia e velocizziamo il caricamento.
             tracks.append(self._track_from_raw(track_data, fetch_album_details=False))
 
         return playlist, tracks
+
+    # ------------------------------------------------------------------
+    # Fetch discografia artista
+    # ------------------------------------------------------------------
+
+    def get_artist_albums(
+            self,
+            artist_id: str,
+            include_groups: str = "ALBUM,EP,SINGLE",
+    ) -> tuple[dict, list[TrackMetadata]]:
+        """
+        Recupera la discografia completa di un artista Tidal.
+        include_groups: ALBUM, EP, SINGLE, COMPILATION (separati da virgola).
+        Deduplica automaticamente tramite ISRC.
+        """
+        artist = self._get(f"/artists/{artist_id}")
+        tracks: list[TrackMetadata] = []
+        seen_isrc: set[str] = set()
+        seen_album_ids: set[str] = set()
+
+        for group in include_groups.split(","):
+            group = group.strip().upper()
+            try:
+                albums = self._paginate(
+                    f"/artists/{artist_id}/albums",
+                    extra_params={"filter": group},
+                )
+            except Exception as exc:
+                logger.warning("[tidal_metadata] gruppo %s fallito: %s", group, exc)
+                continue
+
+            for album_data in albums:
+                album_id = str(album_data.get("id", ""))
+                if not album_id or album_id in seen_album_ids:
+                    continue
+                seen_album_ids.add(album_id)
+
+                try:
+                    _, album_tracks = self.get_album_tracks(album_id)
+                    for track in album_tracks:
+                        if track.isrc and track.isrc in seen_isrc:
+                            logger.debug(
+                                "[tidal_metadata] duplicato saltato: %s (ISRC %s)",
+                                track.title, track.isrc,
+                            )
+                            continue
+                        if track.isrc:
+                            seen_isrc.add(track.isrc)
+                        tracks.append(track)
+                except Exception as exc:
+                    logger.warning(
+                        "[tidal_metadata] album %s saltato: %s", album_id, exc
+                    )
+
+                time.sleep(0.3)  # rate limit tra album
+
+            time.sleep(0.5)  # rate limit tra gruppi
+
+        return artist, tracks
 
     # ------------------------------------------------------------------
     # Entry point pubblico
@@ -240,9 +309,22 @@ class TidalMetadataClient:
             playlist, tracks = self.get_playlist_tracks(info["id"])
             return playlist.get("title", "Unknown Playlist"), tracks
 
+        if t in ("artist", "artist_discography"):
+            group_map = {
+                "albums":       "ALBUM",
+                "eps":          "EP",
+                "singles":      "SINGLE",
+                "compilations": "COMPILATION",
+                "all":          "ALBUM,EP,SINGLE,COMPILATION",
+            }
+            raw_group      = info.get("group", "all")
+            include_groups = group_map.get(raw_group, "ALBUM,EP,SINGLE")
+            artist, tracks = self.get_artist_albums(info["id"], include_groups)
+            return artist.get("name", "Unknown Artist"), tracks
+
         raise SpotiflacError(
             ErrorKind.INVALID_URL,
-            f"Tipo Tidal non supportato: {t} (supportati: track, album, playlist)",
+            f"Tipo Tidal non supportato: {t} (supportati: track, album, playlist, artist)",
         )
 
     # ------------------------------------------------------------------

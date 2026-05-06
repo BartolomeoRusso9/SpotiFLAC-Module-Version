@@ -148,6 +148,47 @@ class SpotifyMetadataClient:
 
         return playlist, tracks
 
+    def get_artist_albums(
+            self,
+            artist_id: str,
+            include_groups: str = "album,single",
+    ) -> tuple[dict, list[TrackMetadata]]:
+        """
+        Recupera la discografia completa di un artista Spotify.
+        include_groups: album, single, appears_on, compilation (separati da virgola).
+        Deduplica automaticamente tramite ISRC.
+        """
+        artist = self._get(f"/artists/{artist_id}")
+        tracks: list[TrackMetadata] = []
+        seen_isrc: set[str] = set()
+        seen_album_ids: set[str] = set()
+
+        for item in self._paginate(
+                f"{_API_BASE}/artists/{artist_id}/albums"
+                f"?include_groups={include_groups}&limit=50"
+        ):
+            album_id = item.get("id")
+            if not album_id or album_id in seen_album_ids:
+                continue
+            seen_album_ids.add(album_id)
+
+            try:
+                _, album_tracks = self.get_album_tracks(album_id)
+                for track in album_tracks:
+                    if track.isrc and track.isrc in seen_isrc:
+                        logger.debug(
+                            "[spotify] duplicato saltato: %s (ISRC %s)",
+                            track.title, track.isrc,
+                        )
+                        continue
+                    if track.isrc:
+                        seen_isrc.add(track.isrc)
+                    tracks.append(track)
+            except Exception as exc:
+                logger.warning("[spotify] album %s saltato: %s", album_id, exc)
+
+        return artist, tracks
+
     def get_url(self, spotify_url: str) -> tuple[str, list[TrackMetadata]]:
         info = parse_spotify_url(spotify_url)
         t    = info["type"]
@@ -165,6 +206,10 @@ class SpotifyMetadataClient:
             pl, tracks = self.get_playlist_tracks(info["id"])
             name = pl.get("name", "Unknown Playlist")
             return name, tracks
+
+        if t in ("artist", "artist_discography"):
+            artist, tracks = self.get_artist_albums(info["id"])
+            return artist.get("name", "Unknown Artist"), tracks
 
         raise SpotiflacError(
             ErrorKind.INVALID_URL,
@@ -185,10 +230,6 @@ class SpotifyMetadataClient:
         return images[0].get("url", "") if images else ""
 
     def _track_from_raw(self, data: dict) -> TrackMetadata:
-        """
-        Costruisce TrackMetadata da una risposta /tracks/:id completa.
-        FIX #5: aggiunto total_tracks estratto dall'album.
-        """
         album       = data.get("album", {})
         artists     = self._format_artists(data.get("artists", []))
         album_artists = self._format_artists(album.get("artists", []) or data.get("artists", []))
@@ -206,7 +247,7 @@ class SpotifyMetadataClient:
             isrc         = data.get("external_ids", {}).get("isrc", ""),
             track_number = data.get("track_number", 0),
             disc_number  = data.get("disc_number", 1),
-            total_tracks = album.get("total_tracks", 0),   # FIX #5: era mancante
+            total_tracks = album.get("total_tracks", 0),
             duration_ms  = data.get("duration_ms", 0),
             release_date = album.get("release_date", ""),
             cover_url    = cover,

@@ -45,6 +45,20 @@ spotiflac url ./out --service tidal
 
 ---
 
+## Supported URL Types
+
+SpotiFLAC supports the following URL formats for both **Spotify** and **Tidal**:
+
+| Type | Spotify | Tidal |
+|---|---|---|
+| Track | `open.spotify.com/track/...` | `listen.tidal.com/track/...` |
+| Album | `open.spotify.com/album/...` | `listen.tidal.com/album/...` |
+| Playlist | `open.spotify.com/playlist/...` | `listen.tidal.com/playlist/...` |
+| Artist | `open.spotify.com/artist/...` | `listen.tidal.com/artist/...` |
+| Discography | *(via artist URL)* | `listen.tidal.com/artist/.../discography/albums` |
+
+---
+
 ## Advanced Configuration
 
 You can customize the download behavior, prioritize specific streaming services, and organize your files automatically into folders.
@@ -62,6 +76,90 @@ SpotiFLAC(
     loop=60 # Retry duration in minutes
 )
 ```
+
+---
+
+## Discography Download
+
+Download the complete discography of an artist — both from Spotify and Tidal. Duplicate tracks (same ISRC across different releases) are automatically skipped.
+
+### Spotify
+
+```python
+from SpotiFLAC import SpotiFLAC
+
+# Full discography (albums + singles)
+SpotiFLAC(
+    url="https://open.spotify.com/artist/1Xyo4u8uXC1ZmMpatF05PJ",
+    output_dir="./MusicLibrary",
+    services=["qobuz", "tidal"],
+    use_album_subfolders=True,
+    filename_format="{year} - {album}/{track}. {title}",
+)
+```
+
+### Tidal
+
+```python
+from SpotiFLAC import SpotiFLAC
+
+# Full discography
+SpotiFLAC(
+    url="https://listen.tidal.com/artist/7804",
+    output_dir="./MusicLibrary",
+    services=["tidal"],
+    use_album_subfolders=True,
+    filename_format="{year} - {album}/{track}. {title}",
+)
+
+# Albums only
+SpotiFLAC(
+    url="https://listen.tidal.com/artist/7804/discography/albums",
+    output_dir="./MusicLibrary",
+    services=["tidal"],
+)
+
+# Singles only
+SpotiFLAC(
+    url="https://listen.tidal.com/artist/7804/discography/singles",
+    output_dir="./MusicLibrary",
+    services=["tidal"],
+)
+```
+
+### CLI
+
+```bash
+# Spotify artist (albums + singles)
+spotiflac https://open.spotify.com/artist/... ./MusicLibrary \
+  --service qobuz tidal \
+  --use-album-subfolders \
+  --filename-format "{year} - {album}/{track}. {title}"
+
+# Tidal artist (full discography)
+spotiflac https://listen.tidal.com/artist/7804 ./MusicLibrary \
+  --service tidal \
+  --use-album-subfolders \
+  --filename-format "{year} - {album}/{track}. {title}"
+
+# Tidal — albums only
+spotiflac https://listen.tidal.com/artist/7804/discography/albums ./MusicLibrary \
+  --service tidal
+```
+
+### Recommended folder structure for discographies
+
+```
+MusicLibrary/
+  Artist Name/
+    2019 - Album Title/
+      01. Song One.flac
+      02. Song Two.flac
+    2023 - Single Title/
+      01. Song Title.flac
+```
+
+Use `--use-album-subfolders` and `--filename-format "{year} - {album}/{track}. {title}"` to achieve this layout automatically.
 
 ---
 
@@ -85,7 +183,7 @@ CLI equivalent:
 spotiflac https://open.spotify.com/track/... ./downloads --output-path files/song.flac
 ```
 
-> **Note:** `output_path` is automatically ignored when the URL points to an **album** or **playlist** — a warning will be printed and files will be saved normally into `output_dir`. Non-existent parent directories are created automatically.
+> **Note:** `output_path` is automatically ignored when the URL points to an **album**, **playlist**, or **artist/discography** — a warning will be printed and files will be saved normally into `output_dir`. Non-existent parent directories are created automatically.
 
 ---
 
@@ -258,9 +356,9 @@ chmod +x SpotiFLAC-Linux-arm64
 
 | Parameter | Type | Default                                                  | Description |
 | --- | --- |----------------------------------------------------------| --- |
-| **`url`** | `str` | *Required*                                               | The Spotify URL (Track, Album, or Playlist) you want to download. |
+| **`url`** | `str` | *Required*                                               | The Spotify or Tidal URL (Track, Album, Playlist, or Artist) you want to download. |
 | **`output_dir`** | `str` | *Required*                                               | The destination directory path where the audio files will be saved. |
-| **`output_path`** | `str` | `None`                                                   | Exact destination file path for **single track** downloads (e.g. `"files/song.flac"`). Overrides `output_dir` + `filename_format`. Automatically ignored for albums and playlists. |
+| **`output_path`** | `str` | `None`                                                   | Exact destination file path for **single track** downloads (e.g. `"files/song.flac"`). Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies. |
 | **`services`** | `list` | `["tidal"]`                                              | Specifies which services to use and their priority order. |
 | **`filename_format`** | `str` | `"{title} - {artist}"`                                   | Format for naming downloaded files. See placeholders below. |
 | **`use_track_numbers`** | `bool` | `False`                                                  | Prefixes the filename with the track number. |
@@ -337,7 +435,7 @@ After each download, SpotiFLAC validates the file to detect common issues:
 | --- | --- |------------------------------------------| --- |
 | `--service` | `-s` | `tidal`                                  | One or more providers in priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`. |
 | `--filename-format` | `-f` | `{title} - {artist}`                     | Filename template with placeholders. |
-| `--output-path` | `-o` | `None`                                   | Exact output file path for single track downloads (e.g. `files/song.flac`). Ignored for albums and playlists. |
+| `--output-path` | `-o` | `None`                                   | Exact output file path for single track downloads (e.g. `files/song.flac`). Ignored for albums, playlists and discographies. |
 | `--quality` | `-q` | `LOSSLESS`                               | Audio quality (see Quality table above). |
 | `--use-track-numbers` | | `False`                                  | Prefix filenames with track numbers. |
 | `--use-album-track-numbers` | | `False`                                  | Use the track's original album number instead of queue position. |
