@@ -221,7 +221,7 @@ class SoundCloudProvider(BaseProvider):
                     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
                 }
 
-                res = self.session.post(self.cobalt_api, json=payload, headers={"Accept": "application/json"})
+                res = self.session.post(self.cobalt_api, json=payload, headers=cobalt_headers)
                 if res.status_code == 200:
                     data = res.json()
                     if data.get('status') in ['tunnel', 'redirect']:
