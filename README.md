@@ -28,7 +28,7 @@ pip install SpotiFLAC
 
 The easiest way to use SpotiFLAC is through the built-in Interactive Wizard. Just run the command without any arguments:
 ```bash
-spotiflac
+SpotiFLAC
 ```
 > (Or python launcher.py if running from source)
 
