@@ -230,42 +230,44 @@ class SpotifyMetadataClient:
             albums_to_fetch.append((album_id, is_featuring))
 
         # Fetch parallelo dei metadati (max 5 richieste simultanee per rispettare rate limit)
+        # Fetch parallelo dei metadati (max 5 richieste simultanee per rispettare rate limit)
         with ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_meta = {
+            future_to_album = {
                 executor.submit(self.get_album_tracks, aid): (aid, is_feat)
                 for aid, is_feat in albums_to_fetch
             }
 
-            for future in as_completed(future_to_meta):
-                album_id, is_featuring = future_to_meta[future]
+            # Raccogliamo i risultati indicizzati per album_id
+            results: dict[str, tuple[list, bool]] = {}
+            for future in as_completed(future_to_album):
+                album_id, is_featuring = future_to_album[future]
                 try:
                     _, album_tracks = future.result()
-                    for track in album_tracks:
-                        # Deduplicazione per ISRC
-                        if track.isrc and track.isrc in seen_isrc:
-                            logger.debug(
-                                "[spotify] duplicato saltato: %s (ISRC %s)",
-                                track.title, track.isrc,
-                            )
-                            continue
-
-                        # FILTRO FEATURING
-                        # Per appears_on/compilation: teniamo SOLO le tracce dove
-                        # l'artista compare con nome esatto (evita falsi positivi da substring).
-                        if is_featuring and not _artist_in_track(artist_name, track.artists):
-                            logger.debug(
-                                "[spotify] traccia saltata (artista assente): %s — %s",
-                                track.title, track.artists,
-                            )
-                            continue
-
-                        if track.isrc:
-                            seen_isrc.add(track.isrc)
-                        tracks.append(track)
-
+                    results[album_id] = (album_tracks, is_featuring)
                 except Exception as exc:
                     logger.warning("[spotify] album %s saltato: %s", album_id, exc)
 
+        # Ricostruiamo in ordine originale (albums_to_fetch è ordinato)
+        for album_id, is_featuring in albums_to_fetch:
+            if album_id not in results:
+                continue
+            album_tracks, _ = results[album_id]
+            for track in album_tracks:
+                if track.isrc and track.isrc in seen_isrc:
+                    logger.debug(
+                        "[spotify] duplicato saltato: %s (ISRC %s)",
+                        track.title, track.isrc,
+                    )
+                    continue
+                if is_featuring and not _artist_in_track(artist_name, track.artists):
+                    logger.debug(
+                        "[spotify] traccia saltata (artista assente): %s — %s",
+                        track.title, track.artists,
+                    )
+                    continue
+                if track.isrc:
+                    seen_isrc.add(track.isrc)
+                tracks.append(track)
         return artist, tracks
 
     def get_url(self, spotify_url: str) -> tuple[str, list[TrackMetadata]]:

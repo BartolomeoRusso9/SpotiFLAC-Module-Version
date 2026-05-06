@@ -318,46 +318,45 @@ class TidalMetadataClient:
                 albums_to_fetch.append((album_id, album_data, is_compilation))
 
         # Fetch parallelo delle tracce di ogni album (max 5 richieste simultanee)
+        # Fetch parallelo delle tracce di ogni album (max 5 richieste simultanee)
         with ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_meta = {
+            future_to_album = {
                 executor.submit(self.get_album_tracks, aid, preloaded): (aid, is_comp)
                 for aid, preloaded, is_comp in albums_to_fetch
             }
 
-            for future in as_completed(future_to_meta):
-                album_id, is_compilation = future_to_meta[future]
+            # Raccogliamo i risultati indicizzati per album_id
+            results: dict[str, tuple[list, bool]] = {}
+            for future in as_completed(future_to_album):
+                album_id, is_compilation = future_to_album[future]
                 try:
                     _, album_tracks = future.result()
-                    for track in album_tracks:
-                        # Deduplicazione per ISRC
-                        if track.isrc and track.isrc in seen_isrc:
-                            logger.debug(
-                                "[tidal_metadata] duplicato saltato: %s (ISRC %s)",
-                                track.title, track.isrc,
-                            )
-                            continue
-
-                        # FILTRO FEATURING
-                        # Per le compilation: teniamo SOLO le tracce dove l'artista
-                        # compare come artista con nome esatto.
-                        # Questo evita di scaricare brani di altri artisti
-                        # che compaiono nella stessa compilation.
-                        if is_compilation and not _artist_in_track(artist_name, track.artists):
-                            logger.debug(
-                                "[tidal_metadata] traccia saltata (artista assente): %s — %s",
-                                track.title, track.artists,
-                            )
-                            continue
-
-                        if track.isrc:
-                            seen_isrc.add(track.isrc)
-                        tracks.append(track)
-
+                    results[album_id] = (album_tracks, is_compilation)
                 except Exception as exc:
                     logger.warning("[tidal_metadata] album %s saltato: %s", album_id, exc)
 
+        # Ricostruiamo in ordine originale (albums_to_fetch è ordinato)
+        for album_id, _, is_compilation in albums_to_fetch:
+            if album_id not in results:
+                continue
+            album_tracks, _ = results[album_id]
+            for track in album_tracks:
+                if track.isrc and track.isrc in seen_isrc:
+                    logger.debug(
+                        "[tidal_metadata] duplicato saltato: %s (ISRC %s)",
+                        track.title, track.isrc,
+                    )
+                    continue
+                if is_compilation and not _artist_in_track(artist_name, track.artists):
+                    logger.debug(
+                        "[tidal_metadata] traccia saltata (artista assente): %s — %s",
+                        track.title, track.artists,
+                    )
+                    continue
+                if track.isrc:
+                    seen_isrc.add(track.isrc)
+                tracks.append(track)
         return artist, tracks
-
     # ------------------------------------------------------------------
     # Entry point pubblico
     # ------------------------------------------------------------------
