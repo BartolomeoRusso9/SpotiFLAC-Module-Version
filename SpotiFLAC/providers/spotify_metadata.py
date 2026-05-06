@@ -10,6 +10,8 @@ from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+import unicodedata
+import re
 
 from ..core.errors import AuthError, NetworkError, InvalidUrlError, SpotiflacError, ErrorKind
 from ..core.models import TrackMetadata
@@ -56,15 +58,17 @@ def parse_spotify_url(uri: str) -> dict[str, str]:
     raise InvalidUrlError(uri)
 
 
+def _normalize_artist(s: str) -> str:
+    s = s.lower().strip()
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    s = re.sub(r"[^a-z0-9 ]", "", s)
+    return re.sub(r"\s+", " ", s).strip()
+
 def _artist_in_track(artist_name: str, track_artists: str) -> bool:
-    """
-    Controlla se artist_name è tra gli artisti della traccia.
-    Usa confronto per nome esatto per ogni artista (non semplice substring),
-    evitando falsi positivi (es. "Ed" che matcha "Edward").
-    """
-    name_lower = artist_name.lower().strip()
+    name_norm = _normalize_artist(artist_name)
     for artist in track_artists.split(","):
-        if artist.strip().lower() == name_lower:
+        if _normalize_artist(artist) == name_norm:
             return True
     return False
 

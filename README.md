@@ -130,13 +130,25 @@ SpotiFLAC(
 ### CLI
 
 ```bash
+# Spotify artist — albums, singles + featuring tracks
+spotiflac https://open.spotify.com/artist/... ./MusicLibrary \
+  --service tidal \
+  --include-featuring \
+  --use-album-subfolders \
+  --filename-format "{year} - {album}/{track}. {title}"
+  
 # Spotify artist (albums + singles)
 spotiflac https://open.spotify.com/artist/... ./MusicLibrary \
   --service qobuz tidal \
   --use-album-subfolders \
   --filename-format "{year} - {album}/{track}. {title}"
 
-# Tidal artist (full discography)
+# Tidal artist — albums, singles + compilations (featuring tracks)
+spotiflac https://listen.tidal.com/artist/7804 ./MusicLibrary \
+  --service tidal \
+  --include-featuring
+
+# Tidal artist (album + singles)
 spotiflac https://listen.tidal.com/artist/7804 ./MusicLibrary \
   --service tidal \
   --use-album-subfolders \
@@ -366,6 +378,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | **`use_artist_subfolders`** | `bool` | `False`                                                  | Automatically organizes downloaded files into subfolders by artist. |
 | **`use_album_subfolders`** | `bool` | `False`                                                  | Automatically organizes downloaded files into subfolders by album. |
 | **`first_artist_only`** | `bool` | `False`                                                  | Uses only the first artist in tags and filename (e.g. `"Artist A"` instead of `"Artist A, Artist B"`). |
+| **`include_featuring`** | `bool` | `False` | When downloading an artist discography, also includes tracks where the artist appears as a featured artist on other artists' releases (`appears_on` on Spotify, `COMPILATIONS` on Tidal). Only the specific tracks featuring the artist are downloaded, not entire albums. |
 | **`loop`** | `int` | `None`                                                   | Duration in minutes to keep retrying failed downloads. |
 | **`quality`** | `str` | `"LOSSLESS"`                                             | Download quality. Tidal: `"LOSSLESS"` or `"HI_RES"`. Qobuz: `"6"` (CD), `"7"` (Hi-Res), `"27"` (Hi-Res Max). |
 | **`log_level`** | `int` | `logging.WARNING`                                        | Python logging level (e.g. `logging.DEBUG` for verbose output). |
@@ -431,25 +444,26 @@ After each download, SpotiFLAC validates the file to detect common issues:
 
 ## CLI Flag Reference
 
-| Flag | Short | Default                                  | Description                                                                                                                  |
-| --- | --- |------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
-| `--service` | `-s` | `tidal`                                  | One or more providers in priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`.                                       |
-| `--filename-format` | `-f` | `{title} - {artist}`                     | Filename template with placeholders.                                                                                         |
-| `--output-path` | `-o` | `None`                                   | Exact output file path for single track downloads (e.g. `files/song.flac`). Ignored for albums, playlists and discographies. |
-| `--quality` | `-q` | `LOSSLESS`                               | Audio quality (see Quality table above).                                                                                     |
-| `--use-track-numbers` | | `False`                                  | Prefix filenames with track numbers.                                                                                         |
+| Flag                        | Short | Default                                  | Description                                                                                                                  |
+|-----------------------------| --- |------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| `--service`                 | `-s` | `tidal`                                  | One or more providers in priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`.                                       |
+| `--filename-format`         | `-f` | `{title} - {artist}`                     | Filename template with placeholders.                                                                                         |
+| `--output-path`             | `-o` | `None`                                   | Exact output file path for single track downloads (e.g. `files/song.flac`). Ignored for albums, playlists and discographies. |
+| `--quality`                 | `-q` | `LOSSLESS`                               | Audio quality (see Quality table above).                                                                                     |
+| `--use-track-numbers`       | | `False`                                  | Prefix filenames with track numbers.                                                                                         |
 | `--use-album-track-numbers` | | `False`                                  | Use the track's original album number instead of queue position.                                                             |
-| `--use-artist-subfolders` | | `False`                                  | Organize files into per-artist subfolders.                                                                                   |
-| `--use-album-subfolders` | | `False`                                  | Organize files into per-album subfolders.                                                                                    |
-| `--first-artist-only` | | `False`                                  | Use only the first artist in tags and filename.                                                                              |
-| `--qobuz-token` | | `None`                                   | Qobuz user auth token (`x-user-auth-token`).                                                                                 |
-| `--loop` | `-l` | `None`                                   | Keep retrying failed downloads for N minutes.                                                                                                     |
-| `--verbose` | `-v` | `False`                                  | Enable debug logging.                                                                                                        |
-| `--no-lyrics` | | `False`                                  | Disable lyrics embedding (lyrics are embedded **by default**).                                                               |
-| `--lyrics-providers` | | `spotify musixmatch lrclib apple`        | Lyrics provider priority order.                                                                                              |
-| `--spotify-token` | | `""`                                     | Spotify `sp_dc` cookie for synced lyrics.                                                                                    |
-| `--no-enrich` | | `False`                                  | Disable multi-provider metadata enrichment (enrichment is **enabled by default**).                                           |
-| `--enrich-providers` | | `deezer apple qobuz tidal`               | Metadata enrichment provider priority order.                                                                                 |
+| `--use-artist-subfolders`   | | `False`                                  | Organize files into per-artist subfolders.                                                                                   |
+| `--use-album-subfolders`    | | `False`                                  | Organize files into per-album subfolders.                                                                                    |
+| `--first-artist-only`       | | `False`                                  | Use only the first artist in tags and filename.                                                                              |
+| `--include-featuring`       | | `False`                                  | Include tracks where the artist appears as a featured artist on other artists' releases. Only applies to artist/discography URLs.|
+| `--qobuz-token`             | | `None`                                   | Qobuz user auth token (`x-user-auth-token`).                                                                                 |
+| `--loop`                    | `-l` | `None`                                   | Keep retrying failed downloads for N minutes.                                                                                                     |
+| `--verbose`                 | `-v` | `False`                                  | Enable debug logging.                                                                                                        |
+| `--no-lyrics`               | | `False`                                  | Disable lyrics embedding (lyrics are embedded **by default**).                                                               |
+| `--lyrics-providers`        | | `spotify musixmatch lrclib apple`        | Lyrics provider priority order.                                                                                              |
+| `--spotify-token`           | | `""`                                     | Spotify `sp_dc` cookie for synced lyrics.                                                                                    |
+| `--no-enrich`               | | `False`                                  | Disable multi-provider metadata enrichment (enrichment is **enabled by default**).                                           |
+| `--enrich-providers`        | | `deezer apple qobuz tidal`               | Metadata enrichment provider priority order.                                                                                 |
 
 ---
 
