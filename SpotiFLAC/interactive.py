@@ -355,12 +355,12 @@ def run_interactive() -> dict:
     if cfg["enrich_metadata"]:
         cfg["enrich_providers"] = _ask_multi(
             "Enrichment providers (order = priority):",
-            options  = ["deezer", "apple", "qobuz", "tidal"],
-            defaults = ["deezer", "apple", "qobuz", "tidal"],
+            options  = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
+            defaults = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
             ordered  = True,
         )
     else:
-        cfg["enrich_providers"] = ["deezer", "apple", "qobuz", "tidal"]
+        cfg["enrich_providers"] = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
 
     # ── 10. Optional Tokens ─────────────────────────────────────────────────────
     _section("10 · Optional Tokens")
