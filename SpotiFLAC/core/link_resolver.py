@@ -1,4 +1,5 @@
 import logging
+import re  # <-- Aggiungi questo
 from typing import Dict, Optional
 from .http import HttpClient
 
@@ -11,6 +12,17 @@ class LinkResolver:
 
     def __init__(self, http_client: HttpClient):
         self.http = http_client
+
+    # --- NUOVO METODO AGGIUNTO ---
+    def identify_provider(self, url: str) -> str:
+        """Identifica la piattaforma direttamente dall'URL fornito dall'utente."""
+        url = url.lower()
+        if "soundcloud.com" in url or "on.soundcloud.com" in url:
+            return "soundcloud"
+        elif "spotify.com" in url:
+            return "spotify"
+        return "unknown"
+    # -----------------------------
 
     def resolve_all(self, spotify_id: str) -> Dict[str, str]:
         """Ritorna un dizionario con i link per ogni piattaforma."""

@@ -64,6 +64,7 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
         "deezer":  ("providers.deezer",  "DeezerProvider"),
         "youtube": ("providers.youtube", "YouTubeProvider"),
         "spoti":   ("providers.spotidownloader", "SpotiDownloaderProvider"),
+        "soundcloud": ("providers.soundcloud", "SoundCloudProvider"), # <-- AGGIUNGI QUESTA RIGA
     }
     if name not in adapters:
         logger.warning("Unknown provider: %s", name)
@@ -253,14 +254,18 @@ class SpotiflacDownloader:
     def _run_once(self, input_url: str) -> None:
         print("Fetching metadata…")
 
-        # Rilevamento Tidal vs Spotify
+        # Rilevamento Tidal vs Spotify vs SoundCloud
         is_tidal = False
+        is_soundcloud = False
         try:
             from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
             if is_tidal_url(input_url):
                 is_tidal = True
         except ImportError:
             pass
+
+        if "soundcloud.com" in input_url or "on.soundcloud.com" in input_url:
+            is_soundcloud = True
 
         try:
             if is_tidal:
@@ -270,6 +275,13 @@ class SpotiflacDownloader:
                     input_url,
                     include_featuring=self._opts.include_featuring,
                 )
+            elif is_soundcloud:
+                # <-- Se hai creato un metadata client per SC (usando il metodo get_playlist_or_album)
+                from .providers.soundcloud import SoundCloudProvider
+                client = SoundCloudProvider()
+                # Esempio: collection_name, tracks = client.extract_metadata(input_url)
+                print("Metadati da link diretto SoundCloud non ancora del tutto implementati.")
+                return
             else:
                 collection_name, tracks = self._client.get_url(
                     input_url,

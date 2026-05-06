@@ -187,7 +187,7 @@ def run_interactive() -> dict:
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
-    print(f"  {DIM('Supported: Spotify and Tidal (track, album, playlist, artist)')}")
+    print(f"  {DIM('Supported: Spotify, Tidal, and SoundCloud (track, album, playlist, artist)')}")
     url = ""
     while not url:
         url = _ask("URL")
@@ -218,7 +218,7 @@ def run_interactive() -> dict:
     print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")
     services = _ask_multi(
         "Services (order = priority):",
-        options  = ["tidal", "qobuz", "amazon", "spoti"],
+        options  = ["tidal", "qobuz", "amazon", "spoti", "soundcloud"],
         defaults = ["tidal"],
         ordered  = True,
     )
@@ -270,7 +270,7 @@ def run_interactive() -> dict:
             cfg["quality"] = "7"
 
     else:
-        # Fallback in case only Amazon or Spotify are used
+        # Fallback in case only Amazon or Spotify or SoundCloud are used
         cfg["quality"] = _ask_choice(
             "Quality:",
             options = ["LOSSLESS", "HI_RES"],
