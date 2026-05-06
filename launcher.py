@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--service", "-s",
-        choices = ["tidal", "qobuz", "amazon", "spoti"],
+        choices = ["tidal", "qobuz", "amazon", "spoti", "soundcloud"],
         nargs   = "+",
         default = ["tidal"],
         metavar = "SERVICE",

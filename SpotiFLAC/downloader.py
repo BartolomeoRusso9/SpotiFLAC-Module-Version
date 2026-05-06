@@ -64,7 +64,7 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
         "deezer":  ("providers.deezer",  "DeezerProvider"),
         "youtube": ("providers.youtube", "YouTubeProvider"),
         "spoti":   ("providers.spotidownloader", "SpotiDownloaderProvider"),
-        "soundcloud": ("providers.soundcloud", "SoundCloudProvider"), # <-- AGGIUNGI QUESTA RIGA
+        "soundcloud": ("providers.soundcloud", "SoundCloudProvider"),
     }
     if name not in adapters:
         logger.warning("Unknown provider: %s", name)
