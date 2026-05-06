@@ -8,7 +8,7 @@ import sys
 
 from SpotiFLAC.check_update import check_for_updates
 from SpotiFLAC import SpotiFLAC
-from interactive import run_interactive
+from SpotiFLAC.interactive import run_interactive
 
 
 def parse_args() -> argparse.Namespace:
