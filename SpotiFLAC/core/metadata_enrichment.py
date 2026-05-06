@@ -88,7 +88,7 @@ class _DeezerMeta:
         if not isrc:
             return out
         try:
-            r = self._s.get(f"{self.BASE}/track/isrc:{isrc}", timeout=12)
+            r = self._s.get(f"{self.BASE}/track/isrc:{isrc}", timeout=7)
             if r.status_code != 200:
                 return out
             d = r.json()
@@ -98,7 +98,7 @@ class _DeezerMeta:
             # Genere dall'album
             album_id = d.get("album", {}).get("id")
             if album_id:
-                ar = self._s.get(f"{self.BASE}/album/{album_id}", timeout=10)
+                ar = self._s.get(f"{self.BASE}/album/{album_id}", timeout=7)
                 if ar.ok:
                     ad = ar.json()
                     genres = ad.get("genres", {}).get("data", [])
@@ -158,7 +158,7 @@ class _AppleMusicMeta:
                     "limit":   5,
                     "country": "US",
                 },
-                timeout=12,
+                timeout=7,
             )
             if not r.ok:
                 return None
@@ -214,7 +214,7 @@ class _TidalMeta:
     def _fetch_and_merge_apis(self) -> None:
         """Scarica le API dal gist e le unisce a quelle di base senza duplicati."""
         try:
-            r = self._s.get(self._GIST_URL, timeout=8)
+            r = self._s.get(self._GIST_URL, timeout=7)
             if r.ok:
                 gist_urls = r.json()
                 if isinstance(gist_urls, list):
@@ -246,7 +246,7 @@ class _TidalMeta:
                     f"{api.rstrip('/')}/search?s={q}&limit=5",
             ):
                 try:
-                    r = self._s.get(endpoint, timeout=8)
+                    r = self._s.get(endpoint, timeout=7)
                     if not r.ok:
                         continue
                     data = r.json()
@@ -325,7 +325,7 @@ def enrich_metadata(
         artist_name: str,
         isrc:        str = "",
         providers:   list[str] | None = None,
-        timeout_s:   float = 15.0,
+        timeout_s:   float = 7.0,
         qobuz_token: str | None = None,
 ) -> EnrichedMetadata:
     """
