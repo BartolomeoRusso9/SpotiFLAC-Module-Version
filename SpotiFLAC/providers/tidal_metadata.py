@@ -237,20 +237,19 @@ class TidalMetadataClient:
     def get_artist_albums(
             self,
             artist_id: str,
-            include_groups: str = "ALBUMS,EPSANDSINGLES",
+            include_groups: str = "ALBUMS,EPSANDSINGLES,COMPILATIONS",
     ) -> tuple[dict, list[TrackMetadata]]:
 
         artist = self._get(f"/artists/{artist_id}")
+        artist_name = artist.get("name", "")
         tracks: list[TrackMetadata] = []
         seen_isrc: set[str] = set()
         seen_album_ids: set[str] = set()
 
-        # Raccogliamo tutti gli ID degli album iterando sui gruppi
         albums_to_fetch = []
         for group in include_groups.split(","):
             group = group.strip().upper()
             try:
-                # Tidal non usa il filtro per gli album standard, solo per EP/Singles/Compilation
                 params = {}
                 if group != "ALBUMS":
                     params["filter"] = group
@@ -263,33 +262,38 @@ class TidalMetadataClient:
                     album_id = str(album_data.get("id", ""))
                     if album_id and album_id not in seen_album_ids:
                         seen_album_ids.add(album_id)
-                        albums_to_fetch.append((album_id, album_data))
+                        albums_to_fetch.append((album_id, album_data, group == "COMPILATIONS"))
             except Exception as exc:
                 logger.warning("[tidal_metadata] gruppo %s fallito: %s", group, exc)
                 continue
 
-        # Parallelizziamo le richieste degli album
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_album = {
-                executor.submit(self.get_album_tracks, aid, preloaded): aid for aid, preloaded in albums_to_fetch
+                executor.submit(self.get_album_tracks, aid, preloaded): (aid, is_comp)
+                for aid, preloaded, is_comp in albums_to_fetch
             }
 
             for future in as_completed(future_to_album):
-                album_id = future_to_album[future]
+                album_id, is_comp = future_to_album[future]
                 try:
                     _, album_tracks = future.result()
                     for track in album_tracks:
                         if track.isrc and track.isrc in seen_isrc:
                             continue
+
+                        # FILTRO FEATURING TIDAL
+                        if is_comp and artist_name.lower() not in track.artists.lower():
+                            continue
+
                         if track.isrc:
                             seen_isrc.add(track.isrc)
                         tracks.append(track)
                 except Exception as exc:
                     logger.warning("[tidal_metadata] album %s saltato: %s", album_id, exc)
 
-                time.sleep(0.3)  # rate limit tra album
+                time.sleep(0.3)
             time.sleep(0.5)
         return artist, tracks
 
@@ -320,10 +324,10 @@ class TidalMetadataClient:
                 "eps":          "EPSANDSINGLES",
                 "singles":      "EPSANDSINGLES",
                 "compilations": "COMPILATIONS",
-                "all":          "ALBUMS,EPSANDSINGLES",
+                "all":          "ALBUMS,EPSANDSINGLES,COMPILATIONS",
             }
             raw_group      = info.get("group", "all")
-            include_groups = group_map.get(raw_group, "ALBUMS,EPSANDSINGLES")
+            include_groups = group_map.get(raw_group, "ALBUMS,EPSANDSINGLES,COMPILATIONS")
             artist, tracks = self.get_artist_albums(info["id"], include_groups)
             return artist.get("name", "Unknown Artist"), tracks
 

@@ -174,47 +174,54 @@ class SpotifyMetadataClient:
     def get_artist_albums(
             self,
             artist_id: str,
-            include_groups: str = "album,single",
+            include_groups: str = "album,single,appears_on",
     ) -> tuple[dict, list[TrackMetadata]]:
 
         artist = self._get(f"/artists/{artist_id}")
+        artist_name = artist.get("name", "")
         tracks: list[TrackMetadata] = []
         seen_isrc: set[str] = set()
         seen_album_ids: set[str] = set()
 
-        # Raccogliamo tutti gli ID degli album prima
+        # Raccogliamo tutti gli ID degli album
         albums_to_fetch = []
         for item in self._paginate(
                 f"{_API_BASE}/artists/{artist_id}/albums"
                 f"?include_groups={include_groups}&limit=50"
         ):
             album_id = item.get("id")
+            album_group = item.get("album_group", "album")
             if album_id and album_id not in seen_album_ids:
                 seen_album_ids.add(album_id)
-                albums_to_fetch.append(album_id)
+                # Segnamo come "True" se l'album è un featuring/compilation
+                albums_to_fetch.append((album_id, album_group in ("appears_on", "compilation")))
 
-        # Parallelizziamo le richieste degli album (max 5 worker per non arrabbiare le API)
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         with ThreadPoolExecutor(max_workers=5) as executor:
-            # Sottomettiamo tutti i task
             future_to_album = {
-                executor.submit(self.get_album_tracks, aid): aid for aid in albums_to_fetch
+                executor.submit(self.get_album_tracks, aid): (aid, is_comp) for aid, is_comp in albums_to_fetch
             }
 
             for future in as_completed(future_to_album):
-                album_id = future_to_album[future]
+                album_id, is_comp = future_to_album[future]
                 try:
                     _, album_tracks = future.result()
                     for track in album_tracks:
-                        # Logica di deduplicazione
                         if track.isrc and track.isrc in seen_isrc:
                             continue
+
+                        # FILTRO FEATURING: se è un album ospite, teniamo solo la canzone in cui canta lui!
+                        if is_comp and artist_name.lower() not in track.artists.lower():
+                            continue
+
                         if track.isrc:
                             seen_isrc.add(track.isrc)
                         tracks.append(track)
                 except Exception as exc:
                     logger.warning("[spotify] album %s saltato: %s", album_id, exc)
+
+                time.sleep(0.2)
 
         return artist, tracks
 
