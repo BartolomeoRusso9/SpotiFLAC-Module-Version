@@ -78,7 +78,7 @@ _DEFAULT_PROVIDERS = ["spotify", "apple", "musixmatch", "amazon", "lrclib"]
 # Provider 1 — Spotify Web                                                     #
 # --------------------------------------------------------------------------- #
 
-def _fetch_spotify(track_id: str, sp_dc_token: str, timeout: int = 8) -> str:
+def _fetch_spotify(track_id: str, sp_dc_token: str, timeout: int = 7) -> str:
     if not track_id or not sp_dc_token:
         return ""
     try:
@@ -176,7 +176,7 @@ def _score_apple_result(res: dict, t_name: str, a_name: str, duration_s: int) ->
             score += 20
     return score
 
-def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: int = 8) -> str:
+def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
     query = urllib.parse.quote(f"{track_name} {artist_name}")
     search_url = f"{_PAXSENIX_APPLE}/search?q={query}"
 
@@ -225,7 +225,7 @@ def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: in
 # Provider 3 — Musixmatch (Paxsenix Proxy - NO TOKEN)                          #
 # --------------------------------------------------------------------------- #
 
-def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeout: int = 8) -> str:
+def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
     params = {
         "t": track_name,
         "a": artist_name,
@@ -260,7 +260,7 @@ def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeou
 # Provider 4 — Amazon Music                                                    #
 # --------------------------------------------------------------------------- #
 
-def _fetch_amazon(isrc: str, timeout: int = 8) -> str:
+def _fetch_amazon(isrc: str, timeout: int = 7) -> str:
     if not isrc: return ""
 
     from ..providers.amazon import AMAZON_API_BASE
@@ -297,7 +297,7 @@ def _fetch_amazon(isrc: str, timeout: int = 8) -> str:
 # Provider 5 — LRCLIB                                                          #
 # --------------------------------------------------------------------------- #
 
-def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", duration_s: int = 0, timeout: int = 8) -> str:
+def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", duration_s: int = 0, timeout: int = 7) -> str:
     # 1. Tenta prima la richiesta ESATTA (endpoint /get)
     def _lrclib_exact(t, a, al, d):
         params = {"artist_name": a, "track_name": t}
