@@ -195,6 +195,20 @@ def run_interactive() -> dict:
     _section("2 · Output Directory")
     cfg["output_dir"] = _ask("Destination folder", "./Downloads")
 
+    # ── 2.5. Custom Output Path (Only for single tracks) ────────────────────
+    if "/track/" in cfg["url"]:
+        _section("2.5 · Custom Output Path")
+        print(f"  {DIM('Since this is a single track, you can specify an exact filename.')}")
+        print(f"  {DIM('Example: my_files/favorite_song.flac')}")
+
+        use_custom = _ask_bool("Do you want to set a custom output path?", False)
+        if use_custom:
+            cfg["output_path"] = _ask("Full file path (overrides format)")
+        else:
+            cfg["output_path"] = None
+    else:
+        cfg["output_path"] = None
+
     # ── 3. Services ──────────────────────────────────────────────────────────
     _section("3 · Audio Services")
     print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")
