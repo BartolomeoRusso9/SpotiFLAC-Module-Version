@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
     lyrics_grp.add_argument(
         "--lyrics-providers",
         nargs   = "+",
-        default = ["spotify", "musixmatch", "lrclib", "apple"],
+        default = ["spotify", "lrclib", "apple", "amazon"],
         dest    = "lyrics_providers",
         choices = ["spotify", "apple", "musixmatch", "amazon", "lrclib"],
         help    = "Provider testi in ordine (default: spotify musixmatch lrclib apple).",
@@ -105,9 +105,9 @@ def parse_args() -> argparse.Namespace:
     enrich_grp.add_argument(
         "--enrich-providers",
         nargs   = "+",
-        default = ["deezer", "apple", "qobuz", "tidal"],
+        default = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         dest    = "enrich_providers",
-        choices = ["deezer", "apple", "qobuz", "tidal"],
+        choices = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         help    = "Provider metadata enrichment in ordine (default: deezer apple qobuz tidal).",
     )
 
