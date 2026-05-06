@@ -1,6 +1,7 @@
 import re
 import json
 import time
+import os
 import logging
 from typing import Dict, List, Optional, Any
 from urllib.parse import quote, urlparse
@@ -9,6 +10,9 @@ from ..core.models import DownloadResult, TrackMetadata
 from ..core.link_resolver import LinkResolver
 from ..core.http import HttpClient
 from .base import BaseProvider
+from ..core.lyrics import fetch_lyrics
+from ..core.tagger import embed_metadata
+from ..core.metadata_enrichment import enrich_metadata
 import requests
 
 logger = logging.getLogger(__name__)
@@ -298,74 +302,75 @@ class SoundCloudProvider(BaseProvider):
         return best
 
     def download_track(self, metadata: TrackMetadata, output_dir: str, **kwargs) -> DownloadResult:
-        """
-        Metodo standard richiesto da DownloadWorker.
-        """
         logger.info(f"[{self.name}] Resolving link for: {metadata.title}")
 
-        # Controllo infallibile: se l'album è SoundCloud, la traccia è nativa
+        # 1. Risoluzione URL
         is_native = metadata.album == "SoundCloud" or (hasattr(metadata, "source_url") and "soundcloud.com" in str(metadata.source_url))
-
         dl_url = None
 
         if is_native:
-            logger.info("[SC] Traccia nativa SoundCloud rilevata. Salto la risoluzione Odesli.")
             sc_url = getattr(metadata, "source_url", None)
-
-            # Dato che è nativa, passiamo l'ID direttamente all'API!
             dl_url = self.get_download_url(track_id=metadata.id, track_permalink=sc_url)
         else:
-            # Flusso normale per tracce Spotify/Tidal: Converti l'ID con Odesli
             try:
                 from ..core.link_resolver import LinkResolver
                 from ..core.http import HttpClient
                 resolver = LinkResolver(HttpClient("odesli"))
                 links = resolver.resolve_all(metadata.id)
                 sc_url = links.get("soundcloud")
-
                 if sc_url:
                     dl_url = self.get_download_url(track_id=None, track_permalink=sc_url)
             except Exception as e:
                 logger.warning(f"[SC] Errore risoluzione Odesli: {e}")
 
         if not dl_url:
-            return DownloadResult.fail(self.provider_id, "Stream non disponibile (Traccia non trovata o API fallita)")
+            return DownloadResult.fail(self.provider_id, "Stream non disponibile")
 
-        # 4. Accesso corretto alle property di TrackMetadata per il salvataggio
         try:
+            # 2. Preparazione File
             filename_template = kwargs.get('filename_format', "{title} - {artist}")
-            filename = filename_template.format(
-                title=metadata.title,
-                artist=metadata.first_artist
-            )
-
-            # Pulisci il nome file da caratteri vietati
+            filename = filename_template.format(title=metadata.title, artist=metadata.first_artist)
             filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
 
-            # Assicurati che la cartella di output esista
-            import os
             os.makedirs(output_dir, exist_ok=True)
-
             file_path = os.path.join(output_dir, f"{filename}.mp3")
 
-            # --- LOGICA DI DOWNLOAD EFFETTIVA ---
-            logger.info(f"[SC] Inizio download: {file_path}")
-
+            # 3. DOWNLOAD EFFETTIVO (Deve avvenire PRIMA di tutto il resto)
+            logger.info(f"[SC] Inizio download audio: {filename}")
             with self.session.get(dl_url, stream=True, timeout=30) as r:
                 r.raise_for_status()
-
-                # Se vuoi integrare la barra di avanzamento di SpotiFLAC:
-                # total_size = int(r.headers.get('content-length', 0))
-
                 with open(file_path, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
-                        if chunk: # filter out keep-alive new chunks
-                            f.write(chunk)
+                        if chunk: f.write(chunk)
 
-            logger.info(f"[SC] Download completato: {filename}")
+            # 4. ENRICHMENT (Ora che abbiamo il file, cerchiamo dati extra)
+            if kwargs.get('enrich_metadata'):
+                logger.info(f"[SC] Ricerca metadati extra (Enrichment)...")
+                extra_meta = enrich_metadata(
+                    track_name=metadata.title,
+                    artist_name=metadata.first_artist,
+                    isrc=metadata.isrc,
+                    providers=kwargs.get('enrich_providers'),
+                    qobuz_token=kwargs.get('qobuz_token')
+                )
+                metadata.update_from_enriched(extra_meta)
+
+            # 5. TESTI (Lyrics)
+            lyrics_data = None
+            if kwargs.get('embed_lyrics'):
+                logger.info(f"[SC] Ricerca testi (Lyrics)...")
+                lyrics_data = fetch_lyrics(
+                    metadata,
+                    providers=kwargs.get('lyrics_providers'),
+                    spotify_token=kwargs.get('lyrics_spotify_token')
+                )
+
+            # 6. TAGGING (Scrive tutto nel file MP3 scaricato)
+            embed_metadata(file_path, metadata, lyrics=lyrics_data)
+
+            logger.info(f"[SC] Completato: {filename}")
             return DownloadResult.ok(self.provider_id, file_path, "mp3")
-            # ------------------------------------
 
         except Exception as e:
-            logger.error(f"[SC] Errore durante il download fisico: {e}")
+            logger.error(f"[SC] Errore durante il processo: {e}")
             return DownloadResult.fail(self.provider_id, str(e))
