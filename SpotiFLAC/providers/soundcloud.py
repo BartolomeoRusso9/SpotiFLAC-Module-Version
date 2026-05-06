@@ -258,6 +258,7 @@ class SoundCloudProvider(BaseProvider):
             id=str(data.get("id")),
             title=data.get("title"),
             artists=[artist_name],
+            album_artist=artist_name,
             album="SoundCloud", # Impostiamo SoundCloud come Album per evitare conflitti
             duration_ms=data.get("full_duration", 0),
             image_url=artwork,
