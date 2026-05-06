@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .core.models import TrackMetadata, DownloadResult
 from .core.progress import DownloadManager, ProgressCallback
-from .core.errors import SpotiflacError
+from .core.errors import SpotiflacError, ErrorKind
 from .providers.base import BaseProvider
 from .providers.spotify_metadata import SpotifyMetadataClient
 from .core.console import print_track_header, print_summary
@@ -322,9 +322,21 @@ class SpotiflacDownloader:
 
         if is_tidal:
             info = parse_tidal_url(input_url)
+
+        elif is_soundcloud:
+            # SoundCloud: distingui playlist vs track usando l'URL
+            stype = "playlist" if "/sets/" in input_url else "track"
+            info = {"type": stype, "id": input_url}
+
         else:
             from .providers.spotify_metadata import parse_spotify_url
             info = parse_spotify_url(input_url)
+
+        if not info:
+            raise SpotiflacError(
+                ErrorKind.INVALID_URL,
+                f"Unsupported or invalid URL: {input_url}"
+            )
 
         is_album       = info["type"] == "album"
         is_playlist    = info["type"] == "playlist"
