@@ -276,12 +276,18 @@ class SpotiflacDownloader:
                     include_featuring=self._opts.include_featuring,
                 )
             elif is_soundcloud:
-                # <-- Se hai creato un metadata client per SC (usando il metodo get_playlist_or_album)
                 from .providers.soundcloud import SoundCloudProvider
                 client = SoundCloudProvider()
-                # Esempio: collection_name, tracks = client.extract_metadata(input_url)
-                print("Metadati da link diretto SoundCloud non ancora del tutto implementati.")
-                return
+
+                print("Recupero metadati esclusivamente da SoundCloud...")
+                # Disabilita l'enrichment per mantenere i dati esclusivi di SoundCloud
+                self._opts.enrich_providers = []
+                self._opts.lyrics_providers = []
+
+                # Estrae i metadati tramite l'URL
+                meta = client.get_metadata_from_url(input_url)
+                collection_name = meta.title
+                tracks = [meta]
             else:
                 collection_name, tracks = self._client.get_url(
                     input_url,

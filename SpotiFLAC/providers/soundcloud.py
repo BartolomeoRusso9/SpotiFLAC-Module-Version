@@ -18,7 +18,6 @@ class SoundCloudProvider(BaseProvider):
         super().__init__() # Inizializza la classe base
         self.provider_id = "soundcloud"
         self.name = "SoundCloud"
-        self.provider_id = "soundcloud"
         self.api_url = "https://api-v2.soundcloud.com"
         self.client_id = None
         self.client_id_expiry = 0
@@ -232,6 +231,41 @@ class SoundCloudProvider(BaseProvider):
 
         return None
 
+    def get_metadata_from_url(self, url: str) -> TrackMetadata:
+        """
+        Estrae i metadati originali da un link SoundCloud.
+        """
+        if not self.client_id:
+            self.client_id = self._fetch_client_id()
+
+        # Risoluzione URL tramite API v2
+        resolve_url = f"{self.api_url}/resolve?url={quote(url)}&client_id={self.client_id}"
+        res = self.session.get(resolve_url)
+        res.raise_for_status()
+        data = res.json()
+
+        # Estrazione degli artisti (SoundCloud usa 'user')
+        artist_name = data.get("user", {}).get("username", "Unknown Artist")
+
+        # Pulizia URL copertina per avere la massima qualità (500x500)
+        artwork = data.get("artwork_url") or data.get("user", {}).get("avatar_url")
+        if artwork:
+            artwork = artwork.replace("-large", "-t500x500")
+
+        # Creazione dell'oggetto TrackMetadata
+        return TrackMetadata(
+            id=str(data.get("id")),
+            title=data.get("title"),
+            artists=[artist_name],
+            album="SoundCloud", # Impostiamo SoundCloud come Album per evitare conflitti
+            duration_ms=data.get("full_duration", 0),
+            image_url=artwork,
+            release_date=data.get("created_at", ""),
+            source_url=url,
+            # Importante: impostiamo i metadati come "completi" per saltare ricerche esterne
+            extra_info={"provider": "soundcloud", "exclusive": True}
+        )
+
     def _pick_best_transcoding(self, transcodings: List[Dict], prefer_format: str) -> Optional[Dict]:
         """Seleziona la migliore qualità audio (evitando gli snippet)."""
         best = None
@@ -283,22 +317,40 @@ class SoundCloudProvider(BaseProvider):
             return DownloadResult.fail(self.provider_id, "Stream unavailable via Cobalt/Direct")
 
         # 3. FIX: Accesso corretto alle property di TrackMetadata
-        # metadata.title e metadata.first_artist sono property, non chiavi di dizionario
         try:
             filename_template = kwargs.get('filename_format', "{title} - {artist}")
             filename = filename_template.format(
                 title=metadata.title,
-                artist=metadata.first_artist # Accesso corretto alla property
+                artist=metadata.first_artist
             )
 
             # Pulisci il nome file da caratteri vietati
-            import re
-            filename = re.sub(r'[<> Paradox:"/\\|?*]', "_", filename)
-            file_path = f"{output_dir}/{filename}.mp3"
+            filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
 
-            # Esegui il download effettivo
-            # ... (logica di download con self.session) ...
+            # Assicurati che la cartella di output esista
+            import os
+            os.makedirs(output_dir, exist_ok=True)
 
+            file_path = os.path.join(output_dir, f"{filename}.mp3")
+
+            # --- LOGICA DI DOWNLOAD EFFETTIVA ---
+            logger.info(f"[SC] Inizio download: {file_path}")
+
+            with self.session.get(dl_url, stream=True, timeout=30) as r:
+                r.raise_for_status()
+
+                # Se vuoi integrare la barra di avanzamento di SpotiFLAC:
+                # total_size = int(r.headers.get('content-length', 0))
+
+                with open(file_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk: # filter out keep-alive new chunks
+                            f.write(chunk)
+
+            logger.info(f"[SC] Download completato: {filename}")
             return DownloadResult.ok(self.provider_id, file_path, "mp3")
+            # ------------------------------------
+
         except Exception as e:
+            logger.error(f"[SC] Errore durante il download fisico: {e}")
             return DownloadResult.fail(self.provider_id, str(e))
