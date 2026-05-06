@@ -279,10 +279,7 @@ class SpotiflacDownloader:
                 from .providers.soundcloud import SoundCloudProvider
                 client = SoundCloudProvider()
 
-                print("Recupero metadati esclusivamente da SoundCloud...")
-                # Disabilita l'enrichment per mantenere i dati esclusivi di SoundCloud
-                self._opts.enrich_providers = []
-                self._opts.lyrics_providers = []
+                print("Recupero metadati da SoundCloud...")
 
                 # Estrae i metadati tramite l'URL
                 meta = client.get_metadata_from_url(input_url)
