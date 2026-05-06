@@ -303,32 +303,35 @@ class SoundCloudProvider(BaseProvider):
         """
         logger.info(f"[{self.name}] Resolving link for: {metadata.title}")
 
-        sc_url = None
+        # Controllo infallibile: se l'album è SoundCloud, la traccia è nativa
+        is_native = metadata.album == "SoundCloud" or (hasattr(metadata, "source_url") and "soundcloud.com" in str(metadata.source_url))
 
-        # 1. Controlla se la traccia è GIA' di SoundCloud (link diretto)
-        if metadata.extra_info and metadata.extra_info.get("provider") == "soundcloud":
-            sc_url = metadata.source_url
+        dl_url = None
+
+        if is_native:
             logger.info("[SC] Traccia nativa SoundCloud rilevata. Salto la risoluzione Odesli.")
+            sc_url = getattr(metadata, "source_url", None)
+
+            # Dato che è nativa, passiamo l'ID direttamente all'API!
+            dl_url = self.get_download_url(track_id=metadata.id, track_permalink=sc_url)
         else:
-            # 2. Usa Odesli SOLO se proveniamo da Spotify o Tidal (flusso normale)
+            # Flusso normale per tracce Spotify/Tidal: Converti l'ID con Odesli
             try:
                 from ..core.link_resolver import LinkResolver
                 from ..core.http import HttpClient
                 resolver = LinkResolver(HttpClient("odesli"))
                 links = resolver.resolve_all(metadata.id)
                 sc_url = links.get("soundcloud")
+
+                if sc_url:
+                    dl_url = self.get_download_url(track_id=None, track_permalink=sc_url)
             except Exception as e:
                 logger.warning(f"[SC] Errore risoluzione Odesli: {e}")
 
-        if not sc_url:
-            return DownloadResult.fail(self.provider_id, "Track not found on SoundCloud")
-
-        # 3. Ottieni l'URL dello stream (Tramite Cobalt o Diretto)
-        dl_url = self.get_download_url(track_id=None, track_permalink=sc_url)
         if not dl_url:
-            return DownloadResult.fail(self.provider_id, "Stream unavailable via Cobalt/Direct")
+            return DownloadResult.fail(self.provider_id, "Stream non disponibile (Traccia non trovata o API fallita)")
 
-        # 4. FIX: Accesso corretto alle property di TrackMetadata
+        # 4. Accesso corretto alle property di TrackMetadata per il salvataggio
         try:
             filename_template = kwargs.get('filename_format', "{title} - {artist}")
             filename = filename_template.format(

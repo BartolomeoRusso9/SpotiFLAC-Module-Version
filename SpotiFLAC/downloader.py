@@ -303,7 +303,7 @@ class SpotiflacDownloader:
             return
 
         missing_isrc = [t for t in tracks if not t.isrc]
-        if missing_isrc:
+        if missing_isrc and not is_soundcloud:
             print(f"Resolving ISRC for {len(missing_isrc)} track(s)…")
             try:
                 from .core.isrc_helper import IsrcHelper
