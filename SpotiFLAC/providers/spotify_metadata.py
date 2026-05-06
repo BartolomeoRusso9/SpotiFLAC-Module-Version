@@ -45,7 +45,7 @@ def parse_spotify_url(uri: str) -> dict[str, str]:
     elif not u.scheme and not u.netloc:
         return {"type": "playlist", "id": u.path}
     else:
-        raise InvalidUrlError(uri)
+        return None
 
     if len(parts) == 3 and parts[1] in ("album", "track", "playlist", "artist"):
         return {"type": parts[1], "id": parts[2].split("?")[0]}
@@ -55,7 +55,7 @@ def parse_spotify_url(uri: str) -> dict[str, str]:
         dtype = "artist_discography" if parts[3] == "discography" else "artist"
         return {"type": dtype, "id": parts[2].split("?")[0]}
 
-    raise InvalidUrlError(uri)
+    return None
 
 
 def _normalize_artist(s: str) -> str:
@@ -281,6 +281,8 @@ class SpotifyMetadataClient:
 
     def get_url(self, spotify_url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata]]:
         info = parse_spotify_url(spotify_url)
+        if info is None:
+            return "Unknown", []
         t    = info["type"]
 
         if t == "track":
