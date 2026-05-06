@@ -237,7 +237,7 @@ class TidalMetadataClient:
     def get_artist_albums(
             self,
             artist_id: str,
-            include_groups: str = "ALBUM,EP,SINGLE",
+            include_groups: str = "ALBUMS,EPSANDSINGLES",
     ) -> tuple[dict, list[TrackMetadata]]:
 
         artist = self._get(f"/artists/{artist_id}")
@@ -250,16 +250,20 @@ class TidalMetadataClient:
         for group in include_groups.split(","):
             group = group.strip().upper()
             try:
-                # Usiamo la sintassi corretta per il client Tidal
+                # Tidal non usa il filtro per gli album standard, solo per EP/Singles/Compilation
+                params = {}
+                if group != "ALBUMS":
+                    params["filter"] = group
+
                 albums = self._paginate(
                     f"/artists/{artist_id}/albums",
-                    extra_params={"filter": group},
+                    extra_params=params,
                 )
                 for album_data in albums:
                     album_id = str(album_data.get("id", ""))
                     if album_id and album_id not in seen_album_ids:
                         seen_album_ids.add(album_id)
-                        albums_to_fetch.append((album_id, album_data)) # Salviamo anche i dati base per evitare chiamate HTTP extra
+                        albums_to_fetch.append((album_id, album_data))
             except Exception as exc:
                 logger.warning("[tidal_metadata] gruppo %s fallito: %s", group, exc)
                 continue
@@ -269,7 +273,6 @@ class TidalMetadataClient:
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_album = {
-                # Passiamo l'album_data come preloaded_album
                 executor.submit(self.get_album_tracks, aid, preloaded): aid for aid, preloaded in albums_to_fetch
             }
 
@@ -295,10 +298,6 @@ class TidalMetadataClient:
     # ------------------------------------------------------------------
 
     def get_url(self, tidal_url: str) -> tuple[str, list[TrackMetadata]]:
-        """
-        Riceve un URL Tidal e restituisce (nome_collezione, [TrackMetadata]).
-        Equivalente a SpotifyMetadataClient.get_url() ma per Tidal.
-        """
         info = parse_tidal_url(tidal_url)
         t    = info["type"]
 
@@ -315,21 +314,22 @@ class TidalMetadataClient:
             return playlist.get("title", "Unknown Playlist"), tracks
 
         if t in ("artist", "artist_discography"):
+            # Mappatura corretta per l'API di Tidal!
             group_map = {
-                "albums":       "ALBUM",
-                "eps":          "EP",
-                "singles":      "SINGLE",
-                "compilations": "COMPILATION",
-                "all":          "ALBUM,EP,SINGLE,COMPILATION",
+                "albums":       "ALBUMS",
+                "eps":          "EPSANDSINGLES",
+                "singles":      "EPSANDSINGLES",
+                "compilations": "COMPILATIONS",
+                "all":          "ALBUMS,EPSANDSINGLES,COMPILATIONS",
             }
             raw_group      = info.get("group", "all")
-            include_groups = group_map.get(raw_group, "ALBUM,EP,SINGLE")
+            include_groups = group_map.get(raw_group, "ALBUMS,EPSANDSINGLES")
             artist, tracks = self.get_artist_albums(info["id"], include_groups)
             return artist.get("name", "Unknown Artist"), tracks
 
         raise SpotiflacError(
             ErrorKind.INVALID_URL,
-            f"Tipo Tidal non supportato: {t} (supportati: track, album, playlist, artist)",
+            f"Tipo Tidal non supportato: {t}",
         )
 
     # ------------------------------------------------------------------
