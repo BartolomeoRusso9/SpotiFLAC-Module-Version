@@ -7,13 +7,13 @@ import logging
 import time
 from typing import Iterator
 from urllib.parse import urlparse, parse_qs
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
 from ..core.errors import AuthError, NetworkError, InvalidUrlError, SpotiflacError, ErrorKind
 from ..core.models import TrackMetadata
 from ..core.isrc_cache import get_cached_isrc, put_cached_isrc
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,19 @@ def parse_spotify_url(uri: str) -> dict[str, str]:
         return {"type": dtype, "id": parts[2].split("?")[0]}
 
     raise InvalidUrlError(uri)
+
+
+def _artist_in_track(artist_name: str, track_artists: str) -> bool:
+    """
+    Controlla se artist_name è tra gli artisti della traccia.
+    Usa confronto per nome esatto per ogni artista (non semplice substring),
+    evitando falsi positivi (es. "Ed" che matcha "Edward").
+    """
+    name_lower = artist_name.lower().strip()
+    for artist in track_artists.split(","):
+        if artist.strip().lower() == name_lower:
+            return True
+    return False
 
 
 class SpotifyMetadataClient:
@@ -124,7 +137,7 @@ class SpotifyMetadataClient:
         missing_isrc_ids = []
         isrc_map = {}
 
-        # 1. Controlliamo la cache prima di fare qualsiasi richiesta
+        # 1. Cache prima
         for item in raw_items:
             track_id = item["id"]
             cached = get_cached_isrc(track_id)
@@ -133,12 +146,11 @@ class SpotifyMetadataClient:
             else:
                 missing_isrc_ids.append(track_id)
 
-        # 2. Recuperiamo gli ISRC mancanti a blocchi di 50 (limite API Spotify)
+        # 2. Recupero ISRC mancanti a blocchi di 50
         for i in range(0, len(missing_isrc_ids), 50):
             chunk = missing_isrc_ids[i:i+50]
             try:
                 ids_str = ",".join(chunk)
-                # Endpoint batch di Spotify
                 data = self._get(f"/tracks?ids={ids_str}")
                 for full_track in data.get("tracks", []):
                     if full_track:
@@ -150,7 +162,7 @@ class SpotifyMetadataClient:
             except Exception as exc:
                 logger.warning("[spotify] Fallimento nel recupero batch degli ISRC: %s", exc)
 
-        # 3. Costruiamo gli oggetti TrackMetadata
+        # 3. Costruzione TrackMetadata
         tracks: list[TrackMetadata] = []
         for item in raw_items:
             track_id = item["id"]
@@ -173,55 +185,86 @@ class SpotifyMetadataClient:
 
     def get_artist_albums(
             self,
+            # FIX: "appears_on" rimosso dal default.
+            # - "album" e "single" sono release proprie dell'artista → tutti i brani inclusi.
+            # - "appears_on" scarica i metadati di interi album di altri artisti poi filtra:
+            #   troppo costoso per default, va abilitato esplicitamente.
+            # - "compilation" è gestito separatamente con filtro featuring.
             artist_id: str,
-            include_groups: str = "album,single,appears_on",
+            include_groups: str = "album,single",
     ) -> tuple[dict, list[TrackMetadata]]:
+        """
+        Recupera la discografia completa di un artista Spotify.
 
+        include_groups: album, single, appears_on, compilation (separati da virgola).
+
+        Logica featuring:
+        - album / single    → tutti i brani inclusi (release proprie)
+        - appears_on        → solo le tracce dove l'artista compare effettivamente
+        - compilation       → solo le tracce dove l'artista compare effettivamente
+        """
         artist = self._get(f"/artists/{artist_id}")
         artist_name = artist.get("name", "")
         tracks: list[TrackMetadata] = []
         seen_isrc: set[str] = set()
         seen_album_ids: set[str] = set()
 
-        # Raccogliamo tutti gli ID degli album
-        albums_to_fetch = []
+        # Raccogliamo tutti gli album con il loro tipo di relazione
+        # album_group: "album" | "single" | "appears_on" | "compilation"
+        albums_to_fetch: list[tuple[str, bool]] = []
+
         for item in self._paginate(
                 f"{_API_BASE}/artists/{artist_id}/albums"
                 f"?include_groups={include_groups}&limit=50"
         ):
-            album_id = item.get("id")
+            album_id    = item.get("id")
             album_group = item.get("album_group", "album")
-            if album_id and album_id not in seen_album_ids:
-                seen_album_ids.add(album_id)
-                # Segnamo come "True" se l'album è un featuring/compilation
-                albums_to_fetch.append((album_id, album_group in ("appears_on", "compilation")))
 
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+            if not album_id or album_id in seen_album_ids:
+                continue
+            seen_album_ids.add(album_id)
 
+            # is_featuring=True → filtra solo le tracce dove l'artista compare come artista
+            # Per album e single propri, tutti i brani vengono inclusi (is_featuring=False)
+            is_featuring = album_group in ("appears_on", "compilation")
+            albums_to_fetch.append((album_id, is_featuring))
+
+        # Fetch parallelo dei metadati (max 5 richieste simultanee per rispettare rate limit)
         with ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_album = {
-                executor.submit(self.get_album_tracks, aid): (aid, is_comp) for aid, is_comp in albums_to_fetch
+            future_to_meta = {
+                executor.submit(self.get_album_tracks, aid): (aid, is_feat)
+                for aid, is_feat in albums_to_fetch
             }
 
-            for future in as_completed(future_to_album):
-                album_id, is_comp = future_to_album[future]
+            for future in as_completed(future_to_meta):
+                album_id, is_featuring = future_to_meta[future]
                 try:
                     _, album_tracks = future.result()
                     for track in album_tracks:
+                        # Deduplicazione per ISRC
                         if track.isrc and track.isrc in seen_isrc:
+                            logger.debug(
+                                "[spotify] duplicato saltato: %s (ISRC %s)",
+                                track.title, track.isrc,
+                            )
                             continue
 
-                        # FILTRO FEATURING: se è un album ospite, teniamo solo la canzone in cui canta lui!
-                        if is_comp and artist_name.lower() not in track.artists.lower():
+                        # FILTRO FEATURING
+                        # Per appears_on/compilation: teniamo SOLO le tracce dove
+                        # l'artista compare con nome esatto (evita falsi positivi da substring).
+                        if is_featuring and not _artist_in_track(artist_name, track.artists):
+                            logger.debug(
+                                "[spotify] traccia saltata (artista assente): %s — %s",
+                                track.title, track.artists,
+                            )
                             continue
 
                         if track.isrc:
                             seen_isrc.add(track.isrc)
                         tracks.append(track)
+
                 except Exception as exc:
                     logger.warning("[spotify] album %s saltato: %s", album_id, exc)
-
-                time.sleep(0.2)
 
         return artist, tracks
 
