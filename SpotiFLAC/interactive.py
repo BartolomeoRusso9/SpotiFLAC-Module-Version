@@ -208,11 +208,56 @@ def run_interactive() -> dict:
 
     # ── 4. Qualità ──────────────────────────────────────────────────────────
     _section("4 · Qualità audio")
-    cfg["quality"] = _ask_choice(
-        "Qualità:",
-        options = ["LOSSLESS", "HI_RES"],
-        default = "LOSSLESS",
-    )
+    print(f"  {DIM('Nota: Se la qualità richiesta non viene trovata, verrà eseguito un fallback automatico.')}")
+
+    has_qobuz = "qobuz" in cfg["services"]
+    has_tidal = "tidal" in cfg["services"]
+
+    if has_qobuz and not has_tidal:
+        # L'utente ha scelto Qobuz ma non Tidal
+        q_choice = _ask_choice(
+            "Qualità Qobuz:",
+            options = ["6 (CD Lossless)", "7 (Hi-Res)", "27 (Hi-Res Max)"],
+            default = "6 (CD Lossless)",
+        )
+        # Estraiamo solo il numero (6, 7 o 27) dalla stringa scelta
+        cfg["quality"] = q_choice.split(" ")[0]
+
+    elif has_tidal and not has_qobuz:
+        # L'utente ha scelto Tidal ma non Qobuz
+        cfg["quality"] = _ask_choice(
+            "Qualità Tidal:",
+            options = ["LOSSLESS", "HI_RES"],
+            default = "LOSSLESS",
+        )
+
+    elif has_qobuz and has_tidal:
+        # L'utente ha inserito entrambi i provider nella lista
+        print(f"  {DIM('Hai selezionato sia Qobuz che Tidal. Scegli un profilo unificato:')}")
+        q_choice = _ask_choice(
+            "Qualità combinata:",
+            options = [
+                "LOSSLESS (Applica '6' su Qobuz e 'LOSSLESS' su Tidal)",
+                "HI_RES (Applica '27' su Qobuz e 'HI_RES' su Tidal)",
+                "7 (Applica qualità Hi-Res intermedia solo per Qobuz)"
+            ],
+            default = "LOSSLESS (Applica '6' su Qobuz e 'LOSSLESS' su Tidal)",
+        )
+        # Riduciamo la stringa lunga al valore chiave richiesto dalla CLI
+        if q_choice.startswith("LOSSLESS"):
+            cfg["quality"] = "LOSSLESS"
+        elif q_choice.startswith("HI_RES"):
+            cfg["quality"] = "HI_RES"
+        else:
+            cfg["quality"] = "7"
+
+    else:
+        # Fallback nel caso usi solo Amazon o Spotify
+        cfg["quality"] = _ask_choice(
+            "Qualità:",
+            options = ["LOSSLESS", "HI_RES"],
+            default = "LOSSLESS",
+        )
 
     # ── 5. Formato filename ─────────────────────────────────────────────────
     _section("5 · Formato nome file")
