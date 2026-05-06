@@ -3,7 +3,7 @@
 [![PyPI - Version](https://img.shields.io/pypi/v/spotiflac?style=for-the-badge&logo=pypi&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/spotiflac?style=for-the-badge&logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/) [![Pepy Total Downloads](https://img.shields.io/pepy/dt/spotiflac?style=for-the-badge&logo=pypi&logoColor=ffffff&labelColor=000000)](https://pypi.org/project/SpotiFLAC/)
 
 
-Integrate **SpotiFLAC** directly into your Python projects. Perfect for building custom Telegram bots, automation tools, bulk downloaders, jellyfin downloader musics or web interfaces.
+Integrate **SpotiFLAC** directly into your Python projects. Perfect for building custom Telegram bots, automation tools, bulk downloaders, downloading music for Jellyfin or web interfaces.
 
 > **Looking for a standalone app?**
 ### [SpotiFLAC (Desktop)](https://github.com/afkarxyz/SpotiFLAC)
@@ -431,25 +431,25 @@ After each download, SpotiFLAC validates the file to detect common issues:
 
 ## CLI Flag Reference
 
-| Flag | Short | Default                                  | Description |
-| --- | --- |------------------------------------------| --- |
-| `--service` | `-s` | `tidal`                                  | One or more providers in priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`. |
-| `--filename-format` | `-f` | `{title} - {artist}`                     | Filename template with placeholders. |
+| Flag | Short | Default                                  | Description                                                                                                                  |
+| --- | --- |------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| `--service` | `-s` | `tidal`                                  | One or more providers in priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`.                                       |
+| `--filename-format` | `-f` | `{title} - {artist}`                     | Filename template with placeholders.                                                                                         |
 | `--output-path` | `-o` | `None`                                   | Exact output file path for single track downloads (e.g. `files/song.flac`). Ignored for albums, playlists and discographies. |
-| `--quality` | `-q` | `LOSSLESS`                               | Audio quality (see Quality table above). |
-| `--use-track-numbers` | | `False`                                  | Prefix filenames with track numbers. |
-| `--use-album-track-numbers` | | `False`                                  | Use the track's original album number instead of queue position. |
-| `--use-artist-subfolders` | | `False`                                  | Organise files into per-artist subfolders. |
-| `--use-album-subfolders` | | `False`                                  | Organise files into per-album subfolders. |
-| `--first-artist-only` | | `False`                                  | Use only the first artist in tags and filename. |
-| `--qobuz-token` | | `None`                                   | Qobuz user auth token (`x-user-auth-token`). |
-| `--loop` | `-l` | `None`                                   | Repeat every N minutes. |
-| `--verbose` | `-v` | `False`                                  | Enable debug logging. |
-| `--no-lyrics` | | `False`                                  | Disable lyrics embedding (lyrics are embedded **by default**). |
-| `--lyrics-providers` | | `spotify musixmatch lrclib apple`        | Lyrics provider priority order. |
-| `--spotify-token` | | `""`                                     | Spotify `sp_dc` cookie for synced lyrics. |
-| `--no-enrich` | | `False`                                  | Disable multi-provider metadata enrichment (enrichment is **enabled by default**). |
-| `--enrich-providers` | | `deezer apple qobuz tidal`               | Metadata enrichment provider priority order. |
+| `--quality` | `-q` | `LOSSLESS`                               | Audio quality (see Quality table above).                                                                                     |
+| `--use-track-numbers` | | `False`                                  | Prefix filenames with track numbers.                                                                                         |
+| `--use-album-track-numbers` | | `False`                                  | Use the track's original album number instead of queue position.                                                             |
+| `--use-artist-subfolders` | | `False`                                  | Organize files into per-artist subfolders.                                                                                   |
+| `--use-album-subfolders` | | `False`                                  | Organize files into per-album subfolders.                                                                                    |
+| `--first-artist-only` | | `False`                                  | Use only the first artist in tags and filename.                                                                              |
+| `--qobuz-token` | | `None`                                   | Qobuz user auth token (`x-user-auth-token`).                                                                                 |
+| `--loop` | `-l` | `None`                                   | Keep retrying failed downloads for N minutes.                                                                                                     |
+| `--verbose` | `-v` | `False`                                  | Enable debug logging.                                                                                                        |
+| `--no-lyrics` | | `False`                                  | Disable lyrics embedding (lyrics are embedded **by default**).                                                               |
+| `--lyrics-providers` | | `spotify musixmatch lrclib apple`        | Lyrics provider priority order.                                                                                              |
+| `--spotify-token` | | `""`                                     | Spotify `sp_dc` cookie for synced lyrics.                                                                                    |
+| `--no-enrich` | | `False`                                  | Disable multi-provider metadata enrichment (enrichment is **enabled by default**).                                           |
+| `--enrich-providers` | | `deezer apple qobuz tidal`               | Metadata enrichment provider priority order.                                                                                 |
 
 ---
 
