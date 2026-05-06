@@ -26,7 +26,22 @@ pip install SpotiFLAC
 
 ## Quick Start
 
-Import the module and start downloading immediately:
+The easiest way to use SpotiFLAC is through the built-in Interactive Wizard. Just run the command without any arguments:
+```bash
+spotiflac
+```
+> (Or python launcher.py if running from source)
+
+---
+## Interactive Mode
+
+SpotiFLAC features a smart Interactive Mode that guides you step-by-step. It dynamically adjusts its questions based on your inputs:
+
+* **Smart URL Detection:** If you input an Artist URL, it will ask if you want to download "Featuring" tracks. It skips this question for albums or playlists.
+* **Smart File Paths:** If you input a Single Track URL, it will ask if you want to set a specific `.flac` output path. If you do, it intelligently skips all questions about filename formatting and subfolder organization.
+* **Unified Quality Profiles:** Automatically translates your desired quality tier across different services (like Tidal and Qobuz).
+* **CLI Generator:** At the end of the configuration, it generates and prints the exact CLI command for your specific setup, so you can copy and reuse it in your automated scripts.
+---
 
 ```python
 from SpotiFLAC import SpotiFLAC
@@ -49,13 +64,12 @@ spotiflac url ./out --service tidal
 
 SpotiFLAC supports the following URL formats for both **Spotify** and **Tidal**:
 
-| Type | Spotify | Tidal |
-|---|---|---|
-| Track | `open.spotify.com/track/...` | `listen.tidal.com/track/...` |
-| Album | `open.spotify.com/album/...` | `listen.tidal.com/album/...` |
-| Playlist | `open.spotify.com/playlist/...` | `listen.tidal.com/playlist/...` |
-| Artist | `open.spotify.com/artist/...` | `listen.tidal.com/artist/...` |
-| Discography | *(via artist URL)* | `listen.tidal.com/artist/.../discography/albums` |
+| Type                          | Spotify                         | Tidal                                            |
+|-------------------------------|---------------------------------|--------------------------------------------------|
+| Track                         | `open.spotify.com/track/...`    | `listen.tidal.com/track/...`                     |
+| Album                         | `open.spotify.com/album/...`    | `listen.tidal.com/album/...`                     |
+| Playlist                      | `open.spotify.com/playlist/...` | `listen.tidal.com/playlist/...`                  |
+| Discography (via artist URL)  | `open.spotify.com/artist/...`   | `listen.tidal.com/artist/.../discography/albums` |
 
 ---
 
@@ -235,6 +249,9 @@ Spotify requires a session cookie called sp_dc to access its internal synced lyr
 
 ## How to Apply Tokens in SpotiFLAC
 Once you have your Qobuz or Spotify tokens, you can pass them to SpotiFLAC in several ways:
+
+### Interactive Wizard (Easiest)
+Simply run `spotiflac` in your terminal. The wizard will prompt you to paste your **sp_dc cookie** or **Qobuz token** during the final configuration steps.
 
 ### Environment Variable (all platforms)
 
