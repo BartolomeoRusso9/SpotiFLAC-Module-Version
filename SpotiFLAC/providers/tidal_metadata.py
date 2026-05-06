@@ -284,8 +284,6 @@ class TidalMetadataClient:
                             seen_isrc.add(track.isrc)
                         tracks.append(track)
                 except Exception as exc:
-                        "[tidal_metadata] album %s saltato: %s", album_id, exc
-                    )
                     logger.warning("[tidal_metadata] album %s saltato: %s", album_id, exc)
 
                 time.sleep(0.3)  # rate limit tra album
