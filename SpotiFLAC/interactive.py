@@ -277,27 +277,41 @@ def run_interactive() -> dict:
             default = "LOSSLESS",
         )
 
-    # ── 5. Filename format ─────────────────────────────────────────────────
-    _section("5 · Filename Format")
-    print(f"  {DIM('Placeholders: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}")
-    cfg["filename_format"] = _ask("Format", "{title} - {artist}")
+    # Se l'utente ha impostato un percorso personalizzato, saltiamo le sezioni 5 e 6
+    if cfg.get("output_path"):
+        _section("5 & 6 · Format & Organization")
+        print(f"  {YELLOW('⏭  Skipped:')} {DIM('Custom output path overrides folders and filename formats.')}")
 
-    # ── 6. Organization options ───────────────────────────────────────────
-    _section("6 · Organization Options")
-
-    # Ask first if they want track numbers
-    cfg["use_track_numbers"] = _ask_bool("Add track number to filename?", False)
-
-    # If yes, ask which type of numbering to use
-    if cfg["use_track_numbers"]:
-        cfg["use_album_track_numbers"] = _ask_bool("Use original album track number?", False)
-    else:
-        # If no, automatically set the variable to False without asking
+        # Impostiamo i valori di default in modo invisibile per evitare errori nel riepilogo
+        cfg["filename_format"] = "{title} - {artist}"
+        cfg["use_track_numbers"] = False
         cfg["use_album_track_numbers"] = False
+        cfg["use_artist_subfolders"] = False
+        cfg["use_album_subfolders"] = False
+        cfg["first_artist_only"] = False
 
-    cfg["use_artist_subfolders"]   = _ask_bool("Create artist subfolders?", False)
-    cfg["use_album_subfolders"]    = _ask_bool("Create album subfolders?", False)
-    cfg["first_artist_only"]       = _ask_bool("Use only the first artist in tags and filename?", False)
+    else:
+        # ── 5. Filename format ─────────────────────────────────────────────────
+        _section("5 · Filename Format")
+        print(f"  {DIM('Placeholders: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}")
+        cfg["filename_format"] = _ask("Format", "{title} - {artist}")
+
+        # ── 6. Organization options ───────────────────────────────────────────
+        _section("6 · Organization Options")
+
+        # Ask first if they want track numbers
+        cfg["use_track_numbers"] = _ask_bool("Add track number to filename?", False)
+
+        # If yes, ask which type of numbering to use
+        if cfg["use_track_numbers"]:
+            cfg["use_album_track_numbers"] = _ask_bool("Use original album track number?", False)
+        else:
+            # If no, automatically set the variable to False without asking
+            cfg["use_album_track_numbers"] = False
+
+        cfg["use_artist_subfolders"]   = _ask_bool("Create artist subfolders?", False)
+        cfg["use_album_subfolders"]    = _ask_bool("Create album subfolders?", False)
+        cfg["first_artist_only"]       = _ask_bool("Use only the first artist in tags and filename?", False)
 
     # ── 7. Featuring ────────────────────────────────────────────────────────
     _section("7 · Featuring")
