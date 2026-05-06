@@ -35,7 +35,7 @@ from .providers import (
 )
 from .core import TrackMetadata, DownloadResult
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 
 __all__ = [
     "SpotiFLAC",
@@ -83,6 +83,7 @@ def SpotiFLAC(
         enrich_metadata:         bool           = True,
         enrich_providers:        list[str] | None = None,
         qobuz_token:             str | None     = None,
+        include_featuring:     bool           = False,
 ) -> None:
     """
     Interfaccia principale per scaricare tracce Spotify in formato FLAC.
@@ -131,6 +132,7 @@ def SpotiFLAC(
         enrich_metadata         = enrich_metadata,
         enrich_providers        = enrich_providers or ["deezer", "apple", "qobuz", "tidal"],
         qobuz_token             = qobuz_token,
+        include_featuring       = include_featuring,
     )
 
     # 3. Esecuzione

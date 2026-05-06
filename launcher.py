@@ -51,6 +51,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-artist-subfolders",   action="store_true", dest="use_artist_subfolders")
     parser.add_argument("--use-album-subfolders",    action="store_true", dest="use_album_subfolders")
     parser.add_argument("--first-artist-only",       action="store_true", dest="first_artist_only")
+    parser.add_argument(
+        "--include-featuring",
+        action  = "store_true",
+        dest    = "include_featuring",
+        default = False,
+        help    = "Includi tracce dove l'artista appare come featuring su release di altri artisti.",
+    )
     parser.add_argument("--qobuz-token", default=None, dest="qobuz_token", help="Token Qobuz")
     parser.add_argument("--loop", "-l", type=int, default=None, help="Ripeti ogni N minuti")
     parser.add_argument("--verbose", "-v", action="store_true")
@@ -135,6 +142,7 @@ def main() -> None:
         enrich_metadata          = args.enrich,
         enrich_providers         = args.enrich_providers,
         qobuz_token              = args.qobuz_token,
+        include_featuring        = args.include_featuring,
     )
 
 if __name__ == "__main__":

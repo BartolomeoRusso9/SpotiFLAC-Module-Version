@@ -47,6 +47,7 @@ class DownloadOptions:
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"]
     )
     qobuz_token:             str | None      = None
+    include_featuring:       bool            = False
 
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
@@ -119,7 +120,6 @@ def download_one(
             if opts.output_path and result.file_path:
                 import shutil
                 import os
-                # FIX Estensione: Assicurati che l'estensione finale corrisponda al formato reale
                 _, ext = os.path.splitext(result.file_path)
                 base_target, _ = os.path.splitext(opts.output_path)
                 target = base_target + ext
@@ -206,9 +206,6 @@ class DownloadWorker:
         return self._failed
 
     def _resolve_output_dir(self) -> str:
-        # When output_path is set (only possible for single tracks — albums/playlists
-        # have it nullified already in SpotiflacDownloader._run_once), use its
-        # parent directory so the provider writes nearby and os.replace is fast.
         if self._opts.output_path:
             out = os.path.normpath(
                 os.path.dirname(os.path.abspath(self._opts.output_path))
@@ -269,9 +266,15 @@ class SpotiflacDownloader:
             if is_tidal:
                 from .providers.tidal_metadata import TidalMetadataClient
                 client = TidalMetadataClient()
-                collection_name, tracks = client.get_url(input_url)
+                collection_name, tracks = client.get_url(
+                    input_url,
+                    include_featuring=self._opts.include_featuring,
+                )
             else:
-                collection_name, tracks = self._client.get_url(input_url)
+                collection_name, tracks = self._client.get_url(
+                    input_url,
+                    include_featuring=self._opts.include_featuring,
+                )
         except SpotiflacError as exc:
             logger.error("Metadata fetch failed: %s", exc)
             print(f"Error: {exc}")
@@ -305,14 +308,19 @@ class SpotiflacDownloader:
             from .providers.spotify_metadata import parse_spotify_url
             info = parse_spotify_url(input_url)
 
-        is_album    = info["type"] == "album"
-        is_playlist = info["type"] == "playlist"
+        is_album       = info["type"] == "album"
+        is_playlist    = info["type"] == "playlist"
+        is_discography = info["type"] in ("artist", "artist_discography")
+
+        # Le discografie riusano la logica playlist (sottocartelle per artista/album)
+        if is_discography:
+            is_playlist = True
+
         self._opts.is_album = is_album
 
-        # output_path ha senso solo per tracce singole: se il link è un album
-        # o una playlist lo azzeriamo subito, prima che il Worker venga creato,
-        # così il resto del codice non deve preoccuparsene affatto.
-        if (is_album or is_playlist) and self._opts.output_path:
+        # output_path ha senso solo per tracce singole: se il link è un album,
+        # una playlist o una discografia lo azzeriamo subito.
+        if (is_album or is_playlist or is_discography) and self._opts.output_path:
             logger.warning(
                 "[downloader] output_path ignorato: il link è un %s, "
                 "i file verranno salvati normalmente in output_dir.",
