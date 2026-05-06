@@ -320,7 +320,7 @@ class TidalMetadataClient:
                 "eps":          "EPSANDSINGLES",
                 "singles":      "EPSANDSINGLES",
                 "compilations": "COMPILATIONS",
-                "all":          "ALBUMS,EPSANDSINGLES,COMPILATIONS",
+                "all":          "ALBUMS,EPSANDSINGLES",
             }
             raw_group      = info.get("group", "all")
             include_groups = group_map.get(raw_group, "ALBUMS,EPSANDSINGLES")
