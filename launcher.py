@@ -4,8 +4,12 @@ CLI entry point per SpotiFLAC — con supporto provider lyrics e metadata enrich
 """
 import argparse
 import logging
+import sys
+
 from SpotiFLAC.check_update import check_for_updates
 from SpotiFLAC import SpotiFLAC
+from interactive import run_interactive
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -110,40 +114,85 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def main() -> None:
+    # Esegui il controllo degli aggiornamenti a prescindere dalla modalità
     check_for_updates()
 
-    args = parse_args()
+    # ── RILEVAMENTO AUTOMATICO ──────────────────────────────────────────────
+    # Se la lista degli argomenti contiene solo il nome dello script (len == 1)
+    # l'utente non ha passato flag, quindi invochiamo la modalità interattiva.
+    if len(sys.argv) == 1:
+        # Avvia il wizard interattivo
+        cfg = run_interactive()
 
-    log_level = logging.DEBUG if args.verbose else logging.WARNING
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+        # Imposta un livello di log di default per la modalità interattiva
+        log_level = logging.WARNING
+        logging.basicConfig(
+            level=log_level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
 
-    SpotiFLAC(
-        url                      = args.url,
-        output_dir               = args.output_dir,
-        services                 = args.service,
-        filename_format          = args.filename_format,
-        use_track_numbers        = args.use_track_numbers,
-        use_album_track_numbers  = args.use_album_track_numbers,
-        use_artist_subfolders    = args.use_artist_subfolders,
-        use_album_subfolders     = args.use_album_subfolders,
-        loop                     = args.loop,
-        quality                  = args.quality,
-        first_artist_only        = args.first_artist_only,
-        log_level                = log_level,
-        output_path              = args.output_path,
-        # Lyrics
-        embed_lyrics             = args.embed_lyrics,
-        lyrics_providers         = args.lyrics_providers,
-        lyrics_spotify_token     = args.spotify_token,
-        # Enrichment
-        enrich_metadata          = args.enrich,
-        enrich_providers         = args.enrich_providers,
-        qobuz_token              = args.qobuz_token,
-        include_featuring        = args.include_featuring,
-    )
+        # Lancia l'istanza passando le chiavi del dizionario 'cfg' raccolte dal wizard
+        SpotiFLAC(
+            url                      = cfg["url"],
+            output_dir               = cfg["output_dir"],
+            services                 = cfg["services"],
+            filename_format          = cfg["filename_format"],
+            use_track_numbers        = cfg["use_track_numbers"],
+            use_album_track_numbers  = cfg["use_album_track_numbers"],
+            use_artist_subfolders    = cfg["use_artist_subfolders"],
+            use_album_subfolders     = cfg["use_album_subfolders"],
+            loop                     = cfg.get("loop"),
+            quality                  = cfg["quality"],
+            first_artist_only        = cfg["first_artist_only"],
+            log_level                = log_level,
+            output_path              = None, # Non gestito dal wizard
+            # Lyrics
+            embed_lyrics             = cfg["embed_lyrics"],
+            lyrics_providers         = cfg["lyrics_providers"],
+            lyrics_spotify_token     = cfg.get("lyrics_spotify_token", ""),
+            # Enrichment
+            enrich_metadata          = cfg["enrich_metadata"],
+            enrich_providers         = cfg["enrich_providers"],
+            qobuz_token              = cfg.get("qobuz_token"),
+            include_featuring        = cfg["include_featuring"],
+        )
+
+    # ── MODALITÀ CLI CLASSICA ───────────────────────────────────────────────
+    else:
+        # Passa ad argparse il parsing standard
+        args = parse_args()
+
+        log_level = logging.DEBUG if args.verbose else logging.WARNING
+        logging.basicConfig(
+            level=log_level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+
+        # Lancia l'istanza usando il Namespace 'args'
+        SpotiFLAC(
+            url                      = args.url,
+            output_dir               = args.output_dir,
+            services                 = args.service,
+            filename_format          = args.filename_format,
+            use_track_numbers        = args.use_track_numbers,
+            use_album_track_numbers  = args.use_album_track_numbers,
+            use_artist_subfolders    = args.use_artist_subfolders,
+            use_album_subfolders     = args.use_album_subfolders,
+            loop                     = args.loop,
+            quality                  = args.quality,
+            first_artist_only        = args.first_artist_only,
+            log_level                = log_level,
+            output_path              = args.output_path,
+            # Lyrics
+            embed_lyrics             = args.embed_lyrics,
+            lyrics_providers         = args.lyrics_providers,
+            lyrics_spotify_token     = args.spotify_token,
+            # Enrichment
+            enrich_metadata          = args.enrich,
+            enrich_providers         = args.enrich_providers,
+            qobuz_token              = args.qobuz_token,
+            include_featuring        = args.include_featuring,
+        )
 
 if __name__ == "__main__":
     main()
