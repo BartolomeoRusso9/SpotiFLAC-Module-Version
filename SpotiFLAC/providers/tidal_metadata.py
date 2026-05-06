@@ -28,6 +28,8 @@ import requests
 
 from ..core.errors import AuthError, NetworkError, InvalidUrlError, SpotiflacError, ErrorKind
 from ..core.models import TrackMetadata
+from ..core.isrc_cache import get_cached_isrc, put_cached_isrc
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -186,8 +188,10 @@ class TidalMetadataClient:
     # Fetch album completo
     # ------------------------------------------------------------------
 
-    def get_album_tracks(self, album_id: str) -> tuple[dict, list[TrackMetadata]]:
-        album = self._get(f"/albums/{album_id}")
+    def get_album_tracks(self, album_id: str, preloaded_album: dict | None = None) -> tuple[dict, list[TrackMetadata]]:
+        # Se abbiamo già i dati dell'album, risparmiamo una chiamata HTTP!
+        album = preloaded_album if preloaded_album else self._get(f"/albums/{album_id}")
+
         items = self._paginate(f"/albums/{album_id}/tracks")
         tracks = [self._track_from_album_item(item, album) for item in items]
         return album, tracks
@@ -235,54 +239,57 @@ class TidalMetadataClient:
             artist_id: str,
             include_groups: str = "ALBUM,EP,SINGLE",
     ) -> tuple[dict, list[TrackMetadata]]:
-        """
-        Recupera la discografia completa di un artista Tidal.
-        include_groups: ALBUM, EP, SINGLE, COMPILATION (separati da virgola).
-        Deduplica automaticamente tramite ISRC.
-        """
+
         artist = self._get(f"/artists/{artist_id}")
         tracks: list[TrackMetadata] = []
         seen_isrc: set[str] = set()
         seen_album_ids: set[str] = set()
 
+        # Raccogliamo tutti gli ID degli album iterando sui gruppi
+        albums_to_fetch = []
         for group in include_groups.split(","):
             group = group.strip().upper()
             try:
+                # Usiamo la sintassi corretta per il client Tidal
                 albums = self._paginate(
                     f"/artists/{artist_id}/albums",
                     extra_params={"filter": group},
                 )
+                for album_data in albums:
+                    album_id = str(album_data.get("id", ""))
+                    if album_id and album_id not in seen_album_ids:
+                        seen_album_ids.add(album_id)
+                        albums_to_fetch.append((album_id, album_data)) # Salviamo anche i dati base per evitare chiamate HTTP extra
             except Exception as exc:
                 logger.warning("[tidal_metadata] gruppo %s fallito: %s", group, exc)
                 continue
 
-            for album_data in albums:
-                album_id = str(album_data.get("id", ""))
-                if not album_id or album_id in seen_album_ids:
-                    continue
-                seen_album_ids.add(album_id)
+        # Parallelizziamo le richieste degli album
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_album = {
+                # Passiamo l'album_data come preloaded_album
+                executor.submit(self.get_album_tracks, aid, preloaded): aid for aid, preloaded in albums_to_fetch
+            }
+
+            for future in as_completed(future_to_album):
+                album_id = future_to_album[future]
                 try:
-                    _, album_tracks = self.get_album_tracks(album_id)
+                    _, album_tracks = future.result()
                     for track in album_tracks:
                         if track.isrc and track.isrc in seen_isrc:
-                            logger.debug(
-                                "[tidal_metadata] duplicato saltato: %s (ISRC %s)",
-                                track.title, track.isrc,
-                            )
                             continue
                         if track.isrc:
                             seen_isrc.add(track.isrc)
                         tracks.append(track)
                 except Exception as exc:
-                    logger.warning(
                         "[tidal_metadata] album %s saltato: %s", album_id, exc
                     )
+                    logger.warning("[tidal_metadata] album %s saltato: %s", album_id, exc)
 
                 time.sleep(0.3)  # rate limit tra album
-
-            time.sleep(0.5)  # rate limit tra gruppi
-
+            time.sleep(0.5)
         return artist, tracks
 
     # ------------------------------------------------------------------

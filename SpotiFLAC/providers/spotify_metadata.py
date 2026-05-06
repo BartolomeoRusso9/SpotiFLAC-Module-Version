@@ -13,6 +13,7 @@ import requests
 from ..core.errors import AuthError, NetworkError, InvalidUrlError, SpotiflacError, ErrorKind
 from ..core.models import TrackMetadata
 from ..core.isrc_cache import get_cached_isrc, put_cached_isrc
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -118,20 +119,42 @@ class SpotifyMetadataClient:
 
     def get_album_tracks(self, album_id: str) -> tuple[dict, list[TrackMetadata]]:
         album = self._get(f"/albums/{album_id}")
-        tracks: list[TrackMetadata] = []
+        raw_items = list(self._paginate(f"{_API_BASE}/albums/{album_id}/tracks?limit=50"))
 
-        for item in self._paginate(f"{_API_BASE}/albums/{album_id}/tracks?limit=50"):
+        missing_isrc_ids = []
+        isrc_map = {}
+
+        # 1. Controlliamo la cache prima di fare qualsiasi richiesta
+        for item in raw_items:
             track_id = item["id"]
-            isrc = get_cached_isrc(track_id)
-            if not isrc:
-                try:
-                    full = self._get(f"/tracks/{track_id}")
-                    isrc = full.get("external_ids", {}).get("isrc", "")
-                    if isrc:
-                        put_cached_isrc(track_id, isrc)
-                except Exception:
-                    pass
+            cached = get_cached_isrc(track_id)
+            if cached:
+                isrc_map[track_id] = cached
+            else:
+                missing_isrc_ids.append(track_id)
 
+        # 2. Recuperiamo gli ISRC mancanti a blocchi di 50 (limite API Spotify)
+        for i in range(0, len(missing_isrc_ids), 50):
+            chunk = missing_isrc_ids[i:i+50]
+            try:
+                ids_str = ",".join(chunk)
+                # Endpoint batch di Spotify
+                data = self._get(f"/tracks?ids={ids_str}")
+                for full_track in data.get("tracks", []):
+                    if full_track:
+                        tid = full_track["id"]
+                        tisrc = full_track.get("external_ids", {}).get("isrc", "")
+                        isrc_map[tid] = tisrc
+                        if tisrc:
+                            put_cached_isrc(tid, tisrc)
+            except Exception as exc:
+                logger.warning("[spotify] Fallimento nel recupero batch degli ISRC: %s", exc)
+
+        # 3. Costruiamo gli oggetti TrackMetadata
+        tracks: list[TrackMetadata] = []
+        for item in raw_items:
+            track_id = item["id"]
+            isrc = isrc_map.get(track_id, "")
             tracks.append(self._track_from_album_item(item, album, isrc))
 
         return album, tracks
@@ -153,39 +176,45 @@ class SpotifyMetadataClient:
             artist_id: str,
             include_groups: str = "album,single",
     ) -> tuple[dict, list[TrackMetadata]]:
-        """
-        Recupera la discografia completa di un artista Spotify.
-        include_groups: album, single, appears_on, compilation (separati da virgola).
-        Deduplica automaticamente tramite ISRC.
-        """
+
         artist = self._get(f"/artists/{artist_id}")
         tracks: list[TrackMetadata] = []
         seen_isrc: set[str] = set()
         seen_album_ids: set[str] = set()
 
+        # Raccogliamo tutti gli ID degli album prima
+        albums_to_fetch = []
         for item in self._paginate(
                 f"{_API_BASE}/artists/{artist_id}/albums"
                 f"?include_groups={include_groups}&limit=50"
         ):
             album_id = item.get("id")
-            if not album_id or album_id in seen_album_ids:
-                continue
-            seen_album_ids.add(album_id)
+            if album_id and album_id not in seen_album_ids:
+                seen_album_ids.add(album_id)
+                albums_to_fetch.append(album_id)
 
-            try:
-                _, album_tracks = self.get_album_tracks(album_id)
-                for track in album_tracks:
-                    if track.isrc and track.isrc in seen_isrc:
-                        logger.debug(
-                            "[spotify] duplicato saltato: %s (ISRC %s)",
-                            track.title, track.isrc,
-                        )
-                        continue
-                    if track.isrc:
-                        seen_isrc.add(track.isrc)
-                    tracks.append(track)
-            except Exception as exc:
-                logger.warning("[spotify] album %s saltato: %s", album_id, exc)
+        # Parallelizziamo le richieste degli album (max 5 worker per non arrabbiare le API)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            # Sottomettiamo tutti i task
+            future_to_album = {
+                executor.submit(self.get_album_tracks, aid): aid for aid in albums_to_fetch
+            }
+
+            for future in as_completed(future_to_album):
+                album_id = future_to_album[future]
+                try:
+                    _, album_tracks = future.result()
+                    for track in album_tracks:
+                        # Logica di deduplicazione
+                        if track.isrc and track.isrc in seen_isrc:
+                            continue
+                        if track.isrc:
+                            seen_isrc.add(track.isrc)
+                        tracks.append(track)
+                except Exception as exc:
+                    logger.warning("[spotify] album %s saltato: %s", album_id, exc)
 
         return artist, tracks
 
