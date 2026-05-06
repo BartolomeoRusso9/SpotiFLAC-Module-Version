@@ -1,13 +1,13 @@
 """
-SpotiFLAC — Modalità interattiva.
-Guida l'utente nella configurazione step-by-step senza dover ricordare i flag CLI.
+SpotiFLAC — Interactive Mode.
+Guides the user through the step-by-step configuration without needing to remember CLI flags.
 """
 from __future__ import annotations
 import os
 import sys
 
 # ---------------------------------------------------------------------------
-# ANSI colors (funzionano su macOS, Linux, Windows 10+)
+# ANSI colors (works on macOS, Linux, Windows 10+)
 # ---------------------------------------------------------------------------
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
 
@@ -31,7 +31,7 @@ MAGENTA= lambda t: _c("95", t)
 # ---------------------------------------------------------------------------
 
 def _ask(prompt: str, default: str = "") -> str:
-    """Chiede una stringa all'utente."""
+    """Asks the user for a string."""
     default_hint = f" {DIM('[' + default + ']')}" if default else ""
     try:
         val = input(f"  {prompt}{default_hint}: ").strip()
@@ -42,7 +42,7 @@ def _ask(prompt: str, default: str = "") -> str:
 
 
 def _ask_bool(prompt: str, default: bool = False) -> bool:
-    """Chiede sì/no."""
+    """Asks for a yes/no confirmation."""
     hint = DIM("Y/n" if default else "y/N")
     try:
         val = input(f"  {prompt} [{hint}]: ").strip().lower()
@@ -55,12 +55,12 @@ def _ask_bool(prompt: str, default: bool = False) -> bool:
 
 
 def _ask_choice(prompt: str, options: list[str], default: str) -> str:
-    """Chiede di scegliere una opzione dalla lista."""
+    """Asks the user to choose an option from a list."""
     print(f"\n  {BOLD(prompt)}")
     for i, opt in enumerate(options, 1):
         marker = GREEN("▶") if opt == default else " "
         print(f"    {marker} {DIM(f'[{i}]')} {opt}")
-    print(f"    {DIM('Invio = default')}")
+    print(f"    {DIM('Enter = default')}")
     try:
         val = input("  → ").strip()
     except (EOFError, KeyboardInterrupt):
@@ -82,15 +82,15 @@ def _ask_multi(
         ordered: bool = False,
 ) -> list[str]:
     """
-    Chiede di selezionare più opzioni.
-    Se ordered=True, l'ordine di inserimento viene mantenuto.
+    Asks the user to select multiple options.
+    If ordered=True, the insertion order is preserved.
     """
     print(f"\n  {BOLD(prompt)}")
     for i, opt in enumerate(options, 1):
         marker = GREEN("●") if opt in defaults else DIM("○")
         default_label = DIM(" (default)") if opt in defaults else ""
         print(f"    {DIM(f'[{i}]')} {marker} {opt}{default_label}")
-    print(f"    {DIM('Inserisci i numeri separati da spazio (es: 1 3 2) — Invio = default')}")
+    print(f"    {DIM('Enter numbers separated by space (e.g., 1 3 2) — Enter = default')}")
     try:
         val = input("  → ").strip()
     except (EOFError, KeyboardInterrupt):
@@ -118,7 +118,7 @@ def _ask_multi(
 
 
 # ---------------------------------------------------------------------------
-# Sezioni del wizard
+# Wizard Sections
 # ---------------------------------------------------------------------------
 
 def _section(title: str) -> None:
@@ -133,20 +133,20 @@ def _header() -> None:
     print(CYAN(BOLD("  ╔══════════════════════════════════════════════╗")))
     print(CYAN(BOLD("  ║        SpotiFLAC  —  Download Wizard         ║")))
     print(CYAN(BOLD("  ╚══════════════════════════════════════════════╝")))
-    print(f"  {DIM('Premi Ctrl+C in qualsiasi momento per uscire')}")
+    print(f"  {DIM('Press Ctrl+C at any time to exit')}")
 
 
 def _summary(cfg: dict) -> None:
-    _section("Riepilogo configurazione")
+    _section("Configuration Summary")
 
     def row(label: str, value: str) -> None:
         print(f"  {BOLD(label + ':'): <30} {GREEN(value)}")
 
     row("URL", cfg["url"])
     row("Output", cfg["output_dir"])
-    row("Servizi", " → ".join(cfg["services"]))
-    row("Qualità", cfg["quality"])
-    row("Formato filename", cfg["filename_format"])
+    row("Services", " → ".join(cfg["services"]))
+    row("Quality", cfg["quality"])
+    row("Filename format", cfg["filename_format"])
 
     flags = []
     if cfg["use_track_numbers"]:     flags.append("track-numbers")
@@ -155,27 +155,27 @@ def _summary(cfg: dict) -> None:
     if cfg["use_album_subfolders"]:  flags.append("album-subfolders")
     if cfg["first_artist_only"]:     flags.append("first-artist-only")
     if cfg["include_featuring"]:     flags.append("include-featuring")
-    row("Opzioni", ", ".join(flags) if flags else "nessuna")
+    row("Options", ", ".join(flags) if flags else "none")
 
-    row("Testi", "abilitati (" + ", ".join(cfg["lyrics_providers"]) + ")" if cfg["embed_lyrics"] else "disabilitati")
-    row("Enrichment", "abilitato (" + ", ".join(cfg["enrich_providers"]) + ")" if cfg["enrich_metadata"] else "disabilitato")
+    row("Lyrics", "enabled (" + ", ".join(cfg["lyrics_providers"]) + ")" if cfg["embed_lyrics"] else "disabled")
+    row("Enrichment", "enabled (" + ", ".join(cfg["enrich_providers"]) + ")" if cfg["enrich_metadata"] else "disabled")
 
     if cfg.get("qobuz_token"):
-        row("Qobuz token", "✓ impostato")
+        row("Qobuz token", "✓ set")
     if cfg.get("lyrics_spotify_token"):
-        row("Spotify token", "✓ impostato")
+        row("Spotify token", "✓ set")
     if cfg.get("loop"):
-        row("Loop", f"ogni {cfg['loop']} minuti")
+        row("Loop", f"every {cfg['loop']} minutes")
 
 
 # ---------------------------------------------------------------------------
-# Wizard principale
+# Main Wizard
 # ---------------------------------------------------------------------------
 
 def run_interactive() -> dict:
     """
-    Esegue il wizard interattivo e restituisce un dict di configurazione
-    compatibile con i parametri di SpotiFLAC().
+    Runs the interactive wizard and returns a configuration dict
+    compatible with SpotiFLAC() parameters.
     """
     _header()
 
@@ -183,67 +183,67 @@ def run_interactive() -> dict:
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
-    print(f"  {DIM('Supportati: Spotify e Tidal (track, album, playlist, artista)')}")
+    print(f"  {DIM('Supported: Spotify and Tidal (track, album, playlist, artist)')}")
     url = ""
     while not url:
         url = _ask("URL")
         if not url:
-            print(f"  {RED('⚠  URL obbligatorio.')}")
+            print(f"  {RED('⚠  URL is required.')}")
     cfg["url"] = url
 
     # ── 2. Output directory ─────────────────────────────────────────────────
-    _section("2 · Directory di output")
-    cfg["output_dir"] = _ask("Cartella di destinazione", "./Downloads")
+    _section("2 · Output Directory")
+    cfg["output_dir"] = _ask("Destination folder", "./Downloads")
 
-    # ── 3. Servizi ──────────────────────────────────────────────────────────
-    _section("3 · Servizi audio")
-    print(f"  {DIM('Scegli i servizi e il loro ordine di priorità (il primo ha la precedenza)')}")
+    # ── 3. Services ──────────────────────────────────────────────────────────
+    _section("3 · Audio Services")
+    print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")
     services = _ask_multi(
-        "Servizi (ordine = priorità):",
+        "Services (order = priority):",
         options  = ["tidal", "qobuz", "amazon", "spoti"],
         defaults = ["tidal"],
         ordered  = True,
     )
     cfg["services"] = services
 
-    # ── 4. Qualità ──────────────────────────────────────────────────────────
-    _section("4 · Qualità audio")
-    print(f"  {DIM('Nota: Se la qualità richiesta non viene trovata, verrà eseguito un fallback automatico.')}")
+    # ── 4. Quality ──────────────────────────────────────────────────────────
+    _section("4 · Audio Quality")
+    print(f"  {DIM('Note: If the requested quality is not found, an automatic fallback will be executed.')}")
 
     has_qobuz = "qobuz" in cfg["services"]
     has_tidal = "tidal" in cfg["services"]
 
     if has_qobuz and not has_tidal:
-        # L'utente ha scelto Qobuz ma non Tidal
+        # The user chose Qobuz but not Tidal
         q_choice = _ask_choice(
-            "Qualità Qobuz:",
+            "Qobuz Quality:",
             options = ["6 (CD Lossless)", "7 (Hi-Res)", "27 (Hi-Res Max)"],
             default = "6 (CD Lossless)",
         )
-        # Estraiamo solo il numero (6, 7 o 27) dalla stringa scelta
+        # Extract only the number (6, 7 or 27) from the chosen string
         cfg["quality"] = q_choice.split(" ")[0]
 
     elif has_tidal and not has_qobuz:
-        # L'utente ha scelto Tidal ma non Qobuz
+        # The user chose Tidal but not Qobuz
         cfg["quality"] = _ask_choice(
-            "Qualità Tidal:",
+            "Tidal Quality:",
             options = ["LOSSLESS", "HI_RES"],
             default = "LOSSLESS",
         )
 
     elif has_qobuz and has_tidal:
-        # L'utente ha inserito entrambi i provider nella lista
-        print(f"  {DIM('Hai selezionato sia Qobuz che Tidal. Scegli un profilo unificato:')}")
+        # The user included both providers in the list
+        print(f"  {DIM('You selected both Qobuz and Tidal. Choose a unified profile:')}")
         q_choice = _ask_choice(
-            "Qualità combinata:",
+            "Combined Quality:",
             options = [
-                "LOSSLESS (Applica '6' su Qobuz e 'LOSSLESS' su Tidal)",
-                "HI_RES (Applica '27' su Qobuz e 'HI_RES' su Tidal)",
-                "7 (Applica qualità Hi-Res intermedia solo per Qobuz)"
+                "LOSSLESS (Applies '6' on Qobuz and 'LOSSLESS' on Tidal)",
+                "HI_RES (Applies '27' on Qobuz and 'HI_RES' on Tidal)",
+                "7 (Applies intermediate Hi-Res quality only for Qobuz)"
             ],
-            default = "LOSSLESS (Applica '6' su Qobuz e 'LOSSLESS' su Tidal)",
+            default = "LOSSLESS (Applies '6' on Qobuz and 'LOSSLESS' on Tidal)",
         )
-        # Riduciamo la stringa lunga al valore chiave richiesto dalla CLI
+        # Reduce the long string to the key value required by the CLI
         if q_choice.startswith("LOSSLESS"):
             cfg["quality"] = "LOSSLESS"
         elif q_choice.startswith("HI_RES"):
@@ -252,62 +252,62 @@ def run_interactive() -> dict:
             cfg["quality"] = "7"
 
     else:
-        # Fallback nel caso usi solo Amazon o Spotify
+        # Fallback in case only Amazon or Spotify are used
         cfg["quality"] = _ask_choice(
-            "Qualità:",
+            "Quality:",
             options = ["LOSSLESS", "HI_RES"],
             default = "LOSSLESS",
         )
 
-    # ── 5. Formato filename ─────────────────────────────────────────────────
-    _section("5 · Formato nome file")
-    print(f"  {DIM('Placeholder: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}")
-    cfg["filename_format"] = _ask("Formato", "{title} - {artist}")
+    # ── 5. Filename format ─────────────────────────────────────────────────
+    _section("5 · Filename Format")
+    print(f"  {DIM('Placeholders: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}")
+    cfg["filename_format"] = _ask("Format", "{title} - {artist}")
 
-    # ── 6. Opzioni organizzazione ───────────────────────────────────────────
-    _section("6 · Opzioni organizzazione")
+    # ── 6. Organization options ───────────────────────────────────────────
+    _section("6 · Organization Options")
 
-    # Chiediamo prima se vuole i numeri di traccia
-    cfg["use_track_numbers"] = _ask_bool("Aggiungi numero traccia al nome file?", False)
+    # Ask first if they want track numbers
+    cfg["use_track_numbers"] = _ask_bool("Add track number to filename?", False)
 
-    # Se risponde sì, chiediamo quale tipo di numerazione vuole usare
+    # If yes, ask which type of numbering to use
     if cfg["use_track_numbers"]:
-        cfg["use_album_track_numbers"] = _ask_bool("Usa numero traccia originale dell'album?", False)
+        cfg["use_album_track_numbers"] = _ask_bool("Use original album track number?", False)
     else:
-        # Se risponde no, impostiamo automaticamente la variabile a False senza chiedere
+        # If no, automatically set the variable to False without asking
         cfg["use_album_track_numbers"] = False
 
-    cfg["use_artist_subfolders"]   = _ask_bool("Crea sottocartelle per artista?", False)
-    cfg["use_album_subfolders"]    = _ask_bool("Crea sottocartelle per album?", False)
-    cfg["first_artist_only"]       = _ask_bool("Usa solo il primo artista nei tag e nel nome?", False)
+    cfg["use_artist_subfolders"]   = _ask_bool("Create artist subfolders?", False)
+    cfg["use_album_subfolders"]    = _ask_bool("Create album subfolders?", False)
+    cfg["first_artist_only"]       = _ask_bool("Use only the first artist in tags and filename?", False)
 
     # ── 7. Featuring ────────────────────────────────────────────────────────
     _section("7 · Featuring")
 
     if "/artist/" in cfg["url"]:
-        print(f"  {DIM('Se attivato, scarica anche le singole tracce dove artista appare come featured')}")
-        print(f"  {DIM('su release di altri artisti (applies_on su Spotify, compilazioni su Tidal)')}")
-        cfg["include_featuring"] = _ask_bool("Includi tracce featuring?", False)
+        print("  " + DIM("If enabled, also downloads individual tracks where the artist appears as a featured artist"))
+        print("  " + DIM("on other artists' releases (appears_on on Spotify, compilations on Tidal)"))
+        cfg["include_featuring"] = _ask_bool("Include featuring tracks?", False)
     else:
-        # Mostriamo all'utente che stiamo saltando la sezione
-        print(f"  {YELLOW('⏭  Saltato:')} {DIM('URL fornito non appartiene alla pagina di un artista.')}")
+        # Show the user that we are skipping this section
+        print(f"  {YELLOW('⏭  Skipped:')} {DIM('The provided URL does not belong to an artist page.')}")
         cfg["include_featuring"] = False
 
-    # ── 8. Testi ────────────────────────────────────────────────────────────
-    _section("8 · Testi (Lyrics)")
-    cfg["embed_lyrics"] = _ask_bool("Incorpora i testi sincronizzati?", True)
+    # ── 8. Lyrics ────────────────────────────────────────────────────────────
+    _section("8 · Lyrics")
+    cfg["embed_lyrics"] = _ask_bool("Embed synchronized lyrics?", True)
 
     if cfg["embed_lyrics"]:
         cfg["lyrics_providers"] = _ask_multi(
-            "Provider testi (ordine = priorità):",
+            "Lyrics providers (order = priority):",
             options  = ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
             defaults = ["spotify", "musixmatch", "lrclib", "apple"],
             ordered  = True,
         )
         has_spotify = "spotify" in cfg["lyrics_providers"]
         if has_spotify:
-            print(f"  {DIM('Il provider Spotify richiede il cookie sp_dc per i testi sincronizzati')}")
-            token = _ask("Cookie sp_dc Spotify (lascia vuoto per saltare)", "")
+            print(f"  {DIM('The Spotify provider requires the sp_dc cookie for synchronized lyrics')}")
+            token = _ask("Spotify sp_dc cookie (leave blank to skip)", "")
             cfg["lyrics_spotify_token"] = token
         else:
             cfg["lyrics_spotify_token"] = ""
@@ -316,13 +316,13 @@ def run_interactive() -> dict:
         cfg["lyrics_spotify_token"]  = ""
 
     # ── 9. Metadata enrichment ──────────────────────────────────────────────
-    _section("9 · Arricchimento metadati")
-    print(f"  {DIM('Aggiunge genere, BPM, etichetta, cover HD, MusicBrainz IDs e altro')}")
-    cfg["enrich_metadata"] = _ask_bool("Abilita arricchimento metadati?", True)
+    _section("9 · Metadata Enrichment")
+    print(f"  {DIM('Adds genre, BPM, label, HD cover, MusicBrainz IDs, and more')}")
+    cfg["enrich_metadata"] = _ask_bool("Enable metadata enrichment?", True)
 
     if cfg["enrich_metadata"]:
         cfg["enrich_providers"] = _ask_multi(
-            "Provider enrichment (ordine = priorità):",
+            "Enrichment providers (order = priority):",
             options  = ["deezer", "apple", "qobuz", "tidal"],
             defaults = ["deezer", "apple", "qobuz", "tidal"],
             ordered  = True,
@@ -330,30 +330,30 @@ def run_interactive() -> dict:
     else:
         cfg["enrich_providers"] = ["deezer", "apple", "qobuz", "tidal"]
 
-    # ── 10. Token Qobuz ─────────────────────────────────────────────────────
-    _section("10 · Token opzionali")
-    cfg["qobuz_token"] = _ask("Qobuz auth token (lascia vuoto per saltare)", "") or None
+    # ── 10. Optional Tokens ─────────────────────────────────────────────────────
+    _section("10 · Optional Tokens")
+    cfg["qobuz_token"] = _ask("Qobuz auth token (leave blank to skip)", "") or None
 
     # ── 11. Loop ────────────────────────────────────────────────────────────
-    loop_str = _ask("Ripeti ogni N minuti (lascia vuoto per disabilitare)", "")
+    loop_str = _ask("Repeat every N minutes (leave blank to disable)", "")
     cfg["loop"] = int(loop_str) if loop_str.isdigit() else None
 
-    # ── Riepilogo + conferma ─────────────────────────────────────────────────
+    # ── Summary + confirmation ─────────────────────────────────────────────────
     _summary(cfg)
     print()
-    if not _ask_bool(BOLD("Avviare il download con questa configurazione?"), True):
-        print(f"\n  {YELLOW('Operazione annullata.')}\n")
+    if not _ask_bool(BOLD("Start download with this configuration?"), True):
+        print(f"\n  {YELLOW('Operation cancelled.')}\n")
         sys.exit(0)
 
-    # ── Comando CLI equivalente ──────────────────────────────────────────────
-    _section("Comando CLI equivalente")
+    # ── Equivalent CLI command ──────────────────────────────────────────────
+    _section("Equivalent CLI command")
     _print_cli_command(cfg)
 
     return cfg
 
 
 def _print_cli_command(cfg: dict) -> None:
-    """Stampa il comando CLI equivalente alla configurazione scelta."""
+    """Prints the CLI command equivalent to the chosen configuration."""
     parts = [f'spotiflac "{cfg["url"]}" "{cfg["output_dir"]}"']
     parts.append(f'-s {" ".join(cfg["services"])}')
     if cfg["quality"] != "LOSSLESS":
