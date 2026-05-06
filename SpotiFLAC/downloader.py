@@ -47,6 +47,7 @@ class DownloadOptions:
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"]
     )
     qobuz_token:             str | None      = None
+    include_featuring:       bool            = False
 
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
@@ -265,9 +266,15 @@ class SpotiflacDownloader:
             if is_tidal:
                 from .providers.tidal_metadata import TidalMetadataClient
                 client = TidalMetadataClient()
-                collection_name, tracks = client.get_url(input_url)
+                collection_name, tracks = client.get_url(
+                    input_url,
+                    include_featuring=self._opts.include_featuring,
+                )
             else:
-                collection_name, tracks = self._client.get_url(input_url)
+                collection_name, tracks = self._client.get_url(
+                    input_url,
+                    include_featuring=self._opts.include_featuring,
+                )
         except SpotiflacError as exc:
             logger.error("Metadata fetch failed: %s", exc)
             print(f"Error: {exc}")

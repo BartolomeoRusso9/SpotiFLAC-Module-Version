@@ -192,6 +192,7 @@ class SpotifyMetadataClient:
             # - "compilation" è gestito separatamente con filtro featuring.
             artist_id: str,
             include_groups: str = "album,single",
+            include_featuring: bool = False,
     ) -> tuple[dict, list[TrackMetadata]]:
         """
         Recupera la discografia completa di un artista Spotify.
@@ -212,6 +213,10 @@ class SpotifyMetadataClient:
         # Raccogliamo tutti gli album con il loro tipo di relazione
         # album_group: "album" | "single" | "appears_on" | "compilation"
         albums_to_fetch: list[tuple[str, bool]] = []
+        if include_featuring:
+            groups = set(include_groups.split(","))
+            groups.update(["appears_on", "compilation"])
+            include_groups = ",".join(groups)
 
         for item in self._paginate(
                 f"{_API_BASE}/artists/{artist_id}/albums"
@@ -270,7 +275,7 @@ class SpotifyMetadataClient:
                 tracks.append(track)
         return artist, tracks
 
-    def get_url(self, spotify_url: str) -> tuple[str, list[TrackMetadata]]:
+    def get_url(self, spotify_url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata]]:
         info = parse_spotify_url(spotify_url)
         t    = info["type"]
 
@@ -289,7 +294,10 @@ class SpotifyMetadataClient:
             return name, tracks
 
         if t in ("artist", "artist_discography"):
-            artist, tracks = self.get_artist_albums(info["id"])
+            artist, tracks = self.get_artist_albums(
+                info["id"],
+                include_featuring=include_featuring,
+            )
             return artist.get("name", "Unknown Artist"), tracks
 
         raise SpotiflacError(

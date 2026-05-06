@@ -264,6 +264,7 @@ class TidalMetadataClient:
             # Le compilazioni contengono tracce di molti artisti e vanno abilitate
             # esplicitamente — analogia con "appears_on" di Spotify.
             include_groups: str = f"{_TIDAL_FILTER_ALBUMS},{_TIDAL_FILTER_EPSANDSINGLES}",
+            include_featuring: bool = False,
     ) -> tuple[dict, list[TrackMetadata]]:
         """
         Recupera la discografia completa di un artista Tidal.
@@ -288,6 +289,11 @@ class TidalMetadataClient:
         # Raccogliamo tutti gli album da tutti i gruppi richiesti
         # Struttura: (album_id, preloaded_album_data, is_compilation)
         albums_to_fetch: list[tuple[str, dict, bool]] = []
+
+        if include_featuring:
+            groups = set(include_groups.split(","))
+            groups.add(_TIDAL_FILTER_COMPILATIONS)
+            include_groups = ",".join(groups)
 
         for group in include_groups.split(","):
             group = group.strip().upper()
@@ -361,7 +367,7 @@ class TidalMetadataClient:
     # Entry point pubblico
     # ------------------------------------------------------------------
 
-    def get_url(self, tidal_url: str) -> tuple[str, list[TrackMetadata]]:
+    def get_url(self, tidal_url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata]]:
         """
         Riceve un URL Tidal e restituisce (nome_collezione, [TrackMetadata]).
         """
@@ -394,7 +400,11 @@ class TidalMetadataClient:
                 raw_group,
                 f"{_TIDAL_FILTER_ALBUMS},{_TIDAL_FILTER_EPSANDSINGLES}",
             )
-            artist, tracks = self.get_artist_albums(info["id"], include_groups)
+            artist, tracks = self.get_artist_albums(
+                info["id"],
+                include_groups,
+                include_featuring=include_featuring,
+            )
             return artist.get("name", "Unknown Artist"), tracks
 
         raise SpotiflacError(
