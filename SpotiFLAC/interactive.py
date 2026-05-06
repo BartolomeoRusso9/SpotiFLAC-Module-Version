@@ -266,8 +266,17 @@ def run_interactive() -> dict:
 
     # ── 6. Opzioni organizzazione ───────────────────────────────────────────
     _section("6 · Opzioni organizzazione")
-    cfg["use_track_numbers"]       = _ask_bool("Aggiungi numero traccia al nome file?", False)
-    cfg["use_album_track_numbers"] = _ask_bool("Usa numero traccia originale dell'album?", False)
+
+    # Chiediamo prima se vuole i numeri di traccia
+    cfg["use_track_numbers"] = _ask_bool("Aggiungi numero traccia al nome file?", False)
+
+    # Se risponde sì, chiediamo quale tipo di numerazione vuole usare
+    if cfg["use_track_numbers"]:
+        cfg["use_album_track_numbers"] = _ask_bool("Usa numero traccia originale dell'album?", False)
+    else:
+        # Se risponde no, impostiamo automaticamente la variabile a False senza chiedere
+        cfg["use_album_track_numbers"] = False
+
     cfg["use_artist_subfolders"]   = _ask_bool("Crea sottocartelle per artista?", False)
     cfg["use_album_subfolders"]    = _ask_bool("Crea sottocartelle per album?", False)
     cfg["first_artist_only"]       = _ask_bool("Usa solo il primo artista nei tag e nel nome?", False)
