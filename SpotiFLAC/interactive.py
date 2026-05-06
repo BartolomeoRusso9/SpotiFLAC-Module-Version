@@ -282,11 +282,15 @@ def run_interactive() -> dict:
     cfg["first_artist_only"]       = _ask_bool("Usa solo il primo artista nei tag e nel nome?", False)
 
     # ── 7. Featuring ────────────────────────────────────────────────────────
-    _section("7 · Featuring")
-    print(f"  {DIM('Se attivato, scarica anche le singole tracce dove artista appare come featured')}")
-    print(f"  {DIM('su release di altri artisti (applies_on su Spotify, compilazioni su Tidal)')}")
-    cfg["include_featuring"] = _ask_bool("Includi tracce featuring?", False)
-
+    # Mostriamo questa sezione solo se l'URL fornito è quello di un artista
+    if "/artist/" in cfg["url"]:
+        _section("7 · Featuring")
+        print(f"  {DIM('Se attivato, scarica anche le singole tracce dove artista appare come featured')}")
+        print(f"  {DIM('su release di altri artisti (applies_on su Spotify, compilazioni su Tidal)')}")
+        cfg["include_featuring"] = _ask_bool("Includi tracce featuring?", False)
+    else:
+        # Se non è un artista, disabilitiamo silenziosamente l'opzione
+        cfg["include_featuring"] = False
     # ── 8. Testi ────────────────────────────────────────────────────────────
     _section("8 · Testi (Lyrics)")
     cfg["embed_lyrics"] = _ask_bool("Incorpora i testi sincronizzati?", True)
