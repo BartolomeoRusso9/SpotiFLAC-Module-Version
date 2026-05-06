@@ -26,7 +26,7 @@ class SoundCloudProvider(BaseProvider):
 
         # Simula un mobile user agent per Cobalt
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         })
 
     def _fetch_client_id(self) -> str:
@@ -43,25 +43,20 @@ class SoundCloudProvider(BaseProvider):
             logger.info("[SC] Found client_id in HTML")
             return match.group(1)
 
-        # Strategia 2: Cerca nei bundle JavaScript
-        script_urls = re.findall(r'src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', res.text)
-        if not script_urls:
-            script_urls = re.findall(r'src="(https://[^"]*sndcdn\.com[^"]*\.js)"', res.text)
+        # Strategia 2: Regex migliorata per prendere QUALSIASI URL .js da sndcdn.com
+        script_urls = re.findall(r'src=["\'](https://[^"\']*sndcdn\.com[^"\']*\.js)["\']', res.text)
 
-        # Controlla gli ultimi bundle (di solito il client_id è lì)
-        for url in reversed(script_urls[-8:]):
+        # Controlla gli ultimi 15 bundle (di solito il client_id è lì)
+        for url in reversed(script_urls[-15:]):
             try:
-                js_res = self.session.get(url)
+                js_res = self.session.get(url, timeout=5)
                 if js_res.status_code == 200:
                     cid_match = re.search(r'client_id[:=]["\']([a-zA-Z0-9]{32})["\']', js_res.text)
-                    if not cid_match:
-                        cid_match = re.search(r'\("client_id=([a-zA-Z0-9]{32})"\)', js_res.text)
-
                     if cid_match:
-                        logger.info("[SC] Found client_id in JS bundle")
+                        logger.info(f"[SC] Found client_id in JS bundle: {url}")
                         return cid_match.group(1)
             except Exception as e:
-                logger.debug(f"[SC] Bundle fetch failed: {e}")
+                logger.debug(f"[SC] Bundle fetch failed for {url}: {e}")
 
         raise ValueError("Could not find SoundCloud client_id")
 
@@ -220,6 +215,12 @@ class SoundCloudProvider(BaseProvider):
                     "downloadMode": "audio",
                     "filenameStyle": "basic"
                 }
+
+                cobalt_headers = {
+                    "Accept": "application/json",
+                    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+                }
+
                 res = self.session.post(self.cobalt_api, json=payload, headers={"Accept": "application/json"})
                 if res.status_code == 200:
                     data = res.json()

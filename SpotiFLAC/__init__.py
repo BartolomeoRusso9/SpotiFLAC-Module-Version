@@ -130,7 +130,7 @@ def SpotiFLAC(
         lyrics_spotify_token    = lyrics_spotify_token,
         # Enrichment
         enrich_metadata         = enrich_metadata,
-        enrich_providers        = enrich_providers or ["deezer", "apple", "qobuz", "tidal"],
+        enrich_providers        = enrich_providers or ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         qobuz_token             = qobuz_token,
         include_featuring       = include_featuring,
     )
