@@ -182,7 +182,8 @@ def run_interactive() -> dict:
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
-    print(f"  {DIM('Supported: Spotify, Tidal, SoundCloud, and YouTube (track, album, playlist, artist)')}")
+    # Aggiornato per includere Apple Music
+    print(f"  {DIM('Supported: Spotify, Tidal, SoundCloud, YouTube and Apple Music (track, album)')}")
     url = ""
     while not url:
         url = _ask("URL")
@@ -244,7 +245,7 @@ def run_interactive() -> dict:
         has_qobuz = "qobuz" in cfg["services"]
         has_tidal = "tidal" in cfg["services"]
         has_deezer = "deezer" in cfg["services"]
-        has_apple = "apple" in cfg["services"] # Aggiunto Apple Music
+        has_apple = "apple" in cfg["services"]
 
         # Solo Qobuz
         if has_qobuz and not (has_tidal or has_deezer or has_apple):
@@ -279,9 +280,10 @@ def run_interactive() -> dict:
                 options = ["ALAC (Lossless)", "ATMOS (Spatial)", "AC3", "AAC", "AAC-LEGACY"],
                 default = "ALAC (Lossless)",
             )
+            # Normalizziamo per il provider apple_music.py
             cfg["quality"] = q_choice.split(" ")[0].lower()
 
-        # Multipli (Aggiornato per includere tutte le qualità di Apple)
+        # Multipli (Con supporto dinamico per le qualità Apple)
         elif (has_qobuz or has_tidal or has_deezer or has_apple):
             print(f"  {DIM('You selected multiple providers. Choose a unified profile:')}")
 
@@ -308,7 +310,7 @@ def run_interactive() -> dict:
                 default = combined_options[0],
             )
 
-            # Mappatura della scelta nella stringa globale corretta
+            # Mappatura corretta per tutte le possibilità Apple
             if q_choice.startswith("LOSSLESS"):
                 cfg["quality"] = "LOSSLESS"
             elif q_choice.startswith("HI_RES"):
