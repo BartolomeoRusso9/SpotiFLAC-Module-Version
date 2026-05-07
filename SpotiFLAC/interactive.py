@@ -224,7 +224,7 @@ def run_interactive() -> dict:
     if is_soundcloud_url:
         cfg["services"] = ["soundcloud"]
         print(
-            f"  {GREEN('✓')} Provider {BOLD('soundcloud')} automatically selected.\n"
+            f"  {GREEN('✓')} Provider {BOLD('soundcloud')} automatically selected.\nSoundCloud tracks cannot be sourced from other providers."
         )
     else:
         print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")

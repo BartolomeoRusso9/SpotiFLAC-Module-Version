@@ -60,19 +60,20 @@ spotiflac url ./out --service tidal
 
 ---
 
-## Supported URL Types
+### Supported URL Types
 
 SpotiFLAC supports the following URL formats for **Spotify**, **Tidal** and **SoundCloud**:
 
-| Type                          | Spotify                         | Tidal                                            | SoundCloud                              |
-|-------------------------------|---------------------------------|--------------------------------------------------|-----------------------------------------|
-| Track                         | `open.spotify.com/track/...`    | `listen.tidal.com/track/...`                     | `soundcloud.com/artist/track-slug`      |
-| Album / Set                   | `open.spotify.com/album/...`    | `listen.tidal.com/album/...`                     | `soundcloud.com/artist/sets/set-slug`   |
-| Playlist                      | `open.spotify.com/playlist/...` | `listen.tidal.com/playlist/...`                  | —                                       |
-| Discography (via artist URL)  | `open.spotify.com/artist/...`   | `listen.tidal.com/artist/.../discography/albums` | —                                       |
+| Type                         | Spotify                         | Tidal                                            | SoundCloud                              |
+|------------------------------|---------------------------------|--------------------------------------------------|-----------------------------------------|
+| Track                        | `open.spotify.com/track/...`    | `listen.tidal.com/track/...`                     | `soundcloud.com/artist/track-slug`      |
+| Album / Set                  | `open.spotify.com/album/...`    | `listen.tidal.com/album/...`                     | `soundcloud.com/artist/sets/set-slug`   |
+| Playlist                     | `open.spotify.com/playlist/...` | `listen.tidal.com/playlist/...`                  | —                                       |
+| Discography (via artist URL) | `open.spotify.com/artist/...`   | `listen.tidal.com/artist/.../discography/albums` | `soundcloud.com/artist`                 |
 
-> **Note:** SoundCloud tracks are downloaded as **MP3** (the platform does not distribute lossless audio). All other services deliver **FLAC**.
-
+> **Note:** SoundCloud tracks are downloaded as **MP3 128kbps** (the platform does not distribute lossless audio). All other services deliver **FLAC**.
+>
+> SoundCloud short links (`on.soundcloud.com/...`) and mobile links (`m.soundcloud.com/...`) are automatically resolved. Tracking parameters (e.g. `?utm_source=...`) are stripped before processing.
 ---
 
 ## Advanced Configuration
@@ -193,32 +194,73 @@ Use `--use-album-subfolders` and `--filename-format "{year} - {album}/{track}. {
 
 ## SoundCloud Download
 
-SpotiFLAC can download tracks and sets directly from SoundCloud. The output format is **MP3** (SoundCloud does not offer lossless streams). Metadata enrichment and lyrics embedding are fully supported.
+SpotiFLAC can download tracks, sets/albums, and full artist pages directly from SoundCloud.
+The output format is always **MP3 128kbps** (SoundCloud does not offer lossless streams).
+Metadata enrichment is supported; lyrics embedding is skipped as SoundCloud does not provide synchronized lyrics data.
+
+### Single Track
 
 ```python
 from SpotiFLAC import SpotiFLAC
 
-# Single track
 SpotiFLAC(
     url="https://soundcloud.com/artist/track-slug",
     output_dir="./downloads",
     services=["soundcloud"],
-    embed_lyrics=True,
-    enrich_metadata=True,
 )
 ```
 
-CLI equivalent:
+### Playlist / Set
 
-```bash
-spotiflac https://soundcloud.com/artist/track-slug ./downloads \
-  --service soundcloud \
-  --enrich-providers deezer apple qobuz tidal soundcloud
+```python
+from SpotiFLAC import SpotiFLAC
+
+SpotiFLAC(
+    url="https://soundcloud.com/artist/sets/set-slug",
+    output_dir="./downloads",
+    services=["soundcloud"],
+    use_album_subfolders=True,
+)
 ```
 
-> Metadata enrichment via Deezer, Apple Music and others still applies to SoundCloud tracks — BPM, genre, label and HD artwork are fetched from those providers using the track's ISRC when available.
+### Artist Page (all public tracks)
 
----
+```python
+from SpotiFLAC import SpotiFLAC
+
+SpotiFLAC(
+    url="https://soundcloud.com/artist",
+    output_dir="./downloads",
+    services=["soundcloud"],
+    use_artist_subfolders=True,
+)
+```
+
+### CLI
+
+```bash
+# Single track
+spotiflac https://soundcloud.com/artist/track-slug ./downloads \
+  --service soundcloud
+
+# Playlist / Set
+spotiflac https://soundcloud.com/artist/sets/set-slug ./downloads \
+  --service soundcloud \
+  --use-album-subfolders
+
+# Artist page
+spotiflac https://soundcloud.com/artist ./downloads \
+  --service soundcloud \
+  --use-artist-subfolders
+```
+
+> **Tip:** When a SoundCloud URL is entered in Interactive Mode, the `soundcloud` service and quality settings are selected automatically — no manual configuration needed.
+
+> **Short links and mobile URLs are supported:**
+> ```bash
+> spotiflac "https://on.soundcloud.com/abc123" ./downloads --service soundcloud
+> spotiflac "https://m.soundcloud.com/artist/track" ./downloads --service soundcloud
+> ```
 
 ## Custom Output Path (single tracks)
 
@@ -419,7 +461,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | **`url`** | `str` | *Required*                                               | The Spotify, Tidal or SoundCloud URL (Track, Album, Playlist, or Artist) you want to download. |
 | **`output_dir`** | `str` | *Required*                                               | The destination directory path where the audio files will be saved. |
 | **`output_path`** | `str` | `None`                                                   | Exact destination file path for **single track** downloads (e.g. `"files/song.flac"`). Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies. |
-| **`services`** | `list` | `["tidal"]`                                              | Specifies which services to use and their priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`, `soundcloud`. |
+| **`services`** | `list` | `["tidal"]` | Specifies which services to use and their priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`, `soundcloud`. When using `soundcloud`, it must be the only entry as SoundCloud tracks cannot be sourced from other providers. |
 | **`filename_format`** | `str` | `"{title} - {artist}"`                                   | Format for naming downloaded files. See placeholders below. |
 | **`use_track_numbers`** | `bool` | `False`                                                  | Prefixes the filename with the track number. |
 | **`use_album_track_numbers`** | `bool` | `False`                                                  | Uses the track's original album number instead of the download queue position. |
@@ -497,7 +539,7 @@ After each download, SpotiFLAC validates the file to detect common issues:
 | `--service`                 | `-s` | `tidal`                                  | One or more providers in priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`, `soundcloud`.                        |
 | `--filename-format`         | `-f` | `{title} - {artist}`                     | Filename template with placeholders.                                                                                         |
 | `--output-path`             | `-o` | `None`                                   | Exact output file path for single track downloads (e.g. `files/song.flac`). Ignored for albums, playlists and discographies. |
-| `--quality`                 | `-q` | `LOSSLESS`                               | Audio quality (see Quality table above). Not applicable to SoundCloud.                                                       |
+| `--quality` | `-q` | `LOSSLESS` | Audio quality. Tidal: `LOSSLESS` or `HI_RES`. Qobuz: `6` (CD), `7` (Hi-Res), `27` (Hi-Res Max). Not applicable to SoundCloud (always MP3 128kbps). |
 | `--use-track-numbers`       | | `False`                                  | Prefix filenames with track numbers.                                                                                         |
 | `--use-album-track-numbers` | | `False`                                  | Use the track's original album number instead of queue position.                                                             |
 | `--use-artist-subfolders`   | | `False`                                  | Organize files into per-artist subfolders.                                                                                   |
