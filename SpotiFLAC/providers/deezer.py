@@ -398,7 +398,7 @@ class DeezerProvider(BaseProvider):
             # Fix 3: Added source banner (Assuming import path, adjust if necessary)
             try:
                 from ..core.console import print_source_banner
-                print_source_banner("Deezer", quality.upper())
+                print_source_banner("Deezer", _RESOLVER_URL,quality.upper())
             except ImportError:
                 pass # Fallback if UI module is structured differently
 

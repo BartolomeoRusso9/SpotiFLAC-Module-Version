@@ -37,13 +37,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _API_BASE       = "https://www.qobuz.com/api.json/0.2"
-_DEFAULT_APP_ID = "712109809"
+_DEFAULT_APP_ID = "798273057"
 _DEFAULT_APP_SECRET = "589be88e4538daea11f509d29e4a23b1"
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/146.0.0.0 Safari/537.36"
 )
+_ZARZ_USER_AGENT = "SpotiFLAC-Mobile"
 _CREDS_TTL        = 24 * 3600
 _PROBE_ISRC       = "USUM71703861"
 _OPEN_URL         = "https://open.qobuz.com/track/"
@@ -69,10 +70,10 @@ _STREAM_APIS: list[str] = [
     "https://www.musicdl.me/api/qobuz/download"
 ]
 
-_MUSICDL_APIS = {
+_POST_APIS = {
     "https://www.musicdl.me/api/qobuz/download",
     "https://dl.musicdl.me/qobuz/download",
-    "https://api.zarz.moe/dl/qbz",
+    "https://api.zarz.moe/v1/dl/qbz",
 }
 
 _QUALITY_FALLBACK: dict[str, list[str]] = {
@@ -278,7 +279,14 @@ def _fetch_stream_url_once(
         quality:   str,
         timeout_s: int = _API_TIMEOUT_S,
 ) -> str:
-    is_musicdl = api_base in _MUSICDL_APIS
+    api_cleaning = api_base.rstrip('/')
+    is_zarz = "zarz.moe" in api_cleaning
+    is_post = api_base in _POST_APIS or is_zarz
+
+    headers = {
+        "User-Agent": _ZARZ_USER_AGENT if is_zarz else _DEFAULT_UA,
+        "Accept": "application/json"
+    }
     delay      = _RETRY_DELAY_S
     last_err: Exception = RuntimeError("no attempts made")
 
@@ -289,7 +297,7 @@ def _fetch_stream_url_once(
             delay *= 2
 
         try:
-            if is_musicdl:
+            if is_post:
                 payload = {
                     "quality": _map_musicdl_quality(quality),
                     "upload_to_r2": False,
@@ -305,7 +313,7 @@ def _fetch_stream_url_once(
                 url = _build_stream_url(api_base, track_id, quality)
                 resp = requests.get(
                     url,
-                    headers={"User-Agent":  _DEFAULT_UA},
+                    headers=headers,
                     timeout=timeout_s,
                 )
 
@@ -357,6 +365,7 @@ def _fetch_stream_url_once(
             raise
         except Exception as exc:
             last_err = exc
+            if not is_post: break
             break
 
     raise last_err

@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_TIDAL_APIS = [
+_TIDAL_APIS_GET = [
     "https://eu-central.monochrome.tf",
     "https://us-west.monochrome.tf",
     "https://api.monochrome.tf",
@@ -59,11 +59,19 @@ _TIDAL_APIS = [
     "https://hifi-two.spotisaver.net",
 ]
 
+_TIDAL_API_POST = [
+    "https://api.zarz.moe/v1/dl/tid2",
+]
+
 _TIDAL_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/145.0.0.0 Safari/537.36"
 )
+
+_POST_USER_AGENT = [
+    "SpotiFLAC-Mobile/1.0"
+]
 
 _TIDAL_API_GIST_URL   = "https://gist.githubusercontent.com/afkarxyz/2ce772b943321b9448b454f39403ce25/raw"
 _TIDAL_API_CACHE_FILE = "tidal-api-urls.json"
@@ -175,7 +183,7 @@ def prime_tidal_api_list() -> None:
         with _tidal_api_list_mu:
             state = _load_tidal_api_list_state_locked()
             if not state["urls"]:
-                state["urls"]       = _normalize_tidal_api_urls(_TIDAL_APIS)
+                state["urls"]       = _normalize_tidal_api_urls(_TIDAL_APIS_GET)
                 state["updated_at"] = int(time.time())
                 state["source"]     = "builtin-fallback"
                 _save_tidal_api_list_state_locked(state)
@@ -195,7 +203,7 @@ def refresh_tidal_api_list(force: bool = False) -> list[str]:
             logger.warning("[tidal] gist fetch failed: %s", exc)
             gist_urls = []
 
-        merged = _normalize_tidal_api_urls(_TIDAL_APIS + gist_urls)
+        merged = _normalize_tidal_api_urls(_TIDAL_APIS_GET + _TIDAL_API_POST + gist_urls)
 
         if not merged:
             if state["urls"]:
@@ -319,7 +327,12 @@ def _fetch_tidal_url_once(
         quality:   str,
         timeout_s: int = _API_TIMEOUT_S,
 ) -> str:
-    url       = f"{api.rstrip('/')}/track/?id={track_id}&quality={quality}"
+    api_cleaning = api.rstrip('/')
+    is_post_api = api_cleaning == _TIDAL_API_POST[0].rstrip('/')
+
+    url = f"{api_cleaning}/track/?id={track_id}&quality={quality}"
+    headers = {"User-Agent": _POST_USER_AGENT[0] if is_post_api else _TIDAL_USER_AGENT}
+
     delay     = _RETRY_DELAY_S
     last_err: Exception = RuntimeError("no attempts made")
 
@@ -330,41 +343,42 @@ def _fetch_tidal_url_once(
             delay *= 2
 
         try:
-            resp = requests.get(
-                url,
-                headers={"User-Agent": _TIDAL_USER_AGENT},
-                timeout=timeout_s,
-            )
+            if is_post_api:
+                resp = requests.post(
+                    api_cleaning,
+                    json={"id": str(track_id), "quality": quality},
+                    headers=headers,
+                    timeout=timeout_s
+                )
+            else:
+                resp = requests.get(url, headers=headers, timeout=timeout_s)
 
-            if resp.status_code >= 500:
-                last_err = RuntimeError(f"HTTP {resp.status_code}")
-                continue
             if resp.status_code == 429:
                 delay = max(delay, 2.0)
-                last_err = RuntimeError("rate limited")
                 continue
             if resp.status_code != 200:
-                raise RuntimeError(f"HTTP {resp.status_code}")
-
-            body = resp.text.strip()
-            if not body:
-                last_err = RuntimeError("empty response")
+                last_err = RuntimeError(f"HTTP {resp.status_code}")
                 continue
 
-            try:
-                data = resp.json()
-            except ValueError:
-                last_err = RuntimeError("invalid JSON")
-                continue
+            data = resp.json()
 
+            # Logica di estrazione basata su index.js (fetchAPIDownloadInfo)
             if isinstance(data, dict):
-                manifest = data.get("data", {}).get("manifest", "")
+                # Gestione struttura nidificata { "data": { "manifest": "..." } }
+                inner_data = data.get("data", {})
+                manifest = inner_data.get("manifest") if isinstance(inner_data, dict) else None
+
+                # Fallback se il manifest è diretto nella root (alcuni mirror fanno così)
+                if not manifest:
+                    manifest = data.get("manifest")
+
                 if manifest:
-                    asset = data.get("data", {}).get("assetPresentation", "")
+                    asset = inner_data.get("assetPresentation", "") if isinstance(inner_data, dict) else ""
                     if asset == "PREVIEW":
                         raise RuntimeError("returned PREVIEW instead of FULL")
                     return "MANIFEST:" + manifest
 
+            # Fallback per mirror che restituiscono una lista di URL diretti
             if isinstance(data, list):
                 for item in data:
                     if isinstance(item, dict) and item.get("OriginalTrackUrl"):
@@ -375,8 +389,6 @@ def _fetch_tidal_url_once(
         except (requests.Timeout, requests.ConnectionError) as exc:
             last_err = exc
             continue
-        except RuntimeError:
-            raise
         except Exception as exc:
             last_err = exc
             break
@@ -447,7 +459,7 @@ class TidalProvider(BaseProvider):
             self._apis = apis or get_tidal_api_list()
         except Exception as exc:
             logger.warning("[tidal] API list unavailable, using built-in fallback: %s", exc)
-            self._apis = list(apis or _TIDAL_APIS)
+            self._apis = list(apis or _TIDAL_APIS_GET)
 
         # FIX #6: _qobuz_token non era mai settabile — ora accetta il parametro
         # e fallback a variabile d'ambiente, come QobuzProvider.

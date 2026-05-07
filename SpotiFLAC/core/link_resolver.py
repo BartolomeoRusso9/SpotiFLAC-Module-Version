@@ -40,7 +40,7 @@ class LinkResolver:
             platform = "deezer"
             raw_id = track_id.replace("deezer_", "")
         else:
-            raw_id = track_id.replace("spotify_", "") # Pulisce eventuali prefissi spotify
+            raw_id = track_id.replace("spotify_", "")
 
         params = {
             "id": raw_id,
