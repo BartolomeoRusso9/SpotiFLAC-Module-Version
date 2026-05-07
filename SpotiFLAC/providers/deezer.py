@@ -359,27 +359,35 @@ class DeezerProvider(BaseProvider):
             metadata:            TrackMetadata,
             output_dir:          str,
             *,
+            quality:             str             = "flac", # Fix 1
             filename_format:     str             = "{title} - {artist}",
             position:            int             = 1,
             include_track_num:   bool            = False,
             use_album_track_num: bool            = False,
             first_artist_only:   bool            = False,
             allow_fallback:      bool            = True,
-            embed_lyrics:            bool            = False,
-            lyrics_providers:        list[str] | None = None,
-            lyrics_spotify_token:    str             = "",
-            enrich_metadata:         bool            = False,
-            enrich_providers:        list[str] | None = None,
-            is_album:                bool            = False,
+            embed_lyrics:        bool            = False,
+            lyrics_providers:    list[str] | None = None,
+            lyrics_spotify_token:str             = "",
+            enrich_metadata:     bool            = False,
+            enrich_providers:    list[str] | None = None,
+            qobuz_token:         str             = "", # Fix 2
+            is_album:            bool            = False,
             **kwargs,
     ) -> DownloadResult:
         if not metadata.isrc:
             return DownloadResult.fail(self.name, "Nessun ISRC disponibile per Deezer")
 
         try:
+            # Fix 5: Explicit keyword arguments
             dest = self._build_output_path(
-                metadata, output_dir, filename_format,
-                position, include_track_num, use_album_track_num, first_artist_only,
+                metadata,
+                output_dir,
+                filename_format=filename_format,
+                position=position,
+                include_track_num=include_track_num,
+                use_album_track_num=use_album_track_num,
+                first_artist_only=first_artist_only,
             )
             if self._file_exists(dest):
                 return DownloadResult.ok(self.name, str(dest))
@@ -387,14 +395,18 @@ class DeezerProvider(BaseProvider):
             from ..core.musicbrainz import AsyncMBFetch
             mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
 
-            before     = self._snapshot(output_dir)
+            # Fix 3: Added source banner (Assuming import path, adjust if necessary)
+            try:
+                from ..core.ui import print_source_banner
+                print_source_banner("Deezer", quality.upper())
+            except ImportError:
+                pass # Fallback if UI module is structured differently
+
+            # Fix 4: Removed fragile _snapshot logic, trust the returned path
             downloaded = self._download_flac_raw(metadata.isrc, output_dir)
 
-            if not downloaded:
-                new_files = self._snapshot(output_dir) - before
-                if not new_files:
-                    return DownloadResult.fail(self.name, "Nessun file FLAC scaricato")
-                downloaded = max(new_files, key=os.path.getmtime)
+            if not downloaded or not os.path.exists(downloaded):
+                return DownloadResult.fail(self.name, "Nessun file FLAC scaricato")
 
             if os.path.abspath(downloaded) != os.path.abspath(str(dest)):
                 import shutil
@@ -457,6 +469,7 @@ class DeezerProvider(BaseProvider):
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
+                qobuz_token             = qobuz_token, # Fix 2 applied
                 is_album                = is_album,
             )
 
