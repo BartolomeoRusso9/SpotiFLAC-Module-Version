@@ -73,6 +73,7 @@ def SpotiFLAC(
         use_artist_subfolders: bool             = False,
         use_album_subfolders:  bool             = False,
         loop:                  int | None       = None,
+        allow_fallback:        bool             = True,
         quality:               str              = "LOSSLESS",
         first_artist_only:     bool             = False,
         log_level:             int              = logging.WARNING,
@@ -89,11 +90,12 @@ def SpotiFLAC(
 
     opts = DownloadOptions(
         output_dir              = output_dir,
-        services                = services or ["deezer", "tidal"],
+        services                = services or ["tidal"],
         filename_format         = filename_format,
         use_track_numbers       = use_track_numbers,
         use_album_track_numbers = use_album_track_numbers,
         use_artist_subfolders   = use_artist_subfolders,
+        allow_fallback          = allow_fallback,
         use_album_subfolders    = use_album_subfolders,
         quality                 = quality,
         first_artist_only       = first_artist_only,

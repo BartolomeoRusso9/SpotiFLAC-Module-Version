@@ -33,7 +33,8 @@ class IsrcFinder:
         try:
             # Nota: richiede headers specifici o token anonimo
             data = self.http.get_json(url)
-            return data.get("external_id", [{}])[0].get("value")
+            ids = data.get("external_id") or [{}]
+            return ids[0].get("value")
         except Exception as e:
             logger.debug("[isrc_finder] Mirror lookup failed: %s", e)
             return None

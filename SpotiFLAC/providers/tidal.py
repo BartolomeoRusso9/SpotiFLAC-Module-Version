@@ -328,7 +328,7 @@ def _fetch_tidal_url_once(
         timeout_s: int = _API_TIMEOUT_S,
 ) -> str:
     api_cleaning = api.rstrip('/')
-    is_post_api = api_cleaning == _TIDAL_API_POST[0].rstrip('/')
+    is_post_api = api_cleaning in {a.rstrip('/') for a in _TIDAL_API_POST}
 
     url = f"{api_cleaning}/track/?id={track_id}&quality={quality}"
     headers = {"User-Agent": _POST_USER_AGENT[0] if is_post_api else _TIDAL_USER_AGENT}

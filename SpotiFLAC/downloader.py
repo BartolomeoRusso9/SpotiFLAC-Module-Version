@@ -55,7 +55,7 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
     from .providers.qobuz import QobuzProvider
 
     if name == "tidal":
-        return TidalProvider()
+        return TidalProvider(qobuz_token=opts.qobuz_token)
     if name == "qobuz":
         return QobuzProvider(qobuz_token=opts.qobuz_token)
 

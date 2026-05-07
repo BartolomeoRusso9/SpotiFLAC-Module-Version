@@ -387,12 +387,6 @@ class SoundCloudProvider(BaseProvider):
     # ENTRY POINT UNIFICATO
     # ==========================================
 
-    # Path da ignorare in un URL utente (non sono tracce)
-    _SC_USER_SUBPAGES = {
-        "sets", "albums", "tracks", "likes",
-        "followers", "following", "reposts", "playlists", "popular-tracks",
-    }
-
     def get_url(self, url: str) -> tuple[str, List[TrackMetadata]]:
         url = self._normalize_url(url)   # ← pulizia centralizzata
         self._ensure_client_id()

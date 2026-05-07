@@ -269,6 +269,17 @@ def run_interactive() -> dict:
 
     if is_soundcloud_url:
         cfg["quality"] = "LOSSLESS"
+        # FIX BUG CRITICO 1: Inizializza le chiavi saltate per SoundCloud
+        cfg["filename_format"] = "{title} - {artist}"
+        cfg["use_track_numbers"] = False
+        cfg["use_album_track_numbers"] = False
+        cfg["use_artist_subfolders"] = False
+        cfg["use_album_subfolders"] = False
+        cfg["first_artist_only"] = False
+        cfg["allow_fallback"] = True
+
+    if is_soundcloud_url:
+        cfg["quality"] = "LOSSLESS"
         print(
             f"  {YELLOW('⏭  Skipped:')} {DIM('Only MP3 available')}"
         )
