@@ -220,16 +220,30 @@ class AppleMusicProvider(BaseProvider):
             res = mb_fetcher.result()
             if res:
                 mapping = {
-                    "mbid_track": "MUSICBRAINZ_TRACKID",
-                    "mbid_album": "MUSICBRAINZ_ALBUMID",
-                    "mbid_artist": "MUSICBRAINZ_ARTISTID",
+                    "mbid_track":       "MUSICBRAINZ_TRACKID",
+                    "mbid_album":       "MUSICBRAINZ_ALBUMID",
+                    "mbid_artist":      "MUSICBRAINZ_ARTISTID",
+                    "mbid_relgroup":    "MUSICBRAINZ_RELEASEGROUPID",
+                    "mbid_albumartist": "MUSICBRAINZ_ALBUMARTISTID",
+                    "barcode":          "BARCODE",
+                    "label":            "LABEL",
+                    "organization":     "ORGANIZATION",
+                    "country":          "RELEASECOUNTRY",
+                    "script":           "SCRIPT",
+                    "status":           "RELEASESTATUS",
+                    "media":            "MEDIA",
+                    "type":             "RELEASETYPE",
+                    "artist_sort":      "ARTISTSORT",
+                    "albumartist_sort": "ALBUMARTISTSORT",
+                    "catalognumber":    "CATALOGNUMBER",
+                    "bpm":              "BPM",
+                    "genre":            "GENRE"
                 }
                 for mb_key, tag_name in mapping.items():
                     val = res.get(mb_key)
                     if val:
                         mb_tags[tag_name] = str(val)
 
-            # Utilizzo del tagger di sistema di SpotiFLAC
             from ..core.tagger import embed_metadata as _embed
             _embed(
                 str(dest), metadata,

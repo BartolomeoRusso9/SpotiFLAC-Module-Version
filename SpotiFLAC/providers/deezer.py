@@ -397,7 +397,7 @@ class DeezerProvider(BaseProvider):
 
             # Fix 3: Added source banner (Assuming import path, adjust if necessary)
             try:
-                from ..core.ui import print_source_banner
+                from ..core.console import print_source_banner
                 print_source_banner("Deezer", quality.upper())
             except ImportError:
                 pass # Fallback if UI module is structured differently
@@ -469,7 +469,7 @@ class DeezerProvider(BaseProvider):
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
-                qobuz_token             = qobuz_token,
+                enrich_qobuz_token      = qobuz_token,
                 is_album                = is_album,
             )
 
