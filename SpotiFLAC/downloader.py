@@ -33,7 +33,6 @@ class DownloadOptions:
     allow_fallback:          bool            = True
     inter_track_delay_s:     float           = 0.5
     is_album:                bool            = False
-    # Exact output file path (overrides output_dir + filename_format for single tracks)
     output_path:             str | None      = None
 
     embed_lyrics:            bool            = True
@@ -117,7 +116,6 @@ def download_one(
         )
 
         if result.success:
-            # If an exact output path was requested, move the file there now.
             if opts.output_path and result.file_path:
                 import shutil
                 import os
@@ -254,10 +252,10 @@ class SpotiflacDownloader:
     def _run_once(self, input_url: str) -> None:
         print("Fetching metadata…")
 
-        # Rilevamento Tidal vs Spotify vs SoundCloud vs YouTube
         is_tidal = False
         is_soundcloud = False
         is_youtube = False
+
         try:
             from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
             if is_tidal_url(input_url):
@@ -269,6 +267,11 @@ class SpotiflacDownloader:
             is_soundcloud = True
         elif "youtube.com" in input_url or "youtu.be" in input_url:
             is_youtube = True
+        elif "deezer.com" in input_url or "deezer.page.link" in input_url:
+            raise SpotiflacError(
+                ErrorKind.INVALID_URL,
+                "L'inserimento di URL Deezer come input primario non è ancora pienamente supportato. Usa un link Spotify e imposta 'deezer' come provider di download."
+            )
 
         try:
             if is_tidal:
@@ -278,7 +281,6 @@ class SpotiflacDownloader:
                     input_url,
                     include_featuring=self._opts.include_featuring,
                 )
-            # ── DOPO ───────────────────────────────────────────────────
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
                 client = SoundCloudProvider()
@@ -334,7 +336,6 @@ class SpotiflacDownloader:
             info = {"type": stype, "id": input_url}
 
         elif is_youtube:
-            # YouTube: distingui playlist vs track vs artist usando l'URL
             stype = "track"
             if "list=" in input_url or "/playlist" in input_url:
                 stype = "playlist"
@@ -356,14 +357,11 @@ class SpotiflacDownloader:
         is_playlist    = info["type"] == "playlist"
         is_discography = info["type"] in ("artist", "artist_discography")
 
-        # Le discografie riusano la logica playlist (sottocartelle per artista/album)
         if is_discography:
             is_playlist = True
 
         self._opts.is_album = is_album
 
-        # output_path ha senso solo per tracce singole: se il link è un album,
-        # una playlist o una discografia lo azzeriamo subito.
         if (is_album or is_playlist or is_discography) and self._opts.output_path:
             logger.warning(
                 "[downloader] output_path ignorato: il link è un %s, "

@@ -12,7 +12,7 @@ Uso avanzato:
         services=["qobuz", "tidal"],
         enrich_metadata=True,
         embed_lyrics=True,
-        quality="HI_RES"
+        quality="LOSSLESS"
     )
 
 Output path (single track):
@@ -28,6 +28,7 @@ import sys
 
 from .downloader import SpotiflacDownloader, DownloadOptions
 from .providers import (
+    DeezerProvider,
     QobuzProvider,
     TidalProvider,
     AmazonProvider,
@@ -41,6 +42,7 @@ __all__ = [
     "SpotiFLAC",
     "SpotiflacDownloader",
     "DownloadOptions",
+    "DeezerProvider",
     "QobuzProvider",
     "TidalProvider",
     "AmazonProvider",
@@ -50,7 +52,6 @@ __all__ = [
 ]
 
 def _setup_logger(level: int):
-    """Configura il logging per il namespace SpotiFLAC senza disturbare il root logger."""
     logger = logging.getLogger("SpotiFLAC")
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
@@ -73,49 +74,20 @@ def SpotiFLAC(
         quality:               str              = "LOSSLESS",
         first_artist_only:     bool             = False,
         log_level:             int              = logging.WARNING,
-        # Exact output file path for single-track downloads
         output_path:             str | None     = None,
-        # Opzioni Lyrics (Attive di default)
         embed_lyrics:            bool           = True,
         lyrics_providers:        list[str] | None = None,
         lyrics_spotify_token:    str            = "",
-        # Opzioni Enrichment (Attive di default)
         enrich_metadata:         bool           = True,
         enrich_providers:        list[str] | None = None,
         qobuz_token:             str | None     = None,
         include_featuring:     bool           = False,
 ) -> None:
-    """
-    Interfaccia principale per scaricare tracce Spotify in formato FLAC.
-
-    Args:
-        url: URL Spotify (track, album, playlist).
-        output_dir: Cartella di destinazione (usata quando output_path non è specificato).
-        services: Provider audio in ordine di priorità ("tidal", "qobuz", "amazon").
-        filename_format: Template per il nome file.
-        use_track_numbers: Aggiunge il numero traccia all'inizio del nome file.
-        use_artist_subfolders: Organizza in cartelle per artista.
-        use_album_subfolders: Organizza in sottocartelle per album.
-        loop: Se impostato (int), ripete l'operazione ogni N minuti.
-        quality: Qualità audio desiderata ("LOSSLESS" o "HI_RES").
-        first_artist_only: Usa solo il primo artista nei tag e nel nome file.
-        log_level: Livello di dettaglio log (logging.INFO, DEBUG, WARNING).
-        output_path: Percorso esatto del file di output per tracce singole
-                     (es. "files/song.flac"). Sovrascrive output_dir + filename_format.
-                     Ignorato silenziosamente per album/playlist.
-        embed_lyrics: Scarica e inserisce i testi nel file FLAC.
-        lyrics_providers: Lista provider testi.
-        enrich_metadata: Arricchisce i tag con dati extra (BPM, Label, Genre, ecc.).
-        enrich_providers: Provider per i dati extra.
-        qobuz_token: Token utente Qobuz opzionale.
-    """
-    # 1. Setup del logging
     _setup_logger(log_level)
 
-    # 2. Preparazione opzioni con gestione dei default
     opts = DownloadOptions(
         output_dir              = output_dir,
-        services                = services or ["tidal"],
+        services                = services or ["deezer", "tidal"],
         filename_format         = filename_format,
         use_track_numbers       = use_track_numbers,
         use_album_track_numbers = use_album_track_numbers,
@@ -124,18 +96,15 @@ def SpotiFLAC(
         quality                 = quality,
         first_artist_only       = first_artist_only,
         output_path             = output_path,
-        # Lyrics
         embed_lyrics            = embed_lyrics,
         lyrics_providers        = lyrics_providers or ["spotify", "musixmatch", "lrclib", "apple"],
         lyrics_spotify_token    = lyrics_spotify_token,
-        # Enrichment
         enrich_metadata         = enrich_metadata,
         enrich_providers        = enrich_providers or ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         qobuz_token             = qobuz_token,
         include_featuring       = include_featuring,
     )
 
-    # 3. Esecuzione
     try:
         downloader = SpotiflacDownloader(opts)
         downloader.run(url, loop_minutes=loop)

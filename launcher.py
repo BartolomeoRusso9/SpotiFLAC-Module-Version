@@ -14,21 +14,20 @@ from SpotiFLAC.interactive import run_interactive
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog            = "spotiflac",
-        description     = "Download tracks in true FLAC/MP3 via Tidal, Qobuz, SoundCloud, YouTube e altri.",
+        description     = "Download tracks in true FLAC/MP3 via Deezer, Tidal, Qobuz, SoundCloud, YouTube e altri.",
         formatter_class = argparse.RawDescriptionHelpFormatter,
     )
 
-    # Argomenti base
     parser.add_argument("url",        help="URL Spotify, Tidal, SoundCloud o YouTube (track, album, playlist, artist)")
     parser.add_argument("output_dir", help="Directory di destinazione")
 
     parser.add_argument(
         "--service", "-s",
-        choices = ["tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube"],
+        choices = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube"],
         nargs   = "+",
-        default = ["tidal"],
+        default = ["deezer", "tidal"],
         metavar = "SERVICE",
-        help    = "Provider audio in ordine di priorità (default: tidal)",
+        help    = "Provider audio in ordine di priorità (default: deezer tidal)",
     )
     parser.add_argument(
         "--filename-format", "-f",
@@ -48,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--quality", "-q",
         default = "LOSSLESS",
-        help    = "Quality: LOSSLESS or HI_RES. Default: LOSSLESS",
+        help    = "Quality: LOSSLESS, HI_RES, HIGH, NORMAL. Default: LOSSLESS",
     )
     parser.add_argument("--use-track-numbers",       action="store_true", dest="use_track_numbers")
     parser.add_argument("--use-album-track-numbers", action="store_true", dest="use_album_track_numbers")
@@ -114,24 +113,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def main() -> None:
-    # Esegui il controllo degli aggiornamenti a prescindere dalla modalità
     check_for_updates()
 
-    # ── RILEVAMENTO AUTOMATICO ──────────────────────────────────────────────
-    # Se la lista degli argomenti contiene solo il nome dello script (len == 1)
-    # l'utente non ha passato flag, quindi invochiamo la modalità interattiva.
     if len(sys.argv) == 1:
-        # Avvia il wizard interattivo
         cfg = run_interactive()
 
-        # Imposta un livello di log di default per la modalità interattiva
         log_level = logging.WARNING
         logging.basicConfig(
             level=log_level,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
 
-        # Lancia l'istanza passando le chiavi del dizionario 'cfg' raccolte dal wizard
         SpotiFLAC(
             url                      = cfg["url"],
             output_dir               = cfg["output_dir"],
@@ -157,9 +149,7 @@ def main() -> None:
             include_featuring        = cfg["include_featuring"],
         )
 
-    # ── MODALITÀ CLI CLASSICA ───────────────────────────────────────────────
     else:
-        # Passa ad argparse il parsing standard
         args = parse_args()
 
         log_level = logging.DEBUG if args.verbose else logging.WARNING
@@ -168,7 +158,6 @@ def main() -> None:
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
 
-        # Lancia l'istanza usando il Namespace 'args'
         SpotiFLAC(
             url                      = args.url,
             output_dir               = args.output_dir,

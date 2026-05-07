@@ -145,7 +145,6 @@ def _summary(cfg: dict) -> None:
     row("URL", cfg["url"])
     row("Output Dir", cfg["output_dir"])
 
-    # Add this check for the custom path
     if cfg.get("output_path"):
         row("Exact File Path", cfg["output_path"])
     row("Services", " → ".join(cfg["services"]))
@@ -177,10 +176,6 @@ def _summary(cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def run_interactive() -> dict:
-    """
-    Runs the interactive wizard and returns a configuration dict
-    compatible with SpotiFLAC() parameters.
-    """
     _header()
 
     cfg: dict = {}
@@ -230,8 +225,8 @@ def run_interactive() -> dict:
         print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")
         cfg["services"] = _ask_multi(
             "Services (order = priority):",
-            options  = ["tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube"],
-            defaults = ["tidal"],
+            options  = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube"],
+            defaults = ["deezer", "tidal"],
             ordered  = True,
         )
 
@@ -248,8 +243,10 @@ def run_interactive() -> dict:
 
         has_qobuz = "qobuz" in cfg["services"]
         has_tidal = "tidal" in cfg["services"]
+        has_deezer = "deezer" in cfg["services"]
 
-        if has_qobuz and not has_tidal:
+        # Solo Qobuz
+        if has_qobuz and not (has_tidal or has_deezer):
             q_choice = _ask_choice(
                 "Qobuz Quality:",
                 options = ["6 (CD Lossless)", "7 (Hi-Res)", "27 (Hi-Res Max)"],
@@ -257,35 +254,58 @@ def run_interactive() -> dict:
             )
             cfg["quality"] = q_choice.split(" ")[0]
 
-        elif has_tidal and not has_qobuz:
+        # Solo Tidal
+        elif has_tidal and not (has_qobuz or has_deezer):
             cfg["quality"] = _ask_choice(
                 "Tidal Quality:",
                 options = ["LOSSLESS", "HI_RES"],
                 default = "LOSSLESS",
             )
 
-        elif has_qobuz and has_tidal:
-            print(f"  {DIM('You selected both Qobuz and Tidal. Choose a unified profile:')}")
+        # Solo Deezer
+        elif has_deezer and not (has_qobuz or has_tidal):
+            q_choice = _ask_choice(
+                "Deezer Quality:",
+                options = ["LOSSLESS (FLAC)", "HIGH (MP3 320)", "NORMAL (MP3 128)"],
+                default = "LOSSLESS (FLAC)",
+            )
+            cfg["quality"] = q_choice.split(" ")[0]
+
+        # Multipli
+        elif (has_qobuz or has_tidal or has_deezer):
+            print(f"  {DIM('You selected multiple providers. Choose a unified profile:')}")
+
+            # Opzioni di base sempre presenti nel mix
+            combined_options = [
+                "LOSSLESS (FLAC on Deezer/Tidal, '6' on Qobuz)",
+                "HI_RES (Best available everywhere, '27' on Qobuz)"
+            ]
+
+            # Aggiungiamo il livello 7 in modo esclusivo se c'è Qobuz nel mix
+            if has_qobuz:
+                combined_options.append("7 (Applies intermediate Hi-Res quality only for Qobuz)")
+
+            combined_options.append("HIGH (MP3 320 where available)")
+
             q_choice = _ask_choice(
                 "Combined Quality:",
-                options = [
-                    "LOSSLESS (Applies '6' on Qobuz and 'LOSSLESS' on Tidal)",
-                    "HI_RES (Applies '27' on Qobuz and 'HI_RES' on Tidal)",
-                    "7 (Applies intermediate Hi-Res quality only for Qobuz)",
-                ],
-                default = "LOSSLESS (Applies '6' on Qobuz and 'LOSSLESS' on Tidal)",
+                options = combined_options,
+                default = combined_options[0],
             )
+
             if q_choice.startswith("LOSSLESS"):
                 cfg["quality"] = "LOSSLESS"
             elif q_choice.startswith("HI_RES"):
                 cfg["quality"] = "HI_RES"
-            else:
+            elif q_choice.startswith("7"):
                 cfg["quality"] = "7"
+            else:
+                cfg["quality"] = "HIGH"
 
         else:
             cfg["quality"] = _ask_choice(
                 "Quality:",
-                options = ["LOSSLESS", "HI_RES"],
+                options = ["LOSSLESS", "HI_RES", "HIGH"],
                 default = "LOSSLESS",
             )
 
@@ -297,14 +317,11 @@ def run_interactive() -> dict:
         # ── 6. Organization options ───────────────────────────────────────────
         _section("6 · Organization Options")
 
-        # Ask first if they want track numbers
         cfg["use_track_numbers"] = _ask_bool("Add track number to filename?", False)
 
-        # If yes, ask which type of numbering to use
         if cfg["use_track_numbers"]:
             cfg["use_album_track_numbers"] = _ask_bool("Use original album track number?", False)
         else:
-            # If no, automatically set the variable to False without asking
             cfg["use_album_track_numbers"] = False
 
         cfg["use_artist_subfolders"]   = _ask_bool("Create artist subfolders?", False)
@@ -319,7 +336,6 @@ def run_interactive() -> dict:
         print("  " + DIM("on other artists' releases (appears_on on Spotify, compilations on Tidal)"))
         cfg["include_featuring"] = _ask_bool("Include featuring tracks?", False)
     else:
-        # Show the user that we are skipping this section
         print(f"  {YELLOW('⏭  Skipped:')} {DIM('The provided URL does not belong to an artist page.')}")
         cfg["include_featuring"] = False
 
@@ -375,7 +391,6 @@ def run_interactive() -> dict:
         print(f"\n  {YELLOW('Operation cancelled.')}\n")
         sys.exit(0)
 
-    # ── Equivalent CLI command ──────────────────────────────────────────────
     _section("Equivalent CLI command")
     _print_cli_command(cfg)
 
@@ -383,7 +398,6 @@ def run_interactive() -> dict:
 
 
 def _print_cli_command(cfg: dict) -> None:
-    """Prints the CLI command equivalent to the chosen configuration."""
     parts = [f'spotiflac "{cfg["url"]}" "{cfg["output_dir"]}"']
     if cfg.get("output_path"):
         parts.append(f'-o "{cfg["output_path"]}"')
