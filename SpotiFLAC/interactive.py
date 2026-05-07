@@ -3,6 +3,7 @@ SpotiFLAC — Interactive Mode.
 Guides the user through the step-by-step configuration without needing to remember CLI flags.
 """
 from __future__ import annotations
+from urllib.parse import urlparse
 import os
 import sys
 
@@ -182,13 +183,45 @@ def run_interactive() -> dict:
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
-    # Aggiornato per includere Apple Music
-    print(f"  {DIM('Supported: Spotify, Tidal, SoundCloud, YouTube and Apple Music (track, album)')}")
+    print(f"  {DIM('Note: Artist discographies are ONLY supported for Spotify and Tidal.')}")
+    print(f"  {DIM('Supported: Track, Album, Playlist, Artist (Spoti/Tidal only).')}")
+
     url = ""
-    while not url:
+    while True:
         url = _ask("URL")
         if not url:
             print(f"  {RED('⚠  URL is required.')}")
+            continue
+
+        lower_url = url.lower()
+        is_blocked = False
+        # Blocco Artisti Apple Music
+        if "music.apple.com" in lower_url and "/artist/" in lower_url:
+            print(f"  {RED('⚠  Discographies are not supported for Apple Music.')}")
+            print(f"     {DIM('Please provide a Track, Album or Playlist link.')}")
+            is_blocked = True
+
+        # Blocco Artisti YouTube / YouTube Music
+        elif ("youtube.com" in lower_url or "youtu.be" in lower_url) and \
+                ("/channel/" in lower_url or "/user/" in lower_url or "/c/" in lower_url or "/@" in lower_url or "/browse/" in lower_url):
+            print(f"  {RED('⚠  Discographies are not supported for YouTube.')}")
+            print(f"     {DIM('Please provide a Video or Playlist link.')}")
+            is_blocked = True
+
+        # Blocco Artisti SoundCloud
+        elif "soundcloud.com" in lower_url:
+            path = urlparse(url).path.strip("/")
+            parts = [p for p in path.split("/") if p]
+            # Profili artistici hanno solitamente solo 1 segmento (es. soundcloud.com/nomeartista)
+            # Tracce hanno 2 (artista/traccia), Set hanno 3 (artista/sets/nomeset)
+            if len(parts) == 1 and parts[0] not in ("discover", "stream", "upload"):
+                print(f"  {RED('⚠  Artist profiles are not supported for SoundCloud.')}")
+                print(f"     {DIM('Please provide a Track or Set link.')}")
+                is_blocked = True
+
+        if not is_blocked:
+            break
+
     cfg["url"] = url
 
     # ── 2. Output directory ─────────────────────────────────────────────────
@@ -332,6 +365,9 @@ def run_interactive() -> dict:
                 options = ["LOSSLESS", "HI_RES", "HIGH"],
                 default = "LOSSLESS",
             )
+        print(f"\n  {BOLD('Quality Fallback')}")
+        print(f"  {DIM('If enabled, SpotiFLAC will download a lower quality if the requested one is unavailable.')}")
+        cfg["allow_fallback"] = _ask_bool("Allow automatic quality fallback?", True)
 
         # ── 5. Filename format ─────────────────────────────────────────────────
         _section("5 · Filename Format")
