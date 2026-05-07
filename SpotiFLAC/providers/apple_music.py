@@ -66,11 +66,12 @@ class AppleMusicProvider(BaseProvider):
         return None
 
     def _resolve_track_url_by_search(self, title: str, artists: str) -> str | None:
-        """Cerca la traccia su Apple Music per nome se l'ISRC fallisce (come in index.js)."""
+        """Cerca la traccia su Apple Music per nome se l'ISRC fallisce."""
+        import urllib.parse
         try:
             first_artist = artists.split(",")[0].strip()
             query = f"{title} {first_artist}"
-            url = f"https://itunes.apple.com/search?term={requests.utils.quote(query)}&entity=song&limit=5"
+            url = f"https://itunes.apple.com/search?term={urllib.parse.quote(query)}&entity=song&limit=5"
             resp = self._session.get(url, timeout=15)
             data = resp.json()
             if data.get("resultCount", 0) > 0:
