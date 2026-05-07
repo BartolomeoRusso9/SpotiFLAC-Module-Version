@@ -62,14 +62,16 @@ spotiflac url ./out --service tidal
 
 ## Supported URL Types
 
-SpotiFLAC supports the following URL formats for both **Spotify** and **Tidal**:
+SpotiFLAC supports the following URL formats for **Spotify**, **Tidal** and **SoundCloud**:
 
-| Type                          | Spotify                         | Tidal                                            |
-|-------------------------------|---------------------------------|--------------------------------------------------|
-| Track                         | `open.spotify.com/track/...`    | `listen.tidal.com/track/...`                     |
-| Album                         | `open.spotify.com/album/...`    | `listen.tidal.com/album/...`                     |
-| Playlist                      | `open.spotify.com/playlist/...` | `listen.tidal.com/playlist/...`                  |
-| Discography (via artist URL)  | `open.spotify.com/artist/...`   | `listen.tidal.com/artist/.../discography/albums` |
+| Type                          | Spotify                         | Tidal                                            | SoundCloud                              |
+|-------------------------------|---------------------------------|--------------------------------------------------|-----------------------------------------|
+| Track                         | `open.spotify.com/track/...`    | `listen.tidal.com/track/...`                     | `soundcloud.com/artist/track-slug`      |
+| Album / Set                   | `open.spotify.com/album/...`    | `listen.tidal.com/album/...`                     | `soundcloud.com/artist/sets/set-slug`   |
+| Playlist                      | `open.spotify.com/playlist/...` | `listen.tidal.com/playlist/...`                  | —                                       |
+| Discography (via artist URL)  | `open.spotify.com/artist/...`   | `listen.tidal.com/artist/.../discography/albums` | —                                       |
+
+> **Note:** SoundCloud tracks are downloaded as **MP3** (the platform does not distribute lossless audio). All other services deliver **FLAC**.
 
 ---
 
@@ -186,6 +188,35 @@ MusicLibrary/
 ```
 
 Use `--use-album-subfolders` and `--filename-format "{year} - {album}/{track}. {title}"` to achieve this layout automatically.
+
+---
+
+## SoundCloud Download
+
+SpotiFLAC can download tracks and sets directly from SoundCloud. The output format is **MP3** (SoundCloud does not offer lossless streams). Metadata enrichment and lyrics embedding are fully supported.
+
+```python
+from SpotiFLAC import SpotiFLAC
+
+# Single track
+SpotiFLAC(
+    url="https://soundcloud.com/artist/track-slug",
+    output_dir="./downloads",
+    services=["soundcloud"],
+    embed_lyrics=True,
+    enrich_metadata=True,
+)
+```
+
+CLI equivalent:
+
+```bash
+spotiflac https://soundcloud.com/artist/track-slug ./downloads \
+  --service soundcloud \
+  --enrich-providers deezer apple qobuz tidal soundcloud
+```
+
+> Metadata enrichment via Deezer, Apple Music and others still applies to SoundCloud tracks — BPM, genre, label and HD artwork are fetched from those providers using the track's ISRC when available.
 
 ---
 
@@ -332,7 +363,7 @@ Program can also be ran by downloading the python files and calling <code>python
 ```bash
 ./SpotiFLAC-Windows.exe url
                         output_dir
-                        [--service tidal qobuz amazon spoti]
+                        [--service tidal qobuz amazon spoti soundcloud]
                         [--filename-format "{title} - {artist}"]
                         [--output-path "files/song.flac"]
                         [--quality LOSSLESS]
@@ -348,7 +379,7 @@ Program can also be ran by downloading the python files and calling <code>python
                         [--lyrics-providers spotify apple musixmatch amazon lrclib]
                         [--spotify-token SP_DC]
                         [--no-enrich]
-                        [--enrich-providers deezer apple qobuz tidal]
+                        [--enrich-providers deezer apple qobuz tidal soundcloud]
 ```
 
 <h4>Linux / Mac example usage:</h4>
@@ -357,7 +388,7 @@ Program can also be ran by downloading the python files and calling <code>python
 chmod +x SpotiFLAC-Linux-arm64
 ./SpotiFLAC-Linux-arm64 url
                         output_dir
-                        [--service tidal qobuz amazon spoti]
+                        [--service tidal qobuz amazon spoti soundcloud]
                         [--filename-format "{title} - {artist}"]
                         [--output-path "files/song.flac"]
                         [--quality LOSSLESS]
@@ -373,7 +404,7 @@ chmod +x SpotiFLAC-Linux-arm64
                         [--lyrics-providers spotify apple musixmatch amazon lrclib]
                         [--spotify-token SP_DC]
                         [--no-enrich]
-                        [--enrich-providers deezer apple qobuz tidal]
+                        [--enrich-providers deezer apple qobuz tidal soundcloud]
 ```
 
 *(For ARM devices like Raspberry Pi, replace `x86_64` with `arm64`)*
@@ -385,10 +416,10 @@ chmod +x SpotiFLAC-Linux-arm64
 
 | Parameter | Type | Default                                                  | Description |
 | --- | --- |----------------------------------------------------------| --- |
-| **`url`** | `str` | *Required*                                               | The Spotify or Tidal URL (Track, Album, Playlist, or Artist) you want to download. |
+| **`url`** | `str` | *Required*                                               | The Spotify, Tidal or SoundCloud URL (Track, Album, Playlist, or Artist) you want to download. |
 | **`output_dir`** | `str` | *Required*                                               | The destination directory path where the audio files will be saved. |
 | **`output_path`** | `str` | `None`                                                   | Exact destination file path for **single track** downloads (e.g. `"files/song.flac"`). Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies. |
-| **`services`** | `list` | `["tidal"]`                                              | Specifies which services to use and their priority order. |
+| **`services`** | `list` | `["tidal"]`                                              | Specifies which services to use and their priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`, `soundcloud`. |
 | **`filename_format`** | `str` | `"{title} - {artist}"`                                   | Format for naming downloaded files. See placeholders below. |
 | **`use_track_numbers`** | `bool` | `False`                                                  | Prefixes the filename with the track number. |
 | **`use_album_track_numbers`** | `bool` | `False`                                                  | Uses the track's original album number instead of the download queue position. |
@@ -397,13 +428,13 @@ chmod +x SpotiFLAC-Linux-arm64
 | **`first_artist_only`** | `bool` | `False`                                                  | Uses only the first artist in tags and filename (e.g. `"Artist A"` instead of `"Artist A, Artist B"`). |
 | **`include_featuring`** | `bool` | `False` | When downloading an artist discography, also includes tracks where the artist appears as a featured artist on other artists' releases (`appears_on` on Spotify, `COMPILATIONS` on Tidal). Only the specific tracks featuring the artist are downloaded, not entire albums. |
 | **`loop`** | `int` | `None`                                                   | Duration in minutes to keep retrying failed downloads. |
-| **`quality`** | `str` | `"LOSSLESS"`                                             | Download quality. Tidal: `"LOSSLESS"` or `"HI_RES"`. Qobuz: `"6"` (CD), `"7"` (Hi-Res), `"27"` (Hi-Res Max). |
+| **`quality`** | `str` | `"LOSSLESS"`                                             | Download quality. Tidal: `"LOSSLESS"` or `"HI_RES"`. Qobuz: `"6"` (CD), `"7"` (Hi-Res), `"27"` (Hi-Res Max). Not applicable to SoundCloud. |
 | **`log_level`** | `int` | `logging.WARNING`                                        | Python logging level (e.g. `logging.DEBUG` for verbose output). |
 | **`embed_lyrics`** | `bool` | `True`                                                   | Whether to fetch and embed synchronized lyrics (LRC) into the audio file. Disable with `False`. |
 | **`lyrics_providers`** | `list` | `["spotify", "musixmatch", "lrclib", "apple"]`           | Priority order of lyrics providers to attempt. |
 | **`lyrics_spotify_token`** | `str` | `""`                                                     | Spotify `sp_dc` cookie required for Spotify lyrics. |
 | **`enrich_metadata`** | `bool` | `True`                                                   | Enables multi-provider metadata enrichment (High-res covers, BPM, Labels, etc.). Disable with `False`. |
-| **`enrich_providers`** | `list` | `["deezer", "apple", "qobuz", "tidal"]`                  | Priority order of metadata providers to attempt. |
+| **`enrich_providers`** | `list` | `["deezer", "apple", "qobuz", "tidal", "soundcloud"]`   | Priority order of metadata providers to attempt. |
 | **`qobuz_token`** | `str` | `None`                                                   | Optional Qobuz user auth token used as fallback for metadata resolution. Fallback: env `QOBUZ_AUTH_TOKEN`. |
 
 ### Filename Format Placeholders
@@ -446,7 +477,7 @@ SpotiFLAC automatically queries **MusicBrainz** in the background (when an ISRC 
 | `MUSICBRAINZ_ARTISTID` | MusicBrainz artist ID |
 | `MUSICBRAINZ_RELEASEGROUPID` | MusicBrainz release group ID |
 
-This is enabled automatically for **Tidal**,  **Qobuz** and **Amazon** providers. No configuration required.
+This is enabled automatically for **Tidal**, **Qobuz**, **Amazon** and **SoundCloud** providers (when ISRC is available). No configuration required.
 
 ---
 
@@ -463,10 +494,10 @@ After each download, SpotiFLAC validates the file to detect common issues:
 
 | Flag                        | Short | Default                                  | Description                                                                                                                  |
 |-----------------------------| --- |------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
-| `--service`                 | `-s` | `tidal`                                  | One or more providers in priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`.                                       |
+| `--service`                 | `-s` | `tidal`                                  | One or more providers in priority order. Choices: `tidal`, `qobuz`, `amazon`, `spoti`, `soundcloud`.                        |
 | `--filename-format`         | `-f` | `{title} - {artist}`                     | Filename template with placeholders.                                                                                         |
 | `--output-path`             | `-o` | `None`                                   | Exact output file path for single track downloads (e.g. `files/song.flac`). Ignored for albums, playlists and discographies. |
-| `--quality`                 | `-q` | `LOSSLESS`                               | Audio quality (see Quality table above).                                                                                     |
+| `--quality`                 | `-q` | `LOSSLESS`                               | Audio quality (see Quality table above). Not applicable to SoundCloud.                                                       |
 | `--use-track-numbers`       | | `False`                                  | Prefix filenames with track numbers.                                                                                         |
 | `--use-album-track-numbers` | | `False`                                  | Use the track's original album number instead of queue position.                                                             |
 | `--use-artist-subfolders`   | | `False`                                  | Organize files into per-artist subfolders.                                                                                   |
@@ -474,13 +505,13 @@ After each download, SpotiFLAC validates the file to detect common issues:
 | `--first-artist-only`       | | `False`                                  | Use only the first artist in tags and filename.                                                                              |
 | `--include-featuring`       | | `False`                                  | Include tracks where the artist appears as a featured artist on other artists' releases. Only applies to artist/discography URLs.|
 | `--qobuz-token`             | | `None`                                   | Qobuz user auth token (`x-user-auth-token`).                                                                                 |
-| `--loop`                    | `-l` | `None`                                   | Keep retrying failed downloads for N minutes.                                                                                                     |
+| `--loop`                    | `-l` | `None`                                   | Keep retrying failed downloads for N minutes.                                                                                |
 | `--verbose`                 | `-v` | `False`                                  | Enable debug logging.                                                                                                        |
 | `--no-lyrics`               | | `False`                                  | Disable lyrics embedding (lyrics are embedded **by default**).                                                               |
 | `--lyrics-providers`        | | `spotify musixmatch lrclib apple`        | Lyrics provider priority order.                                                                                              |
 | `--spotify-token`           | | `""`                                     | Spotify `sp_dc` cookie for synced lyrics.                                                                                    |
 | `--no-enrich`               | | `False`                                  | Disable multi-provider metadata enrichment (enrichment is **enabled by default**).                                           |
-| `--enrich-providers`        | | `deezer apple qobuz tidal`               | Metadata enrichment provider priority order.                                                                                 |
+| `--enrich-providers`        | | `deezer apple qobuz tidal soundcloud`    | Metadata enrichment provider priority order.                                                                                 |
 
 ---
 
@@ -494,7 +525,7 @@ Your support helps keep development going._
 
 ## API Credits
 
-[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [dabmusic.xyz](https://dabmusic.xyz)· [afkarxyz](https://github.com/afkarxyz) · [MusicBrainz](https://musicbrainz.org)
+[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [dabmusic.xyz](https://dabmusic.xyz) · [afkarxyz](https://github.com/afkarxyz) · [MusicBrainz](https://musicbrainz.org) · [SoundCloud](https://soundcloud.com)
 
 > [!TIP]
 >
