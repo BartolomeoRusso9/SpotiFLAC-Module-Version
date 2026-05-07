@@ -3,19 +3,24 @@ from __future__ import annotations
 import logging
 import os
 import time
-import requests
-import shutil
 from pathlib import Path
+import requests
 
+from ..core.errors import SpotiflacError, ErrorKind, TrackNotFoundError
+from ..core.http import RetryConfig
 from ..core.models import TrackMetadata, DownloadResult
-from ..core.errors import SpotiflacError
+from ..core.musicbrainz import AsyncMBFetch
+from ..core.tagger import embed_metadata, _print_mb_summary
+from ..core.provider_stats import record_success, record_failure
+from ..core.download_validation import validate_downloaded_track
+from ..core.console import print_source_banner, print_quality_fallback, print_api_failure
 from .base import BaseProvider
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
 
-# Endpoints descritti in index.js per il proxy di download
+# Endpoints per il proxy di download (basati su Zarz/app2)
 _PROXY_DIRECT_URL = "https://api.zarz.moe/v1/dl/app2"
 _PROXY_QUEUED_BASE = "https://api.zarz.moe/v1/dl/app"
 
@@ -23,10 +28,10 @@ class AppleMusicProvider(BaseProvider):
     name = "apple-music"
 
     def __init__(self, timeout_s: int = 30, proxy_api_key: str = "") -> None:
-        super().__init__(timeout_s=timeout_s)
-        self._session = requests.Session()
+        super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
+        self._session = self._http._session
 
-        # Imposta gli header basati sul proxy descritto in index.js
+        # Imposta gli header basati sul proxy
         headers = {
             "User-Agent": _DEFAULT_UA,
             "Accept": "application/json"
@@ -41,14 +46,13 @@ class AppleMusicProvider(BaseProvider):
         q = quality.lower()
         if q in ["alac", "atmos", "ac3", "aac", "aac-legacy"]:
             return q
-        if q == "high":
-            return "aac"  # Fondamentale per i profili combinati
-        return "alac"  # Default fallback
+        if q in ["high", "lossless"]:
+            return "alac"
+        return "aac"
 
     def _resolve_track_url(self, isrc: str) -> str | None:
         """
-        Sfrutta l'API pubblica di iTunes per trovare l'URL della traccia
-        Apple Music senza aver bisogno di scraping o token JWT complessi.
+        Sfrutta l'API pubblica di iTunes per trovare l'URL della traccia.
         """
         try:
             url = f"https://itunes.apple.com/lookup?isrc={isrc}"
@@ -56,7 +60,6 @@ class AppleMusicProvider(BaseProvider):
             resp.raise_for_status()
             data = resp.json()
             if data.get("resultCount", 0) > 0:
-                # Restituisce il link ufficiale (es. https://music.apple.com/...)
                 return data["results"][0].get("trackViewUrl")
         except Exception as e:
             logger.warning("[apple-music] Risoluzione URL tramite iTunes fallita per ISRC %s: %s", isrc, e)
@@ -76,11 +79,11 @@ class AppleMusicProvider(BaseProvider):
             logger.debug("[apple-music] Ricerca testuale fallita: %s", e)
         return None
 
-    def _get_stream_url(self, track_url: str, codec: str) -> str | None:
+    def _get_stream_url(self, track_url: str, codec: str) -> tuple[str | None, str | None]:
         """
-        Tenta prima il download diretto (app2). Se fallisce, ripiega su app.
+        Tenta prima il download diretto (app2). Se fallisce, ripiega su app in coda.
+        Restituisce una tupla (api_utilizzata, stream_url).
         """
-        # Header ultra-specifici per ingannare Cloudflare
         req_headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -97,32 +100,34 @@ class AppleMusicProvider(BaseProvider):
                 timeout=15
             )
 
-            # Controllo Cloudflare ispirato a index.js riga 112
             if resp.headers.get("cf-mitigated", "").lower() == "challenge":
-                logger.error("[apple-music] BLOCCATO: Il proxy ha attivato la protezione Cloudflare anti-bot.")
-                return None
-
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get("success") and data.get("stream_url"):
-                return data["stream_url"]
+                logger.error("[apple-music] BLOCCATO: Il proxy ha attivato la protezione Cloudflare (Diretto).")
+            else:
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("success") and data.get("stream_url"):
+                    record_success(self.name, _PROXY_DIRECT_URL)
+                    return _PROXY_DIRECT_URL, data["stream_url"]
         except requests.HTTPError as e:
             err_msg = e.response.json().get("error") if e.response.text else str(e)
             logger.debug("[apple-music] app2 rifiutato per %s: %s", codec, err_msg)
+            record_failure(self.name, _PROXY_DIRECT_URL)
         except Exception as e:
             logger.debug("[apple-music] Fallback ad app2 non riuscito: %s", e)
+            record_failure(self.name, _PROXY_DIRECT_URL)
 
-        # 2. Tentativo in coda (App)
+        # 2. Tentativo in Coda (App)
+        download_endpoint = f"{_PROXY_QUEUED_BASE}/download"
         try:
             resp = self._session.post(
-                f"{_PROXY_QUEUED_BASE}/download",
+                download_endpoint,
                 json={"url": track_url, "codec": codec},
                 headers=req_headers,
                 timeout=15
             )
 
             if resp.headers.get("cf-mitigated", "").lower() == "challenge":
-                return None
+                return None, None
 
             resp.raise_for_status()
             job_data = resp.json()
@@ -130,10 +135,11 @@ class AppleMusicProvider(BaseProvider):
 
             if not job_id:
                 logger.warning("[apple-music] Nessun job_id restituito dal proxy di coda per %s.", codec)
-                return None
+                record_failure(self.name, download_endpoint)
+                return None, None
 
-            # Polling come descritto in index.js (downloadPollIntervalMs = 2500)
-            max_wait_s = 60 * 60  # 60 minuti max
+            # Polling in attesa del completamento
+            max_wait_s = 60 * 60
             deadline = time.time() + max_wait_s
 
             while time.time() < deadline:
@@ -143,44 +149,25 @@ class AppleMusicProvider(BaseProvider):
                 status = st_data.get("status", "").lower()
 
                 if status == "completed":
-                    return f"{_PROXY_QUEUED_BASE}/file/{job_id}"
+                    record_success(self.name, _PROXY_QUEUED_BASE)
+                    return _PROXY_QUEUED_BASE, f"{_PROXY_QUEUED_BASE}/file/{job_id}"
                 elif status == "failed":
-                    logger.warning("[apple-music] Errore API per codec %s: %s", codec, st_data.get('error'))
-                    return None
+                    err = st_data.get('error', 'unknown error')
+                    logger.warning("[apple-music] Errore API per codec %s: %s", codec, err)
+                    record_failure(self.name, _PROXY_QUEUED_BASE)
+                    return None, None
 
-                time.sleep(2.5)  # Poll interval 2.5s
+                time.sleep(2.5)
 
             logger.warning("[apple-music] Timeout nell'attesa della traccia per codec %s.", codec)
-            return None
+            record_failure(self.name, _PROXY_QUEUED_BASE)
+            return None, None
+
         except Exception as e:
             logger.debug("[apple-music] Impossibile recuperare lo stream in coda per %s: %s", codec, e)
-            return None
+            record_failure(self.name, download_endpoint)
+            return None, None
 
-    def _download_audio_file(self, stream_url: str, output_path: Path) -> bool:
-        """Scarica fisicamente lo stream restituendo il progresso al core."""
-        temp_path = str(output_path) + ".part"
-        try:
-            with self._session.get(stream_url, stream=True, timeout=30) as resp:
-                resp.raise_for_status()
-                total = int(resp.headers.get("content-length", 0))
-                received = 0
-
-                with open(temp_path, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=65536):
-                        if chunk:
-                            f.write(chunk)
-                            received += len(chunk)
-                            if self._progress_cb and total:
-                                self._progress_cb(received, total)
-
-            # Rinomina al completamento
-            shutil.move(temp_path, str(output_path))
-            return True
-        except Exception as e:
-            logger.error("[apple-music] Errore di connessione durante il salvataggio: %s", e)
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            return False
 
     def download_track(
             self,
@@ -204,29 +191,31 @@ class AppleMusicProvider(BaseProvider):
             **kwargs,
     ) -> DownloadResult:
 
-        # Controlliamo se abbiamo già in mano un link diretto di Apple Music
-        is_native_apple = metadata.external_url and "music.apple.com" in metadata.external_url
+        is_native_apple = metadata.external_url and ("music.apple.com" in metadata.external_url or "apple.com" in metadata.external_url)
 
         if not metadata.isrc and not is_native_apple:
             return DownloadResult.fail(self.name, "Nessun ISRC o URL Apple Music fornito per la risoluzione.")
 
         try:
-            # 1. Determina la sequenza di Fallback per Apple Music
             target_codec = self._normalize_codec(quality)
             codecs_to_try = [target_codec]
 
             if allow_fallback:
                 if target_codec == "atmos":
                     codecs_to_try.extend(["alac", "aac", "aac-legacy"])
-                elif target_codec == "alac" or target_codec == "ac3":
+                elif target_codec in ["alac", "ac3"]:
                     codecs_to_try.extend(["aac", "aac-legacy"])
                 elif target_codec == "aac":
                     codecs_to_try.extend(["aac-legacy"])
 
-                # Rimuovi duplicati mantenendo l'ordine
+                # Rimuove duplicati preservando l'ordine
                 codecs_to_try = list(dict.fromkeys(codecs_to_try))
 
-            # 2. Genera il percorso di destinazione
+            # Trigger Asincrono MusicBrainz
+            mb_fetcher = None
+            if metadata.isrc:
+                mb_fetcher = AsyncMBFetch(metadata.isrc)
+
             dest = self._build_output_path(
                 metadata,
                 output_dir,
@@ -241,91 +230,91 @@ class AppleMusicProvider(BaseProvider):
             if self._file_exists(dest):
                 return DownloadResult.ok(self.name, str(dest))
 
-            # UI opzionale: Banner iniziale
-            try:
-                from ..core.console import print_source_banner
-                print_source_banner("Apple Music", _PROXY_DIRECT_URL,target_codec.upper())
-            except ImportError:
-                pass
-
-            # 3. Risoluzione URL
+            # Risoluzione URL
             track_url = None
             if is_native_apple:
                 track_url = metadata.external_url
-            elif metadata.isrc:
-                track_url = self._resolve_track_url(metadata.isrc)
+            else:
+                if metadata.isrc:
+                    track_url = self._resolve_track_url(metadata.isrc)
+
+                # FALLBACK: Se l'ISRC fallisce, cerca per Titolo e Artista
+                if not track_url:
+                    logger.debug("[apple-music] ISRC non trovato, tento la ricerca testuale...")
+                    track_url = self._resolve_track_url_by_search(metadata.title, metadata.artists)
 
             if not track_url:
-                return DownloadResult.fail(self.name, "Impossibile trovare la traccia su Apple Music.")
+                raise TrackNotFoundError(self.name, f"Traccia non trovata (ISRC: {metadata.isrc})")
 
-            # NON FACCIAMO NESSUNA PULIZIA: Il JS originale manda l'URL grezzo!
-            logger.info("[apple-music] Traccia trovata: %s", track_url)
+            logger.info("[apple-music] URL Traccia risolto: %s", track_url)
 
-            # 4. Ottieni lo stream tentando i codec (Fallback Loop)
             stream_url = None
             used_codec = None
+            api_used = None
 
+            # Fallback Loop dei Codec
             for current_codec in codecs_to_try:
                 logger.debug("[apple-music] Tentativo stream con codec: %s", current_codec)
-                stream_url = self._get_stream_url(track_url, current_codec)
+                api_used, stream_url = self._get_stream_url(track_url, current_codec)
                 if stream_url:
                     used_codec = current_codec
                     break
-                logger.warning("[apple-music] Codec %s fallito o non disponibile, provo alternativa...", current_codec)
+                logger.warning("[apple-music] Codec %s fallito, provo fallback...", current_codec)
 
             if not stream_url or not used_codec:
-                return DownloadResult.fail(self.name, "Nessuno stream audio disponibile (esauriti i fallback possibili).")
+                raise SpotiflacError(ErrorKind.UNAVAILABLE, "Nessuno stream audio disponibile (esauriti i fallback).", self.name)
 
-            # Segnala se c'è stato un downgrade visivamente nella CLI
             if used_codec != target_codec:
-                try:
-                    from ..core.console import print_quality_fallback
-                    print_quality_fallback("Apple Music", target_codec.upper(), used_codec.upper())
-                except ImportError:
-                    pass
+                print_quality_fallback("Apple Music", target_codec.upper(), used_codec.upper())
 
-            # 5. Effettua il Download
-            success = self._download_audio_file(stream_url, dest)
-            if not success or not os.path.exists(dest):
-                return DownloadResult.fail(self.name, "Download del file M4A fallito.")
+            print_source_banner("Apple Music", api_used or "Proxy", used_codec.upper())
 
-            # 4. Inserimento dei Metadati
-            # MusicBrainz lookup asincrono
-            from ..core.musicbrainz import AsyncMBFetch
-            mb_fetcher = AsyncMBFetch(metadata.isrc)
+            # Download Standardizzato tramite _http
+            self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
 
+            # Validazione Traccia (Controllo File Corrotto/Tronco)
+            expected_s = metadata.duration_ms // 1000
+            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
+            if not valid:
+                raise SpotiflacError(ErrorKind.FILE_IO, err_msg, self.name)
+
+            # Mappatura Tag MusicBrainz
             mb_tags: dict[str, str] = {}
-            res = mb_fetcher.result()
-            if res:
-                mapping = {
-                    "mbid_track":       "MUSICBRAINZ_TRACKID",
-                    "mbid_album":       "MUSICBRAINZ_ALBUMID",
-                    "mbid_artist":      "MUSICBRAINZ_ARTISTID",
-                    "mbid_relgroup":    "MUSICBRAINZ_RELEASEGROUPID",
-                    "mbid_albumartist": "MUSICBRAINZ_ALBUMARTISTID",
-                    "barcode":          "BARCODE",
-                    "label":            "LABEL",
-                    "organization":     "ORGANIZATION",
-                    "country":          "RELEASECOUNTRY",
-                    "script":           "SCRIPT",
-                    "status":           "RELEASESTATUS",
-                    "media":            "MEDIA",
-                    "type":             "RELEASETYPE",
-                    "artist_sort":      "ARTISTSORT",
-                    "albumartist_sort": "ALBUMARTISTSORT",
-                    "catalognumber":    "CATALOGNUMBER",
-                    "bpm":              "BPM",
-                    "genre":            "GENRE"
-                }
-                for mb_key, tag_name in mapping.items():
-                    val = res.get(mb_key)
-                    if val:
-                        mb_tags[tag_name] = str(val)
+            if mb_fetcher:
+                res = mb_fetcher.result()
+                if res:
+                    mapping = {
+                        "mbid_track":       "MUSICBRAINZ_TRACKID",
+                        "mbid_album":       "MUSICBRAINZ_ALBUMID",
+                        "mbid_artist":      "MUSICBRAINZ_ARTISTID",
+                        "mbid_relgroup":    "MUSICBRAINZ_RELEASEGROUPID",
+                        "mbid_albumartist": "MUSICBRAINZ_ALBUMARTISTID",
+                        "barcode":          "BARCODE",
+                        "label":            "LABEL",
+                        "organization":     "ORGANIZATION",
+                        "country":          "RELEASECOUNTRY",
+                        "script":           "SCRIPT",
+                        "status":           "RELEASESTATUS",
+                        "media":            "MEDIA",
+                        "type":             "RELEASETYPE",
+                        "artist_sort":      "ARTISTSORT",
+                        "albumartist_sort": "ALBUMARTISTSORT",
+                        "catalognumber":    "CATALOGNUMBER",
+                        "bpm":              "BPM",
+                        "genre":            "GENRE"
+                    }
+                    for mb_key, tag_name in mapping.items():
+                        val = res.get(mb_key)
+                        if val:
+                            mb_tags[tag_name] = str(val)
 
-            from ..core.tagger import embed_metadata, _print_mb_summary
+                    if res.get("original_date"):
+                        mb_tags["ORIGINALDATE"] = res["original_date"]
+                        mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
+                    if res.get("catalognumber"):
+                        mb_tags["CATALOGNUMBER"] = res["catalognumber"]
 
-            if mb_tags:
-                _print_mb_summary(mb_tags)
+            _print_mb_summary(mb_tags)
 
             embed_metadata(
                 str(dest), metadata,
