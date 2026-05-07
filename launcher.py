@@ -105,7 +105,7 @@ def parse_args() -> argparse.Namespace:
     enrich_grp.add_argument(
         "--enrich-providers",
         nargs   = "+",
-        default = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
+        default = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"],
         dest    = "enrich_providers",
         choices = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         help    = "Provider metadata enrichment in ordine (default: deezer apple qobuz tidal).",
