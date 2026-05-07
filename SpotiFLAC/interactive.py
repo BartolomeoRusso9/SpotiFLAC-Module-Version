@@ -230,7 +230,7 @@ def run_interactive() -> dict:
             ordered  = True,
         )
 
-    # ── 4. Quality ───────────────────────────────────────────────────────────
+    # ── 4. Audio Quality ───────────────────────────────────────────────────────────
     _section("4 · Audio Quality")
 
     if is_soundcloud_url:
@@ -244,9 +244,10 @@ def run_interactive() -> dict:
         has_qobuz = "qobuz" in cfg["services"]
         has_tidal = "tidal" in cfg["services"]
         has_deezer = "deezer" in cfg["services"]
+        has_apple = "apple" in cfg["services"] # Aggiunto Apple Music
 
         # Solo Qobuz
-        if has_qobuz and not (has_tidal or has_deezer):
+        if has_qobuz and not (has_tidal or has_deezer or has_apple):
             q_choice = _ask_choice(
                 "Qobuz Quality:",
                 options = ["6 (CD Lossless)", "7 (Hi-Res)", "27 (Hi-Res Max)"],
@@ -255,7 +256,7 @@ def run_interactive() -> dict:
             cfg["quality"] = q_choice.split(" ")[0]
 
         # Solo Tidal
-        elif has_tidal and not (has_qobuz or has_deezer):
+        elif has_tidal and not (has_qobuz or has_deezer or has_apple):
             cfg["quality"] = _ask_choice(
                 "Tidal Quality:",
                 options = ["LOSSLESS", "HI_RES"],
@@ -263,7 +264,7 @@ def run_interactive() -> dict:
             )
 
         # Solo Deezer
-        elif has_deezer and not (has_qobuz or has_tidal):
+        elif has_deezer and not (has_qobuz or has_tidal or has_apple):
             q_choice = _ask_choice(
                 "Deezer Quality:",
                 options = ["LOSSLESS (FLAC)", "HIGH (MP3 320)", "NORMAL (MP3 128)"],
@@ -271,21 +272,35 @@ def run_interactive() -> dict:
             )
             cfg["quality"] = q_choice.split(" ")[0]
 
-        # Multipli
-        elif (has_qobuz or has_tidal or has_deezer):
+        # Solo Apple Music
+        elif has_apple and not (has_qobuz or has_tidal or has_deezer):
+            q_choice = _ask_choice(
+                "Apple Music Quality:",
+                options = ["ALAC (Lossless)", "ATMOS (Spatial)", "AC3", "AAC", "AAC-LEGACY"],
+                default = "ALAC (Lossless)",
+            )
+            cfg["quality"] = q_choice.split(" ")[0].lower()
+
+        # Multipli (Aggiornato per includere tutte le qualità di Apple)
+        elif (has_qobuz or has_tidal or has_deezer or has_apple):
             print(f"  {DIM('You selected multiple providers. Choose a unified profile:')}")
 
-            # Opzioni di base sempre presenti nel mix
             combined_options = [
-                "LOSSLESS (FLAC on Deezer/Tidal, '6' on Qobuz)",
-                "HI_RES (Best available everywhere, '27' on Qobuz)"
+                "LOSSLESS (FLAC on Deezer/Tidal, '6' on Qobuz, ALAC on Apple)",
+                "HI_RES (Best available everywhere, '27' on Qobuz)",
             ]
 
-            # Aggiungiamo il livello 7 in modo esclusivo se c'è Qobuz nel mix
-            if has_qobuz:
-                combined_options.append("7 (Applies intermediate Hi-Res quality only for Qobuz)")
+            if has_apple:
+                combined_options.append("ATMOS (Spatial Audio su Apple, HI_RES sugli altri)")
+                combined_options.append("AC3 (Dolby Digital su Apple, HIGH sugli altri)")
 
-            combined_options.append("HIGH (MP3 320 where available)")
+            if has_qobuz:
+                combined_options.append("7 (Hi-Res intermedio solo per Qobuz)")
+
+            combined_options.append("HIGH (MP3 320 / AAC su Apple)")
+
+            if has_apple:
+                combined_options.append("AAC-LEGACY (Vecchio formato iTunes su Apple, HIGH sugli altri)")
 
             q_choice = _ask_choice(
                 "Combined Quality:",
@@ -293,12 +308,19 @@ def run_interactive() -> dict:
                 default = combined_options[0],
             )
 
+            # Mappatura della scelta nella stringa globale corretta
             if q_choice.startswith("LOSSLESS"):
                 cfg["quality"] = "LOSSLESS"
             elif q_choice.startswith("HI_RES"):
                 cfg["quality"] = "HI_RES"
+            elif q_choice.startswith("ATMOS"):
+                cfg["quality"] = "atmos"
+            elif q_choice.startswith("AC3"):
+                cfg["quality"] = "ac3"
             elif q_choice.startswith("7"):
                 cfg["quality"] = "7"
+            elif q_choice.startswith("AAC-LEGACY"):
+                cfg["quality"] = "aac-legacy"
             else:
                 cfg["quality"] = "HIGH"
 

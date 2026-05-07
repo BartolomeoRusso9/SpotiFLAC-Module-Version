@@ -1,4 +1,3 @@
-# apple_music_provider.py
 from __future__ import annotations
 
 import logging
@@ -39,11 +38,12 @@ class AppleMusicProvider(BaseProvider):
         self._session.headers.update(headers)
 
     def _normalize_codec(self, quality: str) -> str:
-        """Mappa la qualità richiesta in codec compatibili con Apple Music."""
         q = quality.lower()
         if q in ["alac", "atmos", "ac3", "aac", "aac-legacy"]:
             return q
-        return "alac"  # Default fallback come in index.js
+        if q == "high":
+            return "aac"  # Fondamentale per i profili combinati
+        return "alac"  # Default fallback
 
     def _resolve_track_url(self, isrc: str) -> str | None:
         """
@@ -69,7 +69,7 @@ class AppleMusicProvider(BaseProvider):
         """
         # 1. Tentativo Diretto (App2)
         try:
-            logger.debug("[apple-music] Tento risoluzione diretta (app2)...")
+            logger.debug("[apple-music] Tento risoluzione diretta (app2) per codec %s...", codec)
             resp = self._session.post(
                 _PROXY_DIRECT_URL,
                 json={"url": track_url, "codec": codec},
@@ -80,11 +80,11 @@ class AppleMusicProvider(BaseProvider):
             if data.get("success") and data.get("stream_url"):
                 return data["stream_url"]
         except Exception as e:
-            logger.warning("[apple-music] Fallback ad app2 non riuscito: %s", e)
+            logger.debug("[apple-music] Fallback ad app2 non riuscito per %s: %s", codec, e)
 
         # 2. Tentativo in coda (App)
         try:
-            logger.debug("[apple-music] Tento risoluzione in coda (app)...")
+            logger.debug("[apple-music] Tento risoluzione in coda (app) per codec %s...", codec)
             resp = self._session.post(
                 f"{_PROXY_QUEUED_BASE}/download",
                 json={"url": track_url, "codec": codec},
@@ -95,7 +95,8 @@ class AppleMusicProvider(BaseProvider):
             job_id = job_data.get("job_id")
 
             if not job_id:
-                raise SpotiflacError("Nessun job_id restituito dal proxy di coda.")
+                logger.warning("[apple-music] Nessun job_id restituito dal proxy di coda per %s.", codec)
+                return None
 
             # Polling come descritto in index.js (downloadPollIntervalMs = 2500)
             max_wait_s = 60 * 60  # 60 minuti max
@@ -110,13 +111,15 @@ class AppleMusicProvider(BaseProvider):
                 if status == "completed":
                     return f"{_PROXY_QUEUED_BASE}/file/{job_id}"
                 elif status == "failed":
-                    raise SpotiflacError(f"Errore nel job di download Apple: {st_data.get('error')}")
+                    logger.warning("[apple-music] Errore API per codec %s: %s", codec, st_data.get('error'))
+                    return None
 
                 time.sleep(2.5)  # Poll interval 2.5s
 
-            raise SpotiflacError("Timeout nell'attesa della traccia dal proxy.")
+            logger.warning("[apple-music] Timeout nell'attesa della traccia per codec %s.", codec)
+            return None
         except Exception as e:
-            logger.error("[apple-music] Impossibile recuperare lo stream audio: %s", e)
+            logger.debug("[apple-music] Impossibile recuperare lo stream in coda per %s: %s", codec, e)
             return None
 
     def _download_audio_file(self, stream_url: str, output_path: Path) -> bool:
@@ -162,6 +165,7 @@ class AppleMusicProvider(BaseProvider):
             lyrics_spotify_token:str              = "",
             enrich_metadata:     bool             = False,
             enrich_providers:    list[str] | None = None,
+            qobuz_token:         str | None       = None,
             is_album:            bool             = False,
             **kwargs,
     ) -> DownloadResult:
@@ -169,10 +173,22 @@ class AppleMusicProvider(BaseProvider):
             return DownloadResult.fail(self.name, "Nessun ISRC fornito: essenziale per la risoluzione Apple Music.")
 
         try:
-            # Le estensioni Apple Music (M4A) per i formati Lossless o AAC
-            codec = self._normalize_codec(quality)
-            ext = ".m4a"
+            # 1. Determina la sequenza di Fallback per Apple Music
+            target_codec = self._normalize_codec(quality)
+            codecs_to_try = [target_codec]
 
+            if allow_fallback:
+                if target_codec == "atmos":
+                    codecs_to_try.extend(["alac", "aac", "aac-legacy"])
+                elif target_codec == "alac" or target_codec == "ac3":
+                    codecs_to_try.extend(["aac", "aac-legacy"])
+                elif target_codec == "aac":
+                    codecs_to_try.extend(["aac-legacy"])
+
+                # Rimuovi duplicati mantenendo l'ordine
+                codecs_to_try = list(dict.fromkeys(codecs_to_try))
+
+            # 2. Genera il percorso di destinazione
             dest = self._build_output_path(
                 metadata,
                 output_dir,
@@ -181,32 +197,48 @@ class AppleMusicProvider(BaseProvider):
                 include_track_num=include_track_num,
                 use_album_track_num=use_album_track_num,
                 first_artist_only=first_artist_only,
-                extension=ext
+                extension=".m4a"
             )
 
             if self._file_exists(dest):
                 return DownloadResult.ok(self.name, str(dest))
 
-            # UI opzionale (ispirata a deezer.py)
+            # UI opzionale: Banner iniziale
             try:
-                from ..core.ui import print_source_banner
-                print_source_banner("Apple Music", codec.upper())
+                from ..core.console import print_source_banner
+                print_source_banner("Apple Music", target_codec.upper())
             except ImportError:
                 pass
 
-            # 1. Trova l'URL di Apple Music
+            # 3. Risoluzione URL
             track_url = self._resolve_track_url(metadata.isrc)
             if not track_url:
                 return DownloadResult.fail(self.name, "Impossibile trovare la traccia su Apple Music tramite ISRC.")
 
-            logger.info("[apple-music] Traccia trovata: %s", track_url)
+            # 4. Ottieni lo stream tentando i codec (Fallback Loop)
+            stream_url = None
+            used_codec = None
 
-            # 2. Ottieni lo stream di Download dal Proxy (Zarz)
-            stream_url = self._get_stream_url(track_url, codec)
-            if not stream_url:
-                return DownloadResult.fail(self.name, "Nessuno stream audio disponibile dal resolver API.")
+            for current_codec in codecs_to_try:
+                logger.debug("[apple-music] Tentativo stream con codec: %s", current_codec)
+                stream_url = self._get_stream_url(track_url, current_codec)
+                if stream_url:
+                    used_codec = current_codec
+                    break
+                logger.warning("[apple-music] Codec %s fallito o non disponibile, provo alternativa...", current_codec)
 
-            # 3. Effettua il Download
+            if not stream_url or not used_codec:
+                return DownloadResult.fail(self.name, "Nessuno stream audio disponibile (esauriti i fallback possibili).")
+
+            # Segnala se c'è stato un downgrade visivamente nella CLI
+            if used_codec != target_codec:
+                try:
+                    from ..core.console import print_quality_fallback
+                    print_quality_fallback("Apple Music", target_codec.upper(), used_codec.upper())
+                except ImportError:
+                    pass
+
+            # 5. Effettua il Download
             success = self._download_audio_file(stream_url, dest)
             if not success or not os.path.exists(dest):
                 return DownloadResult.fail(self.name, "Download del file M4A fallito.")
@@ -244,8 +276,12 @@ class AppleMusicProvider(BaseProvider):
                     if val:
                         mb_tags[tag_name] = str(val)
 
-            from ..core.tagger import embed_metadata as _embed
-            _embed(
+            from ..core.tagger import embed_metadata, _print_mb_summary
+
+            if mb_tags:
+                _print_mb_summary(mb_tags)
+
+            embed_metadata(
                 str(dest), metadata,
                 first_artist_only       = first_artist_only,
                 cover_url               = metadata.cover_url,
@@ -256,6 +292,7 @@ class AppleMusicProvider(BaseProvider):
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
+                enrich_qobuz_token      = qobuz_token or "",
                 is_album                = is_album,
             )
 

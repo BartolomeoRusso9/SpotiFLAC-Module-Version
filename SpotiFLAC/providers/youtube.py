@@ -468,7 +468,7 @@ class YouTubeProvider(BaseProvider):
             lyrics_spotify_token:str             = "",
             enrich_metadata:     bool            = False,
             enrich_providers:    list[str] | None = None,
-            qobuz_token:         str             = "",
+            qobuz_token:         str | None       = None,
             is_album:            bool            = False,
             **kwargs,
     ) -> DownloadResult:
@@ -568,9 +568,8 @@ class YouTubeProvider(BaseProvider):
                 from ..core.tagger import _print_mb_summary
                 _print_mb_summary(mb_tags)
 
-            # Fix 3: Use central embed_metadata pipeline
-            from ..core.tagger import embed_metadata as _embed
-            _embed(
+            from ..core.tagger import embed_metadata
+            embed_metadata(
                 str(dest), metadata,
                 first_artist_only       = first_artist_only,
                 cover_url               = metadata.cover_url,
@@ -581,7 +580,7 @@ class YouTubeProvider(BaseProvider):
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
-                qobuz_token             = qobuz_token,
+                enrich_qobuz_token      = qobuz_token or "",  # <-- BUG FIX: Nome parametro e handling del None
                 is_album                = is_album,
             )
 

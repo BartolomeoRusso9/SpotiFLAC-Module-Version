@@ -64,7 +64,7 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
         "deezer":  ("providers.deezer",  "DeezerProvider"),
         "youtube": ("providers.youtube", "YouTubeProvider"),
         "spoti":   ("providers.spotidownloader", "SpotiDownloaderProvider"),
-        "apple":   ("providers.apple", "AppleMusicProvider"),
+        "apple":   ("providers.apple_music", "AppleMusicProvider"),
         "soundcloud": ("providers.soundcloud", "SoundCloudProvider"),
     }
     if name not in adapters:
@@ -257,11 +257,18 @@ class SpotiflacDownloader:
         is_tidal = False
         is_soundcloud = False
         is_youtube = False
+        is_apple = False
 
         try:
             from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
             if is_tidal_url(input_url):
                 is_tidal = True
+        except ImportError:
+            pass
+        try:
+            from .providers.apple_music_metadata import is_apple_music_url, parse_apple_music_url
+            if is_apple_music_url(input_url):
+                is_apple = True
         except ImportError:
             pass
 
@@ -283,6 +290,10 @@ class SpotiflacDownloader:
                     input_url,
                     include_featuring=self._opts.include_featuring,
                 )
+            elif is_apple:
+                from .providers.apple_music_metadata import AppleMusicMetadataClient
+                client = AppleMusicMetadataClient()
+                collection_name, tracks = client.get_url(input_url)
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
                 client = SoundCloudProvider()
@@ -325,7 +336,8 @@ class SpotiflacDownloader:
 
         if is_tidal:
             info = parse_tidal_url(input_url)
-
+        elif is_apple:
+            info = parse_apple_music_url(input_url)
         elif is_soundcloud:
             from urllib.parse import urlparse as _urlparse
             _parts = [p for p in _urlparse(input_url).path.strip("/").split("/") if p]

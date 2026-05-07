@@ -371,7 +371,7 @@ class DeezerProvider(BaseProvider):
             lyrics_spotify_token:str             = "",
             enrich_metadata:     bool            = False,
             enrich_providers:    list[str] | None = None,
-            qobuz_token:         str             = "", # Fix 2
+            qobuz_token:         str | None       = None,
             is_album:            bool            = False,
             **kwargs,
     ) -> DownloadResult:
@@ -457,8 +457,8 @@ class DeezerProvider(BaseProvider):
                 from ..core.tagger import _print_mb_summary
                 _print_mb_summary(mb_tags)
 
-            from ..core.tagger import embed_metadata as _embed
-            _embed(
+            from ..core.tagger import embed_metadata
+            embed_metadata(
                 str(dest), metadata,
                 first_artist_only       = first_artist_only,
                 cover_url               = metadata.cover_url,
@@ -469,7 +469,7 @@ class DeezerProvider(BaseProvider):
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
-                enrich_qobuz_token      = qobuz_token,
+                enrich_qobuz_token      = qobuz_token or "",
                 is_album                = is_album,
             )
 
