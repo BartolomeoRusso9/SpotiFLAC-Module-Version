@@ -178,24 +178,12 @@ class SoundCloudProvider(BaseProvider):
         return results
 
     # ==========================================
-    # METADATA FROM URL
+    # METADATA HELPERS
     # ==========================================
 
-    def get_metadata_from_url(self, url: str) -> TrackMetadata:
-        """Estrae i metadati da un link SoundCloud e restituisce TrackMetadata."""
-        # _ensure_client_id gestisce sia il caso None che l'expiry
-        self._ensure_client_id()
-
-        resolve_url = (
-            f"{self.api_url}/resolve"
-            f"?url={quote(url)}&client_id={self.client_id}"
-        )
-        res = self.session.get(resolve_url)
-        res.raise_for_status()
-        data = res.json()
-
+    def _track_data_to_metadata(self, data: dict, external_url: str = "") -> TrackMetadata:
+        """Converte un oggetto traccia raw dell'API SoundCloud in TrackMetadata."""
         user = data.get("user") or {}
-        # publisher_metadata può essere esplicitamente null nell'API → fallback a {}
         pub  = data.get("publisher_metadata") or {}
 
         artist_name = (
@@ -205,19 +193,17 @@ class SoundCloudProvider(BaseProvider):
         )
         isrc = pub.get("isrc") or data.get("isrc", "")
 
-        # Copertina: usa _get_hires_artwork per coerenza con il resto del provider
         raw_artwork = data.get("artwork_url") or user.get("avatar_url", "")
         artwork     = self._get_hires_artwork(raw_artwork)
 
-        # display_date è la data di rilascio ufficiale; created_at è solo l'upload
         raw_date = (
                 pub.get("release_date")
                 or data.get("display_date")
                 or data.get("created_at", "")
         )
         release_date = raw_date.split("T")[0] if raw_date and "T" in raw_date else (raw_date or "")
-
-        album_title = pub.get("album_title") or pub.get("release_title") or "SoundCloud"
+        album_title  = pub.get("album_title") or pub.get("release_title") or "SoundCloud"
+        permalink    = data.get("permalink_url", "") or external_url
 
         return TrackMetadata(
             id           = str(data.get("id")),
@@ -229,9 +215,144 @@ class SoundCloudProvider(BaseProvider):
             cover_url    = artwork,
             release_date = release_date,
             isrc         = isrc,
-            external_url = url,
+            external_url = permalink,
             extra_info   = {"provider": "soundcloud", "exclusive": True},
         )
+
+    def _fetch_full_tracks(self, track_ids: List[str]) -> List[dict]:
+        """Scarica i dati completi di una lista di track ID in batch da 50."""
+        results = []
+        for i in range(0, len(track_ids), 50):
+            batch = track_ids[i:i + 50]
+            try:
+                data = self._api_get("tracks", {"ids": ",".join(batch)})
+                if isinstance(data, list):
+                    results.extend(data)
+            except Exception as e:
+                logger.warning("[SC] Batch fetch failed: %s", e)
+        return results
+
+    def _playlist_data_to_metadata_list(self, data: dict) -> List[TrackMetadata]:
+        """
+        Converte la risposta API di una playlist/set SoundCloud in lista di TrackMetadata.
+        Le tracce "stub" (solo id, senza dati completi) vengono recuperate in batch.
+        """
+        tracks_raw     = data.get("tracks", [])
+        playlist_cover = self._get_hires_artwork(data.get("artwork_url", ""))
+
+        full:     List[dict] = []
+        stub_ids: List[str]  = []
+
+        for t in tracks_raw:
+            if t.get("title"):
+                full.append(t)
+            elif t.get("id"):
+                stub_ids.append(str(t["id"]))
+
+        if stub_ids:
+            full.extend(self._fetch_full_tracks(stub_ids))
+
+        id_to_data = {str(t.get("id")): t for t in full}
+        ordered: List[TrackMetadata] = []
+
+        for i, t in enumerate(tracks_raw):
+            tid        = str(t.get("id", ""))
+            track_data = id_to_data.get(tid)
+            if not track_data:
+                continue
+            meta = self._track_data_to_metadata(track_data)
+            # Usa la copertina della playlist se la traccia non ne ha una
+            if not meta.cover_url and playlist_cover:
+                meta.cover_url = playlist_cover
+            meta.track_number = i + 1
+            ordered.append(meta)
+
+        return ordered
+
+    def _get_user_tracks_list(self, user_id: int) -> List[TrackMetadata]:
+        """
+        Recupera tutte le tracce pubbliche di un artista SoundCloud con paginazione.
+        """
+        tracks:    List[TrackMetadata] = []
+        next_href: Optional[str] = (
+            f"{self.api_url}/users/{user_id}/tracks"
+            f"?limit=20&client_id={self.client_id}"
+        )
+
+        while next_href:
+            try:
+                res = self.session.get(next_href, timeout=15)
+                res.raise_for_status()
+                page = res.json()
+
+                for item in page.get("collection", []):
+                    if item.get("id") and item.get("title"):
+                        tracks.append(self._track_data_to_metadata(item))
+
+                next_href = page.get("next_href")
+                # La next_href di SoundCloud include già il client_id — nessuna
+                # aggiunta necessaria, ma verifichiamo per sicurezza.
+                if next_href and "client_id" not in next_href:
+                    next_href += f"&client_id={self.client_id}"
+
+                if next_href:
+                    time.sleep(0.3)
+
+            except Exception as e:
+                logger.warning("[SC] User tracks pagination failed: %s", e)
+                break
+
+        return tracks
+
+    # ==========================================
+    # ENTRY POINT UNIFICATO
+    # ==========================================
+
+    def get_url(self, url: str) -> tuple[str, List[TrackMetadata]]:
+        """
+        Risolve qualsiasi URL SoundCloud e restituisce (nome_collezione, [TrackMetadata]).
+
+        Tipi supportati:
+          - Track:    soundcloud.com/artist/track-slug
+          - Playlist: soundcloud.com/artist/sets/set-slug
+          - Artist:   soundcloud.com/artist
+        """
+        self._ensure_client_id()
+
+        resolve_url = (
+            f"{self.api_url}/resolve"
+            f"?url={quote(url)}&client_id={self.client_id}"
+        )
+        res = self.session.get(resolve_url, timeout=15)
+        res.raise_for_status()
+        data = res.json()
+
+        kind = data.get("kind", "")
+
+        if kind == "track":
+            meta = self._track_data_to_metadata(data, external_url=url)
+            return meta.title, [meta]
+
+        elif kind == "playlist":
+            name   = data.get("title", "Unknown Playlist")
+            tracks = self._playlist_data_to_metadata_list(data)
+            return name, tracks
+
+        elif kind == "user":
+            user_id   = data.get("id")
+            user_name = data.get("username", "Unknown Artist")
+            tracks    = self._get_user_tracks_list(user_id)
+            return user_name, tracks
+
+        else:
+            raise ValueError(f"Tipo URL SoundCloud non supportato: {kind}")
+
+    # get_metadata_from_url rimane per retrocompatibilità, ora delega a get_url
+    def get_metadata_from_url(self, url: str) -> TrackMetadata:
+        _, tracks = self.get_url(url)
+        if not tracks:
+            raise ValueError(f"Nessuna traccia trovata per: {url}")
+        return tracks[0]
 
     # ==========================================
     # DOWNLOAD URL

@@ -275,16 +275,11 @@ class SpotiflacDownloader:
                     input_url,
                     include_featuring=self._opts.include_featuring,
                 )
+            # ── DOPO ───────────────────────────────────────────────────
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
                 client = SoundCloudProvider()
-
-                print("Recupero metadati da SoundCloud...")
-
-                # Estrae i metadati tramite l'URL
-                meta = client.get_metadata_from_url(input_url)
-                collection_name = meta.title
-                tracks = [meta]
+                collection_name, tracks = client.get_url(input_url)
             else:
                 collection_name, tracks = self._client.get_url(
                     input_url,
@@ -321,8 +316,14 @@ class SpotiflacDownloader:
             info = parse_tidal_url(input_url)
 
         elif is_soundcloud:
-            # SoundCloud: distingui playlist vs track usando l'URL
-            stype = "playlist" if "/sets/" in input_url else "track"
+            from urllib.parse import urlparse as _urlparse
+            _parts = [p for p in _urlparse(input_url).path.strip("/").split("/") if p]
+            if len(_parts) >= 2 and _parts[1] == "sets":
+                stype = "playlist"
+            elif len(_parts) == 1:
+                stype = "artist"
+            else:
+                stype = "track"
             info = {"type": stype, "id": input_url}
 
         else:
