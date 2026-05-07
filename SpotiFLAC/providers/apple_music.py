@@ -210,7 +210,7 @@ class AppleMusicProvider(BaseProvider):
             # UI opzionale: Banner iniziale
             try:
                 from ..core.console import print_source_banner
-                print_source_banner("Apple Music", target_codec.upper())
+                print_source_banner("Apple Music", _PROXY_DIRECT_URL,target_codec.upper())
             except ImportError:
                 pass
 
