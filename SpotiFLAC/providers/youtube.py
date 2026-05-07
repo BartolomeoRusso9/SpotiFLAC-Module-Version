@@ -76,11 +76,6 @@ class YouTubeProvider(BaseProvider):
             browse_id = playlist_id if playlist_id.startswith("VL") or playlist_id.startswith("PL") else f"VL{playlist_id}"
             return self._fetch_container(browse_id)
 
-        # Artista (channel)
-        if "/channel/" in parsed.path:
-            channel_id = parsed.path.split("/channel/")[1].split("?")[0]
-            return self._fetch_artist_discography(channel_id)
-
         # Video Singolo
         video_id = self._extract_video_id(url)
         if video_id:
@@ -162,11 +157,6 @@ class YouTubeProvider(BaseProvider):
             track.track_number = i + 1
 
         return title, tracks
-
-    def _fetch_artist_discography(self, artist_id: str) -> Tuple[str, List[TrackMetadata]]:
-        logger.info("[youtube] Fetching artist: %s", artist_id)
-        title, tracks = self._fetch_container(artist_id)
-        return f"Discografia: {title}", tracks
 
     def _parse_tracks_from_data(self, data: Dict, track_list: List[TrackMetadata]) -> int:
         count_before = len(track_list)
@@ -580,7 +570,7 @@ class YouTubeProvider(BaseProvider):
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
-                enrich_qobuz_token      = qobuz_token or "",  # <-- BUG FIX: Nome parametro e handling del None
+                enrich_qobuz_token      = qobuz_token or "",
                 is_album                = is_album,
             )
 
