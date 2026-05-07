@@ -254,9 +254,10 @@ class SpotiflacDownloader:
     def _run_once(self, input_url: str) -> None:
         print("Fetching metadata…")
 
-        # Rilevamento Tidal vs Spotify vs SoundCloud
+        # Rilevamento Tidal vs Spotify vs SoundCloud vs YouTube
         is_tidal = False
         is_soundcloud = False
+        is_youtube = False
         try:
             from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
             if is_tidal_url(input_url):
@@ -266,6 +267,8 @@ class SpotiflacDownloader:
 
         if "soundcloud.com" in input_url or "on.soundcloud.com" in input_url:
             is_soundcloud = True
+        elif "youtube.com" in input_url or "youtu.be" in input_url:
+            is_youtube = True
 
         try:
             if is_tidal:
@@ -279,6 +282,10 @@ class SpotiflacDownloader:
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
                 client = SoundCloudProvider()
+                collection_name, tracks = client.get_url(input_url)
+            elif is_youtube:
+                from .providers.youtube import YouTubeProvider
+                client = YouTubeProvider()
                 collection_name, tracks = client.get_url(input_url)
             else:
                 collection_name, tracks = self._client.get_url(
@@ -324,6 +331,15 @@ class SpotiflacDownloader:
                 stype = "artist"
             else:
                 stype = "track"
+            info = {"type": stype, "id": input_url}
+
+        elif is_youtube:
+            # YouTube: distingui playlist vs track vs artist usando l'URL
+            stype = "track"
+            if "list=" in input_url or "/playlist" in input_url:
+                stype = "playlist"
+            elif "/browse/" in input_url or "/channel/" in input_url:
+                stype = "artist_discography"
             info = {"type": stype, "id": input_url}
 
         else:
