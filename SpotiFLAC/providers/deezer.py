@@ -190,6 +190,27 @@ class DeezerProvider(BaseProvider):
             logger.warning("[deezer] get_track_by_isrc failed: %s", exc)
             return None
 
+
+    def _search_track_text(self, title: str, artist: str) -> dict | None:
+        """Fallback estremo: cerca la traccia per testo su Deezer."""
+        import urllib.parse
+        # Usiamo solo il primo artista per massimizzare le probabilità di match
+        first_artist = artist.split(",")[0].strip()
+        query = f'track:"{title}" artist:"{first_artist}"'
+        url = f"https://api.deezer.com/search?q={urllib.parse.quote(query)}&limit=1"
+
+        try:
+            data = self._get_json_cached(url)
+            if data and data.get("data"):
+                # Se la ricerca ha successo, recuperiamo l'ID traccia
+                track_id = data["data"][0].get("id")
+                if track_id:
+                    # Richiamiamo l'API specifica per ottenere l'ISRC e tutti i dettagli
+                    return self._get_json(f"https://api.deezer.com/track/{track_id}")
+        except Exception as e:
+            logger.debug("[deezer] Ricerca testuale fallita: %s", e)
+
+        return None
     # ------------------------------------------------------------------
     # Metadati & Crypto Helpers
     # ------------------------------------------------------------------
@@ -359,7 +380,7 @@ class DeezerProvider(BaseProvider):
             metadata:            TrackMetadata,
             output_dir:          str,
             *,
-            quality:             str             = "flac", # Fix 1
+            quality:             str             = "flac",
             filename_format:     str             = "{title} - {artist}",
             position:            int             = 1,
             include_track_num:   bool            = False,
@@ -375,11 +396,20 @@ class DeezerProvider(BaseProvider):
             is_album:            bool            = False,
             **kwargs,
     ) -> DownloadResult:
-        if not metadata.isrc:
-            return DownloadResult.fail(self.name, "Nessun ISRC disponibile per Deezer")
+
+        isrc_to_use = metadata.isrc
+
+        # ---- LOGICA FALLBACK TESTUALE ----
+        if not isrc_to_use:
+            logger.warning("[deezer] ISRC mancante in metadata. Tento ricerca testuale per: %s - %s", metadata.title, metadata.artists)
+            fallback_track = self._search_track_text(metadata.title, metadata.artists)
+            if fallback_track and fallback_track.get("isrc"):
+                isrc_to_use = fallback_track["isrc"]
+                logger.info("[deezer] Ricerca testuale riuscita! Trovato ISRC alternativo: %s", isrc_to_use)
+            else:
+                return DownloadResult.fail(self.name, "Nessun ISRC disponibile e ricerca testuale fallita.")
 
         try:
-            # Fix 5: Explicit keyword arguments
             dest = self._build_output_path(
                 metadata,
                 output_dir,
@@ -393,17 +423,16 @@ class DeezerProvider(BaseProvider):
                 return DownloadResult.ok(self.name, str(dest))
 
             from ..core.musicbrainz import AsyncMBFetch
-            mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
+            mb_fetcher = AsyncMBFetch(isrc_to_use) if isrc_to_use else None
 
-            # Fix 3: Added source banner (Assuming import path, adjust if necessary)
             try:
                 from ..core.console import print_source_banner
-                print_source_banner("Deezer", _RESOLVER_URL,quality.upper())
+                print_source_banner("Deezer", _RESOLVER_URL, quality.upper())
             except ImportError:
-                pass # Fallback if UI module is structured differently
+                pass
 
-            # Fix 4: Removed fragile _snapshot logic, trust the returned path
-            downloaded = self._download_flac_raw(metadata.isrc, output_dir)
+            # Chiamata SINGOLA al downloader con l'ISRC corretto
+            downloaded = self._download_flac_raw(isrc_to_use, output_dir)
 
             if not downloaded or not os.path.exists(downloaded):
                 return DownloadResult.fail(self.name, "Nessun file FLAC scaricato")
@@ -454,8 +483,11 @@ class DeezerProvider(BaseProvider):
                     if res.get("catalognumber"):
                         mb_tags["CATALOGNUMBER"] = res["catalognumber"]
 
-                from ..core.tagger import _print_mb_summary
-                _print_mb_summary(mb_tags)
+                try:
+                    from ..core.tagger import _print_mb_summary
+                    _print_mb_summary(mb_tags)
+                except ImportError:
+                    pass
 
             from ..core.tagger import embed_metadata
             embed_metadata(
