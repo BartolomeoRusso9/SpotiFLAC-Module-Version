@@ -215,82 +215,79 @@ def run_interactive() -> dict:
 
     # ── 3. Services ──────────────────────────────────────────────────────────
     _section("3 · Audio Services")
-    print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")
-    services = _ask_multi(
-        "Services (order = priority):",
-        options  = ["tidal", "qobuz", "amazon", "spoti", "soundcloud"],
-        defaults = ["tidal"],
-        ordered  = True,
+
+    is_soundcloud_url = (
+            "soundcloud.com" in cfg["url"]
+            or "on.soundcloud.com" in cfg["url"]
     )
-    cfg["services"] = services
 
-    # ── 4. Quality ──────────────────────────────────────────────────────────
+    if is_soundcloud_url:
+        cfg["services"] = ["soundcloud"]
+        print(
+            f"  {GREEN('✓')} Provider {BOLD('soundcloud')} automatically selected.\n"
+        )
+    else:
+        print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")
+        cfg["services"] = _ask_multi(
+            "Services (order = priority):",
+            options  = ["tidal", "qobuz", "amazon", "spoti", "soundcloud"],
+            defaults = ["tidal"],
+            ordered  = True,
+        )
+
+    # ── 4. Quality ───────────────────────────────────────────────────────────
     _section("4 · Audio Quality")
-    print(f"  {DIM('Note: If the requested quality is not found, an automatic fallback will be executed.')}")
 
-    has_qobuz = "qobuz" in cfg["services"]
-    has_tidal = "tidal" in cfg["services"]
-
-    if has_qobuz and not has_tidal:
-        # The user chose Qobuz but not Tidal
-        q_choice = _ask_choice(
-            "Qobuz Quality:",
-            options = ["6 (CD Lossless)", "7 (Hi-Res)", "27 (Hi-Res Max)"],
-            default = "6 (CD Lossless)",
+    if is_soundcloud_url:
+        cfg["quality"] = "LOSSLESS"
+        print(
+            f"  {YELLOW('⏭  Skipped:')} {DIM('Only MP3 available')}"
         )
-        # Extract only the number (6, 7 or 27) from the chosen string
-        cfg["quality"] = q_choice.split(" ")[0]
+    else:
+        print(f"  {DIM('Note: If the requested quality is not found, an automatic fallback will be executed.')}")
 
-    elif has_tidal and not has_qobuz:
-        # The user chose Tidal but not Qobuz
-        cfg["quality"] = _ask_choice(
-            "Tidal Quality:",
-            options = ["LOSSLESS", "HI_RES"],
-            default = "LOSSLESS",
-        )
+        has_qobuz = "qobuz" in cfg["services"]
+        has_tidal = "tidal" in cfg["services"]
 
-    elif has_qobuz and has_tidal:
-        # The user included both providers in the list
-        print(f"  {DIM('You selected both Qobuz and Tidal. Choose a unified profile:')}")
-        q_choice = _ask_choice(
-            "Combined Quality:",
-            options = [
-                "LOSSLESS (Applies '6' on Qobuz and 'LOSSLESS' on Tidal)",
-                "HI_RES (Applies '27' on Qobuz and 'HI_RES' on Tidal)",
-                "7 (Applies intermediate Hi-Res quality only for Qobuz)"
-            ],
-            default = "LOSSLESS (Applies '6' on Qobuz and 'LOSSLESS' on Tidal)",
-        )
-        # Reduce the long string to the key value required by the CLI
-        if q_choice.startswith("LOSSLESS"):
-            cfg["quality"] = "LOSSLESS"
-        elif q_choice.startswith("HI_RES"):
-            cfg["quality"] = "HI_RES"
+        if has_qobuz and not has_tidal:
+            q_choice = _ask_choice(
+                "Qobuz Quality:",
+                options = ["6 (CD Lossless)", "7 (Hi-Res)", "27 (Hi-Res Max)"],
+                default = "6 (CD Lossless)",
+            )
+            cfg["quality"] = q_choice.split(" ")[0]
+
+        elif has_tidal and not has_qobuz:
+            cfg["quality"] = _ask_choice(
+                "Tidal Quality:",
+                options = ["LOSSLESS", "HI_RES"],
+                default = "LOSSLESS",
+            )
+
+        elif has_qobuz and has_tidal:
+            print(f"  {DIM('You selected both Qobuz and Tidal. Choose a unified profile:')}")
+            q_choice = _ask_choice(
+                "Combined Quality:",
+                options = [
+                    "LOSSLESS (Applies '6' on Qobuz and 'LOSSLESS' on Tidal)",
+                    "HI_RES (Applies '27' on Qobuz and 'HI_RES' on Tidal)",
+                    "7 (Applies intermediate Hi-Res quality only for Qobuz)",
+                ],
+                default = "LOSSLESS (Applies '6' on Qobuz and 'LOSSLESS' on Tidal)",
+            )
+            if q_choice.startswith("LOSSLESS"):
+                cfg["quality"] = "LOSSLESS"
+            elif q_choice.startswith("HI_RES"):
+                cfg["quality"] = "HI_RES"
+            else:
+                cfg["quality"] = "7"
+
         else:
-            cfg["quality"] = "7"
-
-    else:
-        # Fallback in case only Amazon or Spotify or SoundCloud are used
-        cfg["quality"] = _ask_choice(
-            "Quality:",
-            options = ["LOSSLESS", "HI_RES"],
-            default = "LOSSLESS",
-        )
-
-    # Se l'utente ha impostato un percorso personalizzato, saltiamo le sezioni 5 e 6
-    if cfg.get("output_path"):
-        _section("5 & 6 · Format & Organization")
-        print(f"  {YELLOW('⏭  Skipped:')} {DIM('Custom output path overrides folders and filename formats.')}")
-
-        # Impostiamo i valori di default in modo invisibile per evitare errori nel riepilogo
-        cfg["filename_format"] = "{title} - {artist}"
-        cfg["use_track_numbers"] = False
-        cfg["use_album_track_numbers"] = False
-        cfg["use_artist_subfolders"] = False
-        cfg["use_album_subfolders"] = False
-        cfg["first_artist_only"] = False
-
-    else:
+            cfg["quality"] = _ask_choice(
+                "Quality:",
+                options = ["LOSSLESS", "HI_RES"],
+                default = "LOSSLESS",
+            )
         # ── 5. Filename format ─────────────────────────────────────────────────
         _section("5 · Filename Format")
         print(f"  {DIM('Placeholders: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}")

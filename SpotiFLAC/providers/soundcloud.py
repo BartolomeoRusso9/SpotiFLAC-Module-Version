@@ -44,23 +44,46 @@ class SoundCloudProvider(BaseProvider):
         logger.info("[SC] Fetching SoundCloud client_id...")
         res = self.session.get("https://soundcloud.com/")
         res.raise_for_status()
+        body = res.text
 
-        match = re.search(r'client_id[:=]["\']([a-zA-Z0-9]{32})["\']', res.text)
-        if match:
-            return match.group(1)
+        # Controlla se la versione SC è cambiata — evita fetch inutili
+        version_match = re.search(r'__sc_version="(\d{10})"', body)
+        if version_match:
+            new_version = version_match.group(1)
+            if new_version == getattr(self, '_sc_version', '') and self.client_id:
+                logger.info("[SC] SoundCloud version unchanged, reusing client_id")
+                return self.client_id
+            self._sc_version = new_version
 
+        # Strategia 1: client_id diretto nell'HTML
+        m = re.search(r'client_id[:=]["\']([a-zA-Z0-9]{32})["\']', body)
+        if m:
+            return m.group(1)
+
+        # Strategia 2: JS bundles (ultimi 8, dall'ultimo al primo)
         script_urls = re.findall(
-            r'src=["\'](https://[^"\']*sndcdn\.com[^"\']*\.js)["\']', res.text
+            r'src=["\'](https://[^"\']*sndcdn\.com[^"\']*\.js)["\']', body
         )
-        for url in reversed(script_urls[-15:]):
+        for url in reversed(script_urls[-8:]):
             try:
-                js_res = self.session.get(url, timeout=5)
-                if js_res.status_code == 200:
-                    cid_match = re.search(
-                        r'client_id[:=]["\']([a-zA-Z0-9]{32})["\']', js_res.text
-                    )
-                    if cid_match:
-                        return cid_match.group(1)
+                js = self.session.get(url, timeout=5)
+                if js.status_code != 200:
+                    continue
+                js_body = js.text
+                # Pattern 1: client_id:"XXXX" o client_id='XXXX'
+                cm = re.search(r'client_id[:=]["\']([a-zA-Z0-9]{32})["\']', js_body)
+                if not cm:
+                    # Pattern 2: ("client_id=XXXX")
+                    cm = re.search(r'\("client_id=([a-zA-Z0-9]{32})"\)', js_body)
+                if not cm:
+                    # Pattern 3: client_id=XXXX inline
+                    idx = js_body.find("client_id=")
+                    if idx != -1:
+                        candidate = js_body[idx + 10: idx + 42]
+                        if len(candidate) == 32 and candidate.isalnum():
+                            return candidate
+                if cm:
+                    return cm.group(1)
             except Exception as e:
                 logger.debug("[SC] Bundle fetch failed for %s: %s", url, e)
 
@@ -120,6 +143,73 @@ class SoundCloudProvider(BaseProvider):
             "provider_id":   self.provider_id,
             "permalink_url": data.get("permalink_url", ""),
         }
+
+    # ==========================================
+    # URL UTILITIES
+    # ==========================================
+
+    def _clean_url(self, url: str) -> str:
+        """
+        Normalizza un URL SoundCloud:
+        - rimuove query params (utm_source, ecc.)
+        - normalizza m.soundcloud.com → soundcloud.com
+        """
+        url = url.strip()
+        # Mobile URL
+        url = re.sub(r'^https?://m\.soundcloud\.com', 'https://soundcloud.com', url)
+        # Rimuove query string e fragment
+        for ch in ('?', '#'):
+            idx = url.find(ch)
+            if idx != -1:
+                url = url[:idx]
+        return url.rstrip('/')
+
+    def _resolve_short_link(self, url: str) -> str:
+        """
+        Segue il redirect di on.soundcloud.com e restituisce l'URL canonico.
+        Prova prima il tag og:url nell'HTML, poi il canonical.
+        """
+        try:
+            res = self.session.get(url, timeout=10, allow_redirects=True)
+            # Metodo 1: URL finale dopo redirect
+            final = res.url
+            if 'soundcloud.com' in final and 'on.soundcloud.com' not in final:
+                return self._clean_url(final)
+            # Metodo 2: og:url nel body
+            for pattern in (
+                    r'<meta[^>]*property=["\']og:url["\'][^>]*content=["\']([^"\']+)["\']',
+                    r'<link[^>]*rel=["\']canonical["\'][^>]*href=["\']([^"\']+)["\']',
+            ):
+                m = re.search(pattern, res.text, re.IGNORECASE)
+                if m and 'soundcloud.com' in m.group(1):
+                    return self._clean_url(m.group(1))
+        except Exception as e:
+            logger.warning("[SC] Short link resolution failed: %s", e)
+        return url
+
+    def _normalize_url(self, url: str) -> str:
+        """Entry point unificato per la normalizzazione URL."""
+        url = self._clean_url(url)
+        if 'on.soundcloud.com' in url:
+            url = self._resolve_short_link(url)
+            url = self._clean_url(url)
+        return url
+
+    def _get_hires_artwork(self, url: str) -> str:
+        """Prova la variante -original., fallback a -t500x500."""
+        if not url:
+            return ""
+        if "-large." in url:
+            # Prova prima la versione originale (qualità massima)
+            original = url.replace("-large.", "-original.")
+            try:
+                r = self.session.head(original, timeout=4)
+                if r.status_code == 200:
+                    return original
+            except Exception:
+                pass
+            return url.replace("-large.", "-t500x500.")
+        return url
 
     # ==========================================
     # CORE PROVIDER METHODS
@@ -308,15 +398,14 @@ class SoundCloudProvider(BaseProvider):
     # ENTRY POINT UNIFICATO
     # ==========================================
 
-    def get_url(self, url: str) -> tuple[str, List[TrackMetadata]]:
-        """
-        Risolve qualsiasi URL SoundCloud e restituisce (nome_collezione, [TrackMetadata]).
+    # Path da ignorare in un URL utente (non sono tracce)
+    _SC_USER_SUBPAGES = {
+        "sets", "albums", "tracks", "likes",
+        "followers", "following", "reposts", "playlists", "popular-tracks",
+    }
 
-        Tipi supportati:
-          - Track:    soundcloud.com/artist/track-slug
-          - Playlist: soundcloud.com/artist/sets/set-slug
-          - Artist:   soundcloud.com/artist
-        """
+    def get_url(self, url: str) -> tuple[str, List[TrackMetadata]]:
+        url = self._normalize_url(url)   # ← pulizia centralizzata
         self._ensure_client_id()
 
         resolve_url = (
@@ -332,18 +421,15 @@ class SoundCloudProvider(BaseProvider):
         if kind == "track":
             meta = self._track_data_to_metadata(data, external_url=url)
             return meta.title, [meta]
-
         elif kind == "playlist":
             name   = data.get("title", "Unknown Playlist")
             tracks = self._playlist_data_to_metadata_list(data)
             return name, tracks
-
         elif kind == "user":
             user_id   = data.get("id")
             user_name = data.get("username", "Unknown Artist")
             tracks    = self._get_user_tracks_list(user_id)
             return user_name, tracks
-
         else:
             raise ValueError(f"Tipo URL SoundCloud non supportato: {kind}")
 
