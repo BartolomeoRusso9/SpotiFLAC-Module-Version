@@ -187,7 +187,7 @@ def run_interactive() -> dict:
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
-    print(f"  {DIM('Supported: Spotify, Tidal, and SoundCloud (track, album, playlist, artist)')}")
+    print(f"  {DIM('Supported: Spotify, Tidal, SoundCloud, and YouTube (track, album, playlist, artist)')}")
     url = ""
     while not url:
         url = _ask("URL")
@@ -200,14 +200,14 @@ def run_interactive() -> dict:
     cfg["output_dir"] = _ask("Destination folder", "./Downloads")
 
     # ── 2.5. Custom Output Path (Only for single tracks) ────────────────────
-    if "/track/" in cfg["url"]:
+    if "/track/" in cfg["url"] or "watch?v=" in cfg["url"] or "youtu.be" in cfg["url"]:
         _section("2.5 · Custom Output Path")
         print(f"  {DIM('Since this is a single track, you can specify an exact filename.')}")
-        print(f"  {DIM('Example: my_files/favorite_song.flac')}")
+        print(f"  {DIM('Example: my_files/favorite_song.flac (or .mp3)')}")
 
         use_custom = _ask_bool("Do you want to set a custom output path?", False)
         if use_custom:
-            cfg["output_path"] = _ask("Full file path including .flac " + DIM("(e.g., /Users/Name/Desktop/song.flac)"))
+            cfg["output_path"] = _ask("Full file path including extension " + DIM("(e.g., /Users/Name/Desktop/song.flac)"))
         else:
             cfg["output_path"] = None
     else:
@@ -230,7 +230,7 @@ def run_interactive() -> dict:
         print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")
         cfg["services"] = _ask_multi(
             "Services (order = priority):",
-            options  = ["tidal", "qobuz", "amazon", "spoti", "soundcloud"],
+            options  = ["tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube"],
             defaults = ["tidal"],
             ordered  = True,
         )
@@ -288,6 +288,7 @@ def run_interactive() -> dict:
                 options = ["LOSSLESS", "HI_RES"],
                 default = "LOSSLESS",
             )
+
         # ── 5. Filename format ─────────────────────────────────────────────────
         _section("5 · Filename Format")
         print(f"  {DIM('Placeholders: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}")
@@ -313,7 +314,7 @@ def run_interactive() -> dict:
     # ── 7. Featuring ────────────────────────────────────────────────────────
     _section("7 · Featuring")
 
-    if "/artist/" in cfg["url"]:
+    if "/artist/" in cfg["url"] or "UC" in cfg["url"]:
         print("  " + DIM("If enabled, also downloads individual tracks where the artist appears as a featured artist"))
         print("  " + DIM("on other artists' releases (appears_on on Spotify, compilations on Tidal)"))
         cfg["include_featuring"] = _ask_bool("Include featuring tracks?", False)
@@ -352,12 +353,12 @@ def run_interactive() -> dict:
     if cfg["enrich_metadata"]:
         cfg["enrich_providers"] = _ask_multi(
             "Enrichment providers (order = priority):",
-            options  = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
-            defaults = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
+            options  = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"],
+            defaults = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"],
             ordered  = True,
         )
     else:
-        cfg["enrich_providers"] = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
+        cfg["enrich_providers"] = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"]
 
     # ── 10. Optional Tokens ─────────────────────────────────────────────────────
     _section("10 · Optional Tokens")

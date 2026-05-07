@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Callable
-from urllib.parse import quote
+from typing import Callable, List, Optional, Tuple, Dict, Any
+from urllib.parse import quote, urlparse, parse_qs
 
 import requests
 from mutagen.id3 import (
@@ -23,9 +23,12 @@ logger = logging.getLogger(__name__)
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/145.0.0.0 Safari/537.36"
+    "Chrome/120.0.0.0 Safari/537.36"
 )
 
+# Parametri InnerTube
+YT_SEARCH_PARAMS_TRACKS = "EgWKAQIIAQ=="
+INNERTUBE_CLIENT_VERSION = "1.20240801.01.00"
 
 def _sanitize(value: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", value).strip()
@@ -49,11 +52,183 @@ class YouTubeProvider(BaseProvider):
         super().set_progress_callback(cb)
 
     # ------------------------------------------------------------------
-    # URL resolution
+    # URL Detection & Resolution (Playlist, Album, Artist, Track)
+    # ------------------------------------------------------------------
+
+    def get_url(self, url: str) -> Tuple[str, List[TrackMetadata]]:
+        """
+        Rileva se l'URL è un video singolo, playlist, album o artista e lo elabora.
+        """
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query)
+
+        # Playlist o Album (browseId o list param)
+        playlist_id = qs.get("list", [None])[0]
+        if not playlist_id and "/playlist" in parsed.path:
+            playlist_id = qs.get("list", [None])[0]
+
+        if "/browse/" in parsed.path:
+            browse_id = parsed.path.split("/browse/")[1].split("?")[0]
+            return self._fetch_container(browse_id)
+
+        if playlist_id:
+            # Se inizia con OLAK5uy_, è un album visualizzato come playlist
+            browse_id = playlist_id if playlist_id.startswith("VL") or playlist_id.startswith("PL") else f"VL{playlist_id}"
+            return self._fetch_container(browse_id)
+
+        # Artista (channel)
+        if "/channel/" in parsed.path:
+            channel_id = parsed.path.split("/channel/")[1].split("?")[0]
+            return self._fetch_artist_discography(channel_id)
+
+        # Video Singolo
+        video_id = self._extract_video_id(url)
+        if video_id:
+            meta = self._get_single_track_metadata(video_id)
+            return meta.title, [meta]
+
+        raise ValueError(f"URL YouTube non supportato o non riconosciuto: {url}")
+
+    def _get_single_track_metadata(self, video_id: str) -> TrackMetadata:
+        url = "https://music.youtube.com/youtubei/v1/player?alt=json"
+        payload = {
+            "context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}},
+            "videoId": video_id
+        }
+        resp = self._session.post(url, json=payload, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        details = data.get("videoDetails", {})
+        title = details.get("title", "Unknown")
+        artist = details.get("author", "Unknown Artist")
+        duration = int(details.get("lengthSeconds", 0)) * 1000
+
+        thumbs = details.get("thumbnail", {}).get("thumbnails", [])
+        cover_url = thumbs[-1].get("url") if thumbs else ""
+
+        return TrackMetadata(
+            id=video_id,
+            title=title,
+            artists=artist,
+            album="YouTube",
+            duration_ms=duration,
+            cover_url=cover_url,
+            external_url=f"https://music.youtube.com/watch?v={video_id}",
+            extra_info={"provider": "youtube"}
+        )
+
+    # ------------------------------------------------------------------
+    # InnerTube API Fetchers per Container (Playlist/Album)
+    # ------------------------------------------------------------------
+
+    def _fetch_container(self, browse_id: str) -> Tuple[str, List[TrackMetadata]]:
+        logger.info("[youtube] Fetching container: %s", browse_id)
+
+        url = "https://music.youtube.com/youtubei/v1/browse?alt=json"
+        payload = {
+            "context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}},
+            "browseId": browse_id
+        }
+
+        resp = self._session.post(url, json=payload, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Estrazione Titolo
+        title = "Unknown YouTube Container"
+        try:
+            header = data.get("header", {}).get("musicDetailHeaderRenderer", {})
+            title = header.get("title", {}).get("runs", [{}])[0].get("text", title)
+        except: pass
+
+        tracks = []
+        self._parse_tracks_from_data(data, tracks)
+
+        # Gestione Paginazione (Continuation Tokens)
+        continuation = self._get_continuation_token(data)
+        while continuation:
+            logger.debug("[youtube] Fetching continuation...")
+            cont_data = self._fetch_continuation(continuation)
+            if not cont_data: break
+
+            added = self._parse_tracks_from_data(cont_data, tracks)
+            if added == 0: break
+            continuation = self._get_continuation_token(cont_data)
+
+        # Aggiungiamo i numeri traccia progressivi
+        for i, track in enumerate(tracks):
+            track.track_number = i + 1
+
+        return title, tracks
+
+    def _fetch_artist_discography(self, artist_id: str) -> Tuple[str, List[TrackMetadata]]:
+        logger.info("[youtube] Fetching artist: %s", artist_id)
+        title, tracks = self._fetch_container(artist_id)
+        return f"Discografia: {title}", tracks
+
+    def _parse_tracks_from_data(self, data: Dict, track_list: List[TrackMetadata]) -> int:
+        count_before = len(track_list)
+        items = self._find_key_recursive(data, "musicResponsiveListItemRenderer")
+
+        for item in items:
+            try:
+                v_id = item.get("playlistItemData", {}).get("videoId")
+                if not v_id: continue
+
+                columns = item.get("flexColumns", [])
+                title = columns[0].get("musicResponsiveListItemFlexColumnRenderer", {}).get("text", {}).get("runs", [{}])[0].get("text", "Unknown")
+
+                artist = "Unknown Artist"
+                if len(columns) > 1:
+                    artist_runs = columns[1].get("musicResponsiveListItemFlexColumnRenderer", {}).get("text", {}).get("runs", [])
+                    artist = ", ".join([r["text"] for r in artist_runs if "browseId" in r.get("navigationEndpoint", {}).get("browseEndpoint", {})])
+
+                thumbnails = item.get("thumbnail", {}).get("musicThumbnailRenderer", {}).get("thumbnail", {}).get("thumbnails", [])
+                cover = thumbnails[-1].get("url") if thumbnails else ""
+
+                track_list.append(TrackMetadata(
+                    id=v_id,
+                    title=title,
+                    artists=artist,
+                    album="YouTube Music",
+                    duration_ms=0,
+                    cover_url=cover,
+                    external_url=f"https://music.youtube.com/watch?v={v_id}",
+                    extra_info={"provider": "youtube"}
+                ))
+            except:
+                continue
+
+        return len(track_list) - count_before
+
+    def _get_continuation_token(self, data: Dict) -> Optional[str]:
+        tokens = self._find_key_recursive(data, "continuation")
+        return tokens[0] if tokens else None
+
+    def _fetch_continuation(self, token: str) -> Optional[Dict]:
+        url = f"https://music.youtube.com/youtubei/v1/browse?alt=json&ctoken={quote(token)}&continuation={quote(token)}"
+        try:
+            resp = self._session.post(url, json={"context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}}}, timeout=10)
+            return resp.json() if resp.ok else None
+        except: return None
+
+    def _find_key_recursive(self, data: Any, key: str) -> List[Any]:
+        results = []
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if k == key: results.append(v)
+                else: results.extend(self._find_key_recursive(v, key))
+        elif isinstance(data, list):
+            for item in data:
+                results.extend(self._find_key_recursive(item, key))
+        return results
+
+    # ------------------------------------------------------------------
+    # URL resolution (Per scaricare da piattaforme terze tramite YT)
     # ------------------------------------------------------------------
 
     def _get_youtube_url(self, track_id: str, track_name: str = "", artist_name: str = "") -> str:
-        # Supporto ID Tidal (prefisso "tidal_") e ID Spotify
         if track_id.startswith("tidal_"):
             tidal_id = track_id.removeprefix("tidal_")
             url = f"https://song.link/t/{tidal_id}"
@@ -85,16 +260,26 @@ class YouTubeProvider(BaseProvider):
         raise RuntimeError("Failed to resolve YouTube URL via Songlink and direct search")
 
     def _search_youtube_direct(self, track_name: str, artist_name: str) -> str | None:
-        query      = quote(f"{track_name} {artist_name} audio")
-        search_url = f"https://www.youtube.com/results?search_query={query}"
+        query = f"{track_name} {artist_name}"
+        url = "https://music.youtube.com/youtubei/v1/search?alt=json"
+
+        payload = {
+            "context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}},
+            "query": query,
+            "params": YT_SEARCH_PARAMS_TRACKS
+        }
+
         try:
-            resp  = self._session.get(search_url, timeout=10)
+            resp = self._session.post(url, json=payload, headers={"User-Agent": "Mozilla/5.0 (compatible)"}, timeout=10)
             resp.raise_for_status()
             match = re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp.text)
             if match:
-                return f"https://music.youtube.com/watch?v={match.group(1)}"
+                video_url = f"https://music.youtube.com/watch?v={match.group(1)}"
+                logger.info("[youtube] Direct search (InnerTube) resolved: %s", video_url)
+                return video_url
         except Exception as exc:
-            logger.warning("[youtube] Direct search failed: %s", exc)
+            logger.warning("[youtube] Direct search (InnerTube) failed: %s", exc)
+
         return None
 
     @staticmethod
@@ -103,15 +288,12 @@ class YouTubeProvider(BaseProvider):
         return match.group(1) if match else None
 
     # ------------------------------------------------------------------
-    # Download URL APIs
+    # Download URL APIs (Tiered Fallback)
     # ------------------------------------------------------------------
 
     def _request_spotube_dl(self, video_id: str) -> str | None:
         for engine in ("v1", "v3", "v2"):
-            api_url = (
-                f"https://spotubedl.com/api/download/{video_id}"
-                f"?engine={engine}&format=mp3&quality=320"
-            )
+            api_url = f"https://spotubedl.com/api/download/{video_id}?engine={engine}&format=mp3&quality=320"
             try:
                 resp = self._session.get(api_url, timeout=15)
                 if resp.status_code == 200:
@@ -127,24 +309,56 @@ class YouTubeProvider(BaseProvider):
     def _request_cobalt(self, video_id: str) -> str | None:
         try:
             resp = self._session.post(
-                "https://api.qwkuns.me",
+                "https://api.zarz.moe/v1/dl/cobalt",
                 json={
-                    "url":             f"https://music.youtube.com/watch?v={video_id}",
-                    "audioFormat":     "mp3",
-                    "audioBitrate":    "320",
-                    "downloadMode":    "audio",
-                    "filenameStyle":   "basic",
-                    "disableMetadata": True,
+                    "url": f"https://music.youtube.com/watch?v={video_id}",
+                    "downloadMode": "audio",
+                    "audioFormat": "mp3",
                 },
-                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": _DEFAULT_UA
+                },
                 timeout=15,
             )
             if resp.status_code == 200:
                 data = resp.json()
-                if data.get("status") in ("tunnel", "redirect") and data.get("url"):
-                    return data["url"]
-        except Exception:
-            pass
+                dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
+                if dl_url:
+                    return dl_url
+        except Exception as exc:
+            logger.debug("[youtube] Cobalt fallback failed: %s", exc)
+        return None
+
+    def _request_yt1d(self, video_id: str) -> str | None:
+        try:
+            res_config = self._session.get("https://yt1d.io/results/", headers={"User-Agent": _DEFAULT_UA}, timeout=10)
+            nonce_match = re.search(r'"nonce"\s*:\s*"([^"]+)"', res_config.text)
+            if not nonce_match: return None
+            nonce = nonce_match.group(1)
+
+            payload = {
+                "action": "process_youtube_audio_download",
+                "video_url": f"https://music.youtube.com/watch?v={video_id}",
+                "quality": "m4a",
+                "nonce": nonce
+            }
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "Origin": "https://yt1d.io",
+                "Referer": "https://yt1d.io/results/",
+                "User-Agent": _DEFAULT_UA
+            }
+            res_audio = self._session.post("https://yt1d.io/wp-admin/admin-ajax.php", data=payload, headers=headers, timeout=15)
+            if res_audio.status_code == 200:
+                data = res_audio.json()
+                dl_url = data.get("downloadUrl") or (data.get("data") and data["data"].get("downloadUrl"))
+                if dl_url:
+                    return dl_url
+        except Exception as exc:
+            logger.debug("[youtube] yt1d fallback failed: %s", exc)
         return None
 
     # ------------------------------------------------------------------
@@ -191,8 +405,7 @@ class YouTubeProvider(BaseProvider):
             if publisher: audio.add(TPUB(encoding=3, text=[str(publisher)]))
             if url:       audio.add(WXXX(encoding=3, desc="", url=str(url)))
 
-            audio.add(COMM(encoding=3, lang="eng", desc="",
-                           text=["https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"]))
+            audio.add(COMM(encoding=3, lang="eng", desc="", text=["https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"]))
 
             if lyrics:
                 audio.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
@@ -225,12 +438,12 @@ class YouTubeProvider(BaseProvider):
             use_album_track_num: bool            = False,
             first_artist_only:   bool            = False,
             allow_fallback:      bool            = True,
-            embed_lyrics:            bool            = False,
-            lyrics_providers:        list[str] | None = None,
-            lyrics_spotify_token:    str             = "",
-            enrich_metadata:         bool            = False,
-            enrich_providers:        list[str] | None = None,
-            is_album:                bool            = False,
+            embed_lyrics:        bool            = False,
+            lyrics_providers:    list[str] | None = None,
+            lyrics_spotify_token:str             = "",
+            enrich_metadata:     bool            = False,
+            enrich_providers:    list[str] | None = None,
+            is_album:            bool            = False,
             **kwargs,
     ) -> DownloadResult:
         try:
@@ -242,15 +455,28 @@ class YouTubeProvider(BaseProvider):
             if self._file_exists(dest):
                 return DownloadResult.ok(self.name, str(dest), fmt="mp3")
 
-            yt_url   = self._get_youtube_url(metadata.id, metadata.title, metadata.artists)
-            video_id = self._extract_video_id(yt_url)
+            # Se i metadata sono estratti direttamente da YT (tramite get_url),
+            # usiamo il loro ID nativo, sennò proviamo a risolverlo.
+            if metadata.extra_info.get("provider") == "youtube":
+                video_id = metadata.id
+            else:
+                yt_url   = self._get_youtube_url(metadata.id, metadata.title, metadata.artists)
+                video_id = self._extract_video_id(yt_url)
+
             if not video_id:
                 return DownloadResult.fail(self.name, "Could not extract video ID")
 
-            dl_url = self._request_spotube_dl(video_id) or self._request_cobalt(video_id)
-            if not dl_url:
-                return DownloadResult.fail(self.name, "All YouTube download APIs failed")
+            # Tiered fallback download
+            dl_url = (
+                    self._request_spotube_dl(video_id) or
+                    self._request_cobalt(video_id) or
+                    self._request_yt1d(video_id)
+            )
 
+            if not dl_url:
+                return DownloadResult.fail(self.name, "All YouTube download APIs (Spotube, Cobalt, YT1D) failed")
+
+            logger.info("[youtube] Downloading audio stream from %s", "resolved provider")
             with self._session.get(dl_url, stream=True, timeout=120) as r:
                 r.raise_for_status()
                 total      = int(r.headers.get("Content-Length") or 0)
@@ -266,7 +492,7 @@ class YouTubeProvider(BaseProvider):
             artist       = metadata.artists.split(",")[0].strip() if first_artist_only else metadata.artists
             album_artist = metadata.album_artist.split(",")[0].strip() if first_artist_only else metadata.album_artist
 
-            # FIX #2: fetch_lyrics ritorna tuple[str, str] — unpacking corretto
+            # Lyrics
             lyrics_text = ""
             lyrics_prov = ""
             if embed_lyrics and metadata.title and metadata.first_artist:
@@ -282,7 +508,6 @@ class YouTubeProvider(BaseProvider):
                         providers        = lyrics_providers,
                         spotify_token    = lyrics_spotify_token,
                     )
-                    # fetch_lyrics restituisce sempre una tupla (lyrics, provider)
                     if isinstance(result, tuple):
                         lyrics_text, lyrics_prov = result
                     else:
@@ -294,7 +519,7 @@ class YouTubeProvider(BaseProvider):
                 except Exception as exc:
                     logger.warning("[youtube] lyrics fetch failed: %s", exc)
 
-            # Metadata enrichment per MP3 (ID3 TCON/TBPM)
+            # Metadata enrichment
             genre_tag = ""
             bpm_tag   = ""
             if enrich_metadata and metadata.isrc:

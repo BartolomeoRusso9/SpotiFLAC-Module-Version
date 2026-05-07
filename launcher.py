@@ -14,17 +14,17 @@ from SpotiFLAC.interactive import run_interactive
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog            = "spotiflac",
-        description     = "Download Spotify tracks in true FLAC via Tidal, Qobuz e altri.",
+        description     = "Download tracks in true FLAC/MP3 via Tidal, Qobuz, SoundCloud, YouTube e altri.",
         formatter_class = argparse.RawDescriptionHelpFormatter,
     )
 
     # Argomenti base
-    parser.add_argument("url",        help="Spotify URL (track, album, o playlist)")
+    parser.add_argument("url",        help="URL Spotify, Tidal, SoundCloud o YouTube (track, album, playlist, artist)")
     parser.add_argument("output_dir", help="Directory di destinazione")
 
     parser.add_argument(
         "--service", "-s",
-        choices = ["tidal", "qobuz", "amazon", "spoti", "soundcloud"],
+        choices = ["tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube"],
         nargs   = "+",
         default = ["tidal"],
         metavar = "SERVICE",

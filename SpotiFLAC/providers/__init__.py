@@ -4,6 +4,7 @@ from .tidal import TidalProvider
 from .amazon import AmazonProvider
 from .spotidownloader import SpotiDownloaderProvider
 from .soundcloud import SoundCloudProvider
+from .youtube import YouTubeProvider
 from .spotify_metadata import SpotifyMetadataClient, parse_spotify_url
 
 __all__ = [
@@ -13,6 +14,7 @@ __all__ = [
     "AmazonProvider",
     "SpotiDownloaderProvider",
     "SoundCloudProvider",
+    "YouTubeProvider",
     "SpotifyMetadataClient",
     "parse_spotify_url",
 ]
