@@ -316,15 +316,6 @@ def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", durat
         result = _lrclib_exact(track_name, artist_name, "", duration_s)
         if result: return result
 
-    # Fallback: se il titolo contiene " - " (es. "6. ARTIST - Song Title"),
-    # prova con solo la parte dopo il trattino come titolo reale.
-    if " - " in track_name:
-        short_title = track_name.split(" - ", 1)[-1].strip()
-        if short_title and short_title != track_name:
-            result = _lrclib_exact(short_title, artist_name, "", duration_s)
-            if result: return result
-
-    # Ricerca morbida con titolo originale
     try:
         r = requests.get(
             f"{_LRCLIB}/search",
@@ -334,8 +325,7 @@ def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", durat
         if r.status_code == 200:
             results = r.json()
             if results:
-                best_synced = None
-                best_plain  = None
+                best_synced = best_plain = None
                 for item in results:
                     item_duration = item.get("duration", 0)
                     if duration_s == 0 or abs(item_duration - duration_s) <= 10.0:
@@ -345,32 +335,6 @@ def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", durat
                             best_plain = item["plainLyrics"]
                 return best_synced or best_plain or ""
     except Exception: pass
-
-    # Ricerca morbida con titolo abbreviato (se diverso)
-    if " - " in track_name:
-        short_title = track_name.split(" - ", 1)[-1].strip()
-        if short_title and short_title != track_name:
-            try:
-                r = requests.get(
-                    f"{_LRCLIB}/search",
-                    params={"artist_name": artist_name, "track_name": short_title},
-                    timeout=timeout,
-                )
-                if r.status_code == 200:
-                    results = r.json()
-                    if results:
-                        best_synced = None
-                        best_plain  = None
-                        for item in results:
-                            item_duration = item.get("duration", 0)
-                            if duration_s == 0 or abs(item_duration - duration_s) <= 10.0:
-                                if item.get("syncedLyrics") and not best_synced:
-                                    best_synced = item["syncedLyrics"]
-                                elif item.get("plainLyrics") and not best_plain:
-                                    best_plain = item["plainLyrics"]
-                        return best_synced or best_plain or ""
-            except Exception: pass
-
     return ""
 # --------------------------------------------------------------------------- #
 # Public API                                                                   #
@@ -389,35 +353,49 @@ def fetch_lyrics(
     if providers is None:
         providers = _DEFAULT_PROVIDERS
 
-    clean_track = simplify_track_name(track_name)
+    clean_track  = simplify_track_name(track_name)
     clean_artist = get_primary_artist(artist_name)
 
-    for provider in providers:
-        result = ""
-        try:
-            if provider == "spotify":
-                result = _fetch_spotify(track_id, spotify_token)
-            elif provider == "apple":
-                # Uso i nomi puliti per la ricerca su Apple Music
-                result = _fetch_apple(clean_track, clean_artist, duration_s)
-            elif provider == "musixmatch":
-                # Uso i nomi puliti per la ricerca su Musixmatch
-                result = _fetch_musixmatch(clean_track, clean_artist, duration_s)
-            elif provider == "amazon":
-                result = _fetch_amazon(isrc)
-            elif provider == "lrclib":
-                # LRCLIB riceve i nomi originali prima, poi in caso farà fall-back interno
-                result = _fetch_lrclib(clean_track, clean_artist, album_name, duration_s)
-            else:
-                logger.warning("[lyrics] unknown provider: %s", provider)
-        except Exception as exc:
-            logger.debug("[lyrics/%s] unexpected error: %s", provider, exc)
+    # Se il titolo contiene " - " (es. "6. ARTIST - Song Title"),
+    # prepara anche il titolo abbreviato come fallback.
+    _short = clean_track.split(" - ", 1)[-1].strip() if " - " in clean_track else None
+    short_track = _short if _short and _short != clean_track else None
 
-        if result and result.strip():
-            logger.debug("[lyrics] found via %s (%d chars)", provider, len(result))
-            # Aggiungo i metadati LRC standard al risultato finale!
-            final_lrc = add_lrc_metadata(result.strip(), track_name, artist_name)
-            return final_lrc, provider
+    # Provider che usano ID/ISRC: il titolo non influisce, inutile riprovare.
+    _ID_BASED = {"spotify", "amazon"}
+
+    for provider in providers:
+        titles_to_try = [clean_track]
+        if short_track and provider not in _ID_BASED:
+            titles_to_try.append(short_track)
+
+        for title in titles_to_try:
+            result = ""
+            try:
+                if provider == "spotify":
+                    result = _fetch_spotify(track_id, spotify_token)
+                elif provider == "apple":
+                    result = _fetch_apple(title, clean_artist, duration_s)
+                elif provider == "musixmatch":
+                    result = _fetch_musixmatch(title, clean_artist, duration_s)
+                elif provider == "amazon":
+                    result = _fetch_amazon(isrc)
+                elif provider == "lrclib":
+                    result = _fetch_lrclib(title, clean_artist, album_name, duration_s)
+                else:
+                    logger.warning("[lyrics] unknown provider: %s", provider)
+                    break
+            except Exception as exc:
+                logger.debug("[lyrics/%s] unexpected error: %s", provider, exc)
+
+            if result and result.strip():
+                label = f"{provider}" + (f" [short title]" if title == short_track else "")
+                logger.debug("[lyrics] found via %s (%d chars)", label, len(result))
+                return add_lrc_metadata(result.strip(), track_name, artist_name), provider
+
+            # Per provider ID-based non ha senso iterare su titoli alternativi.
+            if provider in _ID_BASED:
+                break
 
     logger.debug("[lyrics] not found for '%s' by '%s'", track_name, artist_name)
     return "", ""
