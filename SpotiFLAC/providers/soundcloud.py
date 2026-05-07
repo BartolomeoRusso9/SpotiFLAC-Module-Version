@@ -419,6 +419,10 @@ class SoundCloudProvider(BaseProvider):
         # ── 4. Pipeline centrale (enrichment + lyrics + tagging) ──────────
         try:
             qobuz_token = kwargs.get("qobuz_token", "") or os.environ.get("QOBUZ_AUTH_TOKEN", "")
+            effective_providers = [
+                p for p in (lyrics_providers or [])
+                if p != "spotify"
+            ]
 
             embed_metadata(
                 dest, metadata,
@@ -426,7 +430,7 @@ class SoundCloudProvider(BaseProvider):
                 cover_url            = metadata.cover_url,
                 session              = self.session,
                 embed_lyrics         = embed_lyrics,
-                lyrics_providers     = lyrics_providers,
+                lyrics_providers     = effective_providers,
                 lyrics_spotify_token = lyrics_spotify_token,
                 enrich               = enrich_metadata,
                 enrich_providers     = enrich_providers,
