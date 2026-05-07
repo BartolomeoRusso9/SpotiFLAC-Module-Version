@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import re
 import json
 import time
@@ -90,9 +91,13 @@ class SoundCloudProvider(BaseProvider):
     # ==========================================
 
     def _get_hires_artwork(self, url: str) -> str:
+        """Aggiorna l'URL copertina alla massima risoluzione disponibile."""
         if not url:
             return ""
-        return url.replace("-large.", "-original.") or url.replace("-large.", "-t500x500.")
+        # Prova -t500x500. (affidabile), altrimenti lascia invariato
+        if "-large." in url:
+            return url.replace("-large.", "-t500x500.")
+        return url
 
     def _format_track(self, data: Dict) -> Optional[Dict]:
         if not data or not data.get("id"):
@@ -178,8 +183,8 @@ class SoundCloudProvider(BaseProvider):
 
     def get_metadata_from_url(self, url: str) -> TrackMetadata:
         """Estrae i metadati da un link SoundCloud e restituisce TrackMetadata."""
-        if not self.client_id:
-            self.client_id = self._fetch_client_id()
+        # _ensure_client_id gestisce sia il caso None che l'expiry
+        self._ensure_client_id()
 
         resolve_url = (
             f"{self.api_url}/resolve"
@@ -189,18 +194,28 @@ class SoundCloudProvider(BaseProvider):
         res.raise_for_status()
         data = res.json()
 
-        user        = data.get("user", {})
-        pub         = data.get("publisher_metadata", {})
-        artist_name = pub.get("artist") or user.get("username", "Unknown Artist")
-        isrc        = pub.get("isrc") or data.get("isrc", "")
+        user = data.get("user") or {}
+        # publisher_metadata può essere esplicitamente null nell'API → fallback a {}
+        pub  = data.get("publisher_metadata") or {}
 
-        artwork = data.get("artwork_url") or user.get("avatar_url", "")
-        if artwork:
-            artwork = artwork.replace("-large", "-t500x500")
+        artist_name = (
+                pub.get("artist")
+                or data.get("metadata_artist")
+                or user.get("username", "Unknown Artist")
+        )
+        isrc = pub.get("isrc") or data.get("isrc", "")
 
-        release_date = data.get("created_at", "")
-        if release_date and "T" in release_date:
-            release_date = release_date.split("T")[0]
+        # Copertina: usa _get_hires_artwork per coerenza con il resto del provider
+        raw_artwork = data.get("artwork_url") or user.get("avatar_url", "")
+        artwork     = self._get_hires_artwork(raw_artwork)
+
+        # display_date è la data di rilascio ufficiale; created_at è solo l'upload
+        raw_date = (
+                pub.get("release_date")
+                or data.get("display_date")
+                or data.get("created_at", "")
+        )
+        release_date = raw_date.split("T")[0] if raw_date and "T" in raw_date else (raw_date or "")
 
         album_title = pub.get("album_title") or pub.get("release_title") or "SoundCloud"
 
@@ -224,26 +239,33 @@ class SoundCloudProvider(BaseProvider):
 
     def get_download_url(
             self,
-            track_id:     str,
+            track_id:     Optional[str],
             track_permalink: str = None,
             audio_format: str = "mp3",
     ) -> Optional[str]:
-        track_data   = self._api_get(f"tracks/{track_id}")
-        transcodings = track_data.get("media", {}).get("transcodings", [])
-        track_auth   = track_data.get("track_authorization", "")
+        # track_id può essere None quando arriva da Odesli (solo permalink disponibile)
+        # In quel caso saltiamo la chiamata API e andiamo direttamente a Cobalt
+        track_data: Dict = {}
+        if track_id is not None:
+            try:
+                track_data   = self._api_get(f"tracks/{track_id}")
+                transcodings = track_data.get("media", {}).get("transcodings", [])
+                track_auth   = track_data.get("track_authorization", "")
 
-        if transcodings and track_auth:
-            best = self._pick_best_transcoding(transcodings, audio_format)
-            if best:
-                try:
-                    res = self.session.get(
-                        best["url"],
-                        params={"client_id": self.client_id, "track_authorization": track_auth},
-                    )
-                    if res.status_code == 200:
-                        return res.json().get("url")
-                except Exception as e:
-                    logger.warning("[SC] Direct stream fetch failed: %s", e)
+                if transcodings and track_auth:
+                    best = self._pick_best_transcoding(transcodings, audio_format)
+                    if best:
+                        try:
+                            res = self.session.get(
+                                best["url"],
+                                params={"client_id": self.client_id, "track_authorization": track_auth},
+                            )
+                            if res.status_code == 200:
+                                return res.json().get("url")
+                        except Exception as e:
+                            logger.warning("[SC] Direct stream fetch failed: %s", e)
+            except Exception as e:
+                logger.warning("[SC] Track API lookup failed: %s", e)
 
         url_to_fetch = track_permalink or track_data.get("permalink_url")
         if url_to_fetch:
