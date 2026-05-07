@@ -293,7 +293,11 @@ class SpotiflacDownloader:
             elif is_apple:
                 from .providers.apple_music_metadata import AppleMusicMetadataClient
                 client = AppleMusicMetadataClient()
-                collection_name, tracks = client.get_url(input_url)
+                # Aggiunto il passaggio del parametro include_featuring
+                collection_name, tracks = client.get_url(
+                    input_url,
+                    include_featuring=self._opts.include_featuring
+                )
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
                 client = SoundCloudProvider()
@@ -317,7 +321,8 @@ class SpotiflacDownloader:
             return
 
         missing_isrc = [t for t in tracks if not t.isrc]
-        if missing_isrc and not (is_soundcloud or is_apple):
+        only_apple = len(self._opts.services) == 1 and self._opts.services[0] == "apple"
+        if missing_isrc and not is_soundcloud and not (is_apple and only_apple):
             print(f"Resolving ISRC for {len(missing_isrc)} track(s)…")
             try:
                 from .core.isrc_helper import IsrcHelper
