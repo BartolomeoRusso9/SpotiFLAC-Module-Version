@@ -82,7 +82,7 @@ def parse_args() -> argparse.Namespace:
         default = ["spotify", "lrclib", "apple", "amazon"],
         dest    = "lyrics_providers",
         choices = ["spotify", "apple", "musixmatch", "amazon", "lrclib"],
-        help    = "Provider testi in ordine (default: spotify musixmatch lrclib apple).",
+        help    = "Provider testi in ordine (default: spotify lrclib apple amazon).",
     )
     lyrics_grp.add_argument(
         "--spotify-token",
@@ -107,8 +107,8 @@ def parse_args() -> argparse.Namespace:
         nargs   = "+",
         default = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"],
         dest    = "enrich_providers",
-        choices = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
-        help    = "Provider metadata enrichment in ordine (default: deezer apple qobuz tidal).",
+        choices = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"],
+        help    = "Provider metadata enrichment in ordine (default: deezer apple qobuz tidal soundcloud youtube).",
     )
 
     return parser.parse_args()
