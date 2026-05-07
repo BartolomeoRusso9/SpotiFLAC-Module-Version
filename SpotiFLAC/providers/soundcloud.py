@@ -26,6 +26,7 @@ class SoundCloudProvider(BaseProvider):
         self.api_url     = "https://api-v2.soundcloud.com"
         self.client_id   = None
         self.client_id_expiry = 0
+        self._sc_version = ""
         self.cobalt_api  = "https://api.zarz.moe/v1/dl/cobalt/"
         self.session     = requests.Session()
         self.session.headers.update({
@@ -195,22 +196,6 @@ class SoundCloudProvider(BaseProvider):
             url = self._clean_url(url)
         return url
 
-    def _get_hires_artwork(self, url: str) -> str:
-        """Prova la variante -original., fallback a -t500x500."""
-        if not url:
-            return ""
-        if "-large." in url:
-            # Prova prima la versione originale (qualità massima)
-            original = url.replace("-large.", "-original.")
-            try:
-                r = self.session.head(original, timeout=4)
-                if r.status_code == 200:
-                    return original
-            except Exception:
-                pass
-            return url.replace("-large.", "-t500x500.")
-        return url
-
     # ==========================================
     # CORE PROVIDER METHODS
     # ==========================================
@@ -339,10 +324,14 @@ class SoundCloudProvider(BaseProvider):
             elif t.get("id"):
                 stub_ids.append(str(t["id"]))
 
-        if stub_ids:
-            full.extend(self._fetch_full_tracks(stub_ids))
-
         id_to_data = {str(t.get("id")): t for t in full}
+
+        if stub_ids:
+            fetched = self._fetch_full_tracks(stub_ids)
+            for f_t in fetched:
+                t_id = str(f_t.get("id"))
+                if t_id not in id_to_data:
+                    id_to_data[t_id] = f_t
         ordered: List[TrackMetadata] = []
 
         for i, t in enumerate(tracks_raw):
