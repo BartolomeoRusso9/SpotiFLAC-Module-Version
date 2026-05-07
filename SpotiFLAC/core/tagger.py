@@ -1,12 +1,16 @@
 # SpotiFLAC/core/tagger.py
 """
-Tagger FLAC centralizzato — con metadata enrichment multi-provider e lyrics multi-provider.
+Tagger centralizzato — supporto FLAC e MP3.
 
-FIX v2:
-  - ARTIST/ALBUMARTIST scritti come stringa unica con virgola (non lista)
-    per compatibilità con tutti gli editor (beets, foobar2000, picard, ecc.)
-  - Aggiunto ARTISTS/ALBUMARTISTS come tag multi-valore separato
-    per editor avanzati che li supportano (MusicBrainz Picard standard)
+FLAC → tag Vorbis Comment via mutagen.flac
+MP3  → tag ID3v2 via mutagen.id3
+
+Entrambi i formati condividono la stessa pipeline:
+  1. Metadata enrichment (Deezer / Apple / Qobuz / Tidal / SoundCloud)
+  2. Cover art (HD se disponibile)
+  3. Lyrics multi-provider
+  4. MusicBrainz (passati come extra_tags)
+  5. Scrittura tag sul file
 """
 from __future__ import annotations
 import logging
@@ -14,7 +18,15 @@ from pathlib import Path
 
 import requests
 from mutagen.flac import FLAC, Picture
+from mutagen.id3 import (
+    ID3, ID3NoHeaderError, PictureType as _PictureType,
+    TIT2, TPE1, TALB, TPE2, TDRC, TRCK, TPOS, APIC,
+    TPUB, TCOM, TCOP, TCON, TBPM, TSRC, TDOR,
+    TSOP, TSO2, WXXX, COMM, USLT, TXXX,
+)
+from mutagen.id3 import PictureType as ID3PictureType
 from mutagen.id3 import PictureType
+from mutagen.flac import Picture as FlacPicture
 
 from .errors import SpotiflacError, ErrorKind
 from .models import TrackMetadata
@@ -23,20 +35,68 @@ logger = logging.getLogger(__name__)
 
 SOURCE_TAG = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
 
+# ---------------------------------------------------------------------------
+# FLAC tag → ID3 frame mapping
+# ---------------------------------------------------------------------------
+
+# Vorbis tag  →  (ID3FrameClass, kwargs_override | None)
+# Se il valore è None il tag viene scritto come TXXX con desc=chiave originale.
+_FLAC_TO_ID3: dict[str, tuple | None] = {
+    "TITLE":              (TIT2,  {}),
+    "ARTIST":             (TPE1,  {}),
+    "ALBUM":              (TALB,  {}),
+    "ALBUMARTIST":        (TPE2,  {}),
+    "DATE":               (TDRC,  {}),
+    "TRACKNUMBER":        None,                  # gestito a parte (TRCK)
+    "TRACKTOTAL":         None,                  # parte di TRCK
+    "DISCNUMBER":         None,                  # gestito a parte (TPOS)
+    "DISCTOTAL":          None,                  # parte di TPOS
+    "ISRC":               (TSRC,  {}),
+    "COPYRIGHT":          (TCOP,  {}),
+    "COMPOSER":           (TCOM,  {}),
+    "ORGANIZATION":       (TPUB,  {}),
+    "LABEL":              (TPUB,  {}),
+    "GENRE":              (TCON,  {}),
+    "BPM":                (TBPM,  {}),
+    "ORIGINALDATE":       (TDOR,  {}),
+    "ARTISTSORT":         (TSOP,  {}),
+    "ALBUMARTISTSORT":    (TSO2,  {}),
+    # URL → WXXX con desc vuota
+    "URL":                None,
+    # Tutto il resto → TXXX
+}
+
+# Tag che finiscono in TXXX con la chiave come desc
+_TXXX_TAGS = {
+    "MUSICBRAINZ_TRACKID",
+    "MUSICBRAINZ_ALBUMID",
+    "MUSICBRAINZ_ARTISTID",
+    "MUSICBRAINZ_RELEASEGROUPID",
+    "MUSICBRAINZ_ALBUMARTISTID",
+    "BARCODE",
+    "CATALOGNUMBER",
+    "RELEASECOUNTRY",
+    "RELEASESTATUS",
+    "RELEASETYPE",
+    "MEDIA",
+    "SCRIPT",
+    "ORIGINALYEAR",
+    "ITUNESADVISORY",
+    "UPC",
+    "DESCRIPTION",
+    "ARTISTS",
+    "ALBUMARTISTS",
+}
+
 
 # ---------------------------------------------------------------------------
 # MusicBrainz summary helper
 # ---------------------------------------------------------------------------
 
 def _print_mb_summary(mb_tags: dict) -> None:
-    """
-    Stampa un riepilogo dei tag aggiunti da MusicBrainz,
-    in formato analogo al messaggio "Arricchito con: ..." del tagger.
-    """
     if not mb_tags:
         return
 
-    # Mappatura unificata sia per i tag FLAC (UPPERCASE) sia per i dizionari raw (lowercase)
     _TAG_LABELS = {
         "GENRE": "genere", "genre": "genere",
         "BPM": "BPM", "bpm": "BPM",
@@ -53,16 +113,11 @@ def _print_mb_summary(mb_tags: dict) -> None:
         "SCRIPT": "scrittura", "script": "scrittura",
     }
 
-    # Raggruppa tutti gli ID per mostrarli in un unico conteggio finale
     mb_ids = {
         k: v for k, v in mb_tags.items()
         if str(k).startswith("MUSICBRAINZ_") or str(k).startswith("mbid_")
     }
-
-    # Ignoriamo l'anno per evitare il duplicato a schermo (teniamo solo ORIGINALDATE/data)
     skip_dupes = {"ORIGINALYEAR", "original_year", "DATE", "date"}
-
-    # Selezioniamo solo i campi che hanno effettivamente un valore e non sono ID o duplicati
     important = {
         k: v for k, v in mb_tags.items()
         if k not in mb_ids and k not in skip_dupes and v
@@ -71,7 +126,6 @@ def _print_mb_summary(mb_tags: dict) -> None:
     parts = []
     for tag, val in important.items():
         label = _TAG_LABELS.get(tag, str(tag).lower())
-        # Tronchiamo i valori troppo lunghi a 40 caratteri (es. per stringhe lunghissime)
         short_val = str(val)[:40] + ("…" if len(str(val)) > 40 else "")
         parts.append(f"{label}: {short_val}")
 
@@ -83,7 +137,146 @@ def _print_mb_summary(mb_tags: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Main embed function
+# Internal: write ID3 tags to an MP3 file
+# ---------------------------------------------------------------------------
+
+def _embed_id3(
+        path:        Path,
+        tags:        dict[str, str],
+        cover_data:  bytes | None,
+        lyrics:      str | None,
+        lyrics_prov: str,
+) -> None:
+    """Scrive tutti i tag ID3 su un file MP3."""
+    try:
+        audio = ID3(str(path))
+        audio.delete()
+    except ID3NoHeaderError:
+        audio = ID3()
+
+    # ── numeri traccia e disco ──────────────────────────────────────────────
+    track_num   = tags.get("TRACKNUMBER", "0")
+    track_total = tags.get("TRACKTOTAL",  "0")
+    disc_num    = tags.get("DISCNUMBER",  "1")
+    disc_total  = tags.get("DISCTOTAL",   "1")
+
+    trck = f"{track_num}/{track_total}" if track_total and track_total != "0" else track_num
+    tpos = f"{disc_num}/{disc_total}"   if disc_total  and disc_total  != "1" else disc_num
+
+    audio.add(TRCK(encoding=3, text=trck))
+    audio.add(TPOS(encoding=3, text=tpos))
+
+    # ── tag con frame dedicato ─────────────────────────────────────────────
+    _FRAME_MAP: dict[str, type] = {
+        "TITLE":           TIT2,
+        "ARTIST":          TPE1,
+        "ALBUM":           TALB,
+        "ALBUMARTIST":     TPE2,
+        "DATE":            TDRC,
+        "ISRC":            TSRC,
+        "COPYRIGHT":       TCOP,
+        "COMPOSER":        TCOM,
+        "ORGANIZATION":    TPUB,
+        "LABEL":           TPUB,   # alias — uno sovrascrive l'altro (ok)
+        "GENRE":           TCON,
+        "BPM":             TBPM,
+        "ORIGINALDATE":    TDOR,
+        "ARTISTSORT":      TSOP,
+        "ALBUMARTISTSORT": TSO2,
+    }
+    skip = {"TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL", "URL", "DESCRIPTION"}
+
+    for key, val in tags.items():
+        key_up = key.upper()
+        if key_up in skip or not val:
+            continue
+
+        if key_up in _FRAME_MAP:
+            frame_cls = _FRAME_MAP[key_up]
+            frame_id  = frame_cls.__name__
+            audio.add(frame_cls(encoding=3, text=str(val)))
+
+        elif key_up == "URL":
+            audio.add(WXXX(encoding=3, desc="", url=str(val)))
+
+        elif key_up in _TXXX_TAGS or key_up.startswith("MUSICBRAINZ_"):
+            audio.add(TXXX(encoding=3, desc=key_up, text=str(val)))
+
+        else:
+            # Fallback generico → TXXX
+            audio.add(TXXX(encoding=3, desc=key_up, text=str(val)))
+
+    # ── commento / source tag ──────────────────────────────────────────────
+    audio.add(COMM(encoding=3, lang="eng", desc="", text=[SOURCE_TAG]))
+
+    # ── URL se presente ────────────────────────────────────────────────────
+    if tags.get("URL"):
+        audio.add(WXXX(encoding=3, desc="", url=tags["URL"]))
+
+    # ── lyrics ─────────────────────────────────────────────────────────────
+    if lyrics and lyrics.strip():
+        audio.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
+        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
+        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
+        logger.debug("[tagger/mp3] lyrics embedded (%d chars)", len(lyrics))
+
+    # ── copertina ──────────────────────────────────────────────────────────
+    if cover_data:
+        audio.add(APIC(
+            encoding = 3,
+            mime     = "image/jpeg",
+            type     = ID3PictureType.COVER_FRONT,
+            desc     = "Cover",
+            data     = cover_data,
+        ))
+
+    audio.save(str(path), v2_version=3)
+    logger.debug("[tagger/mp3] tags written: %s", path.name)
+
+
+# ---------------------------------------------------------------------------
+# Internal: write Vorbis Comment tags to a FLAC file
+# ---------------------------------------------------------------------------
+
+def _embed_flac(
+        path:        Path,
+        tags:        dict[str, str],
+        cover_data:  bytes | None,
+        lyrics:      str | None,
+        lyrics_prov: str,
+        multi_artist: bool,
+) -> None:
+    """Scrive tutti i tag Vorbis Comment su un file FLAC."""
+    audio = FLAC(str(path))
+    audio.delete()
+
+    if lyrics and lyrics.strip():
+        tags["LYRICS"] = lyrics
+        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
+        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
+        logger.debug("[tagger/flac] lyrics embedded (%d chars)", len(lyrics))
+
+    for key, val in tags.items():
+        if multi_artist and key in ("ARTIST", "ALBUMARTIST") and "," in val:
+            parts = [a.strip() for a in val.split(",") if a.strip()]
+            audio[key] = val
+            audio[key + "S"] = parts
+        else:
+            audio[key] = val
+
+    if cover_data:
+        pic          = FlacPicture()
+        pic.data     = cover_data
+        pic.type     = PictureType.COVER_FRONT
+        pic.mime     = "image/jpeg"
+        audio.add_picture(pic)
+
+    audio.save()
+    logger.debug("[tagger/flac] tags written: %s", path.name)
+
+
+# ---------------------------------------------------------------------------
+# Public API
 # ---------------------------------------------------------------------------
 
 def embed_metadata(
@@ -97,22 +290,27 @@ def embed_metadata(
         extra_tags:        dict[str, str] | None = None,
         multi_artist:      bool  = True,
         is_album:          bool  = False,
-        # Lyrics options
+        # Lyrics
         embed_lyrics:         bool = False,
         lyrics_providers:     list[str] | None = None,
         lyrics_spotify_token: str = "",
-        # Metadata enrichment options
+        # Metadata enrichment
         enrich:           bool = False,
         enrich_providers: list[str] | None = None,
-        enrich_qobuz_token: str  = "",
+        enrich_qobuz_token: str = "",
 ) -> None:
     path = Path(filepath)
     if not path.exists():
         raise SpotiflacError(ErrorKind.FILE_IO, f"File not found: {path}")
 
-    # ------------------------------------------------------------------ #
-    # 1. Metadata enrichment                                               #
-    # ------------------------------------------------------------------ #
+    is_mp3  = path.suffix.lower() == ".mp3"
+    is_flac = path.suffix.lower() == ".flac"
+
+    if not is_mp3 and not is_flac:
+        logger.warning("[tagger] formato non supportato: %s — skip", path.suffix)
+        return
+
+    # ── 1. Metadata enrichment ─────────────────────────────────────────────
     enriched_tags: dict[str, str] = {}
     enriched_cover_url: str = ""
 
@@ -124,7 +322,7 @@ def embed_metadata(
                 artist_name = metadata.first_artist,
                 isrc        = metadata.isrc,
                 providers   = enrich_providers,
-                qobuz_token = enrich_qobuz_token,
+                qobuz_token = enrich_qobuz_token or None,
             )
             enriched_tags      = enriched.as_tags()
             enriched_cover_url = enriched.cover_url_hd
@@ -139,17 +337,13 @@ def embed_metadata(
         except Exception as exc:
             logger.warning("[tagger] enrichment failed: %s", exc)
 
-    # ------------------------------------------------------------------ #
-    # 2. Cover art                                                         #
-    # ------------------------------------------------------------------ #
+    # ── 2. Cover art ───────────────────────────────────────────────────────
     if not cover_data:
         best_cover = enriched_cover_url or cover_url or metadata.cover_url
         if best_cover:
             cover_data = _fetch_cover(best_cover, session)
 
-    # ------------------------------------------------------------------ #
-    # 3. Lyrics                                                            #
-    # ------------------------------------------------------------------ #
+    # ── 3. Lyrics ──────────────────────────────────────────────────────────
     lyrics: str | None = None
     lyrics_prov: str = ""
 
@@ -166,7 +360,6 @@ def embed_metadata(
                 providers        = lyrics_providers,
                 spotify_token    = lyrics_spotify_token,
             )
-            # Supportiamo sia la nuova tupla (lyrics, provider) sia la vecchia stringa
             if isinstance(res, tuple):
                 lyrics, lyrics_prov = res
             else:
@@ -174,80 +367,51 @@ def embed_metadata(
         except Exception as exc:
             logger.warning("[tagger] lyrics fetch failed: %s", exc)
 
+    # ── 4. Costruzione dizionario tag base ─────────────────────────────────
+    tags = metadata.as_flac_tags(first_artist_only=first_artist_only)
+    tags["DESCRIPTION"] = SOURCE_TAG
 
-    # ------------------------------------------------------------------ #
-    # 4. Write FLAC tags                                                   #
-    # ------------------------------------------------------------------ #
+    # Merge enrichment + extra (MusicBrainz, ecc.)
+    merged_extra: dict[str, str] = {**enriched_tags}
+    if extra_tags:
+        merged_extra.update(extra_tags)
+
+    # Per tracce singole l'GENRE dell'enrichment ha priorità
+    if not is_album:
+        enrich_genre = enriched_tags.get("GENRE")
+        if enrich_genre:
+            tags["GENRE"] = enrich_genre
+            for k in [k for k in merged_extra if k.upper() == "GENRE"]:
+                del merged_extra[k]
+
+    # Protezione: non sovrascrivere campi già presenti nel metadata base
+    if metadata.composer:
+        merged_extra.pop("COMPOSER", None)
+        merged_extra.pop("composer", None)
+    if metadata.copyright:
+        merged_extra.pop("COPYRIGHT", None)
+        merged_extra.pop("copyright", None)
+
+    # Gestione date originali
+    orig_date = merged_extra.get("original_date") or merged_extra.get("ORIGINALDATE")
+    if orig_date:
+        tags["ORIGINALDATE"] = str(orig_date)
+        tags["ORIGINALYEAR"] = str(orig_date)[:4]
+
+    _date_keys = {
+        "ORIGINAL_DATE", "ORIGINAL_YEAR", "ORIGINALDATE", "ORIGINALYEAR",
+        "original_date", "original_year",
+    }
+    for key, val in merged_extra.items():
+        if key not in _date_keys and key.upper() not in _date_keys:
+            tags[key.upper()] = str(val)
+
+    # ── 5. Scrittura sul file ──────────────────────────────────────────────
     try:
-        audio = FLAC(str(path))
-        audio.delete()
-
-        tags = metadata.as_flac_tags(first_artist_only=first_artist_only)
-        tags["DESCRIPTION"] = SOURCE_TAG
-
-        # Uniamo i tag dell'arricchimento (Deezer/Apple) con quelli MusicBrainz
-        merged_extra: dict[str, str] = {**enriched_tags}
-
-        if extra_tags:
-            merged_extra.update(extra_tags)
-
-        # --- LOGICA SINGOLI ---
-        if not is_album:
-            enrich_genre = enriched_tags.get("GENRE")
-            if enrich_genre:
-                tags["GENRE"] = enrich_genre
-                keys_to_remove = [k for k in merged_extra if k.upper() == "GENRE"]
-                for k in keys_to_remove:
-                    del merged_extra[k]
-
-        # Scriviamo tutti i tag extra (Enrichment + MusicBrainz)
-        if merged_extra:
-            if metadata.composer:
-                merged_extra.pop("COMPOSER", None)
-                merged_extra.pop("composer", None)
-            if metadata.copyright:
-                merged_extra.pop("COPYRIGHT", None)
-                merged_extra.pop("copyright", None)
-            orig_date = merged_extra.get("original_date") or merged_extra.get("ORIGINALDATE")
-            if orig_date:
-                tags["ORIGINALDATE"] = str(orig_date)
-                tags["ORIGINALYEAR"] = str(orig_date)[:4]
-
-            _date_keys = {"ORIGINAL_DATE", "ORIGINAL_YEAR", "ORIGINALDATE", "ORIGINALYEAR",
-                          "original_date", "original_year"}
-
-            for key, val in merged_extra.items():
-                if key not in _date_keys and key.upper() not in _date_keys:
-                    tags[key.upper()] = str(val)
-
-        if lyrics:
-            tags["LYRICS"] = lyrics
-            prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
-            print(f"  ✦ Testo: aggiunto tramite {prov_str}")
-            logger.debug("[tagger] lyrics embedded (%d chars)", len(lyrics))
-
-        for key, val in tags.items():
-            if multi_artist and key in ("ARTIST", "ALBUMARTIST") and "," in val:
-                parts = [a.strip() for a in val.split(",") if a.strip()]
-
-                # FIX: ARTIST = stringa unica "The Weeknd, Playboi Carti"
-                audio[key] = val
-
-                # ARTISTS / ALBUMARTISTS = tag multi-valore per editor moderni
-                audio[key + "S"] = parts
-            else:
-                audio[key] = val
-
-        if cover_data:
-            pic          = Picture()
-            pic.data     = cover_data
-            pic.type     = PictureType.COVER_FRONT
-            pic.mime     = "image/jpeg"
-            audio.add_picture(pic)
-
-        audio.save()
-        logger.debug("[tagger] metadata embedded: %s", path.name)
-
+        if is_flac:
+            _embed_flac(path, tags, cover_data, lyrics, lyrics_prov, multi_artist)
+        else:  # mp3
+            _embed_id3(path, tags, cover_data, lyrics, lyrics_prov)
     except SpotiflacError:
         raise
     except Exception as exc:
@@ -256,6 +420,11 @@ def embed_metadata(
             f"Failed to embed metadata in {path.name}: {exc}",
             cause=exc,
         )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _fetch_cover(url: str, session: requests.Session | None) -> bytes | None:
     if not url:
@@ -269,6 +438,7 @@ def _fetch_cover(url: str, session: requests.Session | None) -> bytes | None:
     except Exception as exc:
         logger.warning("[tagger] cover download failed (%s): %s", url, exc)
     return None
+
 
 def max_resolution_spotify_cover(url: str) -> str:
     """Converte URL immagine Spotify alla variante massima risoluzione."""
