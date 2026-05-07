@@ -1,7 +1,8 @@
 import logging
 import re
 import requests
-from typing import Any
+from typing import Any, Dict, List, Tuple, Optional  # Modificato per compatibilità 3.9
+
 from ..core.models import TrackMetadata
 from ..core.errors import SpotiflacError, ErrorKind
 
@@ -10,13 +11,10 @@ logger = logging.getLogger(__name__)
 def is_apple_music_url(url: str) -> bool:
     return "music.apple.com" in url.lower()
 
-def parse_apple_music_url(url: str) -> dict[str, str] | None:
+def parse_apple_music_url(url: str) -> Optional[Dict[str, str]]: # Modificato | None in Optional
     """Parser robusto basato sui pattern ufficiali di Apple Music."""
-    # Pattern: /album/nome-album/ID o /album/ID
     album_match = re.search(r"/album/.*/(\d+)", url)
-    # Pattern: /artist/nome-artista/ID o /artist/ID
     artist_match = re.search(r"/artist/.*/(\d+)", url)
-    # Pattern: /song/nome-canzone/ID o parametro ?i=ID
     song_id_match = re.search(r"[?&]i=(\d+)", url) or re.search(r"/song/.*/(\d+)", url)
 
     if song_id_match:
@@ -35,7 +33,7 @@ class AppleMusicMetadataClient:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
         })
 
-    def get_url(self, url: str, **kwargs) -> tuple[str, list[TrackMetadata]]:
+    def get_url(self, url: str, **kwargs) -> Tuple[str, List[TrackMetadata]]:
         info = parse_apple_music_url(url)
         if not info:
             raise SpotiflacError(ErrorKind.INVALID_URL, f"URL Apple Music non riconosciuto: {url}")
@@ -49,7 +47,7 @@ class AppleMusicMetadataClient:
         else:
             raise SpotiflacError(ErrorKind.UNSUPPORTED_FEATURE, f"Tipo {info['type']} non supportato.")
 
-    def _get_track(self, track_id: str) -> tuple[str, list[TrackMetadata]]:
+    def _get_track(self, track_id: str) -> Tuple[str, List[TrackMetadata]]:
         url = f"https://itunes.apple.com/lookup?id={track_id}"
         resp = self._session.get(url, timeout=10)
         data = resp.json()
@@ -58,8 +56,7 @@ class AppleMusicMetadataClient:
         track = self._parse_item(data["results"][0])
         return track.title, [track]
 
-    def _get_album(self, album_id: str) -> tuple[str, list[TrackMetadata]]:
-        # Utilizziamo entity=song per ottenere tutte le tracce dell'album
+    def _get_album(self, album_id: str) -> Tuple[str, List[TrackMetadata]]:
         url = f"https://itunes.apple.com/lookup?id={album_id}&entity=song"
         resp = self._session.get(url, timeout=15)
         data = resp.json()
@@ -71,8 +68,7 @@ class AppleMusicMetadataClient:
         tracks = [self._parse_item(item) for item in results if item.get("wrapperType") == "track"]
         return album_name, tracks
 
-    def _get_artist(self, artist_id: str) -> tuple[str, list[TrackMetadata]]:
-        # Recupera le top songs dell'artista (limite iTunes API è 50 per entity)
+    def _get_artist(self, artist_id: str) -> Tuple[str, List[TrackMetadata]]:
         url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=song&limit=50"
         resp = self._session.get(url, timeout=15)
         data = resp.json()
@@ -84,7 +80,7 @@ class AppleMusicMetadataClient:
         tracks = [self._parse_item(item) for item in results if item.get("wrapperType") == "track"]
         return f"Top Songs: {artist_name}", tracks
 
-    def _parse_item(self, item: dict[str, Any]) -> TrackMetadata:
+    def _parse_item(self, item: Dict[str, Any]) -> TrackMetadata:
         cover_url = item.get("artworkUrl100", "").replace("100x100bb", "1000x1000bb")
         return TrackMetadata(
             id           = f"apple_{item.get('trackId', '')}",
