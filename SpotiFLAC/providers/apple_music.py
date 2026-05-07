@@ -215,6 +215,7 @@ class AppleMusicProvider(BaseProvider):
                 pass
 
             # 3. Risoluzione URL (SALTO INTELLIGENTE)
+            # 3. Risoluzione URL (SALTO INTELLIGENTE)
             track_url = None
             if is_native_apple:
                 track_url = metadata.external_url
@@ -224,7 +225,22 @@ class AppleMusicProvider(BaseProvider):
             if not track_url:
                 return DownloadResult.fail(self.name, "Impossibile trovare la traccia su Apple Music tramite ISRC o URL diretto.")
 
-            logger.info("[apple-music] Traccia trovata: %s", track_url)
+            # --- INIZIO FIX: Pulizia URL per il Proxy ---
+            import re
+            # 1. Forza lo storefront USA (accettato universalmente dai proxy)
+            track_url = re.sub(r'music\.apple\.com/[a-zA-Z]{2}/', 'music.apple.com/us/', track_url)
+
+            # 2. Rimuove i tracking params (es. &uo=4) mantenendo solo l'ID traccia (?i=...)
+            if "?" in track_url:
+                base_url, query_str = track_url.split("?", 1)
+                i_params = [p for p in query_str.split("&") if p.startswith("i=")]
+                if i_params:
+                    track_url = f"{base_url}?{i_params[0]}"
+                else:
+                    track_url = base_url
+            # --- FINE FIX ---
+
+            logger.info("[apple-music] Traccia trovata e pulita: %s", track_url)
 
             # 4. Ottieni lo stream tentando i codec (Fallback Loop)
             stream_url = None
