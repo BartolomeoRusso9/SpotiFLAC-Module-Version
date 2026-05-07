@@ -169,8 +169,12 @@ class AppleMusicProvider(BaseProvider):
             is_album:            bool             = False,
             **kwargs,
     ) -> DownloadResult:
-        if not metadata.isrc:
-            return DownloadResult.fail(self.name, "Nessun ISRC fornito: essenziale per la risoluzione Apple Music.")
+
+        # Controlliamo se abbiamo già in mano un link diretto di Apple Music
+        is_native_apple = metadata.external_url and "music.apple.com" in metadata.external_url
+
+        if not metadata.isrc and not is_native_apple:
+            return DownloadResult.fail(self.name, "Nessun ISRC o URL Apple Music fornito per la risoluzione.")
 
         try:
             # 1. Determina la sequenza di Fallback per Apple Music
@@ -210,10 +214,17 @@ class AppleMusicProvider(BaseProvider):
             except ImportError:
                 pass
 
-            # 3. Risoluzione URL
-            track_url = self._resolve_track_url(metadata.isrc)
+            # 3. Risoluzione URL (SALTO INTELLIGENTE)
+            track_url = None
+            if is_native_apple:
+                track_url = metadata.external_url
+            elif metadata.isrc:
+                track_url = self._resolve_track_url(metadata.isrc)
+
             if not track_url:
-                return DownloadResult.fail(self.name, "Impossibile trovare la traccia su Apple Music tramite ISRC.")
+                return DownloadResult.fail(self.name, "Impossibile trovare la traccia su Apple Music tramite ISRC o URL diretto.")
+
+            logger.info("[apple-music] Traccia trovata: %s", track_url)
 
             # 4. Ottieni lo stream tentando i codec (Fallback Loop)
             stream_url = None
