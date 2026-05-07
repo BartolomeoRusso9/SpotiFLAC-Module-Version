@@ -290,14 +290,14 @@ class YouTubeProvider(BaseProvider):
         return match.group(1) if match else None
 
     # ------------------------------------------------------------------
-    # Download URL APIs (Tiered Fallback)
+    # Download URL APIs (Tiered Fallback Aggiornato)
     # ------------------------------------------------------------------
 
     def _request_spotube_dl(self, video_id: str) -> str | None:
         for engine in ("v1", "v3", "v2"):
             api_url = f"https://spotubedl.com/api/download/{video_id}?engine={engine}&format=mp3&quality=320"
             try:
-                resp = self._session.get(api_url, timeout=15)
+                resp = self._session.get(api_url, timeout=12)
                 if resp.status_code == 200:
                     dl_url = resp.json().get("url")
                     if dl_url:
@@ -309,28 +309,51 @@ class YouTubeProvider(BaseProvider):
         return None
 
     def _request_cobalt(self, video_id: str) -> str | None:
-        try:
-            resp = self._session.post(
-                "https://api.zarz.moe/v1/dl/cobalt",
-                json={
-                    "url": f"https://music.youtube.com/watch?v={video_id}",
-                    "downloadMode": "audio",
-                    "audioFormat": "mp3",
-                },
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "User-Agent": _DEFAULT_UA
-                },
-                timeout=15,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
-                if dl_url:
-                    return dl_url
-        except Exception as exc:
-            logger.debug("[youtube] Cobalt fallback failed: %s", exc)
+        """
+        Interroga molteplici istanze Cobalt per massimizzare l'affidabilità.
+        Compatibile sia con le istanze Cobalt v7 che v10.
+        """
+        instances = [
+            "https://api.zarz.moe/v1/dl/cobalt",
+            "https://co.wuk.sh/api/json",
+            "https://api.cobalt.tools/api/json",
+            "https://cobalt.api.engosfware.com/api/json",
+            "https://cobalt-api.peppertaco.net/api/json"
+        ]
+
+        # Le istanze Cobalt spesso falliscono con music.youtube.com, usiamo quello standard
+        yt_url = f"https://www.youtube.com/watch?v={video_id}"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": _DEFAULT_UA,
+            "Origin": "https://cobalt.tools",
+            "Referer": "https://cobalt.tools/"
+        }
+
+        for url in instances:
+            try:
+                # Payload combinato che funziona su vecchie e nuove versioni di Cobalt
+                payload = {
+                    "url": yt_url,
+                    "downloadMode": "audio",  # Cobalt v7
+                    "audioFormat": "mp3",     # Cobalt v7
+                    "isAudioOnly": True,      # Cobalt v10
+                    "aFormat": "mp3"          # Cobalt v10
+                }
+
+                resp = self._session.post(url, json=payload, headers=headers, timeout=12)
+                if resp.status_code in (200, 202):
+                    data = resp.json()
+                    dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
+                    if dl_url:
+                        logger.debug(f"[youtube] Download resolved via Cobalt instance: {url}")
+                        return dl_url
+            except Exception as exc:
+                logger.debug(f"[youtube] Cobalt instance {url} failed: {exc}")
+                continue
+
         return None
 
     def _request_yt1d(self, video_id: str) -> str | None:
@@ -342,7 +365,7 @@ class YouTubeProvider(BaseProvider):
 
             payload = {
                 "action": "process_youtube_audio_download",
-                "video_url": f"https://music.youtube.com/watch?v={video_id}",
+                "video_url": f"https://www.youtube.com/watch?v={video_id}", # Convertito a www.youtube.com
                 "quality": "m4a",
                 "nonce": nonce
             }
@@ -360,7 +383,7 @@ class YouTubeProvider(BaseProvider):
                 if dl_url:
                     return dl_url
         except Exception as exc:
-            logger.debug("[youtube] yt1d fallback failed: %s", exc)
+            logger.debug(f"[youtube] yt1d fallback failed: {exc}")
         return None
 
     # ------------------------------------------------------------------
@@ -411,7 +434,7 @@ class YouTubeProvider(BaseProvider):
 
             if lyrics:
                 audio.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
-                logger.debug("[youtube] lyrics embedded (%d chars)", len(lyrics))
+                logger.debug(f"[youtube] lyrics embedded ({len(lyrics)} chars)")
 
             if cover_url:
                 try:
@@ -419,11 +442,11 @@ class YouTubeProvider(BaseProvider):
                     if r.status_code == 200:
                         audio.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=r.content))
                 except Exception as exc:
-                    logger.warning("[youtube] Cover download failed: %s", exc)
+                    logger.warning(f"[youtube] Cover download failed: {exc}")
 
             audio.save(filepath, v2_version=3)
         except Exception as exc:
-            logger.warning("[youtube] embed_metadata failed: %s", exc)
+            logger.warning(f"[youtube] embed_metadata failed: {exc}")
 
     # ------------------------------------------------------------------
     # BaseProvider interface
@@ -470,15 +493,15 @@ class YouTubeProvider(BaseProvider):
 
             # Tiered fallback download
             dl_url = (
-                    self._request_spotube_dl(video_id) or
                     self._request_cobalt(video_id) or
+                    self._request_spotube_dl(video_id) or
                     self._request_yt1d(video_id)
             )
 
             if not dl_url:
                 return DownloadResult.fail(self.name, "All YouTube download APIs (Spotube, Cobalt, YT1D) failed")
 
-            logger.info("[youtube] Downloading audio stream from %s", "resolved provider")
+            logger.info(f"[youtube] Downloading audio stream from resolved provider")
             with self._session.get(dl_url, stream=True, timeout=120) as r:
                 r.raise_for_status()
                 total      = int(r.headers.get("Content-Length") or 0)
@@ -519,7 +542,7 @@ class YouTubeProvider(BaseProvider):
                         prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
                         print(f"  ✦ Testo: aggiunto tramite {prov_str}")
                 except Exception as exc:
-                    logger.warning("[youtube] lyrics fetch failed: %s", exc)
+                    logger.warning(f"[youtube] lyrics fetch failed: {exc}")
 
             # Metadata enrichment
             genre_tag = ""
@@ -538,7 +561,7 @@ class YouTubeProvider(BaseProvider):
                     if enriched._sources:
                         print(f"  [youtube] Arricchito: {enriched._sources}")
                 except Exception as exc:
-                    logger.warning("[youtube] enrich failed: %s", exc)
+                    logger.warning(f"[youtube] enrich failed: {exc}")
 
             self._embed_metadata(
                 filepath     = str(dest),
@@ -560,7 +583,7 @@ class YouTubeProvider(BaseProvider):
             return DownloadResult.ok(self.name, str(dest), fmt="mp3")
 
         except SpotiflacError as exc:
-            logger.error("[youtube] %s", exc)
+            logger.error(f"[youtube] {exc}")
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
             logger.exception("[youtube] Unexpected error")
