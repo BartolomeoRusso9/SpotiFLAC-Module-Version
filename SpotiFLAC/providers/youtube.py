@@ -55,7 +55,7 @@ class YouTubeProvider(BaseProvider):
     # URL Detection & Resolution (Playlist, Album, Artist, Track)
     # ------------------------------------------------------------------
 
-    def get_url(self, url: str) -> Tuple[str, List[TrackMetadata]]:
+    def get_url(self, url: str, include_featuring: bool = False) -> Tuple[str, List[TrackMetadata]]:
         """
         Rileva se l'URL è un video singolo, playlist, album o artista e lo elabora.
         """
@@ -308,11 +308,7 @@ class YouTubeProvider(BaseProvider):
                 continue
         return None
 
-    def _request_cobalt(self, video_id: str) -> str | None:
-        """
-        Interroga molteplici istanze Cobalt per massimizzare l'affidabilità.
-        Compatibile sia con le istanze Cobalt v7 che v10.
-        """
+    def _request_cobalt(self, video_id: str, quality: str = "320") -> str | None:
         instances = [
             "https://api.zarz.moe/v1/dl/cobalt",
             "https://co.wuk.sh/api/json",
@@ -321,9 +317,7 @@ class YouTubeProvider(BaseProvider):
             "https://cobalt-api.peppertaco.net/api/json"
         ]
 
-        # Le istanze Cobalt spesso falliscono con music.youtube.com, usiamo quello standard
         yt_url = f"https://www.youtube.com/watch?v={video_id}"
-
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -334,24 +328,29 @@ class YouTubeProvider(BaseProvider):
 
         for url in instances:
             try:
-                # Payload combinato che funziona su vecchie e nuove versioni di Cobalt
+                # Attempt v10 Payload first
                 payload = {
                     "url": yt_url,
-                    "downloadMode": "audio",  # Cobalt v7
-                    "audioFormat": "mp3",     # Cobalt v7
-                    "isAudioOnly": True,      # Cobalt v10
-                    "aFormat": "mp3"          # Cobalt v10
+                    "isAudioOnly": True,
+                    "aFormat": "mp3"
                 }
-
                 resp = self._session.post(url, json=payload, headers=headers, timeout=12)
+
+                # Fallback to v7 Payload if server rejects unknown keys (HTTP 400)
+                if resp.status_code == 400:
+                    payload = {
+                        "url": yt_url,
+                        "downloadMode": "audio",
+                        "audioFormat": "mp3"
+                    }
+                    resp = self._session.post(url, json=payload, headers=headers, timeout=12)
+
                 if resp.status_code in (200, 202):
                     data = resp.json()
                     dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
                     if dl_url:
-                        logger.debug(f"[youtube] Download resolved via Cobalt instance: {url}")
                         return dl_url
-            except Exception as exc:
-                logger.debug(f"[youtube] Cobalt instance {url} failed: {exc}")
+            except Exception:
                 continue
 
         return None
@@ -457,6 +456,7 @@ class YouTubeProvider(BaseProvider):
             metadata:            TrackMetadata,
             output_dir:          str,
             *,
+            quality:             str             = "320", # Fix 1
             filename_format:     str             = "{title} - {artist}",
             position:            int             = 1,
             include_track_num:   bool            = False,
@@ -468,21 +468,28 @@ class YouTubeProvider(BaseProvider):
             lyrics_spotify_token:str             = "",
             enrich_metadata:     bool            = False,
             enrich_providers:    list[str] | None = None,
+            qobuz_token:         str             = "",
             is_album:            bool            = False,
             **kwargs,
     ) -> DownloadResult:
         try:
             dest = self._build_output_path(
-                metadata, output_dir, filename_format,
-                position, include_track_num, use_album_track_num,
-                first_artist_only, extension=".mp3",
+                metadata, output_dir,
+                filename_format=filename_format,
+                position=position,
+                include_track_num=include_track_num,
+                use_album_track_num=use_album_track_num,
+                first_artist_only=first_artist_only,
+                extension=".mp3",
             )
             if self._file_exists(dest):
                 return DownloadResult.ok(self.name, str(dest), fmt="mp3")
 
-            # Se i metadata sono estratti direttamente da YT (tramite get_url),
-            # usiamo il loro ID nativo, sennò proviamo a risolverlo.
-            if metadata.extra_info.get("provider") == "youtube":
+            # Fix 7: Smarter ID resolution to prevent silent Songlink failures
+            is_native_yt = metadata.extra_info.get("provider") == "youtube"
+            looks_like_yt_id = len(metadata.id) == 11 and not metadata.id.startswith("spotify:")
+
+            if is_native_yt or looks_like_yt_id:
                 video_id = metadata.id
             else:
                 yt_url   = self._get_youtube_url(metadata.id, metadata.title, metadata.artists)
@@ -491,9 +498,13 @@ class YouTubeProvider(BaseProvider):
             if not video_id:
                 return DownloadResult.fail(self.name, "Could not extract video ID")
 
-            # Tiered fallback download
+            # Fix 2: Start MusicBrainz fetch asynchronously like other providers
+            from ..core.musicbrainz import AsyncMBFetch
+            mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
+
+            # Attempt Downloads
             dl_url = (
-                    self._request_cobalt(video_id) or
+                    self._request_cobalt(video_id, quality) or
                     self._request_spotube_dl(video_id) or
                     self._request_yt1d(video_id)
             )
@@ -514,70 +525,64 @@ class YouTubeProvider(BaseProvider):
                             if self._progress_cb and total:
                                 self._progress_cb(downloaded, total)
 
-            artist       = metadata.artists.split(",")[0].strip() if first_artist_only else metadata.artists
-            album_artist = metadata.album_artist.split(",")[0].strip() if first_artist_only else metadata.album_artist
+            # Fix 4: Validate downloaded track
+            from ..core.download_validation import validate_downloaded_track
+            expected_s = metadata.duration_ms // 1000
+            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
+            if not valid:
+                return DownloadResult.fail(self.name, f"Validazione fallita: {err_msg}")
 
-            # Lyrics
-            lyrics_text = ""
-            lyrics_prov = ""
-            if embed_lyrics and metadata.title and metadata.first_artist:
-                try:
-                    from ..core.lyrics import fetch_lyrics
-                    result = fetch_lyrics(
-                        track_name       = metadata.title,
-                        artist_name      = metadata.first_artist,
-                        album_name       = metadata.album,
-                        duration_s       = metadata.duration_ms // 1000,
-                        track_id         = metadata.id,
-                        isrc             = metadata.isrc,
-                        providers        = lyrics_providers,
-                        spotify_token    = lyrics_spotify_token,
-                    )
-                    if isinstance(result, tuple):
-                        lyrics_text, lyrics_prov = result
-                    else:
-                        lyrics_text = result or ""
+            # Collect MusicBrainz tags
+            mb_tags: dict[str, str] = {}
+            if mb_fetcher:
+                res = mb_fetcher.result()
+                if res:
+                    mapping = {
+                        "mbid_track":       "MUSICBRAINZ_TRACKID",
+                        "mbid_album":       "MUSICBRAINZ_ALBUMID",
+                        "mbid_artist":      "MUSICBRAINZ_ARTISTID",
+                        "mbid_relgroup":    "MUSICBRAINZ_RELEASEGROUPID",
+                        "mbid_albumartist": "MUSICBRAINZ_ALBUMARTISTID",
+                        "barcode":          "BARCODE",
+                        "label":            "LABEL",
+                        "organization":     "ORGANIZATION",
+                        "country":          "RELEASECOUNTRY",
+                        "script":           "SCRIPT",
+                        "status":           "RELEASESTATUS",
+                        "media":            "MEDIA",
+                        "type":             "RELEASETYPE",
+                        "artist_sort":      "ARTISTSORT",
+                        "albumartist_sort": "ALBUMARTISTSORT",
+                        "catalognumber":    "CATALOGNUMBER",
+                    }
+                    for mb_key, tag_name in mapping.items():
+                        val = res.get(mb_key)
+                        if val:
+                            mb_tags[tag_name] = str(val)
+                    if res.get("original_date"):
+                        mb_tags["ORIGINALDATE"] = res["original_date"]
+                        mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
+                    if res.get("catalognumber"):
+                        mb_tags["CATALOGNUMBER"] = res["catalognumber"]
 
-                    if lyrics_text:
-                        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
-                        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
-                except Exception as exc:
-                    logger.warning(f"[youtube] lyrics fetch failed: {exc}")
+                from ..core.tagger import _print_mb_summary
+                _print_mb_summary(mb_tags)
 
-            # Metadata enrichment
-            genre_tag = ""
-            bpm_tag   = ""
-            if enrich_metadata and metadata.isrc:
-                try:
-                    from ..core.metadata_enrichment import enrich_metadata as _enrich
-                    enriched  = _enrich(
-                        track_name  = metadata.title,
-                        artist_name = metadata.first_artist,
-                        isrc        = metadata.isrc,
-                        providers   = enrich_providers,
-                    )
-                    genre_tag = enriched.genre
-                    bpm_tag   = str(enriched.bpm) if enriched.bpm else ""
-                    if enriched._sources:
-                        print(f"  [youtube] Arricchito: {enriched._sources}")
-                except Exception as exc:
-                    logger.warning(f"[youtube] enrich failed: {exc}")
-
-            self._embed_metadata(
-                filepath     = str(dest),
-                title        = metadata.title,
-                artist       = artist,
-                album        = metadata.album,
-                album_artist = album_artist,
-                date         = metadata.release_date,
-                track_num    = _safe_int(metadata.track_number) or position,
-                total_tracks = _safe_int(metadata.total_tracks),
-                disc_num     = _safe_int(metadata.disc_number),
-                total_discs  = _safe_int(metadata.total_discs),
-                cover_url    = metadata.cover_url,
-                lyrics       = lyrics_text,
-                genre        = genre_tag,
-                bpm          = bpm_tag,
+            # Fix 3: Use central embed_metadata pipeline
+            from ..core.tagger import embed_metadata as _embed
+            _embed(
+                str(dest), metadata,
+                first_artist_only       = first_artist_only,
+                cover_url               = metadata.cover_url,
+                session                 = self._session,
+                extra_tags              = mb_tags,
+                embed_lyrics            = embed_lyrics,
+                lyrics_providers        = lyrics_providers,
+                lyrics_spotify_token    = lyrics_spotify_token,
+                enrich                  = enrich_metadata,
+                enrich_providers        = enrich_providers,
+                qobuz_token             = qobuz_token,
+                is_album                = is_album,
             )
 
             return DownloadResult.ok(self.name, str(dest), fmt="mp3")

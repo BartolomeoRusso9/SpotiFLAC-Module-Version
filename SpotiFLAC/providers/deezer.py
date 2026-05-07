@@ -469,7 +469,7 @@ class DeezerProvider(BaseProvider):
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
-                qobuz_token             = qobuz_token, # Fix 2 applied
+                qobuz_token             = qobuz_token,
                 is_album                = is_album,
             )
 
