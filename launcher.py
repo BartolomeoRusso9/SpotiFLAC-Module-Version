@@ -23,11 +23,11 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--service", "-s",
-        choices = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube"],
+        choices = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple"],
         nargs   = "+",
-        default = ["deezer", "tidal"],
+        default = ["tidal"],
         metavar = "SERVICE",
-        help    = "Provider audio in ordine di priorità (default: deezer tidal)",
+        help    = "Provider audio in ordine di priorità (default: tidal)",
     )
     parser.add_argument(
         "--filename-format", "-f",

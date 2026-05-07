@@ -14,6 +14,7 @@ from .core.progress import DownloadManager, ProgressCallback
 from .core.errors import SpotiflacError, ErrorKind
 from .providers.base import BaseProvider
 from .providers.spotify_metadata import SpotifyMetadataClient
+from .providers.apple_music import AppleMusicProvider
 from .core.console import print_track_header, print_summary
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
         "deezer":  ("providers.deezer",  "DeezerProvider"),
         "youtube": ("providers.youtube", "YouTubeProvider"),
         "spoti":   ("providers.spotidownloader", "SpotiDownloaderProvider"),
+        "apple":   ("providers.apple", "AppleMusicProvider"),
         "soundcloud": ("providers.soundcloud", "SoundCloudProvider"),
     }
     if name not in adapters:

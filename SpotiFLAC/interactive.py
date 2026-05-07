@@ -225,8 +225,8 @@ def run_interactive() -> dict:
         print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")
         cfg["services"] = _ask_multi(
             "Services (order = priority):",
-            options  = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube"],
-            defaults = ["deezer", "tidal"],
+            options  = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple"],
+            defaults = ["tidal"],
             ordered  = True,
         )
 
