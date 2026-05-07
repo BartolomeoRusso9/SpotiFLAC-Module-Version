@@ -298,7 +298,6 @@ def _fetch_amazon(isrc: str, timeout: int = 7) -> str:
 # --------------------------------------------------------------------------- #
 
 def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", duration_s: int = 0, timeout: int = 7) -> str:
-    # 1. Tenta prima la richiesta ESATTA (endpoint /get)
     def _lrclib_exact(t, a, al, d):
         params = {"artist_name": a, "track_name": t}
         if al: params["album_name"] = al
@@ -317,26 +316,61 @@ def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", durat
         result = _lrclib_exact(track_name, artist_name, "", duration_s)
         if result: return result
 
-    # 2. Se fallisce, usa la ricerca MORBIDA (endpoint /search)
+    # Fallback: se il titolo contiene " - " (es. "6. ARTIST - Song Title"),
+    # prova con solo la parte dopo il trattino come titolo reale.
+    if " - " in track_name:
+        short_title = track_name.split(" - ", 1)[-1].strip()
+        if short_title and short_title != track_name:
+            result = _lrclib_exact(short_title, artist_name, "", duration_s)
+            if result: return result
+
+    # Ricerca morbida con titolo originale
     try:
-        r = requests.get(f"{_LRCLIB}/search", params={"artist_name": artist_name, "track_name": track_name}, timeout=timeout)
+        r = requests.get(
+            f"{_LRCLIB}/search",
+            params={"artist_name": artist_name, "track_name": track_name},
+            timeout=timeout,
+        )
         if r.status_code == 200:
             results = r.json()
             if results:
                 best_synced = None
-                best_plain = None
-
+                best_plain  = None
                 for item in results:
                     item_duration = item.get("duration", 0)
-                    # Tollera una differenza di 10 secondi come nel Go
                     if duration_s == 0 or abs(item_duration - duration_s) <= 10.0:
                         if item.get("syncedLyrics") and not best_synced:
                             best_synced = item["syncedLyrics"]
                         elif item.get("plainLyrics") and not best_plain:
                             best_plain = item["plainLyrics"]
-
                 return best_synced or best_plain or ""
     except Exception: pass
+
+    # Ricerca morbida con titolo abbreviato (se diverso)
+    if " - " in track_name:
+        short_title = track_name.split(" - ", 1)[-1].strip()
+        if short_title and short_title != track_name:
+            try:
+                r = requests.get(
+                    f"{_LRCLIB}/search",
+                    params={"artist_name": artist_name, "track_name": short_title},
+                    timeout=timeout,
+                )
+                if r.status_code == 200:
+                    results = r.json()
+                    if results:
+                        best_synced = None
+                        best_plain  = None
+                        for item in results:
+                            item_duration = item.get("duration", 0)
+                            if duration_s == 0 or abs(item_duration - duration_s) <= 10.0:
+                                if item.get("syncedLyrics") and not best_synced:
+                                    best_synced = item["syncedLyrics"]
+                                elif item.get("plainLyrics") and not best_plain:
+                                    best_plain = item["plainLyrics"]
+                        return best_synced or best_plain or ""
+            except Exception: pass
+
     return ""
 # --------------------------------------------------------------------------- #
 # Public API                                                                   #
