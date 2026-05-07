@@ -43,7 +43,7 @@ def print_summary(
 ) -> None:
     bar = "═" * _BANNER_WIDTH
     print(f"\n╔{bar}╗")
-    print(f"║  📊 RIEPILOGO SESSIONE{'':<38}║")
+    print(f"║  RIEPILOGO SESSIONE{'':<38}║")
     print(f"╠{bar}╣")
     print(f"║  Tracce totali : {total:<42}║")
     print(f"║  Completate    : {succeeded:<42}║")
