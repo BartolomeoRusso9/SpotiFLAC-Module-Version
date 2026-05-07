@@ -1,14 +1,7 @@
-"""
-AppleMusicMetadataClient — recupera metadati di tracce/album direttamente
-dall'API pubblica di iTunes/Apple Music quando l'URL di input è un link Apple.
-"""
-from __future__ import annotations
-
 import logging
 import re
 import requests
 from typing import Any
-
 from ..core.models import TrackMetadata
 from ..core.errors import SpotiflacError, ErrorKind
 
@@ -18,32 +11,20 @@ def is_apple_music_url(url: str) -> bool:
     return "music.apple.com" in url.lower()
 
 def parse_apple_music_url(url: str) -> dict[str, str] | None:
-    """Riconosce se il link è una traccia, un album o una playlist."""
+    """Parser robusto basato sui pattern ufficiali di Apple Music."""
+    # Pattern: /album/nome-album/ID o /album/ID
+    album_match = re.search(r"/album/.*/(\d+)", url)
+    # Pattern: /artist/nome-artista/ID o /artist/ID
+    artist_match = re.search(r"/artist/.*/(\d+)", url)
+    # Pattern: /song/nome-canzone/ID o parametro ?i=ID
+    song_id_match = re.search(r"[?&]i=(\d+)", url) or re.search(r"/song/.*/(\d+)", url)
 
-    # Esempio traccia 1 (dal link di un album): music.apple.com/us/album/nome/123456?i=987654
-    if "?i=" in url:
-        track_id = url.split("?i=")[1].split("&")[0]
-        return {"type": "track", "id": track_id}
-
-    # Esempio traccia 2 (link diretto alla canzone): music.apple.com/it/song/uhlala/1588744445
-    if "/song/" in url:
-        track_id = url.split("/")[-1].split("?")[0]
-        return {"type": "track", "id": track_id}
-
-    # Esempio album: music.apple.com/us/album/nome/123456
-    if "/album/" in url:
-        album_id = url.split("/")[-1].split("?")[0]
-        return {"type": "album", "id": album_id}
-
-    # Esempio playlist
-    if "/playlist/" in url:
-        playlist_id = url.split("/")[-1].split("?")[0]
-        return {"type": "playlist", "id": playlist_id}
-
-    # Esempio artista
-    if "/artist/" in url:
-        artist_id = url.split("/")[-1].split("?")[0]
-        return {"type": "artist", "id": artist_id}
+    if song_id_match:
+        return {"type": "track", "id": song_id_match.group(1)}
+    if album_match:
+        return {"type": "album", "id": album_match.group(1)}
+    if artist_match:
+        return {"type": "artist", "id": artist_match.group(1)}
 
     return None
 
@@ -57,60 +38,54 @@ class AppleMusicMetadataClient:
     def get_url(self, url: str, **kwargs) -> tuple[str, list[TrackMetadata]]:
         info = parse_apple_music_url(url)
         if not info:
-            raise SpotiflacError(ErrorKind.INVALID_URL, f"URL Apple Music non valido o non riconosciuto: {url}")
+            raise SpotiflacError(ErrorKind.INVALID_URL, f"URL Apple Music non riconosciuto: {url}")
 
         if info["type"] == "track":
             return self._get_track(info["id"])
         elif info["type"] == "album":
             return self._get_album(info["id"])
+        elif info["type"] == "artist":
+            return self._get_artist(info["id"])
         else:
-            raise SpotiflacError(
-                ErrorKind.UNSUPPORTED_FEATURE,
-                f"L'estrazione nativa per '{info['type']}' di Apple Music non è supportata via iTunes API. Usa un link Album o Track."
-            )
+            raise SpotiflacError(ErrorKind.UNSUPPORTED_FEATURE, f"Tipo {info['type']} non supportato.")
 
     def _get_track(self, track_id: str) -> tuple[str, list[TrackMetadata]]:
         url = f"https://itunes.apple.com/lookup?id={track_id}"
         resp = self._session.get(url, timeout=10)
-        resp.raise_for_status()
         data = resp.json()
-
-        if data.get("resultCount", 0) == 0:
-            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Traccia Apple Music {track_id} non trovata.")
-
-        item = data["results"][0]
-        track = self._parse_item(item)
+        if not data.get("results"):
+            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, "Traccia non trovata.")
+        track = self._parse_item(data["results"][0])
         return track.title, [track]
 
     def _get_album(self, album_id: str) -> tuple[str, list[TrackMetadata]]:
+        # Utilizziamo entity=song per ottenere tutte le tracce dell'album
         url = f"https://itunes.apple.com/lookup?id={album_id}&entity=song"
         resp = self._session.get(url, timeout=15)
-        resp.raise_for_status()
         data = resp.json()
-
         results = data.get("results", [])
         if not results:
-            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Album Apple Music {album_id} non trovato.")
+            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, "Album non trovato.")
 
-        collection_info = results[0]
-        collection_name = collection_info.get("collectionName", "Unknown Album")
+        album_name = results[0].get("collectionName", "Unknown Album")
+        tracks = [self._parse_item(item) for item in results if item.get("wrapperType") == "track"]
+        return album_name, tracks
 
-        tracks = []
-        for item in results[1:]:
-            if item.get("wrapperType") == "track":
-                tracks.append(self._parse_item(item))
+    def _get_artist(self, artist_id: str) -> tuple[str, list[TrackMetadata]]:
+        # Recupera le top songs dell'artista (limite iTunes API è 50 per entity)
+        url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=song&limit=50"
+        resp = self._session.get(url, timeout=15)
+        data = resp.json()
+        results = data.get("results", [])
+        if not results:
+            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, "Artista non trovato.")
 
-        return collection_name, tracks
+        artist_name = results[0].get("artistName", "Unknown Artist")
+        tracks = [self._parse_item(item) for item in results if item.get("wrapperType") == "track"]
+        return f"Top Songs: {artist_name}", tracks
 
     def _parse_item(self, item: dict[str, Any]) -> TrackMetadata:
-        """Converte i dati grezzi di iTunes in TrackMetadata."""
-        # Trasforma l'immagine 100x100 di default in 1000x1000 ad alta risoluzione
         cover_url = item.get("artworkUrl100", "").replace("100x100bb", "1000x1000bb")
-
-        release_date = item.get("releaseDate", "")
-        if release_date:
-            release_date = release_date.split("T")[0] # Prende solo YYYY-MM-DD
-
         return TrackMetadata(
             id           = f"apple_{item.get('trackId', '')}",
             title        = item.get("trackName", "Unknown"),
@@ -119,10 +94,8 @@ class AppleMusicMetadataClient:
             album_artist = [item.get("artistName", "Unknown")],
             isrc         = item.get("isrc", ""),
             track_number = item.get("trackNumber", 1),
-            disc_number  = item.get("discNumber", 1),
-            total_tracks = item.get("trackCount", 0),
             duration_ms  = item.get("trackTimeMillis", 0),
-            release_date = release_date,
+            release_date = item.get("releaseDate", "").split("T")[0],
             cover_url    = cover_url,
             external_url = item.get("trackViewUrl", "")
         )
