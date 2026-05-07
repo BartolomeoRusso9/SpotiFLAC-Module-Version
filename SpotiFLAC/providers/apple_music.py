@@ -62,6 +62,20 @@ class AppleMusicProvider(BaseProvider):
             logger.warning("[apple-music] Risoluzione URL tramite iTunes fallita per ISRC %s: %s", isrc, e)
         return None
 
+    def _resolve_track_url_by_search(self, title: str, artists: str) -> str | None:
+        """Cerca la traccia su Apple Music per nome se l'ISRC fallisce (come in index.js)."""
+        try:
+            first_artist = artists.split(",")[0].strip()
+            query = f"{title} {first_artist}"
+            url = f"https://itunes.apple.com/search?term={requests.utils.quote(query)}&entity=song&limit=5"
+            resp = self._session.get(url, timeout=15)
+            data = resp.json()
+            if data.get("resultCount", 0) > 0:
+                return data["results"][0].get("trackViewUrl")
+        except Exception as e:
+            logger.debug("[apple-music] Ricerca testuale fallita: %s", e)
+        return None
+
     def _get_stream_url(self, track_url: str, codec: str) -> str | None:
         """
         Tenta prima il download diretto (app2). Se fallisce, ripiega su app.
