@@ -19,9 +19,15 @@ def is_apple_music_url(url: str) -> bool:
 
 def parse_apple_music_url(url: str) -> dict[str, str] | None:
     """Riconosce se il link è una traccia, un album o una playlist."""
-    # Esempio traccia: music.apple.com/us/album/nome/123456?i=987654
+
+    # Esempio traccia 1 (dal link di un album): music.apple.com/us/album/nome/123456?i=987654
     if "?i=" in url:
         track_id = url.split("?i=")[1].split("&")[0]
+        return {"type": "track", "id": track_id}
+
+    # Esempio traccia 2 (link diretto alla canzone): music.apple.com/it/song/uhlala/1588744445
+    if "/song/" in url:
+        track_id = url.split("/")[-1].split("?")[0]
         return {"type": "track", "id": track_id}
 
     # Esempio album: music.apple.com/us/album/nome/123456
@@ -29,10 +35,12 @@ def parse_apple_music_url(url: str) -> dict[str, str] | None:
         album_id = url.split("/")[-1].split("?")[0]
         return {"type": "album", "id": album_id}
 
+    # Esempio playlist
     if "/playlist/" in url:
         playlist_id = url.split("/")[-1].split("?")[0]
         return {"type": "playlist", "id": playlist_id}
 
+    # Esempio artista
     if "/artist/" in url:
         artist_id = url.split("/")[-1].split("?")[0]
         return {"type": "artist", "id": artist_id}
