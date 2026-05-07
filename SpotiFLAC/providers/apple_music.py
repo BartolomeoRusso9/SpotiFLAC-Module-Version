@@ -64,32 +64,52 @@ class AppleMusicProvider(BaseProvider):
 
     def _get_stream_url(self, track_url: str, codec: str) -> str | None:
         """
-        Tenta prima il download diretto (app2). Se fallisce o non supportato,
-        ripiega sul download asincrono/in coda (app).
+        Tenta prima il download diretto (app2). Se fallisce, ripiega su app.
         """
+        # Header ultra-specifici per ingannare Cloudflare
+        req_headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Origin": "https://music.apple.com",
+            "Referer": "https://music.apple.com/"
+        }
+
         # 1. Tentativo Diretto (App2)
         try:
-            logger.debug("[apple-music] Tento risoluzione diretta (app2) per codec %s...", codec)
             resp = self._session.post(
                 _PROXY_DIRECT_URL,
                 json={"url": track_url, "codec": codec},
+                headers=req_headers,
                 timeout=15
             )
+
+            # Controllo Cloudflare ispirato a index.js riga 112
+            if resp.headers.get("cf-mitigated", "").lower() == "challenge":
+                logger.error("[apple-music] BLOCCATO: Il proxy ha attivato la protezione Cloudflare anti-bot.")
+                return None
+
             resp.raise_for_status()
             data = resp.json()
             if data.get("success") and data.get("stream_url"):
                 return data["stream_url"]
+        except requests.HTTPError as e:
+            err_msg = e.response.json().get("error") if e.response.text else str(e)
+            logger.debug("[apple-music] app2 rifiutato per %s: %s", codec, err_msg)
         except Exception as e:
-            logger.debug("[apple-music] Fallback ad app2 non riuscito per %s: %s", codec, e)
+            logger.debug("[apple-music] Fallback ad app2 non riuscito: %s", e)
 
         # 2. Tentativo in coda (App)
         try:
-            logger.debug("[apple-music] Tento risoluzione in coda (app) per codec %s...", codec)
             resp = self._session.post(
                 f"{_PROXY_QUEUED_BASE}/download",
                 json={"url": track_url, "codec": codec},
+                headers=req_headers,
                 timeout=15
             )
+
+            if resp.headers.get("cf-mitigated", "").lower() == "challenge":
+                return None
+
             resp.raise_for_status()
             job_data = resp.json()
             job_id = job_data.get("job_id")
@@ -214,8 +234,7 @@ class AppleMusicProvider(BaseProvider):
             except ImportError:
                 pass
 
-            # 3. Risoluzione URL (SALTO INTELLIGENTE)
-            # 3. Risoluzione URL (SALTO INTELLIGENTE)
+            # 3. Risoluzione URL
             track_url = None
             if is_native_apple:
                 track_url = metadata.external_url
@@ -223,24 +242,10 @@ class AppleMusicProvider(BaseProvider):
                 track_url = self._resolve_track_url(metadata.isrc)
 
             if not track_url:
-                return DownloadResult.fail(self.name, "Impossibile trovare la traccia su Apple Music tramite ISRC o URL diretto.")
+                return DownloadResult.fail(self.name, "Impossibile trovare la traccia su Apple Music.")
 
-            # --- INIZIO FIX: Pulizia URL per il Proxy ---
-            import re
-            # 1. Forza lo storefront USA (accettato universalmente dai proxy)
-            track_url = re.sub(r'music\.apple\.com/[a-zA-Z]{2}/', 'music.apple.com/us/', track_url)
-
-            # 2. Rimuove i tracking params (es. &uo=4) mantenendo solo l'ID traccia (?i=...)
-            if "?" in track_url:
-                base_url, query_str = track_url.split("?", 1)
-                i_params = [p for p in query_str.split("&") if p.startswith("i=")]
-                if i_params:
-                    track_url = f"{base_url}?{i_params[0]}"
-                else:
-                    track_url = base_url
-            # --- FINE FIX ---
-
-            logger.info("[apple-music] Traccia trovata e pulita: %s", track_url)
+            # NON FACCIAMO NESSUNA PULIZIA: Il JS originale manda l'URL grezzo!
+            logger.info("[apple-music] Traccia trovata: %s", track_url)
 
             # 4. Ottieni lo stream tentando i codec (Fallback Loop)
             stream_url = None
