@@ -14,7 +14,7 @@ import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from ..core.tagger import _print_mb_summary
+from ..core.tagger import _print_mb_summary, EmbedOptions
 from ..core.link_resolver import LinkResolver
 from pathlib import Path
 from typing import NamedTuple
@@ -705,23 +705,21 @@ class TidalProvider(BaseProvider):
             mb_tags = mb_result_to_tags(res)
             _print_mb_summary(mb_tags)
 
-            # FIX #6: self._qobuz_token ora è correttamente propagato
-            embed_metadata(
-                dest, metadata,
+            opts = EmbedOptions(
                 first_artist_only       = first_artist_only,
                 cover_url               = metadata.cover_url,
-                session                 = self._session,
                 extra_tags              = mb_tags,
                 embed_lyrics            = embed_lyrics,
-                lyrics_providers        = lyrics_providers,
+                lyrics_providers        = lyrics_providers or [],
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
                 enrich_qobuz_token      = self._qobuz_token or "",
                 is_album                = is_album,
             )
-            return DownloadResult.ok(self.name, str(dest))
+            embed_metadata(str(dest), metadata, opts, session=self._session)
 
+            return DownloadResult.ok(self.name, str(dest))
         except SpotiflacError as exc:
             logger.error("[tidal] %s", exc)
             return DownloadResult.fail(self.name, str(exc))

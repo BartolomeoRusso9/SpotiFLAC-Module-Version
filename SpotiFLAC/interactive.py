@@ -32,7 +32,6 @@ MAGENTA= lambda t: _c("95", t)
 # ---------------------------------------------------------------------------
 
 def _ask(prompt: str, default: str = "") -> str:
-    """Asks the user for a string."""
     default_hint = f" {DIM('[' + default + ']')}" if default else ""
     try:
         val = input(f"  {prompt}{default_hint}: ").strip()
@@ -43,7 +42,6 @@ def _ask(prompt: str, default: str = "") -> str:
 
 
 def _ask_bool(prompt: str, default: bool = False) -> bool:
-    """Asks for a yes/no confirmation."""
     hint = DIM("Y/n" if default else "y/N")
     try:
         val = input(f"  {prompt} [{hint}]: ").strip().lower()
@@ -56,7 +54,6 @@ def _ask_bool(prompt: str, default: bool = False) -> bool:
 
 
 def _ask_choice(prompt: str, options: list[str], default: str) -> str:
-    """Asks the user to choose an option from a list."""
     print(f"\n  {BOLD(prompt)}")
     for i, opt in enumerate(options, 1):
         marker = GREEN("▶") if opt == default else " "
@@ -82,10 +79,6 @@ def _ask_multi(
         defaults: list[str],
         ordered: bool = False,
 ) -> list[str]:
-    """
-    Asks the user to select multiple options.
-    If ordered=True, the insertion order is preserved.
-    """
     print(f"\n  {BOLD(prompt)}")
     for i, opt in enumerate(options, 1):
         marker = GREEN("●") if opt in defaults else DIM("○")
@@ -153,12 +146,12 @@ def _summary(cfg: dict) -> None:
     row("Filename format", cfg["filename_format"])
 
     flags = []
-    if cfg["use_track_numbers"]:     flags.append("track-numbers")
-    if cfg["use_album_track_numbers"]: flags.append("album-track-numbers")
-    if cfg["use_artist_subfolders"]: flags.append("artist-subfolders")
-    if cfg["use_album_subfolders"]:  flags.append("album-subfolders")
-    if cfg["first_artist_only"]:     flags.append("first-artist-only")
-    if cfg["include_featuring"]:     flags.append("include-featuring")
+    if cfg["use_track_numbers"]:        flags.append("track-numbers")
+    if cfg["use_album_track_numbers"]:  flags.append("album-track-numbers")
+    if cfg["use_artist_subfolders"]:    flags.append("artist-subfolders")
+    if cfg["use_album_subfolders"]:     flags.append("album-subfolders")
+    if cfg["first_artist_only"]:        flags.append("first-artist-only")
+    if cfg["include_featuring"]:        flags.append("include-featuring")
     row("Options", ", ".join(flags) if flags else "none")
 
     row("Lyrics", "enabled (" + ", ".join(cfg["lyrics_providers"]) + ")" if cfg["embed_lyrics"] else "disabled")
@@ -196,14 +189,12 @@ def run_interactive() -> dict:
         lower_url = url.lower()
         is_blocked = False
 
-        # Block YouTube artist/channel pages
         if ("youtube.com" in lower_url or "youtu.be" in lower_url) and \
                 ("/channel/" in lower_url or "/user/" in lower_url or "/c/" in lower_url or "/@" in lower_url or "/browse/" in lower_url):
             print(f"  {RED('⚠  Discographies are not supported for YouTube.')}")
             print(f"     {DIM('Please provide a Video or Playlist link.')}")
             is_blocked = True
 
-        # Block SoundCloud artist profiles
         elif "soundcloud.com" in lower_url:
             path = urlparse(url).path.strip("/")
             parts = [p for p in path.split("/") if p]
@@ -228,7 +219,7 @@ def run_interactive() -> dict:
             or ("watch?v=" in lower_url and "list=" not in lower_url)
             or ("youtu.be" in lower_url)
             or ("music.apple.com" in lower_url and "?i=" in lower_url)
-            or (("soundcloud.com" in lower_url or "on.soundcloud.com" in lower_url) and "/sets/" not in lower_url) # <-- AGGIUNTO
+            or (("soundcloud.com" in lower_url or "on.soundcloud.com" in lower_url) and "/sets/" not in lower_url)
     )
     if is_single_track:
         _section("2.5 · Custom Output Path")
@@ -305,12 +296,6 @@ def run_interactive() -> dict:
 
     if is_soundcloud_url:
         cfg["quality"] = "LOSSLESS"
-        cfg["filename_format"] = "{title} - {artist}"
-        cfg["use_track_numbers"] = False
-        cfg["use_album_track_numbers"] = False
-        cfg["use_artist_subfolders"] = False
-        cfg["use_album_subfolders"] = False
-        cfg["first_artist_only"] = False
         cfg["allow_fallback"] = True
         print(f"  {YELLOW('⏭  Skipped:')} {DIM('Only MP3 available')}")
     elif is_youtube_url or (len(cfg["services"]) == 1 and cfg["services"][0] == "youtube"):
@@ -320,12 +305,11 @@ def run_interactive() -> dict:
     else:
         print(f"  {DIM('Note: If the requested quality is not found, an automatic fallback will be executed.')}")
 
-        has_qobuz = "qobuz" in cfg["services"]
-        has_tidal = "tidal" in cfg["services"]
+        has_qobuz  = "qobuz"  in cfg["services"]
+        has_tidal  = "tidal"  in cfg["services"]
         has_deezer = "deezer" in cfg["services"]
-        has_apple = "apple" in cfg["services"]
+        has_apple  = "apple"  in cfg["services"]
 
-        # Solo Qobuz
         if has_qobuz and not (has_tidal or has_deezer or has_apple):
             q_choice = _ask_choice(
                 "Qobuz Quality:",
@@ -334,7 +318,6 @@ def run_interactive() -> dict:
             )
             cfg["quality"] = q_choice.split(" ")[0]
 
-        # Solo Tidal
         elif has_tidal and not (has_qobuz or has_deezer or has_apple):
             cfg["quality"] = _ask_choice(
                 "Tidal Quality:",
@@ -342,7 +325,6 @@ def run_interactive() -> dict:
                 default = "LOSSLESS",
             )
 
-        # Solo Deezer
         elif has_deezer and not (has_qobuz or has_tidal or has_apple):
             q_choice = _ask_choice(
                 "Deezer Quality:",
@@ -351,7 +333,6 @@ def run_interactive() -> dict:
             )
             cfg["quality"] = q_choice.split(" ")[0]
 
-        # Solo Apple Music
         elif has_apple and not (has_qobuz or has_tidal or has_deezer):
             q_choice = _ask_choice(
                 "Apple Music Quality:",
@@ -360,7 +341,6 @@ def run_interactive() -> dict:
             )
             cfg["quality"] = q_choice.split(" ")[0].lower()
 
-        # Multipli
         elif (has_qobuz or has_tidal or has_deezer or has_apple):
             print(f"  {DIM('You selected multiple providers. Choose a unified profile:')}")
 
@@ -387,20 +367,13 @@ def run_interactive() -> dict:
                 default = combined_options[0],
             )
 
-            if q_choice.startswith("LOSSLESS"):
-                cfg["quality"] = "LOSSLESS"
-            elif q_choice.startswith("HI_RES"):
-                cfg["quality"] = "HI_RES"
-            elif q_choice.startswith("ATMOS"):
-                cfg["quality"] = "atmos"
-            elif q_choice.startswith("AC3"):
-                cfg["quality"] = "ac3"
-            elif q_choice.startswith("7"):
-                cfg["quality"] = "7"
-            elif q_choice.startswith("AAC-LEGACY"):
-                cfg["quality"] = "aac-legacy"
-            else:
-                cfg["quality"] = "HIGH"
+            if q_choice.startswith("LOSSLESS"):    cfg["quality"] = "LOSSLESS"
+            elif q_choice.startswith("HI_RES"):    cfg["quality"] = "HI_RES"
+            elif q_choice.startswith("ATMOS"):     cfg["quality"] = "atmos"
+            elif q_choice.startswith("AC3"):       cfg["quality"] = "ac3"
+            elif q_choice.startswith("7"):         cfg["quality"] = "7"
+            elif q_choice.startswith("AAC-LEGACY"):cfg["quality"] = "aac-legacy"
+            else:                                   cfg["quality"] = "HIGH"
 
         else:
             cfg["quality"] = _ask_choice(
@@ -419,15 +392,21 @@ def run_interactive() -> dict:
     cfg["filename_format"] = _ask("Format", "{title} - {artist}")
 
     # ── 6. Organization options ───────────────────────────────────────────
+    # FIX #2: use_artist_subfolders, use_album_subfolders e first_artist_only
+    # venivano saltati quando use_track_numbers=True, causando KeyError
+    # in _summary() e in SpotiFLAC(). Ora vengono sempre impostati.
     _section("6 · Organization Options")
 
     cfg["use_track_numbers"] = _ask_bool("Add track number to filename?", False)
 
     if cfg["use_track_numbers"]:
         cfg["use_album_track_numbers"] = _ask_bool("Use original album track number?", False)
+        # Valori di default per i campi che non vengono chiesti in questo ramo
+        cfg["use_artist_subfolders"] = False
+        cfg["use_album_subfolders"]  = False
+        cfg["first_artist_only"]     = False
     else:
         cfg["use_album_track_numbers"] = False
-
         cfg["use_artist_subfolders"]   = _ask_bool("Create artist subfolders?", False)
         cfg["use_album_subfolders"]    = _ask_bool("Create album subfolders?", False)
         cfg["first_artist_only"]       = _ask_bool("Use only the first artist in tags and filename?", False)
@@ -479,12 +458,12 @@ def run_interactive() -> dict:
     if cfg["enrich_metadata"]:
         cfg["enrich_providers"] = _ask_multi(
             "Enrichment providers (order = priority):",
-            options  = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"],
-            defaults = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"],
+            options  = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
+            defaults = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
             ordered  = True,
         )
     else:
-        cfg["enrich_providers"] = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"]
+        cfg["enrich_providers"] = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
 
     # ── 10. Optional Tokens ─────────────────────────────────────────────────────
     _section("10 · Optional Tokens")

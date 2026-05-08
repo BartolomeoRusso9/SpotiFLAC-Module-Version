@@ -115,10 +115,12 @@ def parse_args() -> argparse.Namespace:
     enrich_grp.add_argument(
         "--enrich-providers",
         nargs   = "+",
-        default = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"],
+        # FIX #3: rimosso "youtube" dal default — non esiste in _PROVIDERS
+        # di metadata_enrichment.py e causava un provider silenziosamente ignorato.
+        default = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         dest    = "enrich_providers",
-        choices = ["deezer", "apple", "qobuz", "tidal", "soundcloud", "youtube"],
-        help    = "Provider metadata enrichment in ordine (default: deezer apple qobuz tidal soundcloud youtube).",
+        choices = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
+        help    = "Provider metadata enrichment in ordine (default: deezer apple qobuz tidal soundcloud).",
     )
 
     return parser.parse_args()
@@ -149,11 +151,9 @@ def main() -> None:
             first_artist_only        = cfg["first_artist_only"],
             log_level                = log_level,
             output_path              = cfg.get("output_path"),
-            # Lyrics
             embed_lyrics             = cfg["embed_lyrics"],
             lyrics_providers         = cfg["lyrics_providers"],
             lyrics_spotify_token     = cfg.get("lyrics_spotify_token", ""),
-            # Enrichment
             enrich_metadata          = cfg["enrich_metadata"],
             enrich_providers         = cfg["enrich_providers"],
             qobuz_token              = cfg.get("qobuz_token"),
@@ -164,8 +164,8 @@ def main() -> None:
         args = parse_args()
         file_cfg = load_config()
 
-        quality = getattr(args, 'quality', None) or file_cfg.get("quality", "LOSSLESS")
-        qobuz_token = getattr(args, 'qobuz_token', None) or file_cfg.get("qobuz_token")
+        quality       = getattr(args, 'quality', None)       or file_cfg.get("quality", "LOSSLESS")
+        qobuz_token   = getattr(args, 'qobuz_token', None)   or file_cfg.get("qobuz_token")
         spotify_token = getattr(args, 'spotify_token', None) or file_cfg.get("spotify_token", "")
 
         log_level = logging.DEBUG if args.verbose else logging.WARNING
@@ -188,11 +188,9 @@ def main() -> None:
             first_artist_only        = args.first_artist_only,
             log_level                = log_level,
             output_path              = args.output_path,
-            # Lyrics
             embed_lyrics             = args.embed_lyrics,
             lyrics_providers         = args.lyrics_providers,
             lyrics_spotify_token     = args.spotify_token,
-            # Enrichment
             enrich_metadata          = args.enrich,
             enrich_providers         = args.enrich_providers,
             qobuz_token              = args.qobuz_token,

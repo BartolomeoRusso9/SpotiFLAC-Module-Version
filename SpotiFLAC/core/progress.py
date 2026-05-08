@@ -137,6 +137,10 @@ class DownloadManager:
                 "skipped":          counts[DownloadStatus.SKIPPED],
                 "queue":            [vars(i) for i in self._queue],
             }
+    def reset(self) -> None:
+        """Pulisce lo stato tra sessioni di download distinte."""
+        with self._lock:
+            self._init_state()
 
 
 class ProgressCallback:
@@ -201,6 +205,5 @@ def _fmt_eta(seconds: float) -> str:
     m, s = divmod(s, 60)
     return f"{m:02d}:{s:02d}"
 
-
-# Alias retrocompatibile
+    # Alias retrocompatibile
 RichProgressCallback = ProgressCallback

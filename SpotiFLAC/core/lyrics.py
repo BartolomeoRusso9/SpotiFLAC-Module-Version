@@ -260,7 +260,9 @@ def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeou
 # --------------------------------------------------------------------------- #
 
 def _fetch_amazon(isrc: str, timeout: int = 7) -> str:
-    if not isrc: return ""
+    if not isrc:
+        logger.debug("[lyrics/amazon] skip: ISRC non disponibile")
+        return ""
 
     from ..providers.amazon import AMAZON_API_BASE
 

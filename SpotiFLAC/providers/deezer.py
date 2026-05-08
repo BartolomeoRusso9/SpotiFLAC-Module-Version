@@ -11,6 +11,8 @@ from typing import Any
 import requests
 from mutagen.flac import FLAC
 
+from ..core.tagger import embed_metadata, EmbedOptions
+
 # Gestione opzionale di pycryptodome per la decrittazione Blowfish
 try:
     from Crypto.Cipher import Blowfish
@@ -19,7 +21,7 @@ except ImportError:
     HAS_CRYPTO = False
 
 from ..core.models import TrackMetadata, DownloadResult
-from ..core.errors import SpotiflacError
+from ..core.errors import SpotiflacError, ErrorKind
 from .base import BaseProvider
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 
@@ -191,11 +193,9 @@ class DeezerProvider(BaseProvider):
             logger.warning("[deezer] get_track_by_isrc failed: %s", exc)
             return None
 
-
     def _search_track_text(self, title: str, artist: str) -> dict | None:
         """Fallback estremo: cerca la traccia per testo su Deezer."""
         import urllib.parse
-        # Usiamo solo il primo artista per massimizzare le probabilità di match
         first_artist = artist.split(",")[0].strip()
         query = f'track:"{title}" artist:"{first_artist}"'
         url = f"https://api.deezer.com/search?q={urllib.parse.quote(query)}&limit=1"
@@ -203,15 +203,14 @@ class DeezerProvider(BaseProvider):
         try:
             data = self._get_json_cached(url)
             if data and data.get("data"):
-                # Se la ricerca ha successo, recuperiamo l'ID traccia
                 track_id = data["data"][0].get("id")
                 if track_id:
-                    # Richiamiamo l'API specifica per ottenere l'ISRC e tutti i dettagli
                     return self._get_json(f"https://api.deezer.com/track/{track_id}")
         except Exception as e:
             logger.debug("[deezer] Ricerca testuale fallita: %s", e)
 
         return None
+
     # ------------------------------------------------------------------
     # Metadati & Crypto Helpers
     # ------------------------------------------------------------------
@@ -257,8 +256,9 @@ class DeezerProvider(BaseProvider):
         return bytes(key)
 
     def _decrypt_file(self, encrypted_path: str, output_path: str, track_id: str) -> bool:
+        # FIX #1: SpotiflacError chiamata con firma corretta (kind, message)
         if not HAS_CRYPTO:
-            raise SpotiflacError("Manca pycryptodome, impossibile decriptare la traccia.")
+            raise SpotiflacError(ErrorKind.FILE_IO, "Manca pycryptodome, impossibile decriptare la traccia.")
 
         key = self._generate_blowfish_key(track_id)
         cipher = Blowfish.new(key, Blowfish.MODE_CBC, _BLOWFISH_IV)
@@ -352,7 +352,6 @@ class DeezerProvider(BaseProvider):
         if requires_decryption:
             logger.info("[deezer] File criptato rilevato. Inizio decrittazione Blowfish...")
             success = self._decrypt_file(temp_path, file_path, str(track_id))
-            # Pulisce il file criptato temporaneo
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
@@ -400,7 +399,6 @@ class DeezerProvider(BaseProvider):
 
         isrc_to_use = metadata.isrc
 
-        # ---- LOGICA FALLBACK TESTUALE ----
         if not isrc_to_use:
             logger.warning("[deezer] ISRC mancante in metadata. Tento ricerca testuale per: %s - %s", metadata.title, metadata.artists)
             fallback_track = self._search_track_text(metadata.title, metadata.artists)
@@ -432,7 +430,6 @@ class DeezerProvider(BaseProvider):
             except ImportError:
                 pass
 
-            # Chiamata SINGOLA al downloader con l'ISRC corretto
             downloaded = self._download_flac_raw(isrc_to_use, output_dir)
 
             if not downloaded or not os.path.exists(downloaded):
@@ -462,21 +459,19 @@ class DeezerProvider(BaseProvider):
             except ImportError:
                 pass
 
-            from ..core.tagger import embed_metadata
-            embed_metadata(
-                str(dest), metadata,
+            opts = EmbedOptions(
                 first_artist_only       = first_artist_only,
                 cover_url               = metadata.cover_url,
-                session                 = self._session,
                 extra_tags              = mb_tags,
                 embed_lyrics            = embed_lyrics,
-                lyrics_providers        = lyrics_providers,
+                lyrics_providers        = lyrics_providers or [],
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
                 enrich_qobuz_token      = qobuz_token or "",
                 is_album                = is_album,
             )
+            embed_metadata(str(dest), metadata, opts, session=self._session)
 
             return DownloadResult.ok(self.name, str(dest))
 

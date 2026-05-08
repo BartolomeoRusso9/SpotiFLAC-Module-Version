@@ -1,0 +1,12 @@
+# SpotiFLAC — dipendenze complete
+# Installa con: pip install -r requirements.txt
+
+requests>=2.32.3
+mutagen>=1.47.0
+pyotp>=2.9.0
+pydantic>=2.7.0
+cryptography>=42.0.0
+
+# Necessario per la decrittazione Blowfish (Deezer) e AES-GCM (Amazon)
+# Era usato nel codice ma mancava dalla lista ufficiale (Fix #6)
+pycryptodome>=3.20.0
