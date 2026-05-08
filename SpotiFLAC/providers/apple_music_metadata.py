@@ -1,6 +1,6 @@
 """
-AppleMusicMetadataClient — recupera metadati di tracce/album/artisti
-tramite l'API pubblica di iTunes Search / Lookup.
+AppleMusicMetadataClient — recupera metadati di tracce/album/artisti/playlist
+tramite la AMP API pubblica di Apple Music.
 """
 from __future__ import annotations
 
@@ -19,13 +19,11 @@ from ..core.models import TrackMetadata
 
 logger = logging.getLogger(__name__)
 
-_ITUNES_API_BASE = "https://amp-api.music.apple.com/v1/catalog/"
 _APPLE_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/145.0.0.0 Safari/537.36"
 )
-
 
 # ---------------------------------------------------------------------------
 # URL parsing
@@ -71,7 +69,6 @@ def parse_apple_music_url(url: str) -> dict[str, str]:
 
     raise InvalidUrlError(url)
 
-
 # ---------------------------------------------------------------------------
 # Helper Normalizzazione
 # ---------------------------------------------------------------------------
@@ -89,7 +86,6 @@ def _artist_in_track(artist_name: str, track_artists: str) -> bool:
         if _normalize_artist(artist) == name_norm:
             return True
     return False
-
 
 # ---------------------------------------------------------------------------
 # Client
@@ -162,7 +158,7 @@ class AppleMusicMetadataClient:
             raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Playlist {playlist_id} non trovata.")
 
         playlist_data = results[0]
-        # Potresti implementare la paginazione chiamando 'next' in playlist_data.relationships.tracks
+        # Potresti implementare la paginazione chiamando 'next' in playlist_data.relationships.tracks in futuro
         tracks_data = playlist_data.get("relationships", {}).get("tracks", {}).get("data", [])
         tracks = [self._parse_item(item) for item in tracks_data if item.get("type") == "songs"]
         return playlist_data, tracks
@@ -195,7 +191,6 @@ class AppleMusicMetadataClient:
         # Fetch parallelo dei metadati (max 5 richieste simultanee per rispettare rate limit)
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_album = {
-                # FIX: Ora passiamo lo storefront correttamente
                 executor.submit(self.get_album_tracks, aid, storefront=storefront): aid
                 for aid in albums_to_fetch
             }
@@ -242,7 +237,6 @@ class AppleMusicMetadataClient:
 
         if t == "album":
             album, tracks = self.get_album_tracks(info["id"], storefront=storefront)
-            # FIX: nell'AMP API il nome sta dentro attributes
             name = album.get("attributes", {}).get("name", "Unknown Album")
             return name, tracks
 
