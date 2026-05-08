@@ -226,35 +226,34 @@ def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: in
 # --------------------------------------------------------------------------- #
 
 def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
-    params = {
-        "t": track_name,
-        "a": artist_name,
-        "type": "word",
-        "format": "lrc"
-    }
-    if duration_s > 0:
-        params["d"] = str(duration_s)
+    # Aggiunto il loop per tentare prima word, poi line
+    for sync_type in ["word", "line"]:
+        params = {
+            "t": track_name,
+            "a": artist_name,
+            "type": sync_type,
+            "format": "lrc"
+        }
+        if duration_s > 0:
+            params["d"] = str(duration_s)
 
-    url = f"{_PAXSENIX_MXM}/lyrics?" + urllib.parse.urlencode(params)
-    try:
-        r = requests.get(url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout)
-        if not r.ok: return ""
-
-        body = r.text.strip()
-        import json
+        url = f"{_PAXSENIX_MXM}/lyrics?" + urllib.parse.urlencode(params)
         try:
-            parsed = json.loads(body)
-            if isinstance(parsed, str):
-                return parsed.strip()
-        except ValueError:
-            # Fallback se restituisce plain text direttamente
-            if body and not body.startswith("{"):
-                return body
-        return ""
-    except Exception as exc:
-        logger.debug("[lyrics/musixmatch] %s", exc)
-        return ""
+            r = requests.get(url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout)
+            if r.ok:
+                body = r.text.strip()
+                import json
+                try:
+                    parsed = json.loads(body)
+                    if isinstance(parsed, str) and parsed.strip():
+                        return parsed.strip()
+                except ValueError:
+                    if body and not body.startswith("{"):
+                        return body
+        except Exception as exc:
+            logger.debug("[lyrics/musixmatch] %s fallito: %s", sync_type, exc)
 
+    return ""
 
 # --------------------------------------------------------------------------- #
 # Provider 4 — Amazon Music                                                    #

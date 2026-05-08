@@ -16,6 +16,8 @@ from .providers.base import BaseProvider
 from .providers.spotify_metadata import SpotifyMetadataClient
 from .providers.apple_music import AppleMusicProvider
 from .core.console import print_track_header, print_summary
+from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
+from .providers.apple_music_metadata import is_apple_music_url, parse_apple_music_url
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,7 @@ def download_one(
         providers:  list[BaseProvider],
         opts:       DownloadOptions,
         position:   int = 1,
+        is_album:   bool = False,
 ) -> DownloadResult:
     errors: dict[str, str] = {}
     manager = DownloadManager()
@@ -114,7 +117,7 @@ def download_one(
             enrich_metadata         = opts.enrich_metadata,
             enrich_providers        = opts.enrich_providers,
             qobuz_token             = opts.qobuz_token,
-            is_album                = opts.is_album
+            is_album                = is_album
         )
 
         if result.success:
@@ -175,7 +178,6 @@ class DownloadWorker:
         base_out  = self._resolve_output_dir()
 
         for i, track in enumerate(self._tracks):
-            self._opts.is_album = self._is_album
             position = i + 1
             print_track_header(position, total, track.title, track.artists, track.album)
 
@@ -183,7 +185,7 @@ class DownloadWorker:
 
             out_dir = self._track_output_dir(base_out, track)
             result  = download_one(
-                track, out_dir, self._providers, self._opts, position
+                track, out_dir, self._providers, self._opts, position, self._is_album
             )
 
             if result.success:
@@ -244,11 +246,13 @@ class SpotiflacDownloader:
         self._client = SpotifyMetadataClient()
 
     def run(self, input_url: str, loop_minutes: int | None = None) -> None:
+        failed_tracks = None
         while True:
-            self._run_once(input_url)
-            if not loop_minutes or loop_minutes <= 0:
+            # _run_once ora accetta tracks per non doverli ricaricare
+            failed_tracks = self._run_once(input_url, target_tracks=failed_tracks)
+            if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
                 break
-            print(f"\nNext run in {loop_minutes} minutes…")
+            print(f"\n{len(failed_tracks)} brani falliti. Prossimo tentativo in {loop_minutes} minuti…")
             time.sleep(loop_minutes * 60)
 
     def _run_once(self, input_url: str) -> None:
@@ -260,13 +264,11 @@ class SpotiflacDownloader:
         is_apple = False
 
         try:
-            from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
             if is_tidal_url(input_url):
                 is_tidal = True
         except ImportError:
             pass
         try:
-            from .providers.apple_music_metadata import is_apple_music_url, parse_apple_music_url
             if is_apple_music_url(input_url):
                 is_apple = True
         except ImportError:

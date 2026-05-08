@@ -5,11 +5,22 @@ CLI entry point per SpotiFLAC — con supporto provider lyrics e metadata enrich
 import argparse
 import logging
 import sys
+import json
+import os
 
 from SpotiFLAC.check_update import check_for_updates
 from SpotiFLAC import SpotiFLAC
 from SpotiFLAC.interactive import run_interactive
 
+def load_config() -> dict:
+    config_path = "config.json"
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Errore nel caricamento di config.json: {e}")
+    return {}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -151,6 +162,11 @@ def main() -> None:
 
     else:
         args = parse_args()
+        file_cfg = load_config()
+
+        quality = getattr(args, 'quality', None) or file_cfg.get("quality", "LOSSLESS")
+        qobuz_token = getattr(args, 'qobuz_token', None) or file_cfg.get("qobuz_token")
+        spotify_token = getattr(args, 'spotify_token', None) or file_cfg.get("spotify_token", "")
 
         log_level = logging.DEBUG if args.verbose else logging.WARNING
         logging.basicConfig(

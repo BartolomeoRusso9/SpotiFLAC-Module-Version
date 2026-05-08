@@ -14,6 +14,7 @@ from mutagen.flac import FLAC, Picture
 from mutagen.id3 import PictureType
 from mutagen.mp4 import MP4, MP4Cover
 
+from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError
 from .base import BaseProvider
@@ -351,41 +352,11 @@ class AmazonProvider(BaseProvider):
 
             # ── MusicBrainz tags ──────────────────────────────────────────
             mb_tags: dict[str, str] = {}
+            res: dict = {}
             if mb_fetcher:
                 res = mb_fetcher.result()
-                if res:
-                    mapping = {
-                        "mbid_track":       "MUSICBRAINZ_TRACKID",
-                        "mbid_album":       "MUSICBRAINZ_ALBUMID",
-                        "mbid_artist":      "MUSICBRAINZ_ARTISTID",
-                        "mbid_relgroup":    "MUSICBRAINZ_RELEASEGROUPID",
-                        "mbid_albumartist": "MUSICBRAINZ_ALBUMARTISTID",
-                        "barcode":          "BARCODE",
-                        "label":            "LABEL",
-                        "organization":     "ORGANIZATION",
-                        "country":          "RELEASECOUNTRY",
-                        "script":           "SCRIPT",
-                        "status":           "RELEASESTATUS",
-                        "media":            "MEDIA",
-                        "type":             "RELEASETYPE",
-                        "artist_sort":      "ARTISTSORT",
-                        "albumartist_sort": "ALBUMARTISTSORT",
-                        "catalognumber":    "CATALOGNUMBER",
-                        "bpm":              "BPM",
-                        "genre":            "GENRE"
-                    }
-                    for mb_key, tag_name in mapping.items():
-                        val = res.get(mb_key)
-                        if val:
-                            mb_tags[tag_name] = str(val)
-                    if res.get("original_date"):
-                        mb_tags["ORIGINALDATE"] = res["original_date"]
-                        mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
-                    if res.get("catalognumber"):
-                        mb_tags["CATALOGNUMBER"] = res["catalognumber"]
 
-                from ..core.tagger import _print_mb_summary
-                _print_mb_summary(mb_tags)
+            mb_tags = mb_result_to_tags(res)
 
             # ── Embedding ────────────────────────────────────────────────
             # FLAC → pipeline centrale (enrich, lyrics, MusicBrainz, copertina HD)
