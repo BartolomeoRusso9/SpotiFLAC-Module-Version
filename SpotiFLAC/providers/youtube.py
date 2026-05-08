@@ -322,31 +322,52 @@ class YouTubeProvider(BaseProvider):
 
     def _request_cobalt(self, video_url: str) -> str | None:
         """
-        Allineato all'implementazione JS: usa solo l'istanza primaria e il payload v7.
+        Allineato all'implementazione JS: tenta l'istanza zarz, poi fa fallback
+        sulle istanze pubbliche ufficiali di Cobalt con gli header anti-bot.
         """
+        instances = [
+            COBALT_API_URL,                       # 1. API Primaria (zarz.moe)
+            "https://api.cobalt.tools/",          # 2. API Ufficiale
+            "https://co.wuk.sh/",                 # 3. Istanza pubblica affidabile
+            "https://cobalt-api.kwiatekit.com/"   # 4. Istanza pubblica di backup
+        ]
+
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": _DEFAULT_UA
+            "User-Agent": _DEFAULT_UA,
+            # FONDAMENTALE: Gli header per bypassare i controlli 400/403 di Cobalt
+            "Origin": "https://cobalt.tools",
+            "Referer": "https://cobalt.tools/"
         }
 
+        # Payload v7 per Cobalt allineato a JS
         payload = {
             "url": video_url,
             "downloadMode": "audio",
-            "audioFormat": "mp3" # In JS è "best", in Python forziamo mp3 per compatibilità metadata ID3
+            "audioFormat": "best"
         }
 
-        try:
-            resp = self._session.post(COBALT_API_URL, json=payload, headers=headers, timeout=15)
-            if resp.status_code in (200, 202):
-                data = resp.json()
-                dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
-                if dl_url:
-                    logger.info("[youtube] Cobalt URL generated successfully")
-                    return dl_url
-        except Exception as exc:
-            logger.warning(f"[youtube] Cobalt API failed: {exc}")
+        for api_url in instances:
+            try:
+                logger.info(f"[youtube] Attempting Cobalt API via {api_url}...")
+                resp = self._session.post(api_url, json=payload, headers=headers, timeout=15)
 
+                if resp.status_code in (200, 202):
+                    data = resp.json()
+                    dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
+
+                    if dl_url:
+                        logger.info(f"[youtube] Cobalt URL generated successfully via {api_url}")
+                        return dl_url
+                else:
+                    logger.debug(f"[youtube] Cobalt instance {api_url} returned HTTP {resp.status_code}")
+
+            except Exception as exc:
+                logger.debug(f"[youtube] Cobalt instance {api_url} failed: {exc}")
+                continue
+
+        logger.warning("[youtube] All Cobalt instances failed.")
         return None
 
     def _request_yt1d(self, video_url: str) -> str | None:

@@ -183,7 +183,8 @@ def run_interactive() -> dict:
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
-    print(f"  {DIM('Supported: Track, Album, Playlist — and Artist discographies for Spotify, Tidal and Apple Music.')}")
+    print(f"  {DIM('Accepted links: Spotify, Apple Music, Tidal, SoundCloud, and YouTube.')}")
+    print(f"  {DIM('Modes: Track, Album, Playlist (All) | Artist Discography (Spotify, Apple Music, Tidal only).')}")
 
     url = ""
     while True:
@@ -227,6 +228,7 @@ def run_interactive() -> dict:
             or ("watch?v=" in lower_url and "list=" not in lower_url)
             or ("youtu.be" in lower_url)
             or ("music.apple.com" in lower_url and "?i=" in lower_url)
+            or (("soundcloud.com" in lower_url or "on.soundcloud.com" in lower_url) and "/sets/" not in lower_url) # <-- AGGIUNTO
     )
     if is_single_track:
         _section("2.5 · Custom Output Path")
@@ -249,12 +251,31 @@ def run_interactive() -> dict:
             or "on.soundcloud.com" in cfg["url"]
     )
     is_apple_url = "music.apple.com" in cfg["url"]
+    is_youtube_url = (
+            "youtube.com" in cfg["url"].lower()
+            or "youtu.be" in cfg["url"].lower()
+    )
 
     if is_soundcloud_url:
         cfg["services"] = ["soundcloud"]
         print(
             f"  {GREEN('✓')} Provider {BOLD('soundcloud')} automatically selected.\nSoundCloud tracks cannot be sourced from other providers."
         )
+    elif is_youtube_url:
+        cfg["services"] = ["youtube"]
+        print(
+            f"  {GREEN('✓')} Provider {BOLD('youtube')} automatically selected for YouTube URLs."
+        )
+        print(f"  {DIM('You can add fallback providers if needed.')}")
+        add_fallback = _ask_bool("Add fallback providers?", False)
+        if add_fallback:
+            fallbacks = _ask_multi(
+                "Fallback providers (order = priority):",
+                options  = ["tidal", "qobuz", "deezer", "amazon", "spoti", "apple", "soundcloud"],
+                defaults = ["tidal"],
+                ordered  = True,
+            )
+            cfg["services"] = ["youtube"] + fallbacks
     elif is_apple_url:
         cfg["services"] = ["apple"]
         print(
@@ -292,6 +313,10 @@ def run_interactive() -> dict:
         cfg["first_artist_only"] = False
         cfg["allow_fallback"] = True
         print(f"  {YELLOW('⏭  Skipped:')} {DIM('Only MP3 available')}")
+    elif is_youtube_url or (len(cfg["services"]) == 1 and cfg["services"][0] == "youtube"):
+        cfg["quality"] = "BEST"
+        cfg["allow_fallback"] = True
+        print(f"  {YELLOW('⏭  Skipped:')} {DIM('Default Best Audio (Opus/M4A/MP3)')}")
     else:
         print(f"  {DIM('Note: If the requested quality is not found, an automatic fallback will be executed.')}")
 
@@ -388,20 +413,20 @@ def run_interactive() -> dict:
         print(f"  {DIM('If enabled, SpotiFLAC will download a lower quality if the requested one is unavailable.')}")
         cfg["allow_fallback"] = _ask_bool("Allow automatic quality fallback?", True)
 
-        # ── 5. Filename format ─────────────────────────────────────────────────
-        _section("5 · Filename Format")
-        print(f"  {DIM('Placeholders: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}")
-        cfg["filename_format"] = _ask("Format", "{title} - {artist}")
+    # ── 5. Filename format ─────────────────────────────────────────────────
+    _section("5 · Filename Format")
+    print(f"  {DIM('Placeholders: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}")
+    cfg["filename_format"] = _ask("Format", "{title} - {artist}")
 
-        # ── 6. Organization options ───────────────────────────────────────────
-        _section("6 · Organization Options")
+    # ── 6. Organization options ───────────────────────────────────────────
+    _section("6 · Organization Options")
 
-        cfg["use_track_numbers"] = _ask_bool("Add track number to filename?", False)
+    cfg["use_track_numbers"] = _ask_bool("Add track number to filename?", False)
 
-        if cfg["use_track_numbers"]:
-            cfg["use_album_track_numbers"] = _ask_bool("Use original album track number?", False)
-        else:
-            cfg["use_album_track_numbers"] = False
+    if cfg["use_track_numbers"]:
+        cfg["use_album_track_numbers"] = _ask_bool("Use original album track number?", False)
+    else:
+        cfg["use_album_track_numbers"] = False
 
         cfg["use_artist_subfolders"]   = _ask_bool("Create artist subfolders?", False)
         cfg["use_album_subfolders"]    = _ask_bool("Create album subfolders?", False)
