@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import logging
 import re
-import time
+import json
+import urllib.parse
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
@@ -18,7 +19,7 @@ from ..core.models import TrackMetadata
 
 logger = logging.getLogger(__name__)
 
-_ITUNES_API_BASE = "https://itunes.apple.com"
+_ITUNES_API_BASE = "https://amp-api.music.apple.com/v1/catalog/"
 _APPLE_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -35,63 +36,38 @@ def is_apple_music_url(url: str) -> bool:
     return "music.apple.com" in url.lower() or "apple.com" in url.lower()
 
 def parse_apple_music_url(url: str) -> dict[str, str]:
-    """
-    Analizza un URL Apple Music e restituisce {"type": ..., "id": ...}.
-
-    Esempi:
-    - https://music.apple.com/us/album/name/123456789?i=987654321 -> track: 987654321
-    - https://music.apple.com/us/album/name/123456789 -> album: 123456789
-    - https://music.apple.com/us/playlist/name/pl.u-123456789 -> playlist: pl.u-123456789
-    - https://music.apple.com/us/artist/name/123456789 -> artist: 123456789
-    -  https://music.apple.com/it/song/name/123456789 -> song: 123456789
-    """
     u = urlparse(url)
 
-    # 1. Controllo per tracce (identificate dal parametro query 'i=')
+    # Check traccia via query param
     song_id_match = re.search(r"[?&]i=(\d+)", url)
-    if song_id_match:
-        return {"type": "track", "id": song_id_match.group(1)}
 
-    # 2. Esplorazione del path per identificare song, album, playlist e artisti
     path = u.path.strip("/")
     parts = [p for p in path.split("/") if p]
 
+    # Estrazione dinamica dello storefront (default 'us')
+    storefront = "us"
+    if len(parts) > 0 and len(parts[0]) == 2:
+        storefront = parts[0]
+
+    # Se c'è 'i=', è sicuramente una traccia, ma ci serve anche lo storefront
+    if song_id_match:
+        return {"type": "track", "id": song_id_match.group(1), "storefront": storefront}
+
     if "song" in parts:
         idx = parts.index("song")
-        if len(parts) > idx + 2:
-            return {"type": "track", "id": parts[idx + 2]}
-        elif len(parts) > idx + 1 and parts[idx + 1].isdigit():
-            return {"type": "track", "id": parts[idx + 1]}
+        return {"type": "track", "id": parts[idx + 2] if len(parts) > idx + 2 else parts[idx + 1], "storefront": storefront}
 
     if "album" in parts:
         idx = parts.index("album")
-        if len(parts) > idx + 2:
-            return {"type": "album", "id": parts[idx + 2]}
-        elif len(parts) > idx + 1 and parts[idx + 1].isdigit():
-            return {"type": "album", "id": parts[idx + 1]}
+        return {"type": "album", "id": parts[idx + 2] if len(parts) > idx + 2 else parts[idx + 1], "storefront": storefront}
 
     if "playlist" in parts:
         idx = parts.index("playlist")
-        if len(parts) > idx + 2:
-            return {"type": "playlist", "id": parts[idx + 2]}
-        elif len(parts) > idx + 1:
-            return {"type": "playlist", "id": parts[idx + 1]}
+        return {"type": "playlist", "id": parts[idx + 2] if len(parts) > idx + 2 else parts[idx + 1], "storefront": storefront}
 
     if "artist" in parts:
         idx = parts.index("artist")
-        if len(parts) > idx + 2:
-            return {"type": "artist", "id": parts[idx + 2]}
-        elif len(parts) > idx + 1:
-            return {"type": "artist", "id": parts[idx + 1]}
-
-    # Fallback con regex generiche
-    song_match = re.search(r"/song/[^/]+/(\d+)", url) or re.search(r"/song/(\d+)", url)
-    if song_match:
-        return {"type": "track", "id": song_match.group(1)}
-
-    album_match = re.search(r"/album/[^/]+/(\d+)", url) or re.search(r"/album/(\d+)", url)
-    if album_match:
-        return {"type": "album", "id": album_match.group(1)}
+        return {"type": "artist", "id": parts[idx + 2] if len(parts) > idx + 2 else parts[idx + 1], "storefront": storefront}
 
     raise InvalidUrlError(url)
 
@@ -120,84 +96,98 @@ def _artist_in_track(artist_name: str, track_artists: str) -> bool:
 # ---------------------------------------------------------------------------
 
 class AppleMusicMetadataClient:
-    """
-    Recupera metadati tramite API iTunes Lookup.
-    """
-
     def __init__(self, timeout_s: int = 15) -> None:
         self._timeout = timeout_s
         self._session = requests.Session()
         self._session.headers.update({
             "User-Agent": _APPLE_UA,
-            "Accept": "application/json"
+            "Accept": "application/json",
+            "Origin": "https://music.apple.com"
         })
+        self._auth_token = None
+
+    def _get_token(self) -> str:
+        """Estrae il token JWT anonimo dal frontend web."""
+        if self._auth_token: return self._auth_token
+        try:
+            res = self._session.get("https://music.apple.com/us/browse", timeout=self._timeout)
+            meta_match = re.search(r'<meta\s+name="desktop-music-app/config/environment"\s+content="([^"]+)"', res.text)
+            if meta_match:
+                data = json.loads(urllib.parse.unquote(meta_match.group(1)))
+                self._auth_token = data.get("MEDIA_API", {}).get("token")
+                return self._auth_token
+        except Exception as e:
+            logger.warning("[apple_metadata] Impossibile recuperare JWT token: %s", e)
+        return ""
 
     def _get(self, path: str, params: dict | None = None) -> dict:
+        token = self._get_token()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+
         resp = self._session.get(
-            f"{_ITUNES_API_BASE}/{path.lstrip('/')}",
+            f"https://amp-api.music.apple.com/v1/catalog/{path.lstrip('/')}",
             params=params,
+            headers=headers,
             timeout=self._timeout
         )
-        if resp.status_code in (403, 429):
-            wait = int(resp.headers.get("Retry-After", 5)) + 1
-            logger.warning("[apple_metadata] Rate limited — attendo %ds", wait)
-            time.sleep(wait)
-            return self._get(path, params)
-        if resp.status_code != 200:
-            raise NetworkError("apple_metadata", f"HTTP {resp.status_code} da {path}")
+        resp.raise_for_status()
         return resp.json()
 
     # ------------------------------------------------------------------
     # Metodi di Fetching
     # ------------------------------------------------------------------
 
-    def get_track(self, track_id: str) -> TrackMetadata:
-        data = self._get("/lookup", {"id": track_id})
-        results = data.get("results", [])
+    def get_track(self, track_id: str, storefront: str = "us") -> TrackMetadata:
+        data = self._get(f"/{storefront}/songs/{track_id}", {"include": "albums"})
+        results = data.get("data", [])
         if not results:
             raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Traccia {track_id} non trovata.")
         return self._parse_item(results[0])
 
-    def get_album_tracks(self, album_id: str, preloaded_album: dict | None = None) -> tuple[dict, list[TrackMetadata]]:
-        data = self._get("/lookup", {"id": album_id, "entity": "song"})
-        results = data.get("results", [])
+    def get_album_tracks(self, album_id: str, storefront: str = "us") -> tuple[dict, list[TrackMetadata]]:
+        data = self._get(f"/{storefront}/albums/{album_id}", {"include": "tracks"})
+        results = data.get("data", [])
         if not results:
             raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Album {album_id} non trovato.")
 
-        album_data = results[0] if results[0].get("wrapperType") == "collection" else (preloaded_album or {})
-        tracks = [self._parse_item(item) for item in results if item.get("wrapperType") == "track"]
-
+        album_data = results[0]
+        tracks_data = album_data.get("relationships", {}).get("tracks", {}).get("data", [])
+        tracks = [self._parse_item(item, album_data) for item in tracks_data]
         return album_data, tracks
 
-    def get_playlist_tracks(self, playlist_id: str) -> tuple[dict, list[TrackMetadata]]:
-        # Le playlist di Apple Music richiedono MusicKit. L'API di iTunes Lookup pubblica non le supporta.
-        raise SpotiflacError(
-            ErrorKind.UNSUPPORTED_FEATURE,
-            "L'estrazione dei metadati di intere playlist da Apple Music non è supportata "
-            "tramite API pubblica iTunes. Utilizza l'URL di un album, traccia o artista."
-        )
+    def get_playlist_tracks(self, playlist_id: str, storefront: str = "us") -> tuple[dict, list[TrackMetadata]]:
+        data = self._get(f"/{storefront}/playlists/{playlist_id}", {"include": "tracks"})
+        results = data.get("data", [])
+        if not results:
+            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Playlist {playlist_id} non trovata.")
+
+        playlist_data = results[0]
+        # Potresti implementare la paginazione chiamando 'next' in playlist_data.relationships.tracks
+        tracks_data = playlist_data.get("relationships", {}).get("tracks", {}).get("data", [])
+        tracks = [self._parse_item(item) for item in tracks_data if item.get("type") == "songs"]
+        return playlist_data, tracks
 
     def get_artist_albums(
             self,
             artist_id: str,
-            include_featuring: bool = False
+            include_featuring: bool = False,
+            storefront: str = "us"
     ) -> tuple[dict, list[TrackMetadata]]:
         """
-        Recupera la discografia completa di un artista Apple Music via API pubblica.
+        Recupera la discografia completa di un artista Apple Music via AMP API.
         """
-        data = self._get("/lookup", {"id": artist_id, "entity": "album"})
-        results = data.get("results", [])
+        # Fetch dati artista includendo gli album associati
+        data = self._get(f"/{storefront}/artists/{artist_id}", {"include": "albums"})
+        results = data.get("data", [])
         if not results:
             raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Artista {artist_id} non trovato.")
 
         artist_data = results[0]
-        artist_name = artist_data.get("artistName", "")
+        artist_name = artist_data.get("attributes", {}).get("name", "Unknown")
 
-        # Raccogliamo l'ID e i dettagli di tutti gli album
-        albums_to_fetch = []
-        for item in results[1:]:
-            if item.get("wrapperType") == "collection":
-                albums_to_fetch.append((str(item.get("collectionId")), item))
+        # Raccogliamo gli ID degli album dalle relazioni (relationships)
+        albums_data = artist_data.get("relationships", {}).get("albums", {}).get("data", [])
+        albums_to_fetch = [str(a.get("id")) for a in albums_data if a.get("id")]
 
         tracks: list[TrackMetadata] = []
         seen_isrc: set[str] = set()
@@ -205,8 +195,9 @@ class AppleMusicMetadataClient:
         # Fetch parallelo dei metadati (max 5 richieste simultanee per rispettare rate limit)
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_album = {
-                executor.submit(self.get_album_tracks, aid, preloaded): aid
-                for aid, preloaded in albums_to_fetch
+                # FIX: Ora passiamo lo storefront correttamente
+                executor.submit(self.get_album_tracks, aid, storefront=storefront): aid
+                for aid in albums_to_fetch
             }
 
             results_dict = {}
@@ -219,7 +210,7 @@ class AppleMusicMetadataClient:
                     logger.warning("[apple_metadata] album %s saltato: %s", aid, exc)
 
         # Ricostruiamo la lista di tracce
-        for aid, _ in albums_to_fetch:
+        for aid in albums_to_fetch:
             if aid not in results_dict:
                 continue
             for track in results_dict[aid]:
@@ -227,8 +218,6 @@ class AppleMusicMetadataClient:
                     logger.debug("[apple_metadata] duplicato saltato: %s (ISRC %s)", track.title, track.isrc)
                     continue
 
-                # Su iTunes Search API le release sono miste (manca l'esatto concetto di compilation/appears_on di Spotify).
-                # Filtrataggio logico basato sulla presenza del nome dell'artista.
                 if not include_featuring and not _artist_in_track(artist_name, track.artists):
                     continue
 
@@ -245,52 +234,66 @@ class AppleMusicMetadataClient:
     def get_url(self, url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata]]:
         info = parse_apple_music_url(url)
         t = info["type"]
+        storefront = info.get("storefront", "us") # Estrae lo storefront per propagarlo
 
         if t == "track":
-            meta = self.get_track(info["id"])
+            meta = self.get_track(info["id"], storefront=storefront)
             return meta.title, [meta]
 
         if t == "album":
-            album, tracks = self.get_album_tracks(info["id"])
-            name = album.get("collectionName", "Unknown Album")
+            album, tracks = self.get_album_tracks(info["id"], storefront=storefront)
+            # FIX: nell'AMP API il nome sta dentro attributes
+            name = album.get("attributes", {}).get("name", "Unknown Album")
             return name, tracks
 
         if t == "playlist":
-            playlist, tracks = self.get_playlist_tracks(info["id"])
-            return playlist.get("name", "Unknown Playlist"), tracks
+            playlist, tracks = self.get_playlist_tracks(info["id"], storefront=storefront)
+            name = playlist.get("attributes", {}).get("name", "Unknown Playlist")
+            return name, tracks
 
         if t == "artist":
-            artist, tracks = self.get_artist_albums(info["id"], include_featuring=include_featuring)
-            return artist.get("artistName", "Unknown Artist"), tracks
+            artist, tracks = self.get_artist_albums(
+                info["id"],
+                include_featuring=include_featuring,
+                storefront=storefront
+            )
+            name = artist.get("attributes", {}).get("name", "Unknown Artist")
+            return name, tracks
 
         raise SpotiflacError(
             ErrorKind.INVALID_URL,
-            f"Tipo Apple Music non supportato: {t} (supportati: track, album, artist)"
+            f"Tipo Apple Music non supportato: {t} (supportati: track, album, playlist, artist)"
         )
 
     # ------------------------------------------------------------------
     # Conversione dati API → TrackMetadata
     # ------------------------------------------------------------------
 
-    def _parse_item(self, item: dict) -> TrackMetadata:
-        cover_url = item.get("artworkUrl100", "").replace("100x100bb", "1000x1000bb")
-        release_date = item.get("releaseDate", "").split("T")[0] if item.get("releaseDate") else ""
-        artist_name = item.get("artistName", "Unknown")
+    def _parse_item(self, item: dict, parent_album: dict = None) -> TrackMetadata:
+        attr = item.get("attributes", {})
+        album_attr = parent_album.get("attributes", {}) if parent_album else {}
+
+        # Artwork template replacement (es. {w}x{h}bb.jpg -> 3000x3000bb.jpg)
+        artwork_dict = attr.get("artwork", {})
+        cover_url = artwork_dict.get("url", "").replace("{w}x{h}", "3000x3000")
+        if not cover_url and parent_album: # Fallback su copertina album
+            cover_url = album_attr.get("artwork", {}).get("url", "").replace("{w}x{h}", "3000x3000")
+
+        release_date = attr.get("releaseDate", "").split("T")[0]
 
         return TrackMetadata(
-            id           = f"apple_{item.get('trackId', '')}",
-            title        = item.get("trackName", "Unknown"),
-            artists      = artist_name,  # Spesso in iTunes Search è un'unica stringa comma-separated
-            album        = item.get("collectionName", "Unknown"),
-            album_artist = artist_name,
-            isrc         = item.get("isrc", ""),
-            track_number = item.get("trackNumber", 1),
-            disc_number  = item.get("discNumber", 1),
-            total_tracks = item.get("trackCount", 0),
-            duration_ms  = item.get("trackTimeMillis", 0),
+            id           = f"apple_{item.get('id', '')}",
+            title        = attr.get("name", "Unknown"),
+            artists      = attr.get("artistName", "Unknown"),
+            album        = attr.get("albumName", album_attr.get("name", "Unknown")),
+            album_artist = album_attr.get("artistName", attr.get("artistName", "Unknown")),
+            isrc         = attr.get("isrc", ""),
+            track_number = attr.get("trackNumber", 1),
+            disc_number  = attr.get("discNumber", 1),
+            duration_ms  = attr.get("durationInMillis", 0),
             release_date = release_date,
             cover_url    = cover_url,
-            external_url = item.get("trackViewUrl", ""),
-            copyright    = item.get("copyright", ""),
-            composer     = ""
+            external_url = attr.get("url", ""),
+            copyright    = album_attr.get("copyright", ""), # Ora recuperabile dall'album
+            composer     = attr.get("composerName", "")     # Fornito nativamente da AMP
         )

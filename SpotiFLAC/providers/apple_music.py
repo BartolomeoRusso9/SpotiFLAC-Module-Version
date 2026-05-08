@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import difflib
 import time
 from pathlib import Path
 import requests
@@ -30,8 +31,8 @@ class AppleMusicProvider(BaseProvider):
     def __init__(self, timeout_s: int = 30, proxy_api_key: str = "") -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
         self._session = self._http._session
+        self._url_cache = {} # FIX: Sistema di caching in memoria introdotto
 
-        # Imposta gli header basati sul proxy
         headers = {
             "User-Agent": _DEFAULT_UA,
             "Accept": "application/json"
@@ -65,17 +66,45 @@ class AppleMusicProvider(BaseProvider):
             logger.warning("[apple-music] Risoluzione URL tramite iTunes fallita per ISRC %s: %s", isrc, e)
         return None
 
-    def _resolve_track_url_by_search(self, title: str, artists: str) -> str | None:
-        """Cerca la traccia su Apple Music per nome se l'ISRC fallisce."""
+    def _resolve_track_url_by_search(self, title: str, artists: str, isrc: str = "") -> str | None:
         import urllib.parse
         try:
             first_artist = artists.split(",")[0].strip()
             query = f"{title} {first_artist}"
-            url = f"https://itunes.apple.com/search?term={urllib.parse.quote(query)}&entity=song&limit=5"
+
+            # Controllo cache
+            cache_key = f"search_{query}_{isrc}"
+            if cache_key in self._url_cache:
+                return self._url_cache[cache_key]
+
+            url = f"https://itunes.apple.com/search?term={urllib.parse.quote(query)}&entity=song&limit=10"
             resp = self._session.get(url, timeout=15)
-            data = resp.json()
-            if data.get("resultCount", 0) > 0:
-                return data["results"][0].get("trackViewUrl")
+            results = resp.json().get("results", [])
+
+            if not results: return None
+
+            best_match = None
+            best_score = -1
+
+            for r in results:
+                score = 0
+                r_isrc = r.get("isrc", "")
+
+                # Boost immenso se l'ISRC matcha (stessa logica del JS)
+                if isrc and r_isrc and isrc.upper() == r_isrc.upper():
+                    score += 100
+
+                # Comparazione fuzzy di titolo e artista
+                score += difflib.SequenceMatcher(None, title.lower(), r.get("trackName", "").lower()).ratio() * 60
+                score += difflib.SequenceMatcher(None, first_artist.lower(), r.get("artistName", "").lower()).ratio() * 40
+
+                if score > best_score:
+                    best_score = score
+                    best_match = r.get("trackViewUrl")
+
+            self._url_cache[cache_key] = best_match
+            return best_match
+
         except Exception as e:
             logger.debug("[apple-music] Ricerca testuale fallita: %s", e)
         return None
@@ -270,9 +299,17 @@ class AppleMusicProvider(BaseProvider):
 
             print_source_banner("Apple Music", api_used or "Proxy", used_codec.upper())
 
-            # Download Standardizzato tramite _http
-            self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
-
+            with self._session.get(stream_url, stream=True, timeout=30) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("Content-Length") or 0)
+                downloaded = 0
+                with open(str(dest), "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if self._progress_cb and total:
+                                self._progress_cb(downloaded, total)
             # Validazione Traccia (Controllo File Corrotto/Tronco)
             expected_s = metadata.duration_ms // 1000
             valid, err_msg = validate_downloaded_track(str(dest), expected_s)
