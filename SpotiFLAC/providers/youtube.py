@@ -17,6 +17,7 @@ from mutagen.id3 import (
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError
 from .base import BaseProvider
+from ..core.tagger import embed_metadata, EmbedOptions # Assicurati di importare EmbedOptions!
 
 logger = logging.getLogger(__name__)
 
@@ -617,21 +618,19 @@ class YouTubeProvider(BaseProvider):
                     if res.get("catalognumber"):
                         mb_tags["CATALOGNUMBER"] = res["catalognumber"]
 
-            from ..core.tagger import embed_metadata
-            embed_metadata(
-                str(dest), metadata,
-                first_artist_only       = first_artist_only,
-                cover_url               = metadata.cover_url,
-                session                 = self._session,
-                extra_tags              = mb_tags,
-                embed_lyrics            = embed_lyrics,
-                lyrics_providers        = lyrics_providers,
-                lyrics_spotify_token    = lyrics_spotify_token,
-                enrich                  = enrich_metadata,
-                enrich_providers        = enrich_providers,
-                enrich_qobuz_token      = qobuz_token or "",
-                is_album                = is_album,
+            opts = EmbedOptions(
+                first_artist_only=first_artist_only,
+                cover_url=metadata.cover_url,
+                extra_tags=mb_tags,
+                embed_lyrics=embed_lyrics,
+                lyrics_providers=lyrics_providers or [],
+                lyrics_spotify_token=lyrics_spotify_token,
+                enrich=enrich_metadata,
+                enrich_providers=enrich_providers,
+                enrich_qobuz_token=qobuz_token or "",
+                is_album=is_album,
             )
+            embed_metadata(str(dest), metadata, opts, session=self._session)
 
             return DownloadResult.ok(self.name, str(dest), fmt="mp3")
 

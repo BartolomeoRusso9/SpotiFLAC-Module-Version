@@ -142,7 +142,7 @@ class AppleMusicMetadataClient:
 
         except Exception as e:
             logger.error("[apple_metadata] Impossibile recuperare JWT token: %s", e)
-            raise SpotiflacError(ErrorKind.NETWORK, "Impossibile recuperare il token di Apple Music. Accesso negato (401).")
+            raise SpotiflacError(ErrorKind.NETWORK_ERROR, "Impossibile recuperare il token di Apple Music. Accesso negato (401).")
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         token = self._get_token()

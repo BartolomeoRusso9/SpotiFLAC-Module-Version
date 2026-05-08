@@ -27,6 +27,7 @@ from mutagen.id3 import (
 from mutagen.id3 import PictureType as ID3PictureType
 from mutagen.id3 import PictureType
 from mutagen.flac import Picture as FlacPicture
+from dataclasses import dataclass, field
 
 from .errors import SpotiflacError, ErrorKind
 from .models import TrackMetadata
@@ -274,6 +275,22 @@ def _embed_flac(
     audio.save()
     logger.debug("[tagger/flac] tags written: %s", path.name)
 
+@dataclass
+class EmbedOptions:
+    first_artist_only:    bool            = False
+    cover_url:            str             = ""
+    embed_lyrics:         bool            = False
+    lyrics_providers:     list[str]       = field(default_factory=list)
+    lyrics_spotify_token: str             = ""
+    enrich:               bool            = False
+    enrich_providers:     list[str] | None = None
+    enrich_qobuz_token:   str             = ""
+    is_album:             bool            = False
+    extra_tags:           dict[str, str]  = field(default_factory=dict)
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -282,22 +299,11 @@ def _embed_flac(
 def embed_metadata(
         filepath:          str | Path,
         metadata:          TrackMetadata,
+        opts:              EmbedOptions,
         *,
-        first_artist_only: bool  = False,
-        cover_url:         str   = "",
         cover_data:        bytes | None = None,
         session:           requests.Session | None = None,
-        extra_tags:        dict[str, str] | None = None,
         multi_artist:      bool  = True,
-        is_album:          bool  = False,
-        # Lyrics
-        embed_lyrics:         bool = False,
-        lyrics_providers:     list[str] | None = None,
-        lyrics_spotify_token: str = "",
-        # Metadata enrichment
-        enrich:           bool = False,
-        enrich_providers: list[str] | None = None,
-        enrich_qobuz_token: str = "",
 ) -> None:
     path = Path(filepath)
     if not path.exists():
@@ -314,15 +320,15 @@ def embed_metadata(
     enriched_tags: dict[str, str] = {}
     enriched_cover_url: str = ""
 
-    if enrich:
+    if opts.enrich:
         try:
             from .metadata_enrichment import enrich_metadata as _enrich
             enriched = _enrich(
                 track_name  = metadata.title,
                 artist_name = metadata.first_artist,
                 isrc        = metadata.isrc,
-                providers   = enrich_providers,
-                qobuz_token = enrich_qobuz_token or None,
+                providers   = opts.enrich_providers,
+                qobuz_token = opts.enrich_qobuz_token or None,
             )
             enriched_tags      = enriched.as_tags()
             enriched_cover_url = enriched.cover_url_hd
@@ -339,7 +345,7 @@ def embed_metadata(
 
     # ── 2. Cover art ───────────────────────────────────────────────────────
     if not cover_data:
-        best_cover = enriched_cover_url or cover_url or metadata.cover_url
+        best_cover = enriched_cover_url or opts.cover_url or metadata.cover_url
         if best_cover:
             cover_data = _fetch_cover(best_cover, session)
 
@@ -347,7 +353,7 @@ def embed_metadata(
     lyrics: str | None = None
     lyrics_prov: str = ""
 
-    if embed_lyrics and metadata.title and metadata.first_artist:
+    if opts.embed_lyrics and metadata.title and metadata.first_artist:
         try:
             from .lyrics import fetch_lyrics
             res = fetch_lyrics(
@@ -357,8 +363,8 @@ def embed_metadata(
                 duration_s       = metadata.duration_ms // 1000,
                 track_id         = metadata.id,
                 isrc             = metadata.isrc,
-                providers        = lyrics_providers,
-                spotify_token    = lyrics_spotify_token,
+                providers        = opts.lyrics_providers,
+                spotify_token    = opts.lyrics_spotify_token,
             )
             if isinstance(res, tuple):
                 lyrics, lyrics_prov = res
@@ -368,16 +374,16 @@ def embed_metadata(
             logger.warning("[tagger] lyrics fetch failed: %s", exc)
 
     # ── 4. Costruzione dizionario tag base ─────────────────────────────────
-    tags = metadata.as_flac_tags(first_artist_only=first_artist_only)
+    tags = metadata.as_flac_tags(first_artist_only=opts.first_artist_only)
     tags["DESCRIPTION"] = SOURCE_TAG
 
     # Merge enrichment + extra (MusicBrainz, ecc.)
     merged_extra: dict[str, str] = {**enriched_tags}
-    if extra_tags:
-        merged_extra.update(extra_tags)
+    if opts.extra_tags:
+        merged_extra.update(opts.extra_tags)
 
     # Per tracce singole l'GENRE dell'enrichment ha priorità
-    if not is_album:
+    if not opts.is_album:
         enrich_genre = enriched_tags.get("GENRE")
         if enrich_genre:
             tags["GENRE"] = enrich_genre

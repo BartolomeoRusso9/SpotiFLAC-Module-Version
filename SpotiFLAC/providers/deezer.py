@@ -11,6 +11,8 @@ from typing import Any
 import requests
 from mutagen.flac import FLAC
 
+from ..core.tagger import embed_metadata, EmbedOptions
+
 # Gestione opzionale di pycryptodome per la decrittazione Blowfish
 try:
     from Crypto.Cipher import Blowfish
@@ -457,21 +459,19 @@ class DeezerProvider(BaseProvider):
             except ImportError:
                 pass
 
-            from ..core.tagger import embed_metadata
-            embed_metadata(
-                str(dest), metadata,
+            opts = EmbedOptions(
                 first_artist_only       = first_artist_only,
                 cover_url               = metadata.cover_url,
-                session                 = self._session,
                 extra_tags              = mb_tags,
                 embed_lyrics            = embed_lyrics,
-                lyrics_providers        = lyrics_providers,
+                lyrics_providers        = lyrics_providers or [],
                 lyrics_spotify_token    = lyrics_spotify_token,
                 enrich                  = enrich_metadata,
                 enrich_providers        = enrich_providers,
                 enrich_qobuz_token      = qobuz_token or "",
                 is_album                = is_album,
             )
+            embed_metadata(str(dest), metadata, opts, session=self._session)
 
             return DownloadResult.ok(self.name, str(dest))
 

@@ -22,3 +22,16 @@ __all__ = [
     "SpotifyMetadataClient",
     "parse_spotify_url",
 ]
+
+from typing import TYPE_CHECKING
+
+PROVIDER_REGISTRY: dict[str, type] = {
+        "tidal":      TidalProvider,
+        "qobuz":      QobuzProvider,
+        "amazon":     AmazonProvider,
+        "deezer":     DeezerProvider,
+        "spoti":      SpotiDownloaderProvider,
+        "apple":      AppleMusicProvider,
+        "soundcloud": SoundCloudProvider,
+        "youtube":    YouTubeProvider,
+    }

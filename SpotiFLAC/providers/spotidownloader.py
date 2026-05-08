@@ -7,7 +7,7 @@ import time
 
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError, AuthError, TrackNotFoundError, ErrorKind
-from ..core.tagger import embed_metadata, _print_mb_summary
+from ..core.tagger import embed_metadata, _print_mb_summary, EmbedOptions
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.download_validation import validate_downloaded_track
 from .base import BaseProvider
@@ -220,21 +220,19 @@ class SpotiDownloaderProvider(BaseProvider):
             qobuz_token = kwargs.get("qobuz_token", "") or os.environ.get("QOBUZ_AUTH_TOKEN", "")
 
             # 7. Incorpora tutti i metadati sul file FLAC
-            embed_metadata(
-                dest,
-                metadata,
+            opts = EmbedOptions(
                 first_artist_only=first_artist_only,
                 cover_url=metadata.cover_url,
-                session=self._http._session,
                 extra_tags=mb_tags,
                 embed_lyrics=embed_lyrics,
-                lyrics_providers=lyrics_providers,
+                lyrics_providers=lyrics_providers or [],
                 lyrics_spotify_token=lyrics_spotify_token,
                 enrich=enrich_metadata,
                 enrich_providers=enrich_providers,
-                enrich_qobuz_token=qobuz_token,
-                is_album                = is_album,
+                enrich_qobuz_token=qobuz_token or "",
+                is_album=is_album,
             )
+            embed_metadata(str(dest), metadata, opts, session=self._http._session)
 
             return DownloadResult.ok(self.name, str(dest), fmt="flac")
 

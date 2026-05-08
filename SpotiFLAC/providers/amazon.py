@@ -20,6 +20,7 @@ from ..core.errors import SpotiflacError
 from .base import BaseProvider
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from ..core.console import print_source_banner
+from ..core.tagger import embed_metadata, EmbedOptions, _print_mb_summary
 
 logger = logging.getLogger(__name__)
 
@@ -362,20 +363,19 @@ class AmazonProvider(BaseProvider):
             # FLAC → pipeline centrale (enrich, lyrics, MusicBrainz, copertina HD)
             # M4A  → embedding base (mutagen MP4 non supporta enrich/lyrics FLAC)
             if dest_ext.endswith(".flac"):
-                from ..core.tagger import embed_metadata as _embed
-                _embed(
-                    dest_ext, metadata,
-                    first_artist_only       = first_artist_only,
-                    cover_url               = metadata.cover_url,
-                    session                 = self._session,
-                    extra_tags              = mb_tags,
-                    embed_lyrics            = embed_lyrics,
-                    lyrics_providers        = lyrics_providers,
-                    lyrics_spotify_token    = lyrics_spotify_token,
-                    enrich                  = enrich_metadata,
-                    enrich_providers        = enrich_providers,
-                    is_album                = is_album,
+                opts = EmbedOptions(
+                    first_artist_only    = first_artist_only,
+                    cover_url            = metadata.cover_url,
+                    embed_lyrics         = embed_lyrics,
+                    lyrics_providers     = lyrics_providers or [],
+                    lyrics_spotify_token = lyrics_spotify_token,
+                    enrich               = enrich_metadata,
+                    enrich_providers     = enrich_providers,
+                    is_album             = is_album,
+                    extra_tags           = mb_tags,
                 )
+                # AGGIUNGI QUESTA RIGA:
+                embed_metadata(dest_ext, metadata, opts, session=self._session)
             else:
                 # Fallback .m4a: tag base senza enrich/lyrics
                 track_num    = position

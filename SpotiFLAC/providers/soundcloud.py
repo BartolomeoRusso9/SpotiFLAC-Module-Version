@@ -12,7 +12,7 @@ from ..core.models import DownloadResult, TrackMetadata
 from ..core.link_resolver import LinkResolver
 from ..core.http import HttpClient
 from .base import BaseProvider
-from ..core.tagger import embed_metadata
+from ..core.tagger import embed_metadata, EmbedOptions
 import requests
 
 logger = logging.getLogger(__name__)
@@ -615,19 +615,19 @@ class SoundCloudProvider(BaseProvider):
                 if p != "spotify"
             ]
 
-            embed_metadata(
-                dest, metadata,
+            opts = EmbedOptions(
                 first_artist_only    = first_artist_only,
                 cover_url            = metadata.cover_url,
-                session              = self.session,
                 embed_lyrics         = embed_lyrics,
                 lyrics_providers     = effective_providers,
                 lyrics_spotify_token = lyrics_spotify_token,
                 enrich               = enrich_metadata,
                 enrich_providers     = enrich_providers,
-                enrich_qobuz_token   = qobuz_token,
+                enrich_qobuz_token   = qobuz_token or "",
                 is_album             = is_album,
             )
+            embed_metadata(str(dest), metadata, opts, session=self.session)
+
         except Exception as exc:
             logger.warning("[SC] embed_metadata failed (file salvato senza tag): %s", exc)
 
