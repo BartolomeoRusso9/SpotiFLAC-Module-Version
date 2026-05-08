@@ -4,7 +4,7 @@ Sostituiscono i dict raw per garantire validazione, coercizione e zero KeyError.
 """
 from __future__ import annotations
 import re
-from typing import Literal
+from typing import Literal, Any
 from pydantic import BaseModel, field_validator, model_validator, ValidationInfo
 
 
@@ -31,6 +31,9 @@ class TrackMetadata(BaseModel):
     copyright:    str        = ""
     publisher:    str        = ""
     composer:     str        = ""
+    genre:        str        = ""
+    bpm:          int        = 0
+    extra_info:   dict       = {}
 
     @field_validator("title", "artists", "album", "album_artist", mode="before")
     @classmethod
@@ -94,6 +97,28 @@ class TrackMetadata(BaseModel):
             if val:
                 tags[key] = val
         return tags
+
+    def update_from_enriched(self, extra: Any) -> None:
+        """
+        Aggiorna i metadati base con i dati trovati tramite enrichment.
+        """
+        if extra.genre:
+            self.genre = extra.genre
+
+        if extra.label:
+            # Se l'album è un segnaposto ("SoundCloud"), usiamo la label ufficiale
+            if self.album == "SoundCloud" or not self.album:
+                self.album = extra.label
+            self.publisher = extra.label
+
+        if extra.bpm:
+            self.bpm = extra.bpm
+
+        if extra.cover_url_hd:
+            self.cover_url = extra.cover_url_hd
+
+        if extra.isrc and not self.isrc:
+            self.isrc = extra.isrc
 
 
 # ---------------------------------------------------------------------------

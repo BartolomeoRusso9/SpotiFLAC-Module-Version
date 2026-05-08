@@ -11,10 +11,13 @@ from pathlib import Path
 
 from .core.models import TrackMetadata, DownloadResult
 from .core.progress import DownloadManager, ProgressCallback
-from .core.errors import SpotiflacError
+from .core.errors import SpotiflacError, ErrorKind
 from .providers.base import BaseProvider
 from .providers.spotify_metadata import SpotifyMetadataClient
+from .providers.apple_music import AppleMusicProvider
 from .core.console import print_track_header, print_summary
+from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
+from .providers.apple_music_metadata import is_apple_music_url, parse_apple_music_url
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +36,6 @@ class DownloadOptions:
     allow_fallback:          bool            = True
     inter_track_delay_s:     float           = 0.5
     is_album:                bool            = False
-    # Exact output file path (overrides output_dir + filename_format for single tracks)
     output_path:             str | None      = None
 
     embed_lyrics:            bool            = True
@@ -47,6 +49,7 @@ class DownloadOptions:
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"]
     )
     qobuz_token:             str | None      = None
+    include_featuring:       bool            = False
 
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
@@ -54,7 +57,7 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
     from .providers.qobuz import QobuzProvider
 
     if name == "tidal":
-        return TidalProvider()
+        return TidalProvider(qobuz_token=opts.qobuz_token)
     if name == "qobuz":
         return QobuzProvider(qobuz_token=opts.qobuz_token)
 
@@ -63,6 +66,8 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
         "deezer":  ("providers.deezer",  "DeezerProvider"),
         "youtube": ("providers.youtube", "YouTubeProvider"),
         "spoti":   ("providers.spotidownloader", "SpotiDownloaderProvider"),
+        "apple":   ("providers.apple_music", "AppleMusicProvider"),
+        "soundcloud": ("providers.soundcloud", "SoundCloudProvider"),
     }
     if name not in adapters:
         logger.warning("Unknown provider: %s", name)
@@ -85,6 +90,7 @@ def download_one(
         providers:  list[BaseProvider],
         opts:       DownloadOptions,
         position:   int = 1,
+        is_album:   bool = False,
 ) -> DownloadResult:
     errors: dict[str, str] = {}
     manager = DownloadManager()
@@ -111,15 +117,13 @@ def download_one(
             enrich_metadata         = opts.enrich_metadata,
             enrich_providers        = opts.enrich_providers,
             qobuz_token             = opts.qobuz_token,
-            is_album                = opts.is_album
+            is_album                = is_album
         )
 
         if result.success:
-            # If an exact output path was requested, move the file there now.
             if opts.output_path and result.file_path:
                 import shutil
                 import os
-                # FIX Estensione: Assicurati che l'estensione finale corrisponda al formato reale
                 _, ext = os.path.splitext(result.file_path)
                 base_target, _ = os.path.splitext(opts.output_path)
                 target = base_target + ext
@@ -174,7 +178,6 @@ class DownloadWorker:
         base_out  = self._resolve_output_dir()
 
         for i, track in enumerate(self._tracks):
-            self._opts.is_album = self._is_album
             position = i + 1
             print_track_header(position, total, track.title, track.artists, track.album)
 
@@ -182,7 +185,7 @@ class DownloadWorker:
 
             out_dir = self._track_output_dir(base_out, track)
             result  = download_one(
-                track, out_dir, self._providers, self._opts, position
+                track, out_dir, self._providers, self._opts, position, self._is_album
             )
 
             if result.success:
@@ -206,9 +209,6 @@ class DownloadWorker:
         return self._failed
 
     def _resolve_output_dir(self) -> str:
-        # When output_path is set (only possible for single tracks — albums/playlists
-        # have it nullified already in SpotiflacDownloader._run_once), use its
-        # parent directory so the provider writes nearby and os.replace is fast.
         if self._opts.output_path:
             out = os.path.normpath(
                 os.path.dirname(os.path.abspath(self._opts.output_path))
@@ -246,32 +246,73 @@ class SpotiflacDownloader:
         self._client = SpotifyMetadataClient()
 
     def run(self, input_url: str, loop_minutes: int | None = None) -> None:
+        failed_tracks = None
         while True:
-            self._run_once(input_url)
-            if not loop_minutes or loop_minutes <= 0:
+            # _run_once ora accetta tracks per non doverli ricaricare
+            failed_tracks = self._run_once(input_url, target_tracks=failed_tracks)
+            if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
                 break
-            print(f"\nNext run in {loop_minutes} minutes…")
+            print(f"\n{len(failed_tracks)} brani falliti. Prossimo tentativo in {loop_minutes} minuti…")
             time.sleep(loop_minutes * 60)
 
     def _run_once(self, input_url: str) -> None:
         print("Fetching metadata…")
 
-        # Rilevamento Tidal vs Spotify
         is_tidal = False
+        is_soundcloud = False
+        is_youtube = False
+        is_apple = False
+
         try:
-            from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
             if is_tidal_url(input_url):
                 is_tidal = True
         except ImportError:
             pass
+        try:
+            if is_apple_music_url(input_url):
+                is_apple = True
+        except ImportError:
+            pass
+
+        if "soundcloud.com" in input_url or "on.soundcloud.com" in input_url:
+            is_soundcloud = True
+        elif "youtube.com" in input_url or "youtu.be" in input_url:
+            is_youtube = True
+        elif "deezer.com" in input_url or "deezer.page.link" in input_url:
+            raise SpotiflacError(
+                ErrorKind.INVALID_URL,
+                "L'inserimento di URL Deezer come input primario non è ancora pienamente supportato. Usa un link Spotify e imposta 'deezer' come provider di download."
+            )
 
         try:
             if is_tidal:
                 from .providers.tidal_metadata import TidalMetadataClient
                 client = TidalMetadataClient()
+                collection_name, tracks = client.get_url(
+                    input_url,
+                    include_featuring=self._opts.include_featuring,
+                )
+            elif is_apple:
+                from .providers.apple_music_metadata import AppleMusicMetadataClient
+                client = AppleMusicMetadataClient()
+                # Aggiunto il passaggio del parametro include_featuring
+                collection_name, tracks = client.get_url(
+                    input_url,
+                    include_featuring=self._opts.include_featuring
+                )
+            elif is_soundcloud:
+                from .providers.soundcloud import SoundCloudProvider
+                client = SoundCloudProvider()
+                collection_name, tracks = client.get_url(input_url)
+            elif is_youtube:
+                from .providers.youtube import YouTubeProvider
+                client = YouTubeProvider()
                 collection_name, tracks = client.get_url(input_url)
             else:
-                collection_name, tracks = self._client.get_url(input_url)
+                collection_name, tracks = self._client.get_url(
+                    input_url,
+                    include_featuring=self._opts.include_featuring,
+                )
         except SpotiflacError as exc:
             logger.error("Metadata fetch failed: %s", exc)
             print(f"Error: {exc}")
@@ -282,7 +323,8 @@ class SpotiflacDownloader:
             return
 
         missing_isrc = [t for t in tracks if not t.isrc]
-        if missing_isrc:
+        only_apple = len(self._opts.services) == 1 and self._opts.services[0] == "apple"
+        if missing_isrc and not is_soundcloud and not (is_apple and only_apple):
             print(f"Resolving ISRC for {len(missing_isrc)} track(s)…")
             try:
                 from .core.isrc_helper import IsrcHelper
@@ -301,18 +343,47 @@ class SpotiflacDownloader:
 
         if is_tidal:
             info = parse_tidal_url(input_url)
+        elif is_apple:
+            info = parse_apple_music_url(input_url)
+        elif is_soundcloud:
+            from urllib.parse import urlparse as _urlparse
+            _parts = [p for p in _urlparse(input_url).path.strip("/").split("/") if p]
+            if len(_parts) >= 2 and _parts[1] == "sets":
+                stype = "playlist"
+            elif len(_parts) == 1:
+                stype = "artist"
+            else:
+                stype = "track"
+            info = {"type": stype, "id": input_url}
+
+        elif is_youtube:
+            stype = "track"
+            if "list=" in input_url or "/playlist" in input_url:
+                stype = "playlist"
+            elif "/browse/" in input_url or "/channel/" in input_url:
+                stype = "artist_discography"
+            info = {"type": stype, "id": input_url}
+
         else:
             from .providers.spotify_metadata import parse_spotify_url
             info = parse_spotify_url(input_url)
 
-        is_album    = info["type"] == "album"
-        is_playlist = info["type"] == "playlist"
+        if not info:
+            raise SpotiflacError(
+                ErrorKind.INVALID_URL,
+                f"Unsupported or invalid URL: {input_url}"
+            )
+
+        is_album       = info["type"] == "album"
+        is_playlist    = info["type"] == "playlist"
+        is_discography = info["type"] in ("artist", "artist_discography")
+
+        if is_discography:
+            is_playlist = True
+
         self._opts.is_album = is_album
 
-        # output_path ha senso solo per tracce singole: se il link è un album
-        # o una playlist lo azzeriamo subito, prima che il Worker venga creato,
-        # così il resto del codice non deve preoccuparsene affatto.
-        if (is_album or is_playlist) and self._opts.output_path:
+        if (is_album or is_playlist or is_discography) and self._opts.output_path:
             logger.warning(
                 "[downloader] output_path ignorato: il link è un %s, "
                 "i file verranno salvati normalmente in output_dir.",

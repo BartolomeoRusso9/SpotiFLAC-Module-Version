@@ -78,7 +78,7 @@ _DEFAULT_PROVIDERS = ["spotify", "apple", "musixmatch", "amazon", "lrclib"]
 # Provider 1 — Spotify Web                                                     #
 # --------------------------------------------------------------------------- #
 
-def _fetch_spotify(track_id: str, sp_dc_token: str, timeout: int = 10) -> str:
+def _fetch_spotify(track_id: str, sp_dc_token: str, timeout: int = 7) -> str:
     if not track_id or not sp_dc_token:
         return ""
     try:
@@ -176,7 +176,7 @@ def _score_apple_result(res: dict, t_name: str, a_name: str, duration_s: int) ->
             score += 20
     return score
 
-def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: int = 15) -> str:
+def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
     query = urllib.parse.quote(f"{track_name} {artist_name}")
     search_url = f"{_PAXSENIX_APPLE}/search?q={query}"
 
@@ -225,42 +225,41 @@ def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: in
 # Provider 3 — Musixmatch (Paxsenix Proxy - NO TOKEN)                          #
 # --------------------------------------------------------------------------- #
 
-def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeout: int = 15) -> str:
-    params = {
-        "t": track_name,
-        "a": artist_name,
-        "type": "word",
-        "format": "lrc"
-    }
-    if duration_s > 0:
-        params["d"] = str(duration_s)
+def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
+    # Aggiunto il loop per tentare prima word, poi line
+    for sync_type in ["word", "line"]:
+        params = {
+            "t": track_name,
+            "a": artist_name,
+            "type": sync_type,
+            "format": "lrc"
+        }
+        if duration_s > 0:
+            params["d"] = str(duration_s)
 
-    url = f"{_PAXSENIX_MXM}/lyrics?" + urllib.parse.urlencode(params)
-    try:
-        r = requests.get(url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout)
-        if not r.ok: return ""
-
-        body = r.text.strip()
-        import json
+        url = f"{_PAXSENIX_MXM}/lyrics?" + urllib.parse.urlencode(params)
         try:
-            parsed = json.loads(body)
-            if isinstance(parsed, str):
-                return parsed.strip()
-        except ValueError:
-            # Fallback se restituisce plain text direttamente
-            if body and not body.startswith("{"):
-                return body
-        return ""
-    except Exception as exc:
-        logger.debug("[lyrics/musixmatch] %s", exc)
-        return ""
+            r = requests.get(url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout)
+            if r.ok:
+                body = r.text.strip()
+                import json
+                try:
+                    parsed = json.loads(body)
+                    if isinstance(parsed, str) and parsed.strip():
+                        return parsed.strip()
+                except ValueError:
+                    if body and not body.startswith("{"):
+                        return body
+        except Exception as exc:
+            logger.debug("[lyrics/musixmatch] %s fallito: %s", sync_type, exc)
 
+    return ""
 
 # --------------------------------------------------------------------------- #
 # Provider 4 — Amazon Music                                                    #
 # --------------------------------------------------------------------------- #
 
-def _fetch_amazon(isrc: str, timeout: int = 15) -> str:
+def _fetch_amazon(isrc: str, timeout: int = 7) -> str:
     if not isrc: return ""
 
     from ..providers.amazon import AMAZON_API_BASE
@@ -297,8 +296,7 @@ def _fetch_amazon(isrc: str, timeout: int = 15) -> str:
 # Provider 5 — LRCLIB                                                          #
 # --------------------------------------------------------------------------- #
 
-def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", duration_s: int = 0, timeout: int = 10) -> str:
-    # 1. Tenta prima la richiesta ESATTA (endpoint /get)
+def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", duration_s: int = 0, timeout: int = 7) -> str:
     def _lrclib_exact(t, a, al, d):
         params = {"artist_name": a, "track_name": t}
         if al: params["album_name"] = al
@@ -317,24 +315,23 @@ def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", durat
         result = _lrclib_exact(track_name, artist_name, "", duration_s)
         if result: return result
 
-    # 2. Se fallisce, usa la ricerca MORBIDA (endpoint /search)
     try:
-        r = requests.get(f"{_LRCLIB}/search", params={"artist_name": artist_name, "track_name": track_name}, timeout=timeout)
+        r = requests.get(
+            f"{_LRCLIB}/search",
+            params={"artist_name": artist_name, "track_name": track_name},
+            timeout=timeout,
+        )
         if r.status_code == 200:
             results = r.json()
             if results:
-                best_synced = None
-                best_plain = None
-
+                best_synced = best_plain = None
                 for item in results:
                     item_duration = item.get("duration", 0)
-                    # Tollera una differenza di 10 secondi come nel Go
                     if duration_s == 0 or abs(item_duration - duration_s) <= 10.0:
                         if item.get("syncedLyrics") and not best_synced:
                             best_synced = item["syncedLyrics"]
                         elif item.get("plainLyrics") and not best_plain:
                             best_plain = item["plainLyrics"]
-
                 return best_synced or best_plain or ""
     except Exception: pass
     return ""
@@ -355,35 +352,49 @@ def fetch_lyrics(
     if providers is None:
         providers = _DEFAULT_PROVIDERS
 
-    clean_track = simplify_track_name(track_name)
+    clean_track  = simplify_track_name(track_name)
     clean_artist = get_primary_artist(artist_name)
 
-    for provider in providers:
-        result = ""
-        try:
-            if provider == "spotify":
-                result = _fetch_spotify(track_id, spotify_token)
-            elif provider == "apple":
-                # Uso i nomi puliti per la ricerca su Apple Music
-                result = _fetch_apple(clean_track, clean_artist, duration_s)
-            elif provider == "musixmatch":
-                # Uso i nomi puliti per la ricerca su Musixmatch
-                result = _fetch_musixmatch(clean_track, clean_artist, duration_s)
-            elif provider == "amazon":
-                result = _fetch_amazon(isrc)
-            elif provider == "lrclib":
-                # LRCLIB riceve i nomi originali prima, poi in caso farà fall-back interno
-                result = _fetch_lrclib(clean_track, clean_artist, album_name, duration_s)
-            else:
-                logger.warning("[lyrics] unknown provider: %s", provider)
-        except Exception as exc:
-            logger.debug("[lyrics/%s] unexpected error: %s", provider, exc)
+    # Se il titolo contiene " - " (es. "6. ARTIST - Song Title"),
+    # prepara anche il titolo abbreviato come fallback.
+    _short = clean_track.split(" - ", 1)[-1].strip() if " - " in clean_track else None
+    short_track = _short if _short and _short != clean_track else None
 
-        if result and result.strip():
-            logger.debug("[lyrics] found via %s (%d chars)", provider, len(result))
-            # Aggiungo i metadati LRC standard al risultato finale!
-            final_lrc = add_lrc_metadata(result.strip(), track_name, artist_name)
-            return final_lrc, provider
+    # Provider che usano ID/ISRC: il titolo non influisce, inutile riprovare.
+    _ID_BASED = {"spotify", "amazon"}
+
+    for provider in providers:
+        titles_to_try = [clean_track]
+        if short_track and provider not in _ID_BASED:
+            titles_to_try.append(short_track)
+
+        for title in titles_to_try:
+            result = ""
+            try:
+                if provider == "spotify":
+                    result = _fetch_spotify(track_id, spotify_token)
+                elif provider == "apple":
+                    result = _fetch_apple(title, clean_artist, duration_s)
+                elif provider == "musixmatch":
+                    result = _fetch_musixmatch(title, clean_artist, duration_s)
+                elif provider == "amazon":
+                    result = _fetch_amazon(isrc)
+                elif provider == "lrclib":
+                    result = _fetch_lrclib(title, clean_artist, album_name, duration_s)
+                else:
+                    logger.warning("[lyrics] unknown provider: %s", provider)
+                    break
+            except Exception as exc:
+                logger.debug("[lyrics/%s] unexpected error: %s", provider, exc)
+
+            if result and result.strip():
+                label = f"{provider}" + (f" [short title]" if title == short_track else "")
+                logger.debug("[lyrics] found via %s (%d chars)", label, len(result))
+                return add_lrc_metadata(result.strip(), track_name, artist_name), provider
+
+            # Per provider ID-based non ha senso iterare su titoli alternativi.
+            if provider in _ID_BASED:
+                break
 
     logger.debug("[lyrics] not found for '%s' by '%s'", track_name, artist_name)
     return "", ""

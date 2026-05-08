@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Callable
-from urllib.parse import quote
+from typing import Callable, List, Optional, Tuple, Dict, Any
+from urllib.parse import quote, urlparse, parse_qs
 
 import requests
 from mutagen.id3 import (
@@ -23,9 +23,13 @@ logger = logging.getLogger(__name__)
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/145.0.0.0 Safari/537.36"
+    "Chrome/120.0.0.0 Safari/537.36"
 )
 
+# Parametri InnerTube allineati al JS
+YT_SEARCH_PARAMS_TRACKS = "EgWKAQIIAQ=="
+INNERTUBE_CLIENT_VERSION = "1.20240801.01.00"
+COBALT_API_URL = "https://api.zarz.moe/v1/dl/cobalt"
 
 def _sanitize(value: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", value).strip()
@@ -49,52 +53,228 @@ class YouTubeProvider(BaseProvider):
         super().set_progress_callback(cb)
 
     # ------------------------------------------------------------------
-    # URL resolution
+    # URL Detection & Resolution (Playlist, Album, Artist, Track)
     # ------------------------------------------------------------------
 
-    def _get_youtube_url(self, track_id: str, track_name: str = "", artist_name: str = "") -> str:
-        # Supporto ID Tidal (prefisso "tidal_") e ID Spotify
-        if track_id.startswith("tidal_"):
-            tidal_id = track_id.removeprefix("tidal_")
-            url = f"https://song.link/t/{tidal_id}"
+    def get_url(self, url: str, include_featuring: bool = False) -> Tuple[str, List[TrackMetadata]]:
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query)
+
+        playlist_id = qs.get("list", [None])[0]
+        if not playlist_id and "/playlist" in parsed.path:
+            playlist_id = qs.get("list", [None])[0]
+
+        if "/browse/" in parsed.path:
+            browse_id = parsed.path.split("/browse/")[1].split("?")[0]
+            return self._fetch_container(browse_id)
+
+        if playlist_id:
+            browse_id = playlist_id if playlist_id.startswith("VL") or playlist_id.startswith("PL") else f"VL{playlist_id}"
+            return self._fetch_container(browse_id)
+
+        video_id = self._extract_video_id(url)
+        if video_id:
+            meta = self._get_single_track_metadata(video_id)
+            return meta.title, [meta]
+
+        raise ValueError(f"URL YouTube non supportato o non riconosciuto: {url}")
+
+    def _get_single_track_metadata(self, video_id: str) -> TrackMetadata:
+        url = "https://music.youtube.com/youtubei/v1/player?alt=json"
+        payload = {
+            "context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}},
+            "videoId": video_id
+        }
+        resp = self._session.post(url, json=payload, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        details = data.get("videoDetails", {})
+        title = details.get("title", "Unknown")
+        artist = details.get("author", "Unknown Artist")
+        duration = int(details.get("lengthSeconds", 0)) * 1000
+
+        thumbs = details.get("thumbnail", {}).get("thumbnails", [])
+        cover_url = thumbs[-1].get("url") if thumbs else ""
+
+        return TrackMetadata(
+            id=video_id,
+            title=title,
+            artists=artist,
+            album_artist=artist,
+            album="YouTube",
+            duration_ms=duration,
+            cover_url=cover_url,
+            external_url=f"https://music.youtube.com/watch?v={video_id}",
+            extra_info={"provider": "youtube"}
+        )
+
+    # ------------------------------------------------------------------
+    # InnerTube API Fetchers per Container (Playlist/Album)
+    # ------------------------------------------------------------------
+
+    def _fetch_container(self, browse_id: str) -> Tuple[str, List[TrackMetadata]]:
+        # [Codice invariato: la logica di fetching container e pagination
+        # era già sufficientemente allineata all'approccio InnerTube]
+        logger.info("[youtube] Fetching container: %s", browse_id)
+
+        url = "https://music.youtube.com/youtubei/v1/browse?alt=json"
+        payload = {
+            "context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}},
+            "browseId": browse_id
+        }
+
+        resp = self._session.post(url, json=payload, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        title = "Unknown YouTube Container"
+        try:
+            header = data.get("header", {}).get("musicDetailHeaderRenderer", {})
+            title = header.get("title", {}).get("runs", [{}])[0].get("text", title)
+        except: pass
+
+        tracks = []
+        self._parse_tracks_from_data(data, tracks)
+
+        continuation = self._get_continuation_token(data)
+        while continuation:
+            logger.debug("[youtube] Fetching continuation...")
+            cont_data = self._fetch_continuation(continuation)
+            if not cont_data: break
+
+            added = self._parse_tracks_from_data(cont_data, tracks)
+            if added == 0: break
+            continuation = self._get_continuation_token(cont_data)
+
+        for i, track in enumerate(tracks):
+            track.track_number = i + 1
+
+        return title, tracks
+
+    def _parse_tracks_from_data(self, data: Dict, track_list: List[TrackMetadata]) -> int:
+        count_before = len(track_list)
+        items = self._find_key_recursive(data, "musicResponsiveListItemRenderer")
+
+        for item in items:
+            try:
+                v_id = item.get("playlistItemData", {}).get("videoId")
+                if not v_id: continue
+
+                columns = item.get("flexColumns", [])
+                title = columns[0].get("musicResponsiveListItemFlexColumnRenderer", {}).get("text", {}).get("runs", [{}])[0].get("text", "Unknown")
+
+                artist = "Unknown Artist"
+                if len(columns) > 1:
+                    artist_runs = columns[1].get("musicResponsiveListItemFlexColumnRenderer", {}).get("text", {}).get("runs", [])
+                    artist = ", ".join([r["text"] for r in artist_runs if "browseId" in r.get("navigationEndpoint", {}).get("browseEndpoint", {})])
+
+                thumbnails = item.get("thumbnail", {}).get("musicThumbnailRenderer", {}).get("thumbnail", {}).get("thumbnails", [])
+                cover = thumbnails[-1].get("url") if thumbnails else ""
+
+                track_list.append(TrackMetadata(
+                    id=v_id,
+                    title=title,
+                    artists=artist,
+                    album_artist=artist,
+                    album="YouTube Music",
+                    duration_ms=0,
+                    cover_url=cover,
+                    external_url=f"https://music.youtube.com/watch?v={v_id}",
+                    extra_info={"provider": "youtube"}
+                ))
+            except:
+                continue
+
+        return len(track_list) - count_before
+
+    def _get_continuation_token(self, data: Dict) -> Optional[str]:
+        tokens = self._find_key_recursive(data, "continuation")
+        return tokens[0] if tokens else None
+
+    def _fetch_continuation(self, token: str) -> Optional[Dict]:
+        url = f"https://music.youtube.com/youtubei/v1/browse?alt=json&ctoken={quote(token)}&continuation={quote(token)}"
+        try:
+            resp = self._session.post(url, json={"context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}}}, timeout=10)
+            return resp.json() if resp.ok else None
+        except: return None
+
+    def _find_key_recursive(self, data: Any, key: str) -> List[Any]:
+        results = []
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if k == key: results.append(v)
+                else: results.extend(self._find_key_recursive(v, key))
+        elif isinstance(data, list):
+            for item in data:
+                results.extend(self._find_key_recursive(item, key))
+        return results
+
+    # ------------------------------------------------------------------
+    # URL resolution (Allineato a Odesli JSON API e Deezer API)
+    # ------------------------------------------------------------------
+
+    def _get_youtube_url(self, metadata: TrackMetadata) -> str:
+        # Se abbiamo l'URL esterno (es. Apple Music o Spotify originario), usiamo quello per Odesli!
+        if metadata.external_url:
+            platform_url = metadata.external_url
+        elif metadata.id.startswith("tidal_"):
+            platform_url = f"https://tidal.com/browse/track/{metadata.id.removeprefix('tidal_')}"
+        elif metadata.id.startswith("spotify:"):
+            platform_url = f"https://open.spotify.com/track/{metadata.id.split(':')[-1]}"
         else:
-            url = f"https://song.link/s/{track_id}"
+            # Fallback generico
+            platform_url = f"https://song.link/s/{metadata.id}"
+
+        api_url = f"https://api.song.link/v1-alpha.1/links?url={quote(platform_url)}"
 
         try:
-            resp = self._session.get(
-                url,
-                headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9"},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            match = re.search(r'https://(?:music\.)?youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})', resp.text)
-            if not match:
-                match = re.search(r'https://youtu\.be/([a-zA-Z0-9_-]{11})', resp.text)
-            if match:
-                yt_url = f"https://music.youtube.com/watch?v={match.group(1)}"
-                logger.info("[youtube] Resolved via Songlink: %s", yt_url)
-                return yt_url
-        except Exception as exc:
-            logger.warning("[youtube] Songlink failed: %s", exc)
+            resp = self._session.get(api_url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                links = data.get("linksByPlatform", {})
+                yt_info = links.get("youtubeMusic") or links.get("youtube")
 
-        if track_name and artist_name:
-            yt_url = self._search_youtube_direct(track_name, artist_name)
+                if yt_info and yt_info.get("url"):
+                    yt_url = yt_info["url"]
+                    logger.info("[youtube] Resolved via Odesli JSON API: %s", yt_url)
+                    return yt_url
+        except Exception as exc:
+            logger.warning("[youtube] Odesli API failed: %s", exc)
+
+        # Fallback alla ricerca testuale diretta se Odesli fallisce
+        if metadata.title and metadata.artists:
+            yt_url = self._search_youtube_direct(metadata.title, metadata.artists)
             if yt_url:
                 return yt_url
 
-        raise RuntimeError("Failed to resolve YouTube URL via Songlink and direct search")
+        raise RuntimeError("Failed to resolve YouTube URL via Odesli API and direct search")
 
     def _search_youtube_direct(self, track_name: str, artist_name: str) -> str | None:
-        query      = quote(f"{track_name} {artist_name} audio")
-        search_url = f"https://www.youtube.com/results?search_query={query}"
+        query = f"{track_name} {artist_name}"
+        url = "https://music.youtube.com/youtubei/v1/search?alt=json"
+
+        payload = {
+            "context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}},
+            "query": query,
+            "params": YT_SEARCH_PARAMS_TRACKS
+        }
+
         try:
-            resp  = self._session.get(search_url, timeout=10)
+            resp = self._session.post(url, json=payload, headers={"User-Agent": _DEFAULT_UA}, timeout=10)
             resp.raise_for_status()
-            match = re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp.text)
-            if match:
-                return f"https://music.youtube.com/watch?v={match.group(1)}"
+
+            # Invece di usare una Regex fragile, sfruttiamo la funzione ricorsiva per trovare i videoId
+            data = resp.json()
+            video_ids = self._find_key_recursive(data, "videoId")
+
+            if video_ids:
+                video_url = f"https://music.youtube.com/watch?v={video_ids[0]}"
+                logger.info("[youtube] Direct search resolved: %s", video_url)
+                return video_url
         except Exception as exc:
             logger.warning("[youtube] Direct search failed: %s", exc)
+
         return None
 
     @staticmethod
@@ -103,73 +283,117 @@ class YouTubeProvider(BaseProvider):
         return match.group(1) if match else None
 
     # ------------------------------------------------------------------
-    # Download URL APIs
+    # Download URL APIs (Tiered Fallback Allineato al JS)
     # ------------------------------------------------------------------
 
-    def _request_spotube_dl(self, video_id: str) -> str | None:
-        for engine in ("v1", "v3", "v2"):
-            api_url = (
-                f"https://spotubedl.com/api/download/{video_id}"
-                f"?engine={engine}&format=mp3&quality=320"
-            )
-            try:
-                resp = self._session.get(api_url, timeout=15)
-                if resp.status_code == 200:
-                    dl_url = resp.json().get("url")
-                    if dl_url:
-                        if dl_url.startswith("/"):
-                            dl_url = "https://spotubedl.com" + dl_url
-                        return dl_url
-            except Exception:
-                continue
-        return None
-
-    def _request_cobalt(self, video_id: str) -> str | None:
+    def _request_direct_innertube(self, video_id: str) -> str | None:
+        """
+        Tentativo di emulazione del direct download senza decrittazione JS.
+        Utilizziamo un client Android che a volte restituisce URL non cifrati.
+        """
+        url = "https://music.youtube.com/youtubei/v1/player?alt=json"
+        payload = {
+            "context": {
+                "client": {
+                    "clientName": "ANDROID",
+                    "clientVersion": "21.02.35",
+                    "androidSdkVersion": 30,
+                    "osName": "Android",
+                    "osVersion": "11"
+                }
+            },
+            "videoId": video_id,
+            "contentCheckOk": True,
+            "racyCheckOk": True
+        }
         try:
-            resp = self._session.post(
-                "https://api.qwkuns.me",
-                json={
-                    "url":             f"https://music.youtube.com/watch?v={video_id}",
-                    "audioFormat":     "mp3",
-                    "audioBitrate":    "320",
-                    "downloadMode":    "audio",
-                    "filenameStyle":   "basic",
-                    "disableMetadata": True,
-                },
-                headers={"Content-Type": "application/json", "Accept": "application/json"},
-                timeout=15,
-            )
+            resp = self._session.post(url, json=payload, headers={"User-Agent": "com.google.android.youtube/21.02.35 (Linux; U; Android 11) gzip"}, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
-                if data.get("status") in ("tunnel", "redirect") and data.get("url"):
-                    return data["url"]
-        except Exception:
-            pass
+                formats = data.get("streamingData", {}).get("adaptiveFormats", [])
+                for fmt in formats:
+                    # Cerca formati audio compatibili (140 = m4a, 251 = opus) che hanno un URL diretto (non cifrato)
+                    if fmt.get("itag") in [251, 140, 250, 249] and fmt.get("url"):
+                        logger.info("[youtube] Direct InnerTube URL found (itag=%s)", fmt["itag"])
+                        return fmt["url"]
+        except Exception as exc:
+            logger.debug("[youtube] Direct InnerTube fallback failed: %s", exc)
+        return None
+
+    def _request_cobalt(self, video_url: str) -> str | None:
+        """
+        Allineato all'implementazione JS: usa solo l'istanza primaria e il payload v7.
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": _DEFAULT_UA
+        }
+
+        payload = {
+            "url": video_url,
+            "downloadMode": "audio",
+            "audioFormat": "mp3" # In JS è "best", in Python forziamo mp3 per compatibilità metadata ID3
+        }
+
+        try:
+            resp = self._session.post(COBALT_API_URL, json=payload, headers=headers, timeout=15)
+            if resp.status_code in (200, 202):
+                data = resp.json()
+                dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
+                if dl_url:
+                    logger.info("[youtube] Cobalt URL generated successfully")
+                    return dl_url
+        except Exception as exc:
+            logger.warning(f"[youtube] Cobalt API failed: {exc}")
+
+        return None
+
+    def _request_yt1d(self, video_url: str) -> str | None:
+        """
+        Allineato: Usa GET su /results per il nonce, POST su ajax per il dl.
+        """
+        try:
+            res_config = self._session.get("https://yt1d.io/results/", headers={"User-Agent": _DEFAULT_UA}, timeout=10)
+            nonce_match = re.search(r'"nonce"\s*:\s*"([^"]+)"', res_config.text)
+            if not nonce_match: return None
+            nonce = nonce_match.group(1)
+
+            payload = {
+                "action": "process_youtube_audio_download",
+                "video_url": video_url,
+                "quality": "m4a",
+                "nonce": nonce
+            }
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "Origin": "https://yt1d.io",
+                "Referer": "https://yt1d.io/results/",
+                "User-Agent": _DEFAULT_UA
+            }
+            res_audio = self._session.post("https://yt1d.io/wp-admin/admin-ajax.php", data=payload, headers=headers, timeout=15)
+            if res_audio.status_code == 200:
+                data = res_audio.json()
+                # Gestione percorsi nidificati come in JS extractYt1dDownloadURL()
+                dl_url = data.get("downloadUrl") or data.get("url")
+                if not dl_url and data.get("data"):
+                    dl_url = data["data"].get("downloadUrl") or data["data"].get("url")
+
+                if dl_url:
+                    logger.info("[youtube] YT1D URL generated successfully")
+                    return dl_url
+        except Exception as exc:
+            logger.warning(f"[youtube] yt1d fallback failed: {exc}")
         return None
 
     # ------------------------------------------------------------------
     # Metadata embedding per MP3 (ID3)
     # ------------------------------------------------------------------
+    # [Codice embed_metadata invariato - la libreria Python usa standard nativi
+    # diversi dalla UI JavaScript]
 
-    def _embed_metadata(
-            self,
-            filepath:     str,
-            title:        str,
-            artist:       str,
-            album:        str,
-            album_artist: str,
-            date:         str,
-            track_num:    int,
-            total_tracks: int,
-            disc_num:     int,
-            total_discs:  int,
-            cover_url:    str = "",
-            publisher:    str = "",
-            url:          str = "",
-            lyrics:       str = "",
-            genre:        str = "",
-            bpm:          str = "",
-    ) -> None:
+    def _embed_metadata(self, filepath: str, title: str, artist: str, album: str, album_artist: str, date: str, track_num: int, total_tracks: int, disc_num: int, total_discs: int, cover_url: str = "", publisher: str = "", url: str = "", lyrics: str = "", genre: str = "", bpm: str = "") -> None:
         try:
             try:
                 audio = ID3(filepath)
@@ -191,12 +415,10 @@ class YouTubeProvider(BaseProvider):
             if publisher: audio.add(TPUB(encoding=3, text=[str(publisher)]))
             if url:       audio.add(WXXX(encoding=3, desc="", url=str(url)))
 
-            audio.add(COMM(encoding=3, lang="eng", desc="",
-                           text=["https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"]))
+            audio.add(COMM(encoding=3, lang="eng", desc="", text=["https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"]))
 
             if lyrics:
                 audio.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
-                logger.debug("[youtube] lyrics embedded (%d chars)", len(lyrics))
 
             if cover_url:
                 try:
@@ -204,136 +426,152 @@ class YouTubeProvider(BaseProvider):
                     if r.status_code == 200:
                         audio.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=r.content))
                 except Exception as exc:
-                    logger.warning("[youtube] Cover download failed: %s", exc)
+                    logger.warning(f"[youtube] Cover download failed: {exc}")
 
             audio.save(filepath, v2_version=3)
         except Exception as exc:
-            logger.warning("[youtube] embed_metadata failed: %s", exc)
+            logger.warning(f"[youtube] embed_metadata failed: {exc}")
 
     # ------------------------------------------------------------------
     # BaseProvider interface
     # ------------------------------------------------------------------
 
-    def download_track(
-            self,
-            metadata:            TrackMetadata,
-            output_dir:          str,
-            *,
-            filename_format:     str             = "{title} - {artist}",
-            position:            int             = 1,
-            include_track_num:   bool            = False,
-            use_album_track_num: bool            = False,
-            first_artist_only:   bool            = False,
-            allow_fallback:      bool            = True,
-            embed_lyrics:            bool            = False,
-            lyrics_providers:        list[str] | None = None,
-            lyrics_spotify_token:    str             = "",
-            enrich_metadata:         bool            = False,
-            enrich_providers:        list[str] | None = None,
-            is_album:                bool            = False,
-            **kwargs,
-    ) -> DownloadResult:
+    def download_track(self, metadata: TrackMetadata, output_dir: str, *, quality: str = "320", filename_format: str = "{title} - {artist}", position: int = 1, include_track_num: bool = False, use_album_track_num: bool = False, first_artist_only: bool = False, allow_fallback: bool = True, embed_lyrics: bool = False, lyrics_providers: list[str] | None = None, lyrics_spotify_token: str = "", enrich_metadata: bool = False, enrich_providers: list[str] | None = None, qobuz_token: str | None = None, is_album: bool = False, **kwargs) -> DownloadResult:
         try:
             dest = self._build_output_path(
-                metadata, output_dir, filename_format,
-                position, include_track_num, use_album_track_num,
-                first_artist_only, extension=".mp3",
+                metadata, output_dir,
+                filename_format=filename_format,
+                position=position,
+                include_track_num=include_track_num,
+                use_album_track_num=use_album_track_num,
+                first_artist_only=first_artist_only,
+                extension=".mp3",
             )
             if self._file_exists(dest):
                 return DownloadResult.ok(self.name, str(dest), fmt="mp3")
 
-            yt_url   = self._get_youtube_url(metadata.id, metadata.title, metadata.artists)
-            video_id = self._extract_video_id(yt_url)
+            is_native_yt = metadata.extra_info.get("provider") == "youtube"
+            looks_like_yt_id = len(metadata.id) == 11 and not metadata.id.startswith("spotify:")
+
+            if is_native_yt or looks_like_yt_id:
+                video_id = metadata.id
+                yt_url = f"https://www.youtube.com/watch?v={video_id}"
+            else:
+                yt_url = self._get_youtube_url(metadata)
+                video_id = self._extract_video_id(yt_url)
+
             if not video_id:
                 return DownloadResult.fail(self.name, "Could not extract video ID")
 
-            dl_url = self._request_spotube_dl(video_id) or self._request_cobalt(video_id)
-            if not dl_url:
-                return DownloadResult.fail(self.name, "All YouTube download APIs failed")
+            from ..core.musicbrainz import AsyncMBFetch
+            mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
 
-            with self._session.get(dl_url, stream=True, timeout=120) as r:
-                r.raise_for_status()
-                total      = int(r.headers.get("Content-Length") or 0)
-                downloaded = 0
-                with open(str(dest), "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            if self._progress_cb and total:
-                                self._progress_cb(downloaded, total)
+            # Catena di Download: Proviamo i provider uno ad uno.
+            # Se il download fallisce (es. 403 Forbidden su Direct), passiamo al prossimo.
+            download_sources = [
+                ("Direct", lambda: self._request_direct_innertube(video_id)),
+                ("Cobalt", lambda: self._request_cobalt(yt_url)),
+                ("YT1D", lambda: self._request_yt1d(yt_url))
+            ]
 
-            artist       = metadata.artists.split(",")[0].strip() if first_artist_only else metadata.artists
-            album_artist = metadata.album_artist.split(",")[0].strip() if first_artist_only else metadata.album_artist
+            download_success = False
 
-            # FIX #2: fetch_lyrics ritorna tuple[str, str] — unpacking corretto
-            lyrics_text = ""
-            lyrics_prov = ""
-            if embed_lyrics and metadata.title and metadata.first_artist:
+            for source_name, get_url_func in download_sources:
+                dl_url = get_url_func()
+                if not dl_url:
+                    continue
+
+                logger.info(f"[youtube] Attempting download via {source_name}...")
                 try:
-                    from ..core.lyrics import fetch_lyrics
-                    result = fetch_lyrics(
-                        track_name       = metadata.title,
-                        artist_name      = metadata.first_artist,
-                        album_name       = metadata.album,
-                        duration_s       = metadata.duration_ms // 1000,
-                        track_id         = metadata.id,
-                        isrc             = metadata.isrc,
-                        providers        = lyrics_providers,
-                        spotify_token    = lyrics_spotify_token,
-                    )
-                    # fetch_lyrics restituisce sempre una tupla (lyrics, provider)
-                    if isinstance(result, tuple):
-                        lyrics_text, lyrics_prov = result
-                    else:
-                        lyrics_text = result or ""
+                    headers = {"User-Agent": _DEFAULT_UA}
+                    with self._session.get(dl_url, headers=headers, stream=True, timeout=120) as r:
+                        r.raise_for_status() # Se c'è un 403, salterà direttamente all'except qui sotto
+                        total = int(r.headers.get("Content-Length") or 0)
+                        downloaded = 0
+                        with open(str(dest), "wb") as f:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    if self._progress_cb and total:
+                                        self._progress_cb(downloaded, total)
 
-                    if lyrics_text:
-                        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
-                        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
-                except Exception as exc:
-                    logger.warning("[youtube] lyrics fetch failed: %s", exc)
+                    download_success = True
+                    logger.info(f"[youtube] Download successful via {source_name}")
+                    break  # Download riuscito, usciamo dal ciclo!
 
-            # Metadata enrichment per MP3 (ID3 TCON/TBPM)
-            genre_tag = ""
-            bpm_tag   = ""
-            if enrich_metadata and metadata.isrc:
-                try:
-                    from ..core.metadata_enrichment import enrich_metadata as _enrich
-                    enriched  = _enrich(
-                        track_name  = metadata.title,
-                        artist_name = metadata.first_artist,
-                        isrc        = metadata.isrc,
-                        providers   = enrich_providers,
-                    )
-                    genre_tag = enriched.genre
-                    bpm_tag   = str(enriched.bpm) if enriched.bpm else ""
-                    if enriched._sources:
-                        print(f"  [youtube] Arricchito: {enriched._sources}")
-                except Exception as exc:
-                    logger.warning("[youtube] enrich failed: %s", exc)
+                except Exception as e:
+                    logger.warning(f"[youtube] Download via {source_name} failed: {e}")
+                    # Elimina eventuali file parziali o corrotti prima di passare al prossimo provider
+                    if os.path.exists(str(dest)):
+                        try:
+                            os.remove(str(dest))
+                        except OSError:
+                            pass
+                    continue
 
-            self._embed_metadata(
-                filepath     = str(dest),
-                title        = metadata.title,
-                artist       = artist,
-                album        = metadata.album,
-                album_artist = album_artist,
-                date         = metadata.release_date,
-                track_num    = _safe_int(metadata.track_number) or position,
-                total_tracks = _safe_int(metadata.total_tracks),
-                disc_num     = _safe_int(metadata.disc_number),
-                total_discs  = _safe_int(metadata.total_discs),
-                cover_url    = metadata.cover_url,
-                lyrics       = lyrics_text,
-                genre        = genre_tag,
-                bpm          = bpm_tag,
+            if not download_success:
+                return DownloadResult.fail(self.name, "All YouTube download sources failed (Direct, Cobalt, YT1D)")
+
+            # Validazione del file finale
+            from ..core.download_validation import validate_downloaded_track
+            expected_s = metadata.duration_ms // 1000
+            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
+            if not valid:
+                return DownloadResult.fail(self.name, f"Validazione fallita: {err_msg}")
+
+            mb_tags: dict[str, str] = {}
+            if mb_fetcher:
+                res = mb_fetcher.result()
+                if res:
+                    mapping = {
+                        "mbid_track":       "MUSICBRAINZ_TRACKID",
+                        "mbid_album":       "MUSICBRAINZ_ALBUMID",
+                        "mbid_artist":      "MUSICBRAINZ_ARTISTID",
+                        "mbid_relgroup":    "MUSICBRAINZ_RELEASEGROUPID",
+                        "mbid_albumartist": "MUSICBRAINZ_ALBUMARTISTID",
+                        "barcode":          "BARCODE",
+                        "label":            "LABEL",
+                        "organization":     "ORGANIZATION",
+                        "country":          "RELEASECOUNTRY",
+                        "script":           "SCRIPT",
+                        "status":           "RELEASESTATUS",
+                        "media":            "MEDIA",
+                        "type":             "RELEASETYPE",
+                        "artist_sort":      "ARTISTSORT",
+                        "albumartist_sort": "ALBUMARTISTSORT",
+                        "catalognumber":    "CATALOGNUMBER",
+                    }
+                    for mb_key, tag_name in mapping.items():
+                        val = res.get(mb_key)
+                        if val:
+                            mb_tags[tag_name] = str(val)
+                    if res.get("original_date"):
+                        mb_tags["ORIGINALDATE"] = res["original_date"]
+                        mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
+                    if res.get("catalognumber"):
+                        mb_tags["CATALOGNUMBER"] = res["catalognumber"]
+
+            from ..core.tagger import embed_metadata
+            embed_metadata(
+                str(dest), metadata,
+                first_artist_only       = first_artist_only,
+                cover_url               = metadata.cover_url,
+                session                 = self._session,
+                extra_tags              = mb_tags,
+                embed_lyrics            = embed_lyrics,
+                lyrics_providers        = lyrics_providers,
+                lyrics_spotify_token    = lyrics_spotify_token,
+                enrich                  = enrich_metadata,
+                enrich_providers        = enrich_providers,
+                enrich_qobuz_token      = qobuz_token or "",
+                is_album                = is_album,
             )
 
             return DownloadResult.ok(self.name, str(dest), fmt="mp3")
 
         except SpotiflacError as exc:
-            logger.error("[youtube] %s", exc)
+            logger.error(f"[youtube] {exc}")
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
             logger.exception("[youtube] Unexpected error")

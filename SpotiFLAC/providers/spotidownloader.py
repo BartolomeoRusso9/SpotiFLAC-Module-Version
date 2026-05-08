@@ -8,7 +8,7 @@ import time
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError, AuthError, TrackNotFoundError, ErrorKind
 from ..core.tagger import embed_metadata, _print_mb_summary
-from ..core.musicbrainz import AsyncMBFetch
+from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.download_validation import validate_downloaded_track
 from .base import BaseProvider
 
@@ -209,41 +209,13 @@ class SpotiDownloaderProvider(BaseProvider):
                 raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
 
             # 6. Recupera e formatta i tag di MusicBrainz
-            mb_tags = {}
+            mb_tags: dict[str, str] = {}
+            res: dict = {}
             if mb_fetcher:
                 res = mb_fetcher.result()
-                if res:
-                    mapping = {
-                        "mbid_track":       "MUSICBRAINZ_TRACKID",
-                        "mbid_album":       "MUSICBRAINZ_ALBUMID",
-                        "mbid_artist":      "MUSICBRAINZ_ARTISTID",
-                        "mbid_relgroup":    "MUSICBRAINZ_RELEASEGROUPID",
-                        "mbid_albumartist": "MUSICBRAINZ_ALBUMARTISTID",
-                        "barcode":          "BARCODE",
-                        "label":            "LABEL",
-                        "organization":     "ORGANIZATION",
-                        "country":          "RELEASECOUNTRY",
-                        "script":           "SCRIPT",
-                        "status":           "RELEASESTATUS",
-                        "media":            "MEDIA",
-                        "type":             "RELEASETYPE",
-                        "artist_sort":      "ARTISTSORT",
-                        "albumartist_sort": "ALBUMARTISTSORT",
-                        "catalognumber":    "CATALOGNUMBER",
-                        "bpm":              "BPM",
-                        "genre":            "GENRE"
-                    }
-                    for mb_key, tag_name in mapping.items():
-                        val = res.get(mb_key)
-                        if val:
-                            mb_tags[tag_name] = str(val)
 
-                    if res.get("original_date"):
-                        mb_tags["ORIGINALDATE"] = res["original_date"]
-                        mb_tags["ORIGINALYEAR"] = res["original_date"][:4]
-                    if res.get("catalognumber"):
-                        mb_tags["CATALOGNUMBER"] = res["catalognumber"]
-                _print_mb_summary(mb_tags)
+            mb_tags = mb_result_to_tags(res)
+            _print_mb_summary(mb_tags)
 
             qobuz_token = kwargs.get("qobuz_token", "") or os.environ.get("QOBUZ_AUTH_TOKEN", "")
 

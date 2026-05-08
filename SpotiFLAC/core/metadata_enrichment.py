@@ -88,7 +88,7 @@ class _DeezerMeta:
         if not isrc:
             return out
         try:
-            r = self._s.get(f"{self.BASE}/track/isrc:{isrc}", timeout=12)
+            r = self._s.get(f"{self.BASE}/track/isrc:{isrc}", timeout=7)
             if r.status_code != 200:
                 return out
             d = r.json()
@@ -98,7 +98,7 @@ class _DeezerMeta:
             # Genere dall'album
             album_id = d.get("album", {}).get("id")
             if album_id:
-                ar = self._s.get(f"{self.BASE}/album/{album_id}", timeout=10)
+                ar = self._s.get(f"{self.BASE}/album/{album_id}", timeout=7)
                 if ar.ok:
                     ad = ar.json()
                     genres = ad.get("genres", {}).get("data", [])
@@ -158,7 +158,7 @@ class _AppleMusicMeta:
                     "limit":   5,
                     "country": "US",
                 },
-                timeout=12,
+                timeout=7,
             )
             if not r.ok:
                 return None
@@ -214,7 +214,7 @@ class _TidalMeta:
     def _fetch_and_merge_apis(self) -> None:
         """Scarica le API dal gist e le unisce a quelle di base senza duplicati."""
         try:
-            r = self._s.get(self._GIST_URL, timeout=8)
+            r = self._s.get(self._GIST_URL, timeout=7)
             if r.ok:
                 gist_urls = r.json()
                 if isinstance(gist_urls, list):
@@ -246,7 +246,7 @@ class _TidalMeta:
                     f"{api.rstrip('/')}/search?s={q}&limit=5",
             ):
                 try:
-                    r = self._s.get(endpoint, timeout=8)
+                    r = self._s.get(endpoint, timeout=7)
                     if not r.ok:
                         continue
                     data = r.json()
@@ -307,9 +307,55 @@ class _QobuzMeta:
             logger.debug("[meta/qobuz] %s", exc)
         return out
 
+# --------------------------------------------------------------------------- #
+# Provider: SoundCloud                                                        #
+# --------------------------------------------------------------------------- #
+
+class _SoundCloudMeta:
+    """
+    Recupera metadati extra da SoundCloud.
+    Utile soprattutto come fallback per le copertine HD di brani non ufficiali.
+    """
+
+    def __init__(self) -> None:
+        self._provider: Any = None
+
+    def _get_provider(self) -> Any:
+        if self._provider is None:
+            try:
+                from ..providers.soundcloud import SoundCloudProvider
+                self._provider = SoundCloudProvider()
+            except Exception as exc:
+                logger.debug("[meta/soundcloud] cannot init provider: %s", exc)
+        return self._provider
+
+    def fetch(self, track_name: str, artist_name: str) -> EnrichedMetadata:
+        out = EnrichedMetadata()
+        try:
+            prov = self._get_provider()
+            if prov is None:
+                return out
+
+            # Effettua una ricerca su SoundCloud
+            query = f"{artist_name} {track_name}"
+            results = prov.search(query, search_type="tracks", limit=1)
+
+            if not results:
+                return out
+
+            track = results[0]
+            # SoundCloud è ottimo per le copertine ad alta risoluzione
+            out.cover_url_hd = track.get("cover_url", "")
+
+            # A volte gli artisti inseriscono il genere su SoundCloud,
+            # se lo implementi nel parser di soundcloud.py potrai estrarlo qui.
+
+        except Exception as exc:
+            logger.debug("[meta/soundcloud] %s", exc)
+        return out
 
 # --------------------------------------------------------------------------- #
-# Public API                                                                   #
+# Public API                                                                  #
 # --------------------------------------------------------------------------- #
 
 _PROVIDERS = {
@@ -317,6 +363,7 @@ _PROVIDERS = {
     "apple":  _AppleMusicMeta,
     "tidal":  _TidalMeta,
     "qobuz":  _QobuzMeta,
+    "soundcloud": _SoundCloudMeta,
 }
 
 
@@ -325,7 +372,7 @@ def enrich_metadata(
         artist_name: str,
         isrc:        str = "",
         providers:   list[str] | None = None,
-        timeout_s:   float = 15.0,
+        timeout_s:   float = 7.0,
         qobuz_token: str | None = None,
 ) -> EnrichedMetadata:
     """
@@ -366,6 +413,8 @@ def enrich_metadata(
                 return name, inst.fetch(track_name, artist_name)
             elif name == "qobuz":
                 return name, inst.fetch(isrc)
+            elif name == "soundcloud":
+                return name, inst.fetch(track_name, artist_name)
         except Exception as exc:
             logger.debug("[meta/enrich] %s failed: %s", name, exc)
         return name, EnrichedMetadata()

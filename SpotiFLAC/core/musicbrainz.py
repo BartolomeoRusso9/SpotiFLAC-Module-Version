@@ -245,7 +245,45 @@ def fetch_mb_metadata(isrc: str) -> dict:
             _mb_inflight.pop(cache_key, None)
 
     return res
+def mb_result_to_tags(res: dict) -> dict[str, str]:
+    """Converte il dizionario di risposta di MusicBrainz nei tag standard supportati da SpotiFLAC."""
+    if not res:
+        return {}
 
+    mapping = {
+        "mbid_track":       "MUSICBRAINZ_TRACKID",
+        "mbid_album":       "MUSICBRAINZ_ALBUMID",
+        "mbid_artist":      "MUSICBRAINZ_ARTISTID",
+        "mbid_relgroup":    "MUSICBRAINZ_RELEASEGROUPID",
+        "mbid_albumartist": "MUSICBRAINZ_ALBUMARTISTID",
+        "barcode":          "BARCODE",
+        "label":            "LABEL",
+        "organization":     "ORGANIZATION",
+        "country":          "RELEASECOUNTRY",
+        "script":           "SCRIPT",
+        "status":           "RELEASESTATUS",
+        "media":            "MEDIA",
+        "type":             "RELEASETYPE",
+        "artist_sort":      "ARTISTSORT",
+        "albumartist_sort": "ALBUMARTISTSORT",
+        "catalognumber":    "CATALOGNUMBER",
+        "bpm":              "BPM",
+        "genre":            "GENRE"
+    }
+
+    tags = {}
+    for mb_key, tag_name in mapping.items():
+        val = res.get(mb_key)
+        if val:
+            tags[tag_name] = str(val)
+
+    if res.get("original_date"):
+        tags["ORIGINALDATE"] = res["original_date"]
+        tags["ORIGINALYEAR"] = res["original_date"][:4]
+    if res.get("catalognumber"):
+        tags["CATALOGNUMBER"] = res["catalognumber"]
+
+    return tags
 
 class AsyncMBFetch:
     """
@@ -264,3 +302,4 @@ class AsyncMBFetch:
         except Exception as e:
             logger.debug("[musicbrainz] Async fetch failed: %s", e)
             return {}
+
