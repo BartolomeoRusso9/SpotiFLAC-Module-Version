@@ -248,152 +248,158 @@ class SpotiflacDownloader:
     def run(self, input_url: str, loop_minutes: int | None = None) -> None:
         failed_tracks = None
         while True:
-            # _run_once ora accetta tracks per non doverli ricaricare
             failed_tracks = self._run_once(input_url, target_tracks=failed_tracks)
             if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
                 break
             print(f"\n{len(failed_tracks)} brani falliti. Prossimo tentativo in {loop_minutes} minuti…")
             time.sleep(loop_minutes * 60)
 
-    def _run_once(self, input_url: str) -> None:
-        print("Fetching metadata…")
+    def _run_once(self, input_url: str, target_tracks: list | None = None) -> list:
+        # Import puliti e sicuri in cima al metodo
+        from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
+        from .providers.apple_music_metadata import is_apple_music_url, parse_apple_music_url
 
-        is_tidal = False
-        is_soundcloud = False
-        is_youtube = False
-        is_apple = False
-
-        try:
-            if is_tidal_url(input_url):
-                is_tidal = True
-        except ImportError:
-            pass
-        try:
-            if is_apple_music_url(input_url):
-                is_apple = True
-        except ImportError:
-            pass
-
-        if "soundcloud.com" in input_url or "on.soundcloud.com" in input_url:
-            is_soundcloud = True
-        elif "youtube.com" in input_url or "youtu.be" in input_url:
-            is_youtube = True
-        elif "deezer.com" in input_url or "deezer.page.link" in input_url:
-            raise SpotiflacError(
-                ErrorKind.INVALID_URL,
-                "L'inserimento di URL Deezer come input primario non è ancora pienamente supportato. Usa un link Spotify e imposta 'deezer' come provider di download."
-            )
-
-        try:
-            if is_tidal:
-                from .providers.tidal_metadata import TidalMetadataClient
-                client = TidalMetadataClient()
-                collection_name, tracks = client.get_url(
-                    input_url,
-                    include_featuring=self._opts.include_featuring,
-                )
-            elif is_apple:
-                from .providers.apple_music_metadata import AppleMusicMetadataClient
-                client = AppleMusicMetadataClient()
-                # Aggiunto il passaggio del parametro include_featuring
-                collection_name, tracks = client.get_url(
-                    input_url,
-                    include_featuring=self._opts.include_featuring
-                )
-            elif is_soundcloud:
-                from .providers.soundcloud import SoundCloudProvider
-                client = SoundCloudProvider()
-                collection_name, tracks = client.get_url(input_url)
-            elif is_youtube:
-                from .providers.youtube import YouTubeProvider
-                client = YouTubeProvider()
-                collection_name, tracks = client.get_url(input_url)
-            else:
-                collection_name, tracks = self._client.get_url(
-                    input_url,
-                    include_featuring=self._opts.include_featuring,
-                )
-        except SpotiflacError as exc:
-            logger.error("Metadata fetch failed: %s", exc)
-            print(f"Error: {exc}")
-            return
-
-        if not tracks:
-            print("No tracks found.")
-            return
-
-        missing_isrc = [t for t in tracks if not t.isrc]
-        only_apple = len(self._opts.services) == 1 and self._opts.services[0] == "apple"
-        if missing_isrc and not is_soundcloud and not (is_apple and only_apple):
-            print(f"Resolving ISRC for {len(missing_isrc)} track(s)…")
-            try:
-                from .core.isrc_helper import IsrcHelper
-                from .core.http import HttpClient
-                resolver = IsrcHelper(HttpClient("isrc"))
-                for i, track in enumerate(tracks):
-                    if not track.isrc:
-                        resolved = resolver.get_isrc(track.id)
-                        if resolved:
-                            tracks[i] = track.model_copy(update={"isrc": resolved})
-                            logger.debug("[isrc] resolved %s → %s", track.id, resolved)
-            except Exception as exc:
-                logger.warning("[isrc] bulk resolution failed: %s", exc)
-
-        print(f"Found {len(tracks)} track(s) in: {collection_name}")
-
-        if is_tidal:
-            info = parse_tidal_url(input_url)
-        elif is_apple:
-            info = parse_apple_music_url(input_url)
-        elif is_soundcloud:
-            from urllib.parse import urlparse as _urlparse
-            _parts = [p for p in _urlparse(input_url).path.strip("/").split("/") if p]
-            if len(_parts) >= 2 and _parts[1] == "sets":
-                stype = "playlist"
-            elif len(_parts) == 1:
-                stype = "artist"
-            else:
-                stype = "track"
-            info = {"type": stype, "id": input_url}
-
-        elif is_youtube:
-            stype = "track"
-            if "list=" in input_url or "/playlist" in input_url:
-                stype = "playlist"
-            elif "/browse/" in input_url or "/channel/" in input_url:
-                stype = "artist_discography"
-            info = {"type": stype, "id": input_url}
-
-        else:
-            from .providers.spotify_metadata import parse_spotify_url
-            info = parse_spotify_url(input_url)
-
-        if not info:
-            raise SpotiflacError(
-                ErrorKind.INVALID_URL,
-                f"Unsupported or invalid URL: {input_url}"
-            )
-
-        is_album       = info["type"] == "album"
-        is_playlist    = info["type"] == "playlist"
-        is_discography = info["type"] in ("artist", "artist_discography")
-
-        if is_discography:
+        # Se abbiamo dei brani falliti dal ciclo precedente, usiamo direttamente quelli
+        # saltando la fase di fetching di ISRC e metadati dell'intera playlist/album.
+        if target_tracks is not None:
+            print(f"\nRitentando il download di {len(target_tracks)} brani...")
+            tracks = target_tracks
+            collection_name = "Retry Failed Tracks"
+            is_album = self._opts.is_album
             is_playlist = True
 
-        self._opts.is_album = is_album
+        else:
+            print("Fetching metadata…")
 
-        if (is_album or is_playlist or is_discography) and self._opts.output_path:
-            logger.warning(
-                "[downloader] output_path ignorato: il link è un %s, "
-                "i file verranno salvati normalmente in output_dir.",
-                info["type"],
-            )
-            print(
-                f"Avviso: --output-path viene ignorato per {info['type']}. "
-                "I file verranno salvati seguendo la normale rinominazione."
-            )
-            self._opts.output_path = None
+            is_tidal = False
+            is_soundcloud = False
+            is_youtube = False
+            is_apple = False
+
+            if is_tidal_url(input_url):
+                is_tidal = True
+            elif is_apple_music_url(input_url):
+                is_apple = True
+
+            if "soundcloud.com" in input_url or "on.soundcloud.com" in input_url:
+                is_soundcloud = True
+            elif "youtube.com" in input_url or "youtu.be" in input_url:
+                is_youtube = True
+            elif "deezer.com" in input_url or "deezer.page.link" in input_url:
+                raise SpotiflacError(
+                    ErrorKind.INVALID_URL,
+                    "L'inserimento di URL Deezer come input primario non è ancora pienamente supportato. Usa un link Spotify e imposta 'deezer' come provider di download."
+                )
+
+            try:
+                if is_tidal:
+                    from .providers.tidal_metadata import TidalMetadataClient
+                    client = TidalMetadataClient()
+                    collection_name, tracks = client.get_url(
+                        input_url,
+                        include_featuring=self._opts.include_featuring,
+                    )
+                elif is_apple:
+                    from .providers.apple_music_metadata import AppleMusicMetadataClient
+                    client = AppleMusicMetadataClient()
+                    collection_name, tracks = client.get_url(
+                        input_url,
+                        include_featuring=self._opts.include_featuring
+                    )
+                elif is_soundcloud:
+                    from .providers.soundcloud import SoundCloudProvider
+                    client = SoundCloudProvider()
+                    collection_name, tracks = client.get_url(input_url)
+                elif is_youtube:
+                    from .providers.youtube import YouTubeProvider
+                    client = YouTubeProvider()
+                    collection_name, tracks = client.get_url(input_url)
+                else:
+                    collection_name, tracks = self._client.get_url(
+                        input_url,
+                        include_featuring=self._opts.include_featuring,
+                    )
+            except SpotiflacError as exc:
+                logger.error("Metadata fetch failed: %s", exc)
+                print(f"Error: {exc}")
+                return []
+
+            if not tracks:
+                print("No tracks found.")
+                return []
+
+            missing_isrc = [t for t in tracks if not t.isrc]
+            only_apple = len(self._opts.services) == 1 and self._opts.services[0] == "apple"
+            if missing_isrc and not is_soundcloud and not (is_apple and only_apple):
+                print(f"Resolving ISRC for {len(missing_isrc)} track(s)…")
+                try:
+                    from .core.isrc_helper import IsrcHelper
+                    from .core.http import HttpClient
+                    resolver = IsrcHelper(HttpClient("isrc"))
+                    for i, track in enumerate(tracks):
+                        if not track.isrc:
+                            resolved = resolver.get_isrc(track.id)
+                            if resolved:
+                                tracks[i] = track.model_copy(update={"isrc": resolved})
+                                logger.debug("[isrc] resolved %s → %s", track.id, resolved)
+                except Exception as exc:
+                    logger.warning("[isrc] bulk resolution failed: %s", exc)
+
+            print(f"Found {len(tracks)} track(s) in: {collection_name}")
+
+            if is_tidal:
+                info = parse_tidal_url(input_url)
+            elif is_apple:
+                info = parse_apple_music_url(input_url)
+            elif is_soundcloud:
+                from urllib.parse import urlparse as _urlparse
+                _parts = [p for p in _urlparse(input_url).path.strip("/").split("/") if p]
+                if len(_parts) >= 2 and _parts[1] == "sets":
+                    stype = "playlist"
+                elif len(_parts) == 1:
+                    stype = "artist"
+                else:
+                    stype = "track"
+                info = {"type": stype, "id": input_url}
+
+            elif is_youtube:
+                stype = "track"
+                if "list=" in input_url or "/playlist" in input_url:
+                    stype = "playlist"
+                elif "/browse/" in input_url or "/channel/" in input_url:
+                    stype = "artist_discography"
+                info = {"type": stype, "id": input_url}
+
+            else:
+                from .providers.spotify_metadata import parse_spotify_url
+                info = parse_spotify_url(input_url)
+
+            if not info:
+                raise SpotiflacError(
+                    ErrorKind.INVALID_URL,
+                    f"Unsupported or invalid URL: {input_url}"
+                )
+
+            is_album       = info["type"] == "album"
+            is_playlist    = info["type"] == "playlist"
+            is_discography = info["type"] in ("artist", "artist_discography")
+
+            if is_discography:
+                is_playlist = True
+
+            self._opts.is_album = is_album
+
+            if (is_album or is_playlist or is_discography) and self._opts.output_path:
+                logger.warning(
+                    "[downloader] output_path ignorato: il link è un %s, "
+                    "i file verranno salvati normalmente in output_dir.",
+                    info["type"],
+                )
+                print(
+                    f"Avviso: --output-path viene ignorato per {info['type']}. "
+                    "I file verranno salvati seguendo la normale rinominazione."
+                )
+                self._opts.output_path = None
 
         manager = DownloadManager()
         for t in tracks:
@@ -406,8 +412,15 @@ class SpotiflacDownloader:
             is_album        = is_album,
             is_playlist     = is_playlist,
         )
-        worker.run()
 
+        # worker.run() restituisce una lista di tuple: (title, artist, error)
+        failed_tuples = worker.run()
+
+        # Estraiamo gli oggetti TrackMetadata originari che corrispondono ai brani falliti
+        failed_titles = {f[0] for f in failed_tuples}
+        failed_tracks_obj = [t for t in tracks if t.title in failed_titles]
+
+        return failed_tracks_obj
 
 def _format_seconds(seconds: float) -> str:
     s = int(round(seconds))
