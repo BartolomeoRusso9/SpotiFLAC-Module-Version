@@ -568,22 +568,14 @@ class TidalProvider(BaseProvider):
     # File download
     # ------------------------------------------------------------------
 
-    def _download_file(self, url_or_manifest: str, dest: Path, quality: str) -> None:
+    def _download_file(self, url_or_manifest: str, dest: Path) -> None:
         if url_or_manifest.startswith("MANIFEST:"):
-            self._download_from_manifest(url_or_manifest.removeprefix("MANIFEST:"), dest, quality)
+            self._download_from_manifest(url_or_manifest.removeprefix("MANIFEST:"), dest)
         else:
             self._http.stream_to_file(url_or_manifest, str(dest), self._progress_cb)
 
-    def _download_from_manifest(self, manifest_b64: str, dest: Path, quality: str) -> None:
+    def _download_from_manifest(self, manifest_b64: str, dest: Path) -> None:
         result = parse_manifest(manifest_b64)
-        if quality in ("LOSSLESS", "HI_RES"):
-            is_flac = "flac" in result.mime_type.lower() or (result.direct_url and "flac" in result.direct_url.lower())
-            if not is_flac:
-                raise SpotiflacError(
-                    ErrorKind.UNAVAILABLE,
-                    f"The mirror returned a lossy format ({result.mime_type}) instead of a TRUE FLAC.",
-                    self.name
-                )
         if result.direct_url and "flac" in result.mime_type.lower():
             self._http.stream_to_file(result.direct_url, str(dest), self._progress_cb)
             return
@@ -698,7 +690,7 @@ class TidalProvider(BaseProvider):
                 else self._get_download_url(track_id, quality)
             )
 
-            self._download_file(dl_url, dest, quality)
+            self._download_file(dl_url, dest)
 
             expected_s = metadata.duration_ms // 1000
             valid, err_msg = validate_downloaded_track(str(dest), expected_s)
