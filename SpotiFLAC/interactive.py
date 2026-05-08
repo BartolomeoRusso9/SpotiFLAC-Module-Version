@@ -183,8 +183,7 @@ def run_interactive() -> dict:
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
-    print(f"  {DIM('Note: Artist discographies are ONLY supported for Spotify and Tidal.')}")
-    print(f"  {DIM('Supported: Track, Album, Playlist, Artist (Spoti/Tidal only).')}")
+    print(f"  {DIM('Supported: Track, Album, Playlist — and Artist discographies for Spotify, Tidal and Apple Music.')}")
 
     url = ""
     while True:
@@ -195,25 +194,18 @@ def run_interactive() -> dict:
 
         lower_url = url.lower()
         is_blocked = False
-        # Blocco Artisti Apple Music
-        if "music.apple.com" in lower_url and "/artist/" in lower_url:
-            print(f"  {RED('⚠  Discographies are not supported for Apple Music.')}")
-            print(f"     {DIM('Please provide a Track, Album or Playlist link.')}")
-            is_blocked = True
 
-        # Blocco Artisti YouTube / YouTube Music
-        elif ("youtube.com" in lower_url or "youtu.be" in lower_url) and \
+        # Block YouTube artist/channel pages
+        if ("youtube.com" in lower_url or "youtu.be" in lower_url) and \
                 ("/channel/" in lower_url or "/user/" in lower_url or "/c/" in lower_url or "/@" in lower_url or "/browse/" in lower_url):
             print(f"  {RED('⚠  Discographies are not supported for YouTube.')}")
             print(f"     {DIM('Please provide a Video or Playlist link.')}")
             is_blocked = True
 
-        # Blocco Artisti SoundCloud
+        # Block SoundCloud artist profiles
         elif "soundcloud.com" in lower_url:
             path = urlparse(url).path.strip("/")
             parts = [p for p in path.split("/") if p]
-            # Profili artistici hanno solitamente solo 1 segmento (es. soundcloud.com/nomeartista)
-            # Tracce hanno 2 (artista/traccia), Set hanno 3 (artista/sets/nomeset)
             if len(parts) == 1 and parts[0] not in ("discover", "stream", "upload"):
                 print(f"  {RED('⚠  Artist profiles are not supported for SoundCloud.')}")
                 print(f"     {DIM('Please provide a Track or Set link.')}")
@@ -229,7 +221,14 @@ def run_interactive() -> dict:
     cfg["output_dir"] = _ask("Destination folder", "./Downloads")
 
     # ── 2.5. Custom Output Path (Only for single tracks) ────────────────────
-    if "/track/" in cfg["url"] or "watch?v=" in cfg["url"] or "youtu.be" in cfg["url"]:
+    lower_url = url.lower()
+    is_single_track = (
+            "/track/" in lower_url
+            or ("watch?v=" in lower_url and "list=" not in lower_url)
+            or ("youtu.be" in lower_url)
+            or ("music.apple.com" in lower_url and "?i=" in lower_url)
+    )
+    if is_single_track:
         _section("2.5 · Custom Output Path")
         print(f"  {DIM('Since this is a single track, you can specify an exact filename.')}")
         print(f"  {DIM('Example: my_files/favorite_song.flac (or .mp3)')}")
@@ -249,12 +248,28 @@ def run_interactive() -> dict:
             "soundcloud.com" in cfg["url"]
             or "on.soundcloud.com" in cfg["url"]
     )
+    is_apple_url = "music.apple.com" in cfg["url"]
 
     if is_soundcloud_url:
         cfg["services"] = ["soundcloud"]
         print(
             f"  {GREEN('✓')} Provider {BOLD('soundcloud')} automatically selected.\nSoundCloud tracks cannot be sourced from other providers."
         )
+    elif is_apple_url:
+        cfg["services"] = ["apple"]
+        print(
+            f"  {GREEN('✓')} Provider {BOLD('apple')} automatically selected for Apple Music URLs."
+        )
+        print(f"  {DIM('You can add fallback providers if needed.')}")
+        add_fallback = _ask_bool("Add fallback providers?", False)
+        if add_fallback:
+            fallbacks = _ask_multi(
+                "Fallback providers (order = priority):",
+                options  = ["tidal", "qobuz", "deezer", "amazon", "spoti"],
+                defaults = ["tidal"],
+                ordered  = True,
+            )
+            cfg["services"] = ["apple"] + fallbacks
     else:
         print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")
         cfg["services"] = _ask_multi(
@@ -269,7 +284,6 @@ def run_interactive() -> dict:
 
     if is_soundcloud_url:
         cfg["quality"] = "LOSSLESS"
-        # FIX BUG CRITICO 1: Inizializza le chiavi saltate per SoundCloud
         cfg["filename_format"] = "{title} - {artist}"
         cfg["use_track_numbers"] = False
         cfg["use_album_track_numbers"] = False
@@ -277,12 +291,7 @@ def run_interactive() -> dict:
         cfg["use_album_subfolders"] = False
         cfg["first_artist_only"] = False
         cfg["allow_fallback"] = True
-
-    if is_soundcloud_url:
-        cfg["quality"] = "LOSSLESS"
-        print(
-            f"  {YELLOW('⏭  Skipped:')} {DIM('Only MP3 available')}"
-        )
+        print(f"  {YELLOW('⏭  Skipped:')} {DIM('Only MP3 available')}")
     else:
         print(f"  {DIM('Note: If the requested quality is not found, an automatic fallback will be executed.')}")
 
@@ -324,10 +333,9 @@ def run_interactive() -> dict:
                 options = ["ALAC (Lossless)", "ATMOS (Spatial)", "AC3", "AAC", "AAC-LEGACY"],
                 default = "ALAC (Lossless)",
             )
-            # Normalizziamo per il provider apple_music.py
             cfg["quality"] = q_choice.split(" ")[0].lower()
 
-        # Multipli (Con supporto dinamico per le qualità Apple)
+        # Multipli
         elif (has_qobuz or has_tidal or has_deezer or has_apple):
             print(f"  {DIM('You selected multiple providers. Choose a unified profile:')}")
 
@@ -354,7 +362,6 @@ def run_interactive() -> dict:
                 default = combined_options[0],
             )
 
-            # Mappatura corretta per tutte le possibilità Apple
             if q_choice.startswith("LOSSLESS"):
                 cfg["quality"] = "LOSSLESS"
             elif q_choice.startswith("HI_RES"):
@@ -376,6 +383,7 @@ def run_interactive() -> dict:
                 options = ["LOSSLESS", "HI_RES", "HIGH"],
                 default = "LOSSLESS",
             )
+
         print(f"\n  {BOLD('Quality Fallback')}")
         print(f"  {DIM('If enabled, SpotiFLAC will download a lower quality if the requested one is unavailable.')}")
         cfg["allow_fallback"] = _ask_bool("Allow automatic quality fallback?", True)
@@ -402,9 +410,15 @@ def run_interactive() -> dict:
     # ── 7. Featuring ────────────────────────────────────────────────────────
     _section("7 · Featuring")
 
-    if "/artist/" in cfg["url"] or "UC" in cfg["url"]:
+    lower_url = cfg["url"].lower()
+    is_artist_url = (
+            "/artist/" in lower_url
+            or ("UC" in cfg["url"] and "youtube.com" in lower_url)
+    )
+
+    if is_artist_url:
         print("  " + DIM("If enabled, also downloads individual tracks where the artist appears as a featured artist"))
-        print("  " + DIM("on other artists' releases (appears_on on Spotify, compilations on Tidal)"))
+        print("  " + DIM("on other artists' releases (appears_on on Spotify/Apple Music, compilations on Tidal)"))
         cfg["include_featuring"] = _ask_bool("Include featuring tracks?", False)
     else:
         print(f"  {YELLOW('⏭  Skipped:')} {DIM('The provided URL does not belong to an artist page.')}")
