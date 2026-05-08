@@ -98,7 +98,8 @@ class AppleMusicMetadataClient:
         self._session.headers.update({
             "User-Agent": _APPLE_UA,
             "Accept": "application/json",
-            "Origin": "https://music.apple.com"
+            "Origin": "https://music.apple.com",
+            "Referer": "https://music.apple.com/" # Nuovo header richiesto
         })
         self._auth_token = None
 
@@ -107,18 +108,44 @@ class AppleMusicMetadataClient:
         if self._auth_token: return self._auth_token
         try:
             res = self._session.get("https://music.apple.com/us/browse", timeout=self._timeout)
-            meta_match = re.search(r'<meta\s+name="desktop-music-app/config/environment"\s+content="([^"]+)"', res.text)
-            if meta_match:
-                data = json.loads(urllib.parse.unquote(meta_match.group(1)))
-                self._auth_token = data.get("MEDIA_API", {}).get("token")
-                return self._auth_token
-        except Exception as e:
-            logger.warning("[apple_metadata] Impossibile recuperare JWT token: %s", e)
-        return ""
 
+            # L'intestazione del token JWT di Apple è cambiata.
+            # Usiamo una regex universale per JWT: Header(eyJ) . Payload(eyJ) . Signature
+            jwt_pattern = re.compile(r'(eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)')
+
+            # 1. Ricerca globale nell'HTML
+            unquoted_html = urllib.parse.unquote(res.text)
+            for match in jwt_pattern.finditer(unquoted_html):
+                token = match.group(1)
+                # I token di Apple Music sono molto lunghi (>200 caratteri). Evitiamo falsi positivi.
+                if len(token) > 150:
+                    self._auth_token = token
+                    return token
+
+            # 2. Fallback: Ricerca in tutti i file Javascript della pagina
+            # (In caso Apple decida di spostare il token nei bundle JS asincroni)
+            js_scripts = re.findall(r'<script[^>]+src="([^"]+\.js)"', res.text)
+            for js_url in js_scripts:
+                if js_url.startswith('/'):
+                    js_url = "https://music.apple.com" + js_url
+                try:
+                    js_res = self._session.get(js_url, timeout=self._timeout)
+                    for match in jwt_pattern.finditer(urllib.parse.unquote(js_res.text)):
+                        token = match.group(1)
+                        if len(token) > 150:
+                            self._auth_token = token
+                            return token
+                except Exception:
+                    continue
+
+            raise Exception("Token non trovato nell'HTML o nei JS")
+
+        except Exception as e:
+            logger.error("[apple_metadata] Impossibile recuperare JWT token: %s", e)
+            raise SpotiflacError(ErrorKind.NETWORK, "Impossibile recuperare il token di Apple Music. Accesso negato (401).")
     def _get(self, path: str, params: dict | None = None) -> dict:
         token = self._get_token()
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        headers = {"Authorization": f"Bearer {token}"}
 
         resp = self._session.get(
             f"https://amp-api.music.apple.com/v1/catalog/{path.lstrip('/')}",
@@ -126,6 +153,11 @@ class AppleMusicMetadataClient:
             headers=headers,
             timeout=self._timeout
         )
+
+        # Resetta il token se scade durante la sessione
+        if resp.status_code == 401:
+            self._auth_token = None
+
         resp.raise_for_status()
         return resp.json()
 
