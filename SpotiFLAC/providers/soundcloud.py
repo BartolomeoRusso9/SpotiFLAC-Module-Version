@@ -19,10 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class SoundCloudProvider(BaseProvider):
+    name = "soundcloud"
+
     def __init__(self):
         super().__init__()
         self.provider_id = "soundcloud"
-        self.name        = "SoundCloud"
         self.api_url     = "https://api-v2.soundcloud.com"
         self.client_id   = None
         self.client_id_expiry = 0

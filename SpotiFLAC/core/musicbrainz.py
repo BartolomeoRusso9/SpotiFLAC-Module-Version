@@ -8,7 +8,7 @@ import threading
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
-
+import atexit as _atexit
 import requests
 import threading as _threading
 
@@ -286,11 +286,11 @@ def mb_result_to_tags(res: dict) -> dict[str, str]:
     return tags
 
 class AsyncMBFetch:
-    """
-    Avvia la ricerca di MusicBrainz in background.
-    Restituisce un dizionario completo con tutti i metadati professionali.
-    """
     _executor = ThreadPoolExecutor(max_workers=4)
+
+    @classmethod
+    def _shutdown(cls) -> None:
+        cls._executor.shutdown(wait=False)
 
     def __init__(self, isrc: str):
         self.isrc = isrc
@@ -302,4 +302,6 @@ class AsyncMBFetch:
         except Exception as e:
             logger.debug("[musicbrainz] Async fetch failed: %s", e)
             return {}
+
+_atexit.register(AsyncMBFetch._shutdown)
 
