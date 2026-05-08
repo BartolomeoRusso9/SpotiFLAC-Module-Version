@@ -30,6 +30,41 @@ _DEFAULT_UA = (
 YT_SEARCH_PARAMS_TRACKS = "EgWKAQIIAQ=="
 INNERTUBE_CLIENT_VERSION = "1.20240801.01.00"
 COBALT_API_URL = "https://api.zarz.moe/v1/dl/cobalt"
+_INNERTUBE_CLIENTS = [
+    # ANDROID_VR: NON richiede GVS PO Token — va provato PRIMO
+    {
+        "name": "android_vr",
+        "clientName": "ANDROID_VR",
+        "clientVersion": "1.65.10",
+        "ua": "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+        "extra": {
+            "androidSdkVersion": 32,
+            "osName": "Android", "osVersion": "12L",
+            "platform": "MOBILE",
+            "deviceMake": "Oculus", "deviceModel": "Quest 3",
+            "hl": "en", "gl": "US",
+            "timeZone": "UTC", "utcOffsetMinutes": 0,
+        },
+        "key": "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
+        "clientHeader": "28",
+    },
+    # ANDROID: richiede PO token ma proviamo come fallback
+    {
+        "name": "android",
+        "clientName": "ANDROID",
+        "clientVersion": "21.02.35",
+        "ua": "com.google.android.youtube/21.02.35 (Linux; U; Android 11) gzip",
+        "extra": {
+            "androidSdkVersion": 30,
+            "osName": "Android", "osVersion": "11",
+            "platform": "MOBILE",
+            "hl": "en", "gl": "US",
+            "timeZone": "UTC", "utcOffsetMinutes": 0,
+        },
+        "key": "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
+        "clientHeader": "3",
+    },
+]
 
 def _sanitize(value: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", value).strip()
@@ -288,86 +323,95 @@ class YouTubeProvider(BaseProvider):
 
     def _request_direct_innertube(self, video_id: str) -> str | None:
         """
-        Tentativo di emulazione del direct download senza decrittazione JS.
-        Utilizziamo un client Android che a volte restituisce URL non cifrati.
+        Prova i client InnerTube in ordine: ANDROID_VR prima (no PO token),
+        poi ANDROID come fallback. Allineato all'index.js del provider mobile.
         """
-        url = "https://music.youtube.com/youtubei/v1/player?alt=json"
-        payload = {
-            "context": {
-                "client": {
-                    "clientName": "ANDROID",
-                    "clientVersion": "21.02.35",
-                    "androidSdkVersion": 30,
-                    "osName": "Android",
-                    "osVersion": "11"
-                }
-            },
-            "videoId": video_id,
-            "contentCheckOk": True,
-            "racyCheckOk": True
-        }
-        try:
-            resp = self._session.post(url, json=payload, headers={"User-Agent": "com.google.android.youtube/21.02.35 (Linux; U; Android 11) gzip"}, timeout=10)
-            if resp.status_code == 200:
+        player_url = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false"
+
+        for client in _INNERTUBE_CLIENTS:
+            payload = {
+                "videoId": video_id,
+                "contentCheckOk": True,
+                "racyCheckOk": True,
+                "context": {
+                    "client": {
+                        "clientName": client["clientName"],
+                        "clientVersion": client["clientVersion"],
+                        **client["extra"],
+                    }
+                },
+            }
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": client["ua"],
+                "Origin": "https://www.youtube.com",
+                "X-YouTube-Client-Name": client["clientHeader"],
+                "X-YouTube-Client-Version": client["clientVersion"],
+            }
+            try:
+                resp = self._session.post(
+                    player_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=10,
+                )
+                if resp.status_code != 200:
+                    logger.debug("[youtube] %s: HTTP %s", client["name"], resp.status_code)
+                    continue
+
                 data = resp.json()
-                formats = data.get("streamingData", {}).get("adaptiveFormats", [])
-                for fmt in formats:
-                    # Cerca formati audio compatibili (140 = m4a, 251 = opus) che hanno un URL diretto (non cifrato)
-                    if fmt.get("itag") in [251, 140, 250, 249] and fmt.get("url"):
-                        logger.info("[youtube] Direct InnerTube URL found (itag=%s)", fmt["itag"])
-                        return fmt["url"]
-        except Exception as exc:
-            logger.debug("[youtube] Direct InnerTube fallback failed: %s", exc)
+                if data.get("playabilityStatus", {}).get("status") != "OK":
+                    logger.debug("[youtube] %s: not OK — %s", client["name"],
+                                 data.get("playabilityStatus", {}).get("reason", "?"))
+                    continue
+
+                streaming = data.get("streamingData", {})
+                all_formats = streaming.get("formats", []) + streaming.get("adaptiveFormats", [])
+
+                # Preferenza itag: 251 (opus), 140 (m4a), 250, 249
+                for preferred in [251, 140, 250, 249]:
+                    for fmt in all_formats:
+                        if fmt.get("itag") == preferred and fmt.get("url"):
+                            logger.info("[youtube] %s: direct URL found (itag=%s)",
+                                        client["name"], preferred)
+                            return fmt["url"]
+
+            except Exception as exc:
+                logger.debug("[youtube] %s InnerTube failed: %s", client["name"], exc)
+
         return None
 
     def _request_cobalt(self, video_url: str) -> str | None:
         """
-        Allineato all'implementazione JS: tenta l'istanza zarz, poi fa fallback
-        sulle istanze pubbliche ufficiali di Cobalt con gli header anti-bot.
+        Allineato all'index.js: usa User-Agent SpotiFLAC-Mobile senza
+        Origin/Referer (così come fa il provider mobile nativo).
         """
-        instances = [
-            COBALT_API_URL,                       # 1. API Primaria (zarz.moe)
-            "https://api.cobalt.tools/",          # 2. API Ufficiale
-            "https://co.wuk.sh/",                 # 3. Istanza pubblica affidabile
-            "https://cobalt-api.kwiatekit.com/"   # 4. Istanza pubblica di backup
-        ]
-
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": _DEFAULT_UA,
-            # FONDAMENTALE: Gli header per bypassare i controlli 400/403 di Cobalt
-            "Origin": "https://cobalt.tools",
-            "Referer": "https://cobalt.tools/"
-        }
-
-        # Payload v7 per Cobalt allineato a JS
         payload = {
             "url": video_url,
             "downloadMode": "audio",
-            "audioFormat": "best"
+            "audioFormat": "best",
+            }
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "SpotiFLAC-Mobile",  # getAppUserAgent() nel JS
         }
+        try:
+            resp = self._session.post(
+                COBALT_API_URL,
+                json=payload,
+                headers=headers,
+                timeout=15,
+            )
 
-        for api_url in instances:
-            try:
-                logger.info(f"[youtube] Attempting Cobalt API via {api_url}...")
-                resp = self._session.post(api_url, json=payload, headers=headers, timeout=15)
-
-                if resp.status_code in (200, 202):
-                    data = resp.json()
-                    dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
-
-                    if dl_url:
-                        logger.info(f"[youtube] Cobalt URL generated successfully via {api_url}")
-                        return dl_url
-                else:
-                    logger.debug(f"[youtube] Cobalt instance {api_url} returned HTTP {resp.status_code}")
-
-            except Exception as exc:
-                logger.debug(f"[youtube] Cobalt instance {api_url} failed: {exc}")
-                continue
-
-        logger.warning("[youtube] All Cobalt instances failed.")
+            if resp.status_code in (200, 202):
+                data = resp.json()
+                dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
+                if dl_url:
+                    return dl_url
+            logger.warning("[youtube] Cobalt returned HTTP %s", resp.status_code)
+        except Exception as exc:
+            logger.debug("[youtube] Cobalt failed: %s", exc)
         return None
 
     def _request_yt1d(self, video_url: str) -> str | None:

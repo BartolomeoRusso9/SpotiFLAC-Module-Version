@@ -143,18 +143,24 @@ class AppleMusicMetadataClient:
         except Exception as e:
             logger.error("[apple_metadata] Impossibile recuperare JWT token: %s", e)
             raise SpotiflacError(ErrorKind.NETWORK, "Impossibile recuperare il token di Apple Music. Accesso negato (401).")
+
     def _get(self, path: str, params: dict | None = None) -> dict:
         token = self._get_token()
         headers = {"Authorization": f"Bearer {token}"}
 
+        # Se il path è già un URL assoluto (es. dalla paginazione), usalo direttamente
+        if path.startswith("https://"):
+            url = path
+        else:
+            url = f"https://amp-api.music.apple.com/v1/catalog/{path.lstrip('/')}"
+
         resp = self._session.get(
-            f"https://amp-api.music.apple.com/v1/catalog/{path.lstrip('/')}",
+            url,
             params=params,
             headers=headers,
             timeout=self._timeout
         )
 
-        # Resetta il token se scade durante la sessione
         if resp.status_code == 401:
             self._auth_token = None
 
@@ -195,39 +201,88 @@ class AppleMusicMetadataClient:
         tracks = [self._parse_item(item) for item in tracks_data if item.get("type") == "songs"]
         return playlist_data, tracks
 
+    def _paginate_relationship(self, initial_path: str) -> list[dict]:
+        results: list[dict] = []
+        next_url: str | None = initial_path  # prima iterazione usa il path relativo
+
+        while next_url:
+            try:
+                data = self._get(next_url)
+            except Exception as exc:
+                logger.warning("[apple_metadata] paginazione interrotta: %s", exc)
+                break
+
+            page = data.get("data", [])
+            results.extend(page)
+
+            raw_next = data.get("next")  # es. "/v1/catalog/us/artists/123/albums?offset=25"
+            if not raw_next or not page:
+                break
+
+            # Apple Music restituisce 'next' come path assoluto senza host —
+            # lo convertiamo in URL completo per il prossimo giro
+            next_url = "https://amp-api.music.apple.com" + raw_next
+
+            import time as _time
+            _time.sleep(0.3)
+
+        return results
+
     def get_artist_albums(
             self,
             artist_id: str,
             include_featuring: bool = False,
-            storefront: str = "us"
+            storefront: str = "us",
     ) -> tuple[dict, list[TrackMetadata]]:
         """
-        Recupera la discografia completa di un artista Apple Music via AMP API.
+        Recupera la discografia completa di un artista Apple Music via AMP API,
+        con paginazione corretta e supporto per le featuring (appears-on-albums).
         """
-        # Fetch dati artista includendo gli album associati
-        data = self._get(f"/{storefront}/artists/{artist_id}", {"include": "albums"})
-        results = data.get("data", [])
-        if not results:
+        # 1. Dati artista (senza include=albums per non sprecare la quota della prima pagina)
+        artist_data = self._get(f"/{storefront}/artists/{artist_id}")
+        artist_results = artist_data.get("data", [])
+        if not artist_results:
             raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Artista {artist_id} non trovato.")
 
-        artist_data = results[0]
-        artist_name = artist_data.get("attributes", {}).get("name", "Unknown")
+        artist_obj  = artist_results[0]
+        artist_name = artist_obj.get("attributes", {}).get("name", "Unknown")
 
-        # Raccogliamo gli ID degli album dalle relazioni (relationships)
-        albums_data = artist_data.get("relationships", {}).get("albums", {}).get("data", [])
-        albums_to_fetch = [str(a.get("id")) for a in albums_data if a.get("id")]
+        # 2. Raccoglie gli ID album paginando l'endpoint dedicato
+        #    (più affidabile di ?include=albums che è limitato a 25)
+        album_ids: list[str] = []
+        seen_ids:  set[str]  = set()
 
+        # Album propri
+        for album_data in self._paginate_relationship(
+                f"/{storefront}/artists/{artist_id}/albums"
+        ):
+            aid = str(album_data.get("id", ""))
+            if aid and aid not in seen_ids:
+                seen_ids.add(aid)
+                album_ids.append(aid)
+
+        # Featuring (appears-on): album di altri artisti dove compare
+        if include_featuring:
+            for album_data in self._paginate_relationship(
+                    f"/{storefront}/artists/{artist_id}/appears-on-albums"
+            ):
+                aid = str(album_data.get("id", ""))
+                if aid and aid not in seen_ids:
+                    seen_ids.add(aid)
+                    album_ids.append(aid)
+
+        logger.info("[apple_metadata] %s: %d album totali da scaricare", artist_name, len(album_ids))
+
+        # 3. Fetch parallelo delle tracce di ogni album
         tracks: list[TrackMetadata] = []
         seen_isrc: set[str] = set()
 
-        # Fetch parallelo dei metadati (max 5 richieste simultanee per rispettare rate limit)
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_album = {
                 executor.submit(self.get_album_tracks, aid, storefront=storefront): aid
-                for aid in albums_to_fetch
+                for aid in album_ids
             }
-
-            results_dict = {}
+            results_dict: dict[str, list[TrackMetadata]] = {}
             for future in as_completed(future_to_album):
                 aid = future_to_album[future]
                 try:
@@ -236,23 +291,28 @@ class AppleMusicMetadataClient:
                 except Exception as exc:
                     logger.warning("[apple_metadata] album %s saltato: %s", aid, exc)
 
-        # Ricostruiamo la lista di tracce
-        for aid in albums_to_fetch:
+        # 4. Merge in ordine originale, deduplicazione per ISRC
+        for aid in album_ids:
             if aid not in results_dict:
                 continue
             for track in results_dict[aid]:
                 if track.isrc and track.isrc in seen_isrc:
-                    logger.debug("[apple_metadata] duplicato saltato: %s (ISRC %s)", track.title, track.isrc)
+                    logger.debug("[apple_metadata] duplicato saltato: %s (ISRC %s)",
+                                 track.title, track.isrc)
                     continue
 
-                if not include_featuring and not _artist_in_track(artist_name, track.artists):
-                    continue
+                # Se è un featuring, includi solo tracce dove compare effettivamente
+                if include_featuring and aid not in {
+                    a for a in album_ids[:len(album_ids)]
+                }:
+                    if not _artist_in_track(artist_name, track.artists):
+                        continue
 
                 if track.isrc:
                     seen_isrc.add(track.isrc)
                 tracks.append(track)
 
-        return artist_data, tracks
+        return artist_obj, tracks
 
     # ------------------------------------------------------------------
     # Entry point pubblico
