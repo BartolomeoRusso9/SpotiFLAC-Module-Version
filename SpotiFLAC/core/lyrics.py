@@ -2,12 +2,16 @@
 """
 Multi-provider lyrics fetcher.
 
-Ordine di tentativo (configurabile):
+Ordine di tentativo (configurabile via DEFAULT_LYRICS_PROVIDERS):
   1. Spotify Web  — testo sincronizzato LRC (richiede sp_dc cookie)
   2. Apple Music  — testo sincronizzato LRC via paxsenix proxy
   3. Musixmatch   — testo sincronizzato / plain via paxsenix proxy
   4. Amazon Music — testo plain via API
   5. LRCLIB       — testo sincronizzato / plain
+
+FIX: DEFAULT_LYRICS_PROVIDERS è ora una costante esportabile usata anche da
+__init__.py e launcher.py, eliminando le tre definizioni inconsistenti
+che prima divergevano silenziosamente.
 """
 from __future__ import annotations
 
@@ -18,6 +22,16 @@ from typing import Any
 import requests
 import re
 import unicodedata
+
+# ---------------------------------------------------------------------------
+# Costante condivisa — importata da __init__.py, launcher.py, downloader.py
+# ---------------------------------------------------------------------------
+DEFAULT_LYRICS_PROVIDERS  = ["spotify", "apple", "musixmatch", "lrclib", "amazon"]
+DEFAULT_ENRICH_PROVIDERS  = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def simplify_track_name(name: str) -> str:
     """Rimuove suffissi come (feat. ...), - Remastered, (Radio Edit), ecc."""
@@ -70,8 +84,8 @@ _UA = (
     "Chrome/145.0.0.0 Safari/537.36"
 )
 
-# Aggiunto Apple Music e messo in priorità
-_DEFAULT_PROVIDERS = ["spotify", "apple", "musixmatch", "amazon", "lrclib"]
+# Provider set che usano ID/ISRC: il titolo non influisce, inutile riprovare
+_ID_BASED_PROVIDERS = {"spotify", "amazon"}
 
 
 # --------------------------------------------------------------------------- #
@@ -157,7 +171,6 @@ def _spotify_client_token(sp_dc: str, timeout: int) -> str:
 
 def _score_apple_result(res: dict, t_name: str, a_name: str, duration_s: int) -> int:
     score = 0
-    # Usa la nuova normalizzazione invece di un semplice .lower().strip()
     r_t = normalize_loose_string(res.get("songName", ""))
     r_a = normalize_loose_string(res.get("artistName", ""))
     t_t = normalize_loose_string(t_name)
@@ -172,7 +185,7 @@ def _score_apple_result(res: dict, t_name: str, a_name: str, duration_s: int) ->
     r_dur = res.get("duration", 0)
     if duration_s > 0 and r_dur > 0:
         diff = abs((r_dur / 1000.0) - duration_s)
-        if diff <= 5:  # Tolerance
+        if diff <= 5:
             score += 20
     return score
 
@@ -226,7 +239,6 @@ def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: in
 # --------------------------------------------------------------------------- #
 
 def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
-    # Aggiunto il loop per tentare prima word, poi line
     for sync_type in ["word", "line"]:
         params = {
             "t": track_name,
@@ -337,6 +349,7 @@ def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", durat
                 return best_synced or best_plain or ""
     except Exception: pass
     return ""
+
 # --------------------------------------------------------------------------- #
 # Public API                                                                   #
 # --------------------------------------------------------------------------- #
@@ -352,22 +365,17 @@ def fetch_lyrics(
         spotify_token:    str  = "",
 ) -> tuple[str, str]:
     if providers is None:
-        providers = _DEFAULT_PROVIDERS
+        providers = DEFAULT_LYRICS_PROVIDERS
 
     clean_track  = simplify_track_name(track_name)
     clean_artist = get_primary_artist(artist_name)
 
-    # Se il titolo contiene " - " (es. "6. ARTIST - Song Title"),
-    # prepara anche il titolo abbreviato come fallback.
     _short = clean_track.split(" - ", 1)[-1].strip() if " - " in clean_track else None
     short_track = _short if _short and _short != clean_track else None
 
-    # Provider che usano ID/ISRC: il titolo non influisce, inutile riprovare.
-    _ID_BASED = {"spotify", "amazon"}
-
     for provider in providers:
         titles_to_try = [clean_track]
-        if short_track and provider not in _ID_BASED:
+        if short_track and provider not in _ID_BASED_PROVIDERS:
             titles_to_try.append(short_track)
 
         for title in titles_to_try:
@@ -394,8 +402,7 @@ def fetch_lyrics(
                 logger.debug("[lyrics] found via %s (%d chars)", label, len(result))
                 return add_lrc_metadata(result.strip(), track_name, artist_name), provider
 
-            # Per provider ID-based non ha senso iterare su titoli alternativi.
-            if provider in _ID_BASED:
+            if provider in _ID_BASED_PROVIDERS:
                 break
 
     logger.debug("[lyrics] not found for '%s' by '%s'", track_name, artist_name)

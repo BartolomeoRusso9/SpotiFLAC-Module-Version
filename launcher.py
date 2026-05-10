@@ -89,10 +89,10 @@ def parse_args() -> argparse.Namespace:
     lyrics_grp.add_argument(
         "--lyrics-providers",
         nargs   = "+",
-        default = ["spotify", "lrclib", "apple", "amazon"],
+        default = ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
         dest    = "lyrics_providers",
         choices = ["spotify", "apple", "musixmatch", "amazon", "lrclib"],
-        help    = "Provider testi in ordine (default: spotify lrclib apple amazon).",
+        help    = "Provider testi in ordine (default: spotify apple musixmatch lrclib amazon).",
     )
     lyrics_grp.add_argument(
         "--spotify-token",
@@ -115,8 +115,6 @@ def parse_args() -> argparse.Namespace:
     enrich_grp.add_argument(
         "--enrich-providers",
         nargs   = "+",
-        # FIX #3: rimosso "youtube" dal default — non esiste in _PROVIDERS
-        # di metadata_enrichment.py e causava un provider silenziosamente ignorato.
         default = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         dest    = "enrich_providers",
         choices = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
@@ -164,9 +162,13 @@ def main() -> None:
         args = parse_args()
         file_cfg = load_config()
 
-        quality       = getattr(args, 'quality', None)       or file_cfg.get("quality", "LOSSLESS")
-        qobuz_token   = getattr(args, 'qobuz_token', None)   or file_cfg.get("qobuz_token")
-        spotify_token = getattr(args, 'spotify_token', None) or file_cfg.get("spotify_token", "")
+        # FIX: le variabili merged vengono ora effettivamente usate nel call a SpotiFLAC().
+        # Prima il codice calcolava quality/qobuz_token/spotify_token unificati
+        # ma poi passava args.quality / args.qobuz_token / args.spotify_token (raw),
+        # rendendo il merge da config.json completamente inutile.
+        quality       = args.quality       or file_cfg.get("quality", "LOSSLESS")
+        qobuz_token   = args.qobuz_token   or file_cfg.get("qobuz_token")
+        spotify_token = args.spotify_token or file_cfg.get("spotify_token", "")
 
         log_level = logging.DEBUG if args.verbose else logging.WARNING
         logging.basicConfig(
@@ -184,16 +186,16 @@ def main() -> None:
             use_artist_subfolders    = args.use_artist_subfolders,
             use_album_subfolders     = args.use_album_subfolders,
             loop                     = args.loop,
-            quality                  = args.quality,
+            quality                  = quality,         # FIX: era args.quality
             first_artist_only        = args.first_artist_only,
             log_level                = log_level,
             output_path              = args.output_path,
             embed_lyrics             = args.embed_lyrics,
             lyrics_providers         = args.lyrics_providers,
-            lyrics_spotify_token     = args.spotify_token,
+            lyrics_spotify_token     = spotify_token,   # FIX: era args.spotify_token
             enrich_metadata          = args.enrich,
             enrich_providers         = args.enrich_providers,
-            qobuz_token              = args.qobuz_token,
+            qobuz_token              = qobuz_token,     # FIX: era args.qobuz_token
             include_featuring        = args.include_featuring,
         )
 

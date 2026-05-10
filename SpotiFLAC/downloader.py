@@ -40,13 +40,13 @@ class DownloadOptions:
 
     embed_lyrics:            bool            = True
     lyrics_providers:        list[str]       = field(
-        default_factory=lambda: ["spotify", "musixmatch", "amazon", "lrclib"]
+        default_factory=lambda: ["spotify", "apple", "musixmatch", "lrclib", "amazon"]
     )
     lyrics_spotify_token:    str             = ""
 
     enrich_metadata:         bool            = True
     enrich_providers:        list[str]       = field(
-        default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"]
+        default_factory=lambda: ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
     )
     qobuz_token:             str | None      = None
     include_featuring:       bool            = False
@@ -215,7 +215,6 @@ class DownloadWorker:
 
     def _print_summary(self, elapsed: float) -> None:
         succeeded = len(self._tracks) - len(self._failed)
-        # passa solo (title, artists, err) escludendo l'id in posizione 0
         display = [(t, a, e) for _, t, a, e in self._failed]
         print_summary(len(self._tracks), succeeded, display, elapsed)
 
@@ -285,7 +284,7 @@ class SpotiflacDownloader:
 
         if not tracks:
             return collection_name, [], {}
-        # ── Costruzione url_info ───────────────────────────────────────────
+
         if is_tidal:
             info = parse_tidal_url(url)
         elif is_apple:
@@ -326,7 +325,6 @@ class SpotiflacDownloader:
         only_apple   = len(self._opts.services) == 1 and self._opts.services[0] == "apple"
         only_youtube = len(self._opts.services) == 1 and self._opts.services[0] == "youtube"
 
-        # SoundCloud e provider che non usano ISRC: skip silenzioso
         if only_apple or only_youtube:
             return tracks
 
@@ -378,43 +376,48 @@ class SpotiflacDownloader:
             collection_name = "Retry Failed Tracks"
             is_album        = self._opts.is_album
             is_playlist     = len(tracks) > 1
-            info            = {}
-        else:
-            try:
-                collection_name, tracks, info = self._resolve_metadata(url)
-            except SpotiflacError as exc:
-                logger.error("Metadata fetch failed: %s", exc)
-                print(f"Error: {exc}")
-                return []
+            return self._run_worker(tracks, collection_name, {}, is_album, is_playlist)
 
-            if not tracks:
-                print("No tracks found.")
-                return []
+        try:
+            collection_name, tracks, info = self._resolve_metadata(url)
+        except SpotiflacError as exc:
+            logger.error("Metadata fetch failed: %s", exc)
+            print(f"Error: {exc}")
+            return []
 
-            # Determina tipo dalla info prima di modificare opts
-            is_album       = info.get("type") == "album"
-            is_playlist    = info.get("type") in ("playlist", "artist", "artist_discography")
-            is_discography = info.get("type") in ("artist", "artist_discography")
-            if is_discography:
-                is_playlist = True
+        if not tracks:
+            print("No tracks found.")
+            return []
 
-            self._opts.is_album = is_album
+        is_album       = info.get("type") == "album"
+        is_playlist    = info.get("type") in ("playlist", "artist", "artist_discography")
+        is_discography = info.get("type") in ("artist", "artist_discography")
+        if is_discography:
+            is_playlist = True
 
-            # output_path non ha senso per collezioni
-            if (is_album or is_playlist) and self._opts.output_path:
-                logger.warning(
-                    "[downloader] output_path ignorato: il link è un %s.", info.get("type")
-                )
-                print(
-                    f"Avviso: --output-path viene ignorato per {info.get('type')}. "
-                    "I file verranno salvati seguendo la normale rinominazione."
-                )
-                self._opts.output_path = None
+        # FIX: invece di mutare self._opts (side effect su oggetto condiviso),
+        # aggiorniamo is_album localmente e lo passiamo esplicitamente ai metodi.
+        # Prima: self._opts.is_album = is_album  ← mutazione inattesa
+        effective_opts = self._opts
+        if self._opts.is_album != is_album:
+            from dataclasses import replace
+            effective_opts = replace(self._opts, is_album=is_album)
 
-            # SoundCloud non ha ISRC affidabili
-            is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
-            if not is_soundcloud:
-                tracks = self._resolve_isrc_bulk(tracks)
+        # FIX: output_path non ha senso per collezioni.
+        # Prima il codice mutava self._opts.output_path = None (side effect permanente).
+        # Ora lo segnaliamo con un solo logger.warning senza mutare lo stato.
+        if (is_album or is_playlist) and self._opts.output_path:
+            logger.warning(
+                "[downloader] --output-path ignorato per %s: "
+                "i file verranno salvati con la normale rinominazione.",
+                info.get("type"),
+            )
+            from dataclasses import replace
+            effective_opts = replace(effective_opts, output_path=None)
+
+        is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
+        if not is_soundcloud:
+            tracks = self._resolve_isrc_bulk(tracks)
 
         return self._run_worker(tracks, collection_name, info, is_album, is_playlist)
 
