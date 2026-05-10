@@ -295,9 +295,10 @@ class TidalMetadataClient:
         albums_to_fetch: list[tuple[str, dict, bool]] = []
 
         if include_featuring:
-            groups = set(include_groups.split(","))
-            groups.add(_TIDAL_FILTER_COMPILATIONS)
-            include_groups = ",".join(groups)
+            existing = include_groups.split(",")
+            if _TIDAL_FILTER_COMPILATIONS not in existing:
+                existing.append(_TIDAL_FILTER_COMPILATIONS)
+            include_groups = ",".join(existing)
 
         for group in include_groups.split(","):
             group = group.strip().upper()
@@ -306,8 +307,6 @@ class TidalMetadataClient:
 
             try:
                 # FIX: passiamo SEMPRE filter, anche per ALBUMS.
-                # Prima il codice non passava filter per ALBUMS, causando
-                # un ritorno potenzialmente indeterminato dall'API Tidal.
                 albums = self._paginate(
                     f"/artists/{artist_id}/albums",
                     extra_params={"filter": group},
@@ -327,7 +326,6 @@ class TidalMetadataClient:
                 # HTTP extra in get_album_tracks
                 albums_to_fetch.append((album_id, album_data, is_compilation))
 
-        # Fetch parallelo delle tracce di ogni album (max 5 richieste simultanee)
         # Fetch parallelo delle tracce di ogni album (max 5 richieste simultanee)
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_album = {

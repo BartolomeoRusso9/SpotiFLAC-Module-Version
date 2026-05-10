@@ -23,9 +23,13 @@ _MB_THROTTLE_COOLDOWN    = 5.0
 
 _USER_AGENT = "SpotiFLAC/2.0 ( support@spotbye.qzz.io )"
 
-_mb_cache: dict[str, dict] = {}
+# FIX: sentinel per distinguere "lookup fallito" da "lookup non ancora avvenuto".
+# Prima, quando il leader thread falliva, i follower ricevevano {} dal get() sulla
+# cache vuota, senza modo di sapere se fosse un fallimento o un risultato legittimo.
+_LOOKUP_FAILED = object()
+
+_mb_cache: dict[str, object] = {}
 _mb_inflight: dict[str, threading.Event] = {}
-# FIX #4: rimossa _mb_inflight_results — era definita ma mai letta né scritta (codice morto)
 _mb_inflight_mu = threading.Lock()
 
 _mb_throttle_mu = threading.Lock()
@@ -121,8 +125,11 @@ def fetch_mb_metadata(isrc: str) -> dict:
 
     cache_key = isrc.strip().upper()
 
-    if cache_key in _mb_cache:
-        return _mb_cache[cache_key]
+    # FIX: controlla il cache con il sentinel.
+    cached = _mb_cache.get(cache_key)
+    if cached is not None:
+        # Se era un lookup fallito, restituiamo {} senza ritentare
+        return {} if cached is _LOOKUP_FAILED else cached  # type: ignore[return-value]
 
     if should_skip_mb():
         logger.debug("[musicbrainz] skipped (offline recently)")
@@ -139,26 +146,31 @@ def fetch_mb_metadata(isrc: str) -> dict:
 
     if not is_leader:
         event.wait()
-        return _mb_cache.get(cache_key, {})
+        # FIX: controlla il sentinel anche per i follower
+        result = _mb_cache.get(cache_key)
+        return {} if (result is None or result is _LOOKUP_FAILED) else result  # type: ignore[return-value]
 
-    res = {
-        "genre": "", "original_date": "", "bpm": "", "mbid_track": "",
-        "mbid_album": "", "mbid_artist": "", "mbid_relgroup": "",
-        "mbid_albumartist": "", "albumartist_sort": "", "catalognumber": "",
-        "label": "", "barcode": "", "organization": "",
-        "country": "", "script": "", "status": "",
-        "media": "", "type": "", "artist_sort": ""
-    }
+    res: dict | object = _LOOKUP_FAILED  # Default: lookup fallito
 
     try:
         data = _query_recordings(f"isrc:{isrc}")
         set_mb_status(True)
+
+        parsed: dict = {
+            "genre": "", "original_date": "", "bpm": "", "mbid_track": "",
+            "mbid_album": "", "mbid_artist": "", "mbid_relgroup": "",
+            "mbid_albumartist": "", "albumartist_sort": "", "catalognumber": "",
+            "label": "", "barcode": "", "organization": "",
+            "country": "", "script": "", "status": "",
+            "media": "", "type": "", "artist_sort": ""
+        }
+
         recs = data.get("recordings", [])
         if recs:
             rec = recs[0]
-            res["mbid_track"] = rec.get("id", "")
-            res["original_date"] = rec.get("first-release-date", "")
-            res["bpm"] = str(rec.get("bpm", "")) if rec.get("bpm") else ""
+            parsed["mbid_track"] = rec.get("id", "")
+            parsed["original_date"] = rec.get("first-release-date", "")
+            parsed["bpm"] = str(rec.get("bpm", "")) if rec.get("bpm") else ""
 
             credits = rec.get("artist-credit", [])
             if credits:
@@ -171,8 +183,8 @@ def fetch_mb_metadata(isrc: str) -> dict:
                     phrase = c.get("joinphrase", "")
                     if a_id: artist_ids.append(a_id)
                     if a_sort: sort_names.append(a_sort + phrase)
-                res["mbid_artist"] = "; ".join(artist_ids)
-                res["artist_sort"] = "".join(sort_names)
+                parsed["mbid_artist"] = "; ".join(artist_ids)
+                parsed["artist_sort"] = "".join(sort_names)
 
             all_tags = rec.get("tags", [])
             for c in credits:
@@ -183,7 +195,7 @@ def fetch_mb_metadata(isrc: str) -> dict:
                 for t in sorted_tags:
                     name = t.get("name", "").title()
                     if name and name not in genres: genres.append(name)
-                res["genre"] = "; ".join(genres[:5])
+                parsed["genre"] = "; ".join(genres[:5])
 
             releases = rec.get("releases", [])
             if releases:
@@ -196,15 +208,15 @@ def fetch_mb_metadata(isrc: str) -> dict:
                     return score
 
                 rel = max(releases, key=_release_score)
-                res["mbid_album"]    = rel.get("id", "")
-                res["mbid_relgroup"] = rel.get("release-group", {}).get("id", "")
-                res["status"]        = rel.get("status", "")
-                res["type"]          = rel.get("release-group", {}).get("primary-type", "")
-                res["country"]       = rel.get("country", "")
-                res["script"]        = rel.get("text-representation", {}).get("script", "")
+                parsed["mbid_album"]    = rel.get("id", "")
+                parsed["mbid_relgroup"] = rel.get("release-group", {}).get("id", "")
+                parsed["status"]        = rel.get("status", "")
+                parsed["type"]          = rel.get("release-group", {}).get("primary-type", "")
+                parsed["country"]       = rel.get("country", "")
+                parsed["script"]        = rel.get("text-representation", {}).get("script", "")
                 media = rel.get("media", [])
                 if media:
-                    res["media"] = media[0].get("format", "")
+                    parsed["media"] = media[0].get("format", "")
 
                 rel_credits = rel.get("artist-credit", [])
                 if rel_credits:
@@ -217,34 +229,41 @@ def fetch_mb_metadata(isrc: str) -> dict:
                         phrase = c.get("joinphrase", "")
                         if a_id:   aa_ids.append(a_id)
                         if a_sort: aa_sort_names.append(a_sort + phrase)
-                    res["mbid_albumartist"] = "; ".join(aa_ids)
-                    res["albumartist_sort"] = "".join(aa_sort_names)
+                    parsed["mbid_albumartist"] = "; ".join(aa_ids)
+                    parsed["albumartist_sort"] = "".join(aa_sort_names)
 
                 for r in releases:
-                    if not res.get("barcode") and r.get("barcode"):
-                        res["barcode"] = r["barcode"]
+                    if not parsed.get("barcode") and r.get("barcode"):
+                        parsed["barcode"] = r["barcode"]
                     for li in r.get("label-info", []):
                         lbl = li.get("label") or {}
-                        if not res.get("label") and lbl.get("name"):
-                            res["label"]        = lbl["name"]
-                            res["organization"] = lbl["name"]
-                        if not res.get("catalognumber") and li.get("catalog-number"):
-                            res["catalognumber"] = li["catalog-number"]
-                    if res.get("barcode") and res.get("label") and res.get("catalognumber"):
+                        if not parsed.get("label") and lbl.get("name"):
+                            parsed["label"]        = lbl["name"]
+                            parsed["organization"] = lbl["name"]
+                        if not parsed.get("catalognumber") and li.get("catalog-number"):
+                            parsed["catalognumber"] = li["catalog-number"]
+                    if parsed.get("barcode") and parsed.get("label") and parsed.get("catalognumber"):
                         break
 
-        _mb_cache[cache_key] = res
+        res = parsed  # Lookup riuscito
 
     except Exception as e:
         set_mb_status(False)
         logger.debug("[musicbrainz] lookup failed: %s", e)
-        return {}
+        res = _LOOKUP_FAILED
+
     finally:
+        # FIX: salva sempre qualcosa in cache (anche il sentinel di fallimento)
+        # così i follower non devono aspettare e i retry inutili vengono evitati
+        # finché MB non torna online (gestito da should_skip_mb).
+        _mb_cache[cache_key] = res
         event.set()
         with _mb_inflight_mu:
             _mb_inflight.pop(cache_key, None)
 
-    return res
+    return {} if res is _LOOKUP_FAILED else res  # type: ignore[return-value]
+
+
 def mb_result_to_tags(res: dict) -> dict[str, str]:
     """Converte il dizionario di risposta di MusicBrainz nei tag standard supportati da SpotiFLAC."""
     if not res:
@@ -304,4 +323,3 @@ class AsyncMBFetch:
             return {}
 
 _atexit.register(AsyncMBFetch._shutdown)
-

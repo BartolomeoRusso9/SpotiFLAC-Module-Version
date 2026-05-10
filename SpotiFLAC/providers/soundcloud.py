@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import re
-import json
-import time
-import os
 import logging
+import os
+import re
+import time
 from typing import Dict, List, Optional, Any
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
-from ..core.models import DownloadResult, TrackMetadata
-from ..core.link_resolver import LinkResolver
-from ..core.http import HttpClient
-from .base import BaseProvider
-from ..core.tagger import embed_metadata, EmbedOptions
 import requests
+
+from .base import BaseProvider
+from ..core.http import HttpClient
+from ..core.link_resolver import LinkResolver
+from ..core.models import DownloadResult, TrackMetadata
+from ..core.tagger import embed_metadata, EmbedOptions
 
 logger = logging.getLogger(__name__)
 

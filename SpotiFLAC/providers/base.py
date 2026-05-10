@@ -25,10 +25,10 @@ class BaseProvider(ABC):
     name: str = "base"
 
     def __init__(
-        self,
-        timeout_s:  int            = 30,
-        retry:      RetryConfig | None = None,
-        headers:    dict[str, str] | None = None,
+            self,
+            timeout_s:  int            = 30,
+            retry:      RetryConfig | None = None,
+            headers:    dict[str, str] | None = None,
     ) -> None:
         self._http = HttpClient(
             provider  = self.name,
@@ -47,25 +47,30 @@ class BaseProvider(ABC):
 
     @abstractmethod
     def download_track(
-        self,
-        metadata:   TrackMetadata,
-        output_dir: str,
-        *,
-        filename_format:     str  = "{title} - {artist}",
-        position:            int  = 1,
-        include_track_num:   bool = False,
-        use_album_track_num: bool = False,
-        first_artist_only:   bool = False,
-        allow_fallback:      bool = True,
-        embed_lyrics: bool = False,
-        lyrics_providers: list[str] | None = None,
-        lyrics_spotify_token: str = "",
-        enrich_metadata: bool = False,
-        enrich_providers: list[str] | None = None,
-        is_album: bool = False,
-        **kwargs,
+            self,
+            metadata:   TrackMetadata,
+            output_dir: str,
+            *,
+            filename_format:      str  = "{title} - {artist}",
+            position:             int  = 1,
+            include_track_num:    bool = False,
+            use_album_track_num:  bool = False,
+            first_artist_only:    bool = False,
+            allow_fallback:       bool = True,
+            embed_lyrics:         bool = False,
+            lyrics_providers:     list[str] | None = None,
+            lyrics_spotify_token: str  = "",
+            enrich_metadata:      bool = False,
+            enrich_providers:     list[str] | None = None,
+            is_album:             bool = False,
+            **kwargs,
     ) -> DownloadResult:
-        """Scarica la traccia e ritorna un DownloadResult (mai eccezioni al caller)."""
+        """
+        Scarica la traccia e ritorna un DownloadResult.
+
+        IMPORTANTE: le implementazioni NON devono propagare eccezioni al caller;
+        devono catturarle e restituire DownloadResult.fail(...) in caso di errore.
+        """
         raise NotImplementedError
 
     # ------------------------------------------------------------------
@@ -73,15 +78,15 @@ class BaseProvider(ABC):
     # ------------------------------------------------------------------
 
     def _build_output_path(
-        self,
-        metadata:            TrackMetadata,
-        output_dir:          str,
-        filename_format:     str,
-        position:            int,
-        include_track_num:   bool,
-        use_album_track_num: bool,
-        first_artist_only:   bool,
-        extension:           str = ".flac",
+            self,
+            metadata:            TrackMetadata,
+            output_dir:          str,
+            filename_format:     str,
+            position:            int,
+            include_track_num:   bool,
+            use_album_track_num: bool,
+            first_artist_only:   bool,
+            extension:           str = ".flac",
     ) -> Path:
         filename = build_filename(
             metadata,
@@ -104,22 +109,7 @@ class BaseProvider(ABC):
             return True
         return False
 
-    def _safe_download(
-        self,
-        metadata:   TrackMetadata,
-        output_dir: str,
-        **kwargs,
-    ) -> DownloadResult:
-        """
-        Wrapper che cattura SpotiflacError e ritorna DownloadResult.fail()
-        invece di propagare eccezioni — equivalente al pattern Go
-        `if err != nil { return err }`.
-        """
-        try:
-            return self.download_track(metadata, output_dir, **kwargs)
-        except SpotiflacError as exc:
-            logger.error("[%s] %s", self.name, exc)
-            return DownloadResult.fail(self.name, str(exc))
-        except Exception as exc:
-            logger.exception("[%s] Unexpected error", self.name)
-            return DownloadResult.fail(self.name, f"Unexpected: {exc}")
+    # FIX: rimosso _safe_download — era codice morto.
+    # Nessun provider lo chiamava: tutti invocano download_track() direttamente.
+    # Il pattern corretto è che download_track() catchi le eccezioni internamente
+    # e ritorni DownloadResult.fail(), come da docstring qui sopra.

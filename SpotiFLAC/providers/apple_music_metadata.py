@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
 import requests
+import time as _time
 
 from ..core.errors import NetworkError, SpotiflacError, ErrorKind, InvalidUrlError
 from ..core.models import TrackMetadata
@@ -223,7 +224,6 @@ class AppleMusicMetadataClient:
             # lo convertiamo in URL completo per il prossimo giro
             next_url = "https://amp-api.music.apple.com" + raw_next
 
-            import time as _time
             _time.sleep(0.3)
 
         return results

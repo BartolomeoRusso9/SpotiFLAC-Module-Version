@@ -41,15 +41,12 @@ class TrackMetadata(BaseModel):
         if not v:
             return "Unknown"
         s = str(v).strip()
-        
+
         if info.field_name in ("artists", "album_artist"):
-        # Sostituzioni dei separatori comuni con la virgola
             s = s.replace(" & ", ", ")
             s = s.replace(" / ", ", ")
             s = s.replace(" feat. ", ", ")
             s = s.replace(" ft. ", ", ")
-
-        # Esempio: "Artist A, Artist B & Artist C" -> "Artist A, Artist B, Artist C"
             parts = [p.strip() for p in s.split(",") if p.strip()]
             s = ", ".join(parts)
         return s or "Unknown"
@@ -86,7 +83,6 @@ class TrackMetadata(BaseModel):
             "DISCTOTAL":    str(self.total_discs or 1),
         }
 
-        # Campi opzionali
         for key, val in [
             ("ISRC",         self.isrc),
             ("COPYRIGHT",    self.copyright),
@@ -98,25 +94,55 @@ class TrackMetadata(BaseModel):
                 tags[key] = val
         return tags
 
+    def with_enrichment(self, extra: Any) -> "TrackMetadata":
+        """
+        Restituisce una nuova istanza aggiornata con i dati dell'enrichment.
+
+        FIX: in precedenza usava assegnazione diretta (self.field = value),
+        che è anti-pattern per Pydantic v2. Ora usa model_copy(update={})
+        che è l'approccio idiomatico e produce un nuovo oggetto immutabile.
+        """
+        updates: dict[str, Any] = {}
+
+        if extra.genre:
+            updates["genre"] = extra.genre
+
+        if extra.label:
+            if self.album in ("SoundCloud", "") or not self.album:
+                updates["album"] = extra.label
+            updates["publisher"] = extra.label
+
+        if extra.bpm:
+            updates["bpm"] = extra.bpm
+
+        if extra.cover_url_hd:
+            updates["cover_url"] = extra.cover_url_hd
+
+        if extra.isrc and not self.isrc:
+            updates["isrc"] = extra.isrc
+
+        if not updates:
+            return self
+        return self.model_copy(update=updates)
+
     def update_from_enriched(self, extra: Any) -> None:
         """
         Aggiorna i metadati base con i dati trovati tramite enrichment.
+
+        Deprecato: preferire with_enrichment() che ritorna una nuova istanza
+        (pattern immutabile, idiomatico per Pydantic v2).
+        Mantenuto per retrocompatibilità.
         """
         if extra.genre:
             self.genre = extra.genre
-
         if extra.label:
-            # Se l'album è un segnaposto ("SoundCloud"), usiamo la label ufficiale
             if self.album == "SoundCloud" or not self.album:
                 self.album = extra.label
             self.publisher = extra.label
-
         if extra.bpm:
             self.bpm = extra.bpm
-
         if extra.cover_url_hd:
             self.cover_url = extra.cover_url_hd
-
         if extra.isrc and not self.isrc:
             self.isrc = extra.isrc
 
@@ -180,7 +206,6 @@ def build_filename(
     Costruisce il filename finale applicando i placeholder o i formati legacy.
     Placeholder supportati: {title}, {artist}, {album}, {album_artist}, {year}, {date}, {disc}, {isrc}, {track}
     """
-    # Preparazione variabili sanificate
     artist       = sanitize(metadata.first_artist if first_artist_only else metadata.artists)
     album_artist = sanitize(metadata.first_artist if first_artist_only else metadata.album_artist)
     title        = sanitize(metadata.title)
@@ -189,14 +214,12 @@ def build_filename(
     date         = sanitize(metadata.release_date)
     disc         = metadata.disc_number
 
-    # Determina il numero traccia (sequenziale o da album)
     track_number = (
         metadata.track_number
         if (use_album_track_number and metadata.track_number > 0)
         else position
     )
 
-    # Logica di rimpiazzo Template
     if "{" in fmt:
         result = (
             fmt
@@ -214,22 +237,19 @@ def build_filename(
         if metadata.track_number > 0:
             result = result.replace("{track}", f"{metadata.track_number:02d}")
         else:
-            # Rimuove {track} e separatori pendenti se il numero non esiste
             result = re.sub(r"\{track\}[\.\s-]*", "", result)
     else:
-        # Formati legacy (se fmt non è un template string)
         if fmt == "artist-title":
             result = f"{artist} - {title}"
         elif fmt == "title":
             result = title
-        else:  # default: title-artist
+        else:
             result = f"{title} - {artist}"
 
         track_number = metadata.track_number if use_album_track_number else position
         if include_track_number and track_number > 0:
             result = f"{track_number:02d}. {result}"
 
-    # Pulizia finale e aggiunta estensione
     result = _WHITESPACE.sub(" ", result).strip() or "Unknown"
     if not result.lower().endswith(extension):
         result += extension

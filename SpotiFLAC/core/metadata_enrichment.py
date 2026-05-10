@@ -136,7 +136,7 @@ class _AppleMusicMeta:
 
     def fetch(self, track_name: str, artist_name: str, isrc: str = "") -> EnrichedMetadata:
         out = EnrichedMetadata()
-        item = self._search(track_name, artist_name)
+        item = self._search(track_name, artist_name, isrc)
         if not item:
             return out
         out.genre    = item.get("primaryGenreName", "")
@@ -147,8 +147,27 @@ class _AppleMusicMeta:
         # Collection (album) info → label non disponibile via iTunes pubblica
         return out
 
-    def _search(self, title: str, artist: str) -> dict[str, Any] | None:
+    def _search(self, title: str, artist: str, isrc: str) -> dict[str, Any] | None:
         try:
+            # 1. Tenta prima la ricerca esatta per ISRC (se fornito)
+            if isrc:
+                r_isrc = self._s.get(
+                    self.SEARCH,
+                    params={
+                        "term":    isrc,
+                        "media":   "music",
+                        "entity":  "song",
+                        "limit":   1,
+                        "country": "US",
+                    },
+                    timeout=7,
+                )
+                if r_isrc.ok:
+                    results = r_isrc.json().get("results", [])
+                    if results:
+                        return results[0] # Match esatto trovato
+
+            # 2. Fallback: ricerca testuale per Titolo + Artista
             r = self._s.get(
                 self.SEARCH,
                 params={
@@ -174,8 +193,6 @@ class _AppleMusicMeta:
         except Exception as exc:
             logger.debug("[meta/apple] %s", exc)
             return None
-
-
 # --------------------------------------------------------------------------- #
 # Provider: Tidal (via API mirror — stesso sistema di tidal.py)               #
 # --------------------------------------------------------------------------- #

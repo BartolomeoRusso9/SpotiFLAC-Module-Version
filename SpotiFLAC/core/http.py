@@ -4,6 +4,7 @@ Ogni provider riceve un'istanza configurata — zero `requests.get` raw in giro.
 """
 from __future__ import annotations
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -37,12 +38,12 @@ class HttpClient:
     """
 
     def __init__(
-        self,
-        provider:    str,
-        timeout_s:   int            = 30,
-        retry:       RetryConfig | None = None,
-        headers:     dict[str, str] | None = None,
-        session:     Session | None    = None,
+            self,
+            provider:    str,
+            timeout_s:   int            = 30,
+            retry:       RetryConfig | None = None,
+            headers:     dict[str, str] | None = None,
+            session:     Session | None    = None,
     ) -> None:
         self._provider = provider
         self._timeout  = timeout_s
@@ -72,18 +73,22 @@ class HttpClient:
         return self._parse_json(self.post(url, **kwargs))
 
     def stream_to_file(
-        self,
-        url:        str,
-        dest_path:  str,
-        progress_cb: Any = None,   # Callable[[int, int], None] | None
-        chunk_size: int = 256 * 1024,
-        extra_headers: dict[str, str] | None = None,
+            self,
+            url:        str,
+            dest_path:  str,
+            progress_cb: Any = None,   # Callable[[int, int], None] | None
+            chunk_size: int = 256 * 1024,
+            extra_headers: dict[str, str] | None = None,
     ) -> None:
         """
         Scarica in streaming verso un file .part, poi rinomina atomicamente.
         progress_cb(downloaded_bytes, total_bytes) viene chiamata ad ogni chunk.
+
+        FIX: il finally block originale tentava os.remove(temp) dopo che
+        os.replace(temp, dest_path) lo aveva già spostato/eliminato,
+        generando sempre un silenzioso OSError. Ora il cleanup del file
+        temporaneo avviene solo in caso di errore, non dopo il successo.
         """
-        import os
         temp = dest_path + ".part"
         req_kwargs: dict[str, Any] = {"stream": True, "timeout": (self._timeout, 120)}
         if extra_headers:
@@ -102,17 +107,16 @@ class HttpClient:
                             downloaded += len(chunk)
                             if progress_cb:
                                 progress_cb(downloaded, total)
+            # Rinomina atomica: dopo questo punto temp non esiste più.
             os.replace(temp, dest_path)
+
         except SpotiflacError:
+            # Cleanup del .part solo in caso di errore
+            _safe_remove(temp)
             raise
         except Exception as exc:
+            _safe_remove(temp)
             raise NetworkError(self._provider, f"Stream download failed: {exc}", exc)
-        finally:
-            if os.path.exists(temp):
-                try:
-                    os.remove(temp)
-                except OSError:
-                    pass
 
     # ------------------------------------------------------------------
     # Internal
@@ -186,3 +190,15 @@ class HttpClient:
         except ValueError as exc:
             preview = body[:200] + ("..." if len(body) > 200 else "")
             raise ParseError(self._provider, f"Invalid JSON: {preview}", exc)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _safe_remove(path: str) -> None:
+    """Rimuove un file ignorando silenziosamente se non esiste."""
+    try:
+        os.remove(path)
+    except OSError:
+        pass
