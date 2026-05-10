@@ -295,11 +295,10 @@ class TidalMetadataClient:
         albums_to_fetch: list[tuple[str, dict, bool]] = []
 
         if include_featuring:
-            # FIX: Preserva l'ordine originale e aggiunge COMPILATIONS se non c'è
-            groups = [g.strip() for g in include_groups.split(",") if g.strip()]
-            if _TIDAL_FILTER_COMPILATIONS not in groups:
-                groups.append(_TIDAL_FILTER_COMPILATIONS)
-            include_groups = ",".join(groups)
+            existing = include_groups.split(",")
+            if _TIDAL_FILTER_COMPILATIONS not in existing:
+                existing.append(_TIDAL_FILTER_COMPILATIONS)
+            include_groups = ",".join(existing)
 
         for group in include_groups.split(","):
             group = group.strip().upper()
