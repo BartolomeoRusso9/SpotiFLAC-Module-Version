@@ -1,7 +1,6 @@
 import json
 import time
 from pathlib import Path
-from dataclasses import asdict
 from typing import List
 from .models import TrackMetadata
 
@@ -14,14 +13,12 @@ class HistoryManager:
 
     def add(self, metadata: TrackMetadata):
         history = self.get_all()
-        # Rimuovi se già presente (deduplicazione)
         history = [h for h in history if h['id'] != metadata.id]
 
-        entry = asdict(metadata)
+        entry = metadata.model_dump()
         entry['fetched_at'] = int(time.time())
         history.insert(0, entry)
 
-        # Mantieni ultimi 50
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(history[:50], f, indent=2)
 

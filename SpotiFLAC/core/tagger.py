@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 
 import requests
+import time
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import (
     ID3, ID3NoHeaderError, PictureType as _PictureType,
@@ -284,7 +285,7 @@ class EmbedOptions:
     lyrics_spotify_token: str             = ""
     enrich:               bool            = False
     enrich_providers:     list[str] | None = None
-    enrich_qobuz_token:   str             = ""
+    enrich_qobuz_token:   str | None      = None
     is_album:             bool            = False
     extra_tags:           dict[str, str]  = field(default_factory=dict)
 
@@ -328,7 +329,7 @@ def embed_metadata(
                 artist_name = metadata.first_artist,
                 isrc        = metadata.isrc,
                 providers   = opts.enrich_providers,
-                qobuz_token = opts.enrich_qobuz_token or None,
+                qobuz_token = opts.enrich_qobuz_token,
             )
             enriched_tags      = enriched.as_tags()
             enriched_cover_url = enriched.cover_url_hd
@@ -435,14 +436,17 @@ def embed_metadata(
 def _fetch_cover(url: str, session: requests.Session | None) -> bytes | None:
     if not url:
         return None
-    try:
-        s   = session or requests.Session()
-        res = s.get(url, timeout=8)
-        if res.status_code == 200:
-            return res.content
-        logger.warning("[tagger] cover HTTP %s for %s", res.status_code, url)
-    except Exception as exc:
-        logger.warning("[tagger] cover download failed (%s): %s", url, exc)
+    s = session or requests.Session()
+    for attempt in range(3):
+        try:
+            res = s.get(url, timeout=8)
+            if res.status_code == 200:
+                return res.content
+            logger.warning("[tagger] cover HTTP %s (attempt %d)", res.status_code, attempt + 1)
+        except Exception as exc:
+            logger.warning("[tagger] cover attempt %d failed: %s", attempt + 1, exc)
+        if attempt < 2:
+            time.sleep(1.5 * (attempt + 1))
     return None
 
 

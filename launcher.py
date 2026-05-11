@@ -149,6 +149,7 @@ def main() -> None:
             first_artist_only        = cfg["first_artist_only"],
             log_level                = log_level,
             output_path              = cfg.get("output_path"),
+            allow_fallback           = cfg.get("allow_fallback", True),
             embed_lyrics             = cfg["embed_lyrics"],
             lyrics_providers         = cfg["lyrics_providers"],
             lyrics_spotify_token     = cfg.get("lyrics_spotify_token", ""),

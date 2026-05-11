@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "0.4.7"
+version = "0.4.8"
 description = "Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    { name="ShuKurenais" }
+    { name="ShuKurenais, BartolomeoRusso9" }
 ]
 
 keywords = [
@@ -42,6 +42,7 @@ dependencies = [
     # FIX #6: pycryptodome era usato in deezer.py e amazon.py ma non dichiarato
     # come dipendenza — causava ImportError silenzioso gestito con HAS_CRYPTO=False.
     "pycryptodome>=3.20.0",
+    "packaging>=23.0",
 ]
 
 [project.urls]

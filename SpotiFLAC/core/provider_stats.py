@@ -6,9 +6,10 @@ Le API che falliscono vengono messe in fondo alla lista automaticamente,
 quelle che funzionano vengono promosse in cima — senza shuffle casuale.
 """
 from __future__ import annotations
+
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -19,22 +20,12 @@ class _ProviderStats:
     last_failure: float = 0.0
 
     def score(self) -> float:
-        """
-        Score più alto = API migliore = va in cima alla lista.
-        Formula ispirata al Go: premia successi recenti, penalizza fallimenti recenti.
-        Un fallimento nelle ultime 5 minuti abbassa drasticamente lo score.
-        """
         base = self.successes - (self.failures * 2)
         now  = time.time()
-
-        # Penalità temporale per fallimenti recenti (5 minuti)
         if self.last_failure > 0 and (now - self.last_failure) < 300:
             base -= 10
-
-        # Bonus per successo recente (5 minuti)
         if self.last_success > 0 and (now - self.last_success) < 300:
             base += 5
-
         return float(base)
 
 
@@ -70,18 +61,16 @@ class ProviderScorer:
             s.last_failure = time.time()
 
     def prioritize(self, provider_type: str, api_urls: list[str]) -> list[str]:
-        """
-        Ritorna la lista di API ordinata per score decrescente.
-        API senza storia mantengono l'ordine originale (score = 0).
-        Equivalente a prioritizeProviders() del Go.
-        """
         with self._stats_lock:
             def _score(url: str) -> float:
                 key = f"{provider_type}:{url}"
                 s   = self._stats.get(key)
-                return s.score() if s else 0.0
+                if s is None:
+                    return 0.0   # API nuova: neutro, non penalizzata
+                sc = s.score()
+                # Se negativo, non scendere sotto -1 per non sparire in fondo
+                return max(sc, -1.0)   # ← FIX: floor a -1
 
-            # sort stabile: a parità di score mantiene ordine originale
             return sorted(api_urls, key=_score, reverse=True)
 
     def reset(self) -> None:
