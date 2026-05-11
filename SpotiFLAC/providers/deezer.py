@@ -1,15 +1,14 @@
 # deezer_provider.py
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
 import time
-import hashlib
 from typing import Any
 
 import requests
-from mutagen.flac import FLAC
 
 from ..core.tagger import embed_metadata, EmbedOptions
 
@@ -23,7 +22,7 @@ except ImportError:
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError, ErrorKind
 from .base import BaseProvider
-from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
+from ..core.musicbrainz import mb_result_to_tags
 
 logger = logging.getLogger(__name__)
 
@@ -164,8 +163,6 @@ class DeezerProvider(BaseProvider):
             finally:
                 with self._cache_mu:
                     self._url_locks.pop(url, None)
-
-                return data
 
     def _post_json(self, url: str, payload: dict) -> dict:
         resp = self._session.post(url, json=payload, timeout=_API_TIMEOUT_S)
