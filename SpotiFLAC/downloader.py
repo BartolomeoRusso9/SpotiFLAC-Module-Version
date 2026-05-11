@@ -2,22 +2,22 @@
 Downloader — orchestratore principale.
 """
 from __future__ import annotations
+
 import logging
 import os
 import re
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 
+from .core.console import print_track_header, print_summary
+from .core.errors import SpotiflacError, ErrorKind
 from .core.models import TrackMetadata, DownloadResult
 from .core.progress import DownloadManager, ProgressCallback
-from .core.errors import SpotiflacError, ErrorKind
 from .providers.base import BaseProvider
 from .providers.spotify_metadata import SpotifyMetadataClient
-from .providers.apple_music import AppleMusicProvider
-from .core.console import print_track_header, print_summary
-from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
-from .providers.apple_music_metadata import is_apple_music_url, parse_apple_music_url
+from .core.isrc_helper import IsrcHelper
+from .core.http import HttpClient
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -330,14 +330,25 @@ class SpotiflacDownloader:
 
         print(f"Resolving ISRC for {len(missing)} track(s)…")
         try:
-            from .core.isrc_helper import IsrcHelper
-            from .core.http import HttpClient
             resolver = IsrcHelper(HttpClient("isrc"))
-            for i, track in enumerate(tracks):
-                if not track.isrc:
-                    resolved = resolver.get_isrc(track.id)
-                    if resolved:
-                        tracks[i] = track.model_copy(update={"isrc": resolved})
+            def _resolve_one(args):
+                i, track, resolver = args
+                if track.isrc:
+                    return i, track
+                resolved = resolver.get_isrc(track.id)
+                if resolved:
+                    return i, track.model_copy(update={"isrc": resolved})
+                return i, track
+
+            with ThreadPoolExecutor(max_workers=min(8, len(missing))) as pool:
+                futs = {pool.submit(_resolve_one, (i, t, resolver)): i
+                        for i, t in enumerate(tracks) if not t.isrc}
+                for fut in as_completed(futs):
+                    try:
+                        i, updated = fut.result()
+                        tracks[i] = updated
+                    except Exception as exc:
+                        logger.debug("[isrc] resolve failed: %s", exc)
                         logger.debug("[isrc] resolved %s → %s", track.id, resolved)
         except Exception as exc:
             logger.warning("[isrc] bulk resolution failed: %s", exc)
@@ -351,15 +362,16 @@ class SpotiflacDownloader:
             info:            dict,
             is_album:        bool,
             is_playlist:     bool,
+            opts:            DownloadOptions | None = None,
     ) -> list[TrackMetadata]:
-        """Lancia DownloadWorker e restituisce i TrackMetadata dei brani falliti."""
+        effective = opts if opts is not None else self._opts
         manager = DownloadManager()
         for t in tracks:
             manager.add_to_queue(t.id, t.title, t.artists, t.album, t.id)
 
         worker = DownloadWorker(
             tracks          = tracks,
-            opts            = self._opts,
+            opts            = effective,
             collection_name = collection_name,
             is_album        = is_album,
             is_playlist     = is_playlist,
@@ -419,7 +431,7 @@ class SpotiflacDownloader:
         if not is_soundcloud:
             tracks = self._resolve_isrc_bulk(tracks)
 
-        return self._run_worker(tracks, collection_name, info, is_album, is_playlist)
+        return self._run_worker(tracks, collection_name, info, is_album, is_playlist, opts=effective_opts)
 
     @staticmethod
     def _format_seconds(seconds: float) -> str:

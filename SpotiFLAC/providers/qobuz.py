@@ -9,26 +9,26 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from ..core.tagger import _print_mb_summary, EmbedOptions
 from dataclasses import dataclass, field
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 import requests
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from ..core.errors import (
-    AuthError, TrackNotFoundError, NetworkError,
-    ParseError, SpotiflacError, ErrorKind,
-)
-from ..core.http import HttpClient, RetryConfig
-from ..core.models import TrackMetadata, DownloadResult
-from ..core.tagger import embed_metadata
-from ..core.provider_stats import record_success, record_failure, prioritize_providers
 from .base import BaseProvider
-from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
-from ..core.download_validation import validate_downloaded_track
 from ..core.console import (
     print_source_banner, print_api_failure, print_quality_fallback,
 )
+from ..core.download_validation import validate_downloaded_track
+from ..core.errors import (
+    TrackNotFoundError, NetworkError,
+    ParseError, SpotiflacError, ErrorKind,
+)
+from ..core.http import RetryConfig
+from ..core.models import TrackMetadata, DownloadResult
+from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
+from ..core.provider_stats import record_success, record_failure, prioritize_providers
+from ..core.tagger import _print_mb_summary, EmbedOptions
+from ..core.tagger import embed_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -403,7 +403,7 @@ def _fetch_stream_url_parallel(
                 errors.append(f"{api}: {err_msg}")
                 record_failure("qobuz", api)
                 print_api_failure("qobuz", api, err_msg)
-    except (TimeoutError, FuturesTimeoutError):
+    except FuturesTimeoutError:
         errors.append("global timeout exceeded")
     finally:
         pool.shutdown(wait=False, cancel_futures=True)

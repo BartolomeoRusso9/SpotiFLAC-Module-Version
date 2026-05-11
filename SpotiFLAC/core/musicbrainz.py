@@ -39,7 +39,7 @@ _mb_blocked_till: float = 0.0
 _mb_status_lock        = _threading.Lock()
 _mb_last_checked_at:   float = 0.0
 _mb_last_online:       bool  = True
-_MB_STATUS_SKIP_WINDOW = 300.0
+_MB_STATUS_SKIP_WINDOW = 30.0
 
 
 def set_mb_status(online: bool) -> None:
@@ -305,21 +305,29 @@ def mb_result_to_tags(res: dict) -> dict[str, str]:
     return tags
 
 class AsyncMBFetch:
-    _executor = ThreadPoolExecutor(max_workers=4)
+    _executor: ThreadPoolExecutor | None = ThreadPoolExecutor(max_workers=4)
+    _executor_lock = threading.Lock()
 
     @classmethod
     def _shutdown(cls) -> None:
-        cls._executor.shutdown(wait=False)
+        with cls._executor_lock:
+            if cls._executor is not None:
+                cls._executor.shutdown(wait=False)
+                cls._executor = None
+
+    @classmethod
+    def _get_executor(cls) -> ThreadPoolExecutor:
+        with cls._executor_lock:
+            if cls._executor is None:
+                cls._executor = ThreadPoolExecutor(max_workers=4)
+            return cls._executor
 
     def __init__(self, isrc: str):
         self.isrc = isrc
-        self.future = self._executor.submit(fetch_mb_metadata, isrc)
-
-    def result(self) -> dict:
         try:
-            return self.future.result(timeout=15)
-        except Exception as e:
-            logger.debug("[musicbrainz] Async fetch failed: %s", e)
-            return {}
+            self.future = self._get_executor().submit(fetch_mb_metadata, isrc)
+        except RuntimeError:
+            # executor spento e non ancora ricreato — retry
+            self.future = self._get_executor().submit(fetch_mb_metadata, isrc)
 
 _atexit.register(AsyncMBFetch._shutdown)

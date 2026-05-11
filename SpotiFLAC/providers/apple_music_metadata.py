@@ -6,16 +6,15 @@ from __future__ import annotations
 
 import logging
 import re
-import json
-import urllib.parse
+import time as _time
 import unicodedata
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
 import requests
-import time as _time
 
-from ..core.errors import NetworkError, SpotiflacError, ErrorKind, InvalidUrlError
+from ..core.errors import SpotiflacError, ErrorKind, InvalidUrlError
 from ..core.models import TrackMetadata
 
 logger = logging.getLogger(__name__)
@@ -260,7 +259,7 @@ class AppleMusicMetadataClient:
             if aid and aid not in seen_ids:
                 seen_ids.add(aid)
                 album_ids.append(aid)
-
+        own_album_ids: set[str] = set(album_ids)
         # Featuring (appears-on): album di altri artisti dove compare
         if include_featuring:
             for album_data in self._paginate_relationship(
@@ -302,9 +301,7 @@ class AppleMusicMetadataClient:
                     continue
 
                 # Se è un featuring, includi solo tracce dove compare effettivamente
-                if include_featuring and aid not in {
-                    a for a in album_ids[:len(album_ids)]
-                }:
+                if include_featuring and aid not in own_album_ids:
                     if not _artist_in_track(artist_name, track.artists):
                         continue
 

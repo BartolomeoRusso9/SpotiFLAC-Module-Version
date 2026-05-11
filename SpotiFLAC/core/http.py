@@ -3,10 +3,11 @@ HTTP client centralizzato con retry esponenziale e timeout.
 Ogni provider riceve un'istanza configurata — zero `requests.get` raw in giro.
 """
 from __future__ import annotations
+
 import logging
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -99,7 +100,8 @@ class HttpClient:
                 self._raise_for_status(resp)
                 total = int(resp.headers.get("Content-Length") or 0)
                 downloaded = 0
-                os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
+                parent = os.path.dirname(os.path.abspath(dest_path))
+                os.makedirs(parent, exist_ok=True)
                 with open(temp, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=chunk_size):
                         if chunk:

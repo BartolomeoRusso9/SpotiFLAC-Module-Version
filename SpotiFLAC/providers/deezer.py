@@ -156,15 +156,16 @@ class DeezerProvider(BaseProvider):
                 entry = self._search_cache.get(url)
                 if entry and not entry.is_expired():
                     return entry.data
+            try:
+                data = self._get_json(url)
+                with self._cache_mu:
+                    self._search_cache[url] = _CacheEntry(data)
+                return data
+            finally:
+                with self._cache_mu:
+                    self._url_locks.pop(url, None)
 
-            data = self._get_json(url)
-
-            with self._cache_mu:
-                self._search_cache[url] = _CacheEntry(data)
-                if url in self._url_locks:
-                    del self._url_locks[url]
-
-        return data
+                return data
 
     def _post_json(self, url: str, payload: dict) -> dict:
         resp = self._session.post(url, json=payload, timeout=_API_TIMEOUT_S)

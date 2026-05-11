@@ -259,6 +259,11 @@ def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeou
                     parsed = json.loads(body)
                     if isinstance(parsed, str) and parsed.strip():
                         return parsed.strip()
+                    if isinstance(parsed, dict):
+                        for key in ("lrc", "lyrics", "syncedLyrics", "plainLyrics"):
+                            val = parsed.get(key)
+                            if isinstance(val, str) and val.strip():
+                                return val.strip()
                 except ValueError:
                     if body and not body.startswith("{"):
                         return body

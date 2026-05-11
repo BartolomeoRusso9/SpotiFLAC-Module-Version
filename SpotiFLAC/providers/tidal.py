@@ -14,27 +14,27 @@ import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from ..core.tagger import _print_mb_summary, EmbedOptions
-from ..core.link_resolver import LinkResolver
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote
 
 import requests
 
-from ..core.errors import (
-    TrackNotFoundError, ParseError,
-    SpotiflacError, ErrorKind,
-)
-from ..core.http import HttpClient, RetryConfig
-from ..core.models import TrackMetadata, DownloadResult
-from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
-from ..core.tagger import embed_metadata
 from .base import BaseProvider
 from ..core.console import (
     print_source_banner, print_api_failure, print_quality_fallback,
 )
 from ..core.download_validation import validate_downloaded_track
+from ..core.errors import (
+    TrackNotFoundError, ParseError,
+    SpotiflacError, ErrorKind,
+)
+from ..core.http import RetryConfig
+from ..core.link_resolver import LinkResolver
+from ..core.models import TrackMetadata, DownloadResult
+from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
+from ..core.tagger import _print_mb_summary, EmbedOptions
+from ..core.tagger import embed_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +203,9 @@ def refresh_tidal_api_list(force: bool = False) -> list[str]:
             logger.warning("[tidal] gist fetch failed: %s", exc)
             gist_urls = []
 
-        merged = _normalize_tidal_api_urls(_TIDAL_APIS_GET + _TIDAL_API_POST + gist_urls)
+        get_urls  = _normalize_tidal_api_urls(_TIDAL_APIS_GET + gist_urls)
+        post_urls = _normalize_tidal_api_urls(_TIDAL_API_POST)
+        merged    = get_urls + [u for u in post_urls if u not in set(get_urls)]
 
         if not merged:
             if state["urls"]:
@@ -539,7 +541,7 @@ class TidalProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def _get_download_url(self, track_id: int, quality: str) -> str:
-        from ..core.provider_stats import prioritize_providers, record_success, record_failure
+        from ..core.provider_stats import prioritize_providers, record_success
 
         try:
             rotated = get_rotated_tidal_api_list()
@@ -743,10 +745,13 @@ class TidalProvider(BaseProvider):
 
     @staticmethod
     def _random_ua() -> str:
-        from random import randrange
+        import random
+        rng = random.Random()   # istanza locale non condivisa
+        # seed basato su tempo con granularità oraria → stesso UA per ~1h
+        rng.seed(int(time.time() // 3600))
         return (
-            f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_{randrange(11,15)}_{randrange(4,9)}) "
-            f"AppleWebKit/{randrange(530,537)}.{randrange(30,37)} (KHTML, like Gecko) "
-            f"Chrome/{randrange(80,105)}.0.{randrange(3000,4500)}.{randrange(60,125)} "
-            f"Safari/{randrange(530,537)}.{randrange(30,36)}"
+            f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_{rng.randrange(11,15)}_{rng.randrange(4,9)}) "
+            f"AppleWebKit/{rng.randrange(530,537)}.{rng.randrange(30,37)} (KHTML, like Gecko) "
+            f"Chrome/{rng.randrange(80,105)}.0.{rng.randrange(3000,4500)}.{rng.randrange(60,125)} "
+            f"Safari/{rng.randrange(530,537)}.{rng.randrange(30,36)}"
         )

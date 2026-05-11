@@ -1,10 +1,11 @@
-from typing import Optional
 import re
+
 from .isrc_cache import get_cached_isrc, put_cached_isrc
-from ..providers.soundplate import SoundplateProvider
-from ..providers.songstats import SongstatsProvider
 from .isrc_finder import IsrcFinder
 from .link_resolver import LinkResolver  # Importiamo il tuo resolver
+from ..providers.songstats import SongstatsProvider
+from ..providers.soundplate import SoundplateProvider
+
 
 class IsrcHelper:
     """Gestore centralizzato per la risoluzione ISRC con fallback e traduzione cross-platform."""
@@ -30,7 +31,7 @@ class IsrcHelper:
                 links = self.resolver.resolve_all(track_id)
                 if "spotify" in links:
                     # Estraiamo l'ID base62 dall'URL di Spotify
-                    match = re.search(r"track/([a-zA-Z0-9]+)", links["spotify"])
+                    match = re.search(r"track/([a-zA-Z0-9]{22})", links["spotify"])
                     if match:
                         search_id = match.group(1)
             except Exception:
