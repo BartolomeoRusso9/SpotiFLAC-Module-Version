@@ -205,5 +205,5 @@ def _fmt_eta(seconds: float) -> str:
     m, s = divmod(s, 60)
     return f"{m:02d}:{s:02d}"
 
-    # Alias retrocompatibile
+# Alias retrocompatibile
 RichProgressCallback = ProgressCallback

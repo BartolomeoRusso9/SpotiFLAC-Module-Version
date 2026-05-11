@@ -17,7 +17,8 @@ from mutagen.id3 import (
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError
 from .base import BaseProvider
-from ..core.tagger import embed_metadata, EmbedOptions # Assicurati di importare EmbedOptions!
+from ..core.tagger import embed_metadata, EmbedOptions
+from ..core.musicbrainz import mb_result_to_tags
 
 logger = logging.getLogger(__name__)
 
@@ -589,6 +590,7 @@ class YouTubeProvider(BaseProvider):
             mb_tags: dict[str, str] = {}
             if mb_fetcher:
                 res = mb_fetcher.future.result()
+                mb_tags = mb_result_to_tags(res)
                 if res:
                     mapping = {
                         "mbid_track":       "MUSICBRAINZ_TRACKID",

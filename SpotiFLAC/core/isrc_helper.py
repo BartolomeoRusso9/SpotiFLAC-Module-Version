@@ -29,9 +29,9 @@ class IsrcHelper:
         if not track_id.startswith("spotify_") and "_" in track_id:
             try:
                 links = self.resolver.resolve_all(track_id)
-                if "spotify" in links:
-                    # Estraiamo l'ID base62 dall'URL di Spotify
-                    match = re.search(r"track/([a-zA-Z0-9]{22})", links["spotify"])
+                spotify_url = links.get("spotify")
+                if spotify_url:
+                    match = re.search(r"track/([a-zA-Z0-9]{22})", spotify_url)
                     if match:
                         search_id = match.group(1)
             except Exception:
