@@ -42,6 +42,7 @@ dependencies = [
     # FIX #6: pycryptodome era usato in deezer.py e amazon.py ma non dichiarato
     # come dipendenza — causava ImportError silenzioso gestito con HAS_CRYPTO=False.
     "pycryptodome>=3.20.0",
+    "packaging>=23.0",
 ]
 
 [project.urls]

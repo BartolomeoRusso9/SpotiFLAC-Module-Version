@@ -330,4 +330,11 @@ class AsyncMBFetch:
             # executor spento e non ancora ricreato — retry
             self.future = self._get_executor().submit(fetch_mb_metadata, isrc)
 
+    def result(self, timeout: float | None = None) -> dict:
+        """Blocca fino al completamento del fetch e ritorna il risultato."""
+        try:
+            return self.future.result(timeout=timeout)
+        except Exception:
+            return {}
+
 _atexit.register(AsyncMBFetch._shutdown)

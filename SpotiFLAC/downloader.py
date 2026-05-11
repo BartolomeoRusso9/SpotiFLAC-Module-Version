@@ -349,7 +349,6 @@ class SpotiflacDownloader:
                         tracks[i] = updated
                     except Exception as exc:
                         logger.debug("[isrc] resolve failed: %s", exc)
-                        logger.debug("[isrc] resolved %s → %s", track.id, resolved)
         except Exception as exc:
             logger.warning("[isrc] bulk resolution failed: %s", exc)
 

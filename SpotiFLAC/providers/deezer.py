@@ -447,7 +447,7 @@ class DeezerProvider(BaseProvider):
             mb_tags: dict[str, str] = {}
             res: dict = {}
             if mb_fetcher:
-                res = mb_fetcher.result()
+                res = mb_fetcher.future.result()
 
             mb_tags = mb_result_to_tags(res)
 

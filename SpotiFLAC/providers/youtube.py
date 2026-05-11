@@ -588,7 +588,7 @@ class YouTubeProvider(BaseProvider):
 
             mb_tags: dict[str, str] = {}
             if mb_fetcher:
-                res = mb_fetcher.result()
+                res = mb_fetcher.future.result()
                 if res:
                     mapping = {
                         "mbid_track":       "MUSICBRAINZ_TRACKID",
