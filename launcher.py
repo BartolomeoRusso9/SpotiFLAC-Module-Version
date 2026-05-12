@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI entry point per SpotiFLAC — con supporto provider lyrics e metadata enrichment ATTIVI di default.
+CLI entry point for SpotiFLAC — with lyrics provider and metadata enrichment support ACTIVE by default.
 """
 import argparse
 import logging
@@ -19,18 +19,18 @@ def load_config() -> dict:
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            print(f"Errore nel caricamento di config.json: {e}")
+            print(f"Error loading config.json: {e}")
     return {}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog            = "spotiflac",
-        description     = "Download tracks in true FLAC/MP3 via Deezer, Tidal, Qobuz, SoundCloud, YouTube e altri.",
+        description     = "Download tracks in true FLAC/MP3 via Deezer, Tidal, Qobuz, SoundCloud, YouTube and more.",
         formatter_class = argparse.RawDescriptionHelpFormatter,
     )
 
-    parser.add_argument("url",        help="URL Spotify, Tidal, SoundCloud o YouTube (track, album, playlist, artist)")
-    parser.add_argument("output_dir", help="Directory di destinazione")
+    parser.add_argument("url",        help="Spotify, Tidal, SoundCloud or YouTube URL (track, album, playlist, artist)")
+    parser.add_argument("output_dir", help="Destination directory")
 
     parser.add_argument(
         "--service", "-s",
@@ -38,13 +38,13 @@ def parse_args() -> argparse.Namespace:
         nargs   = "+",
         default = ["tidal"],
         metavar = "SERVICE",
-        help    = "Provider audio in ordine di priorità (default: tidal)",
+        help    = "Audio providers in priority order (default: tidal)",
     )
     parser.add_argument(
         "--filename-format", "-f",
         default = "{title} - {artist}",
         dest    = "filename_format",
-        help    = "Template filename. Placeholder: {title} {artist} {album} "
+        help    = "Filename template. Placeholders: {title} {artist} {album} "
                   "{album_artist} {year} {date} {track} {disc} {isrc} {position}",
     )
     parser.add_argument(
@@ -52,8 +52,8 @@ def parse_args() -> argparse.Namespace:
         default = None,
         dest    = "output_path",
         metavar = "FILE",
-        help    = "Percorso esatto del file di output per tracce singole "
-                  "(es. files/song.flac). Sovrascrive output_dir + filename_format.",
+        help    = "Exact output file path for single track downloads "
+                  "(e.g. files/song.flac). Overrides output_dir + filename_format.",
     )
     parser.add_argument(
         "--quality", "-q",
@@ -70,10 +70,10 @@ def parse_args() -> argparse.Namespace:
         action  = "store_true",
         dest    = "include_featuring",
         default = False,
-        help    = "Includi tracce dove l'artista appare come featuring su release di altri artisti.",
+        help    = "Include tracks where the artist appears as a featured artist on other artists' releases.",
     )
-    parser.add_argument("--qobuz-token", default=None, dest="qobuz_token", help="Token Qobuz")
-    parser.add_argument("--loop", "-l", type=int, default=None, help="Ripeti ogni N minuti")
+    parser.add_argument("--qobuz-token", default=None, dest="qobuz_token", help="Qobuz token")
+    parser.add_argument("--loop", "-l", type=int, default=None, help="Retry every N minutes")
     parser.add_argument("--verbose", "-v", action="store_true")
 
     # ── Lyrics ──────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ def parse_args() -> argparse.Namespace:
         "--no-lyrics",
         action = "store_false",
         dest   = "embed_lyrics",
-        help   = "Disabilita l'embedding dei testi (attivo di default)",
+        help   = "Disable lyrics embedding (enabled by default)",
     )
     parser.set_defaults(embed_lyrics=True)
 
@@ -92,14 +92,14 @@ def parse_args() -> argparse.Namespace:
         default = ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
         dest    = "lyrics_providers",
         choices = ["spotify", "apple", "musixmatch", "amazon", "lrclib"],
-        help    = "Provider testi in ordine (default: spotify apple musixmatch lrclib amazon).",
+        help    = "Lyrics providers in priority order (default: spotify apple musixmatch lrclib amazon).",
     )
     lyrics_grp.add_argument(
         "--spotify-token",
         default = "",
         dest    = "spotify_token",
         metavar = "SP_DC",
-        help    = "Cookie sp_dc Spotify",
+        help    = "Spotify sp_dc cookie",
     )
 
     # ── Metadata enrichment ─────────────────────────────────────────────────
@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
         "--no-enrich",
         action = "store_false",
         dest   = "enrich",
-        help   = "Disabilita l'arricchimento metadati (attivo di default)",
+        help   = "Disable metadata enrichment (enabled by default)",
     )
     parser.set_defaults(enrich=True)
 
@@ -118,7 +118,7 @@ def parse_args() -> argparse.Namespace:
         default = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         dest    = "enrich_providers",
         choices = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
-        help    = "Provider metadata enrichment in ordine (default: deezer apple qobuz tidal soundcloud).",
+        help    = "Metadata enrichment providers in priority order (default: deezer apple qobuz tidal soundcloud).",
     )
 
     return parser.parse_args()
@@ -162,11 +162,6 @@ def main() -> None:
     else:
         args = parse_args()
         file_cfg = load_config()
-
-        # FIX: le variabili merged vengono ora effettivamente usate nel call a SpotiFLAC().
-        # Prima il codice calcolava quality/qobuz_token/spotify_token unificati
-        # ma poi passava args.quality / args.qobuz_token / args.spotify_token (raw),
-        # rendendo il merge da config.json completamente inutile.
         quality       = args.quality       or file_cfg.get("quality", "LOSSLESS")
         qobuz_token   = args.qobuz_token   or file_cfg.get("qobuz_token")
         spotify_token = args.spotify_token or file_cfg.get("spotify_token", "")
@@ -187,16 +182,16 @@ def main() -> None:
             use_artist_subfolders    = args.use_artist_subfolders,
             use_album_subfolders     = args.use_album_subfolders,
             loop                     = args.loop,
-            quality                  = quality,         # FIX: era args.quality
+            quality                  = quality,
             first_artist_only        = args.first_artist_only,
             log_level                = log_level,
             output_path              = args.output_path,
             embed_lyrics             = args.embed_lyrics,
             lyrics_providers         = args.lyrics_providers,
-            lyrics_spotify_token     = spotify_token,   # FIX: era args.spotify_token
+            lyrics_spotify_token     = spotify_token,
             enrich_metadata          = args.enrich,
             enrich_providers         = args.enrich_providers,
-            qobuz_token              = qobuz_token,     # FIX: era args.qobuz_token
+            qobuz_token              = qobuz_token,
             include_featuring        = args.include_featuring,
         )
 

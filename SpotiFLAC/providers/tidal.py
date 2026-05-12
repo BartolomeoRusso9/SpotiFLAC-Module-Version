@@ -154,10 +154,20 @@ def _fetch_tidal_api_urls_from_gist() -> list[str]:
     resp = requests.get(_TIDAL_API_GIST_URL, timeout=10, headers={"User-Agent": _TIDAL_USER_AGENT})
     if resp.status_code != 200:
         raise RuntimeError(f"Tidal API gist returned status {resp.status_code}")
-    urls = resp.json()
-    if not isinstance(urls, list):
-        raise RuntimeError("Tidal API gist did not return a JSON array")
-    urls = _normalize_tidal_api_urls(urls)
+    try:
+        payload = resp.json()
+    except Exception:
+        raise RuntimeError(f"Tidal API gist returned non-JSON: {resp.text[:120]}")
+    if not isinstance(payload, list):
+        if isinstance(payload, dict):
+            urls = payload.get("apis") or payload.get("urls") or list(payload.values())
+            if urls and isinstance(urls, list):
+                payload = urls
+            else:
+                raise RuntimeError(f"Tidal API gist returned unexpected format: {type(payload)}")
+        else:
+            raise RuntimeError("Tidal API gist did not return a JSON array")
+    urls = _normalize_tidal_api_urls(payload)
     if not urls:
         raise RuntimeError("Tidal API gist returned no valid URLs")
     return urls
@@ -476,15 +486,21 @@ class TidalProvider(BaseProvider):
             spotify_track_id: str,
             track_name:       str = "",
             artist_name:      str = "",
+            isrc:             str = "",          # ← add this
     ) -> str:
         if track_name and artist_name and track_name != "Unknown":
-            result = self._search_on_mirrors(track_name, artist_name)
+            result = self._search_on_mirrors(track_name, artist_name, isrc)
             if result:
                 return result
         logger.info("[tidal] mirror search failed — trying Songlink")
         return self._resolve_via_songlink(spotify_track_id)
 
-    def _search_on_mirrors(self, track_name: str, artist_name: str) -> str | None:
+    def _search_on_mirrors(
+            self,
+            track_name:  str,
+            artist_name: str,
+            isrc:        str = "",
+    ) -> str | None:
         clean_track  = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", track_name).strip()
         clean_artist = artist_name.split(",")[0].strip()
         query        = quote(f"{clean_artist} {clean_track}")
@@ -492,15 +508,15 @@ class TidalProvider(BaseProvider):
         for api in self._apis:
             base = api.rstrip("/")
             for endpoint in [
-                f"{base}/search/?s={query}&limit=3",
-                f"{base}/search?s={query}&limit=3",
-                f"{base}/search/track/?s={query}&limit=3",
+                f"{base}/search/?s={query}&limit=5",
+                f"{base}/search?s={query}&limit=5",
+                f"{base}/search/track/?s={query}&limit=5",
             ]:
                 try:
                     resp = self._session.get(endpoint, timeout=7)
                     if resp.status_code != 200:
                         continue
-                    t_id = self._extract_track_id(resp.json())
+                    t_id = self._extract_best_track_id(resp.json(), isrc)
                     if t_id:
                         return f"https://listen.tidal.com/track/{t_id}"
                 except Exception:
@@ -508,24 +524,47 @@ class TidalProvider(BaseProvider):
         return None
 
     @staticmethod
-    def _extract_track_id(data: object) -> str | None:
-        if isinstance(data, list) and data:
-            item = data[0]
-            return str(item.get("id") or item.get("track_id") or "")
-        if isinstance(data, dict):
-            for key in ["items", "tracks", "result", "results"]:
-                inner = data.get(key)
-                if isinstance(inner, list) and inner:
-                    return str(inner[0].get("id") or inner[0].get("track_id") or "")
-            nested = data.get("data", {})
-            if isinstance(nested, dict):
-                for key in ["items", "tracks", "results"]:
-                    inner = nested.get(key)
-                    if isinstance(inner, list) and inner:
-                        return str(inner[0].get("id") or inner[0].get("track_id") or "")
-            direct = data.get("id") or data.get("trackId")
-            if direct:
-                return str(direct)
+    def _extract_best_track_id(data: object, isrc: str = "") -> str | None:
+        """Return the track ID whose ISRC matches, falling back to first result."""
+        def _iter_items(d: object):
+            if isinstance(d, list):
+                yield from d
+            elif isinstance(d, dict):
+                for key in ("items", "tracks", "result", "results"):
+                    inner = d.get(key)
+                    if isinstance(inner, list):
+                        yield from inner
+                        return
+                nested = d.get("data", {})
+                if isinstance(nested, dict):
+                    for key in ("items", "tracks", "results"):
+                        inner = nested.get(key)
+                        if isinstance(inner, list):
+                            yield from inner
+                            return
+                # single item dict
+                if d.get("id") or d.get("trackId"):
+                    yield d
+
+        first_id: str | None = None
+        for item in _iter_items(data):
+            if not isinstance(item, dict):
+                continue
+            t_id = str(item.get("id") or item.get("track_id") or "")
+            if not t_id:
+                continue
+            if not first_id:
+                first_id = t_id
+        # If ISRC matches, return immediately
+        if isrc and item.get("isrc", "").upper() == isrc.upper():
+            logger.debug("[tidal] ISRC match found: %s", t_id)
+            return t_id
+
+    # No ISRC match — only use first result if no ISRC was provided
+    # (if we had an ISRC and nothing matched, returning first is risky)
+        if not isrc:
+            return first_id
+        logger.debug("[tidal] no ISRC match among mirror results, falling back to Songlink")
         return None
 
     def _resolve_via_songlink(self, spotify_track_id: str) -> str:
@@ -598,28 +637,35 @@ class TidalProvider(BaseProvider):
 
     def _download_segments(self, init_url: str, media_urls: list[str], dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        headers = {"User-Agent": _TIDAL_USER_AGENT}
-        total   = len(media_urls)
-        t_start = time.time()
+        headers  = {"User-Agent": _TIDAL_USER_AGENT}
+        t_start  = time.time()
+        total_bytes = 0
 
         with open(dest, "wb") as f:
             resp = self._session.get(init_url, timeout=15, headers=headers)
             resp.raise_for_status()
             f.write(resp.content)
+            total_bytes += len(resp.content)
 
-            for i, url in enumerate(media_urls, 1):
+            for url in media_urls:
                 resp = self._session.get(url, timeout=15, headers=headers)
                 resp.raise_for_status()
-                f.write(resp.content)
-                pct    = i / total
-                filled = int(pct * 24)
-                bar    = "█" * filled + "░" * (24 - filled)
-                eta    = (time.time() - t_start) / i * (total - i) if i > 0 else 0
-                m, s   = divmod(int(eta), 60)
-                print(f"\r  [{bar}] {i}/{total} segmenti  ETA {m:02d}:{s:02d}   ", end="", flush=True)
+                chunk = resp.content
+                f.write(chunk)
+                total_bytes += len(chunk)
+
+                elapsed   = time.time() - t_start
+                mb_done   = total_bytes / (1024 * 1024)
+                speed_mbs = mb_done / elapsed if elapsed > 0 else 0.0
+                print(
+                    f"\r  ↓ {mb_done:.2f} MB  ·  {speed_mbs:.2f} MB/s   ",
+                    end="", flush=True,
+                )
 
         elapsed = time.time() - t_start
-        print(f"\r  ✓ {total} segmenti scaricati in {elapsed:.1f}s{'':<20}")
+        mb_tot  = total_bytes / (1024 * 1024)
+        avg_mbs = mb_tot / elapsed if elapsed > 0 else 0
+        print(f"\r  ✓ {mb_tot:.2f} MB downloaded in {elapsed:.1f}s  ·  avg {avg_mbs:.2f} MB/s   ")
 
     @staticmethod
     def _ffmpeg_to_flac(src: Path, dst: Path) -> None:
@@ -671,7 +717,7 @@ class TidalProvider(BaseProvider):
                 logger.info("[tidal] Direct Tidal ID detected: %s", metadata.id)
             else:
                 tidal_url = self.resolve_spotify_to_tidal(
-                    metadata.id, metadata.title, metadata.artists
+                    metadata.id, metadata.title, metadata.artists, isrc=metadata.isrc,
                 )
             track_id = self._parse_track_id(tidal_url)
 

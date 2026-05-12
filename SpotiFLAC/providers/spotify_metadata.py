@@ -106,20 +106,28 @@ class SpotifyMetadataClient:
 
     def _get(self, path: str, **kwargs) -> dict:
         token = self._ensure_token()
-        resp  = self._session.get(
-            f"{_API_BASE}/{path.lstrip('/')}",
-            headers = {"Authorization": f"Bearer {token}"},
-            timeout = self._timeout,
-            **kwargs,
-        )
-        if resp.status_code == 429:
-            retry_after = int(resp.headers.get("Retry-After", 5)) + 1
-            logger.info("[spotify] Rate limited — sleeping %ss", retry_after)
-            time.sleep(retry_after)
-            return self._get(path, **kwargs)
-        if resp.status_code != 200:
-            raise NetworkError("spotify", f"HTTP {resp.status_code} from {path}")
-        return resp.json()
+        for attempt in range(3):                          # ← add retry loop
+            resp = self._session.get(
+                f"{_API_BASE}/{path.lstrip('/')}",
+                headers = {"Authorization": f"Bearer {token}"},
+                timeout = self._timeout,
+                **kwargs,
+            )
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("Retry-After", 5)) + 1
+                logger.info("[spotify] Rate limited — sleeping %ss", retry_after)
+                time.sleep(retry_after)
+                continue
+            if resp.status_code in (502, 503, 504) and attempt < 2:   # ← retry transients
+                wait = 1.5 * (attempt + 1)
+                logger.warning("[spotify] HTTP %s — retry %d/2 in %.1fs",
+                               resp.status_code, attempt + 1, wait)
+                time.sleep(wait)
+                continue
+            if resp.status_code != 200:
+                raise NetworkError("spotify", f"HTTP {resp.status_code} from {path}")
+            return resp.json()
+        raise NetworkError("spotify", f"HTTP {resp.status_code} from {path} after retries")
 
     def _paginate(self, url: str, delay: float = 0.5) -> Iterator[dict]:
         while url:
