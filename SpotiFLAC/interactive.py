@@ -1,6 +1,12 @@
 """
 SpotiFLAC — Interactive Mode.
-Il provider Spotify ora usa autenticazione anonima tramite TOTP.
+Novità rispetto alla versione precedente:
+  - Health check automatico all'avvio
+  - Cronologia URL con selezione rapida
+  - Ultima cartella di output come default
+  - Gestione profili (carica / salva)
+  - Sezione retry per-traccia
+  - Sezione post-download actions
 """
 from __future__ import annotations
 from urllib.parse import urlparse
@@ -119,13 +125,185 @@ def _header() -> None:
     print(f"  {DIM('Press Ctrl+C at any time to exit')}")
 
 
+# ---------------------------------------------------------------------------
+# Health Check
+# ---------------------------------------------------------------------------
+
+_ALL_SERVICES = ["tidal", "qobuz", "deezer", "amazon", "soundcloud", "apple", "youtube", "spoti"]
+
+def _run_health_check() -> dict[str, bool]:
+    """
+    Esegue un health check rapido su tutti i provider e restituisce {provider: ok}.
+    Non blocca la wizard in caso di errore.
+    """
+    try:
+        from SpotiFLAC.core.health_check import run_health_check, get_working_providers
+        results = run_health_check(_ALL_SERVICES)
+        working = set(get_working_providers(results))
+        return {svc: svc in working for svc in _ALL_SERVICES}
+    except Exception:
+        return {}
+
+
+def _display_health_check() -> dict[str, bool]:
+    """Mostra il risultato del health check in formato compatto."""
+    _section("Service Availability Check")
+    print(f"  {DIM('Probing endpoints...')} ", end="", flush=True)
+
+    status = _run_health_check()
+
+    # Cancella la riga "Probing…" e stampa i risultati
+    print("\r", end="")
+
+    if not status:
+        print(f"  {YELLOW('⚠  Health check skipped (import error or no network)')}")
+        return {}
+
+    cols = []
+    for svc in _ALL_SERVICES:
+        ok = status.get(svc, False)
+        icon = GREEN("✅") if ok else RED("❌")
+        cols.append(f"{icon} {svc}")
+
+    # Stampa su due righe da 4 provider ciascuna
+    half = len(cols) // 2
+    print(f"  {'   '.join(cols[:half])}")
+    print(f"  {'   '.join(cols[half:])}")
+
+    working_count = sum(status.values())
+    total = len(status)
+    summary_color = GREEN if working_count == total else (YELLOW if working_count > 0 else RED)
+    print(f"\n  {summary_color(f'{working_count}/{total} providers reachable')}")
+
+    if working_count == 0:
+        print(f"\n  {RED('✗  No providers reachable — check your internet connection.')}")
+
+    return status
+
+
+# ---------------------------------------------------------------------------
+# URL History
+# ---------------------------------------------------------------------------
+
+def _pick_from_history() -> str | None:
+    """
+    Mostra gli URL recenti e restituisce quello scelto, o None per inserirne uno nuovo.
+    """
+    try:
+        from SpotiFLAC.core.session_memory import get_url_history
+        history = get_url_history()
+    except Exception:
+        return None
+
+    if not history:
+        return None
+
+    _section("Recent URLs  (optional)")
+    print(f"  {DIM('Press Enter to type a new URL, or choose a recent one:')}")
+    print()
+
+    for i, entry in enumerate(history[:8], 1):
+        label = entry.get("label", entry.get("url", ""))[:55]
+        url_short = entry.get("url", "")[:60]
+        print(f"    {DIM(f'[{i}]')} {label}")
+        if label != url_short:
+            print(f"         {DIM(url_short)}")
+
+    print(f"\n    {DIM('[Enter]')} Type a new URL")
+    try:
+        val = input("  → ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(0)
+
+    if not val:
+        return None
+    if val.isdigit() and 1 <= int(val) <= len(history[:8]):
+        return history[int(val) - 1]["url"]
+    # Typed directly
+    return val if val else None
+
+
+# ---------------------------------------------------------------------------
+# Profile Management
+# ---------------------------------------------------------------------------
+
+def _profile_load_section(cfg: dict) -> dict:
+    """Offre il caricamento di un profilo salvato. Restituisce il cfg (possibilmente aggiornato)."""
+    try:
+        from SpotiFLAC.core.profiles import list_profiles, get_profile
+        profiles = list_profiles()
+    except Exception:
+        return cfg
+
+    if not profiles:
+        return cfg
+
+    _section("Load Profile  (optional)")
+    print(f"  {DIM('Saved profiles:')}")
+    for i, name in enumerate(profiles, 1):
+        print(f"    {DIM(f'[{i}]')} {name}")
+    print(f"    {DIM('[Enter]')} Start fresh")
+
+    try:
+        val = input("  → ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(0)
+
+    if not val:
+        return cfg
+
+    chosen_name: str | None = None
+    if val.isdigit() and 1 <= int(val) <= len(profiles):
+        chosen_name = profiles[int(val) - 1]
+    elif val in profiles:
+        chosen_name = val
+
+    if chosen_name:
+        profile_data = get_profile(chosen_name)
+        if profile_data:
+            cfg.update({k: v for k, v in profile_data.items() if not k.startswith("_")})
+            print(f"\n  {GREEN('✓')} Profile {BOLD(chosen_name)} loaded.")
+    return cfg
+
+
+def _profile_save_section(cfg: dict) -> None:
+    """Offre il salvataggio del profilo corrente."""
+    if not _ask_bool("Save this configuration as a profile?", False):
+        return
+    try:
+        from SpotiFLAC.core.profiles import save_profile, list_profiles
+    except Exception:
+        print(f"  {RED('✗  Profile save unavailable.')}")
+        return
+
+    existing = list_profiles()
+    if existing:
+        print(f"  {DIM('Existing profiles: ' + ', '.join(existing))}")
+
+    name = _ask("Profile name", "default").strip()
+    if not name:
+        return
+
+    try:
+        save_profile(name, cfg)
+        print(f"  {GREEN('✓')} Profile {BOLD(name)} saved.")
+    except Exception as exc:
+        print(f"  {RED(f'✗  Save failed: {exc}')}")
+
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+
 def _summary(cfg: dict) -> None:
     _section("Configuration Summary")
 
     def row(label: str, value: str) -> None:
         print(f"  {BOLD(label + ':'): <30} {GREEN(value)}")
 
-    row("URL", cfg["url"])
+    row("URL", cfg["url"][:65])
     row("Output Dir", cfg["output_dir"])
 
     if cfg.get("output_path"):
@@ -146,25 +324,51 @@ def _summary(cfg: dict) -> None:
     row("Lyrics", "enabled (" + ", ".join(cfg["lyrics_providers"]) + ")" if cfg["embed_lyrics"] else "disabled")
     row("Enrichment", "enabled (" + ", ".join(cfg["enrich_providers"]) + ")" if cfg["enrich_metadata"] else "disabled")
 
+    retries = cfg.get("track_max_retries", 0)
+    if retries:
+        row("Retries per track", str(retries))
+
+    action = cfg.get("post_download_action", "none")
+    if action and action != "none":
+        row("Post-download", action)
+
     if cfg.get("qobuz_token"):
         row("Qobuz token", "✓ set")
     if cfg.get("loop"):
         row("Loop", f"every {cfg['loop']} minutes")
 
 
+# ---------------------------------------------------------------------------
+# Main wizard
+# ---------------------------------------------------------------------------
+
 def run_interactive() -> dict:
     _header()
 
+    # ── Health check ────────────────────────────────────────────────────────
+    health_status = _display_health_check()
+
     cfg: dict = {}
+
+    # ── Profile load ────────────────────────────────────────────────────────
+    cfg = _profile_load_section(cfg)
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
-    print(f"  {DIM('Accepted links: Spotify, Apple Music, Tidal, SoundCloud, and YouTube.')}")
-    print(f"  {DIM('Modes: Track, Album, Playlist (All) | Artist Discography (Spotify, Apple Music, Tidal only).')}")
+    print(f"  {DIM('Accepted: Spotify, Apple Music, Tidal, SoundCloud, YouTube.')}")
+    print(f"  {DIM('Modes: Track, Album, Playlist, Artist Discography.')}")
+
+    # Try history first
+    prefill = _pick_from_history()
 
     url = ""
     while True:
-        url = _ask("URL")
+        if prefill:
+            url = _ask("URL", prefill)
+            prefill = None
+        else:
+            url = _ask("URL")
+
         if not url:
             print(f"  {RED('⚠  URL is required.')}")
             continue
@@ -193,9 +397,22 @@ def run_interactive() -> dict:
 
     # ── 2. Output directory ─────────────────────────────────────────────────
     _section("2 · Output Directory")
-    cfg["output_dir"] = _ask("Destination folder", "./Downloads")
+    try:
+        from SpotiFLAC.core.session_memory import get_last_folder
+        last_folder = get_last_folder() or "./Downloads"
+    except Exception:
+        last_folder = "./Downloads"
 
-    # ── 2.5. Custom Output Path (Only for single tracks) ────────────────────
+    cfg["output_dir"] = _ask("Destination folder", last_folder)
+
+    # Persist for next time
+    try:
+        from SpotiFLAC.core.session_memory import set_last_folder
+        set_last_folder(cfg["output_dir"])
+    except Exception:
+        pass
+
+    # ── 2.5. Custom Output Path (single tracks only) ─────────────────────
     lower_url = url.lower()
     is_single_track = (
             "/track/" in lower_url
@@ -206,12 +423,12 @@ def run_interactive() -> dict:
     )
     if is_single_track:
         _section("2.5 · Custom Output Path")
-        print(f"  {DIM('Since this is a single track, you can specify an exact filename.')}")
-        print(f"  {DIM('Example: my_files/favorite_song.flac (or .mp3)')}")
+        print(f"  {DIM('Specify an exact filename for this single track (optional).')}")
+        print(f"  {DIM('Example: my_files/favorite_song.flac')}")
 
-        use_custom = _ask_bool("Do you want to set a custom output path?", False)
+        use_custom = _ask_bool("Set a custom output path?", False)
         if use_custom:
-            cfg["output_path"] = _ask("Full file path including extension " + DIM("(e.g., /Users/Name/Desktop/song.flac)"))
+            cfg["output_path"] = _ask("Full file path including extension")
         else:
             cfg["output_path"] = None
     else:
@@ -220,26 +437,22 @@ def run_interactive() -> dict:
     # ── 3. Services ──────────────────────────────────────────────────────────
     _section("3 · Audio Services")
 
-    is_soundcloud_url = (
-            "soundcloud.com" in cfg["url"]
-            or "on.soundcloud.com" in cfg["url"]
-    )
-    is_apple_url    = "music.apple.com" in cfg["url"]
-    is_youtube_url  = (
-            "youtube.com" in cfg["url"].lower()
-            or "youtu.be" in cfg["url"].lower()
-    )
+    # Warn about unreachable services
+    if health_status:
+        unavailable = [s for s in _ALL_SERVICES if not health_status.get(s, True)]
+        if unavailable:
+            print(f"  {YELLOW('⚠  Currently unreachable:')} {', '.join(unavailable)}")
+
+    is_soundcloud_url = "soundcloud.com" in cfg["url"] or "on.soundcloud.com" in cfg["url"]
+    is_apple_url      = "music.apple.com" in cfg["url"]
+    is_youtube_url    = "youtube.com" in cfg["url"].lower() or "youtu.be" in cfg["url"].lower()
 
     if is_soundcloud_url:
         cfg["services"] = ["soundcloud"]
-        print(
-            f"  {GREEN('✓')} Provider {BOLD('soundcloud')} automatically selected.\nSoundCloud tracks cannot be sourced from other providers."
-        )
+        print(f"  {GREEN('✓')} Provider {BOLD('soundcloud')} automatically selected.")
     elif is_youtube_url:
         cfg["services"] = ["youtube"]
-        print(
-            f"  {GREEN('✓')} Provider {BOLD('youtube')} automatically selected for YouTube URLs."
-        )
+        print(f"  {GREEN('✓')} Provider {BOLD('youtube')} automatically selected.")
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
@@ -251,9 +464,7 @@ def run_interactive() -> dict:
             cfg["services"] = ["youtube"] + fallbacks
     elif is_apple_url:
         cfg["services"] = ["apple"]
-        print(
-            f"  {GREEN('✓')} Provider {BOLD('apple')} automatically selected for Apple Music URLs."
-        )
+        print(f"  {GREEN('✓')} Provider {BOLD('apple')} automatically selected.")
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
@@ -264,7 +475,7 @@ def run_interactive() -> dict:
             )
             cfg["services"] = ["apple"] + fallbacks
     else:
-        print(f"  {DIM('Choose the services and their priority order (the first has priority)')}")
+        print(f"  {DIM('Choose services and their priority order (first = highest priority).')}")
         cfg["services"] = _ask_multi(
             "Services (order = priority):",
             options  = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple"],
@@ -272,7 +483,7 @@ def run_interactive() -> dict:
             ordered  = True,
         )
 
-    # ── 4. Audio Quality ───────────────────────────────────────────────────────────
+    # ── 4. Audio Quality ─────────────────────────────────────────────────────
     _section("4 · Audio Quality")
 
     if is_soundcloud_url:
@@ -284,7 +495,7 @@ def run_interactive() -> dict:
         cfg["allow_fallback"] = True
         print(f"  {YELLOW('⏭  Skipped:')} {DIM('Default Best Audio (Opus/M4A/MP3)')}")
     else:
-        print(f"  {DIM('Note: If the requested quality is not found, an automatic fallback will be executed.')}")
+        print(f"  {DIM('Automatic fallback applies if the requested quality is unavailable.')}")
 
         has_qobuz  = "qobuz"  in cfg["services"]
         has_tidal  = "tidal"  in cfg["services"]
@@ -298,14 +509,12 @@ def run_interactive() -> dict:
                 default = "6 (CD Lossless)",
             )
             cfg["quality"] = q_choice.split(" ")[0]
-
         elif has_tidal and not (has_qobuz or has_deezer or has_apple):
             cfg["quality"] = _ask_choice(
                 "Tidal Quality:",
                 options = ["LOSSLESS", "HI_RES"],
                 default = "LOSSLESS",
             )
-
         elif has_deezer and not (has_qobuz or has_tidal or has_apple):
             q_choice = _ask_choice(
                 "Deezer Quality:",
@@ -313,7 +522,6 @@ def run_interactive() -> dict:
                 default = "LOSSLESS (FLAC)",
             )
             cfg["quality"] = q_choice.split(" ")[0]
-
         elif has_apple and not (has_qobuz or has_tidal or has_deezer):
             q_choice = _ask_choice(
                 "Apple Music Quality:",
@@ -321,27 +529,25 @@ def run_interactive() -> dict:
                 default = "ALAC (Lossless)",
             )
             cfg["quality"] = q_choice.split(" ")[0].lower()
-
-        elif (has_qobuz or has_tidal or has_deezer or has_apple):
+        elif has_qobuz or has_tidal or has_deezer or has_apple:
             combined_options = [
                 "LOSSLESS (FLAC on Deezer/Tidal, '6' on Qobuz, ALAC on Apple)",
                 "HI_RES (Best available everywhere, '27' on Qobuz)",
             ]
             if has_apple:
-                combined_options.append("ATMOS (Spatial Audio su Apple, HI_RES sugli altri)")
-                combined_options.append("AC3 (Dolby Digital su Apple, HIGH sugli altri)")
+                combined_options.append("ATMOS (Spatial Audio on Apple, HI_RES elsewhere)")
+                combined_options.append("AC3 (Dolby Digital on Apple, HIGH elsewhere)")
             if has_qobuz:
-                combined_options.append("7 (Hi-Res intermedio solo per Qobuz)")
-            combined_options.append("HIGH (MP3 320 / AAC su Apple)")
+                combined_options.append("7 (Hi-Res mid on Qobuz only)")
+            combined_options.append("HIGH (MP3 320 / AAC on Apple)")
             if has_apple:
-                combined_options.append("AAC-LEGACY (Vecchio formato iTunes su Apple, HIGH sugli altri)")
+                combined_options.append("AAC-LEGACY (Legacy iTunes on Apple, HIGH elsewhere)")
 
             q_choice = _ask_choice(
                 "Combined Quality:",
                 options = combined_options,
                 default = combined_options[0],
             )
-
             if q_choice.startswith("LOSSLESS"):    cfg["quality"] = "LOSSLESS"
             elif q_choice.startswith("HI_RES"):    cfg["quality"] = "HI_RES"
             elif q_choice.startswith("ATMOS"):     cfg["quality"] = "atmos"
@@ -349,7 +555,6 @@ def run_interactive() -> dict:
             elif q_choice.startswith("7"):         cfg["quality"] = "7"
             elif q_choice.startswith("AAC-LEGACY"):cfg["quality"] = "aac-legacy"
             else:                                   cfg["quality"] = "HIGH"
-
         else:
             cfg["quality"] = _ask_choice(
                 "Quality:",
@@ -362,25 +567,31 @@ def run_interactive() -> dict:
     # ── 5. Filename format ─────────────────────────────────────────────────
     _section("5 · Filename Format")
     print(f"  {DIM('Placeholders: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}")
-    cfg["filename_format"] = _ask("Format", "{title} - {artist}")
+    cfg["filename_format"] = _ask("Format", cfg.get("filename_format", "{title} - {artist}"))
 
     # ── 6. Organization Options ───────────────────────────────────────────
     _section("6 · Organization Options")
 
-    cfg["use_track_numbers"] = _ask_bool("Add track number to filename?", False)
+    cfg["use_track_numbers"]      = cfg.get("use_track_numbers", False)
+    cfg["use_album_track_numbers"]= cfg.get("use_album_track_numbers", False)
+    cfg["use_artist_subfolders"]  = cfg.get("use_artist_subfolders", False)
+    cfg["use_album_subfolders"]   = cfg.get("use_album_subfolders", False)
+    cfg["first_artist_only"]      = cfg.get("first_artist_only", False)
+
+    cfg["use_track_numbers"] = _ask_bool("Add track number to filename?", cfg["use_track_numbers"])
 
     if cfg["use_track_numbers"]:
-        cfg["use_album_track_numbers"] = _ask_bool("Use original album track number?", False)
+        cfg["use_album_track_numbers"] = _ask_bool("Use original album track number?", cfg["use_album_track_numbers"])
         cfg["use_artist_subfolders"] = False
         cfg["use_album_subfolders"]  = False
         cfg["first_artist_only"]     = False
     else:
         cfg["use_album_track_numbers"] = False
-        cfg["use_artist_subfolders"]   = _ask_bool("Create artist subfolders?", False)
-        cfg["use_album_subfolders"]    = _ask_bool("Create album subfolders?", False)
-        cfg["first_artist_only"]       = _ask_bool("Use only the first artist in tags and filename?", False)
+        cfg["use_artist_subfolders"]   = _ask_bool("Create artist subfolders?", cfg["use_artist_subfolders"])
+        cfg["use_album_subfolders"]    = _ask_bool("Create album subfolders?", cfg["use_album_subfolders"])
+        cfg["first_artist_only"]       = _ask_bool("Use only the first artist in tags and filename?", cfg["first_artist_only"])
 
-    # ── 7. Featuring ────────────────────────────────────────────────────────
+    # ── 7. Featuring ─────────────────────────────────────────────────────────
     _section("7 · Featuring")
 
     lower_url = cfg["url"].lower()
@@ -390,50 +601,86 @@ def run_interactive() -> dict:
     )
 
     if is_artist_url:
-        print("  " + DIM("If enabled, also downloads individual tracks where the artist appears as a featured artist"))
-        cfg["include_featuring"] = _ask_bool("Include featuring tracks?", False)
+        print(f"  {DIM('Also downloads tracks where the artist appears as a featured artist.')}")
+        cfg["include_featuring"] = _ask_bool("Include featuring tracks?", cfg.get("include_featuring", False))
     else:
-        print(f"  {YELLOW('⏭  Skipped:')} {DIM('The provided URL does not belong to an artist page.')}")
+        print(f"  {YELLOW('⏭  Skipped:')} {DIM('URL is not an artist page.')}")
         cfg["include_featuring"] = False
 
     # ── 8. Lyrics ────────────────────────────────────────────────────────────
     _section("8 · Lyrics")
-    cfg["embed_lyrics"] = _ask_bool("Embed synchronized lyrics?", True)
+    cfg["embed_lyrics"] = _ask_bool("Embed synchronized lyrics?", cfg.get("embed_lyrics", True))
 
     if cfg["embed_lyrics"]:
         cfg["lyrics_providers"] = _ask_multi(
             "Lyrics providers (order = priority):",
             options  = ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
-            defaults = ["spotify", "lrclib", "apple", "amazon"],
+            defaults = cfg.get("lyrics_providers") or ["spotify", "lrclib", "apple", "amazon"],
             ordered  = True,
         )
     else:
-        cfg["lyrics_providers"] = ["spotify", "musixmatch", "lrclib", "apple"]
+        cfg["lyrics_providers"] = cfg.get("lyrics_providers") or ["spotify", "musixmatch", "lrclib", "apple"]
 
     # ── 9. Metadata enrichment ──────────────────────────────────────────────
     _section("9 · Metadata Enrichment")
-    print(f"  {DIM('Adds genre, BPM, label, HD cover, MusicBrainz IDs, and more')}")
-    cfg["enrich_metadata"] = _ask_bool("Enable metadata enrichment?", True)
+    print(f"  {DIM('Adds genre, BPM, label, HD cover, MusicBrainz IDs, and more.')}")
+    cfg["enrich_metadata"] = _ask_bool("Enable metadata enrichment?", cfg.get("enrich_metadata", True))
 
     if cfg["enrich_metadata"]:
         cfg["enrich_providers"] = _ask_multi(
             "Enrichment providers (order = priority):",
             options  = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
-            defaults = ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
+            defaults = cfg.get("enrich_providers") or ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
             ordered  = True,
         )
     else:
-        cfg["enrich_providers"] = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
+        cfg["enrich_providers"] = cfg.get("enrich_providers") or ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
 
-    # ── 10. Optional Tokens ─────────────────────────────────────────────────────
-    _section("10 · Optional Tokens")
+    # ── 10. Retry ────────────────────────────────────────────────────────────
+    _section("10 · Retry on Failure")
+    print(f"  {DIM('Extra download attempts per track if all providers fail on first try.')}")
+    print(f"  {DIM('Each retry waits exponentially longer (2s, 4s, 8s…).')}")
+    default_retries = cfg.get("track_max_retries", 0)
+    retry_str = _ask("Extra retries per track (0 = no retry)", str(default_retries))
+    try:
+        cfg["track_max_retries"] = max(0, int(retry_str))
+    except ValueError:
+        cfg["track_max_retries"] = 0
+
+    # ── 11. Post-download Action ─────────────────────────────────────────────
+    _section("11 · Post-Download Action")
+    print(f"  {DIM('Action to perform automatically when all downloads finish.')}")
+
+    action_options = ["none", "open_folder", "notify", "command"]
+    default_action = cfg.get("post_download_action", "none")
+    action_choice = _ask_choice(
+        "Action on completion:",
+        options = action_options,
+        default = default_action,
+    )
+    cfg["post_download_action"] = action_choice
+
+    if action_choice == "command":
+        print(f"  {DIM('Placeholders: {folder} {succeeded} {failed}')}")
+        cfg["post_download_command"] = _ask(
+            "Shell command",
+            cfg.get("post_download_command", "echo 'Done: {succeeded} tracks in {folder}'"),
+        )
+    else:
+        cfg["post_download_command"] = cfg.get("post_download_command", "")
+
+    # ── 12. Optional Tokens ──────────────────────────────────────────────────
+    _section("12 · Optional Tokens")
     cfg["qobuz_token"] = _ask("Qobuz auth token (leave blank to skip)", "") or None
 
-    # ── 11. Loop ────────────────────────────────────────────────────────────
+    # ── 13. Loop ─────────────────────────────────────────────────────────────
     loop_str = _ask("Repeat every N minutes (leave blank to disable)", "")
     cfg["loop"] = int(loop_str) if loop_str.isdigit() else None
 
-    # ── Summary + confirmation ─────────────────────────────────────────────────
+    # ── Profile save ────────────────────────────────────────────────────────
+    _profile_save_section(cfg)
+
+    # ── Summary + confirmation ───────────────────────────────────────────────
     _summary(cfg)
     print()
     if not _ask_bool(BOLD("Start download with this configuration?"), True):
@@ -451,7 +698,7 @@ def _print_cli_command(cfg: dict) -> None:
     if cfg.get("output_path"):
         parts.append(f'-o "{cfg["output_path"]}"')
     parts.append(f'-s {" ".join(cfg["services"])}')
-    if cfg["quality"] != "LOSSLESS":
+    if cfg["quality"] not in ("LOSSLESS", "BEST"):
         parts.append(f'-q {cfg["quality"]}')
     if cfg["filename_format"] != "{title} - {artist}":
         parts.append(f'--filename-format "{cfg["filename_format"]}"')
@@ -469,6 +716,12 @@ def _print_cli_command(cfg: dict) -> None:
         parts.append("--no-enrich")
     else:
         parts.append(f'--enrich-providers {" ".join(cfg["enrich_providers"])}')
+    if cfg.get("track_max_retries"):
+        parts.append(f'--retries {cfg["track_max_retries"]}')
+    if cfg.get("post_download_action") and cfg["post_download_action"] != "none":
+        parts.append(f'--post-action {cfg["post_download_action"]}')
+        if cfg["post_download_action"] == "command" and cfg.get("post_download_command"):
+            parts.append(f'--post-command "{cfg["post_download_command"]}"')
     if cfg.get("qobuz_token"):
         parts.append(f'--qobuz-token "{cfg["qobuz_token"]}"')
     if cfg.get("loop"):
