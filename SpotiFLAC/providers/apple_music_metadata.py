@@ -163,6 +163,11 @@ class AppleMusicMetadataClient:
 
         if resp.status_code == 401:
             self._auth_token = None
+            # Retry con nuovo token
+            token = self._get_token()
+            resp = self._session.get(url, params=params,
+                                    headers={"Authorization": f"Bearer {token}"},
+                                    timeout=self._timeout)
 
         resp.raise_for_status()
         return resp.json()

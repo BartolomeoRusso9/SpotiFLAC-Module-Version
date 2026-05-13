@@ -19,7 +19,7 @@ _ORIGIN   = "https://spotidownloader.com"
 _SESSION_URL = f"{_API_BASE}/session"
 
 class SpotiDownloaderProvider(BaseProvider):
-    name = "spotidownloader"
+    name = "spoti"
 
     _token: str = ""
     _token_exp: float = 0.0

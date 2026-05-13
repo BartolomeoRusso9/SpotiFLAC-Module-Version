@@ -291,7 +291,6 @@ class DeezerProvider(BaseProvider):
             raise SpotiflacError(ErrorKind.FILE_IO, "Manca pycryptodome, impossibile decriptare la traccia.")
 
         key = self._generate_blowfish_key(track_id)
-        cipher = Blowfish.new(key, Blowfish.MODE_CBC, _BLOWFISH_IV)
 
         try:
             with open(encrypted_path, "rb") as f_in, open(output_path, "wb") as f_out:
@@ -303,6 +302,7 @@ class DeezerProvider(BaseProvider):
 
                     # Deezer cripta solo 1 blocco ogni 3 (0, 3, 6...) se è pieno
                     if len(chunk) == _CHUNK_SIZE and chunk_index % 3 == 0:
+                        cipher = Blowfish.new(key, Blowfish.MODE_CBC, _BLOWFISH_IV)  # reset per ogni chunk
                         decrypted = cipher.decrypt(chunk)
                         f_out.write(decrypted)
                     else:
