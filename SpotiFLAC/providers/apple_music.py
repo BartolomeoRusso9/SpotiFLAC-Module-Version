@@ -176,10 +176,15 @@ class AppleMusicProvider(BaseProvider):
                 return None, None
 
             # Polling in attesa del completamento
-            max_wait_s = 60 * 60
+            max_wait_s = 60 * 10  # 10 minutes — was 60 * 60 (1 hour)
             deadline = time.time() + max_wait_s
 
+            poll_count = 0
             while time.time() < deadline:
+                poll_count += 1
+                if poll_count % 12 == 0:  # every ~30s
+                    elapsed = int(time.time() - (deadline - max_wait_s))
+                    print(f"  ⏳ Apple Music: waiting for job {job_id[:8]}… ({elapsed}s elapsed)")
                 st_resp = self._session.get(f"{API_ENDPOINTS['proxy_queued']}/status/{job_id}", timeout=15)
                 st_resp.raise_for_status()
                 st_data = st_resp.json()
@@ -345,7 +350,7 @@ class AppleMusicProvider(BaseProvider):
             )
             embed_metadata(str(dest), metadata, opts, session=self._session)
 
-            return DownloadResult.ok(self.name, str(dest))
+            return DownloadResult.ok(self.name, str(dest), fmt="m4a")
 
         except SpotiflacError as exc:
             logger.error("[%s] %s", self.name, exc)

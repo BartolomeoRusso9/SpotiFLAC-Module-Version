@@ -66,7 +66,7 @@ _STREAM_APIS: list[str] = [
     "https://qobuz.spotbye.qzz.io/api/track/",
     "https://qobuz.squid.wtf/api/download-music?country=US&track_id=",
     "https://dl.musicdl.me/qobuz/download",
-    "https://api.zarz.moe/dl/qbz",
+    "https://api.zarz.moe/v1/dl/qbz",
     "https://www.musicdl.me/api/qobuz/download"
 ]
 
@@ -77,11 +77,17 @@ _POST_APIS = {
 }
 
 _QUALITY_FALLBACK: dict[str, list[str]] = {
-    "27": ["27", "7", "6"],
-    "7":  ["7", "6"],
-    "6":  ["6"],
-    "5":  ["6"],
-    "":   ["6"],
+    "27":       ["27", "7", "6"],
+    "7":        ["7", "6"],
+    "6":        ["6"],
+    "5":        ["6"],
+    "":         ["6"],
+    # Non-numeric aliases forwarded from other providers
+    "HI_RES":   ["27", "7", "6"],
+    "LOSSLESS": ["6"],
+    "HIGH":     ["6"],
+    "NORMAL":   ["6"],
+    "BEST":     ["6"],
 }
 
 # FIX #3: mappa i valori Tidal-style verso i codici numerici Qobuz

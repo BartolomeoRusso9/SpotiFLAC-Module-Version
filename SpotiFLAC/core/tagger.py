@@ -258,9 +258,9 @@ def _embed_flac(
 
     for key, val in tags.items():
         if multi_artist and key in ("ARTIST", "ALBUMARTIST") and "," in val:
+            # Vorbis Comment standard: repeat the tag for each artist value
             parts = [a.strip() for a in val.split(",") if a.strip()]
-            audio[key] = val
-            audio[key + "S"] = parts
+            audio[key] = parts
         else:
             audio[key] = val
 
@@ -273,6 +273,150 @@ def _embed_flac(
 
     audio.save()
     logger.debug("[tagger/flac] tags written: %s", path.name)
+
+
+def _embed_m4a(
+        path:        Path,
+        tags:        dict[str, str],
+        cover_data:  bytes | None,
+        lyrics:      str | None,
+        lyrics_prov: str,
+) -> None:
+    """Scrive tag su file M4A/AAC tramite mutagen.mp4.MP4."""
+    from mutagen.mp4 import MP4, MP4Cover
+
+    audio = MP4(str(path))
+    audio.delete()
+
+    _M4A_MAP = {
+        "TITLE":        "\xa9nam",
+        "ARTIST":       "\xa9ART",
+        "ALBUM":        "\xa9alb",
+        "ALBUMARTIST":  "aART",
+        "DATE":         "\xa9day",
+        "GENRE":        "\xa9gen",
+        "COMPOSER":     "\xa9wrt",
+        "COPYRIGHT":    "cprt",
+        "DESCRIPTION":  "\xa9cmt",
+        "ISRC":         "----:com.apple.iTunes:ISRC",
+        "ORGANIZATION": "----:com.apple.iTunes:LABEL",
+        "LABEL":        "----:com.apple.iTunes:LABEL",
+        "BPM":          "tmpo",
+    }
+
+    track_num   = int(tags.get("TRACKNUMBER", "0") or 0)
+    track_total = int(tags.get("TRACKTOTAL",  "0") or 0)
+    disc_num    = int(tags.get("DISCNUMBER",  "1") or 1)
+    disc_total  = int(tags.get("DISCTOTAL",   "1") or 1)
+
+    skip = {"TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL"}
+
+    if track_num:
+        audio["trkn"] = [(track_num, track_total)]
+    if disc_num:
+        audio["disk"] = [(disc_num, disc_total)]
+
+    for key, val in tags.items():
+        key_up = key.upper()
+        if key_up in skip or not val:
+            continue
+        m4a_key = _M4A_MAP.get(key_up)
+        if m4a_key == "tmpo":
+            try:
+                audio[m4a_key] = [int(val)]
+            except (ValueError, TypeError):
+                pass
+        elif m4a_key and m4a_key.startswith("----"):
+            audio[m4a_key] = [str(val).encode("utf-8")]
+        elif m4a_key:
+            audio[m4a_key] = [str(val)]
+        else:
+            freeform = f"----:com.apple.iTunes:{key_up}"
+            audio[freeform] = [str(val).encode("utf-8")]
+
+    if lyrics and lyrics.strip():
+        audio["\xa9lyr"] = [lyrics]
+        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
+        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
+        logger.debug("[tagger/m4a] lyrics embedded (%d chars)", len(lyrics))
+
+    if cover_data:
+        audio["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
+
+    audio.save()
+    logger.debug("[tagger/m4a] tags written: %s", path.name)
+
+
+def _embed_m4a(
+        path:        Path,
+        tags:        dict[str, str],
+        cover_data:  bytes | None,
+        lyrics:      str | None,
+        lyrics_prov: str,
+) -> None:
+    """Scrive tag su file M4A/AAC tramite mutagen.mp4.MP4."""
+    from mutagen.mp4 import MP4, MP4Cover
+
+    audio = MP4(str(path))
+    audio.delete()
+
+    _M4A_MAP = {
+        "TITLE":        "\xa9nam",
+        "ARTIST":       "\xa9ART",
+        "ALBUM":        "\xa9alb",
+        "ALBUMARTIST":  "aART",
+        "DATE":         "\xa9day",
+        "GENRE":        "\xa9gen",
+        "COMPOSER":     "\xa9wrt",
+        "COPYRIGHT":    "cprt",
+        "DESCRIPTION":  "\xa9cmt",
+        "ISRC":         "----:com.apple.iTunes:ISRC",
+        "ORGANIZATION": "----:com.apple.iTunes:LABEL",
+        "LABEL":        "----:com.apple.iTunes:LABEL",
+        "BPM":          "tmpo",
+    }
+
+    track_num   = int(tags.get("TRACKNUMBER", "0") or 0)
+    track_total = int(tags.get("TRACKTOTAL",  "0") or 0)
+    disc_num    = int(tags.get("DISCNUMBER",  "1") or 1)
+    disc_total  = int(tags.get("DISCTOTAL",   "1") or 1)
+
+    skip = {"TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL"}
+
+    if track_num:
+        audio["trkn"] = [(track_num, track_total)]
+    if disc_num:
+        audio["disk"] = [(disc_num, disc_total)]
+
+    for key, val in tags.items():
+        key_up = key.upper()
+        if key_up in skip or not val:
+            continue
+        m4a_key = _M4A_MAP.get(key_up)
+        if m4a_key == "tmpo":
+            try:
+                audio[m4a_key] = [int(val)]
+            except (ValueError, TypeError):
+                pass
+        elif m4a_key and m4a_key.startswith("----"):
+            audio[m4a_key] = [str(val).encode("utf-8")]
+        elif m4a_key:
+            audio[m4a_key] = [str(val)]
+        else:
+            freeform = f"----:com.apple.iTunes:{key_up}"
+            audio[freeform] = [str(val).encode("utf-8")]
+
+    if lyrics and lyrics.strip():
+        audio["\xa9lyr"] = [lyrics]
+        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
+        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
+        logger.debug("[tagger/m4a] lyrics embedded (%d chars)", len(lyrics))
+
+    if cover_data:
+        audio["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
+
+    audio.save()
+    logger.debug("[tagger/m4a] tags written: %s", path.name)
 
 @dataclass
 class EmbedOptions:
@@ -309,8 +453,9 @@ def embed_metadata(
 
     is_mp3  = path.suffix.lower() == ".mp3"
     is_flac = path.suffix.lower() == ".flac"
+    is_m4a  = path.suffix.lower() in (".m4a", ".aac")
 
-    if not is_mp3 and not is_flac:
+    if not is_mp3 and not is_flac and not is_m4a:
         logger.warning("[tagger] formato non supportato: %s — skip", path.suffix)
         return
 
@@ -413,8 +558,10 @@ def embed_metadata(
     try:
         if is_flac:
             _embed_flac(path, tags, cover_data, lyrics, lyrics_prov, multi_artist)
-        else:  # mp3
+        elif is_mp3:
             _embed_id3(path, tags, cover_data, lyrics, lyrics_prov)
+        else:  # m4a / aac
+            _embed_m4a(path, tags, cover_data, lyrics, lyrics_prov)
     except SpotiflacError:
         raise
     except Exception as exc:
