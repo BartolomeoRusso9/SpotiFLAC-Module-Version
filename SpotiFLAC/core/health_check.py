@@ -63,12 +63,10 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     try:
         from SpotiFLAC.providers.deezer import _RESOLVER_URL
         endpoints["deezer"] = [
-            ("GET",  "https://api.deezer.com/2.0/track/isrc:USUM71703861"),
             ("POST", _RESOLVER_URL),
         ]
     except ImportError:
         endpoints["deezer"] = [
-            ("GET", "https://api.deezer.com/2.0/track/isrc:USUM71703861"),
         ]
 
     # ── Amazon ─────────────────────────────────────────────────────────────
@@ -91,16 +89,14 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
             from SpotiFLAC.providers.apple_music_metadata import API_ENDPOINTS as APPLE_META_ENDPOINTS
         except ImportError:
             # Fallback se non trova il modulo metadata
-            APPLE_META_ENDPOINTS = {"itunes_search": "https://itunes.apple.com/search"}
+            APPLE_META_ENDPOINTS = {}
 
         endpoints["apple"] = [
-            ("GET",  f"{APPLE_META_ENDPOINTS.get('itunes_search', 'https://itunes.apple.com/search')}?term=test&limit=1"),
             ("POST", APPLE_DL_ENDPOINTS.get("proxy_direct", "https://api.zarz.moe/v1/dl/app2")),
             ("GET",  f"{APPLE_DL_ENDPOINTS.get('proxy_queued', 'https://api.zarz.moe/v1/dl/app')}/status/test"),
         ]
     except ImportError:
         endpoints["apple"] = [
-            ("GET",  "https://itunes.apple.com/search?term=test&limit=1"),
             ("POST", "https://api.zarz.moe/v1/dl/app2"),
             ("GET",  "https://api.zarz.moe/v1/dl/app/status/test"),
         ]
@@ -122,12 +118,10 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     try:
         from SpotiFLAC.providers.youtube import COBALT_API_URL
         endpoints["youtube"] = [
-            ("GET",  "https://music.youtube.com/"),
             ("POST", COBALT_API_URL),
         ]
     except ImportError:
         endpoints["youtube"] = [
-            ("GET", "https://music.youtube.com/"),
         ]
 
     # ── SpotiDownloader ────────────────────────────────────────────────────

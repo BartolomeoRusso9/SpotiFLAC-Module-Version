@@ -36,7 +36,6 @@ classifiers = [
 dependencies = [
     "requests>=2.32.3",
     "mutagen>=1.47.0",
-    "pyotp>=2.9.0",
     "pydantic>=2.7.0",
     "cryptography>=42.0.0",
     # FIX #6: pycryptodome era usato in deezer.py e amazon.py ma non dichiarato

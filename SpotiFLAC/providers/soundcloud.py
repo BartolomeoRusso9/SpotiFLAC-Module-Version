@@ -572,7 +572,7 @@ class SoundCloudProvider(BaseProvider):
                 logger.warning("[SC] Odesli resolution error: %s", e)
 
         if not dl_url:
-            return DownloadResult.fail(self.provider_id, "Stream non disponibile")
+            return DownloadResult.fail(self.name, "Stream non disponibile")
 
         # ── 2. Costruzione percorso output (estensione .mp3) ──────────────
         dest = self._build_output_path(
@@ -581,7 +581,7 @@ class SoundCloudProvider(BaseProvider):
             extension=".mp3",
         )
         if self._file_exists(dest):
-            return DownloadResult.ok(self.provider_id, str(dest), fmt="mp3")
+            return DownloadResult.ok(self.name, str(dest), fmt="mp3")
 
         # ── 3. Download effettivo ─────────────────────────────────────────
         try:

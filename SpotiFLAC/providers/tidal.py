@@ -518,7 +518,7 @@ class TidalProvider(BaseProvider):
                     resp = self._session.get(endpoint, timeout=7)
                     if resp.status_code != 200:
                         continue
-                    t_id = self._extract_best_track_id(resp.json(), isrc, duration_ms)
+                    t_id = self._extract_best_track_id(resp.json(), clean_track, clean_artist, isrc, duration_ms)
                     if t_id:
                         return f"https://listen.tidal.com/track/{t_id}"
                 except Exception:
