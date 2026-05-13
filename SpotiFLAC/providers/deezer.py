@@ -174,14 +174,13 @@ class DeezerProvider(BaseProvider):
             "Accept": "application/json"
         }
 
-        max_retries = 3
-        base_delay = 5.0
+        max_retries = 2
+        base_delay = 3.0
 
         for attempt in range(max_retries):
             resp = self._session.post(url, json=payload, headers=headers, timeout=_API_TIMEOUT_S)
 
             if resp.status_code == 429:
-                # Exponential backoff: 5s, 10s, 20s...
                 delay = base_delay * (2 ** attempt)
                 logger.warning(
                     "[deezer] HTTP 429 on %s: rate limit, waiting %.1f seconds (attempt %d/%d)...",
