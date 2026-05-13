@@ -89,17 +89,10 @@ def parse_args() -> argparse.Namespace:
     lyrics_grp.add_argument(
         "--lyrics-providers",
         nargs   = "+",
-        default = ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
+        default = ["spotify", "apple", "lrclib", "amazon"],
         dest    = "lyrics_providers",
         choices = ["spotify", "apple", "musixmatch", "amazon", "lrclib"],
-        help    = "Lyrics providers in priority order (default: spotify apple musixmatch lrclib amazon).",
-    )
-    lyrics_grp.add_argument(
-        "--spotify-token",
-        default = "",
-        dest    = "spotify_token",
-        metavar = "SP_DC",
-        help    = "Spotify sp_dc cookie",
+        help    = "Lyrics providers in priority order (default: spotify apple lrclib amazon).",
     )
 
     # ── Metadata enrichment ─────────────────────────────────────────────────
@@ -152,7 +145,6 @@ def main() -> None:
             allow_fallback           = cfg.get("allow_fallback", True),
             embed_lyrics             = cfg["embed_lyrics"],
             lyrics_providers         = cfg["lyrics_providers"],
-            lyrics_spotify_token     = cfg.get("lyrics_spotify_token", ""),
             enrich_metadata          = cfg["enrich_metadata"],
             enrich_providers         = cfg["enrich_providers"],
             qobuz_token              = cfg.get("qobuz_token"),
@@ -164,7 +156,6 @@ def main() -> None:
         file_cfg = load_config()
         quality       = args.quality       or file_cfg.get("quality", "LOSSLESS")
         qobuz_token   = args.qobuz_token   or file_cfg.get("qobuz_token")
-        spotify_token = args.spotify_token or file_cfg.get("spotify_token", "")
 
         log_level = logging.DEBUG if args.verbose else logging.WARNING
         logging.basicConfig(
@@ -188,7 +179,6 @@ def main() -> None:
             output_path              = args.output_path,
             embed_lyrics             = args.embed_lyrics,
             lyrics_providers         = args.lyrics_providers,
-            lyrics_spotify_token     = spotify_token,
             enrich_metadata          = args.enrich,
             enrich_providers         = args.enrich_providers,
             qobuz_token              = qobuz_token,

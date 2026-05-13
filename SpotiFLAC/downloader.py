@@ -42,7 +42,6 @@ class DownloadOptions:
     lyrics_providers:        list[str]       = field(
         default_factory=lambda: ["spotify", "apple", "musixmatch", "lrclib", "amazon"]
     )
-    lyrics_spotify_token:    str             = ""
 
     enrich_metadata:         bool            = True
     enrich_providers:        list[str]       = field(
@@ -90,7 +89,6 @@ def download_one(
             quality                 = opts.quality,
             embed_lyrics            = opts.embed_lyrics,
             lyrics_providers        = opts.lyrics_providers,
-            lyrics_spotify_token    = opts.lyrics_spotify_token,
             enrich_metadata         = opts.enrich_metadata,
             enrich_providers        = opts.enrich_providers,
             qobuz_token             = opts.qobuz_token,
@@ -234,7 +232,6 @@ class SpotiflacDownloader:
             time.sleep(loop_minutes * 60)
 
     def _resolve_metadata(self, url: str) -> tuple[str, list[TrackMetadata], dict]:
-        """Ritorna (collection_name, tracks, url_info)."""
         from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
         from .providers.apple_music_metadata import is_apple_music_url, parse_apple_music_url
 
@@ -317,7 +314,6 @@ class SpotiflacDownloader:
         return collection_name, tracks, info
 
     def _resolve_isrc_bulk(self, tracks: list[TrackMetadata]) -> list[TrackMetadata]:
-        """Risolve ISRC mancanti in batch."""
         missing = [t for t in tracks if not t.isrc]
         if not missing:
             return tracks
@@ -406,17 +402,11 @@ class SpotiflacDownloader:
         if is_discography:
             is_playlist = True
 
-        # FIX: invece di mutare self._opts (side effect su oggetto condiviso),
-        # aggiorniamo is_album localmente e lo passiamo esplicitamente ai metodi.
-        # Prima: self._opts.is_album = is_album  ← mutazione inattesa
         effective_opts = self._opts
         if self._opts.is_album != is_album:
             from dataclasses import replace
             effective_opts = replace(self._opts, is_album=is_album)
 
-        # FIX: output_path non ha senso per collezioni.
-        # Prima il codice mutava self._opts.output_path = None (side effect permanente).
-        # Ora lo segnaliamo con un solo logger.warning senza mutare lo stato.
         if (is_album or is_playlist) and self._opts.output_path:
             logger.warning(
                 "[downloader] --output-path ignorato per %s: "

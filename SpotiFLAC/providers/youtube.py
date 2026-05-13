@@ -503,7 +503,7 @@ class YouTubeProvider(BaseProvider):
     # BaseProvider interface
     # ------------------------------------------------------------------
 
-    def download_track(self, metadata: TrackMetadata, output_dir: str, *, quality: str = "320", filename_format: str = "{title} - {artist}", position: int = 1, include_track_num: bool = False, use_album_track_num: bool = False, first_artist_only: bool = False, allow_fallback: bool = True, embed_lyrics: bool = False, lyrics_providers: list[str] | None = None, lyrics_spotify_token: str = "", enrich_metadata: bool = False, enrich_providers: list[str] | None = None, qobuz_token: str | None = None, is_album: bool = False, **kwargs) -> DownloadResult:
+    def download_track(self, metadata: TrackMetadata, output_dir: str, *, quality: str = "320", filename_format: str = "{title} - {artist}", position: int = 1, include_track_num: bool = False, use_album_track_num: bool = False, first_artist_only: bool = False, allow_fallback: bool = True, embed_lyrics: bool = False, lyrics_providers: list[str] | None = None,  enrich_metadata: bool = False, enrich_providers: list[str] | None = None, qobuz_token: str | None = None, is_album: bool = False, **kwargs) -> DownloadResult:
         try:
             dest = self._build_output_path(
                 metadata, output_dir,
@@ -626,7 +626,6 @@ class YouTubeProvider(BaseProvider):
                 extra_tags=mb_tags,
                 embed_lyrics=embed_lyrics,
                 lyrics_providers=lyrics_providers or [],
-                lyrics_spotify_token=lyrics_spotify_token,
                 enrich=enrich_metadata,
                 enrich_providers=enrich_providers,
                 enrich_qobuz_token=qobuz_token or "",

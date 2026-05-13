@@ -59,7 +59,6 @@ class BaseProvider(ABC):
             allow_fallback:       bool = True,
             embed_lyrics:         bool = False,
             lyrics_providers:     list[str] | None = None,
-            lyrics_spotify_token: str  = "",
             enrich_metadata:      bool = False,
             enrich_providers:     list[str] | None = None,
             is_album:             bool = False,
