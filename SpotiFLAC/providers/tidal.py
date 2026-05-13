@@ -444,9 +444,10 @@ def _fetch_tidal_url_parallel(
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
+    logger.debug("[tidal] All APIs failed details: %s", "; ".join(errors))
     raise SpotiflacError(
         ErrorKind.UNAVAILABLE,
-        f"all {len(apis)} Tidal APIs failed in {time.time()-start:.1f}s — {'; '.join(errors)}",
+        f"All {len(apis)} Tidal APIs failed.",
         "tidal",
     )
 

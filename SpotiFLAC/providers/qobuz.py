@@ -416,9 +416,10 @@ def _fetch_stream_url_parallel(
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
+    logger.debug("[qobuz] All APIs failed details: %s", "; ".join(errors))
     raise SpotiflacError(
         ErrorKind.UNAVAILABLE,
-        f"all {len(apis)} Qobuz stream APIs failed in {time.time()-start:.1f}s — {'; '.join(errors)}",
+        f"All {len(apis)} Qobuz stream APIs failed.",
         "qobuz",
     )
 
@@ -657,15 +658,15 @@ class QobuzProvider(BaseProvider):
                     logger.debug("[qobuz] ISRC %s not found, trying textual fallback. Error: %s", metadata.isrc, e)
 
             if not track:
-                logger.info("[qobuz] Tento la ricerca testuale per: %s - %s", metadata.title, metadata.artists)
+                logger.info("[qobuz] Trying textual search for: %s - %s", metadata.title, metadata.artists)
                 track = self._search_by_text(metadata.title, metadata.artists)
 
             if not track:
-                raise TrackNotFoundError(self.name, f"Traccia non trovata (ISRC: {metadata.isrc}, Testo: {metadata.title})")
+                raise TrackNotFoundError(self.name, f"Track not found (ISRC: {metadata.isrc}, Title: {metadata.title})")
 
             track_id = track.get("id")
             if not track_id:
-                raise TrackNotFoundError(self.name, "ID traccia mancante nella risposta di Qobuz")
+                raise TrackNotFoundError(self.name, "Missing track ID in Qobuz response")
             dest = self._build_output_path(
                 metadata, output_dir, filename_format,
                 position, include_track_num, use_album_track_num, first_artist_only,

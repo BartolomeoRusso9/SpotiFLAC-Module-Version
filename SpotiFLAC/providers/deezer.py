@@ -79,7 +79,7 @@ class DeezerProvider(BaseProvider):
         self._last_cache_cleanup    = 0.0
 
         if not HAS_CRYPTO:
-            logger.warning("[deezer] pycryptodome non trovato. I download criptati falliranno. Esegui 'pip install pycryptodome'.")
+            logger.warning("[deezer] pycryptodome not found. Execute 'pip install pycryptodome'.")
 
     # ------------------------------------------------------------------
     # Cache helpers
@@ -165,7 +165,35 @@ class DeezerProvider(BaseProvider):
                     self._url_locks.pop(url, None)
 
     def _post_json(self, url: str, payload: dict) -> dict:
-        resp = self._session.post(url, json=payload, timeout=_API_TIMEOUT_S)
+        import time
+
+        # Selettore User-Agent come nel file JS
+        is_zarz = url.startswith("https://api.zarz.moe") or url.startswith("http://api.zarz.moe")
+        headers = {
+            "User-Agent": "SpotiFLAC-Mobile" if is_zarz else _DEFAULT_UA,
+            "Accept": "application/json"
+        }
+
+        max_retries = 3
+        base_delay = 5.0
+
+        for attempt in range(max_retries):
+            resp = self._session.post(url, json=payload, headers=headers, timeout=_API_TIMEOUT_S)
+
+            if resp.status_code == 429:
+                # Exponential backoff: 5s, 10s, 20s...
+                delay = base_delay * (2 ** attempt)
+                logger.warning(
+                    "[deezer] HTTP 429 on %s: rate limit, waiting %.1f seconds (attempt %d/%d)...",
+                    url, delay, attempt + 1, max_retries
+                )
+                time.sleep(delay)
+                continue
+
+            resp.raise_for_status()
+            return resp.json()
+
+        # Se esaurisce i tentativi, solleva l'eccezione dell'ultima risposta
         resp.raise_for_status()
         return resp.json()
 
@@ -328,7 +356,7 @@ class DeezerProvider(BaseProvider):
         if not track_id:
             return None
 
-        logger.info("[deezer] Trovato: %s - %s (ID: %s)", meta["artists"], meta["title"], track_id)
+        logger.info("[deezer] Found: %s - %s (ID: %s)", meta["artists"], meta["title"], track_id)
 
         try:
             payload = {
@@ -353,7 +381,7 @@ class DeezerProvider(BaseProvider):
                 requires_decryption = True
 
         except Exception as exc:
-            logger.warning("[deezer] Resolver API fallito: %s", exc)
+            logger.warning("[deezer] Resolver API failed:: %s", exc)
             return None
 
         filename  = f"{self._safe(meta['artists'])} - {self._safe(meta['title'])}.flac"
@@ -433,7 +461,7 @@ class DeezerProvider(BaseProvider):
             fallback_track = self._search_track_text(metadata.title, metadata.artists)
             if fallback_track and fallback_track.get("isrc"):
                 isrc_to_use = fallback_track["isrc"]
-                logger.info("[deezer] Ricerca testuale riuscita! Trovato ISRC alternativo: %s", isrc_to_use)
+                logger.info("[deezer] Found alternative ISRC: %s", isrc_to_use)
             else:
                 return DownloadResult.fail(self.name, "Nessun ISRC disponibile e ricerca testuale fallita.")
 
@@ -462,7 +490,7 @@ class DeezerProvider(BaseProvider):
             downloaded = self._download_flac_raw(isrc_to_use, output_dir)
 
             if not downloaded or not os.path.exists(downloaded):
-                return DownloadResult.fail(self.name, "Nessun file FLAC scaricato")
+                return DownloadResult.fail(self.name, "No FLAC file downloaded")
 
             if os.path.abspath(downloaded) != os.path.abspath(str(dest)):
                 import shutil

@@ -53,8 +53,8 @@ class SpotiDownloaderProvider(BaseProvider):
             if "403" in str(exc):
                 raise AuthError(
                     self.name,
-                    "Accesso negato dal server (probabile blocco Cloudflare/WAF attivo). "
-                    "Il provider potrebbe essere temporaneamente inaccessibile."
+                    "Access denied by server (likely Cloudflare/WAF block active). "
+                    "The provider might be temporarily unavailable."
                 ) from exc
             raise AuthError(self.name, f"session request failed: {exc}")
 
@@ -132,7 +132,7 @@ class SpotiDownloaderProvider(BaseProvider):
             if url and ".flac" in url:
                 return url
 
-        raise TrackNotFoundError(self.name, "FLAC non disponibile per questa traccia")
+        raise TrackNotFoundError(self.name, "FLAC not available for this track")
 
     # ---------------------------------------------------------
     # DOWNLOAD PIPELINE
@@ -161,7 +161,7 @@ class SpotiDownloaderProvider(BaseProvider):
         if metadata.id.startswith("tidal_"):
             return DownloadResult.fail(
                 self.name,
-                "SpotiDownloader non supporta ID Tidal — provider saltato",
+                "SpotiDownloader does not support Tidal IDs — provider skipped",
             )
 
         try:

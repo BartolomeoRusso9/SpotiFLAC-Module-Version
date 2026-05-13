@@ -99,19 +99,19 @@ def _print_mb_summary(mb_tags: dict) -> None:
         return
 
     _TAG_LABELS = {
-        "GENRE": "genere", "genre": "genere",
+        "GENRE": "genre", "genre": "genre",
         "BPM": "BPM", "bpm": "BPM",
-        "LABEL": "etichetta", "label": "etichetta",
-        "CATALOGNUMBER": "n. catalogo", "catalognumber": "n. catalogo",
+        "LABEL": "label", "label": "label",
+        "CATALOGNUMBER": "catalog no.", "catalognumber": "catalog no.",
         "BARCODE": "barcode", "barcode": "barcode",
-        "ORIGINALDATE": "data", "original_date": "data",
-        "RELEASECOUNTRY": "paese", "country": "paese",
-        "RELEASESTATUS": "stato release", "status": "stato release",
-        "MEDIA": "supporto", "media": "supporto",
-        "RELEASETYPE": "tipo release", "type": "tipo release",
-        "ARTISTSORT": "artista (sort)", "artist_sort": "artista (sort)",
-        "ALBUMARTISTSORT": "artista album (sort)", "albumartist_sort": "artista album (sort)",
-        "SCRIPT": "scrittura", "script": "scrittura",
+        "ORIGINALDATE": "date", "original_date": "date",
+        "RELEASECOUNTRY": "country", "country": "country",
+        "RELEASESTATUS": "release status", "status": "release status",
+        "MEDIA": "media", "media": "media",
+        "RELEASETYPE": "release type", "type": "release type",
+        "ARTISTSORT": "artist (sort)", "artist_sort": "artist (sort)",
+        "ALBUMARTISTSORT": "album artist (sort)", "albumartist_sort": "album artist (sort)",
+        "SCRIPT": "script", "script": "script",
     }
 
     mb_ids = {
@@ -131,7 +131,7 @@ def _print_mb_summary(mb_tags: dict) -> None:
         parts.append(f"{label}: {short_val}")
 
     if mb_ids:
-        parts.append(f"ID MusicBrainz ({len(mb_ids)} campi)")
+        parts.append(f"MusicBrainz ID ({len(mb_ids)} fields)")
 
     if parts:
         print(f"  ✦ MusicBrainz: {', '.join(parts)}")
@@ -216,8 +216,8 @@ def _embed_id3(
     # ── lyrics ─────────────────────────────────────────────────────────────
     if lyrics and lyrics.strip():
         audio.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
-        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
-        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
+        prov_str = lyrics_prov if lyrics_prov else "unknown"
+        print(f"  ✦ Lyrics: added via {prov_str}")
         logger.debug("[tagger/mp3] lyrics embedded (%d chars)", len(lyrics))
 
     # ── copertina ──────────────────────────────────────────────────────────
@@ -403,12 +403,12 @@ def embed_metadata(
             enriched_tags      = enriched.as_tags()
             enriched_cover_url = enriched.cover_url_hd
             if enriched._sources:
-                nomi_campi = {"cover_url_hd": "cover", "explicit": "advisory"}
-                dettagli = ", ".join(
-                    f"{nomi_campi.get(campo, campo)} ({provider})"
-                    for campo, provider in enriched._sources.items()
+                field_names = {"cover_url_hd": "cover", "explicit": "advisory"}
+                details = ", ".join(
+                    f"{field_names.get(field, field)} ({provider})"
+                    for field, provider in enriched._sources.items()
                 )
-                print(f"Arricchito con: {dettagli}")
+                print(f"  ✦ Enriched with: {details}")
             logger.debug("[tagger] enriched: %s", list(enriched_tags.keys()))
         except Exception as exc:
             logger.warning("[tagger] enrichment failed: %s", exc)

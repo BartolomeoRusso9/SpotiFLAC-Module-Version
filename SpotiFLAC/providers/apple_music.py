@@ -64,7 +64,7 @@ class AppleMusicProvider(BaseProvider):
             if data.get("resultCount", 0) > 0:
                 return data["results"][0].get("trackViewUrl")
         except Exception as e:
-            logger.warning("[apple-music] Risoluzione URL tramite iTunes fallita per ISRC %s: %s", isrc, e)
+            logger.warning("[apple-music] iTunes URL resolution failed for ISRC %s: %s", isrc, e)
         return None
 
     def _resolve_track_url_by_search(self, title: str, artists: str, isrc: str = "", duration_ms: int = 0) -> str | None:
@@ -109,7 +109,7 @@ class AppleMusicProvider(BaseProvider):
             return best_match
 
         except Exception as e:
-            logger.debug("[apple-music] Ricerca testuale fallita: %s", e)
+            logger.debug("[apple-music] Text search failed: %s", e)
         return None
 
     def _get_stream_url(self, track_url: str, codec: str) -> tuple[str | None, str | None]:
@@ -136,7 +136,7 @@ class AppleMusicProvider(BaseProvider):
             if resp.headers.get("cf-mitigated", "").lower() == "challenge":
                 raise SpotiflacError(
                     ErrorKind.NETWORK_ERROR,
-                    "Proxy bloccato da Cloudflare challenge",
+                    "Proxy blocked by Cloudflare challenge",
                     self.name,
                 )
             else:
@@ -147,10 +147,10 @@ class AppleMusicProvider(BaseProvider):
                     return API_ENDPOINTS["proxy_direct"], data["stream_url"]
         except requests.HTTPError as e:
             err_msg = e.response.json().get("error") if e.response.text else str(e)
-            logger.debug("[apple-music] app2 rifiutato per %s: %s", codec, err_msg)
+            logger.debug("[apple-music] app2 rejected for %s: %s", codec, err_msg)
             record_failure(self.name, API_ENDPOINTS["proxy_direct"])
         except Exception as e:
-            logger.debug("[apple-music] Fallback ad app2 non riuscito: %s", e)
+            logger.debug("[apple-music] Fallback to app2 failed: %s", e)
             record_failure(self.name, API_ENDPOINTS["proxy_direct"])
 
         # 2. Tentativo in Coda (App)
@@ -171,7 +171,7 @@ class AppleMusicProvider(BaseProvider):
             job_id = job_data.get("job_id")
 
             if not job_id:
-                logger.warning("[apple-music] Nessun job_id restituito dal proxy di coda per %s.", codec)
+                logger.warning("[apple-music] No job_id returned by queued proxy for %s.", codec)
                 record_failure(self.name, download_endpoint)
                 return None, None
 
@@ -195,18 +195,18 @@ class AppleMusicProvider(BaseProvider):
                     return API_ENDPOINTS["proxy_queued"], f"{API_ENDPOINTS['proxy_queued']}/file/{job_id}"
                 elif status == "failed":
                     err = st_data.get('error', 'unknown error')
-                    logger.warning("[apple-music] Errore API per codec %s: %s", codec, err)
+                    logger.warning("[apple-music] API error for codec %s: %s", codec, err)
                     record_failure(self.name, API_ENDPOINTS["proxy_queued"])
                     return None, None
 
                 time.sleep(2.5)
 
-            logger.warning("[apple-music] Timeout nell'attesa della traccia per codec %s.", codec)
+            logger.warning("[apple-music] Timeout waiting for track with codec %s.", codec)
             record_failure(self.name, API_ENDPOINTS["proxy_queued"])
             return None, None
 
         except Exception as e:
-            logger.debug("[apple-music] Impossibile recuperare lo stream in coda per %s: %s", codec, e)
+            logger.debug("[apple-music] Failed to retrieve queued stream for %s: %s", codec, e)
             record_failure(self.name, download_endpoint)
             return None, None
 
@@ -235,7 +235,7 @@ class AppleMusicProvider(BaseProvider):
         is_native_apple = metadata.external_url and ("music.apple.com" in metadata.external_url or "apple.com" in metadata.external_url)
 
         if not metadata.isrc and not is_native_apple:
-            return DownloadResult.fail(self.name, "Nessun ISRC o URL Apple Music fornito per la risoluzione.")
+            return DownloadResult.fail(self.name, "No ISRC or Apple Music URL provided for resolution.")
 
         try:
             target_codec = self._normalize_codec(quality)
@@ -281,13 +281,13 @@ class AppleMusicProvider(BaseProvider):
 
                 # FALLBACK: Se l'ISRC fallisce, cerca per Titolo e Artista
                 if not track_url:
-                    logger.debug("[apple-music] ISRC non trovato, tento la ricerca testuale...")
+                    logger.debug("[apple-music] ISRC not found, trying textual search...")
                     track_url = self._resolve_track_url_by_search(metadata.title, metadata.artists)
 
             if not track_url:
-                raise TrackNotFoundError(self.name, f"Traccia non trovata (ISRC: {metadata.isrc})")
+                raise TrackNotFoundError(self.name, f"Track not found (ISRC: {metadata.isrc})")
 
-            logger.info("[apple-music] URL Traccia risolto: %s", track_url)
+            logger.info("[apple-music] Resolved track URL: %s", track_url)
 
             stream_url = None
             used_codec = None
@@ -295,15 +295,15 @@ class AppleMusicProvider(BaseProvider):
 
             # Fallback Loop dei Codec
             for current_codec in codecs_to_try:
-                logger.debug("[apple-music] Tentativo stream con codec: %s", current_codec)
+                logger.debug("[apple-music] Attempting stream with codec: %s", current_codec)
                 api_used, stream_url = self._get_stream_url(track_url, current_codec)
                 if stream_url:
                     used_codec = current_codec
                     break
-                logger.warning("[apple-music] Codec %s fallito, provo fallback...", current_codec)
+                logger.warning("[apple-music] Codec %s failed, trying fallback...", current_codec)
 
             if not stream_url or not used_codec:
-                raise SpotiflacError(ErrorKind.UNAVAILABLE, "Nessuno stream audio disponibile (esauriti i fallback).", self.name)
+                raise SpotiflacError(ErrorKind.UNAVAILABLE, "No audio stream available (fallbacks exhausted).", self.name)
 
             if used_codec != target_codec:
                 print_quality_fallback("Apple Music", target_codec.upper(), used_codec.upper())
@@ -356,5 +356,5 @@ class AppleMusicProvider(BaseProvider):
             logger.error("[%s] %s", self.name, exc)
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
-            logger.exception("[%s] Errore imprevisto", self.name)
+            logger.exception("[%s] Unexpected error", self.name)
             return DownloadResult.fail(self.name, f"Unexpected: {exc}")
