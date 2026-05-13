@@ -555,16 +555,18 @@ class TidalProvider(BaseProvider):
                 continue
             if not first_id:
                 first_id = t_id
-        # If ISRC matches, return immediately
-        if isrc and item.get("isrc", "").upper() == isrc.upper():
-            logger.debug("[tidal] ISRC match found: %s", t_id)
-            return t_id
 
-    # No ISRC match — only use first result if no ISRC was provided
-    # (if we had an ISRC and nothing matched, returning first is risky)
-        if not isrc:
+            # Controllo ISRC (ora correttamente DENTRO il ciclo)
+            if isrc and item.get("isrc", "").upper() == isrc.upper():
+                logger.debug("[tidal] ISRC match found: %s", t_id)
+                return t_id
+
+        # MODIFICA: Se arriviamo qui, nessun ISRC corrispondeva.
+        # Forziamo comunque la restituzione del primo ID trovato dalla ricerca testuale.
+        if first_id:
+            logger.warning("[tidal] Nessun match ISRC esatto, forzo il download del primo risultato testuale")
             return first_id
-        logger.debug("[tidal] no ISRC match among mirror results, falling back to Songlink")
+
         return None
 
     def _resolve_via_songlink(self, spotify_track_id: str) -> str:
