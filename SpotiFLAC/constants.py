@@ -1,4 +1,4 @@
-"""URL endpoint e costanti condivise tra provider."""
+"""URL endpoints and constants shared between providers."""
 
 TIDAL_GIST_URL     = "https://gist.githubusercontent.com/afkarxyz/..."
 TIDAL_APIS_BUILTIN = ["https://eu-central.monochrome.tf", ...]

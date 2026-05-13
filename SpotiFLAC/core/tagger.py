@@ -1,16 +1,15 @@
-# SpotiFLAC/core/tagger.py
 """
-Tagger centralizzato — supporto FLAC e MP3.
+Centralized Tagger — support for FLAC and MP3.
 
-FLAC → tag Vorbis Comment via mutagen.flac
-MP3  → tag ID3v2 via mutagen.id3
+FLAC → Vorbis Comment tags via mutagen.flac
+MP3  → ID3v2 tags via mutagen.id3
 
-Entrambi i formati condividono la stessa pipeline:
+Both formats share the same pipeline:
   1. Metadata enrichment (Deezer / Apple / Qobuz / Tidal / SoundCloud)
-  2. Cover art (HD se disponibile)
-  3. Lyrics multi-provider
-  4. MusicBrainz (passati come extra_tags)
-  5. Scrittura tag sul file
+  2. Cover art (HD if available)
+  3. Multi-provider lyrics
+  4. MusicBrainz (passed as extra_tags)
+  5. Writing tags to file
 """
 from __future__ import annotations
 

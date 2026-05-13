@@ -1,12 +1,12 @@
 """
 SpotiFLAC — Interactive Mode.
-Novità rispetto alla versione precedente:
-  - Health check automatico all'avvio
-  - Cronologia URL con selezione rapida
-  - Ultima cartella di output come default
-  - Gestione profili (carica / salva)
-  - Sezione retry per-traccia
-  - Sezione post-download actions
+New features compared to previous version:
+  - Automatic health check at startup
+  - URL history with quick selection
+  - Last output folder as default
+  - Profile management (load / save)
+  - Per-track retry section
+  - Post-download actions section
 """
 from __future__ import annotations
 from urllib.parse import urlparse
@@ -177,7 +177,7 @@ def _display_health_check() -> dict[str, bool]:
                 # Mostriamo l'URL in verde tenue
                 print(f"      {DIM('↳')} {GREEN(url)}")
         else:
-            print(f"      {DIM('↳ nessun endpoint raggiungibile')}")
+            print(f"      {DIM('↳ no reachable endpoints')}")
 
     working_count = sum(status.values())
     total = len(_ALL_SERVICES)

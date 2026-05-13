@@ -112,15 +112,11 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         sc_api = getattr(sc, "api_url", "https://api-v2.soundcloud.com")
         cobalt = getattr(sc, "cobalt_api", "https://api.zarz.moe/v1/dl/cobalt/")
         endpoints["soundcloud"] = [
-            ("GET",  "https://soundcloud.com/"),
             ("GET",  sc_api),
             ("POST", cobalt),
         ]
     except Exception:
-        endpoints["soundcloud"] = [
-            ("GET", "https://soundcloud.com/"),
-            ("GET", "https://api-v2.soundcloud.com"),
-        ]
+        endpoints["soundcloud"] = []
 
     # ── YouTube ────────────────────────────────────────────────────────────
     try:
