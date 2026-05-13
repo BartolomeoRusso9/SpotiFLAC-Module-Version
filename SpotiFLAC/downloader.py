@@ -556,8 +556,8 @@ class SpotiflacDownloader:
         try:
             from .core.session_memory import add_url_to_history
             add_url_to_history(url, label=collection_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[downloader] Failed operation: %s", exc)
 
         return self._run_worker(tracks, collection_name, info, is_album, is_playlist, opts=effective_opts)
 

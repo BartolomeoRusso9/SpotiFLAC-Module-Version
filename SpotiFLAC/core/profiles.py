@@ -12,7 +12,11 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+import threading
+import logging
 
+logger = logging.getLogger(__name__)
+_io_lock = threading.Lock()
 _PROFILES_FILE = Path.home() / ".cache" / "spotiflac" / "profiles.json"
 
 # Chiavi che vengono salvate in un profilo (esclude URL, cartella, token personali)
@@ -29,17 +33,23 @@ _PROFILE_KEYS = [
 
 
 def _load() -> dict:
-    try:
-        if _PROFILES_FILE.exists():
-            return json.loads(_PROFILES_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        pass
+    with _io_lock:
+        try:
+            if _PROFILES_FILE.exists():
+                return json.loads(_PROFILES_FILE.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.debug("[profile] Read error: %s", exc)
     return {}
 
 
 def _write(profiles: dict) -> None:
-    _PROFILES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _PROFILES_FILE.write_text(json.dumps(profiles, indent=2), encoding="utf-8")
+    with _io_lock:
+        try:
+             _PROFILES_FILE.parent.mkdir(parents=True, exist_ok=True)
+             _PROFILES_FILE.write_text(json.dumps(profiles, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.debug("[profile] Write error: %s", exc)
+
 
 
 def list_profiles() -> list[str]:

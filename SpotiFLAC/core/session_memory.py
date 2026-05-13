@@ -11,28 +11,32 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+import threading
+import logging
 
+logger = logging.getLogger(__name__)
+_io_lock = threading.Lock()
 _SESSION_FILE = Path.home() / ".cache" / "spotiflac" / "session.json"
 _MAX_HISTORY  = 20
 
 
 def _load() -> dict:
-    try:
-        if _SESSION_FILE.exists():
-            return json.loads(_SESSION_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        pass
+    with _io_lock:
+        try:
+            if _SESSION_FILE.exists():
+                return json.loads(_SESSION_FILE.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.debug("[session] Read error: %s", exc)
     return {"last_folder": "", "url_history": []}
 
 
 def _save(data: dict) -> None:
-    try:
-        _SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _SESSION_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
-
+    with _io_lock:
+        try:
+            _SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _SESSION_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.debug("[session] Write error: %s", exc)
 # ---------------------------------------------------------------------------
 # Output folder
 # ---------------------------------------------------------------------------

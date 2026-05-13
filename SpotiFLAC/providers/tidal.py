@@ -63,6 +63,8 @@ _TIDAL_API_POST = [
     "https://api.zarz.moe/v1/dl/tid2",
 ]
 
+_CLEAN_POST_APIS = frozenset(a.rstrip('/') for a in _TIDAL_API_POST)
+
 _TIDAL_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -340,7 +342,7 @@ def _fetch_tidal_url_once(
         timeout_s: int = _API_TIMEOUT_S,
 ) -> str:
     api_cleaning = api.rstrip('/')
-    is_post_api = api_cleaning in {a.rstrip('/') for a in _TIDAL_API_POST}
+    is_post_api = api_cleaning in _CLEAN_POST_APIS
 
     url = f"{api_cleaning}/track/?id={track_id}&quality={quality}"
     headers = {"User-Agent": _POST_USER_AGENT[0] if is_post_api else _TIDAL_USER_AGENT}

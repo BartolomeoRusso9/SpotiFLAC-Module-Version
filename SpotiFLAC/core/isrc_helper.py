@@ -2,15 +2,14 @@ import re
 
 from .isrc_cache import get_cached_isrc, put_cached_isrc
 from .isrc_finder import IsrcFinder
-from .link_resolver import LinkResolver  # Importiamo il tuo resolver
-from ..providers.songstats import SongstatsProvider
-from ..providers.soundplate import SoundplateProvider
-
+from .link_resolver import LinkResolver
 
 class IsrcHelper:
     """Gestore centralizzato per la risoluzione ISRC con fallback e traduzione cross-platform."""
 
     def __init__(self, http_client):
+        from ..providers.songstats import SongstatsProvider
+        from ..providers.soundplate import SoundplateProvider
         self.http = http_client
         self.finder = IsrcFinder(http_client)
         self.soundplate = SoundplateProvider(http_client)

@@ -28,6 +28,7 @@ import logging
 import re
 import threading
 import time
+import functools
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from typing import Any
@@ -361,6 +362,7 @@ class _TidalMeta:
 # ---------------------------------------------------------------------------
 
 class _QobuzMeta:
+
     def __init__(self, qobuz_token: str | None = None) -> None:
         self._provider: Any = None
         self._qobuz_token = qobuz_token
@@ -400,7 +402,9 @@ class _QobuzMeta:
             logger.debug("[meta/qobuz] %s", exc)
         return out
 
-
+@functools.lru_cache(maxsize=2)
+def _get_qobuz_meta(token: str | None) -> _QobuzMeta:
+    return _QobuzMeta(qobuz_token=token)
 # ---------------------------------------------------------------------------
 # Provider: SoundCloud
 # ---------------------------------------------------------------------------
@@ -537,8 +541,7 @@ def enrich_metadata(
             elif name == "tidal":
                 return name, _get_tidal().fetch(track_name, artist_name)
             elif name == "qobuz":
-                # Qobuz non può essere singleton perché il token varia
-                return name, _QobuzMeta(qobuz_token=qobuz_token).fetch(isrc)
+                return name, _get_qobuz_meta(qobuz_token).fetch(isrc)
             elif name == "soundcloud":
                 return name, _get_sc().fetch(track_name, artist_name)
             else:
