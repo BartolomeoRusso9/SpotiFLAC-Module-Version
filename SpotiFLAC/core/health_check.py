@@ -184,7 +184,7 @@ def _check_one(provider: str, method: str, url: str) -> HealthResult:
 def run_health_check(
         services: list[str],
         *,
-        include_all_endpoints: bool = False,
+        include_all_endpoints: bool = True,
 ) -> list[HealthResult]:
     """
     Controlla i provider richiesti in parallelo.
