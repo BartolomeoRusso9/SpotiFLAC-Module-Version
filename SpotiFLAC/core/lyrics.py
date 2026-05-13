@@ -166,8 +166,9 @@ def _fetch_spotify(track_id: str, timeout: int = 7) -> str:
             timeout=timeout,
         )
         if r.status_code == 401:
-            # Token scaduto — invalida cache e riprova una volta
-            _spotify_session_cache.clear()
+            # Invalida solo il token, non la sessione con i cookie
+            _spotify_session_cache.pop("token", None)
+            _spotify_session_cache.pop("cached_at", None)
             access_token = _get_spotify_anon_token(timeout)
             if not access_token:
                 return ""
@@ -407,7 +408,8 @@ def fetch_lyrics(
             result = ""
             try:
                 if provider == "spotify":
-                    result = _fetch_spotify(track_id)
+                    spotify_id = track_id if (track_id and len(track_id) == 22 and "_" not in track_id) else ""
+                    result = _fetch_spotify(spotify_id)
                 elif provider == "apple":
                     result = _fetch_apple(title, clean_artist, duration_s)
                 elif provider == "musixmatch":
