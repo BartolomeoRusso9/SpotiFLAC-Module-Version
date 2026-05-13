@@ -13,22 +13,22 @@ Entrambi i formati condividono la stessa pipeline:
   5. Scrittura tag sul file
 """
 from __future__ import annotations
+
 import logging
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import requests
-import time
-from mutagen.flac import FLAC, Picture
+from mutagen.flac import FLAC
+from mutagen.flac import Picture as FlacPicture
 from mutagen.id3 import (
-    ID3, ID3NoHeaderError, PictureType as _PictureType,
-    TIT2, TPE1, TALB, TPE2, TDRC, TRCK, TPOS, APIC,
+    ID3, ID3NoHeaderError, TIT2, TPE1, TALB, TPE2, TDRC, TRCK, TPOS, APIC,
     TPUB, TCOM, TCOP, TCON, TBPM, TSRC, TDOR,
     TSOP, TSO2, WXXX, COMM, USLT, TXXX,
 )
-from mutagen.id3 import PictureType as ID3PictureType
 from mutagen.id3 import PictureType
-from mutagen.flac import Picture as FlacPicture
-from dataclasses import dataclass, field
+from mutagen.id3 import PictureType as ID3PictureType
 
 from .errors import SpotiflacError, ErrorKind
 from .models import TrackMetadata
@@ -195,7 +195,6 @@ def _embed_id3(
 
         if key_up in _FRAME_MAP:
             frame_cls = _FRAME_MAP[key_up]
-            frame_id  = frame_cls.__name__
             audio.add(frame_cls(encoding=3, text=str(val)))
 
         elif key_up == "URL":
@@ -282,7 +281,6 @@ class EmbedOptions:
     cover_url:            str             = ""
     embed_lyrics:         bool            = False
     lyrics_providers:     list[str]       = field(default_factory=list)
-    lyrics_spotify_token: str             = ""
     enrich:               bool            = False
     enrich_providers:     list[str] | None = None
     enrich_qobuz_token:   str | None      = None
@@ -365,7 +363,6 @@ def embed_metadata(
                 track_id         = metadata.id,
                 isrc             = metadata.isrc,
                 providers        = opts.lyrics_providers,
-                spotify_token    = opts.lyrics_spotify_token,
             )
             if isinstance(res, tuple):
                 lyrics, lyrics_prov = res

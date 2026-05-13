@@ -1,17 +1,15 @@
-# SpotiFLAC/core/lyrics.py
 """
 Multi-provider lyrics fetcher.
 
 Ordine di tentativo (configurabile via DEFAULT_LYRICS_PROVIDERS):
-  1. Spotify Web  — testo sincronizzato LRC (richiede sp_dc cookie)
+  1. Spotify Web  — testo sincronizzato LRC (autenticazione anonima via TOTP, nessun token richiesto)
   2. Apple Music  — testo sincronizzato LRC via paxsenix proxy
   3. Musixmatch   — testo sincronizzato / plain via paxsenix proxy
   4. Amazon Music — testo plain via API
   5. LRCLIB       — testo sincronizzato / plain
 
-FIX: DEFAULT_LYRICS_PROVIDERS è ora una costante esportabile usata anche da
-__init__.py e launcher.py, eliminando le tre definizioni inconsistenti
-che prima divergevano silenziosamente.
+MODIFICA: il provider Spotify ora usa autenticazione anonima tramite TOTP
+(stessa logica di index.js). Non è più richiesto alcun cookie sp_dc.
 """
 from __future__ import annotations
 
@@ -23,9 +21,6 @@ import requests
 import re
 import unicodedata
 
-# ---------------------------------------------------------------------------
-# Costante condivisa — importata da __init__.py, launcher.py, downloader.py
-# ---------------------------------------------------------------------------
 DEFAULT_LYRICS_PROVIDERS  = ["spotify", "apple", "musixmatch", "lrclib", "amazon"]
 DEFAULT_ENRICH_PROVIDERS  = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
 
@@ -34,7 +29,6 @@ DEFAULT_ENRICH_PROVIDERS  = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
 # ---------------------------------------------------------------------------
 
 def simplify_track_name(name: str) -> str:
-    """Rimuove suffissi come (feat. ...), - Remastered, (Radio Edit), ecc."""
     patterns = [
         r'\s*\(feat\..*?\)', r'\s*\(ft\..*?\)', r'\s*\(featuring.*?\)', r'\s*\(with.*?\)',
         r'\s*-\s*Remaster(ed)?.*$', r'\s*-\s*\d{4}\s*Remaster.*$',
@@ -46,8 +40,8 @@ def simplify_track_name(name: str) -> str:
         result = re.sub(pattern, "", result, flags=re.IGNORECASE)
     return result.strip() or name
 
+
 def get_primary_artist(name: str) -> str:
-    """Estrae solo l'artista principale rimuovendo collaboratori."""
     separators = [", ", "; ", " & ", " feat. ", " ft. ", " featuring ", " with "]
     result = name
     for sep in separators:
@@ -57,20 +51,21 @@ def get_primary_artist(name: str) -> str:
             break
     return result.strip()
 
+
 def normalize_loose_string(text: str) -> str:
-    """Rimuove accenti e caratteri speciali per confronti morbidi."""
     text = text.lower().strip()
     text = text.replace('ß', 'ss').replace('đ', 'dj').replace('æ', 'ae').replace('œ', 'oe')
     text = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
     text = re.sub(r'[/\\_\-|.&+]', ' ', text)
     return ' '.join(text.split())
 
+
 def add_lrc_metadata(lrc_text: str, track_name: str, artist_name: str) -> str:
-    """Aggiunge i tag LRC standard se non sono presenti."""
     if not lrc_text or "[ti:" in lrc_text:
         return lrc_text
     headers = f"[ti:{track_name}]\n[ar:{artist_name}]\n[by:SpotiFLAC]\n\n"
     return headers + lrc_text
+
 
 logger = logging.getLogger(__name__)
 
@@ -84,32 +79,108 @@ _UA = (
     "Chrome/145.0.0.0 Safari/537.36"
 )
 
-# Provider set che usano ID/ISRC: il titolo non influisce, inutile riprovare
 _ID_BASED_PROVIDERS = {"spotify", "amazon"}
 
+# Cache della sessione Spotify anonima (accessToken + clientToken)
+_spotify_session_cache: dict = {}
+
 
 # --------------------------------------------------------------------------- #
-# Provider 1 — Spotify Web                                                     #
+# Provider 1 — Spotify Web (autenticazione anonima TOTP)        #
 # --------------------------------------------------------------------------- #
 
-def _fetch_spotify(track_id: str, sp_dc_token: str, timeout: int = 7) -> str:
-    if not track_id or not sp_dc_token:
+def _get_spotify_anon_token(timeout: int = 7) -> str:
+    """
+    Ottiene un access token Spotify in modo anonimo usando TOTP.
+    Usa una sessione con cookie persistenti per evitare chiamate ripetute.
+    """
+    global _spotify_session_cache
+
+    # Reuse cached token if still valid (Spotify token dura ~1h)
+    import time as _time
+    cached = _spotify_session_cache.get("token")
+    cached_at = _spotify_session_cache.get("cached_at", 0)
+    if cached and (_time.time() - cached_at) < 3000:
+        return cached
+
+    try:
+        session = _spotify_session_cache.get("session")
+        if session is None:
+            session = requests.Session()
+            _spotify_session_cache["session"] = session
+
+        # Step 1: visita open.spotify.com per ottenere i cookie di sessione (sp_t, ecc.)
+        session.get(
+            "https://open.spotify.com",
+            headers={"User-Agent": _UA},
+            timeout=timeout,
+        )
+
+        # Step 2: genera TOTP
+        totp_headers: dict[str, str] = {}
+        try:
+            from .spotify_totp import generate_spotify_totp
+            code, version = generate_spotify_totp()
+            if code:
+                totp_headers["Spotify-TOTP"]    = code
+                totp_headers["Spotify-TOTP-V2"] = f"{code}:{version}"
+        except Exception:
+            pass
+
+        # Step 3: ottieni access token anonimo
+        r = session.get(
+            "https://open.spotify.com/api/token",
+            params={"reason": "init", "productType": "web-player"},
+            headers={"User-Agent": _UA, **totp_headers},
+            timeout=timeout,
+        )
+        if r.ok:
+            token = r.json().get("accessToken", "")
+            if token:
+                _spotify_session_cache["token"]     = token
+                _spotify_session_cache["cached_at"] = _time.time()
+                return token
+    except Exception as exc:
+        logger.debug("[lyrics/spotify] anon token failed: %s", exc)
+
+    return ""
+
+
+def _fetch_spotify(track_id: str, timeout: int = 7) -> str:
+    """Scarica i testi da Spotify usando autenticazione anonima TOTP."""
+    if not track_id:
         return ""
     try:
-        client_token = _spotify_client_token(sp_dc_token, timeout)
-        if not client_token:
+        access_token = _get_spotify_anon_token(timeout)
+        if not access_token:
             return ""
 
         r = requests.get(
             f"{_SPOTIFY_LYRICS}/{track_id}",
             params={"format": "json", "market": "from_token"},
             headers={
-                "Authorization": f"Bearer {client_token}",
+                "Authorization": f"Bearer {access_token}",
                 "App-Platform":  "WebPlayer",
                 "User-Agent":    _UA,
             },
             timeout=timeout,
         )
+        if r.status_code == 401:
+            # Token scaduto — invalida cache e riprova una volta
+            _spotify_session_cache.clear()
+            access_token = _get_spotify_anon_token(timeout)
+            if not access_token:
+                return ""
+            r = requests.get(
+                f"{_SPOTIFY_LYRICS}/{track_id}",
+                params={"format": "json", "market": "from_token"},
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "App-Platform":  "WebPlayer",
+                    "User-Agent":    _UA,
+                },
+                timeout=timeout,
+            )
         if r.status_code != 200:
             return ""
 
@@ -136,35 +207,6 @@ def _fetch_spotify(track_id: str, sp_dc_token: str, timeout: int = 7) -> str:
         return ""
 
 
-def _spotify_client_token(sp_dc: str, timeout: int) -> str:
-    totp_headers: dict[str, str] = {}
-    try:
-        from .spotify_totp import generate_spotify_totp
-        totp_code, totp_version = generate_spotify_totp()
-        if totp_code:
-            totp_headers["Spotify-TOTP"]    = totp_code
-            totp_headers["Spotify-TOTP-V2"] = f"{totp_code}:{totp_version}"
-    except Exception:
-        pass
-
-    try:
-        r = requests.get(
-            "https://open.spotify.com/get_access_token",
-            params={"reason": "transport", "productType": "web_player"},
-            headers={
-                "Cookie":     f"sp_dc={sp_dc}",
-                "User-Agent": _UA,
-                **totp_headers,
-            },
-            timeout=timeout,
-        )
-        if r.ok:
-            return r.json().get("accessToken", "")
-    except Exception:
-        pass
-    return ""
-
-
 # --------------------------------------------------------------------------- #
 # Provider 2 — Apple Music (Paxsenix Proxy)                                    #
 # --------------------------------------------------------------------------- #
@@ -175,13 +217,10 @@ def _score_apple_result(res: dict, t_name: str, a_name: str, duration_s: int) ->
     r_a = normalize_loose_string(res.get("artistName", ""))
     t_t = normalize_loose_string(t_name)
     t_a = normalize_loose_string(a_name)
-
     if r_t == t_t: score += 50
     elif t_t in r_t or r_t in t_t: score += 25
-
     if r_a == t_a: score += 60
     elif t_a in r_a or r_a in t_a: score += 30
-
     r_dur = res.get("duration", 0)
     if duration_s > 0 and r_dur > 0:
         diff = abs((r_dur / 1000.0) - duration_s)
@@ -189,66 +228,52 @@ def _score_apple_result(res: dict, t_name: str, a_name: str, duration_s: int) ->
             score += 20
     return score
 
+
 def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
     query = urllib.parse.quote(f"{track_name} {artist_name}")
     search_url = f"{_PAXSENIX_APPLE}/search?q={query}"
-
     try:
         r = requests.get(search_url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout)
         if not r.ok: return ""
         results = r.json()
         if not results: return ""
-
         best = max(results, key=lambda x: _score_apple_result(x, track_name, artist_name, duration_s))
         song_id = best.get("id")
         if not song_id: return ""
-
         lyrics_url = f"{_PAXSENIX_APPLE}/lyrics?id={song_id}"
         r_lyr = requests.get(lyrics_url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout)
         if not r_lyr.ok: return ""
-
         data = r_lyr.json()
         content = data.get("content", []) if isinstance(data, dict) else data
-
         lrc_lines = []
         for line in content:
             ts = int(line.get("timestamp", 0))
             m, s = divmod(ts // 1000, 60)
             cs = (ts % 1000) // 10
-
             text_parts = line.get("text", [])
             line_text = ""
             for part in text_parts:
                 line_text += part.get("text", "")
                 if not part.get("part", False):
                     line_text += " "
-
             line_text = line_text.strip()
             if line_text:
                 lrc_lines.append(f"[{m:02d}:{s:02d}.{cs:02d}]{line_text}")
-
         return "\n".join(lrc_lines)
-
     except Exception as exc:
         logger.debug("[lyrics/apple] %s", exc)
         return ""
 
 
 # --------------------------------------------------------------------------- #
-# Provider 3 — Musixmatch (Paxsenix Proxy - NO TOKEN)                          #
+# Provider 3 — Musixmatch (Paxsenix Proxy)                                     #
 # --------------------------------------------------------------------------- #
 
 def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
     for sync_type in ["word", "line"]:
-        params = {
-            "t": track_name,
-            "a": artist_name,
-            "type": sync_type,
-            "format": "lrc"
-        }
+        params = {"t": track_name, "a": artist_name, "type": sync_type, "format": "lrc"}
         if duration_s > 0:
             params["d"] = str(duration_s)
-
         url = f"{_PAXSENIX_MXM}/lyrics?" + urllib.parse.urlencode(params)
         try:
             r = requests.get(url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout)
@@ -269,8 +294,8 @@ def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeou
                         return body
         except Exception as exc:
             logger.debug("[lyrics/musixmatch] %s fallito: %s", sync_type, exc)
-
     return ""
+
 
 # --------------------------------------------------------------------------- #
 # Provider 4 — Amazon Music                                                    #
@@ -278,11 +303,8 @@ def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeou
 
 def _fetch_amazon(isrc: str, timeout: int = 7) -> str:
     if not isrc:
-        logger.debug("[lyrics/amazon] skip: ISRC non disponibile")
         return ""
-
     from ..providers.amazon import AMAZON_API_BASE
-
     try:
         r = requests.get(
             f"{AMAZON_API_BASE}/lyrics/{isrc}",
@@ -293,7 +315,6 @@ def _fetch_amazon(isrc: str, timeout: int = 7) -> str:
         data  = r.json()
         lines = data.get("lines") or data.get("lyrics", [])
         if not lines: return ""
-
         if isinstance(lines[0], dict):
             lrc = []
             for line in lines:
@@ -304,7 +325,6 @@ def _fetch_amazon(isrc: str, timeout: int = 7) -> str:
                 text = line.get("text", "")
                 lrc.append(f"[{m:02d}:{s:02d}.{cs:02d}]{text}")
             return "\n".join(lrc)
-
         return "\n".join(str(l) for l in lines)
     except Exception as exc:
         logger.debug("[lyrics/amazon] %s", exc)
@@ -355,19 +375,19 @@ def _fetch_lrclib(track_name: str, artist_name: str, album_name: str = "", durat
     except Exception: pass
     return ""
 
+
 # --------------------------------------------------------------------------- #
 # Public API                                                                   #
 # --------------------------------------------------------------------------- #
 
 def fetch_lyrics(
-        track_name:       str,
-        artist_name:      str,
-        album_name:       str  = "",
-        duration_s:       int  = 0,
-        track_id:         str  = "",
-        isrc:             str  = "",
-        providers:        list[str] | None = None,
-        spotify_token:    str  = "",
+        track_name:    str,
+        artist_name:   str,
+        album_name:    str  = "",
+        duration_s:    int  = 0,
+        track_id:      str  = "",
+        isrc:          str  = "",
+        providers:     list[str] | None = None,
 ) -> tuple[str, str]:
     if providers is None:
         providers = DEFAULT_LYRICS_PROVIDERS
@@ -387,7 +407,7 @@ def fetch_lyrics(
             result = ""
             try:
                 if provider == "spotify":
-                    result = _fetch_spotify(track_id, spotify_token)
+                    result = _fetch_spotify(track_id)
                 elif provider == "apple":
                     result = _fetch_apple(title, clean_artist, duration_s)
                 elif provider == "musixmatch":

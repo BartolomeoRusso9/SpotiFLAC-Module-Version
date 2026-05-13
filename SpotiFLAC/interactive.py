@@ -1,15 +1,12 @@
 """
 SpotiFLAC — Interactive Mode.
-Guides the user through the step-by-step configuration without needing to remember CLI flags.
+Il provider Spotify ora usa autenticazione anonima tramite TOTP.
 """
 from __future__ import annotations
 from urllib.parse import urlparse
 import os
 import sys
 
-# ---------------------------------------------------------------------------
-# ANSI colors (works on macOS, Linux, Windows 10+)
-# ---------------------------------------------------------------------------
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
 
 def _c(code: str, text: str) -> str:
@@ -17,19 +14,15 @@ def _c(code: str, text: str) -> str:
         return text
     return f"\033[{code}m{text}\033[0m"
 
-BOLD   = lambda t: _c("1", t)
-DIM    = lambda t: _c("2", t)
-CYAN   = lambda t: _c("96", t)
-GREEN  = lambda t: _c("92", t)
-YELLOW = lambda t: _c("93", t)
-RED    = lambda t: _c("91", t)
-BLUE   = lambda t: _c("94", t)
-MAGENTA= lambda t: _c("95", t)
+BOLD    = lambda t: _c("1", t)
+DIM     = lambda t: _c("2", t)
+CYAN    = lambda t: _c("96", t)
+GREEN   = lambda t: _c("92", t)
+YELLOW  = lambda t: _c("93", t)
+RED     = lambda t: _c("91", t)
+BLUE    = lambda t: _c("94", t)
+MAGENTA = lambda t: _c("95", t)
 
-
-# ---------------------------------------------------------------------------
-# Primitive input helpers
-# ---------------------------------------------------------------------------
 
 def _ask(prompt: str, default: str = "") -> str:
     default_hint = f" {DIM('[' + default + ']')}" if default else ""
@@ -111,10 +104,6 @@ def _ask_multi(
         return result if result else list(defaults)
 
 
-# ---------------------------------------------------------------------------
-# Wizard Sections
-# ---------------------------------------------------------------------------
-
 def _section(title: str) -> None:
     width = 50
     print(f"\n{CYAN('─' * width)}")
@@ -159,15 +148,9 @@ def _summary(cfg: dict) -> None:
 
     if cfg.get("qobuz_token"):
         row("Qobuz token", "✓ set")
-    if cfg.get("lyrics_spotify_token"):
-        row("Spotify token", "✓ set")
     if cfg.get("loop"):
         row("Loop", f"every {cfg['loop']} minutes")
 
-
-# ---------------------------------------------------------------------------
-# Main Wizard
-# ---------------------------------------------------------------------------
 
 def run_interactive() -> dict:
     _header()
@@ -241,8 +224,8 @@ def run_interactive() -> dict:
             "soundcloud.com" in cfg["url"]
             or "on.soundcloud.com" in cfg["url"]
     )
-    is_apple_url = "music.apple.com" in cfg["url"]
-    is_youtube_url = (
+    is_apple_url    = "music.apple.com" in cfg["url"]
+    is_youtube_url  = (
             "youtube.com" in cfg["url"].lower()
             or "youtu.be" in cfg["url"].lower()
     )
@@ -257,7 +240,6 @@ def run_interactive() -> dict:
         print(
             f"  {GREEN('✓')} Provider {BOLD('youtube')} automatically selected for YouTube URLs."
         )
-        print(f"  {DIM('You can add fallback providers if needed.')}")
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
@@ -272,7 +254,6 @@ def run_interactive() -> dict:
         print(
             f"  {GREEN('✓')} Provider {BOLD('apple')} automatically selected for Apple Music URLs."
         )
-        print(f"  {DIM('You can add fallback providers if needed.')}")
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
@@ -342,22 +323,16 @@ def run_interactive() -> dict:
             cfg["quality"] = q_choice.split(" ")[0].lower()
 
         elif (has_qobuz or has_tidal or has_deezer or has_apple):
-            print(f"  {DIM('You selected multiple providers. Choose a unified profile:')}")
-
             combined_options = [
                 "LOSSLESS (FLAC on Deezer/Tidal, '6' on Qobuz, ALAC on Apple)",
                 "HI_RES (Best available everywhere, '27' on Qobuz)",
             ]
-
             if has_apple:
                 combined_options.append("ATMOS (Spatial Audio su Apple, HI_RES sugli altri)")
                 combined_options.append("AC3 (Dolby Digital su Apple, HIGH sugli altri)")
-
             if has_qobuz:
                 combined_options.append("7 (Hi-Res intermedio solo per Qobuz)")
-
             combined_options.append("HIGH (MP3 320 / AAC su Apple)")
-
             if has_apple:
                 combined_options.append("AAC-LEGACY (Vecchio formato iTunes su Apple, HIGH sugli altri)")
 
@@ -382,8 +357,6 @@ def run_interactive() -> dict:
                 default = "LOSSLESS",
             )
 
-        print(f"\n  {BOLD('Quality Fallback')}")
-        print(f"  {DIM('If enabled, SpotiFLAC will download a lower quality if the requested one is unavailable.')}")
         cfg["allow_fallback"] = _ask_bool("Allow automatic quality fallback?", True)
 
     # ── 5. Filename format ─────────────────────────────────────────────────
@@ -391,17 +364,13 @@ def run_interactive() -> dict:
     print(f"  {DIM('Placeholders: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}")
     cfg["filename_format"] = _ask("Format", "{title} - {artist}")
 
-    # ── 6. Organization options ───────────────────────────────────────────
-    # FIX #2: use_artist_subfolders, use_album_subfolders e first_artist_only
-    # venivano saltati quando use_track_numbers=True, causando KeyError
-    # in _summary() e in SpotiFLAC(). Ora vengono sempre impostati.
+    # ── 6. Organization Options ───────────────────────────────────────────
     _section("6 · Organization Options")
 
     cfg["use_track_numbers"] = _ask_bool("Add track number to filename?", False)
 
     if cfg["use_track_numbers"]:
         cfg["use_album_track_numbers"] = _ask_bool("Use original album track number?", False)
-        # Valori di default per i campi che non vengono chiesti in questo ramo
         cfg["use_artist_subfolders"] = False
         cfg["use_album_subfolders"]  = False
         cfg["first_artist_only"]     = False
@@ -422,7 +391,6 @@ def run_interactive() -> dict:
 
     if is_artist_url:
         print("  " + DIM("If enabled, also downloads individual tracks where the artist appears as a featured artist"))
-        print("  " + DIM("on other artists' releases (appears_on on Spotify/Apple Music, compilations on Tidal)"))
         cfg["include_featuring"] = _ask_bool("Include featuring tracks?", False)
     else:
         print(f"  {YELLOW('⏭  Skipped:')} {DIM('The provided URL does not belong to an artist page.')}")
@@ -436,19 +404,11 @@ def run_interactive() -> dict:
         cfg["lyrics_providers"] = _ask_multi(
             "Lyrics providers (order = priority):",
             options  = ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
-            defaults = ["spotify", "musixmatch", "lrclib", "apple"],
+            defaults = ["spotify", "lrclib", "apple", "amazon"],
             ordered  = True,
         )
-        has_spotify = "spotify" in cfg["lyrics_providers"]
-        if has_spotify:
-            print(f"  {DIM('The Spotify provider requires the sp_dc cookie for synchronized lyrics')}")
-            token = _ask("Spotify sp_dc cookie (leave blank to skip)", "")
-            cfg["lyrics_spotify_token"] = token
-        else:
-            cfg["lyrics_spotify_token"] = ""
     else:
-        cfg["lyrics_providers"]      = ["spotify", "musixmatch", "lrclib", "apple"]
-        cfg["lyrics_spotify_token"]  = ""
+        cfg["lyrics_providers"] = ["spotify", "musixmatch", "lrclib", "apple"]
 
     # ── 9. Metadata enrichment ──────────────────────────────────────────────
     _section("9 · Metadata Enrichment")
@@ -505,8 +465,6 @@ def _print_cli_command(cfg: dict) -> None:
         parts.append("--no-lyrics")
     else:
         parts.append(f'--lyrics-providers {" ".join(cfg["lyrics_providers"])}')
-        if cfg.get("lyrics_spotify_token"):
-            parts.append(f'--spotify-token "{cfg["lyrics_spotify_token"]}"')
     if not cfg["enrich_metadata"]:
         parts.append("--no-enrich")
     else:

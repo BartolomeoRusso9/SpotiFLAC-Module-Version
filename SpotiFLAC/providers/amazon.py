@@ -324,7 +324,6 @@ class AmazonProvider(BaseProvider):
             # ── parametri lyrics e enrich (stessa firma di Tidal/Qobuz) ──
             embed_lyrics:            bool            = False,
             lyrics_providers:        list[str] | None = None,
-            lyrics_spotify_token:    str             = "",
             enrich_metadata:         bool            = False,
             enrich_providers:        list[str] | None = None,
             is_album:                bool            = False,
@@ -370,7 +369,6 @@ class AmazonProvider(BaseProvider):
                     cover_url            = metadata.cover_url,
                     embed_lyrics         = embed_lyrics,
                     lyrics_providers     = lyrics_providers or [],
-                    lyrics_spotify_token = lyrics_spotify_token,
                     enrich               = enrich_metadata,
                     enrich_providers     = enrich_providers,
                     is_album             = is_album,

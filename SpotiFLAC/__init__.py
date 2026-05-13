@@ -37,7 +37,7 @@ from .providers import (
 )
 from .core import TrackMetadata, DownloadResult
 
-__version__ = "0.4.9"
+__version__ = "0.5.0"
 
 __all__ = [
     "SpotiFLAC",
@@ -77,14 +77,13 @@ def SpotiFLAC(
         quality:               str              = "LOSSLESS",
         first_artist_only:     bool             = False,
         log_level:             int              = logging.WARNING,
-        output_path:             str | None     = None,
-        embed_lyrics:            bool           = True,
-        lyrics_providers:        list[str] | None = None,
-        lyrics_spotify_token:    str            = "",
-        enrich_metadata:         bool           = True,
-        enrich_providers:        list[str] | None = None,
-        qobuz_token:             str | None     = None,
-        include_featuring:     bool           = False,
+        output_path:           str | None       = None,
+        embed_lyrics:          bool             = True,
+        lyrics_providers:      list[str] | None = None,
+        enrich_metadata:       bool             = True,
+        enrich_providers:      list[str] | None = None,
+        qobuz_token:           str | None       = None,
+        include_featuring:     bool             = False,
 ) -> None:
     _setup_logger(log_level)
 
@@ -102,7 +101,6 @@ def SpotiFLAC(
         output_path             = output_path,
         embed_lyrics            = embed_lyrics,
         lyrics_providers        = lyrics_providers or ["spotify", "musixmatch", "lrclib", "apple"],
-        lyrics_spotify_token    = lyrics_spotify_token,
         enrich_metadata         = enrich_metadata,
         enrich_providers        = enrich_providers or ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         qobuz_token             = qobuz_token,
