@@ -92,7 +92,7 @@ def parse_args() -> argparse.Namespace:
         default = ["spotify", "apple", "lrclib", "amazon"],
         dest    = "lyrics_providers",
         choices = ["spotify", "apple", "musixmatch", "amazon", "lrclib"],
-        help    = "Lyrics providers in priority order (default: spotify apple musixmatch lrclib amazon).",
+        help    = "Lyrics providers in priority order (default: spotify apple lrclib amazon).",
     )
 
     # ── Metadata enrichment ─────────────────────────────────────────────────

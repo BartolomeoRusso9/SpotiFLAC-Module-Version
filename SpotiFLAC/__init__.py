@@ -100,7 +100,7 @@ def SpotiFLAC(
         first_artist_only       = first_artist_only,
         output_path             = output_path,
         embed_lyrics            = embed_lyrics,
-        lyrics_providers        = lyrics_providers or ["spotify", "musixmatch", "lrclib", "apple"],
+        lyrics_providers        = lyrics_providers or ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
         enrich_metadata         = enrich_metadata,
         enrich_providers        = enrich_providers or ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         qobuz_token             = qobuz_token,
