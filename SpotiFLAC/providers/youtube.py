@@ -33,39 +33,60 @@ YT_SEARCH_PARAMS_TRACKS = "EgWKAQIIAQ=="
 INNERTUBE_CLIENT_VERSION = "1.20240801.01.00"
 COBALT_API_URL = "https://api.zarz.moe/v1/dl/cobalt"
 _INNERTUBE_CLIENTS = [
-    # ANDROID_VR: NON richiede GVS PO Token — va provato PRIMO
+    # 1. ANDROID_VR: Spesso non richiede PO Token (Provato per primo)
     {
         "name": "android_vr",
         "clientName": "ANDROID_VR",
         "clientVersion": "1.65.10",
         "ua": "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
         "extra": {
-            "androidSdkVersion": 32,
-            "osName": "Android", "osVersion": "12L",
-            "platform": "MOBILE",
-            "deviceMake": "Oculus", "deviceModel": "Quest 3",
-            "hl": "en", "gl": "US",
-            "timeZone": "UTC", "utcOffsetMinutes": 0,
+            "androidSdkVersion": 32, "osName": "Android", "osVersion": "12L",
+            "platform": "MOBILE", "deviceMake": "Oculus", "deviceModel": "Quest 3",
+            "hl": "en", "gl": "US", "timeZone": "UTC", "utcOffsetMinutes": 0,
         },
         "key": "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
         "clientHeader": "28",
     },
-    # ANDROID: richiede PO token ma proviamo come fallback
+    # 2. MWEB: Nuovo client web mobile per bypass fallback (Dal JS)
+    {
+        "name": "mweb",
+        "clientName": "MWEB",
+        "clientVersion": "2.20260115.01.00",
+        "ua": "Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)",
+        "extra": {
+            "hl": "en", "gl": "US", "timeZone": "UTC", "utcOffsetMinutes": 0,
+            "userAgent": "Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)",
+        },
+        "key": "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
+        "clientHeader": "2",
+    },
+    # 3. ANDROID: Client standard aggiornato
     {
         "name": "android",
         "clientName": "ANDROID",
         "clientVersion": "21.02.35",
         "ua": "com.google.android.youtube/21.02.35 (Linux; U; Android 11) gzip",
         "extra": {
-            "androidSdkVersion": 30,
-            "osName": "Android", "osVersion": "11",
-            "platform": "MOBILE",
-            "hl": "en", "gl": "US",
-            "timeZone": "UTC", "utcOffsetMinutes": 0,
+            "androidSdkVersion": 30, "osName": "Android", "osVersion": "11",
+            "platform": "MOBILE", "hl": "en", "gl": "US", "timeZone": "UTC", "utcOffsetMinutes": 0,
         },
         "key": "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
         "clientHeader": "3",
     },
+    # 4. IOS: Nuovo client iOS per bypass fallback (Dal JS)
+    {
+        "name": "ios",
+        "clientName": "IOS",
+        "clientVersion": "21.02.3",
+        "ua": "com.google.ios.youtube/21.02.3 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+        "extra": {
+            "deviceMake": "Apple", "deviceModel": "iPhone16,2",
+            "osName": "iOS", "osVersion": "18.3.2",
+            "platform": "MOBILE", "hl": "en", "gl": "US", "timeZone": "UTC", "utcOffsetMinutes": 0,
+        },
+        "key": "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
+        "clientHeader": "5",
+    }
 ]
 
 def _sanitize(value: str) -> str:

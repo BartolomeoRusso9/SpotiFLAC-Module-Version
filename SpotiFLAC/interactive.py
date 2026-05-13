@@ -131,47 +131,56 @@ def _header() -> None:
 
 _ALL_SERVICES = ["tidal", "qobuz", "deezer", "amazon", "soundcloud", "apple", "youtube", "spoti"]
 
-def _run_health_check() -> dict[str, bool]:
+def _run_health_check():
     """
-    Esegue un health check rapido su tutti i provider e restituisce {provider: ok}.
-    Non blocca la wizard in caso di errore.
+    Esegue l'health check su tutti gli endpoint e restituisce la lista dei risultati.
     """
     try:
-        from SpotiFLAC.core.health_check import run_health_check, get_working_providers
-        results = run_health_check(_ALL_SERVICES)
-        working = set(get_working_providers(results))
-        return {svc: svc in working for svc in _ALL_SERVICES}
+        from SpotiFLAC.core.health_check import run_health_check
+        # Passiamo include_all_endpoints=True per testare e mostrare TUTTI i link
+        return run_health_check(_ALL_SERVICES, include_all_endpoints=True)
     except Exception:
-        return {}
+        return []
 
 
 def _display_health_check() -> dict[str, bool]:
-    """Mostra il risultato del health check in formato compatto."""
+    """Mostra il risultato del health check in formato lista con gli URL funzionanti."""
     _section("Service Availability Check")
     print(f"  {DIM('Probing endpoints...')} ", end="", flush=True)
 
-    status = _run_health_check()
+    results = _run_health_check()
 
-    # Cancella la riga "Probing…" e stampa i risultati
-    print("\r", end="")
+    # Cancella la riga "Probing…"
+    print("\r" + " " * 40 + "\r", end="")
 
-    if not status:
+    if not results:
         print(f"  {YELLOW('⚠  Health check skipped (import error or no network)')}")
         return {}
 
-    cols = []
-    for svc in _ALL_SERVICES:
-        ok = status.get(svc, False)
-        icon = GREEN("✅") if ok else RED("❌")
-        cols.append(f"{icon} {svc}")
+    # Organizza i risultati
+    status = {svc: False for svc in _ALL_SERVICES}
+    working_urls = {svc: [] for svc in _ALL_SERVICES}
 
-    # Stampa su due righe da 4 provider ciascuna
-    half = len(cols) // 2
-    print(f"  {'   '.join(cols[:half])}")
-    print(f"  {'   '.join(cols[half:])}")
+    for r in results:
+        if r.ok:
+            status[r.provider] = True
+            working_urls[r.provider].append(r.url)
+
+    # Stampa i provider in verticale con i rispettivi link
+    for svc in _ALL_SERVICES:
+        ok = status[svc]
+        icon = GREEN("✅") if ok else RED("❌")
+        print(f"  {icon} {BOLD(svc)}")
+
+        if ok:
+            for url in working_urls[svc]:
+                # Mostriamo l'URL in verde tenue
+                print(f"      {DIM('↳')} {GREEN(url)}")
+        else:
+            print(f"      {DIM('↳ nessun endpoint raggiungibile')}")
 
     working_count = sum(status.values())
-    total = len(status)
+    total = len(_ALL_SERVICES)
     summary_color = GREEN if working_count == total else (YELLOW if working_count > 0 else RED)
     print(f"\n  {summary_color(f'{working_count}/{total} providers reachable')}")
 

@@ -486,7 +486,8 @@ class TidalProvider(BaseProvider):
             spotify_track_id: str,
             track_name:       str = "",
             artist_name:      str = "",
-            isrc:             str = "",          # ← add this
+            isrc:             str = "",
+            duration_ms:      int = 0,
     ) -> str:
         if track_name and artist_name and track_name != "Unknown":
             result = self._search_on_mirrors(track_name, artist_name, isrc)
@@ -500,6 +501,7 @@ class TidalProvider(BaseProvider):
             track_name:  str,
             artist_name: str,
             isrc:        str = "",
+            duration_ms: int = 0,
     ) -> str | None:
         clean_track  = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", track_name).strip()
         clean_artist = artist_name.split(",")[0].strip()
@@ -516,7 +518,7 @@ class TidalProvider(BaseProvider):
                     resp = self._session.get(endpoint, timeout=7)
                     if resp.status_code != 200:
                         continue
-                    t_id = self._extract_best_track_id(resp.json(), isrc)
+                    t_id = self._extract_best_track_id(resp.json(), isrc, duration_ms)
                     if t_id:
                         return f"https://listen.tidal.com/track/{t_id}"
                 except Exception:
@@ -524,11 +526,11 @@ class TidalProvider(BaseProvider):
         return None
 
     @staticmethod
-    def _extract_best_track_id(data: object, isrc: str = "") -> str | None:
-        """Return the track ID whose ISRC matches, falling back to first result."""
+    def _extract_best_track_id(data: object, track_name: str, artist_name: str, isrc: str = "", duration_ms: int = 0) -> str | None:
+        import difflib
+
         def _iter_items(d: object):
-            if isinstance(d, list):
-                yield from d
+            if isinstance(d, list): yield from d
             elif isinstance(d, dict):
                 for key in ("items", "tracks", "result", "results"):
                     inner = d.get(key)
@@ -542,30 +544,49 @@ class TidalProvider(BaseProvider):
                         if isinstance(inner, list):
                             yield from inner
                             return
-                # single item dict
-                if d.get("id") or d.get("trackId"):
-                    yield d
+                if d.get("id") or d.get("trackId"): yield d
 
-        first_id: str | None = None
+        best_id = None
+        best_score = 0.0
+
         for item in _iter_items(data):
-            if not isinstance(item, dict):
-                continue
+            if not isinstance(item, dict): continue
             t_id = str(item.get("id") or item.get("track_id") or "")
-            if not t_id:
-                continue
-            if not first_id:
-                first_id = t_id
+            if not t_id: continue
 
-            # Controllo ISRC (ora correttamente DENTRO il ciclo)
+            # Match esatto ISRC (vince sempre)
             if isrc and item.get("isrc", "").upper() == isrc.upper():
-                logger.debug("[tidal] ISRC match found: %s", t_id)
                 return t_id
 
-        # MODIFICA: Se arriviamo qui, nessun ISRC corrispondeva.
-        # Forziamo comunque la restituzione del primo ID trovato dalla ricerca testuale.
-        if first_id:
-            logger.warning("[tidal] Nessun match ISRC esatto, forzo il download del primo risultato testuale")
-            return first_id
+            # Fallback avanzato tramite scoring testuale + durata (dal JS)
+            t_title = item.get("title", "")
+
+            # Estrazione artista (gestisce vari formati API di Tidal)
+            t_artist = ""
+            artists_list = item.get("artists", [])
+            if artists_list and isinstance(artists_list, list):
+                t_artist = artists_list[0].get("name", "")
+            elif item.get("artist") and isinstance(item.get("artist"), dict):
+                t_artist = item.get("artist").get("name", "")
+
+            t_dur = item.get("duration", 0) * 1000
+
+            score = 0.0
+            score += difflib.SequenceMatcher(None, track_name.lower(), t_title.lower()).ratio() * 60
+            score += difflib.SequenceMatcher(None, artist_name.split(',')[0].lower(), t_artist.lower()).ratio() * 40
+
+            # Bonus se la durata combacia (+/- 10 secondi)
+            if duration_ms > 0 and t_dur > 0:
+                if abs(duration_ms - t_dur) <= 10000:
+                    score += 20
+
+            if score > best_score:
+                best_score = score
+                best_id = t_id
+
+        # Restituiamo solo se il punteggio è decente (evita di scaricare cover a caso)
+        if best_id and best_score > 60:
+            return best_id
 
         return None
 
@@ -717,9 +738,7 @@ class TidalProvider(BaseProvider):
                 tidal_url = f"https://listen.tidal.com/track/{metadata.id.removeprefix('tidal_')}"
                 logger.info("[tidal] Direct Tidal ID detected: %s", metadata.id)
             else:
-                tidal_url = self.resolve_spotify_to_tidal(
-                    metadata.id, metadata.title, metadata.artists, isrc=metadata.isrc,
-                )
+                tidal_url = self.resolve_spotify_to_tidal(metadata.id, metadata.title, metadata.artists, metadata.isrc, metadata.duration_ms)
             track_id = self._parse_track_id(tidal_url)
 
             mb_fetcher = None

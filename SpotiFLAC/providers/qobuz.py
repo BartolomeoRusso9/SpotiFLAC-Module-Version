@@ -541,6 +541,52 @@ class QobuzProvider(BaseProvider):
             raise TrackNotFoundError(self.name, isrc)
         return items[0]
 
+    def _search_by_text(self, title: str, artist: str) -> dict | None:
+        """
+        Fallback basato sul JS: cerca la traccia per Titolo e Artista e la valuta
+        quando l'ISRC non è disponibile o fallisce.
+        """
+        import difflib
+        query = f"{title} {artist}".strip()
+
+        try:
+            resp = self._do_signed_get("track/search", {"query": query, "limit": "10"})
+            if resp.status_code != 200:
+                return None
+
+            items = resp.json().get("tracks", {}).get("items", [])
+            if not items:
+                return None
+
+            best_match = None
+            best_score = 0.0
+
+            title_lower = title.lower()
+
+            # Scorriamo i risultati e diamo un punteggio (porting della logica scoreTrackCandidate)
+            for item in items:
+                t_title = item.get("title", "").lower()
+
+                # Se c'è una corrispondenza esatta o quasi esatta
+                if title_lower == t_title or title_lower in t_title or t_title in title_lower:
+                    score = 900
+                else:
+                    score = difflib.SequenceMatcher(None, title_lower, t_title).ratio() * 100
+
+                # Diamo priorità alle tracce Hi-Res (come fa il JS)
+                if item.get("maximum_bit_depth", 0) >= 24:
+                    score += 10
+
+                if score > best_score:
+                    best_score = score
+                    best_match = item
+
+            return best_match
+
+        except Exception as exc:
+            logger.debug("[qobuz] Text search failed: %s", exc)
+            return None
+
     def _get_stream_url(self, track_id: int, quality: str, allow_fallback: bool) -> str:
         chain = _QUALITY_FALLBACK.get(quality, [quality])
         ordered_apis = prioritize_providers("qobuz", list(_STREAM_APIS))
@@ -586,24 +632,32 @@ class QobuzProvider(BaseProvider):
             is_album:                bool            = False,
             **kwargs,
     ) -> DownloadResult:
-        # FIX #3: normalizza la quality Tidal-style verso i codici numerici Qobuz.
-        # Se quality è "LOSSLESS" o "HI_RES" (passata da downloader.py dopo il Fix #1),
-        # la convertiamo nel formato atteso da Qobuz prima di qualsiasi uso.
+
         quality = _TIDAL_TO_QOBUZ_QUALITY.get(quality, quality)
 
         try:
-            if not metadata.isrc:
-                raise TrackNotFoundError(self.name, "no ISRC provided")
-
             mb_fetcher = None
             if (enrich_metadata or embed_genre) and metadata.isrc:
                 mb_fetcher = AsyncMBFetch(metadata.isrc)
 
-            track    = self._search_by_isrc(metadata.isrc)
+            track = None
+            if metadata.isrc:
+
+                try:
+                    track = self._search_by_isrc(metadata.isrc)
+                except Exception as e:
+                    logger.debug("[qobuz] ISRC %s not found, trying textual fallback. Error: %s", metadata.isrc, e)
+
+            if not track:
+                logger.info("[qobuz] Tento la ricerca testuale per: %s - %s", metadata.title, metadata.artists)
+                track = self._search_by_text(metadata.title, metadata.artists)
+
+            if not track:
+                raise TrackNotFoundError(self.name, f"Traccia non trovata (ISRC: {metadata.isrc}, Testo: {metadata.title})")
+
             track_id = track.get("id")
             if not track_id:
-                raise TrackNotFoundError(self.name, metadata.isrc)
-
+                raise TrackNotFoundError(self.name, "ID traccia mancante nella risposta di Qobuz")
             dest = self._build_output_path(
                 metadata, output_dir, filename_format,
                 position, include_track_num, use_album_track_num, first_artist_only,

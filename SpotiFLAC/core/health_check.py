@@ -73,25 +73,36 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     # ── Amazon ─────────────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.amazon import AMAZON_API_BASE
-        endpoints["amazon"] = [("GET", AMAZON_API_BASE)]
+        from SpotiFLAC.providers.amazon import API_ENDPOINTS
+        # Estrae tutti gli URL dal dizionario e li prepara per il controllo "GET"
+        endpoints["amazon"] = [("GET", url) for url in API_ENDPOINTS.values()]
     except ImportError:
-        endpoints["amazon"] = [("GET", "https://amazon.spotbye.qzz.io/api")]
+        # Fallback manuale con i due endpoint in caso di problemi di importazione
+        endpoints["amazon"] = [
+            ("GET", "https://amazon.spotbye.qzz.io/api"),
+            ("GET", "https://api.zarz.moe/v1/dl/amazeamazeamaze")
+        ]
+
 
     # ── Apple Music ────────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.apple_music import (
-            _PROXY_DIRECT_URL,
-            _PROXY_QUEUED_BASE,
-        )
+        from SpotiFLAC.providers.apple_music import API_ENDPOINTS as APPLE_DL_ENDPOINTS
+        try:
+            from SpotiFLAC.providers.apple_music_metadata import API_ENDPOINTS as APPLE_META_ENDPOINTS
+        except ImportError:
+            # Fallback se non trova il modulo metadata
+            APPLE_META_ENDPOINTS = {"itunes_search": "https://itunes.apple.com/search"}
+
         endpoints["apple"] = [
-            ("GET",  "https://itunes.apple.com/search?term=test&limit=1"),
-            ("POST", _PROXY_DIRECT_URL),
-            ("GET",  f"{_PROXY_QUEUED_BASE}/status/test"),
+            ("GET",  f"{APPLE_META_ENDPOINTS.get('itunes_search', 'https://itunes.apple.com/search')}?term=test&limit=1"),
+            ("POST", APPLE_DL_ENDPOINTS.get("proxy_direct", "https://api.zarz.moe/v1/dl/app2")),
+            ("GET",  f"{APPLE_DL_ENDPOINTS.get('proxy_queued', 'https://api.zarz.moe/v1/dl/app')}/status/test"),
         ]
     except ImportError:
         endpoints["apple"] = [
-            ("GET", "https://itunes.apple.com/search?term=test&limit=1"),
+            ("GET",  "https://itunes.apple.com/search?term=test&limit=1"),
+            ("POST", "https://api.zarz.moe/v1/dl/app2"),
+            ("GET",  "https://api.zarz.moe/v1/dl/app/status/test"),
         ]
 
     # ── SoundCloud ─────────────────────────────────────────────────────────
@@ -154,7 +165,7 @@ class HealthResult(NamedTuple):
     method:   str
     ok:       bool
     latency:  float   # ms; -1 = irraggiungibile
-    detail:   str     # "HTTP 200", "timeout", ecc.
+    detail:   str
 
 
 # ---------------------------------------------------------------------------

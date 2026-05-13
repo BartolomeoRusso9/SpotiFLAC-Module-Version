@@ -192,20 +192,52 @@ class DeezerProvider(BaseProvider):
             return None
 
     def _search_track_text(self, title: str, artist: str) -> dict | None:
-        """Fallback estremo: cerca la traccia per testo su Deezer."""
+        """
+        Fallback avanzato: cerca la traccia per testo su Deezer valutando i risultati
+        con un sistema a punteggio (70% titolo, 30% artista), basato sulla logica JS.
+        """
         import urllib.parse
+        import difflib # Aggiunto per confrontare le stringhe
+
         first_artist = artist.split(",")[0].strip()
         query = f'track:"{title}" artist:"{first_artist}"'
-        url = f"https://api.deezer.com/search?q={urllib.parse.quote(query)}&limit=1"
+        # Aumentiamo il limite per avere più candidati, come nel JS
+        url = f"https://api.deezer.com/search?q={urllib.parse.quote(query)}&limit=10"
 
         try:
             data = self._get_json_cached(url)
             if data and data.get("data"):
-                track_id = data["data"][0].get("id")
-                if track_id:
-                    return self._get_json(f"https://api.deezer.com/track/{track_id}")
+                best_match = None
+                best_score = 0.0
+
+                title_lower = title.lower()
+                artist_lower = first_artist.lower()
+
+                for track in data["data"]:
+                    t_title = track.get("title", "").lower()
+                    t_artist = track.get("artist", {}).get("name", "").lower()
+
+                    # Calcolo del punteggio (simile a findBestSearchMatch del JS)
+                    title_ratio = difflib.SequenceMatcher(None, title_lower, t_title).ratio()
+                    artist_ratio = difflib.SequenceMatcher(None, artist_lower, t_artist).ratio()
+
+                    score = (title_ratio * 70) + (artist_ratio * 30)
+
+                    if score > best_score:
+                        best_score = score
+                        best_match = track
+
+                # Se il punteggio supera la soglia minima di 55 (come nel JS)
+                if best_match and best_score >= 55:
+                    track_id = best_match.get("id")
+                    if track_id:
+                        logger.debug("[deezer] Trovata corrispondenza testuale con score %.2f", best_score)
+                        return self._get_json(f"https://api.deezer.com/track/{track_id}")
+                else:
+                    logger.debug("[deezer] Nessuna traccia ha superato lo score minimo (Migliore: %.2f)", best_score)
+
         except Exception as e:
-            logger.debug("[deezer] Ricerca testuale fallita: %s", e)
+            logger.debug("[deezer] Ricerca testuale avanzata fallita: %s", e)
 
         return None
 
