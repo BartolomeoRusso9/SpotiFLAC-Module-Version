@@ -115,7 +115,7 @@ class YouTubeProvider(BaseProvider):
     # URL Detection & Resolution (Playlist, Album, Artist, Track)
     # ------------------------------------------------------------------
 
-    def get_url(self, url: str, include_featuring: bool = False) -> Tuple[str, List[TrackMetadata]]:
+    def get_url(self, url: str) -> Tuple[str, List[TrackMetadata]]:
         parsed = urlparse(url)
         qs = parse_qs(parsed.query)
 
@@ -345,63 +345,71 @@ class YouTubeProvider(BaseProvider):
     # Download URL APIs (Tiered Fallback Allineato al JS)
     # ------------------------------------------------------------------
 
-    def _request_direct_innertube(self, video_id: str) -> str | None:
-        """
-        Usa yt-dlp nativamente per estrarre l'URL audio diretto.
-        Questo gestisce in automatico PO Token, firme (signatures),
-        throttling e bypassa nativamente l'errore 403 Forbidden.
-        """
-        # Configuriamo yt-dlp per estrarre solo il miglior formato audio senza scaricarlo lui stesso
-        # (lasciamo che sia SpotiFLAC a gestire il download e lo streaming)
+    def _download_direct_innertube(self, video_id: str, dest_path: str) -> bool:
+
+        def _yt_dlp_progress(d):
+            if d['status'] == 'downloading':
+                # Prendi i byte scaricati e il totale (reale o stimato)
+                downloaded = d.get('downloaded_bytes', 0)
+                total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+
+                # Comunica l'aggiornamento alla UI di SpotiFLAC
+                if self._progress_cb and total > 0:
+                    self._progress_cb(downloaded, total)
+
+        class MuteLogger:
+            def debug(self, msg): pass
+            def warning(self, msg): pass
+            def error(self, msg): pass
+
         ydl_opts = {
             'format': 'bestaudio/best',
             'quiet': True,
             'no_warnings': True,
-            'simulate': True,
+            'noprogress': True,
+            'logger': MuteLogger(),
+            'outtmpl': dest_path.rsplit('.', 1)[0] + '.%(ext)s',
             'extractor_args': {
                 'youtube': ['player_client=android']
-            }
+            },
+            'updatetime': False,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'm4a',
+                'preferredquality': '256',
+            }],
+            'progress_hooks': [_yt_dlp_progress],
         }
 
         url = f"https://www.youtube.com/watch?v={video_id}"
 
         try:
-            logger.info(f"[youtube] yt-dlp extraction (ID: {video_id})...")
+            logger.info(f"[youtube] Native yt-dlp download (ID: {video_id})...")
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Estraiamo il dizionario con tutti i metadati e i link
-                info = ydl.extract_info(url, download=False)
+                ydl.download([url])
 
-                dl_url = info.get('url')
-                if dl_url:
-                    logger.info("[youtube] yt-dlp ha estratto l'URL diretto con successo!")
-                    return dl_url
+            if os.path.exists(dest_path):
+                return True
 
-        except yt_dlp.utils.DownloadError as e:
-            logger.warning(f"[youtube] yt-dlp ha riscontrato un errore: {e}")
         except Exception as e:
-            logger.debug(f"[youtube] Errore imprevisto con yt-dlp: {e}")
+            logger.warning(f"[youtube] yt-dlp error: {e}")
 
-        return None
+        return False
 
     def _request_cobalt(self, video_url: str) -> str | None:
         """
-        Interroga molteplici mirror di Cobalt v10 in caso di fallimento dei server primari.
+        Interroga molteplici mirror di Cobalt. Aggiornato per supportare Cobalt v10 e v7.
         """
         cobalt_instances = [
-            "https://co.wuk.sh/api/json",
-            "https://cobalt.qiaeru.tech/api/json",
-            "https://cobalt.cibere.dev/api/json",
-            "https://cobalt.owo.vc/api/json",
-            "https://api.cobalt.tools/api/json"
+            "https://co.wuk.sh",
+            "https://cobalt.qiaeru.tech",
+            "https://cobalt.cibere.dev",
+            "https://cobalt.owo.vc",
+            "https://api.cobalt.tools"
         ]
-
-        payload = {
-            "url": video_url,
-            "isAudioOnly": True,
-            "aFormat": "best",
-            "downloadMode": "audio"
-        }
 
         headers = {
             "Content-Type": "application/json",
@@ -409,15 +417,24 @@ class YouTubeProvider(BaseProvider):
             "User-Agent": _DEFAULT_UA,
         }
 
-        for api_url in cobalt_instances:
+        for base_url in cobalt_instances:
             try:
-                logger.debug(f"[youtube] Tentativo Cobalt via: {api_url}")
-                resp = self._session.post(
-                    api_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=10,
-                )
+                logger.debug(f"[youtube] Tentativo Cobalt via: {base_url}")
+                # Prova il nuovo standard Cobalt v10
+                payload_v10 = {
+                    "url": video_url,
+                    "downloadMode": "audio",
+                    "audioFormat": "mp3"
+                }
+                api_url = f"{base_url}/" if not base_url.endswith("/") else base_url
+
+                resp = self._session.post(api_url, json=payload_v10, headers=headers, timeout=10)
+
+                # Fallback per i server non aggiornati (API v7)
+                if resp.status_code == 404:
+                    payload_v7 = {"url": video_url, "isAudioOnly": True, "aFormat": "mp3"}
+                    api_url = f"{base_url.rstrip('/')}/api/json"
+                    resp = self._session.post(api_url, json=payload_v7, headers=headers, timeout=10)
 
                 if resp.status_code in (200, 202):
                     data = resp.json()
@@ -426,7 +443,7 @@ class YouTubeProvider(BaseProvider):
                         logger.info(f"[youtube] Cobalt URL generato con successo da {api_url}")
                         return dl_url
             except Exception as exc:
-                logger.debug(f"[youtube] Fallimento Cobalt su {api_url}: {exc}")
+                logger.debug(f"[youtube] Fallimento Cobalt su {base_url}: {exc}")
                 continue
 
         logger.warning("[youtube] Tutti i server Cobalt sono attualmente offline o irraggiungibili.")
@@ -528,10 +545,10 @@ class YouTubeProvider(BaseProvider):
                 include_track_num=include_track_num,
                 use_album_track_num=use_album_track_num,
                 first_artist_only=first_artist_only,
-                extension=".mp3",
+                extension=".m4a",
             )
             if self._file_exists(dest):
-                return DownloadResult.ok(self.name, str(dest), fmt="mp3")
+                return DownloadResult.ok(self.name, str(dest), fmt="m4a")
 
             is_native_yt = metadata.extra_info.get("provider") == "youtube"
             looks_like_yt_id = len(metadata.id) == 11 and not metadata.id.startswith("spotify:")
@@ -549,49 +566,58 @@ class YouTubeProvider(BaseProvider):
             from ..core.musicbrainz import AsyncMBFetch
             mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
 
-            # Catena di Download: Proviamo i provider uno ad uno.
-            # Se il download fallisce (es. 403 Forbidden su Direct), passiamo al prossimo.
-            download_sources = [
-                ("Direct", lambda: self._request_direct_innertube(video_id)),
-                ("Cobalt", lambda: self._request_cobalt(yt_url)),
-                ("YT1D", lambda: self._request_yt1d(yt_url))
-            ]
+            try:
+                from ..core.console import print_source_banner
+                real_quality = "M4A 256kbps"
+                print_source_banner("youtube", "music.youtube.com", real_quality)
+            except ImportError:
+                pass
 
+            # Catena di Download: yt-dlp nativo prima, fallback poi.
             download_success = False
 
-            for source_name, get_url_func in download_sources:
-                dl_url = get_url_func()
-                if not dl_url:
-                    continue
+            # 1. Download nativo yt-dlp (Massima velocità, niente throttling del parametro 'n')
+            if self._download_direct_innertube(video_id, str(dest)):
+                download_success = True
+            else:
+                # 2. Fallback su API esterne
+                download_sources = [
+                    ("Cobalt", lambda: self._request_cobalt(yt_url)),
+                    ("YT1D", lambda: self._request_yt1d(yt_url))
+                ]
 
-                logger.info(f"[youtube] Attempting download via {source_name}...")
-                try:
-                    headers = {"User-Agent": _DEFAULT_UA}
-                    with self._session.get(dl_url, headers=headers, stream=True, timeout=120) as r:
-                        r.raise_for_status() # Se c'è un 403, salterà direttamente all'except qui sotto
-                        total = int(r.headers.get("Content-Length") or 0)
-                        downloaded = 0
-                        with open(str(dest), "wb") as f:
-                            for chunk in r.iter_content(chunk_size=8192):
-                                if chunk:
-                                    f.write(chunk)
-                                    downloaded += len(chunk)
-                                    if self._progress_cb and total:
-                                        self._progress_cb(downloaded, total)
+                for source_name, get_url_func in download_sources:
+                    dl_url = get_url_func()
+                    if not dl_url:
+                        continue
 
-                    download_success = True
-                    logger.info(f"[youtube] Download successful via {source_name}")
-                    break  # Download riuscito, usciamo dal ciclo!
+                    logger.info(f"[youtube] Attempting download via {source_name}...")
+                    try:
+                        headers = {"User-Agent": _DEFAULT_UA}
+                        with self._session.get(dl_url, headers=headers, stream=True, timeout=120) as r:
+                            r.raise_for_status()
+                            total = int(r.headers.get("Content-Length") or 0)
+                            downloaded = 0
+                            with open(str(dest), "wb") as f:
+                                for chunk in r.iter_content(chunk_size=262144):
+                                    if chunk:
+                                        f.write(chunk)
+                                        downloaded += len(chunk)
+                                        if self._progress_cb and total:
+                                            self._progress_cb(downloaded, total)
 
-                except Exception as e:
-                    logger.warning(f"[youtube] Download via {source_name} failed: {e}")
-                    # Elimina eventuali file parziali o corrotti prima di passare al prossimo provider
-                    if os.path.exists(str(dest)):
-                        try:
-                            os.remove(str(dest))
-                        except OSError:
-                            pass
-                    continue
+                        download_success = True
+                        logger.info(f"[youtube] Download successful via {source_name}")
+                        break
+
+                    except Exception as e:
+                        logger.warning(f"[youtube] Download via {source_name} failed: {e}")
+                        if os.path.exists(str(dest)):
+                            try:
+                                os.remove(str(dest))
+                            except OSError:
+                                pass
+                        continue
 
             if not download_success:
                 return DownloadResult.fail(self.name, "All YouTube download sources failed (Direct, Cobalt, YT1D)")

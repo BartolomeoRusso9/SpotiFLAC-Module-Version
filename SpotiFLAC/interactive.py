@@ -197,40 +197,83 @@ def _display_health_check() -> dict[str, bool]:
 def _pick_from_history() -> str | None:
     """
     Mostra gli URL recenti e restituisce quello scelto, o None per inserirne uno nuovo.
+    Permette anche di eliminare elementi dalla cronologia o svuotarla del tutto.
     """
     try:
-        from SpotiFLAC.core.session_memory import get_url_history
-        history = get_url_history()
+        # Importiamo anche clear_url_history
+        from SpotiFLAC.core.session_memory import get_url_history, remove_url_from_history, clear_url_history
     except Exception:
         return None
 
-    if not history:
-        return None
+    while True:
+        history = get_url_history()
 
-    _section("Recent URLs  (optional)")
-    print(f"  {DIM('Press Enter to type a new URL, or choose a recent one:')}")
-    print()
+        if not history:
+            return None
 
-    for i, entry in enumerate(history[:8], 1):
-        label = entry.get("label", entry.get("url", ""))[:55]
-        url_short = entry.get("url", "")[:60]
-        print(f"    {DIM(f'[{i}]')} {label}")
-        if label != url_short:
-            print(f"         {DIM(url_short)}")
-
-    print(f"\n    {DIM('[Enter]')} Type a new URL")
-    try:
-        val = input("  → ").strip()
-    except (EOFError, KeyboardInterrupt):
+        _section("Recent URLs  (optional)")
+        print(f"  {DIM('Press Enter to type a new URL, or choose a recent one:')}")
         print()
-        sys.exit(0)
 
-    if not val:
-        return None
-    if val.isdigit() and 1 <= int(val) <= len(history[:8]):
-        return history[int(val) - 1]["url"]
-    # Typed directly
-    return val if val else None
+        for i, entry in enumerate(history[:8], 1):
+            label = entry.get("label", entry.get("url", ""))[:55]
+            url_short = entry.get("url", "")[:60]
+            print(f"    {DIM(f'[{i}]')} {label}")
+            if label != url_short:
+                print(f"         {DIM(url_short)}")
+
+        print(f"\n    {DIM('[Enter]')} Type a new URL to create a queue")
+        print(f"    {DIM('[d + num]')} Delete an entry (e.g., d2, d5)")
+        print(f"    {DIM('[c]')} Clear all history")
+
+        try:
+            val = input("  → ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
+
+        if not val:
+            return None
+
+        val_lower = val.lower()
+
+        # --- Logica per svuotare tutta la cronologia ---
+        if val_lower in ('c', 'clear'):
+            # Chiediamo conferma (di default su No) prima di eliminare tutto
+            if _ask_bool("Are you sure you want to clear ALL history?", False):
+                try:
+                    clear_url_history()
+                    print(f"\n  {GREEN('✓')} History cleared.\n")
+                    # Il continue farà ricominciare il ciclo:
+                    # get_url_history() restituirà una lista vuota e la funzione uscirà ritornando None
+                    continue
+                except Exception as e:
+                    print(f"\n  {RED('✗')} Could not clear history: {e}\n")
+                    continue
+            else:
+                # Se l'utente preme 'n' o invio, annulla e ricarica la lista
+                print()
+                continue
+
+        # --- Logica di eliminazione singola ---
+        if val_lower.startswith('d') and len(val_lower) > 1:
+            num_str = val_lower[1:].strip()
+            if num_str.isdigit():
+                idx = int(num_str) - 1
+                if 0 <= idx < len(history[:8]):
+                    url_to_remove = history[idx].get("url")
+                    try:
+                        remove_url_from_history(url_to_remove)
+                        print(f"\n  {GREEN('✓')} Entry deleted. Refreshing list...\n")
+                        continue
+                    except Exception as e:
+                        print(f"\n  {RED('✗')} Could not delete: {e}\n")
+                        continue
+
+        if val.isdigit() and 1 <= int(val) <= len(history[:8]):
+            return history[int(val) - 1]["url"]
+
+        return val if val else None
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +398,19 @@ def run_interactive() -> dict:
     _header()
 
     # ── Health check ────────────────────────────────────────────────────────
-    health_status = _display_health_check()
+    while True:
+        health_status = _display_health_check()
+
+        working_count = sum(health_status.values()) if health_status else 0
+        total_services = len(_ALL_SERVICES)
+
+        if working_count == total_services:
+            break
+
+        print() # Aggiunge uno spazio per la leggibilità
+        # Chiede se riprovare usando la funzione nativa _ask_bool (default False)
+        if not _ask_bool("Some providers are unreachable. Retry health check?", False):
+            break
 
     cfg: dict = {}
 
@@ -478,7 +533,7 @@ def run_interactive() -> dict:
         if add_fallback:
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options  = ["tidal", "qobuz", "deezer", "amazon", "spoti"],
+                options  = ["tidal", "qobuz", "deezer", "amazon", "spoti", "youtube"],
                 defaults = ["tidal"],
                 ordered  = True,
             )

@@ -12,9 +12,47 @@ from __future__ import annotations
 
 import concurrent.futures
 import time
+import json
 from typing import NamedTuple
+from urllib.parse import urlparse
 
 import requests
+
+# ---------------------------------------------------------------------------
+# Helper per la validazione del payload
+# ---------------------------------------------------------------------------
+
+def _is_streaming_url(raw: str) -> bool:
+    """Verifica se una stringa è un URL HTTP/HTTPS valido."""
+    if not raw or not isinstance(raw, str):
+        return False
+    parsed = urlparse(raw.strip())
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+def _contains_streaming_url(body: str) -> bool:
+    """Cerca un URL di streaming valido nel testo o nel JSON della risposta."""
+    if not body.strip():
+        return False
+
+    # 1. Controlla se il body stesso è un URL diretto
+    if _is_streaming_url(body):
+        return True
+
+    # 2. Cerca nel JSON (formato diretto o annidato in "data")
+    try:
+        data = json.loads(body)
+        if isinstance(data, dict):
+            # Formato {"url": "..."}
+            if "url" in data and _is_streaming_url(data["url"]):
+                return True
+            # Formato {"data": {"url": "..."}}
+            if "data" in data and isinstance(data["data"], dict):
+                if "url" in data["data"] and _is_streaming_url(data["data"]["url"]):
+                    return True
+    except ValueError:
+        pass
+
+    return False
 
 # ---------------------------------------------------------------------------
 # Import endpoint lists directly from provider modules
@@ -81,7 +119,6 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
             ("GET", "https://api.zarz.moe/v1/dl/amazeamazeamaze")
         ]
 
-
     # ── Apple Music ────────────────────────────────────────────────────────
     try:
         from SpotiFLAC.providers.apple_music import API_ENDPOINTS as APPLE_DL_ENDPOINTS
@@ -133,7 +170,6 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     return endpoints
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -143,7 +179,6 @@ _TIMEOUT = 5
 
 # Carica gli endpoint una sola volta al momento dell'import
 _ENDPOINTS: dict[str, list[tuple[str, str]]] = _load_endpoints()
-
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -156,7 +191,6 @@ class HealthResult(NamedTuple):
     ok:       bool
     latency:  float   # ms; -1 = irraggiungibile
     detail:   str
-
 
 # ---------------------------------------------------------------------------
 # Core check logic
@@ -172,12 +206,47 @@ def _check_one(provider: str, method: str, url: str) -> HealthResult:
             allow_redirects = True,
         )
         ms = (time.perf_counter() - t0) * 1000
-        ok = resp.status_code < 500
-        return HealthResult(provider, url, method, ok, ms, f"HTTP {resp.status_code}")
+
+        ok = False
+        detail = f"HTTP {resp.status_code}"
+
+        # Verifica rigorosa dello stato e del contenuto
+        if resp.status_code == 200:
+            body = resp.text
+
+            if provider == "amazon":
+                if '"amazonMusic":"up"' in body:
+                    ok = True
+                else:
+                    detail = "Bad Payload"
+
+            elif provider in ("qobuz", "qbz"):
+                if _contains_streaming_url(body):
+                    ok = True
+                else:
+                    detail = "No Stream URL"
+
+            elif provider == "spoti":
+                try:
+                    json.loads(body)
+                    ok = True
+                except ValueError:
+                    detail = "HTML/CF Block"
+
+            else:
+                # Per gli altri provider, un 200 OK con un body non vuoto è
+                # un controllo sufficiente.
+                if body.strip():
+                    ok = True
+                else:
+                    detail = "Empty Body"
+
+        return HealthResult(provider, url, method, ok, ms, detail)
+
     except requests.Timeout:
         return HealthResult(provider, url, method, False, -1, "timeout")
     except requests.ConnectionError:
-        return HealthResult(provider, url, method, False, -1, "connection refused")
+        return HealthResult(provider, url, method, False, -1, "conn refused")
     except Exception as exc:
         return HealthResult(provider, url, method, False, -1, str(exc)[:40])
 
@@ -199,8 +268,16 @@ def run_health_check(
     Ritorna i risultati ordinati per provider → endpoint.
     """
     tasks: list[tuple[str, str, str]] = []  # (provider, method, url)
+    results: list[HealthResult] = []
 
     for svc in services:
+        if svc == "youtube":
+            # YouTube usa yt-dlp in locale, non dipende da un endpoint HTTP.
+            # Lo consideriamo sempre online con una spunta fissa.
+            results.append(HealthResult("youtube", "yt-dlp (local binary)", "CLI", True, 0.0, "local"))
+            # NOTA: non mettiamo più il "continue", così prosegue e aggiunge
+            # ai "tasks" HTTP anche l'eventuale endpoint Cobalt API.
+
         eps = _ENDPOINTS.get(svc)
         if not eps:
             continue
@@ -212,9 +289,8 @@ def run_health_check(
             tasks.append((svc, m, u))
 
     if not tasks:
-        return []
+        return results
 
-    results: list[HealthResult] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(tasks), 20)) as pool:
         futs = {pool.submit(_check_one, p, m, u): (p, m, u) for p, m, u in tasks}
         for fut in concurrent.futures.as_completed(futs):
@@ -225,13 +301,11 @@ def run_health_check(
     results.sort(key=lambda r: (svc_order.get(r.provider, 99), r.url))
     return results
 
-
 # ---------------------------------------------------------------------------
 # Report rendering
 # ---------------------------------------------------------------------------
 
 _URL_MAX = 48   # max chars shown for endpoint URL in table
-
 
 def print_health_report(
         results: list[HealthResult],
@@ -285,14 +359,6 @@ def print_health_report(
     prov_total  = len({r.provider for r in results})
     print(f"\n  {ok_count}/{len(results)} endpoints reachable "
           f"({prov_ok}/{prov_total} providers with at least one working endpoint).\n")
-
-
-def print_endpoint_summary() -> None:
-    """Stampa quanti endpoint sono configurati per ogni provider."""
-    print("\n  Configured endpoints per provider:")
-    for provider, eps in _ENDPOINTS.items():
-        print(f"    {provider:<14} {len(eps):>2} endpoint(s)")
-    print()
 
 
 # ---------------------------------------------------------------------------
