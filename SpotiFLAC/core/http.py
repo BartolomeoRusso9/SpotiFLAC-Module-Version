@@ -7,6 +7,8 @@ from __future__ import annotations
 import logging
 import os
 import time
+import threading
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +21,44 @@ from .errors import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ------------------------------------------------------------------
+# Rate Limiter
+# ------------------------------------------------------------------
+class RateLimiter:
+    def __init__(self, max_requests: int, window_seconds: float):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self.timestamps = deque()
+        self.lock = threading.Lock()
+
+    def _clean_old_timestamps(self, now: float):
+        cutoff = now - self.window
+        while self.timestamps and self.timestamps[0] <= cutoff:
+            self.timestamps.popleft()
+
+    def wait_for_slot(self):
+        now = time.time()
+
+        with self.lock:
+            self._clean_old_timestamps(now)
+
+            if len(self.timestamps) < self.max_requests:
+                self.timestamps.append(time.time())
+                return
+
+            oldest_timestamp = self.timestamps[0]
+            wait_duration = (oldest_timestamp + self.window) - now
+
+        if wait_duration > 0:
+            time.sleep(wait_duration)
+
+        with self.lock:
+            self._clean_old_timestamps(time.time())
+            self.timestamps.append(time.time())
+
+# Istanza globale del Rate Limiter per Song.link / Odesli (9 req / 60 secondi)
+songlink_rate_limiter = RateLimiter(9, 60.0)
 
 
 @dataclass
@@ -36,6 +76,7 @@ class HttpClient:
     - retry esponenziale automatico
     - parsing sicuro della risposta JSON
     - mapping HTTP status → errori tipati
+    - rate limiting preventivo (opzionale)
     """
 
     def __init__(
@@ -45,11 +86,13 @@ class HttpClient:
             retry:       RetryConfig | None = None,
             headers:     dict[str, str] | None = None,
             session:     Session | None    = None,
+            rate_limiter: RateLimiter | None = None, # <-- Aggiunto
     ) -> None:
         self._provider = provider
         self._timeout  = timeout_s
         self._retry    = retry or RetryConfig()
         self._session  = session or Session()
+        self._limiter  = rate_limiter # <-- Assegnato
         if headers:
             self._session.headers.update(headers)
 
@@ -81,21 +124,17 @@ class HttpClient:
             chunk_size: int = 256 * 1024,
             extra_headers: dict[str, str] | None = None,
     ) -> None:
-        """
-        Scarica in streaming verso un file .part, poi rinomina atomicamente.
-        progress_cb(downloaded_bytes, total_bytes) viene chiamata ad ogni chunk.
-
-        FIX: il finally block originale tentava os.remove(temp) dopo che
-        os.replace(temp, dest_path) lo aveva già spostato/eliminato,
-        generando sempre un silenzioso OSError. Ora il cleanup del file
-        temporaneo avviene solo in caso di errore, non dopo il successo.
-        """
+        """... (Nessuna modifica necessaria qui) ..."""
         temp = dest_path + ".part"
         req_kwargs: dict[str, Any] = {"stream": True, "timeout": (self._timeout, 120)}
         if extra_headers:
             req_kwargs["headers"] = extra_headers
 
         try:
+            # Anche per lo streaming, aspetta uno slot se il limiter è configurato
+            if self._limiter:
+                self._limiter.wait_for_slot()
+
             with self._session.get(url, **req_kwargs) as resp:
                 self._raise_for_status(resp)
                 total = int(resp.headers.get("Content-Length") or 0)
@@ -109,11 +148,9 @@ class HttpClient:
                             downloaded += len(chunk)
                             if progress_cb:
                                 progress_cb(downloaded, total)
-            # Rinomina atomica: dopo questo punto temp non esiste più.
             os.replace(temp, dest_path)
 
         except SpotiflacError:
-            # Cleanup del .part solo in caso di errore
             _safe_remove(temp)
             raise
         except Exception as exc:
@@ -131,6 +168,12 @@ class HttpClient:
 
         for attempt in range(1, self._retry.max_attempts + 1):
             try:
+                # <-- QUI AVVIENE LA MAGIA -->
+                # Se questo client ha un rate limiter assegnato,
+                # metti in attesa il thread fino a quando non c'è uno slot libero.
+                if self._limiter:
+                    self._limiter.wait_for_slot()
+
                 resp = self._session.request(method, url, **kwargs)
                 self._raise_for_status(resp)
                 return resp
@@ -168,6 +211,7 @@ class HttpClient:
         raise last_err  # type: ignore[misc]
 
     def _raise_for_status(self, resp: Response) -> None:
+        # (Nessuna modifica necessaria qui)
         sc = resp.status_code
         if sc == 200:
             return
@@ -184,6 +228,7 @@ class HttpClient:
             raise NetworkError(self._provider, f"HTTP {sc} from {resp.url}")
 
     def _parse_json(self, resp: Response) -> dict:
+        # (Nessuna modifica necessaria qui)
         body = resp.text
         if not body.strip():
             raise ParseError(self._provider, "Empty response body")
@@ -194,12 +239,7 @@ class HttpClient:
             raise ParseError(self._provider, f"Invalid JSON: {preview}", exc)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _safe_remove(path: str) -> None:
-    """Rimuove un file ignorando silenziosamente se non esiste."""
     try:
         os.remove(path)
     except OSError:

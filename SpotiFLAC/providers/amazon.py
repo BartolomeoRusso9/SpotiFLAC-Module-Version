@@ -171,40 +171,70 @@ class AmazonProvider(BaseProvider):
         return "flac"
 
     def _download_from_zarz_api(self, asin: str, output_dir: str, quality: str) -> str | None:
+        import time
         codec = self._quality_to_zarz_codec(quality)
         api_url = f"{API_ENDPOINTS['zarz']}/media?asin={asin}&codec={codec}"
         logger.info("[amazon] Trying Zarz.moe API (ASIN: %s, codec: %s)", asin, codec)
 
+        # User-Agent Mobile per bypassare i blocchi WAF di Zarz
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "SpotiFLAC-Mobile"
+        }
+
+        max_retries = 2
+        base_delay = 3.0
+        resp = None
+
+        for attempt in range(max_retries):
+            try:
+                resp = self._session.get(api_url, headers=headers, timeout=30)
+
+                if resp.status_code == 429:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "[amazon] Zarz API returned 429 (Rate Limit). Waiting %.1f seconds (attempt %d/%d)...",
+                        delay, attempt + 1, max_retries
+                    )
+                    time.sleep(delay)
+                    continue
+
+                break  # Usciamo dal loop se non è 429 o se c'è un altro errore
+            except requests.RequestException as exc:
+                logger.warning("[amazon] Zarz API connection error: %s", exc)
+                break
+
+        if not resp or resp.status_code != 200:
+            status = resp.status_code if resp else "Timeout/Connection Error"
+            logger.warning("[amazon] Zarz API failed with status: %s", status)
+            return None
+
         try:
-            resp = self._session.get(
-                api_url,
-                headers={"Accept": "application/json"},
-                timeout=30,
-            )
-
-            if resp.status_code != 200:
-                logger.warning(f"[amazon] Zarz API returned status {resp.status_code}")
-                return None
-
             data = resp.json()
-            if isinstance(data, list):
-                if not data:
-                    return None
-                data = data[0]
+        except ValueError:
+            logger.warning("[amazon] Zarz API returned invalid JSON")
+            return None
 
-            audio = data.get("audio", {})
-            stream_url = audio.get("url")
-            decryption_key = audio.get("key", "").strip()
-            returned_codec = audio.get("codec", codec)
-
-            if not stream_url:
-                logger.warning("[amazon] No streamUrl in Zarz API response")
+        if isinstance(data, list):
+            if not data:
                 return None
+            data = data[0]
 
-            temp_file = os.path.join(output_dir, f"{asin}_zarz.enc")
-            logger.info("[amazon] Downloading encrypted stream from Zarz…")
+        audio = data.get("audio", {})
+        stream_url = audio.get("url")
+        decryption_key = audio.get("key", "").strip()
+        returned_codec = audio.get("codec", codec)
 
-            with self._session.get(stream_url, stream=True, timeout=120) as r:
+        if not stream_url:
+            logger.warning("[amazon] No streamUrl in Zarz API response")
+            return None
+
+        temp_file = os.path.join(output_dir, f"{asin}_zarz.enc")
+        logger.info("[amazon] Downloading encrypted stream from Zarz…")
+
+        try:
+            # Usiamo gli stessi headers (con UA Mobile) anche per il download effettivo
+            with self._session.get(stream_url, stream=True, headers=headers, timeout=120) as r:
                 r.raise_for_status()
                 total = int(r.headers.get("Content-Length") or 0)
                 downloaded = 0
@@ -215,39 +245,41 @@ class AmazonProvider(BaseProvider):
                             downloaded += len(chunk)
                             if self._progress_cb and total:
                                 self._progress_cb(downloaded, total)
-
-            if decryption_key:
-                logger.info("[amazon] Decrypting Zarz stream…")
-                # eac3/mha1/opus usually go into .m4a or .mp4
-                ext = ".flac" if returned_codec == "flac" else ".m4a"
-                out = os.path.join(output_dir, f"{asin}{ext}")
-
-                si = None
-                if os.name == "nt":
-                    si = subprocess.STARTUPINFO()
-                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-                result = subprocess.run(
-                    [_ffmpeg_path(), "-y", "-decryption_key", decryption_key,
-                     "-i", temp_file, "-c", "copy", out],
-                    capture_output=True, startupinfo=si,
-                )
-                os.remove(temp_file)
-                if result.returncode != 0:
-                    logger.warning(f"[amazon] Zarz decryption failed: {result.stderr.decode()}")
-                    return None
-                return out
-
-            ext = ".flac" if returned_codec == "flac" else ".m4a"
-            final = os.path.join(output_dir, f"{asin}{ext}")
-            if os.path.exists(final):
-                os.remove(final)
-            os.rename(temp_file, final)
-            return final
-
         except Exception as exc:
-            logger.warning("[amazon] Zarz API download failed: %s", exc)
+            logger.warning("[amazon] Failed to download Zarz stream: %s", exc)
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
             return None
+
+        if decryption_key:
+            logger.info("[amazon] Decrypting Zarz stream…")
+            ext = ".flac" if returned_codec == "flac" else ".m4a"
+            out = os.path.join(output_dir, f"{asin}{ext}")
+
+            si = None
+            if os.name == "nt":
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            result = subprocess.run(
+                [_ffmpeg_path(), "-y", "-decryption_key", decryption_key,
+                 "-i", temp_file, "-c", "copy", out],
+                capture_output=True, startupinfo=si,
+            )
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+
+            if result.returncode != 0:
+                logger.warning("[amazon] Zarz decryption failed: %s", result.stderr.decode()[:100])
+                return None
+            return out
+
+        ext = ".flac" if returned_codec == "flac" else ".m4a"
+        final = os.path.join(output_dir, f"{asin}{ext}")
+        if os.path.exists(final):
+            os.remove(final)
+        os.rename(temp_file, final)
+        return final
 
     def _download_from_spotbye_api(self, asin: str, output_dir: str) -> str:
         api_url = f"{API_ENDPOINTS['spotbye']}/track/{asin}"
@@ -259,15 +291,17 @@ class AmazonProvider(BaseProvider):
             headers={"X-Debug-Key": debug_key},
             timeout=30,
         )
+        from ..core.errors import SpotiflacError, ErrorKind
+
         if resp.status_code != 200:
-            raise RuntimeError(f"Spotbye API returned status {resp.status_code}")
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Spotbye API returned status {resp.status_code}", self.name)
 
         data           = resp.json()
         stream_url     = data.get("streamUrl")
         decryption_key = data.get("decryptionKey")
 
         if not stream_url:
-            raise RuntimeError("No streamUrl in Spotbye API response")
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, "No streamUrl in Spotbye API response", self.name)
 
         temp_file = os.path.join(output_dir, f"{asin}.enc")
         logger.info("[amazon] Downloading encrypted stream from Spotbye…")
@@ -302,7 +336,7 @@ class AmazonProvider(BaseProvider):
             )
             os.remove(temp_file)
             if result.returncode != 0:
-                raise RuntimeError(f"Decryption failed: {result.stderr.decode()}")
+                raise SpotiflacError(ErrorKind.FILE_IO, f"Decryption failed: {result.stderr.decode()[:100]}", self.name)
             return out
 
         final = os.path.join(output_dir, f"{asin}.m4a")

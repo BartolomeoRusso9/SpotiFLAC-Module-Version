@@ -42,6 +42,7 @@ dependencies = [
     # come dipendenza — causava ImportError silenzioso gestito con HAS_CRYPTO=False.
     "pycryptodome>=3.20.0",
     "packaging>=23.0",
+    "yt-dlp>=2024.04.09",
 ]
 
 [project.urls]

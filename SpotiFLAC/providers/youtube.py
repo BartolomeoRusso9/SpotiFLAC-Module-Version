@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import yt_dlp
 from typing import Callable, List, Optional, Tuple, Dict, Any
 from urllib.parse import quote, urlparse, parse_qs
 
@@ -346,95 +347,89 @@ class YouTubeProvider(BaseProvider):
 
     def _request_direct_innertube(self, video_id: str) -> str | None:
         """
-        Prova i client InnerTube in ordine: ANDROID_VR prima (no PO token),
-        poi ANDROID come fallback. Allineato all'index.js del provider mobile.
+        Usa yt-dlp nativamente per estrarre l'URL audio diretto.
+        Questo gestisce in automatico PO Token, firme (signatures),
+        throttling e bypassa nativamente l'errore 403 Forbidden.
         """
-        player_url = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false"
-
-        for client in _INNERTUBE_CLIENTS:
-            payload = {
-                "videoId": video_id,
-                "contentCheckOk": True,
-                "racyCheckOk": True,
-                "context": {
-                    "client": {
-                        "clientName": client["clientName"],
-                        "clientVersion": client["clientVersion"],
-                        **client["extra"],
-                    }
-                },
+        # Configuriamo yt-dlp per estrarre solo il miglior formato audio senza scaricarlo lui stesso
+        # (lasciamo che sia SpotiFLAC a gestire il download e lo streaming)
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'quiet': True,
+            'no_warnings': True,
+            'simulate': True,
+            'extractor_args': {
+                'youtube': ['player_client=android']
             }
-            headers = {
-                "Content-Type": "application/json",
-                "User-Agent": client["ua"],
-                "Origin": "https://www.youtube.com",
-                "X-YouTube-Client-Name": client["clientHeader"],
-                "X-YouTube-Client-Version": client["clientVersion"],
-            }
-            try:
-                resp = self._session.post(
-                    player_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=10,
-                )
-                if resp.status_code != 200:
-                    logger.debug("[youtube] %s: HTTP %s", client["name"], resp.status_code)
-                    continue
+        }
 
-                data = resp.json()
-                if data.get("playabilityStatus", {}).get("status") != "OK":
-                    logger.debug("[youtube] %s: not OK — %s", client["name"],
-                                 data.get("playabilityStatus", {}).get("reason", "?"))
-                    continue
+        url = f"https://www.youtube.com/watch?v={video_id}"
 
-                streaming = data.get("streamingData", {})
-                all_formats = streaming.get("formats", []) + streaming.get("adaptiveFormats", [])
+        try:
+            logger.info(f"[youtube] yt-dlp extraction (ID: {video_id})...")
 
-                # Preferenza itag: 251 (opus), 140 (m4a), 250, 249
-                for preferred in [251, 140, 250, 249]:
-                    for fmt in all_formats:
-                        if fmt.get("itag") == preferred and fmt.get("url"):
-                            logger.info("[youtube] %s: direct URL found (itag=%s)",
-                                        client["name"], preferred)
-                            return fmt["url"]
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # Estraiamo il dizionario con tutti i metadati e i link
+                info = ydl.extract_info(url, download=False)
 
-            except Exception as exc:
-                logger.debug("[youtube] %s InnerTube failed: %s", client["name"], exc)
+                dl_url = info.get('url')
+                if dl_url:
+                    logger.info("[youtube] yt-dlp ha estratto l'URL diretto con successo!")
+                    return dl_url
+
+        except yt_dlp.utils.DownloadError as e:
+            logger.warning(f"[youtube] yt-dlp ha riscontrato un errore: {e}")
+        except Exception as e:
+            logger.debug(f"[youtube] Errore imprevisto con yt-dlp: {e}")
 
         return None
 
     def _request_cobalt(self, video_url: str) -> str | None:
         """
-        Allineato all'index.js: usa User-Agent SpotiFLAC-Mobile senza
-        Origin/Referer (così come fa il provider mobile nativo).
+        Interroga molteplici mirror di Cobalt v10 in caso di fallimento dei server primari.
         """
+        cobalt_instances = [
+            "https://co.wuk.sh/api/json",
+            "https://cobalt.qiaeru.tech/api/json",
+            "https://cobalt.cibere.dev/api/json",
+            "https://cobalt.owo.vc/api/json",
+            "https://api.cobalt.tools/api/json"
+        ]
+
         payload = {
             "url": video_url,
-            "downloadMode": "audio",
-            "audioFormat": "best",
-            }
+            "isAudioOnly": True,
+            "aFormat": "best",
+            "downloadMode": "audio"
+        }
+
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "SpotiFLAC-Mobile",  # getAppUserAgent() nel JS
+            "User-Agent": _DEFAULT_UA,
         }
-        try:
-            resp = self._session.post(
-                COBALT_API_URL,
-                json=payload,
-                headers=headers,
-                timeout=15,
-            )
 
-            if resp.status_code in (200, 202):
-                data = resp.json()
-                dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
-                if dl_url:
-                    return dl_url
-            logger.warning("[youtube] Cobalt returned HTTP %s", resp.status_code)
-        except Exception as exc:
-            logger.debug("[youtube] Cobalt failed: %s", exc)
+        for api_url in cobalt_instances:
+            try:
+                logger.debug(f"[youtube] Tentativo Cobalt via: {api_url}")
+                resp = self._session.post(
+                    api_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=10,
+                )
+
+                if resp.status_code in (200, 202):
+                    data = resp.json()
+                    dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
+                    if dl_url:
+                        logger.info(f"[youtube] Cobalt URL generato con successo da {api_url}")
+                        return dl_url
+            except Exception as exc:
+                logger.debug(f"[youtube] Fallimento Cobalt su {api_url}: {exc}")
+                continue
+
+        logger.warning("[youtube] Tutti i server Cobalt sono attualmente offline o irraggiungibili.")
         return None
 
     def _request_yt1d(self, video_url: str) -> str | None:
