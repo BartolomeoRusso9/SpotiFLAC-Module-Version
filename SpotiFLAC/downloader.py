@@ -1,11 +1,18 @@
 """
-Downloader — orchestratore principale.
+Downloader — main orchestrator.
+Changes compared to the original:
+  - DownloadOptions: +track_max_retries, +post_download_action, +post_download_command
+  - download_one(): per-track retry with exponential backoff
+  - DownloadWorker: post-download actions (open_folder / notify / command)
+  - SpotiflacDownloader.run(): accepts str | list[str] for batch mode
 """
 from __future__ import annotations
 
 import logging
 import os
 import re
+import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 
@@ -50,6 +57,14 @@ class DownloadOptions:
     qobuz_token:             str | None      = None
     include_featuring:       bool            = False
 
+    # ── New fields ───────────────────────────────────────────────────────
+    track_max_retries:       int             = 0
+    # none | open_folder | notify | command
+    post_download_action:    str             = "none"
+    # Shell command (used when action == "command")
+    # Supported placeholders: {folder} {succeeded} {failed}
+    post_download_command:   str             = ""
+
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
     from .providers import PROVIDER_REGISTRY
@@ -60,6 +75,7 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
     kwargs = {"qobuz_token": opts.qobuz_token} if name in ("tidal", "qobuz") else {}
     return cls(**kwargs)
 
+
 def download_one(
         metadata:   TrackMetadata,
         output_dir: str,
@@ -68,56 +84,108 @@ def download_one(
         position:   int = 1,
         is_album:   bool = False,
 ) -> DownloadResult:
-    errors: dict[str, str] = {}
+    """
+    Attempts to download a single track across all providers in order,
+    with per-track retry if track_max_retries > 0.
+
+    Retry strategy: exponential backoff (2^attempt seconds, max 30s).
+    Each retry starts over from the first provider in the list.
+    """
+    max_retries = opts.track_max_retries
     manager = DownloadManager()
+    errors: dict[str, str] = {}
 
-    for provider in providers:
-        logger.info("[%s] Trying: %s — %s", provider.name, metadata.artists, metadata.title)
+    for attempt in range(max_retries + 1):
+        if attempt > 0:
+            wait = min(2 ** attempt, 30)
+            print(f"\n  ↺  Retry {attempt}/{max_retries} in {wait}s… "
+                  f"({metadata.artists} — {metadata.title})")
+            time.sleep(wait)
+            errors.clear()
 
-        cb = ProgressCallback(item_id=metadata.id)
-        provider.set_progress_callback(cb)
+        for provider in providers:
+            logger.info("[%s] Trying: %s — %s", provider.name, metadata.artists, metadata.title)
 
-        result = provider.download_track(
-            metadata,
-            output_dir,
-            filename_format         = opts.filename_format,
-            position                = position,
-            include_track_num       = opts.use_track_numbers,
-            use_album_track_num     = opts.use_album_track_numbers,
-            first_artist_only       = opts.first_artist_only,
-            allow_fallback          = opts.allow_fallback,
-            quality                 = opts.quality,
-            embed_lyrics            = opts.embed_lyrics,
-            lyrics_providers        = opts.lyrics_providers,
-            enrich_metadata         = opts.enrich_metadata,
-            enrich_providers        = opts.enrich_providers,
-            qobuz_token             = opts.qobuz_token,
-            is_album                = is_album
-        )
+            cb = ProgressCallback(item_id=metadata.id)
+            provider.set_progress_callback(cb)
 
-        if result.success:
-            if opts.output_path and result.file_path:
-                import shutil
-                import os
-                _, ext = os.path.splitext(result.file_path)
-                base_target, _ = os.path.splitext(opts.output_path)
-                target = base_target + ext
-                os.makedirs(os.path.dirname(os.path.abspath(target)) or ".", exist_ok=True)
-                if os.path.abspath(result.file_path) != os.path.abspath(target):
-                    if os.path.exists(target):
-                        os.remove(target)
-                    shutil.move(result.file_path, target)
-                result = DownloadResult.ok(result.provider, target, result.format or "flac")
+            result = provider.download_track(
+                metadata,
+                output_dir,
+                filename_format         = opts.filename_format,
+                position                = position,
+                include_track_num       = opts.use_track_numbers,
+                use_album_track_num     = opts.use_album_track_numbers,
+                first_artist_only       = opts.first_artist_only,
+                allow_fallback          = opts.allow_fallback,
+                quality                 = opts.quality,
+                embed_lyrics            = opts.embed_lyrics,
+                lyrics_providers        = opts.lyrics_providers,
+                enrich_metadata         = opts.enrich_metadata,
+                enrich_providers        = opts.enrich_providers,
+                qobuz_token             = opts.qobuz_token,
+                is_album                = is_album,
+            )
 
-            logger.info("[%s] ✓ %s — %s", provider.name, metadata.artists, metadata.title)
-            return result
+            if result.success:
+                if opts.output_path and result.file_path:
+                    import shutil
+                    _, ext = os.path.splitext(result.file_path)
+                    base_target, _ = os.path.splitext(opts.output_path)
+                    target = base_target + ext
+                    os.makedirs(os.path.dirname(os.path.abspath(target)) or ".", exist_ok=True)
+                    if os.path.abspath(result.file_path) != os.path.abspath(target):
+                        if os.path.exists(target):
+                            os.remove(target)
+                        shutil.move(result.file_path, target)
+                    result = DownloadResult.ok(result.provider, target, result.format or "flac")
 
-        errors[provider.name] = result.error or "unknown error"
-        logger.warning("[%s] ✗ %s", provider.name, result.error)
+                logger.info("[%s] ✓ %s — %s", provider.name, metadata.artists, metadata.title)
+                return result
 
+            errors[provider.name] = result.error or "unknown error"
+            logger.warning("[%s] ✗ %s", provider.name, result.error)
+
+    attempts_str = f"{max_retries + 1} attempt(s)"
     summary = "; ".join(f"{k}: {v}" for k, v in errors.items())
-    return DownloadResult.fail("none", f"All providers failed — {summary}")
+    return DownloadResult.fail("none", f"All providers failed after {attempts_str} — {summary}")
 
+
+# ---------------------------------------------------------------------------
+# Post-download actions helpers
+# ---------------------------------------------------------------------------
+
+def _send_system_notify(title: str, body: str) -> None:
+    """Sends a system notification (Linux/macOS/Windows)."""
+    try:
+        if sys.platform == "darwin":
+            script = f'display notification "{body}" with title "{title}"'
+            subprocess.run(["osascript", "-e", script], timeout=3, check=False)
+        elif sys.platform == "win32":
+            # Windows: text fallback (avoids extra dependencies)
+            print(f"\n  🔔 {title}: {body}")
+        else:
+            subprocess.run(["notify-send", title, body], timeout=3, check=False)
+    except Exception:
+        print(f"\n  🔔 {title}: {body}")
+
+
+def _open_folder(path: str) -> None:
+    """Opens the folder in the system file manager."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        elif sys.platform == "win32":
+            subprocess.Popen(["explorer", os.path.normpath(path)])
+        else:
+            subprocess.Popen(["xdg-open", path])
+    except Exception as exc:
+        logger.warning("[post-action] open_folder failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# DownloadWorker
+# ---------------------------------------------------------------------------
 
 class DownloadWorker:
     def __init__(
@@ -182,6 +250,10 @@ class DownloadWorker:
 
         elapsed = time.perf_counter() - start
         self._print_summary(elapsed)
+
+        # ── Post-download action ───────────────────────────────────────────
+        self._execute_post_action(base_out)
+
         return self._failed
 
     def _resolve_output_dir(self) -> str:
@@ -216,20 +288,79 @@ class DownloadWorker:
         display = [(t, a, e) for _, t, a, e in self._failed]
         print_summary(len(self._tracks), succeeded, display, elapsed)
 
+    def _execute_post_action(self, output_dir: str) -> None:
+        """
+        Executes the configured post-download action.
+        Supports: none | open_folder | notify | command
+        """
+        action = self._opts.post_download_action
+        if not action or action == "none":
+            return
+
+        succeeded   = len(self._tracks) - len(self._failed)
+        failed_count = len(self._failed)
+
+        if action == "open_folder":
+            print(f"\n  📂 Opening folder: {output_dir}")
+            _open_folder(output_dir)
+
+        elif action == "notify":
+            body = f"{succeeded} tracks downloaded"
+            if failed_count:
+                body += f", {failed_count} failed"
+            _send_system_notify("SpotiFLAC — Download completed", body)
+
+        elif action == "command":
+            cmd_template = self._opts.post_download_command
+            if not cmd_template:
+                logger.warning("[post-action] action=command but post_download_command is empty")
+                return
+            cmd = (
+                cmd_template
+                .replace("{folder}",    output_dir)
+                .replace("{succeeded}", str(succeeded))
+                .replace("{failed}",    str(failed_count))
+            )
+            try:
+                print(f"\n  ▶  Executing post-download command: {cmd[:80]}")
+                subprocess.Popen(cmd, shell=True)
+            except Exception as exc:
+                logger.warning("[post-action] command failed: %s", exc)
+
+        else:
+            logger.warning("[post-action] unknown action: %s", action)
+
+
+# ---------------------------------------------------------------------------
+# SpotiflacDownloader
+# ---------------------------------------------------------------------------
 
 class SpotiflacDownloader:
     def __init__(self, opts: DownloadOptions) -> None:
         self._opts   = opts
         self._client = SpotifyMetadataClient()
 
-    def run(self, input_url: str, loop_minutes: int | None = None) -> None:
-        failed_tracks = None
-        while True:
-            failed_tracks = self._run_once(input_url, target_tracks=failed_tracks)
-            if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
-                break
-            print(f"\n{len(failed_tracks)} brani falliti. Prossimo tentativo in {loop_minutes} minuti…")
-            time.sleep(loop_minutes * 60)
+    def run(self, input_url: str | list[str], loop_minutes: int | None = None) -> None:
+        """
+        Starts downloading one or more URLs.
+        Accepts both a single string and a list of URLs (batch mode).
+        """
+        urls = [input_url] if isinstance(input_url, str) else list(input_url)
+
+        for idx, url in enumerate(urls):
+            if len(urls) > 1:
+                print(f"\n{'═' * 55}")
+                print(f"  URL {idx + 1}/{len(urls)}: {url[:55]}")
+                print(f"{'═' * 55}")
+
+            failed_tracks = None
+            while True:
+                failed_tracks = self._run_once(url, target_tracks=failed_tracks)
+                if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
+                    break
+                print(f"\n{len(failed_tracks)} tracks failed. "
+                      f"Next attempt in {loop_minutes} minutes…")
+                time.sleep(loop_minutes * 60)
 
     def _resolve_metadata(self, url: str) -> tuple[str, list[TrackMetadata], dict]:
         from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
@@ -245,8 +376,8 @@ class SpotiflacDownloader:
         if "deezer.com" in url or "deezer.page.link" in url:
             raise SpotiflacError(
                 ErrorKind.INVALID_URL,
-                "L'inserimento di URL Deezer come input primario non è ancora pienamente supportato. "
-                "Usa un link Spotify e imposta 'deezer' come provider di download."
+                "Providing Deezer URLs as primary input is not yet fully supported. "
+                "Use a Spotify link and set 'deezer' as the download provider."
             )
 
         try:
@@ -327,6 +458,7 @@ class SpotiflacDownloader:
         print(f"Resolving ISRC for {len(missing)} track(s)…")
         try:
             resolver = IsrcHelper(HttpClient("isrc"))
+
             def _resolve_one(args):
                 i, track, resolver = args
                 if track.isrc:
@@ -378,7 +510,7 @@ class SpotiflacDownloader:
 
     def _run_once(self, url: str, target_tracks=None) -> list:
         if target_tracks is not None:
-            print(f"\nRitentando il download di {len(target_tracks)} brani...")
+            print(f"\nRetrying download for {len(target_tracks)} track(s)...")
             tracks          = target_tracks
             collection_name = "Retry Failed Tracks"
             is_album        = self._opts.is_album
@@ -409,8 +541,8 @@ class SpotiflacDownloader:
 
         if (is_album or is_playlist) and self._opts.output_path:
             logger.warning(
-                "[downloader] --output-path ignorato per %s: "
-                "i file verranno salvati con la normale rinominazione.",
+                "[downloader] --output-path ignored for %s: "
+                "files will be saved with standard renaming.",
                 info.get("type"),
             )
             from dataclasses import replace
@@ -419,6 +551,13 @@ class SpotiflacDownloader:
         is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
         if not is_soundcloud:
             tracks = self._resolve_isrc_bulk(tracks)
+
+        # Update URL history with collection name
+        try:
+            from .core.session_memory import add_url_to_history
+            add_url_to_history(url, label=collection_name)
+        except Exception as exc:
+            logger.debug("[downloader] Failed operation: %s", exc)
 
         return self._run_worker(tracks, collection_name, info, is_album, is_playlist, opts=effective_opts)
 

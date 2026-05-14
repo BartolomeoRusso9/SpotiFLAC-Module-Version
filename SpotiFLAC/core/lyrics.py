@@ -14,12 +14,13 @@ MODIFICA: il provider Spotify ora usa autenticazione anonima tramite TOTP
 from __future__ import annotations
 
 import logging
-import urllib.parse
-from typing import Any
-
-import requests
 import re
 import unicodedata
+import urllib.parse
+
+import requests
+
+from ..providers.amazon import API_ENDPOINTS
 
 DEFAULT_LYRICS_PROVIDERS  = ["spotify", "apple", "musixmatch", "lrclib", "amazon"]
 DEFAULT_ENRICH_PROVIDERS  = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
@@ -305,10 +306,9 @@ def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeou
 def _fetch_amazon(isrc: str, timeout: int = 7) -> str:
     if not isrc:
         return ""
-    from ..providers.amazon import AMAZON_API_BASE
     try:
         r = requests.get(
-            f"{AMAZON_API_BASE}/lyrics/{isrc}",
+            f"{API_ENDPOINTS['spotbye']}/lyrics/{isrc}",
             headers={"User-Agent": _UA},
             timeout=timeout,
         )

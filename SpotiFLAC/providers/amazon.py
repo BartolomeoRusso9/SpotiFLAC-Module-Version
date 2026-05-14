@@ -30,7 +30,11 @@ _DEFAULT_UA = (
     "Chrome/145.0.0.0 Safari/537.36"
 )
 
-AMAZON_API_BASE = "https://amazon.spotbye.qzz.io/api"
+API_ENDPOINTS = {
+    "spotbye": "https://amazon.spotbye.qzz.io/api",
+    "zarz": "https://api.zarz.moe/v1/dl/amazeamazeamaze"
+}
+
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
@@ -158,16 +162,128 @@ class AmazonProvider(BaseProvider):
         except Exception:
             return "m4a"
 
-    def _download_from_api(self, amazon_url: str, output_dir: str, quality: str) -> str:
-        asin_match = re.search(r"(B[0-9A-Z]{9})", amazon_url)
-        if not asin_match:
-            raise RuntimeError(f"Cannot extract ASIN from: {amazon_url}")
-        asin = asin_match.group(1)
+    def _quality_to_zarz_codec(self, quality: str) -> str:
+        if not quality:
+            return "flac"
+        q = str(quality).lower().strip()
+        if q in ["opus", "eac3", "mha1"]:
+            return q
+        return "flac"
 
-        api_url = f"{AMAZON_API_BASE}/track/{asin}"
-        logger.info("[amazon] Fetching track (ASIN: %s)", asin)
+    def _download_from_zarz_api(self, asin: str, output_dir: str, quality: str) -> str | None:
+        import time
+        codec = self._quality_to_zarz_codec(quality)
+        api_url = f"{API_ENDPOINTS['zarz']}/media?asin={asin}&codec={codec}"
+        logger.info("[amazon] Trying Zarz.moe API (ASIN: %s, codec: %s)", asin, codec)
 
-        print_source_banner("amazon", api_url, quality)
+        # User-Agent Mobile per bypassare i blocchi WAF di Zarz
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "SpotiFLAC-Mobile"
+        }
+
+        max_retries = 2
+        base_delay = 3.0
+        resp = None
+
+        for attempt in range(max_retries):
+            try:
+                resp = self._session.get(api_url, headers=headers, timeout=30)
+
+                if resp.status_code == 429:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "[amazon] Zarz API returned 429 (Rate Limit). Waiting %.1f seconds (attempt %d/%d)...",
+                        delay, attempt + 1, max_retries
+                    )
+                    time.sleep(delay)
+                    continue
+
+                break  # Usciamo dal loop se non è 429 o se c'è un altro errore
+            except requests.RequestException as exc:
+                logger.warning("[amazon] Zarz API connection error: %s", exc)
+                break
+
+        if not resp or resp.status_code != 200:
+            status = resp.status_code if resp else "Timeout/Connection Error"
+            logger.warning("[amazon] Zarz API failed with status: %s", status)
+            return None
+
+        try:
+            data = resp.json()
+        except ValueError:
+            logger.warning("[amazon] Zarz API returned invalid JSON")
+            return None
+
+        if isinstance(data, list):
+            if not data:
+                return None
+            data = data[0]
+
+        audio = data.get("audio", {})
+        stream_url = audio.get("url")
+        decryption_key = audio.get("key", "").strip()
+        returned_codec = audio.get("codec", codec)
+
+        if not stream_url:
+            logger.warning("[amazon] No streamUrl in Zarz API response")
+            return None
+
+        temp_file = os.path.join(output_dir, f"{asin}_zarz.enc")
+        logger.info("[amazon] Downloading encrypted stream from Zarz…")
+
+        try:
+            # Usiamo gli stessi headers (con UA Mobile) anche per il download effettivo
+            with self._session.get(stream_url, stream=True, headers=headers, timeout=120) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("Content-Length") or 0)
+                downloaded = 0
+                with open(temp_file, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if self._progress_cb and total:
+                                self._progress_cb(downloaded, total)
+        except Exception as exc:
+            logger.warning("[amazon] Failed to download Zarz stream: %s", exc)
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+            return None
+
+        if decryption_key:
+            logger.info("[amazon] Decrypting Zarz stream…")
+            ext = ".flac" if returned_codec == "flac" else ".m4a"
+            out = os.path.join(output_dir, f"{asin}{ext}")
+
+            si = None
+            if os.name == "nt":
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            result = subprocess.run(
+                [_ffmpeg_path(), "-y", "-decryption_key", decryption_key,
+                 "-i", temp_file, "-c", "copy", out],
+                capture_output=True, startupinfo=si,
+            )
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+
+            if result.returncode != 0:
+                logger.warning("[amazon] Zarz decryption failed: %s", result.stderr.decode()[:100])
+                return None
+            return out
+
+        ext = ".flac" if returned_codec == "flac" else ".m4a"
+        final = os.path.join(output_dir, f"{asin}{ext}")
+        if os.path.exists(final):
+            os.remove(final)
+        os.rename(temp_file, final)
+        return final
+
+    def _download_from_spotbye_api(self, asin: str, output_dir: str) -> str:
+        api_url = f"{API_ENDPOINTS['spotbye']}/track/{asin}"
+        logger.info("[amazon] Fetching track from Spotbye API (ASIN: %s)", asin)
 
         debug_key = _get_amazon_debug_key()
         resp = self._session.get(
@@ -175,18 +291,20 @@ class AmazonProvider(BaseProvider):
             headers={"X-Debug-Key": debug_key},
             timeout=30,
         )
+        from ..core.errors import SpotiflacError, ErrorKind
+
         if resp.status_code != 200:
-            raise RuntimeError(f"Amazon API returned status {resp.status_code}")
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Spotbye API returned status {resp.status_code}", self.name)
 
         data           = resp.json()
         stream_url     = data.get("streamUrl")
         decryption_key = data.get("decryptionKey")
 
         if not stream_url:
-            raise RuntimeError("No streamUrl in API response")
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, "No streamUrl in Spotbye API response", self.name)
 
         temp_file = os.path.join(output_dir, f"{asin}.enc")
-        logger.info("[amazon] Downloading encrypted stream…")
+        logger.info("[amazon] Downloading encrypted stream from Spotbye…")
 
         with self._session.get(stream_url, stream=True, timeout=120) as r:
             r.raise_for_status()
@@ -201,7 +319,7 @@ class AmazonProvider(BaseProvider):
                             self._progress_cb(downloaded, total)
 
         if decryption_key:
-            logger.info("[amazon] Decrypting…")
+            logger.info("[amazon] Decrypting Spotbye stream…")
             codec = self._get_codec(temp_file)
             ext   = ".flac" if codec == "flac" else ".m4a"
             out   = os.path.join(output_dir, f"{asin}{ext}")
@@ -218,7 +336,7 @@ class AmazonProvider(BaseProvider):
             )
             os.remove(temp_file)
             if result.returncode != 0:
-                raise RuntimeError(f"Decryption failed: {result.stderr.decode()}")
+                raise SpotiflacError(ErrorKind.FILE_IO, f"Decryption failed: {result.stderr.decode()[:100]}", self.name)
             return out
 
         final = os.path.join(output_dir, f"{asin}.m4a")
@@ -226,6 +344,24 @@ class AmazonProvider(BaseProvider):
             os.remove(final)
         os.rename(temp_file, final)
         return final
+
+    def _download_from_api(self, amazon_url: str, output_dir: str, quality: str) -> str:
+        asin_match = re.search(r"(B[0-9A-Z]{9})", amazon_url)
+        if not asin_match:
+            raise RuntimeError(f"Cannot extract ASIN from: {amazon_url}")
+        asin = asin_match.group(1)
+
+        print_source_banner("amazon", amazon_url, quality)
+
+        # 1. Prova prima il nuovo endpoint Zarz.moe
+        zarz_result = self._download_from_zarz_api(asin, output_dir, quality)
+        if zarz_result and os.path.exists(zarz_result):
+            return zarz_result
+
+        # 2. Se Zarz.moe fallisce, fallback sul vecchio endpoint Spotbye
+        logger.info("[amazon] Falling back to Spotbye API...")
+        return self._download_from_spotbye_api(asin, output_dir)
+
 
     # ------------------------------------------------------------------
     # Metadata embedding (fallback for .m4a only)
@@ -321,7 +457,6 @@ class AmazonProvider(BaseProvider):
             first_artist_only:   bool            = False,
             allow_fallback:      bool            = True,
             quality:             str             = "LOSSLESS",
-            # ── parametri lyrics e enrich (stessa firma di Tidal/Qobuz) ──
             embed_lyrics:            bool            = False,
             lyrics_providers:        list[str] | None = None,
             enrich_metadata:         bool            = False,
@@ -337,7 +472,6 @@ class AmazonProvider(BaseProvider):
             if self._file_exists(dest):
                 return DownloadResult.ok(self.name, str(dest))
 
-            # Avvia MusicBrainz in parallelo mentre il file viene scaricato
             from ..core.musicbrainz import AsyncMBFetch
             mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
 
@@ -361,8 +495,6 @@ class AmazonProvider(BaseProvider):
             mb_tags = mb_result_to_tags(res)
 
             # ── Embedding ────────────────────────────────────────────────
-            # FLAC → pipeline centrale (enrich, lyrics, MusicBrainz, copertina HD)
-            # M4A  → embedding base (mutagen MP4 non supporta enrich/lyrics FLAC)
             if dest_ext.endswith(".flac"):
                 opts = EmbedOptions(
                     first_artist_only    = first_artist_only,
@@ -374,10 +506,8 @@ class AmazonProvider(BaseProvider):
                     is_album             = is_album,
                     extra_tags           = mb_tags,
                 )
-                # AGGIUNGI QUESTA RIGA:
                 embed_metadata(dest_ext, metadata, opts, session=self._session)
             else:
-                # Fallback .m4a: tag base senza enrich/lyrics
                 track_num    = position
                 if use_album_track_num and _safe_int(metadata.track_number) > 0:
                     track_num = _safe_int(metadata.track_number)

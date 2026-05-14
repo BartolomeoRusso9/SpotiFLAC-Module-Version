@@ -125,21 +125,8 @@ class TrackMetadata(BaseModel):
             return self
         return self.model_copy(update=updates)
 
-    def update_from_enriched(self, extra: Any) -> None:
-        """Deprecato: usa with_enrichment(). Mantenuto per retrocompatibilità."""
-        from pydantic import model_validator
-        updates: dict = {}
-        if extra.genre:        updates["genre"]     = extra.genre
-        if extra.bpm:          updates["bpm"]       = extra.bpm
-        if extra.cover_url_hd: updates["cover_url"] = extra.cover_url_hd
-        if extra.isrc and not self.isrc:
-            updates["isrc"] = extra.isrc
-        if extra.label:
-            if self.album in ("SoundCloud", "") or not self.album:
-                updates["album"] = extra.label
-            updates["publisher"] = extra.label
-        for k, v in updates.items():
-            object.__setattr__(self, k, v)   # bypassa il validator Pydantic v2
+    # update_from_enriched removed — was using object.__setattr__ bypassing Pydantic v2.
+    # Use with_enrichment() instead.
 
 
 # ---------------------------------------------------------------------------

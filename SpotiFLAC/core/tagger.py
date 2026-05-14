@@ -1,16 +1,15 @@
-# SpotiFLAC/core/tagger.py
 """
-Tagger centralizzato — supporto FLAC e MP3.
+Centralized Tagger — support for FLAC and MP3.
 
-FLAC → tag Vorbis Comment via mutagen.flac
-MP3  → tag ID3v2 via mutagen.id3
+FLAC → Vorbis Comment tags via mutagen.flac
+MP3  → ID3v2 tags via mutagen.id3
 
-Entrambi i formati condividono la stessa pipeline:
+Both formats share the same pipeline:
   1. Metadata enrichment (Deezer / Apple / Qobuz / Tidal / SoundCloud)
-  2. Cover art (HD se disponibile)
-  3. Lyrics multi-provider
-  4. MusicBrainz (passati come extra_tags)
-  5. Scrittura tag sul file
+  2. Cover art (HD if available)
+  3. Multi-provider lyrics
+  4. MusicBrainz (passed as extra_tags)
+  5. Writing tags to file
 """
 from __future__ import annotations
 
@@ -100,19 +99,19 @@ def _print_mb_summary(mb_tags: dict) -> None:
         return
 
     _TAG_LABELS = {
-        "GENRE": "genere", "genre": "genere",
+        "GENRE": "genre", "genre": "genre",
         "BPM": "BPM", "bpm": "BPM",
-        "LABEL": "etichetta", "label": "etichetta",
-        "CATALOGNUMBER": "n. catalogo", "catalognumber": "n. catalogo",
+        "LABEL": "label", "label": "label",
+        "CATALOGNUMBER": "catalog no.", "catalognumber": "catalog no.",
         "BARCODE": "barcode", "barcode": "barcode",
-        "ORIGINALDATE": "data", "original_date": "data",
-        "RELEASECOUNTRY": "paese", "country": "paese",
-        "RELEASESTATUS": "stato release", "status": "stato release",
-        "MEDIA": "supporto", "media": "supporto",
-        "RELEASETYPE": "tipo release", "type": "tipo release",
-        "ARTISTSORT": "artista (sort)", "artist_sort": "artista (sort)",
-        "ALBUMARTISTSORT": "artista album (sort)", "albumartist_sort": "artista album (sort)",
-        "SCRIPT": "scrittura", "script": "scrittura",
+        "ORIGINALDATE": "date", "original_date": "date",
+        "RELEASECOUNTRY": "country", "country": "country",
+        "RELEASESTATUS": "release status", "status": "release status",
+        "MEDIA": "media", "media": "media",
+        "RELEASETYPE": "release type", "type": "release type",
+        "ARTISTSORT": "artist (sort)", "artist_sort": "artist (sort)",
+        "ALBUMARTISTSORT": "album artist (sort)", "albumartist_sort": "album artist (sort)",
+        "SCRIPT": "script", "script": "script",
     }
 
     mb_ids = {
@@ -132,7 +131,7 @@ def _print_mb_summary(mb_tags: dict) -> None:
         parts.append(f"{label}: {short_val}")
 
     if mb_ids:
-        parts.append(f"ID MusicBrainz ({len(mb_ids)} campi)")
+        parts.append(f"MusicBrainz ID ({len(mb_ids)} fields)")
 
     if parts:
         print(f"  ✦ MusicBrainz: {', '.join(parts)}")
@@ -217,8 +216,8 @@ def _embed_id3(
     # ── lyrics ─────────────────────────────────────────────────────────────
     if lyrics and lyrics.strip():
         audio.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
-        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
-        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
+        prov_str = lyrics_prov if lyrics_prov else "unknown"
+        print(f"  ✦ Lyrics: added via {prov_str}")
         logger.debug("[tagger/mp3] lyrics embedded (%d chars)", len(lyrics))
 
     # ── copertina ──────────────────────────────────────────────────────────
@@ -259,9 +258,9 @@ def _embed_flac(
 
     for key, val in tags.items():
         if multi_artist and key in ("ARTIST", "ALBUMARTIST") and "," in val:
+            # Vorbis Comment standard: repeat the tag for each artist value
             parts = [a.strip() for a in val.split(",") if a.strip()]
-            audio[key] = val
-            audio[key + "S"] = parts
+            audio[key] = parts
         else:
             audio[key] = val
 
@@ -274,6 +273,77 @@ def _embed_flac(
 
     audio.save()
     logger.debug("[tagger/flac] tags written: %s", path.name)
+
+def _embed_m4a(
+        path:        Path,
+        tags:        dict[str, str],
+        cover_data:  bytes | None,
+        lyrics:      str | None,
+        lyrics_prov: str,
+) -> None:
+    """Scrive tag su file M4A/AAC tramite mutagen.mp4.MP4."""
+    from mutagen.mp4 import MP4, MP4Cover
+
+    audio = MP4(str(path))
+    audio.delete()
+
+    _M4A_MAP = {
+        "TITLE":        "\xa9nam",
+        "ARTIST":       "\xa9ART",
+        "ALBUM":        "\xa9alb",
+        "ALBUMARTIST":  "aART",
+        "DATE":         "\xa9day",
+        "GENRE":        "\xa9gen",
+        "COMPOSER":     "\xa9wrt",
+        "COPYRIGHT":    "cprt",
+        "DESCRIPTION":  "\xa9cmt",
+        "ISRC":         "----:com.apple.iTunes:ISRC",
+        "ORGANIZATION": "----:com.apple.iTunes:LABEL",
+        "LABEL":        "----:com.apple.iTunes:LABEL",
+        "BPM":          "tmpo",
+    }
+
+    track_num   = int(tags.get("TRACKNUMBER", "0") or 0)
+    track_total = int(tags.get("TRACKTOTAL",  "0") or 0)
+    disc_num    = int(tags.get("DISCNUMBER",  "1") or 1)
+    disc_total  = int(tags.get("DISCTOTAL",   "1") or 1)
+
+    skip = {"TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL"}
+
+    if track_num:
+        audio["trkn"] = [(track_num, track_total)]
+    if disc_num:
+        audio["disk"] = [(disc_num, disc_total)]
+
+    for key, val in tags.items():
+        key_up = key.upper()
+        if key_up in skip or not val:
+            continue
+        m4a_key = _M4A_MAP.get(key_up)
+        if m4a_key == "tmpo":
+            try:
+                audio[m4a_key] = [int(val)]
+            except (ValueError, TypeError):
+                pass
+        elif m4a_key and m4a_key.startswith("----"):
+            audio[m4a_key] = [str(val).encode("utf-8")]
+        elif m4a_key:
+            audio[m4a_key] = [str(val)]
+        else:
+            freeform = f"----:com.apple.iTunes:{key_up}"
+            audio[freeform] = [str(val).encode("utf-8")]
+
+    if lyrics and lyrics.strip():
+        audio["\xa9lyr"] = [lyrics]
+        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
+        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
+        logger.debug("[tagger/m4a] lyrics embedded (%d chars)", len(lyrics))
+
+    if cover_data:
+        audio["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
+
+    audio.save()
+    logger.debug("[tagger/m4a] tags written: %s", path.name)
 
 @dataclass
 class EmbedOptions:
@@ -310,8 +380,9 @@ def embed_metadata(
 
     is_mp3  = path.suffix.lower() == ".mp3"
     is_flac = path.suffix.lower() == ".flac"
+    is_m4a  = path.suffix.lower() in (".m4a", ".aac")
 
-    if not is_mp3 and not is_flac:
+    if not is_mp3 and not is_flac and not is_m4a:
         logger.warning("[tagger] formato non supportato: %s — skip", path.suffix)
         return
 
@@ -332,12 +403,12 @@ def embed_metadata(
             enriched_tags      = enriched.as_tags()
             enriched_cover_url = enriched.cover_url_hd
             if enriched._sources:
-                nomi_campi = {"cover_url_hd": "cover", "explicit": "advisory"}
-                dettagli = ", ".join(
-                    f"{nomi_campi.get(campo, campo)} ({provider})"
-                    for campo, provider in enriched._sources.items()
+                field_names = {"cover_url_hd": "cover", "explicit": "advisory"}
+                details = ", ".join(
+                    f"{field_names.get(field, field)} ({provider})"
+                    for field, provider in enriched._sources.items()
                 )
-                print(f"Arricchito con: {dettagli}")
+                print(f"  ✦ Enriched with: {details}")
             logger.debug("[tagger] enriched: %s", list(enriched_tags.keys()))
         except Exception as exc:
             logger.warning("[tagger] enrichment failed: %s", exc)
@@ -414,8 +485,10 @@ def embed_metadata(
     try:
         if is_flac:
             _embed_flac(path, tags, cover_data, lyrics, lyrics_prov, multi_artist)
-        else:  # mp3
+        elif is_mp3:
             _embed_id3(path, tags, cover_data, lyrics, lyrics_prov)
+        else:  # m4a / aac
+            _embed_m4a(path, tags, cover_data, lyrics, lyrics_prov)
     except SpotiflacError:
         raise
     except Exception as exc:

@@ -1,7 +1,8 @@
 import logging
-import re  # <-- Aggiungi questo
-from typing import Dict, Optional
-from .http import HttpClient
+from typing import Dict
+
+# 1. IMPORTA IL RATE LIMITER DA http.py
+from .http import HttpClient, songlink_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,12 @@ class LinkResolver:
 
         links = {}
         try:
+            # 2. METTI IN ATTESA IL THREAD FINCHÈ NON C'È UNO SLOT LIBERO
+            songlink_rate_limiter.wait_for_slot()
+
+            # Ora la richiesta è sicura e non supererà le 9 al minuto!
             data = self.http.get_json(self.API_URL, params=params)
+
             entities = data.get("linksByPlatform", {})
             for plat, info in entities.items():
                 links[plat] = info.get("url")

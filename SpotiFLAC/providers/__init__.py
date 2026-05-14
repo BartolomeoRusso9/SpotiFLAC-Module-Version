@@ -23,8 +23,6 @@ __all__ = [
     "parse_spotify_url",
 ]
 
-from typing import TYPE_CHECKING
-
 PROVIDER_REGISTRY: dict[str, type] = {
         "tidal":      TidalProvider,
         "qobuz":      QobuzProvider,

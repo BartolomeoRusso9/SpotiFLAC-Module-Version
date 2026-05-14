@@ -1,14 +1,11 @@
 """
-Output centralizzato per messaggi utente (non logging).
-Separa i messaggi user-facing dai logger di debug.
+Centralized output for user-facing messages (not debug logging).
+Separates user-facing console UI from debug loggers.
 """
 from __future__ import annotations
 import sys
-import time
 
-# Larghezza fissa per il banner sorgente
 _BANNER_WIDTH = 60
-
 
 def print_track_header(position: int, total: int, title: str, artists: str, album: str) -> None:
     bar   = "─" * _BANNER_WIDTH
@@ -19,7 +16,6 @@ def print_track_header(position: int, total: int, title: str, artists: str, albu
     print(f"│   ↳ {album[:50]!s:<50} │")
     print(f"└{bar}┘")
 
-
 def print_source_banner(provider: str, api: str, quality: str) -> None:
     label = _shorten_api(api)
     line  = f"  📡  {provider.upper()}  ·  {label}  ·  {quality}"
@@ -27,13 +23,11 @@ def print_source_banner(provider: str, api: str, quality: str) -> None:
     print(f"{line}")
     print(f"{'─'*_BANNER_WIDTH}")
 
-
 def print_official_source(provider: str, quality: str) -> None:
-    line = f"  💎  {provider.upper()}  ·  API Ufficiale  ·  {quality}"
+    line = f"  💎  {provider.upper()}  ·  Official API  ·  {quality}"
     print(f"{'─'*_BANNER_WIDTH}")
     print(f"{line}")
     print(f"{'─'*_BANNER_WIDTH}")
-
 
 def print_summary(
         total:     int,
@@ -43,42 +37,38 @@ def print_summary(
 ) -> None:
     bar = "═" * _BANNER_WIDTH
     print(f"\n╔{bar}╗")
-    print(f"║  RIEPILOGO SESSIONE{'':<38}║")
+    print(f"║  SESSION SUMMARY{'':<43}║")
     print(f"╠{bar}╣")
-    print(f"║  Tracce totali : {total:<42}║")
-    print(f"║  Completate    : {succeeded:<42}║")
-    print(f"║  Fallite       : {len(failed):<42}║")
-    print(f"║  Tempo impiegato: {_fmt_seconds(elapsed_s):<41}║")
+    print(f"║  Total Tracks  : {total:<42}║")
+    print(f"║  Successful    : {succeeded:<42}║")
+    print(f"║  Failed        : {len(failed):<42}║")
+    print(f"║  Time Elapsed  : {_fmt_seconds(elapsed_s):<42}║")
     if failed:
         print(f"╠{bar}╣")
-        print(f"║  ✗ FALLIMENTI{'':<47}║")
+        print(f"║  ✗ FAILURES{'':<47}║")
         for title, artists, err in failed:
-            short = f"{title[:22]} — {artists[:16]}: {err[:14]}"
+            short_err = _clean_error(err)[:18]
+            short = f"{title[:20]} — {artists[:14]}: {short_err}"
             print(f"║    {short:<56}║")
     print(f"╚{bar}╝")
 
-
 def print_skip(filepath: str, size_mb: float) -> None:
-    print(f"  ⏭  già presente  ·  {filepath[-45:]!s}  ({size_mb:.1f} MB)")
-
+    print(f"  ⏭  already exists  ·  {filepath[-40:]!s}  ({size_mb:.1f} MB)")
 
 def print_api_failure(provider: str, api: str, reason: str) -> None:
     label = _shorten_api(api)
-    print(f"  ✗  {provider}  ·  {label}  ·  {reason}", file=sys.stderr)
-
+    clean_reason = _clean_error(reason)
+    print(f"  ✗  {provider}  ·  {label}  ·  {clean_reason}", file=sys.stderr)
 
 def print_quality_fallback(provider: str, from_q: str, to_q: str) -> None:
-    print(f"  ⬇  {provider}: qualità {from_q} non disponibile — fallback → {to_q}")
-
+    print(f"  ⬇  {provider}: quality {from_q} unavailable — falling back to {to_q}")
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
 def _shorten_api(url: str) -> str:
-    """Ritorna solo il dominio, senza schema e path."""
     return url.removeprefix("https://").removeprefix("http://").split("/")[0]
-
 
 def _fmt_seconds(s: float) -> str:
     s = int(round(s))
@@ -88,3 +78,16 @@ def _fmt_seconds(s: float) -> str:
         if val:
             parts.append(f"{val}{unit}")
     return " ".join(parts) or "0s"
+
+def _clean_error(err: str) -> str:
+    """Rimuove la spazzatura dalle eccezioni Python per l'output in console."""
+    err_str = str(err)
+    if "Max retries exceeded" in err_str or "NameResolutionError" in err_str:
+        return "Connection timeout / Unreachable"
+    if "Read timed out" in err_str:
+        return "Read timed out"
+    if "403 Client Error: Forbidden" in err_str:
+        return "HTTP 403 Forbidden (Cloudflare/WAF blocked)"
+    if "Expecting value: line 1" in err_str or "invalid JSON" in err_str.lower():
+        return "Invalid JSON response"
+    return err_str.split('\n')[0][:60]

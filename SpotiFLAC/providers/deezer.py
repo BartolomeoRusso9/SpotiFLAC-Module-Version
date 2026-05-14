@@ -79,7 +79,7 @@ class DeezerProvider(BaseProvider):
         self._last_cache_cleanup    = 0.0
 
         if not HAS_CRYPTO:
-            logger.warning("[deezer] pycryptodome non trovato. I download criptati falliranno. Esegui 'pip install pycryptodome'.")
+            logger.warning("[deezer] pycryptodome not found. Execute 'pip install pycryptodome'.")
 
     # ------------------------------------------------------------------
     # Cache helpers
@@ -165,7 +165,34 @@ class DeezerProvider(BaseProvider):
                     self._url_locks.pop(url, None)
 
     def _post_json(self, url: str, payload: dict) -> dict:
-        resp = self._session.post(url, json=payload, timeout=_API_TIMEOUT_S)
+        import time
+
+        # Selettore User-Agent come nel file JS
+        is_zarz = url.startswith("https://api.zarz.moe") or url.startswith("http://api.zarz.moe")
+        headers = {
+            "User-Agent": "SpotiFLAC-Mobile" if is_zarz else _DEFAULT_UA,
+            "Accept": "application/json"
+        }
+
+        max_retries = 2
+        base_delay = 3.0
+
+        for attempt in range(max_retries):
+            resp = self._session.post(url, json=payload, headers=headers, timeout=_API_TIMEOUT_S)
+
+            if resp.status_code == 429:
+                delay = base_delay * (2 ** attempt)
+                logger.warning(
+                    "[deezer] HTTP 429 on %s: rate limit, waiting %.1f seconds (attempt %d/%d)...",
+                    url, delay, attempt + 1, max_retries
+                )
+                time.sleep(delay)
+                continue
+
+            resp.raise_for_status()
+            return resp.json()
+
+        # Se esaurisce i tentativi, solleva l'eccezione dell'ultima risposta
         resp.raise_for_status()
         return resp.json()
 
@@ -192,20 +219,52 @@ class DeezerProvider(BaseProvider):
             return None
 
     def _search_track_text(self, title: str, artist: str) -> dict | None:
-        """Fallback estremo: cerca la traccia per testo su Deezer."""
+        """
+        Fallback avanzato: cerca la traccia per testo su Deezer valutando i risultati
+        con un sistema a punteggio (70% titolo, 30% artista), basato sulla logica JS.
+        """
         import urllib.parse
+        import difflib # Aggiunto per confrontare le stringhe
+
         first_artist = artist.split(",")[0].strip()
         query = f'track:"{title}" artist:"{first_artist}"'
-        url = f"https://api.deezer.com/search?q={urllib.parse.quote(query)}&limit=1"
+        # Aumentiamo il limite per avere più candidati, come nel JS
+        url = f"https://api.deezer.com/search?q={urllib.parse.quote(query)}&limit=10"
 
         try:
             data = self._get_json_cached(url)
             if data and data.get("data"):
-                track_id = data["data"][0].get("id")
-                if track_id:
-                    return self._get_json(f"https://api.deezer.com/track/{track_id}")
+                best_match = None
+                best_score = 0.0
+
+                title_lower = title.lower()
+                artist_lower = first_artist.lower()
+
+                for track in data["data"]:
+                    t_title = track.get("title", "").lower()
+                    t_artist = track.get("artist", {}).get("name", "").lower()
+
+                    # Calcolo del punteggio (simile a findBestSearchMatch del JS)
+                    title_ratio = difflib.SequenceMatcher(None, title_lower, t_title).ratio()
+                    artist_ratio = difflib.SequenceMatcher(None, artist_lower, t_artist).ratio()
+
+                    score = (title_ratio * 70) + (artist_ratio * 30)
+
+                    if score > best_score:
+                        best_score = score
+                        best_match = track
+
+                # Se il punteggio supera la soglia minima di 55 (come nel JS)
+                if best_match and best_score >= 55:
+                    track_id = best_match.get("id")
+                    if track_id:
+                        logger.debug("[deezer] Trovata corrispondenza testuale con score %.2f", best_score)
+                        return self._get_json(f"https://api.deezer.com/track/{track_id}")
+                else:
+                    logger.debug("[deezer] Nessuna traccia ha superato lo score minimo (Migliore: %.2f)", best_score)
+
         except Exception as e:
-            logger.debug("[deezer] Ricerca testuale fallita: %s", e)
+            logger.debug("[deezer] Ricerca testuale avanzata fallita: %s", e)
 
         return None
 
@@ -259,7 +318,6 @@ class DeezerProvider(BaseProvider):
             raise SpotiflacError(ErrorKind.FILE_IO, "Manca pycryptodome, impossibile decriptare la traccia.")
 
         key = self._generate_blowfish_key(track_id)
-        cipher = Blowfish.new(key, Blowfish.MODE_CBC, _BLOWFISH_IV)
 
         try:
             with open(encrypted_path, "rb") as f_in, open(output_path, "wb") as f_out:
@@ -271,6 +329,7 @@ class DeezerProvider(BaseProvider):
 
                     # Deezer cripta solo 1 blocco ogni 3 (0, 3, 6...) se è pieno
                     if len(chunk) == _CHUNK_SIZE and chunk_index % 3 == 0:
+                        cipher = Blowfish.new(key, Blowfish.MODE_CBC, _BLOWFISH_IV)  # reset per ogni chunk
                         decrypted = cipher.decrypt(chunk)
                         f_out.write(decrypted)
                     else:
@@ -296,7 +355,7 @@ class DeezerProvider(BaseProvider):
         if not track_id:
             return None
 
-        logger.info("[deezer] Trovato: %s - %s (ID: %s)", meta["artists"], meta["title"], track_id)
+        logger.info("[deezer] Found: %s - %s (ID: %s)", meta["artists"], meta["title"], track_id)
 
         try:
             payload = {
@@ -321,7 +380,7 @@ class DeezerProvider(BaseProvider):
                 requires_decryption = True
 
         except Exception as exc:
-            logger.warning("[deezer] Resolver API fallito: %s", exc)
+            logger.warning("[deezer] Resolver API failed:: %s", exc)
             return None
 
         filename  = f"{self._safe(meta['artists'])} - {self._safe(meta['title'])}.flac"
@@ -401,7 +460,7 @@ class DeezerProvider(BaseProvider):
             fallback_track = self._search_track_text(metadata.title, metadata.artists)
             if fallback_track and fallback_track.get("isrc"):
                 isrc_to_use = fallback_track["isrc"]
-                logger.info("[deezer] Ricerca testuale riuscita! Trovato ISRC alternativo: %s", isrc_to_use)
+                logger.info("[deezer] Found alternative ISRC: %s", isrc_to_use)
             else:
                 return DownloadResult.fail(self.name, "Nessun ISRC disponibile e ricerca testuale fallita.")
 
@@ -430,7 +489,7 @@ class DeezerProvider(BaseProvider):
             downloaded = self._download_flac_raw(isrc_to_use, output_dir)
 
             if not downloaded or not os.path.exists(downloaded):
-                return DownloadResult.fail(self.name, "Nessun file FLAC scaricato")
+                return DownloadResult.fail(self.name, "No FLAC file downloaded")
 
             if os.path.abspath(downloaded) != os.path.abspath(str(dest)):
                 import shutil
