@@ -67,7 +67,9 @@ _STREAM_APIS: list[str] = [
     "https://qobuz.squid.wtf/api/download-music?country=US&track_id=",
     "https://dl.musicdl.me/qobuz/download",
     "https://api.zarz.moe/v1/dl/qbz",
+    "https://api.zarz.moe/v1/qbz",
     "https://api.zarz.moe/v1/qbz2",
+    "https://api.zarz.moe/v1/dl/qbz2",
     "https://www.musicdl.me/api/qobuz/download"
 ]
 
@@ -75,7 +77,9 @@ _POST_APIS = {
     "https://www.musicdl.me/api/qobuz/download",
     "https://dl.musicdl.me/qobuz/download",
     "https://api.zarz.moe/v1/dl/qbz",
+    "https://api.zarz.moe/v1/qbz",
     "https://api.zarz.moe/v1/qbz2",
+    "https://api.zarz.moe/v1/dl/qbz2",
 }
 
 _QUALITY_FALLBACK: dict[str, list[str]] = {

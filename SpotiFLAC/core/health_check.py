@@ -81,10 +81,15 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         tidal_eps = [("GET", f"{url.rstrip('/')}/track/?id=1&quality=LOSSLESS")
                      for url in tidal_get]
         tidal_eps += [("POST", url) for url in _TIDAL_API_POST]
+
+        # --- NUOVA AGGIUNTA: Endpoint Zarz API ---
+        tidal_eps.append(("GET", "https://api.zarz.moe/v1/health"))
+
         endpoints["tidal"] = tidal_eps
     except ImportError:
-        endpoints["tidal"] = [("GET", "https://eu-central.monochrome.tf/track/?id=1&quality=LOSSLESS")]
-
+        endpoints["tidal"] = [
+            ("GET", "https://api.zarz.moe/v1/health")  # Aggiunto anche nel fallback
+        ]
     # ── Qobuz ──────────────────────────────────────────────────────────────
     try:
         from SpotiFLAC.providers.qobuz import _STREAM_APIS, _API_BASE
@@ -93,18 +98,26 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
                      for url in _STREAM_APIS]
         # Aggiunge anche l'API ufficiale Qobuz (search pubblica)
         qobuz_eps.append(("GET", f"{_API_BASE}/track/search?query=test&limit=1&app_id=0"))
+
+        # NUOVA AGGIUNTA: Endpoint Zarz API
+        qobuz_eps.append(("GET", "https://api.zarz.moe/v1/health"))
+
         endpoints["qobuz"] = qobuz_eps
     except ImportError:
-        endpoints["qobuz"] = [("GET", "https://dab.yeet.su/api/stream?trackId=1&quality=6")]
+        endpoints["qobuz"] = [
+            ("GET", "https://api.zarz.moe/v1/health") # Aggiunto anche nel fallback
+        ]
 
     # ── Deezer ─────────────────────────────────────────────────────────────
     try:
         from SpotiFLAC.providers.deezer import _RESOLVER_URL
         endpoints["deezer"] = [
             ("POST", _RESOLVER_URL),
+            ("GET", "https://api.zarz.moe/v1/health"), # Aggiunta endpoint Zarz
         ]
     except ImportError:
         endpoints["deezer"] = [
+            ("GET", "https://api.zarz.moe/v1/health"), # Fallback minimo
         ]
 
     # ── Amazon ─────────────────────────────────────────────────────────────
@@ -112,11 +125,16 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         from SpotiFLAC.providers.amazon import API_ENDPOINTS
         # Estrae tutti gli URL dal dizionario e li prepara per il controllo "GET"
         endpoints["amazon"] = [("GET", url) for url in API_ENDPOINTS.values()]
+
+        # --- NUOVA AGGIUNTA: Endpoint Zarz API ---
+        endpoints["amazon"].append(("GET", "https://api.zarz.moe/v1/health"))
+
     except ImportError:
-        # Fallback manuale con i due endpoint in caso di problemi di importazione
+        # Fallback manuale in caso di problemi di importazione
         endpoints["amazon"] = [
             ("GET", "https://amazon.spotbye.qzz.io/api"),
-            ("GET", "https://api.zarz.moe/v1/dl/amazeamazeamaze")
+            ("GET", "https://api.zarz.moe/v1/dl/amazeamazeamaze"),
+            ("GET", "https://api.zarz.moe/v1/health")  # Aggiunto anche nel fallback
         ]
 
     # ── Apple Music ────────────────────────────────────────────────────────
@@ -131,11 +149,13 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         endpoints["apple"] = [
             ("POST", APPLE_DL_ENDPOINTS.get("proxy_direct", "https://api.zarz.moe/v1/dl/app2")),
             ("GET",  f"{APPLE_DL_ENDPOINTS.get('proxy_queued', 'https://api.zarz.moe/v1/dl/app')}/status/test"),
+            ("GET", "https://api.zarz.moe/v1/health"),
         ]
     except ImportError:
         endpoints["apple"] = [
             ("POST", "https://api.zarz.moe/v1/dl/app2"),
             ("GET",  "https://api.zarz.moe/v1/dl/app/status/test"),
+            ("GET", "https://api.zarz.moe/v1/health"), # Aggiunto anche nel fallback
         ]
 
     # ── SoundCloud ─────────────────────────────────────────────────────────
@@ -147,9 +167,12 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         endpoints["soundcloud"] = [
             ("GET",  sc_api),
             ("POST", cobalt),
+            ("GET", "https://api.zarz.moe/v1/health"), # Aggiunta endpoint Zarz
         ]
     except Exception:
-        endpoints["soundcloud"] = []
+        endpoints["soundcloud"] = [
+            ("GET", "https://api.zarz.moe/v1/health"), # Fallback minimo
+        ]
 
     # ── YouTube ────────────────────────────────────────────────────────────
     try:
@@ -215,16 +238,47 @@ def _check_one(provider: str, method: str, url: str) -> HealthResult:
             body = resp.text
 
             if provider == "amazon":
-                if '"amazonMusic":"up"' in body:
-                    ok = True
+                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
+                if "api.zarz.moe/v1/health" in url:
+                    try:
+                        json.loads(body)
+                        ok = True
+                    except ValueError:
+                        detail = "Bad Health Payload"
+
+                # --- VECCHIO CONTROLLO INVARIATO: Per le API normali di Amazon ---
                 else:
-                    detail = "Bad Payload"
+                    if '"amazonMusic":"up"' in body:
+                        ok = True
+                    else:
+                        detail = "Bad Payload"
+
+            elif provider == "tidal":
+                if "api.zarz.moe/v1/health" in url:
+                    try:
+                        json.loads(body)
+                        ok = True
+                    except ValueError:
+                        detail = "Bad Health Payload"
+                else:
+                    if body.strip():
+                        ok = True
+                    else:
+                        detail = "Empty Body"
 
             elif provider in ("qobuz", "qbz"):
-                if _contains_streaming_url(body):
-                    ok = True
+                if "api.zarz.moe/v1/health" in url:
+                    try:
+                        json.loads(body)
+                        ok = True
+                    except ValueError:
+                        detail = "Bad Health Payload"
+
                 else:
-                    detail = "No Stream URL"
+                    if _contains_streaming_url(body):
+                        ok = True
+                    else:
+                        detail = "No Stream URL"
 
             elif provider == "spoti":
                 try:
@@ -232,6 +286,54 @@ def _check_one(provider: str, method: str, url: str) -> HealthResult:
                     ok = True
                 except ValueError:
                     detail = "HTML/CF Block"
+
+            elif provider == "deezer":
+                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
+                if "api.zarz.moe/v1/health" in url:
+                    try:
+                        json.loads(body)
+                        ok = True
+                    except ValueError:
+                        detail = "Bad Health Payload"
+
+                # --- VECCHIO CONTROLLO INVARIATO: Verifica generica ---
+                else:
+                    if body.strip():
+                        ok = True
+                    else:
+                        detail = "Empty Body"
+
+            elif provider == "apple":
+                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
+                if "api.zarz.moe/v1/health" in url:
+                    try:
+                        json.loads(body)
+                        ok = True
+                    except ValueError:
+                        detail = "Bad Health Payload"
+
+                # --- VECCHIO CONTROLLO INVARIATO: Verifica generica per Apple ---
+                else:
+                    if body.strip():
+                        ok = True
+                    else:
+                        detail = "Empty Body"
+
+            elif provider == "soundcloud":
+                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
+                if "api.zarz.moe/v1/health" in url:
+                    try:
+                        json.loads(body)
+                        ok = True
+                    except ValueError:
+                        detail = "Bad Health Payload"
+
+                # --- VECCHIO CONTROLLO INVARIATO: Verifica generica ---
+                else:
+                    if body.strip():
+                        ok = True
+                    else:
+                        detail = "Empty Body"
 
             else:
                 # Per gli altri provider, un 200 OK con un body non vuoto è

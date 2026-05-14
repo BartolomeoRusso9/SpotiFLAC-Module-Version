@@ -144,7 +144,7 @@ def _run_health_check():
 
 
 def _display_health_check() -> dict[str, bool]:
-    """Mostra il risultato del health check in formato lista con gli URL funzionanti."""
+    """Mostra il risultato del health check in formato semplificato senza URL."""
     _section("Service Availability Check")
     print(f"  {DIM('Probing endpoints...')} ", end="", flush=True)
 
@@ -157,27 +157,24 @@ def _display_health_check() -> dict[str, bool]:
         print(f"  {YELLOW('⚠  Health check skipped (import error or no network)')}")
         return {}
 
-    # Organizza i risultati
+    # Organizza i risultati: ci basta sapere se il provider ha almeno un endpoint OK
     status = {svc: False for svc in _ALL_SERVICES}
-    working_urls = {svc: [] for svc in _ALL_SERVICES}
-
     for r in results:
         if r.ok:
             status[r.provider] = True
-            working_urls[r.provider].append(r.url)
 
-    # Stampa i provider in verticale con i rispettivi link
+    # Stampa i provider in verticale con lo stato testuale
     for svc in _ALL_SERVICES:
         ok = status[svc]
         icon = GREEN("✅") if ok else RED("❌")
         print(f"  {icon} {BOLD(svc)}")
 
         if ok:
-            for url in working_urls[svc]:
-                # Mostriamo l'URL in verde tenue
-                print(f"      {DIM('↳')} {GREEN(url)}")
+            # Mostra solo "reachable" invece dell'URL o del binario locale
+            print(f"      {DIM('↳')} {GREEN('reachable')}")
         else:
-            print(f"      {DIM('↳ no reachable endpoints')}")
+            # Manteniamo il messaggio di errore esistente
+            print(f"      {DIM('↳')} {RED('no reachable endpoints')}")
 
     working_count = sum(status.values())
     total = len(_ALL_SERVICES)
