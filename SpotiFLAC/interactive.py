@@ -598,6 +598,8 @@ def run_interactive() -> dict:
             if has_apple:
                 combined_options.append("ATMOS (Spatial Audio on Apple, HI_RES elsewhere)")
                 combined_options.append("AC3 (Dolby Digital on Apple, HIGH elsewhere)")
+            if has_tidal:
+                combined_options.insert(1, "DOLBY_ATMOS (Dolby Atmos on Tidal, HI_RES elsewhere)")
             if has_qobuz:
                 combined_options.append("7 (Hi-Res mid on Qobuz only)")
             combined_options.append("HIGH (MP3 320 / AAC on Apple)")
@@ -609,8 +611,9 @@ def run_interactive() -> dict:
                 options = combined_options,
                 default = combined_options[0],
             )
-            if q_choice.startswith("LOSSLESS"):    cfg["quality"] = "LOSSLESS"
+            if q_choice.startswith("LOSSLESS"):    cfg  ["quality"] = "LOSSLESS"
             elif q_choice.startswith("HI_RES"):    cfg["quality"] = "HI_RES"
+            elif q_choice.startswith("DOLBY_ATMOS"): cfg["quality"] = "DOLBY_ATMOS"
             elif q_choice.startswith("ATMOS"):     cfg["quality"] = "atmos"
             elif q_choice.startswith("AC3"):       cfg["quality"] = "ac3"
             elif q_choice.startswith("7"):         cfg["quality"] = "7"

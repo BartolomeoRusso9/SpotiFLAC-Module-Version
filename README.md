@@ -153,7 +153,7 @@ Save and reuse complete download configurations without re-typing them every tim
 # Save current flags as "hires-tidal"
 spotiflac https://... ./out \
   --service tidal \
-  --quality HI_RES \
+  --quality HI_RES_LOSSLESS \
   --use-album-subfolders \
   --filename-format "{year} - {album}/{track}. {title}" \
   --save-profile hires-tidal
@@ -174,7 +174,7 @@ from SpotiFLAC.core.profiles import save_profile, get_profile, list_profiles
 # Save
 save_profile("hires-tidal", {
     "services":             ["tidal"],
-    "quality":              "HI_RES",
+    "quality":              "HI_RES_LOSSLESS",
     "use_album_subfolders": True,
     "filename_format":      "{year} - {album}/{track}. {title}",
 })
@@ -610,7 +610,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | **`include_featuring`**        | `bool`  | `False`                                                   | When downloading an artist discography, also includes tracks where the artist appears as a featured artist.                                                                                                                                                                |
 | **`loop`**                     | `int`   | `None`                                                    | Duration in minutes to keep retrying **permanently failed** tracks after a full session completes.                                                                                                                                                                        |
 | **`track_max_retries`**        | `int`   | `0`                                                       | Extra download attempts **per track** when all providers fail on the first try. Each retry cycles through all providers again with exponential backoff (2 s → 4 s → 8 s …, capped at 30 s).                                                                              |
-| **`quality`**                  | `str`   | `"LOSSLESS"`                                              | Download quality. Tidal: `"LOSSLESS"` or `"HI_RES"`. Qobuz: `"6"` (CD), `"7"` (Hi-Res), `"27"` (Hi-Res Max). Apple Music: `"alac"`, `"atmos"`, `"ac3"`, `"aac"`, `"aac-legacy"`.                                                                                         |
+| **`quality`**                  | `str`   | `"LOSSLESS"`                                              | Download quality. Tidal: `"DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"`. Qobuz: `"6"` (CD), `"7"` (Hi-Res), `"27"` (Hi-Res Max). Apple Music: `"alac"`, `"atmos"`, `"ac3"`, `"aac"`, `"aac-legacy"`.                                                                                         |
 | **`allow_fallback`**           | `bool`  | `True`                                                    | Automatically falls back to the next available quality tier if the requested quality is unavailable.                                                                                                                                                                       |
 | **`log_level`**                | `int`   | `logging.WARNING`                                         | Python logging level.                                                                                                                                                                                                                                                      |
 | **`embed_lyrics`**             | `bool`  | `True`                                                    | Whether to fetch and embed synchronized lyrics (LRC) into the audio file.                                                                                                                                                                                                 |

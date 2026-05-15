@@ -80,7 +80,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--quality", "-q",
         default = pd.get("quality", "LOSSLESS"),
-        help    = "Quality: LOSSLESS, HI_RES, HIGH, NORMAL. Default: LOSSLESS",
+        help = "Quality: DOLBY_ATMOS, HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW (Tidal). "
+       "Qobuz: 27, 7, 6. Apple: alac, atmos, ac3, aac. Default: LOSSLESS"
     )
     parser.add_argument("--use-track-numbers",       action="store_true", dest="use_track_numbers",       default=pd.get("use_track_numbers", False))
     parser.add_argument("--use-album-track-numbers", action="store_true", dest="use_album_track_numbers", default=pd.get("use_album_track_numbers", False))
