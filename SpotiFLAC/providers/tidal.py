@@ -83,6 +83,42 @@ _MAX_RETRIES   = 1
 _RETRY_DELAY_S = 0.3
 
 # ---------------------------------------------------------------------------
+# Quality helpers  (aligned with index.js normalizeDownloadQuality /
+#                  buildFallbackQualities)
+# ---------------------------------------------------------------------------
+
+def _normalize_quality(value: str) -> str:
+    """Mirror JS normalizeDownloadQuality() exactly."""
+    normalized = (value or "").strip().upper()
+    if not normalized:
+        return "LOSSLESS"
+    if normalized in ("DOLBY", "ATMOS", "DOLBY ATMOS"):
+        return "DOLBY_ATMOS"
+    if normalized in ("EAC3", "EC3", "EAC3_JOC"):
+        return "DOLBY_ATMOS"
+    if normalized in ("HIRES", "HI_RES", "MASTER"):
+        return "HI_RES_LOSSLESS"
+    if normalized == "FLAC":
+        return "LOSSLESS"
+    return normalized
+
+
+# Fallback chains aligned with JS buildFallbackQualities()
+_QUALITY_FALLBACK_CHAINS: dict[str, list[str]] = {
+    "DOLBY_ATMOS":    ["DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"],
+    "HI_RES_LOSSLESS": ["HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"],
+    "LOSSLESS":        ["LOSSLESS", "HIGH", "LOW"],
+    "HIGH":            ["HIGH", "LOW"],
+    "LOW":             ["LOW"],
+}
+
+
+def _quality_fallback_chain(quality: str) -> list[str]:
+    """Return the ordered fallback list for a given quality string."""
+    normalized = _normalize_quality(quality)
+    return _QUALITY_FALLBACK_CHAINS.get(normalized, [normalized or "LOSSLESS"])
+
+# ---------------------------------------------------------------------------
 # API list manager
 # ---------------------------------------------------------------------------
 
@@ -342,9 +378,11 @@ def _fetch_tidal_url_once(
         timeout_s: int = _API_TIMEOUT_S,
 ) -> str:
     api_cleaning = api.rstrip('/')
-    is_post_api = api_cleaning in _CLEAN_POST_APIS
+    is_post_api  = api_cleaning in _CLEAN_POST_APIS
 
-    url = f"{api_cleaning}/track/?id={track_id}&quality={quality}"
+    # Normalise quality string to canonical form (HI_RES → HI_RES_LOSSLESS, etc.)
+    quality = _normalize_quality(quality)
+
     headers = {"User-Agent": _POST_USER_AGENT[0] if is_post_api else _TIDAL_USER_AGENT}
 
     delay     = _RETRY_DELAY_S
@@ -358,13 +396,65 @@ def _fetch_tidal_url_once(
 
         try:
             if is_post_api:
+                # ----------------------------------------------------------------
+                # DOLBY_ATMOS: separate endpoint (mirrors JS fetchAtmosManifestPayload)
+                # POST {id, endpoint: "manifests", formats: ["EAC3_JOC"]}
+                # Response: payload.data.data.attributes.uri  → raw MPD URL
+                # ----------------------------------------------------------------
+                if quality == "DOLBY_ATMOS":
+                    resp = requests.post(
+                        api_cleaning,
+                        json={"id": str(track_id), "endpoint": "manifests", "formats": ["EAC3_JOC"]},
+                        headers=headers,
+                        timeout=timeout_s,
+                    )
+                    if resp.status_code == 429:
+                        delay = max(delay, 2.0)
+                        continue
+                    if resp.status_code != 200:
+                        last_err = RuntimeError(f"HTTP {resp.status_code}")
+                        continue
+
+                    data = resp.json()
+                    try:
+                        attributes = data["data"]["data"]["attributes"]
+                    except (KeyError, TypeError) as exc:
+                        last_err = RuntimeError(f"Atmos manifest payload missing attributes: {exc}")
+                        continue
+
+                    formats = attributes.get("formats", [])
+                    if "EAC3_JOC" not in [f.upper() for f in formats]:
+                        raise RuntimeError("TIDAL API did not report EAC3_JOC for this track")
+
+                    manifest_uri = attributes.get("uri", "").strip()
+                    if not manifest_uri:
+                        raise RuntimeError("Atmos manifest URI was empty")
+
+                    # Fetch the MPD document and return it as base64 so the
+                    # existing _download_from_manifest / parse_manifest path
+                    # handles it transparently.
+                    mpd_resp = requests.get(
+                        manifest_uri,
+                        headers={
+                            "Accept": "application/dash+xml,text/xml,application/xml;q=0.9,*/*;q=0.8",
+                            "User-Agent": _TIDAL_USER_AGENT,
+                        },
+                        timeout=timeout_s,
+                    )
+                    mpd_resp.raise_for_status()
+                    return "MANIFEST:" + base64.b64encode(mpd_resp.content).decode()
+
+                # ----------------------------------------------------------------
+                # All other qualities: POST {id, quality}
+                # ----------------------------------------------------------------
                 resp = requests.post(
                     api_cleaning,
                     json={"id": str(track_id), "quality": quality},
                     headers=headers,
-                    timeout=timeout_s
+                    timeout=timeout_s,
                 )
             else:
+                url = f"{api_cleaning}/track/?id={track_id}&quality={quality}"
                 resp = requests.get(url, headers=headers, timeout=timeout_s)
 
             if resp.status_code == 429:
@@ -622,14 +712,24 @@ class TidalProvider(BaseProvider):
         return dl_url
 
     def _get_download_url_with_fallback(self, track_id: int, quality: str) -> str:
-        try:
-            return self._get_download_url(track_id, quality)
-        except SpotiflacError:
-            if quality == "HI_RES":
-                print_quality_fallback("tidal", "HI_RES", "LOSSLESS")
-                logger.warning("[tidal] HI_RES failed — fallback to LOSSLESS")
-                return self._get_download_url(track_id, "LOSSLESS")
-            raise
+        """Try each quality tier in the JS-defined fallback chain."""
+        chain = _quality_fallback_chain(quality)
+        last_exc: Exception = RuntimeError("no qualities attempted")
+
+        for tier in chain:
+            try:
+                url = self._get_download_url(track_id, tier)
+                if tier != _normalize_quality(quality):
+                    # Log the effective quality downgrade so callers are aware
+                    print_quality_fallback("tidal", _normalize_quality(quality), tier)
+                    logger.warning("[tidal] quality downgraded from %s to %s", quality, tier)
+                return url
+            except SpotiflacError as exc:
+                last_exc = exc
+                logger.warning("[tidal] %s unavailable, trying next tier: %s", tier, exc)
+                continue
+
+        raise last_exc
 
     # ------------------------------------------------------------------
     # File download
@@ -664,34 +764,41 @@ class TidalProvider(BaseProvider):
     def _download_segments(self, init_url: str, media_urls: list[str], dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         headers  = {"User-Agent": _TIDAL_USER_AGENT}
-        t_start  = time.time()
+        
         total_bytes = 0
+        estimated_total = 0
 
         with open(dest, "wb") as f:
+            # 1. Download del segmento di inizializzazione
             resp = self._session.get(init_url, timeout=15, headers=headers)
             resp.raise_for_status()
-            f.write(resp.content)
-            total_bytes += len(resp.content)
+            chunk = resp.content
+            f.write(chunk)
+            total_bytes += len(chunk)
 
-            for url in media_urls:
+            # 2. Download dei segmenti multimediali iterativi
+            for i, url in enumerate(media_urls):
                 resp = self._session.get(url, timeout=15, headers=headers)
                 resp.raise_for_status()
                 chunk = resp.content
                 f.write(chunk)
                 total_bytes += len(chunk)
 
-                elapsed   = time.time() - t_start
-                mb_done   = total_bytes / (1024 * 1024)
-                speed_mbs = mb_done / elapsed if elapsed > 0 else 0.0
-                print(
-                    f"\r  ↓ {mb_done:.2f} MB  ·  {speed_mbs:.2f} MB/s   ",
-                    end="", flush=True,
-                )
+                # Stima dei byte totali per la barra di progresso (peso_attuale + stima_rimanenti)
+                if estimated_total == 0 and len(chunk) > 0:
+                    estimated_total = total_bytes + (len(chunk) * (len(media_urls) - i - 1))
 
-        elapsed = time.time() - t_start
-        mb_tot  = total_bytes / (1024 * 1024)
-        avg_mbs = mb_tot / elapsed if elapsed > 0 else 0
-        print(f"\r  ✓ {mb_tot:.2f} MB downloaded in {elapsed:.1f}s  ·  avg {avg_mbs:.2f} MB/s   ")
+                # Integrazione con la VERA barra di progresso nativa dell'app (la stessa usata da Qobuz)
+                if hasattr(self, "_progress_cb") and self._progress_cb:
+                    try:
+                        # Richiamo con la firma standard: (bytes_scaricati, byte_totali)
+                        self._progress_cb(total_bytes, estimated_total)
+                    except TypeError:
+                        try:
+                            # Fallback di sicurezza in caso la callback si aspetti solo il chunk_size
+                            self._progress_cb(len(chunk))
+                        except Exception:
+                            pass
 
     @staticmethod
     def _ffmpeg_to_flac(src: Path, dst: Path) -> None:

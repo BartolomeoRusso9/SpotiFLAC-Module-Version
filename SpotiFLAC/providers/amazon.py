@@ -162,17 +162,28 @@ class AmazonProvider(BaseProvider):
                 timeout=20,
             )
             resp.raise_for_status()
-            match = re.search(
-                r'https://music\.amazon\.com/(tracks|albums)/([A-Z0-9]{10})',
-                resp.text,
-            )
-            if not match:
-                raise RuntimeError("Amazon link not found in Songlink HTML")
-            asin = match.group(2)
+            
+            asin = None
+            
+            match_track_asin = re.search(r'trackAsin=([A-Z0-9]{10})', resp.text)
+            if match_track_asin:
+                asin = match_track_asin.group(1)
+                logger.info("[amazon] Found exact trackAsin: %s", asin)
+            else:
+                track_matches = re.findall(r'https://music\.amazon\.com/tracks/([A-Z0-9]{10})', resp.text)
+                if track_matches:
+                    asin = track_matches[0]
+                    logger.info("[amazon] Found track ASIN: %s", asin)
+
+            if not asin:
+                raise RuntimeError("No valid Track ASIN found in Songlink HTML. Only Album links without track IDs were found.")
+
+            # Ricostruiamo l'URL forzando il formato traccia e la regione USA
             base = base64.b64decode("aHR0cHM6Ly9tdXNpYy5hbWF6b24uY29tL3RyYWNrcy8=").decode()
             amazon_url = f"{base}{asin}?musicTerritory=US"
-            logger.info("[amazon] Resolved URL: %s", amazon_url)
+            logger.info("[amazon] Resolved final URL: %s", amazon_url)
             return amazon_url
+            
         except Exception as exc:
             raise RuntimeError(f"Failed to resolve Amazon URL: {exc}") from exc
 
@@ -364,7 +375,7 @@ class AmazonProvider(BaseProvider):
         decryption_key = data.get("decryptionKey")
 
         # Estraiamo il token del captcha dal JSON (proviamo sia con il trattino che in camelCase per sicurezza)
-        captcha_token  = data.get("x-captcha-header") or data.get("xCaptchaHeader")
+        captcha_token  = data.get("x-captcha-token") or data.get("xCaptchaToken")
 
         if not stream_url:
             raise SpotiflacError(ErrorKind.UNAVAILABLE, f"No streamUrl in {provider_key} API response", self.name)
@@ -377,8 +388,8 @@ class AmazonProvider(BaseProvider):
 
         # 2. Se l'API ci ha restituito il captcha, lo aggiungiamo agli headers
         if captcha_token:
-            download_headers["x-captcha-header"] = str(captcha_token)
-            logger.info("[amazon] Injected x-captcha-header for stream download.")
+            download_headers["x-captcha-token"] = str(captcha_token)
+            logger.info("[amazon] Injected x-captcha-token for stream download.")
 
         # 3. Passiamo download_headers alla richiesta GET
         with self._session.get(stream_url, stream=True, headers=download_headers, timeout=120) as r:
@@ -420,6 +431,89 @@ class AmazonProvider(BaseProvider):
         os.rename(temp_file, final)
         return final
 
+    def _download_from_spotbye1_api(self, asin: str, output_dir: str) -> str:
+        logger.info("[amazon] Fetching track from Spotbye1 API (ASIN: %s)", asin)
+
+        from ..core.errors import SpotiflacError, ErrorKind
+
+        resp = self._session.post(
+            "https://amz.spotbye.qzz.io/api/track",
+            json={"asin": asin, "tier": "best"},
+            headers={
+                "Accept": "*/*",
+                "User-Agent": _DEFAULT_UA,
+            },
+        )
+        print("Asin:", asin)
+
+        if resp.status_code != 200:
+            err_msg = resp.json() if "application/json" in resp.headers.get("Content-Type", "") else resp.text
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"spotbye1 API returned {resp.status_code}: {err_msg}", self.name)
+
+        data           = resp.json()
+        stream_obj     = data.get("stream", {})
+        drm_obj        = data.get("drm", {})
+        
+        stream_url     = stream_obj.get("url")
+        decryption_key = drm_obj.get("key")
+        captcha_token  = stream_obj.get("headers", {}).get("x-captcha-token")
+        returned_codec = stream_obj.get("codec", "flac")
+
+        if not stream_url:
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, "No streamUrl in spotbye1 API response", self.name)
+            
+        if not captcha_token:
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, "No captcha token in spotbye1 API response", self.name)
+
+        logger.info("[amazon] Step1 OK — stream_url: %s, codec: %s, captcha: %s…", stream_url, returned_codec, captcha_token[:8])
+        
+        stream_headers = {
+            "User-Agent":      _DEFAULT_UA,
+            "x-captcha-token": captcha_token,
+        }
+
+        temp_file = os.path.join(output_dir, f"{asin}.enc")
+        logger.info("[amazon] Downloading encrypted stream from amz.squid.wtf…")
+
+        with self._session.get(stream_url, stream=True, headers=stream_headers, timeout=120) as r:
+            r.raise_for_status()
+            total      = int(r.headers.get("Content-Length") or 0)
+            downloaded = 0
+            with open(temp_file, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if self._progress_cb and total:
+                            self._progress_cb(downloaded, total)
+
+        if decryption_key:
+            logger.info("[amazon] Decrypting Spotbye1 stream…")
+            ext = ".flac" if returned_codec == "flac" else ".m4a"
+            out = os.path.join(output_dir, f"{asin}{ext}")
+
+            si = None
+            if os.name == "nt":
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            result = subprocess.run(
+                [_ffmpeg_path(), "-y", "-decryption_key", decryption_key.strip(),
+                "-i", temp_file, "-c", "copy", out],
+                capture_output=True, startupinfo=si,
+            )
+            os.remove(temp_file)
+            if result.returncode != 0:
+                raise SpotiflacError(ErrorKind.FILE_IO, f"Decryption failed: {result.stderr.decode()[:100]}", self.name)
+            return out
+
+        ext   = ".flac" if returned_codec == "flac" else ".m4a"
+        final = os.path.join(output_dir, f"{asin}{ext}")
+        if os.path.exists(final):
+            os.remove(final)
+        os.rename(temp_file, final)
+        return final
+
     def _download_from_api(self, amazon_url: str, output_dir: str, quality: str) -> str:
         asin_match = re.search(r"(B[0-9A-Z]{9})", amazon_url)
         if not asin_match:
@@ -441,7 +535,7 @@ class AmazonProvider(BaseProvider):
         print_source_banner("amazon", spotbye1_url, quality)
 
         try:
-            return self._download_from_spotbye_api(asin, output_dir, provider_key="spotbye1")
+            return self._download_from_spotbye1_api(asin, output_dir)
         except Exception as e:
             logger.warning("[amazon] Spotbye1 failed: %s", e)
 

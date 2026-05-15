@@ -573,7 +573,7 @@ def run_interactive() -> dict:
         elif has_tidal and not (has_qobuz or has_deezer or has_apple):
             cfg["quality"] = _ask_choice(
                 "Tidal Quality:",
-                options = ["LOSSLESS", "HI_RES"],
+                options = ["DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"],
                 default = "LOSSLESS",
             )
         elif has_deezer and not (has_qobuz or has_tidal or has_apple):
