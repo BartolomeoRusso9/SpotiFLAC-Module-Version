@@ -444,7 +444,6 @@ class AmazonProvider(BaseProvider):
                 "User-Agent": _DEFAULT_UA,
             },
         )
-        print("Asin:", asin)
 
         if resp.status_code != 200:
             err_msg = resp.json() if "application/json" in resp.headers.get("Content-Type", "") else resp.text
