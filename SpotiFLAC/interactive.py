@@ -131,15 +131,14 @@ def _header() -> None:
 
 _ALL_SERVICES = ["tidal", "qobuz", "deezer", "amazon", "soundcloud", "apple", "youtube", "spoti"]
 
+# interactive.py — modifica _run_health_check
+
 def _run_health_check():
-    """
-    Esegue l'health check su tutti gli endpoint e restituisce la lista dei risultati.
-    """
     try:
         from SpotiFLAC.core.health_check import run_health_check
-        # Passiamo include_all_endpoints=True per testare e mostrare TUTTI i link
         return run_health_check(_ALL_SERVICES, include_all_endpoints=True)
-    except Exception:
+    except Exception as e:
+        print(f"  {RED(f'Health check error: {e}')}")   # ← aggiunta
         return []
 
 

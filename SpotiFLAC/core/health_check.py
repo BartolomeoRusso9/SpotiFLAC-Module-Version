@@ -123,19 +123,23 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     # ── Amazon ─────────────────────────────────────────────────────────────
     try:
         from SpotiFLAC.providers.amazon import API_ENDPOINTS
-        # Estrae tutti gli URL dal dizionario e li prepara per il controllo "GET"
-        endpoints["amazon"] = [("GET", url) for url in API_ENDPOINTS.values()]
-
-        # --- NUOVA AGGIUNTA: Endpoint Zarz API ---
+        amazon_list = []
+        for val in API_ENDPOINTS.values():
+            if isinstance(val, str):
+                amazon_list.append(("GET", val))
+            elif isinstance(val, dict):
+                # Gestisce eventuali strutture annidate (es. per regione)
+                for sub_val in val.values():
+                    if isinstance(sub_val, str):
+                        amazon_list.append(("GET", sub_val))
+        
+        endpoints["amazon"] = amazon_list
         endpoints["amazon"].append(("GET", "https://api.zarz.moe/v1/health"))
-
     except ImportError:
-        # Fallback manuale in caso di problemi di importazione
         endpoints["amazon"] = [
-            ("GET", "https://amazon.spotbye.qzz.io/api"),
-            ("GET", "https://api.zarz.moe/v1/dl/amazeamazeamaze"),
-            ("GET", "https://api.zarz.moe/v1/health")  # Aggiunto anche nel fallback
+            ("GET", "https://api.zarz.moe/v1/health") # Aggiunto anche nel fallback
         ]
+        
 
     # ── Apple Music ────────────────────────────────────────────────────────
     try:
@@ -400,7 +404,7 @@ def run_health_check(
 
     # Ordina per provider (rispetta l'ordine di `services`), poi per URL
     svc_order = {svc: i for i, svc in enumerate(services)}
-    results.sort(key=lambda r: (svc_order.get(r.provider, 99), r.url))
+    results.sort(key=lambda r: (svc_order.get(r.provider, 99), str(r.url)))
     return results
 
 # ---------------------------------------------------------------------------
