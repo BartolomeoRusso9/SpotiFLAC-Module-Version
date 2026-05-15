@@ -1,26 +1,26 @@
 # amazon_provider.py
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import os
 import re
 import subprocess
-import base64
-import hashlib
 from typing import Callable
 
 import requests
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import PictureType
 from mutagen.mp4 import MP4, MP4Cover
 
-from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
-from ..core.models import TrackMetadata, DownloadResult
-from ..core.errors import SpotiflacError
 from .base import BaseProvider
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from ..core.console import print_source_banner
-from ..core.tagger import embed_metadata, EmbedOptions, _print_mb_summary
+from ..core.errors import SpotiflacError
+from ..core.models import TrackMetadata, DownloadResult
+from ..core.musicbrainz import mb_result_to_tags
+from ..core.tagger import embed_metadata, EmbedOptions
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,18 @@ _DEFAULT_UA = (
 )
 
 API_ENDPOINTS = {
-    "spotbye": "https://amazon.spotbye.qzz.io/api",
-    "zarz": "https://api.zarz.moe/v1/dl/amazeamazeamaze"
+    "spotbye1": {
+        "base_url": "https://amz.spotbye.qzz.io/api",
+        "method": "POST"
+    },
+    "spotbye2": {
+        "base_url": "https://amazon.spotbye.qzz.io/api",
+        "method": "GET"
+    },
+    "zarz": {
+        "base_url": "https://api.zarz.moe/v1/dl/amazeamazeamaze",
+        "method": "POST"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -107,6 +117,30 @@ class AmazonProvider(BaseProvider):
     def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
         super().set_progress_callback(cb)
 
+    def _make_api_request(
+            self,
+            provider_key: str,
+            endpoint: str,
+            headers: dict | None = None,
+            params: dict | None = None,
+            payload: dict | None = None
+    ) -> requests.Response:
+        """
+        Helper per gestire le chiamate API distinguendo automaticamente tra GET e POST
+        in base alla configurazione in API_ENDPOINTS.
+        """
+        config = API_ENDPOINTS.get(provider_key)
+        if not config:
+            raise ValueError(f"Provider sconosciuto: {provider_key}")
+
+        url = f"{config['base_url']}{endpoint}"
+        method = config.get("method", "GET").upper()
+
+        if method == "POST":
+            return self._session.post(url, json=payload, headers=headers, timeout=30)
+        else:
+            return self._session.get(url, params=params, headers=headers, timeout=30)
+
     # ------------------------------------------------------------------
     # Songlink → Amazon URL
     # ------------------------------------------------------------------
@@ -173,10 +207,9 @@ class AmazonProvider(BaseProvider):
     def _download_from_zarz_api(self, asin: str, output_dir: str, quality: str) -> str | None:
         import time
         codec = self._quality_to_zarz_codec(quality)
-        api_url = f"{API_ENDPOINTS['zarz']}/media?asin={asin}&codec={codec}"
         logger.info("[amazon] Trying Zarz.moe API (ASIN: %s, codec: %s)", asin, codec)
 
-        # User-Agent Mobile per bypassare i blocchi WAF di Zarz
+        # Stessi identici headers di getAppUserAgent() in JS
         headers = {
             "Accept": "application/json",
             "User-Agent": "SpotiFLAC-Mobile"
@@ -188,7 +221,13 @@ class AmazonProvider(BaseProvider):
 
         for attempt in range(max_retries):
             try:
-                resp = self._session.get(api_url, headers=headers, timeout=30)
+                # Usiamo il nostro helper _make_api_request invece di comporre l'URL a mano
+                resp = self._make_api_request(
+                    provider_key="zarz",
+                    endpoint="/media",
+                    headers=headers,
+                    params={"asin": asin, "codec": codec}
+                )
 
                 if resp.status_code == 429:
                     delay = base_delay * (2 ** attempt)
@@ -215,6 +254,7 @@ class AmazonProvider(BaseProvider):
             logger.warning("[amazon] Zarz API returned invalid JSON")
             return None
 
+        # Identico a JS: Se Zarz restituisce un array, prendiamo il primo elemento
         if isinstance(data, list):
             if not data:
                 return None
@@ -281,32 +321,67 @@ class AmazonProvider(BaseProvider):
         os.rename(temp_file, final)
         return final
 
-    def _download_from_spotbye_api(self, asin: str, output_dir: str) -> str:
-        api_url = f"{API_ENDPOINTS['spotbye']}/track/{asin}"
-        logger.info("[amazon] Fetching track from Spotbye API (ASIN: %s)", asin)
+    def _download_from_spotbye_api(self, asin: str, output_dir: str, provider_key: str) -> str:
+        logger.info("[amazon] Fetching track from %s API (ASIN: %s)", provider_key, asin)
 
-        debug_key = _get_amazon_debug_key()
-        resp = self._session.get(
-            api_url,
-            headers={"X-Debug-Key": debug_key},
-            timeout=30,
+        config = API_ENDPOINTS.get(provider_key)
+        method = config.get("method", "GET").upper()
+
+        # Adattiamo l'endpoint e i dati in base a se è la versione POST o GET
+        if method == "POST":
+            endpoint = "/track"
+            payload = {"asin": asin, "tier": "best", "country": "US"}
+            params = None
+            headers = {
+                "X-Debug-Key": _get_amazon_debug_key(),
+                "Content-Type": "application/json"
+            }
+        else:
+            # Assumiamo che la GET usi il vecchio formato URL
+            endpoint = f"/track/{asin}"
+            payload = None
+            params = None
+            headers = {
+                "X-Debug-Key": _get_amazon_debug_key()
+            }
+
+        resp = self._make_api_request(
+            provider_key=provider_key,
+            endpoint=endpoint,
+            headers=headers,
+            payload=payload,
+            params=params
         )
+
         from ..core.errors import SpotiflacError, ErrorKind
 
         if resp.status_code != 200:
-            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Spotbye API returned status {resp.status_code}", self.name)
+            err_msg = resp.json() if "application/json" in resp.headers.get("Content-Type", "") else resp.text
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"{provider_key} API returned {resp.status_code}: {err_msg}", self.name)
 
         data           = resp.json()
         stream_url     = data.get("streamUrl")
         decryption_key = data.get("decryptionKey")
 
+        # Estraiamo il token del captcha dal JSON (proviamo sia con il trattino che in camelCase per sicurezza)
+        captcha_token  = data.get("x-captcha-header") or data.get("xCaptchaHeader")
+
         if not stream_url:
-            raise SpotiflacError(ErrorKind.UNAVAILABLE, "No streamUrl in Spotbye API response", self.name)
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"No streamUrl in {provider_key} API response", self.name)
 
         temp_file = os.path.join(output_dir, f"{asin}.enc")
-        logger.info("[amazon] Downloading encrypted stream from Spotbye…")
+        logger.info("[amazon] Downloading encrypted stream from %s…", provider_key)
 
-        with self._session.get(stream_url, stream=True, timeout=120) as r:
+        # 1. Prepariamo un dizionario di headers specifico per il download
+        download_headers = {}
+
+        # 2. Se l'API ci ha restituito il captcha, lo aggiungiamo agli headers
+        if captcha_token:
+            download_headers["x-captcha-header"] = str(captcha_token)
+            logger.info("[amazon] Injected x-captcha-header for stream download.")
+
+        # 3. Passiamo download_headers alla richiesta GET
+        with self._session.get(stream_url, stream=True, headers=download_headers, timeout=120) as r:
             r.raise_for_status()
             total      = int(r.headers.get("Content-Length") or 0)
             downloaded = 0
@@ -351,17 +426,32 @@ class AmazonProvider(BaseProvider):
             raise RuntimeError(f"Cannot extract ASIN from: {amazon_url}")
         asin = asin_match.group(1)
 
-        print_source_banner("amazon", amazon_url, quality)
+        # --- TENTATIVO 1: ZARZ ---
+        codec = self._quality_to_zarz_codec(quality)
+        zarz_url = f"{API_ENDPOINTS['zarz']['base_url']}/media?asin={asin}&codec={codec}"
+        print_source_banner("amazon", zarz_url, quality)
 
-        # 1. Prova prima il nuovo endpoint Zarz.moe
         zarz_result = self._download_from_zarz_api(asin, output_dir, quality)
         if zarz_result and os.path.exists(zarz_result):
             return zarz_result
 
-        # 2. Se Zarz.moe fallisce, fallback sul vecchio endpoint Spotbye
-        logger.info("[amazon] Falling back to Spotbye API...")
-        return self._download_from_spotbye_api(asin, output_dir)
+        # --- TENTATIVO 2: SPOTBYE 1 (POST) ---
+        logger.info("[amazon] Zarz failed. Falling back to Spotbye1 API...")
+        spotbye1_url = API_ENDPOINTS['spotbye1']['base_url']
+        print_source_banner("amazon", spotbye1_url, quality)
 
+        try:
+            return self._download_from_spotbye_api(asin, output_dir, provider_key="spotbye1")
+        except Exception as e:
+            logger.warning("[amazon] Spotbye1 failed: %s", e)
+
+        # --- TENTATIVO 3: SPOTBYE 2 (GET) ---
+        logger.info("[amazon] Spotbye1 failed. Falling back to Spotbye2 API...")
+        spotbye2_url = API_ENDPOINTS['spotbye2']['base_url']
+        print_source_banner("amazon", spotbye2_url, quality)
+
+        # Se anche questo fallisce, l'eccezione salirà normalmente fermando il downloader
+        return self._download_from_spotbye_api(asin, output_dir, provider_key="spotbye2")
 
     # ------------------------------------------------------------------
     # Metadata embedding (fallback for .m4a only)
