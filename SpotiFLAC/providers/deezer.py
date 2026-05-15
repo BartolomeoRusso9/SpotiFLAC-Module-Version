@@ -170,8 +170,8 @@ class DeezerProvider(BaseProvider):
         # Selettore User-Agent come nel file JS
         is_zarz = url.startswith("https://api.zarz.moe") or url.startswith("http://api.zarz.moe")
         headers = {
-            "User-Agent": "SpotiFLAC-Mobile" if is_zarz else _DEFAULT_UA,
-            "Accept": "application/json"
+            "User-Agent": "SpotiFLAC-Mobile/1.0" if is_zarz else _DEFAULT_UA,
+            "Content-Type": "application/json"
         }
 
         max_retries = 2
