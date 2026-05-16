@@ -7,6 +7,7 @@ from .spotidownloader import SpotiDownloaderProvider
 from .apple_music import AppleMusicProvider
 from .soundcloud import SoundCloudProvider
 from .youtube import YouTubeProvider
+from .pandora import PandoraProvider
 from .spotify_metadata import SpotifyMetadataClient, parse_spotify_url
 
 __all__ = [
@@ -32,4 +33,5 @@ PROVIDER_REGISTRY: dict[str, type] = {
         "apple":      AppleMusicProvider,
         "soundcloud": SoundCloudProvider,
         "youtube":    YouTubeProvider,
+        "pandora":    PandoraProvider,
     }

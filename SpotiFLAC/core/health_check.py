@@ -237,52 +237,60 @@ def _check_one(provider: str, method: str, url: str) -> HealthResult:
         ok = False
         detail = f"HTTP {resp.status_code}"
 
-        # Verifica rigorosa dello stato e del contenuto
         if resp.status_code == 200:
             body = resp.text
 
-            if provider == "amazon":
-                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
-
-                # --- VECCHIO CONTROLLO INVARIATO: Per le API normali di Amazon ---
-                else:
-                    if '"amazonMusic":"up"' in body:
-                        ok = True
+            # ───────────────────────────────────────────────────────────────────────
+            # INTERCETTAZIONE CENTRALIZZATA DI ZARZ HEALTH CHECK
+            # ───────────────────────────────────────────────────────────────────────
+            if "api.zarz.moe/v1/health" in url:
+                try:
+                    data = json.loads(body)
+                    services = data.get("services", {})
+                    
+                    # Normalizza la chiave del provider (es. se usi internamente 'qbz' o 'qobuz')
+                    svc_key = "qobuz" if provider == "qbz" else provider
+                    
+                    if svc_key in services:
+                        svc_info = services[svc_key]
+                        # Il provider funziona DAVVERO solo se lo status interno è 200 OK
+                        if svc_info.get("status") == 200:
+                            ok = True
+                            detail = svc_info.get("detail") or "ok"
+                        else:
+                            ok = False
+                            # Estrae il dettaglio reale (es. "auth_required" o "error")
+                            inner_detail = svc_info.get("detail") or "error"
+                            detail = f"Zarz {svc_info.get('status')} ({inner_detail})"
                     else:
-                        detail = "Bad Payload"
+                        # Fallback se il provider specifico non è presente nel dizionario di Zarz
+                        ok = True
+                        detail = "Zarz Link OK"
+                except ValueError:
+                    detail = "Bad Health Payload"
+                
+                return HealthResult(provider, url, method, ok, ms, detail)
+
+            # ───────────────────────────────────────────────────────────────────────
+            # CONTROLLI RIGIDI PER GLI ENDPOINT REALI/DIRETTI (NON-HEALTH)
+            # ───────────────────────────────────────────────────────────────────────
+            if provider == "amazon":
+                if '"amazonMusic":"up"' in body:
+                    ok = True
+                else:
+                    detail = "Bad Payload"
 
             elif provider == "tidal":
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
+                if body.strip():
+                    ok = True
                 else:
-                    if body.strip():
-                        ok = True
-                    else:
-                        detail = "Empty Body"
+                    detail = "Empty Body"
 
             elif provider in ("qobuz", "qbz"):
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
-
+                if _contains_streaming_url(body):
+                    ok = True
                 else:
-                    if _contains_streaming_url(body):
-                        ok = True
-                    else:
-                        detail = "No Stream URL"
+                    detail = "No Stream URL"
 
             elif provider == "spoti":
                 try:
@@ -291,57 +299,14 @@ def _check_one(provider: str, method: str, url: str) -> HealthResult:
                 except ValueError:
                     detail = "HTML/CF Block"
 
-            elif provider == "deezer":
-                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
-
-                # --- VECCHIO CONTROLLO INVARIATO: Verifica generica ---
+            elif provider in ("deezer", "apple", "soundcloud", "youtube"):
+                # Per gli endpoint API diretti, un body non vuoto indica responsività
+                if body.strip():
+                    ok = True
                 else:
-                    if body.strip():
-                        ok = True
-                    else:
-                        detail = "Empty Body"
-
-            elif provider == "apple":
-                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
-
-                # --- VECCHIO CONTROLLO INVARIATO: Verifica generica per Apple ---
-                else:
-                    if body.strip():
-                        ok = True
-                    else:
-                        detail = "Empty Body"
-
-            elif provider == "soundcloud":
-                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
-
-                # --- VECCHIO CONTROLLO INVARIATO: Verifica generica ---
-                else:
-                    if body.strip():
-                        ok = True
-                    else:
-                        detail = "Empty Body"
+                    detail = "Empty Body"
 
             else:
-                # Per gli altri provider, un 200 OK con un body non vuoto è
-                # un controllo sufficiente.
                 if body.strip():
                     ok = True
                 else:
