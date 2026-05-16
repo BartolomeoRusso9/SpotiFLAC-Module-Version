@@ -49,16 +49,16 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         prog            = "spotiflac",
-        description     = "Download tracks in true FLAC/MP3 via Deezer, Tidal, Qobuz, SoundCloud, YouTube and more.",
+        description     = "Download tracks in true FLAC/MP3 via Deezer, Tidal, Qobuz, SoundCloud, YouTube, Pandora and more.",
         formatter_class = argparse.RawDescriptionHelpFormatter,
     )
 
-    parser.add_argument("url",        help="Spotify, Tidal, Apple Music, SoundCloud or YouTube URL")
+    parser.add_argument("url",        help="Spotify, Tidal, Apple Music, SoundCloud, YouTube or Pandora URL")
     parser.add_argument("output_dir", help="Destination directory")
 
     parser.add_argument(
         "--service", "-s",
-        choices = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple"],
+        choices = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple", "pandora"],
         nargs   = "+",
         default = pd.get("services", ["tidal"]),
         metavar = "SERVICE",
@@ -81,7 +81,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "--quality", "-q",
         default = pd.get("quality", "LOSSLESS"),
         help = "Quality: DOLBY_ATMOS, HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW (Tidal). "
-       "Qobuz: 27, 7, 6. Apple: alac, atmos, ac3, aac. Default: LOSSLESS"
+               "Qobuz: 27, 7, 6. Apple: alac, atmos, ac3, aac. "
+               "Pandora: mp3_192, aac_64, aac_32. Default: LOSSLESS"
     )
     parser.add_argument("--use-track-numbers",       action="store_true", dest="use_track_numbers",       default=pd.get("use_track_numbers", False))
     parser.add_argument("--use-album-track-numbers", action="store_true", dest="use_album_track_numbers", default=pd.get("use_album_track_numbers", False))
@@ -219,7 +220,6 @@ def main() -> None:
 
     else:
         # ── CLI mode ──────────────────────────────────────────────────────
-        # Pre-parse to detect --profile before building full defaults
         profile_defaults: dict = {}
         if "--profile" in sys.argv:
             idx = sys.argv.index("--profile")
@@ -227,7 +227,6 @@ def main() -> None:
                 profile_defaults = _load_profile_into_defaults(sys.argv[idx + 1])
 
         file_cfg = load_config()
-        # config.json < profile < CLI flags  (each layer overrides the previous)
         merged_defaults = {**file_cfg, **profile_defaults}
 
         args = parse_args(profile_defaults=merged_defaults)
@@ -263,7 +262,6 @@ def main() -> None:
             post_download_command    = args.post_command,
         )
 
-        # Save profile after run if requested
         if args.save_profile:
             try:
                 from SpotiFLAC.core.profiles import save_profile

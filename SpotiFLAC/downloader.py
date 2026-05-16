@@ -365,6 +365,7 @@ class SpotiflacDownloader:
     def _resolve_metadata(self, url: str) -> tuple[str, list[TrackMetadata], dict]:
         from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
         from .providers.apple_music_metadata import is_apple_music_url, parse_apple_music_url
+        from .providers.pandora import is_pandora_url, parse_pandora_url
 
         print("Fetching metadata…")
 
@@ -372,6 +373,7 @@ class SpotiflacDownloader:
         is_apple      = is_apple_music_url(url)
         is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
         is_youtube    = "youtube.com" in url or "youtu.be" in url
+        is_pandora    = is_pandora_url(url)
 
         if "deezer.com" in url or "deezer.page.link" in url:
             raise SpotiflacError(
@@ -400,6 +402,10 @@ class SpotiflacDownloader:
             elif is_youtube:
                 from .providers.youtube import YouTubeProvider
                 client = YouTubeProvider()
+                collection_name, tracks = client.get_url(url)
+            elif is_pandora:
+                from .providers.pandora import PandoraProvider
+                client = PandoraProvider()
                 collection_name, tracks = client.get_url(url)
             else:
                 collection_name, tracks = self._client.get_url(
@@ -434,6 +440,8 @@ class SpotiflacDownloader:
             elif "/browse/" in url or "/channel/" in url:
                 stype = "artist_discography"
             info = {"type": stype, "id": url}
+        elif is_pandora:
+            info = parse_pandora_url(url)
         else:
             from .providers.spotify_metadata import parse_spotify_url
             info = parse_spotify_url(url)
@@ -549,7 +557,10 @@ class SpotiflacDownloader:
             effective_opts = replace(effective_opts, output_path=None)
 
         is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
-        if not is_soundcloud:
+        is_pandora    = "pandora.com" in url or "pandora.app.link" in url
+
+        # Skip ISRC bulk resolution for providers that supply their own metadata
+        if not is_soundcloud and not is_pandora:
             tracks = self._resolve_isrc_bulk(tracks)
 
         # Update URL history with collection name

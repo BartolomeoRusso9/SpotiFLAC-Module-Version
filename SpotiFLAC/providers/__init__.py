@@ -20,6 +20,7 @@ __all__ = [
     "SoundCloudProvider",
     "YouTubeProvider",
     "DeezerProvider",
+    "PandoraProvider",
     "SpotifyMetadataClient",
     "parse_spotify_url",
 ]
