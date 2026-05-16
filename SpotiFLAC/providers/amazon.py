@@ -301,6 +301,8 @@ class AmazonProvider(BaseProvider):
             if os.path.exists(temp_file):
                 os.remove(temp_file)
             return None
+        
+        api_meta = data.get("metadata", {})
 
         if decryption_key:
             logger.info("[amazon] Decrypting Zarz stream…")
@@ -371,6 +373,7 @@ class AmazonProvider(BaseProvider):
             raise SpotiflacError(ErrorKind.UNAVAILABLE, f"{provider_key} API returned {resp.status_code}: {err_msg}", self.name)
 
         data           = resp.json()
+        api_meta       = data.get("metadata", {})
         stream_url     = data.get("streamUrl")
         decryption_key = data.get("decryptionKey")
 
@@ -423,13 +426,13 @@ class AmazonProvider(BaseProvider):
             os.remove(temp_file)
             if result.returncode != 0:
                 raise SpotiflacError(ErrorKind.FILE_IO, f"Decryption failed: {result.stderr.decode()[:100]}", self.name)
-            return out
+            return out, api_meta
 
         final = os.path.join(output_dir, f"{asin}.m4a")
         if os.path.exists(final):
             os.remove(final)
         os.rename(temp_file, final)
-        return final
+        return final, api_meta
 
     def _download_from_spotbye1_api(self, asin: str, output_dir: str) -> str:
         logger.info("[amazon] Fetching track from Spotbye1 API (ASIN: %s)", asin)
@@ -450,6 +453,7 @@ class AmazonProvider(BaseProvider):
             raise SpotiflacError(ErrorKind.UNAVAILABLE, f"spotbye1 API returned {resp.status_code}: {err_msg}", self.name)
 
         data           = resp.json()
+        api_meta       = data.get("metadata", {})
         stream_obj     = data.get("stream", {})
         drm_obj        = data.get("drm", {})
         
@@ -504,16 +508,16 @@ class AmazonProvider(BaseProvider):
             os.remove(temp_file)
             if result.returncode != 0:
                 raise SpotiflacError(ErrorKind.FILE_IO, f"Decryption failed: {result.stderr.decode()[:100]}", self.name)
-            return out
+            return out, api_meta
 
         ext   = ".flac" if returned_codec == "flac" else ".m4a"
         final = os.path.join(output_dir, f"{asin}{ext}")
         if os.path.exists(final):
             os.remove(final)
         os.rename(temp_file, final)
-        return final
+        return final, api_meta
 
-    def _download_from_api(self, amazon_url: str, output_dir: str, quality: str) -> str:
+    def _download_from_api(self, amazon_url: str, output_dir: str, quality: str) -> tuple[str, dict]:
         asin_match = re.search(r"(B[0-9A-Z]{9})", amazon_url)
         if not asin_match:
             raise RuntimeError(f"Cannot extract ASIN from: {amazon_url}")
@@ -525,7 +529,7 @@ class AmazonProvider(BaseProvider):
         print_source_banner("amazon", zarz_url, quality)
 
         zarz_result = self._download_from_zarz_api(asin, output_dir, quality)
-        if zarz_result and os.path.exists(zarz_result):
+        if zarz_result and os.path.exists(zarz_result[0]):
             return zarz_result
 
         # --- TENTATIVO 2: SPOTBYE 1 (POST) ---
@@ -566,6 +570,7 @@ class AmazonProvider(BaseProvider):
             copyright:    str = "",
             publisher:    str = "",
             url:          str = "",
+            api_metadata: dict | None = None,
     ) -> None:
         cover_data: bytes | None = None
         if cover_url:
@@ -597,6 +602,14 @@ class AmazonProvider(BaseProvider):
                 if copyright: audio["COPYRIGHT"]    = copyright
                 if publisher: audio["ORGANIZATION"] = publisher
                 if url:       audio["URL"]          = url
+                if api_metadata:
+                    if api_metadata.get("genre"): audio["GENRE"] = api_metadata["genre"]
+                    if api_metadata.get("composer"): audio["COMPOSER"] = api_metadata["composer"]
+                    if api_metadata.get("isrc"): audio["ISRC"] = api_metadata["isrc"]
+                    if api_metadata.get("label"): audio["LABEL"] = api_metadata["label"]
+                    if api_metadata.get("copyright"): audio["COPYRIGHT"] = api_metadata["copyright"]
+                    if "is_explicit" in api_metadata:
+                        audio["ITUNESADVISORY"] = "1" if api_metadata["is_explicit"] else "2"
                 if cover_data:
                     pic      = Picture()
                     pic.data = cover_data
@@ -616,6 +629,14 @@ class AmazonProvider(BaseProvider):
                 audio["trkn"]    = [(t_num, t_total)]
                 audio["disk"]    = [(d_num, d_total)]
                 if copyright: audio["cprt"] = copyright
+                if api_metadata:
+                    if api_metadata.get("genre"): audio["\xa9gen"] = api_metadata["genre"]
+                    if api_metadata.get("composer"): audio["\xa9wrt"] = api_metadata["composer"]
+                    if api_metadata.get("isrc"): audio["----:com.apple.iTunes:ISRC"] = api_metadata["isrc"].encode()
+                    if api_metadata.get("label"): audio["----:com.apple.iTunes:LABEL"] = api_metadata["label"].encode()
+                    if api_metadata.get("copyright"): audio["cprt"] = api_metadata["copyright"]
+                    if "is_explicit" in api_metadata:
+                        audio["rtng"] = [2] if api_metadata["is_explicit"] else [1] # 2 = explicit, 1 = clean
                 if cover_data:
                     audio["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
                 audio.save()
@@ -659,7 +680,7 @@ class AmazonProvider(BaseProvider):
             mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
 
             amazon_url = self._get_amazon_url(metadata.id)
-            downloaded = self._download_from_api(amazon_url, output_dir, quality)
+            downloaded, api_metadata = self._download_from_api(amazon_url, output_dir, quality) 
 
             ext      = os.path.splitext(downloaded)[1] or ".m4a"
             dest_ext = str(dest).rsplit(".", 1)[0] + ext
@@ -676,6 +697,15 @@ class AmazonProvider(BaseProvider):
                 res = mb_fetcher.future.result()
 
             mb_tags = mb_result_to_tags(res)
+
+            if api_metadata:
+                if api_metadata.get("genre"): mb_tags["GENRE"] = api_metadata["genre"]
+                if api_metadata.get("label"): mb_tags["LABEL"] = api_metadata["label"]
+                if api_metadata.get("isrc"): mb_tags["ISRC"] = api_metadata["isrc"]
+                if api_metadata.get("composer"): mb_tags["COMPOSER"] = api_metadata["composer"]
+                if api_metadata.get("copyright"): mb_tags["COPYRIGHT"] = api_metadata["copyright"]
+                if "is_explicit" in api_metadata:
+                    mb_tags["ITUNESADVISORY"] = "1" if api_metadata["is_explicit"] else "2"
 
             # ── Embedding ────────────────────────────────────────────────
             if dest_ext.endswith(".flac"):
@@ -709,6 +739,7 @@ class AmazonProvider(BaseProvider):
                     disc_num     = _safe_int(metadata.disc_number),
                     total_discs  = _safe_int(metadata.total_discs),
                     cover_url    = metadata.cover_url,
+                    api_metadata = api_metadata,
                 )
                 if enrich_metadata or embed_lyrics:
                     logger.warning(
