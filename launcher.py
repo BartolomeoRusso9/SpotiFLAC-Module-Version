@@ -62,7 +62,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         nargs   = "+",
         default = pd.get("services", ["tidal"]),
         metavar = "SERVICE",
-        help    = "Audio providers in priority order (default: tidal)",
+        help    = "Audio providers in priority order (default: tidal). "
+                  "Choices: tidal, qobuz, deezer, amazon, spoti, soundcloud, youtube, apple, pandora",
     )
     parser.add_argument(
         "--filename-format", "-f",
