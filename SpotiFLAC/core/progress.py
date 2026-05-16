@@ -169,12 +169,20 @@ class ProgressCallback:
         mb_done    = current_bytes / (1024 * 1024)
 
         if total_bytes > 0:
-            pct     = current_bytes / total_bytes
+            # FIX: Previene overflow se il server invia un Content-Length più piccolo del reale
+            display_total = max(current_bytes, total_bytes)
+
+            pct     = current_bytes / display_total
             filled  = int(pct * 20)
             bar     = "█" * filled + "░" * (20 - filled)
-            eta_s   = (total_bytes - current_bytes) / speed_bps if speed_bps > 0 else 0
+
+            # Evita tempi negativi o divisioni per zero
+            bytes_left = display_total - current_bytes
+            eta_s   = bytes_left / speed_bps if speed_bps > 0 else 0
             eta_str = _fmt_eta(eta_s) if eta_s > 0 else "--:--"
-            mb_tot  = total_bytes / (1024 * 1024)
+
+            mb_tot  = display_total / (1024 * 1024)
+
             print(
                 f"\r  [{bar}] {pct*100:5.1f}%  "
                 f"{mb_done:.1f}/{mb_tot:.1f} MB  "
