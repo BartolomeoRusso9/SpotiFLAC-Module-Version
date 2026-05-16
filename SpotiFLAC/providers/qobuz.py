@@ -98,8 +98,12 @@ _QUALITY_FALLBACK: dict[str, list[str]] = {
 
 # FIX #3: mappa i valori Tidal-style verso i codici numerici Qobuz
 _TIDAL_TO_QOBUZ_QUALITY: dict[str, str] = {
-    "HI_RES":  "27",
-    "LOSSLESS": "6",
+    "DOLBY_ATMOS":     "27",
+    "HI_RES_LOSSLESS": "27",
+    "HI_RES":          "27",
+    "LOSSLESS":        "6",
+    "HIGH":            "6",
+    "LOW":             "6",
 }
 
 _API_TIMEOUT_S = 8

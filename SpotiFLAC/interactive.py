@@ -129,17 +129,14 @@ def _header() -> None:
 # Health Check
 # ---------------------------------------------------------------------------
 
-_ALL_SERVICES = ["tidal", "qobuz", "deezer", "amazon", "soundcloud", "apple", "youtube", "spoti"]
+_ALL_SERVICES = ["tidal", "qobuz", "deezer", "amazon", "soundcloud", "apple", "youtube", "pandora", "spoti"]
 
 def _run_health_check():
-    """
-    Esegue l'health check su tutti gli endpoint e restituisce la lista dei risultati.
-    """
     try:
         from SpotiFLAC.core.health_check import run_health_check
-        # Passiamo include_all_endpoints=True per testare e mostrare TUTTI i link
         return run_health_check(_ALL_SERVICES, include_all_endpoints=True)
-    except Exception:
+    except Exception as e:
+        print(f"  {RED(f'Health check error: {e}')}")
         return []
 
 
@@ -170,10 +167,8 @@ def _display_health_check() -> dict[str, bool]:
         print(f"  {icon} {BOLD(svc)}")
 
         if ok:
-            # Mostra solo "reachable" invece dell'URL o del binario locale
             print(f"      {DIM('↳')} {GREEN('reachable')}")
         else:
-            # Manteniamo il messaggio di errore esistente
             print(f"      {DIM('↳')} {RED('no reachable endpoints')}")
 
     working_count = sum(status.values())
@@ -192,12 +187,7 @@ def _display_health_check() -> dict[str, bool]:
 # ---------------------------------------------------------------------------
 
 def _pick_from_history() -> str | None:
-    """
-    Mostra gli URL recenti e restituisce quello scelto, o None per inserirne uno nuovo.
-    Permette anche di eliminare elementi dalla cronologia o svuotarla del tutto.
-    """
     try:
-        # Importiamo anche clear_url_history
         from SpotiFLAC.core.session_memory import get_url_history, remove_url_from_history, clear_url_history
     except Exception:
         return None
@@ -234,25 +224,19 @@ def _pick_from_history() -> str | None:
 
         val_lower = val.lower()
 
-        # --- Logica per svuotare tutta la cronologia ---
         if val_lower in ('c', 'clear'):
-            # Chiediamo conferma (di default su No) prima di eliminare tutto
             if _ask_bool("Are you sure you want to clear ALL history?", False):
                 try:
                     clear_url_history()
                     print(f"\n  {GREEN('✓')} History cleared.\n")
-                    # Il continue farà ricominciare il ciclo:
-                    # get_url_history() restituirà una lista vuota e la funzione uscirà ritornando None
                     continue
                 except Exception as e:
                     print(f"\n  {RED('✗')} Could not clear history: {e}\n")
                     continue
             else:
-                # Se l'utente preme 'n' o invio, annulla e ricarica la lista
                 print()
                 continue
 
-        # --- Logica di eliminazione singola ---
         if val_lower.startswith('d') and len(val_lower) > 1:
             num_str = val_lower[1:].strip()
             if num_str.isdigit():
@@ -278,7 +262,6 @@ def _pick_from_history() -> str | None:
 # ---------------------------------------------------------------------------
 
 def _profile_load_section(cfg: dict) -> dict:
-    """Offre il caricamento di un profilo salvato. Restituisce il cfg (possibilmente aggiornato)."""
     try:
         from SpotiFLAC.core.profiles import list_profiles, get_profile
         profiles = list_profiles()
@@ -318,7 +301,6 @@ def _profile_load_section(cfg: dict) -> dict:
 
 
 def _profile_save_section(cfg: dict) -> None:
-    """Offre il salvataggio del profilo corrente."""
     if not _ask_bool("Save this configuration as a profile?", False):
         return
     try:
@@ -404,8 +386,7 @@ def run_interactive() -> dict:
         if working_count == total_services:
             break
 
-        print() # Aggiunge uno spazio per la leggibilità
-        # Chiede se riprovare usando la funzione nativa _ask_bool (default False)
+        print()
         if not _ask_bool("Some providers are unreachable. Retry health check?", False):
             break
 
@@ -416,10 +397,9 @@ def run_interactive() -> dict:
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
-    print(f"  {DIM('Accepted: Spotify, Apple Music, Tidal, SoundCloud, YouTube.')}")
+    print(f"  {DIM('Accepted: Spotify, Apple Music, Tidal, SoundCloud, YouTube, Pandora.')}")
     print(f"  {DIM('Modes: Track, Album, Playlist, Artist Discography.')}")
 
-    # Try history first
     prefill = _pick_from_history()
 
     url = ""
@@ -466,7 +446,6 @@ def run_interactive() -> dict:
 
     cfg["output_dir"] = _ask("Destination folder", last_folder)
 
-    # Persist for next time
     try:
         from SpotiFLAC.core.session_memory import set_last_folder
         set_last_folder(cfg["output_dir"])
@@ -481,6 +460,8 @@ def run_interactive() -> dict:
             or ("youtu.be" in lower_url)
             or ("music.apple.com" in lower_url and "?i=" in lower_url)
             or (("soundcloud.com" in lower_url or "on.soundcloud.com" in lower_url) and "/sets/" not in lower_url)
+            or ("pandora.com" in lower_url and "/artist/" in lower_url and lower_url.count("/") >= 5)
+            or ("pandora.app.link" in lower_url)
     )
     if is_single_track:
         _section("2.5 · Custom Output Path")
@@ -498,7 +479,6 @@ def run_interactive() -> dict:
     # ── 3. Services ──────────────────────────────────────────────────────────
     _section("3 · Audio Services")
 
-    # Warn about unreachable services
     if health_status:
         unavailable = [s for s in _ALL_SERVICES if not health_status.get(s, True)]
         if unavailable:
@@ -507,6 +487,7 @@ def run_interactive() -> dict:
     is_soundcloud_url = "soundcloud.com" in cfg["url"] or "on.soundcloud.com" in cfg["url"]
     is_apple_url      = "music.apple.com" in cfg["url"]
     is_youtube_url    = "youtube.com" in cfg["url"].lower() or "youtu.be" in cfg["url"].lower()
+    is_pandora_url    = "pandora.com" in cfg["url"].lower() or "pandora.app.link" in cfg["url"].lower()
 
     if is_soundcloud_url:
         cfg["services"] = ["soundcloud"]
@@ -535,11 +516,24 @@ def run_interactive() -> dict:
                 ordered  = True,
             )
             cfg["services"] = ["apple"] + fallbacks
+    elif is_pandora_url:
+        cfg["services"] = ["pandora"]
+        print(f"  {GREEN('✓')} Provider {BOLD('pandora')} automatically selected.")
+        print(f"  {DIM('Note: Pandora delivers MP3 (192kbps default). No lossless streams available.')}")
+        add_fallback = _ask_bool("Add fallback providers?", False)
+        if add_fallback:
+            fallbacks = _ask_multi(
+                "Fallback providers (order = priority):",
+                options  = ["tidal", "qobuz", "deezer", "amazon", "spoti", "apple"],
+                defaults = ["tidal"],
+                ordered  = True,
+            )
+            cfg["services"] = ["pandora"] + fallbacks
     else:
         print(f"  {DIM('Choose services and their priority order (first = highest priority).')}")
         cfg["services"] = _ask_multi(
             "Services (order = priority):",
-            options  = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple"],
+            options  = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple", "pandora"],
             defaults = ["tidal"],
             ordered  = True,
         )
@@ -551,6 +545,15 @@ def run_interactive() -> dict:
         cfg["quality"] = "LOSSLESS"
         cfg["allow_fallback"] = True
         print(f"  {YELLOW('⏭  Skipped:')} {DIM('Only MP3 available')}")
+    elif is_pandora_url or (len(cfg["services"]) == 1 and cfg["services"][0] == "pandora"):
+        cfg["allow_fallback"] = True
+        q_choice = _ask_choice(
+            "Pandora Quality:",
+            options = ["mp3_192 (High — default)", "aac_64 (Medium)", "aac_32 (Low)"],
+            default = "mp3_192 (High — default)",
+        )
+        cfg["quality"] = q_choice.split(" ")[0]
+        print(f"  {DIM('Note: Output will be MP3 or M4A depending on selected quality.')}")
     elif is_youtube_url or (len(cfg["services"]) == 1 and cfg["services"][0] == "youtube"):
         cfg["quality"] = "BEST"
         cfg["allow_fallback"] = True
@@ -573,7 +576,7 @@ def run_interactive() -> dict:
         elif has_tidal and not (has_qobuz or has_deezer or has_apple):
             cfg["quality"] = _ask_choice(
                 "Tidal Quality:",
-                options = ["LOSSLESS", "HI_RES"],
+                options = ["DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"],
                 default = "LOSSLESS",
             )
         elif has_deezer and not (has_qobuz or has_tidal or has_apple):
@@ -598,6 +601,8 @@ def run_interactive() -> dict:
             if has_apple:
                 combined_options.append("ATMOS (Spatial Audio on Apple, HI_RES elsewhere)")
                 combined_options.append("AC3 (Dolby Digital on Apple, HIGH elsewhere)")
+            if has_tidal:
+                combined_options.insert(1, "DOLBY_ATMOS (Dolby Atmos on Tidal, HI_RES elsewhere)")
             if has_qobuz:
                 combined_options.append("7 (Hi-Res mid on Qobuz only)")
             combined_options.append("HIGH (MP3 320 / AAC on Apple)")
@@ -611,6 +616,7 @@ def run_interactive() -> dict:
             )
             if q_choice.startswith("LOSSLESS"):    cfg["quality"] = "LOSSLESS"
             elif q_choice.startswith("HI_RES"):    cfg["quality"] = "HI_RES"
+            elif q_choice.startswith("DOLBY_ATMOS"): cfg["quality"] = "DOLBY_ATMOS"
             elif q_choice.startswith("ATMOS"):     cfg["quality"] = "atmos"
             elif q_choice.startswith("AC3"):       cfg["quality"] = "ac3"
             elif q_choice.startswith("7"):         cfg["quality"] = "7"

@@ -72,7 +72,6 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
             _TIDAL_API_POST,
             get_tidal_api_list,
         )
-        # Prova prima la lista cached (include eventuali URL dal gist)
         try:
             tidal_get = get_tidal_api_list()
         except Exception:
@@ -81,31 +80,27 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         tidal_eps = [("GET", f"{url.rstrip('/')}/track/?id=1&quality=LOSSLESS")
                      for url in tidal_get]
         tidal_eps += [("POST", url) for url in _TIDAL_API_POST]
-
-        # --- NUOVA AGGIUNTA: Endpoint Zarz API ---
         tidal_eps.append(("GET", "https://api.zarz.moe/v1/health"))
 
         endpoints["tidal"] = tidal_eps
     except ImportError:
         endpoints["tidal"] = [
-            ("GET", "https://api.zarz.moe/v1/health")  # Aggiunto anche nel fallback
+            ("GET", "https://api.zarz.moe/v1/health")
         ]
+
     # ── Qobuz ──────────────────────────────────────────────────────────────
     try:
         from SpotiFLAC.providers.qobuz import _STREAM_APIS, _API_BASE
         qobuz_eps = [("GET", f"{url}1&quality=6") if url.endswith("=")
                      else ("GET", f"{url}1?quality=6")
                      for url in _STREAM_APIS]
-        # Aggiunge anche l'API ufficiale Qobuz (search pubblica)
         qobuz_eps.append(("GET", f"{_API_BASE}/track/search?query=test&limit=1&app_id=0"))
-
-        # NUOVA AGGIUNTA: Endpoint Zarz API
         qobuz_eps.append(("GET", "https://api.zarz.moe/v1/health"))
 
         endpoints["qobuz"] = qobuz_eps
     except ImportError:
         endpoints["qobuz"] = [
-            ("GET", "https://api.zarz.moe/v1/health") # Aggiunto anche nel fallback
+            ("GET", "https://api.zarz.moe/v1/health")
         ]
 
     # ── Deezer ─────────────────────────────────────────────────────────────
@@ -113,28 +108,30 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         from SpotiFLAC.providers.deezer import _RESOLVER_URL
         endpoints["deezer"] = [
             ("POST", _RESOLVER_URL),
-            ("GET", "https://api.zarz.moe/v1/health"), # Aggiunta endpoint Zarz
+            ("GET", "https://api.zarz.moe/v1/health"),
         ]
     except ImportError:
         endpoints["deezer"] = [
-            ("GET", "https://api.zarz.moe/v1/health"), # Fallback minimo
+            ("GET", "https://api.zarz.moe/v1/health"),
         ]
 
     # ── Amazon ─────────────────────────────────────────────────────────────
     try:
         from SpotiFLAC.providers.amazon import API_ENDPOINTS
-        # Estrae tutti gli URL dal dizionario e li prepara per il controllo "GET"
-        endpoints["amazon"] = [("GET", url) for url in API_ENDPOINTS.values()]
+        amazon_list = []
+        for val in API_ENDPOINTS.values():
+            if isinstance(val, str):
+                amazon_list.append(("GET", val))
+            elif isinstance(val, dict):
+                for sub_val in val.values():
+                    if isinstance(sub_val, str):
+                        amazon_list.append(("GET", sub_val))
 
-        # --- NUOVA AGGIUNTA: Endpoint Zarz API ---
+        endpoints["amazon"] = amazon_list
         endpoints["amazon"].append(("GET", "https://api.zarz.moe/v1/health"))
-
     except ImportError:
-        # Fallback manuale in caso di problemi di importazione
         endpoints["amazon"] = [
-            ("GET", "https://amazon.spotbye.qzz.io/api"),
-            ("GET", "https://api.zarz.moe/v1/dl/amazeamazeamaze"),
-            ("GET", "https://api.zarz.moe/v1/health")  # Aggiunto anche nel fallback
+            ("GET", "https://api.zarz.moe/v1/health")
         ]
 
     # ── Apple Music ────────────────────────────────────────────────────────
@@ -143,7 +140,6 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         try:
             from SpotiFLAC.providers.apple_music_metadata import API_ENDPOINTS as APPLE_META_ENDPOINTS
         except ImportError:
-            # Fallback se non trova il modulo metadata
             APPLE_META_ENDPOINTS = {}
 
         endpoints["apple"] = [
@@ -155,7 +151,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         endpoints["apple"] = [
             ("POST", "https://api.zarz.moe/v1/dl/app2"),
             ("GET",  "https://api.zarz.moe/v1/dl/app/status/test"),
-            ("GET", "https://api.zarz.moe/v1/health"), # Aggiunto anche nel fallback
+            ("GET", "https://api.zarz.moe/v1/health"),
         ]
 
     # ── SoundCloud ─────────────────────────────────────────────────────────
@@ -167,11 +163,11 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         endpoints["soundcloud"] = [
             ("GET",  sc_api),
             ("POST", cobalt),
-            ("GET", "https://api.zarz.moe/v1/health"), # Aggiunta endpoint Zarz
+            ("GET", "https://api.zarz.moe/v1/health"),
         ]
     except Exception:
         endpoints["soundcloud"] = [
-            ("GET", "https://api.zarz.moe/v1/health"), # Fallback minimo
+            ("GET", "https://api.zarz.moe/v1/health"),
         ]
 
     # ── YouTube ────────────────────────────────────────────────────────────
@@ -181,7 +177,18 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
             ("POST", COBALT_API_URL),
         ]
     except ImportError:
-        endpoints["youtube"] = [
+        endpoints["youtube"] = []
+
+    # ── Pandora ────────────────────────────────────────────────────────────
+    try:
+        from SpotiFLAC.providers.pandora import _API_BASE_URL, _DOWNLOAD_PATH
+        endpoints["pandora"] = [
+            ("GET",  f"{_API_BASE_URL}/v1/health"),
+            ("POST", f"{_API_BASE_URL}{_DOWNLOAD_PATH}"),
+        ]
+    except ImportError:
+        endpoints["pandora"] = [
+            ("GET", "https://api.zarz.moe/v1/health"),
         ]
 
     # ── SpotiDownloader ────────────────────────────────────────────────────
@@ -233,52 +240,59 @@ def _check_one(provider: str, method: str, url: str) -> HealthResult:
         ok = False
         detail = f"HTTP {resp.status_code}"
 
-        # Verifica rigorosa dello stato e del contenuto
         if resp.status_code == 200:
             body = resp.text
 
-            if provider == "amazon":
-                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
+            # ── Centralised Zarz health check ──────────────────────────────
+            if "api.zarz.moe/v1/health" in url:
+                try:
+                    data = json.loads(body)
+                    services = data.get("services", {})
+                    svc_key = "qobuz" if provider == "qbz" else provider
 
-                # --- VECCHIO CONTROLLO INVARIATO: Per le API normali di Amazon ---
-                else:
-                    if '"amazonMusic":"up"' in body:
-                        ok = True
+                    if svc_key in services:
+                        svc_info = services[svc_key]
+                        if svc_info.get("status") == 200:
+                            ok = True
+                            detail = svc_info.get("detail") or "ok"
+                        else:
+                            ok = False
+                            inner_detail = svc_info.get("detail") or "error"
+                            detail = f"Zarz {svc_info.get('status')} ({inner_detail})"
                     else:
-                        detail = "Bad Payload"
+                        ok = True
+                        detail = "Zarz Link OK"
+                except ValueError:
+                    detail = "Bad Health Payload"
+
+                return HealthResult(provider, url, method, ok, ms, detail)
+
+            # ── Pandora-specific checks ────────────────────────────────────
+            if provider == "pandora":
+                # The Pandora download endpoint returns a JSON body when reachable
+                # (even a 422/400 means the service is up); a non-empty body is enough.
+                if body.strip():
+                    ok = True
+                else:
+                    detail = "Empty Body"
+
+            elif provider == "amazon":
+                if '"amazonMusic":"up"' in body:
+                    ok = True
+                else:
+                    detail = "Bad Payload"
 
             elif provider == "tidal":
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
+                if body.strip():
+                    ok = True
                 else:
-                    if body.strip():
-                        ok = True
-                    else:
-                        detail = "Empty Body"
+                    detail = "Empty Body"
 
             elif provider in ("qobuz", "qbz"):
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
-
+                if _contains_streaming_url(body):
+                    ok = True
                 else:
-                    if _contains_streaming_url(body):
-                        ok = True
-                    else:
-                        detail = "No Stream URL"
+                    detail = "No Stream URL"
 
             elif provider == "spoti":
                 try:
@@ -287,57 +301,13 @@ def _check_one(provider: str, method: str, url: str) -> HealthResult:
                 except ValueError:
                     detail = "HTML/CF Block"
 
-            elif provider == "deezer":
-                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
-
-                # --- VECCHIO CONTROLLO INVARIATO: Verifica generica ---
+            elif provider in ("deezer", "apple", "soundcloud", "youtube"):
+                if body.strip():
+                    ok = True
                 else:
-                    if body.strip():
-                        ok = True
-                    else:
-                        detail = "Empty Body"
-
-            elif provider == "apple":
-                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
-
-                # --- VECCHIO CONTROLLO INVARIATO: Verifica generica per Apple ---
-                else:
-                    if body.strip():
-                        ok = True
-                    else:
-                        detail = "Empty Body"
-
-            elif provider == "soundcloud":
-                # --- NUOVA AGGIUNTA: Eccezione per l'health check di Zarz ---
-                if "api.zarz.moe/v1/health" in url:
-                    try:
-                        json.loads(body)
-                        ok = True
-                    except ValueError:
-                        detail = "Bad Health Payload"
-
-                # --- VECCHIO CONTROLLO INVARIATO: Verifica generica ---
-                else:
-                    if body.strip():
-                        ok = True
-                    else:
-                        detail = "Empty Body"
+                    detail = "Empty Body"
 
             else:
-                # Per gli altri provider, un 200 OK con un body non vuoto è
-                # un controllo sufficiente.
                 if body.strip():
                     ok = True
                 else:
@@ -360,25 +330,13 @@ def run_health_check(
 ) -> list[HealthResult]:
     """
     Controlla i provider richiesti in parallelo.
-
-    Args:
-        services:              Lista di nomi provider da verificare.
-        include_all_endpoints: Se True, controlla tutti gli endpoint di ogni provider.
-                               Se False (default), controlla solo il primo endpoint
-                               per provider (più veloce, solo per sanity check).
-
-    Ritorna i risultati ordinati per provider → endpoint.
     """
-    tasks: list[tuple[str, str, str]] = []  # (provider, method, url)
+    tasks: list[tuple[str, str, str]] = []
     results: list[HealthResult] = []
 
     for svc in services:
         if svc == "youtube":
-            # YouTube usa yt-dlp in locale, non dipende da un endpoint HTTP.
-            # Lo consideriamo sempre online con una spunta fissa.
             results.append(HealthResult("youtube", "yt-dlp (local binary)", "CLI", True, 0.0, "local"))
-            # NOTA: non mettiamo più il "continue", così prosegue e aggiunge
-            # ai "tasks" HTTP anche l'eventuale endpoint Cobalt API.
 
         eps = _ENDPOINTS.get(svc)
         if not eps:
@@ -386,7 +344,6 @@ def run_health_check(
         if include_all_endpoints:
             tasks.extend((svc, m, u) for m, u in eps)
         else:
-            # Solo il primo endpoint per provider (representative check)
             m, u = eps[0]
             tasks.append((svc, m, u))
 
@@ -398,16 +355,15 @@ def run_health_check(
         for fut in concurrent.futures.as_completed(futs):
             results.append(fut.result())
 
-    # Ordina per provider (rispetta l'ordine di `services`), poi per URL
     svc_order = {svc: i for i, svc in enumerate(services)}
-    results.sort(key=lambda r: (svc_order.get(r.provider, 99), r.url))
+    results.sort(key=lambda r: (svc_order.get(r.provider, 99), str(r.url)))
     return results
 
 # ---------------------------------------------------------------------------
 # Report rendering
 # ---------------------------------------------------------------------------
 
-_URL_MAX = 48   # max chars shown for endpoint URL in table
+_URL_MAX = 48
 
 def print_health_report(
         results: list[HealthResult],
@@ -444,7 +400,6 @@ def print_health_report(
         lat_str = f"{r.latency:>5.0f} ms" if r.latency >= 0 else "  timeout"
         detail  = r.detail[:10]
 
-        # Raggruppa visivamente per provider
         provider_cell = r.provider if r.provider != prev_provider else ""
         prev_provider = r.provider
 

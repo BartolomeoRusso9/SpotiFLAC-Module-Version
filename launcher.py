@@ -49,20 +49,21 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         prog            = "spotiflac",
-        description     = "Download tracks in true FLAC/MP3 via Deezer, Tidal, Qobuz, SoundCloud, YouTube and more.",
+        description     = "Download tracks in true FLAC/MP3 via Deezer, Tidal, Qobuz, SoundCloud, YouTube, Pandora and more.",
         formatter_class = argparse.RawDescriptionHelpFormatter,
     )
 
-    parser.add_argument("url",        help="Spotify, Tidal, Apple Music, SoundCloud or YouTube URL")
+    parser.add_argument("url",        help="Spotify, Tidal, Apple Music, SoundCloud, YouTube or Pandora URL")
     parser.add_argument("output_dir", help="Destination directory")
 
     parser.add_argument(
         "--service", "-s",
-        choices = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple"],
+        choices = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple", "pandora"],
         nargs   = "+",
         default = pd.get("services", ["tidal"]),
         metavar = "SERVICE",
-        help    = "Audio providers in priority order (default: tidal)",
+        help    = "Audio providers in priority order (default: tidal). "
+                  "Choices: tidal, qobuz, deezer, amazon, spoti, soundcloud, youtube, apple, pandora",
     )
     parser.add_argument(
         "--filename-format", "-f",
@@ -80,7 +81,9 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--quality", "-q",
         default = pd.get("quality", "LOSSLESS"),
-        help    = "Quality: LOSSLESS, HI_RES, HIGH, NORMAL. Default: LOSSLESS",
+        help = "Quality: DOLBY_ATMOS, HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW (Tidal). "
+               "Qobuz: 27, 7, 6. Apple: alac, atmos, ac3, aac. "
+               "Pandora: mp3_192, aac_64, aac_32. Default: LOSSLESS"
     )
     parser.add_argument("--use-track-numbers",       action="store_true", dest="use_track_numbers",       default=pd.get("use_track_numbers", False))
     parser.add_argument("--use-album-track-numbers", action="store_true", dest="use_album_track_numbers", default=pd.get("use_album_track_numbers", False))
@@ -194,14 +197,14 @@ def main() -> None:
             url                      = cfg["url"],
             output_dir               = cfg["output_dir"],
             services                 = cfg["services"],
-            filename_format          = cfg["filename_format"],
+            filename_format           = cfg["filename_format"],
             use_track_numbers        = cfg["use_track_numbers"],
             use_album_track_numbers  = cfg["use_album_track_numbers"],
             use_artist_subfolders    = cfg["use_artist_subfolders"],
             use_album_subfolders     = cfg["use_album_subfolders"],
             loop                     = cfg.get("loop"),
             quality                  = cfg["quality"],
-            first_artist_only        = cfg["first_artist_only"],
+            first_artist_only         = cfg["first_artist_only"],
             log_level                = log_level,
             output_path              = cfg.get("output_path"),
             allow_fallback           = cfg.get("allow_fallback", True),
@@ -218,7 +221,6 @@ def main() -> None:
 
     else:
         # ── CLI mode ──────────────────────────────────────────────────────
-        # Pre-parse to detect --profile before building full defaults
         profile_defaults: dict = {}
         if "--profile" in sys.argv:
             idx = sys.argv.index("--profile")
@@ -226,7 +228,6 @@ def main() -> None:
                 profile_defaults = _load_profile_into_defaults(sys.argv[idx + 1])
 
         file_cfg = load_config()
-        # config.json < profile < CLI flags  (each layer overrides the previous)
         merged_defaults = {**file_cfg, **profile_defaults}
 
         args = parse_args(profile_defaults=merged_defaults)
@@ -241,14 +242,14 @@ def main() -> None:
             url                      = args.url,
             output_dir               = args.output_dir,
             services                 = args.service,
-            filename_format          = args.filename_format,
+            filename_format           = args.filename_format,
             use_track_numbers        = args.use_track_numbers,
             use_album_track_numbers  = args.use_album_track_numbers,
             use_artist_subfolders    = args.use_artist_subfolders,
             use_album_subfolders     = args.use_album_subfolders,
             loop                     = args.loop,
             quality                  = quality,
-            first_artist_only        = args.first_artist_only,
+            first_artist_only         = args.first_artist_only,
             log_level                = log_level,
             output_path              = args.output_path,
             embed_lyrics             = args.embed_lyrics,
@@ -262,19 +263,18 @@ def main() -> None:
             post_download_command    = args.post_command,
         )
 
-        # Save profile after run if requested
         if args.save_profile:
             try:
                 from SpotiFLAC.core.profiles import save_profile
                 profile_cfg = {
                     "services":              args.service,
                     "quality":               quality,
-                    "filename_format":       args.filename_format,
+                    "filename_format":        args.filename_format,
                     "use_track_numbers":     args.use_track_numbers,
                     "use_album_track_numbers": args.use_album_track_numbers,
                     "use_artist_subfolders": args.use_artist_subfolders,
                     "use_album_subfolders":  args.use_album_subfolders,
-                    "first_artist_only":     args.first_artist_only,
+                    "first_artist_only":      args.first_artist_only,
                     "allow_fallback":        True,
                     "embed_lyrics":          args.embed_lyrics,
                     "lyrics_providers":      args.lyrics_providers,

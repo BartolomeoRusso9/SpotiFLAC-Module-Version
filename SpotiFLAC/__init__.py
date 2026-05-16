@@ -38,7 +38,7 @@ from .providers import (
 )
 from .core import TrackMetadata, DownloadResult
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 __all__ = [
     "SpotiFLAC",
@@ -105,14 +105,14 @@ def SpotiFLAC(
     opts = DownloadOptions(
         output_dir              = output_dir,
         services                = services or ["tidal"],
-        filename_format         = filename_format,
+        filename_format          = filename_format,
         use_track_numbers       = use_track_numbers,
         use_album_track_numbers = use_album_track_numbers,
         use_artist_subfolders   = use_artist_subfolders,
         allow_fallback          = allow_fallback,
         use_album_subfolders    = use_album_subfolders,
         quality                 = quality,
-        first_artist_only       = first_artist_only,
+        first_artist_only        = first_artist_only,
         output_path             = output_path,
         embed_lyrics            = embed_lyrics,
         lyrics_providers        = lyrics_providers or ["spotify", "apple", "musixmatch", "lrclib", "amazon"],

@@ -32,7 +32,7 @@ class AppleMusicProvider(BaseProvider):
     def __init__(self, timeout_s: int = 30, proxy_api_key: str = "") -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
         self._session = self._http._session
-        self._url_cache = {} # Sistema di caching in memoria introdotto
+        self._url_cache = {}
 
         headers = {
             "User-Agent": _DEFAULT_UA,
