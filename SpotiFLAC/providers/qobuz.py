@@ -44,7 +44,7 @@ _DEFAULT_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/146.0.0.0 Safari/537.36"
 )
-_ZARZ_USER_AGENT = "SpotiFLAC-Mobile"
+_ZARZ_USER_AGENT = "SpotiFLAC-Mobile/1.0"
 _CREDS_TTL        = 24 * 3600
 _PROBE_ISRC       = "USUM71703861"
 _OPEN_URL         = "https://open.qobuz.com/track/"
@@ -65,21 +65,13 @@ _STREAM_APIS: list[str] = [
     "https://qbz.afkarxyz.qzz.io/api/track/",
     "https://qobuz.spotbye.qzz.io/api/track/",
     "https://qobuz.squid.wtf/api/download-music?country=US&track_id=",
-    "https://dl.musicdl.me/qobuz/download",
-    "https://api.zarz.moe/v1/dl/qbz",
-    "https://api.zarz.moe/v1/qbz",
-    "https://api.zarz.moe/v1/qbz2",
-    "https://api.zarz.moe/v1/dl/qbz2",
-    "https://www.musicdl.me/api/qobuz/download"
 ]
 
 _POST_APIS = {
+    "https://api.zarz.moe/v1/dl/qbz",
+    "https://api.zarz.moe/v1/dl/qbz2",
     "https://www.musicdl.me/api/qobuz/download",
     "https://dl.musicdl.me/qobuz/download",
-    "https://api.zarz.moe/v1/dl/qbz",
-    "https://api.zarz.moe/v1/qbz",
-    "https://api.zarz.moe/v1/qbz2",
-    "https://api.zarz.moe/v1/dl/qbz2",
 }
 
 _QUALITY_FALLBACK: dict[str, list[str]] = {
@@ -151,7 +143,12 @@ class QobuzCredentials:
 
     @classmethod
     def default(cls) -> "QobuzCredentials":
-        return cls(_DEFAULT_APP_ID, _DEFAULT_APP_SECRET, "embedded-default")
+        return cls(
+            app_id=_DEFAULT_APP_ID, 
+            app_secret=_DEFAULT_APP_SECRET, 
+            source="embedded-default",
+            user_auth_token=os.environ.get("QOBUZ_AUTH_TOKEN")
+        )
 
 _QOBUZ_MUSICDL_SEED = bytes([
     0x73,0x70,0x6f,0x74,0x69,0x66,
@@ -322,7 +319,7 @@ def _fetch_stream_url_once(
                 resp = requests.post(
                     api_base,
                     json=payload,
-                    headers={"User-Agent": _DEFAULT_UA},
+                    headers={"User-Agent": _ZARZ_USER_AGENT if is_zarz else _DEFAULT_UA},
                     timeout=timeout_s,
                 )
             else:
@@ -559,10 +556,6 @@ class QobuzProvider(BaseProvider):
         return items[0]
 
     def _search_by_text(self, title: str, artist: str) -> dict | None:
-        """
-        Fallback basato sul JS: cerca la traccia per Titolo e Artista e la valuta
-        quando l'ISRC non è disponibile o fallisce.
-        """
         import difflib
         query = f"{title} {artist}".strip()
 
@@ -606,7 +599,8 @@ class QobuzProvider(BaseProvider):
 
     def _get_stream_url(self, track_id: int, quality: str, allow_fallback: bool) -> str:
         chain = _QUALITY_FALLBACK.get(quality, [quality])
-        ordered_apis = prioritize_providers("qobuz", list(_STREAM_APIS))
+        all_apis = list(_STREAM_APIS) + list(_POST_APIS)
+        ordered_apis = prioritize_providers("qobuz", all_apis)
         if not allow_fallback:
             chain = chain[:1]
 

@@ -604,7 +604,7 @@ class SoundCloudProvider(BaseProvider):
             logger.error("[SC] Download failed: %s", e)
             if dest.exists():
                 dest.unlink(missing_ok=True)
-            return DownloadResult.fail(self.provider_id, str(e))
+            return DownloadResult.fail(self.name, str(e))
 
         # ── 4. Pipeline centrale (enrichment + lyrics + tagging) ──────────
         try:
@@ -630,4 +630,4 @@ class SoundCloudProvider(BaseProvider):
             logger.warning("[SC] embed_metadata failed (file salvato senza tag): %s", exc)
 
         logger.info("[SC] Completed: %s", dest.name)
-        return DownloadResult.ok(self.provider_id, str(dest), fmt="mp3")
+        return DownloadResult.ok(self.name, str(dest), fmt="mp3")

@@ -29,6 +29,7 @@ def _is_streaming_url(raw: str) -> bool:
     parsed = urlparse(raw.strip())
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
+
 def _contains_streaming_url(body: str) -> bool:
     """Cerca un URL di streaming valido nel testo o nel JSON della risposta."""
     if not body.strip():
@@ -53,6 +54,7 @@ def _contains_streaming_url(body: str) -> bool:
         pass
 
     return False
+
 
 # ---------------------------------------------------------------------------
 # Import endpoint lists directly from provider modules
@@ -79,21 +81,33 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
         tidal_eps = [("GET", f"{url.rstrip('/')}/track/?id=1&quality=LOSSLESS")
                      for url in tidal_get]
+        # POST probe: body vuoto ma il server risponde comunque
         tidal_eps += [("POST", url) for url in _TIDAL_API_POST]
         tidal_eps.append(("GET", "https://api.zarz.moe/v1/health"))
 
         endpoints["tidal"] = tidal_eps
     except ImportError:
         endpoints["tidal"] = [
-            ("GET", "https://api.zarz.moe/v1/health")
+            ("GET", "https://api.zarz.moe/v1/health"),
         ]
 
     # ── Qobuz ──────────────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.qobuz import _STREAM_APIS, _API_BASE
-        qobuz_eps = [("GET", f"{url}1&quality=6") if url.endswith("=")
-                     else ("GET", f"{url}1?quality=6")
-                     for url in _STREAM_APIS]
+        from SpotiFLAC.providers.qobuz import _STREAM_APIS, _API_BASE, _POST_APIS
+        qobuz_eps: list[tuple[str, str]] = []
+        _QOBUZ_PROBE_ID = "3135556"
+        
+        # 1. Uniamo gli endpoint GET e POST per non mancarne nessuno
+        all_qobuz_urls = set(_STREAM_APIS).union(_POST_APIS)
+        
+        for url in all_qobuz_urls:
+            if url in _POST_APIS:
+                qobuz_eps.append(("POST", url))
+            elif url.endswith("="):
+                qobuz_eps.append(("GET", f"{url}{_QOBUZ_PROBE_ID}&quality=6"))
+            else:
+                qobuz_eps.append(("GET", f"{url}{_QOBUZ_PROBE_ID}?quality=6"))
+                
         qobuz_eps.append(("GET", f"{_API_BASE}/track/search?query=test&limit=1&app_id=0"))
         qobuz_eps.append(("GET", "https://api.zarz.moe/v1/health"))
 
@@ -105,12 +119,12 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     # ── Deezer ─────────────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.deezer import _RESOLVER_URL
+        # Usa l'API pubblica di Deezer come probe affidabile (sempre 200)
+        # invece del resolver interno che richiede un payload specifico.
         endpoints["deezer"] = [
-            ("POST", _RESOLVER_URL),
             ("GET", "https://api.zarz.moe/v1/health"),
         ]
-    except ImportError:
+    except Exception:
         endpoints["deezer"] = [
             ("GET", "https://api.zarz.moe/v1/health"),
         ]
@@ -118,52 +132,52 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     # ── Amazon ─────────────────────────────────────────────────────────────
     try:
         from SpotiFLAC.providers.amazon import API_ENDPOINTS
-        amazon_list = []
+        amazon_list: list[tuple[str, str]] = []
         for val in API_ENDPOINTS.values():
-            if isinstance(val, str):
-                amazon_list.append(("GET", val))
-            elif isinstance(val, dict):
-                for sub_val in val.values():
-                    if isinstance(sub_val, str):
-                        amazon_list.append(("GET", sub_val))
+            if isinstance(val, dict):
+                base_url = val.get("base_url", "")
+                if base_url:
+                    # Tutti gli endpoint Amazon sono POST-only.
+                    # Un POST con body vuoto ({}) provoca 400/422 ma prova che
+                    # il server è raggiungibile — molto meglio di un GET che
+                    # restituisce 404/405 e viene interpretato come "down".
+                    amazon_list.append(("POST", base_url))
+            elif isinstance(val, str):
+                amazon_list.append(("POST", val))
 
+        amazon_list.append(("GET", "https://api.zarz.moe/v1/health"))
         endpoints["amazon"] = amazon_list
-        endpoints["amazon"].append(("GET", "https://api.zarz.moe/v1/health"))
     except ImportError:
         endpoints["amazon"] = [
-            ("GET", "https://api.zarz.moe/v1/health")
+            ("POST", "https://amz.spotbye.qzz.io/api"),
+            ("POST", "https://amazon.spotbye.qzz.io/api"),
+            ("GET",  "https://api.zarz.moe/v1/health"),
         ]
 
     # ── Apple Music ────────────────────────────────────────────────────────
     try:
         from SpotiFLAC.providers.apple_music import API_ENDPOINTS as APPLE_DL_ENDPOINTS
-        try:
-            from SpotiFLAC.providers.apple_music_metadata import API_ENDPOINTS as APPLE_META_ENDPOINTS
-        except ImportError:
-            APPLE_META_ENDPOINTS = {}
-
         endpoints["apple"] = [
+            # POST probe con body vuoto: il server risponde 400/422 se up
             ("POST", APPLE_DL_ENDPOINTS.get("proxy_direct", "https://api.zarz.moe/v1/dl/app2")),
             ("GET",  f"{APPLE_DL_ENDPOINTS.get('proxy_queued', 'https://api.zarz.moe/v1/dl/app')}/status/test"),
-            ("GET", "https://api.zarz.moe/v1/health"),
+            ("GET",  "https://api.zarz.moe/v1/health"),
         ]
     except ImportError:
         endpoints["apple"] = [
             ("POST", "https://api.zarz.moe/v1/dl/app2"),
             ("GET",  "https://api.zarz.moe/v1/dl/app/status/test"),
-            ("GET", "https://api.zarz.moe/v1/health"),
+            ("GET",  "https://api.zarz.moe/v1/health"),
         ]
 
     # ── SoundCloud ─────────────────────────────────────────────────────────
     try:
         from SpotiFLAC.providers.soundcloud import SoundCloudProvider
         sc = SoundCloudProvider.__new__(SoundCloudProvider)
-        sc_api = getattr(sc, "api_url", "https://api-v2.soundcloud.com")
-        cobalt = getattr(sc, "cobalt_api", "https://api.zarz.moe/v1/dl/cobalt/")
+        cobalt  = getattr(sc, "cobalt_api", "https://api.zarz.moe/v1/dl/cobalt/")
         endpoints["soundcloud"] = [
-            ("GET",  sc_api),
             ("POST", cobalt),
-            ("GET", "https://api.zarz.moe/v1/health"),
+            ("GET",  "https://api.zarz.moe/v1/health"),
         ]
     except Exception:
         endpoints["soundcloud"] = [
@@ -171,13 +185,9 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         ]
 
     # ── YouTube ────────────────────────────────────────────────────────────
-    try:
-        from SpotiFLAC.providers.youtube import COBALT_API_URL
-        endpoints["youtube"] = [
-            ("POST", COBALT_API_URL),
-        ]
-    except ImportError:
-        endpoints["youtube"] = []
+    # YouTube usa yt-dlp locale, nessun endpoint HTTP da sondare.
+    # Viene sempre considerato raggiungibile da run_health_check().
+    endpoints["youtube"] = []
 
     # ── Pandora ────────────────────────────────────────────────────────────
     try:
@@ -200,6 +210,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     return endpoints
 
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -207,8 +218,12 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 _UA      = "SpotiFLAC-HealthCheck/1.0"
 _TIMEOUT = 5
 
+# Endpoint POST-only che non richiedono payload per rispondere (accettano body vuoto)
+_POST_PROBE_ONLY: frozenset[str] = frozenset()
+
 # Carica gli endpoint una sola volta al momento dell'import
 _ENDPOINTS: dict[str, list[tuple[str, str]]] = _load_endpoints()
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -222,6 +237,7 @@ class HealthResult(NamedTuple):
     latency:  float   # ms; -1 = irraggiungibile
     detail:   str
 
+
 # ---------------------------------------------------------------------------
 # Core check logic
 # ---------------------------------------------------------------------------
@@ -229,71 +245,107 @@ class HealthResult(NamedTuple):
 def _check_one(provider: str, method: str, url: str) -> HealthResult:
     try:
         t0 = time.perf_counter()
-        resp = requests.request(
-            method, url,
-            headers         = {"User-Agent": _UA},
-            timeout         = _TIMEOUT,
-            allow_redirects = True,
-        )
+
+        req_kwargs: dict = {
+            "headers":         {"User-Agent": _UA},
+            "timeout":         _TIMEOUT,
+            "allow_redirects": True,
+        }
+
+        # I POST senza body vengono rifiutati con 400/405 da molti server,
+        # rendendo impossibile distinguere "server down" da "endpoint POST-only".
+        # Soluzione: invia sempre un JSON body vuoto nei POST → il server
+        # risponde con il suo normale errore di validazione (400/422)
+        # anziché un generico 405 Method Not Allowed.
+        if method == "POST":
+            req_kwargs["json"] = {}
+
+        resp = requests.request(method, url, **req_kwargs)
         ms = (time.perf_counter() - t0) * 1000
 
-        ok = False
+        ok     = False
         detail = f"HTTP {resp.status_code}"
 
+        # ── POST probe ─────────────────────────────────────────────────────
+        # Per gli endpoint POST-only delle API di download, qualsiasi risposta
+        # HTTP (anche 400/422 "bad request") significa che il server è up e
+        # funzionante. Solo 502/503/504 significano "giù".
+        _is_post_probe = (method == "POST" and "health" not in url)
+        if _is_post_probe:
+            if resp.status_code in (502, 503, 504):
+                ok     = False
+                detail = f"Server Error {resp.status_code}"
+            else:
+                ok     = True
+                detail = f"HTTP {resp.status_code}"
+            return HealthResult(provider, url, method, ok, ms, detail)
+
+        # ── GET probes ─────────────────────────────────────────────────────
         if resp.status_code == 200:
             body = resp.text
 
             # ── Centralised Zarz health check ──────────────────────────────
             if "api.zarz.moe/v1/health" in url:
                 try:
-                    data = json.loads(body)
+                    data     = json.loads(body)
                     services = data.get("services", {})
-                    svc_key = "qobuz" if provider == "qbz" else provider
+                    svc_key  = "qobuz" if provider == "qbz" else provider
 
                     if svc_key in services:
                         svc_info = services[svc_key]
                         if svc_info.get("status") == 200:
-                            ok = True
+                            ok     = True
                             detail = svc_info.get("detail") or "ok"
                         else:
-                            ok = False
+                            ok           = False
                             inner_detail = svc_info.get("detail") or "error"
-                            detail = f"Zarz {svc_info.get('status')} ({inner_detail})"
+                            detail       = f"Zarz {svc_info.get('status')} ({inner_detail})"
                     else:
-                        ok = True
+                        ok     = True
                         detail = "Zarz Link OK"
                 except ValueError:
                     detail = "Bad Health Payload"
 
                 return HealthResult(provider, url, method, ok, ms, detail)
 
-            # ── Pandora-specific checks ────────────────────────────────────
+            # ── Pandora ────────────────────────────────────────────────────
             if provider == "pandora":
-                # The Pandora download endpoint returns a JSON body when reachable
-                # (even a 422/400 means the service is up); a non-empty body is enough.
                 if body.strip():
                     ok = True
                 else:
                     detail = "Empty Body"
 
+            # ── Amazon ─────────────────────────────────────────────────────
             elif provider == "amazon":
-                if '"amazonMusic":"up"' in body:
+                # GET su un endpoint Amazon (es. base URL): corpo non vuoto = up
+                if body.strip():
                     ok = True
                 else:
-                    detail = "Bad Payload"
+                    detail = "Empty Body"
 
+            # ── Tidal ──────────────────────────────────────────────────────
             elif provider == "tidal":
                 if body.strip():
                     ok = True
                 else:
                     detail = "Empty Body"
 
+            # ── Qobuz ──────────────────────────────────────────────────────
             elif provider in ("qobuz", "qbz"):
                 if _contains_streaming_url(body):
                     ok = True
                 else:
-                    detail = "No Stream URL"
+                    # Accetta anche una risposta JSON con errore ma corpo valido
+                    # (significa che l'API è up ma non ha trovato il brano)
+                    try:
+                        parsed = json.loads(body)
+                        if isinstance(parsed, dict) and body.strip():
+                            ok     = True
+                            detail = parsed.get("error", "JSON OK")
+                    except ValueError:
+                        detail = "No Stream URL"
 
+            # ── SpotiDownloader ────────────────────────────────────────────
             elif provider == "spoti":
                 try:
                     json.loads(body)
@@ -301,7 +353,20 @@ def _check_one(provider: str, method: str, url: str) -> HealthResult:
                 except ValueError:
                     detail = "HTML/CF Block"
 
-            elif provider in ("deezer", "apple", "soundcloud", "youtube"):
+            # ── Deezer ─────────────────────────────────────────────────────
+            elif provider == "deezer":
+                try:
+                    parsed = json.loads(body)
+                    if parsed.get("id") and not parsed.get("error"):
+                        ok     = True
+                        detail = "API OK"
+                    else:
+                        detail = parsed.get("error", {}).get("message", "API Error")
+                except ValueError:
+                    detail = "Bad JSON"
+
+            # ── Apple / SoundCloud / YouTube / default ─────────────────────
+            elif provider in ("apple", "soundcloud", "youtube"):
                 if body.strip():
                     ok = True
                 else:
@@ -330,9 +395,10 @@ def run_health_check(
 ) -> list[HealthResult]:
     """
     Controlla i provider richiesti in parallelo.
+    YouTube usa yt-dlp locale e viene sempre marcato come raggiungibile.
     """
-    tasks: list[tuple[str, str, str]] = []
-    results: list[HealthResult] = []
+    tasks:   list[tuple[str, str, str]] = []
+    results: list[HealthResult]         = []
 
     for svc in services:
         if svc == "youtube":
@@ -359,11 +425,13 @@ def run_health_check(
     results.sort(key=lambda r: (svc_order.get(r.provider, 99), str(r.url)))
     return results
 
+
 # ---------------------------------------------------------------------------
 # Report rendering
 # ---------------------------------------------------------------------------
 
 _URL_MAX = 48
+
 
 def print_health_report(
         results: list[HealthResult],
@@ -375,16 +443,11 @@ def print_health_report(
         print("  Nessun provider da verificare.")
         return
 
-    url_col = _URL_MAX if show_urls else 0
-    total_w = 14 + 6 + 12 + 9 + (url_col + 3 if show_urls else 0)
-
-    sep_inner = "─" * total_w
-    sep_mid   = "┼".join(["─" * 14, "─" * 6, "─" * 12, "─" * 9] +
-                         (["─" * (url_col + 2)] if show_urls else []))
+    url_col    = _URL_MAX if show_urls else 0
     header_top = "┬".join(["─" * 14, "─" * 6, "─" * 12, "─" * 9] +
-                          (["─" * (url_col + 2)] if show_urls else []))
+                           (["─" * (url_col + 2)] if show_urls else []))
     header_bot = "┼".join(["─" * 14, "─" * 6, "─" * 12, "─" * 9] +
-                          (["─" * (url_col + 2)] if show_urls else []))
+                           (["─" * (url_col + 2)] if show_urls else []))
 
     print()
     print(f"  ┌{header_top}┐")
@@ -411,9 +474,9 @@ def print_health_report(
 
     print(f"  └{'┴'.join(['─'*14,'─'*6,'─'*12,'─'*9] + (['─'*(url_col+2)] if show_urls else []))}┘")
 
-    ok_count    = sum(1 for r in results if r.ok)
-    prov_ok     = len({r.provider for r in results if r.ok})
-    prov_total  = len({r.provider for r in results})
+    ok_count   = sum(1 for r in results if r.ok)
+    prov_ok    = len({r.provider for r in results if r.ok})
+    prov_total = len({r.provider for r in results})
     print(f"\n  {ok_count}/{len(results)} endpoints reachable "
           f"({prov_ok}/{prov_total} providers with at least one working endpoint).\n")
 

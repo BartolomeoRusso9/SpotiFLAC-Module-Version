@@ -423,15 +423,6 @@ class DeezerProvider(BaseProvider):
     # BaseProvider interface
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _snapshot(directory: str) -> set[str]:
-        result = set()
-        for root, _, files in os.walk(directory):
-            for f in files:
-                if f.lower().endswith(".flac"):
-                    result.add(os.path.join(root, f))
-        return result
-
     def download_track(
             self,
             metadata:            TrackMetadata,

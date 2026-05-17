@@ -785,13 +785,13 @@ class TidalProvider(BaseProvider):
                 total_bytes += len(chunk)
 
                 # Stima dei byte totali per la barra di progresso (peso_attuale + stima_rimanenti)
+                # Stima dei byte totali per la barra di progresso
                 if estimated_total == 0 and len(chunk) > 0:
-                    estimated_total = total_bytes + (len(chunk) * (len(media_urls) - i - 1))
+                    # Includiamo i byte dell'init + una stima per i restanti (compreso questo ciclo)
+                    estimated_total = total_bytes + (len(chunk) * (len(media_urls) - i))
 
-                # Integrazione con la VERA barra di progresso nativa dell'app (la stessa usata da Qobuz)
                 if hasattr(self, "_progress_cb") and self._progress_cb:
                     try:
-                        # Richiamo con la firma standard: (bytes_scaricati, byte_totali)
                         self._progress_cb(total_bytes, estimated_total)
                     except TypeError:
                         try:

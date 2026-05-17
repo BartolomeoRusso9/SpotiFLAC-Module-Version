@@ -325,14 +325,14 @@ class AmazonProvider(BaseProvider):
             if result.returncode != 0:
                 logger.warning("[amazon] Zarz decryption failed: %s", result.stderr.decode()[:100])
                 return None
-            return out
+            return out, api_meta
 
         ext = ".flac" if returned_codec == "flac" else ".m4a"
         final = os.path.join(output_dir, f"{asin}{ext}")
         if os.path.exists(final):
             os.remove(final)
         os.rename(temp_file, final)
-        return final
+        return final, api_meta
 
     def _download_from_spotbye_api(self, asin: str, output_dir: str, provider_key: str) -> str:
         logger.info("[amazon] Fetching track from %s API (ASIN: %s)", provider_key, asin)

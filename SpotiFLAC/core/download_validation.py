@@ -17,7 +17,6 @@ _DURATION_DIFF_RATIO      = 0.25
 
 
 def _get_audio_duration(filepath: str) -> float:
-    """Usa ffprobe per ottenere la durata in secondi."""
     try:
         result = subprocess.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json",
@@ -27,7 +26,8 @@ def _get_audio_duration(filepath: str) -> float:
         import json
         data = json.loads(result.stdout)
         return float(data.get("format", {}).get("duration", 0))
-    except Exception:
+    except Exception as exc:
+        logger.warning("[validation] No ffprobe found. Error: %s", exc)
         return 0.0
 
 

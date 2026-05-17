@@ -675,7 +675,7 @@ class YouTubeProvider(BaseProvider):
             )
             embed_metadata(str(dest), metadata, opts, session=self._session)
 
-            return DownloadResult.ok(self.name, str(dest), fmt="mp3")
+            return DownloadResult.ok(self.name, str(dest), fmt="m4a")
 
         except SpotiflacError as exc:
             logger.error(f"[youtube] {exc}")
