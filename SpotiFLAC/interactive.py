@@ -141,13 +141,10 @@ def _run_health_check():
 
 
 def _display_health_check() -> dict[str, bool]:
-    """Mostra il risultato del health check in formato semplificato senza URL."""
     _section("Service Availability Check")
     print(f"  {DIM('Probing endpoints...')} ", end="", flush=True)
 
     results = _run_health_check()
-
-    # Cancella la riga "Probing…"
     print("\r" + " " * 40 + "\r", end="")
 
     if not results:
@@ -682,11 +679,11 @@ def run_interactive() -> dict:
         cfg["lyrics_providers"] = _ask_multi(
             "Lyrics providers (order = priority):",
             options  = ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
-            defaults = cfg.get("lyrics_providers") or ["spotify", "lrclib", "apple", "amazon"],
+            defaults = cfg.get("lyrics_providers") or ["lrclib", "apple", "amazon"],
             ordered  = True,
         )
     else:
-        cfg["lyrics_providers"] = cfg.get("lyrics_providers") or ["spotify", "musixmatch", "lrclib", "apple"]
+        cfg["lyrics_providers"] = cfg.get("lyrics_providers") or ["lrclib", "apple", "amazon"]
 
     # ── 9. Metadata enrichment ──────────────────────────────────────────────
     _section("9 · Metadata Enrichment")

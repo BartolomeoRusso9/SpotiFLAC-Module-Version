@@ -42,7 +42,7 @@ _DEEZER_API_URL  = "https://api.deezer.com"
 _PANDORA_BASE    = "https://www.pandora.com"
 _USER_COUNTRY    = "US"
 
-_MOBILE_UA = "SpotiFLAC-Mobile"
+_MOBILE_UA = "SpotiFLAC-Mobile/1.0  "
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -50,8 +50,8 @@ _DEFAULT_UA = (
 )
 
 # Pandora ID regex: TR:xxx, AL:xxx, AR:xxx, PL:xxx, ST:xxx
-_PANDORA_ID_RE       = re.compile(r'\b(TR|AL|AR|PL|ST):[A-Za-z0-9:]+\b', re.IGNORECASE)
-_PANDORA_PRETTY_RE   = re.compile(r'(?:^|[/?=&])((TR|AL|AR|PL|ST)[A-Za-z0-9]+)(?=$|[/?&#])', re.IGNORECASE)
+_PANDORA_ID_RE = re.compile(r'\b(TR|AL|AR|PL|ST):?[A-Za-z0-9]+\b', re.IGNORECASE)
+_PANDORA_PRETTY_RE = re.compile(r'(?:^|[/?=&])((TR|AL|AR|PL|ST)(\d[A-Za-z0-9]*))(?=[/?&#]|$)', re.IGNORECASE)
 
 _QUALITY_MAP = {
     "mp3_192": "highQuality",
@@ -114,14 +114,22 @@ def _normalize_pandora_id(value: str) -> str:
     except Exception:
         pass
 
-    # Pattern con separatore : (TR:XXXXXX)
-    m = _PANDORA_ID_RE.search(raw)
+    # Cerca l'ID dividendo esplicitamente il prefisso (gruppo 1) e i numeri (gruppo 2).
+    # I due punti (:?) in mezzo vengono ignorati dalla cattura.
+    m = re.search(r'\b(TR|AL|AR|PL|ST):([A-Za-z0-9]+)\b', raw, re.IGNORECASE)
     if m:
-        return m.group(0).upper()
+        prefix = m.group(1).upper()
+        id_part = m.group(2).upper()
+        return f"{prefix}:{id_part}"
 
-    # Pattern senza separatore : (TRXXXXXX)
+    # Pattern di fallback nel caso i word boundary (\b) falliscano per URL strani
     pm = _PANDORA_PRETTY_RE.search(raw)
-    return pm.group(1) if pm else ""
+    if pm:
+        prefix = pm.group(2).upper()
+        id_part = pm.group(3).upper()                  # ← gruppo 3 = solo l'ID numerico
+        return f"{prefix}:{id_part}"
+
+    return ""
 
 
 def _extract_pandora_track_id(value: str) -> str:
@@ -380,6 +388,63 @@ class PandoraProvider(BaseProvider):
     # ------------------------------------------------------------------
     # App link resolution
     # ------------------------------------------------------------------
+
+    def check_availability(
+        self,
+        isrc: str,
+        track_name: str,
+        artist_name: str,
+        options: dict | None = None,
+    ) -> dict:
+        """
+        Maps a Spotify/Deezer/generic URL to a Pandora TR: ID via Song.link.
+        Returns {"available": True, "track_id": "TR:XXXXXX"} or {"available": False}.
+        """
+        options = options or {}
+
+        # Fast path: caller already has a direct Pandora TR: ID
+        direct_id = _extract_pandora_track_id(options.get("spotify_id", "") or "")
+        if direct_id:
+            return {"available": True, "track_id": direct_id}
+
+        # Build candidates the same way as JS checkAvailability / normalizeDownloadCandidateURL
+        def _candidate(value: str) -> str:
+            value = _normalize_secure_url(str(value or "").strip())
+            if not value:
+                return ""
+            if re.match(r'^https?://', value, re.IGNORECASE):
+                return value
+            if "pandora.com" in value or "pandora.app.link" in value:
+                return value
+            if re.match(r'^(TR|AL|AR|PL|ST):?[A-Za-z0-9]+$', value, re.IGNORECASE):
+                return _build_pandora_url(_normalize_pandora_id(value))
+            if re.match(r'^[A-Za-z0-9]{22}$', value):          # Spotify bare ID
+                return f"https://open.spotify.com/track/{value}"
+            if re.match(r'^spotify:track:[A-Za-z0-9]{22}$', value, re.IGNORECASE):
+                return "https://open.spotify.com/track/" + value.split(":")[-1]
+            if re.match(r'^\d+$', value):                       # Deezer bare ID
+                return f"https://www.deezer.com/track/{value}"
+            return ""
+
+        candidates = [
+            _candidate(options.get("spotify_id", "") or ""),
+            _candidate(options.get("deezer_id",  "") or ""),
+            _candidate(options.get("url",        "") or ""),
+            _candidate(options.get("link",       "") or ""),
+        ]
+
+        for url in candidates:
+            if not url:
+                continue
+            try:
+                resolved_url = self._normalize_pandora_track_url(url)
+                track_id = _extract_pandora_track_id(resolved_url)
+                if track_id:
+                    return {"available": True, "track_id": track_id}
+            except Exception as exc:
+                logger.debug("[pandora] availability candidate failed: %s", exc)
+
+        return {"available": False, "reason": "not_found_on_pandora"}
 
     def _resolve_pandora_app_link(self, url: str) -> str:
         """Porta di resolvePandoraAppLink() in JS."""
@@ -755,8 +820,15 @@ class PandoraProvider(BaseProvider):
         if track_id:
             return _normalize_pandora_canonical_url(input_url, track_id)
 
+        # Song.link richiede un URL completo, non un bare ID.
+        # Se input_url non inizia con "http" (es. Spotify ID grezzo),
+        # costruiamo l'URL Spotify corrispondente.
+        url_for_songlink = input_url
+        if not input_url.startswith("http"):
+            url_for_songlink = f"https://open.spotify.com/track/{input_url}"
+
         # Fallback via Song.link
-        songlink   = self._resolve_song_link(str(input_url or "").strip())
+        songlink   = self._resolve_song_link(url_for_songlink)
         pandora_url = self._extract_pandora_url_from_songlink(songlink)
         resolved_id = _extract_pandora_track_id(pandora_url)
 
@@ -802,8 +874,15 @@ class PandoraProvider(BaseProvider):
             if metadata.external_url and "pandora.com" in metadata.external_url:
                 download_url = _normalize_secure_url(metadata.external_url)
             elif pandora_track_id:
+                # Preferisci l'URL esterno completo (es. Spotify) rispetto al bare ID,
+                # così Song.link riceve un URL valido e può trovare il match su Pandora.
+                resolve_input = (
+                    metadata.external_url
+                    if metadata.external_url and metadata.external_url.startswith("http")
+                    else pandora_track_id
+                )
                 download_url = _normalize_secure_url(
-                    self._normalize_pandora_track_url(pandora_track_id)
+                    self._normalize_pandora_track_url(resolve_input)
                 )
             else:
                 return DownloadResult.fail(self.name, "No Pandora track ID or URL available")
@@ -829,9 +908,13 @@ class PandoraProvider(BaseProvider):
             # 4. Chiama l'API Zarz per ottenere i CDN links
             print_source_banner("pandora", f"{_API_BASE_URL}{_DOWNLOAD_PATH}", quality)
 
+            # Assicuriamo che Zarz riceva ESATTAMENTE il formato pulito (es. https://www.pandora.com/TR:XXXXX)
+            zarz_id = _extract_pandora_track_id(download_url)
+            safe_api_url = _build_pandora_url(zarz_id) if zarz_id else download_url
+
             payload = self._post_json(
                 f"{_API_BASE_URL}{_DOWNLOAD_PATH}",
-                {"url": download_url},
+                {"url": safe_api_url},
             )
 
             if not payload or payload.get("success") is not True:

@@ -253,7 +253,7 @@ def _embed_flac(
     if lyrics and lyrics.strip():
         tags["LYRICS"] = lyrics
         prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
-        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
+        print(f"  ✦ Lyrics: added with {prov_str}")
         logger.debug("[tagger/flac] lyrics embedded (%d chars)", len(lyrics))
 
     for key, val in tags.items():
@@ -336,7 +336,7 @@ def _embed_m4a(
     if lyrics and lyrics.strip():
         audio["\xa9lyr"] = [lyrics]
         prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
-        print(f"  ✦ Testo: aggiunto tramite {prov_str}")
+        print(f"  ✦ Lyrics: added with {prov_str}")
         logger.debug("[tagger/m4a] lyrics embedded (%d chars)", len(lyrics))
 
     if cover_data:
