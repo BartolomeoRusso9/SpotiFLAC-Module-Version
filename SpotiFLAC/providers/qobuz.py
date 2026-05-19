@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -98,9 +99,12 @@ _TIDAL_TO_QOBUZ_QUALITY: dict[str, str] = {
     "LOW":             "6",
 }
 
-_API_TIMEOUT_S = 8
-_MAX_RETRIES   = 1
-_RETRY_DELAY_S = 0.3
+_API_TIMEOUT_S      = 8
+_MAX_RETRIES_GET    = 1          # GET APIs: pubbliche, veloci, basta 1 retry
+_MAX_RETRIES_POST   = 2          # POST/Zarz: più soggette a rate-limit, 2 retry
+_RETRY_BASE_DELAY_S = 1.0        # backoff iniziale per 429 (was 0.3 — troppo aggressivo)
+_RETRY_MAX_DELAY_S  = 16.0       # cap del backoff (3 tentativi POST = 1+2=3s totali)
+_RETRY_JITTER       = 0.25       # ±25% jitter per evitare thundering herd sui thread paralleli
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +290,35 @@ def _extract_stream_url_from_json(data: dict) -> str | None:
     return None
 
 
+def _backoff_delay(attempt: int, server_hint_s: float | None = None) -> float:
+    """Exponential backoff con jitter. Usa Retry-After del server se disponibile."""
+    if server_hint_s is not None:
+        base = max(server_hint_s, _RETRY_BASE_DELAY_S)
+    else:
+        base = min(_RETRY_BASE_DELAY_S * (2 ** (attempt - 1)), _RETRY_MAX_DELAY_S)
+    jitter = base * _RETRY_JITTER * (2 * random.random() - 1)   # ±25%
+    return max(0.1, base + jitter)
+
+
+def _parse_retry_after(resp: requests.Response) -> float | None:
+    """Legge l'header Retry-After (secondi o HTTP-date). Ritorna None se assente/malformato."""
+    raw = resp.headers.get("Retry-After", "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        import datetime
+        dt = parsedate_to_datetime(raw)
+        secs = (dt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+        return max(0.0, secs)
+    except Exception:
+        return None
+
+
 def _fetch_stream_url_once(
         api_base:  str,
         track_id:  int,
@@ -296,18 +329,22 @@ def _fetch_stream_url_once(
     is_zarz = "zarz.moe" in api_cleaning
     is_post = api_base in _POST_APIS or is_zarz
 
+    max_retries = _MAX_RETRIES_POST if is_post else _MAX_RETRIES_GET
+
     headers = {
         "User-Agent": _ZARZ_USER_AGENT if is_zarz else _DEFAULT_UA,
         "Accept": "application/json"
     }
-    delay      = _RETRY_DELAY_S
     last_err: Exception = RuntimeError("no attempts made")
 
-    for attempt in range(_MAX_RETRIES + 1):
+    for attempt in range(max_retries + 1):
         if attempt > 0:
-            logger.debug("[qobuz] retry %d/%d for %s after %.1fs", attempt, _MAX_RETRIES, api_base, delay)
+            delay = _backoff_delay(attempt)
+            logger.debug(
+                "[qobuz] retry %d/%d for %s after %.2fs",
+                attempt, max_retries, api_base, delay,
+            )
             time.sleep(delay)
-            delay *= 2
 
         try:
             if is_post:
@@ -334,12 +371,21 @@ def _fetch_stream_url_once(
                     timeout=timeout_s,
                 )
 
+            if resp.status_code == 429:
+                retry_after = _parse_retry_after(resp)
+                wait = _backoff_delay(attempt + 1, retry_after)
+                logger.warning(
+                    "[qobuz] 429 rate-limit da %s (tentativo %d/%d) — attendo %.2fs%s",
+                    api_base, attempt + 1, max_retries + 1, wait,
+                    f" (Retry-After: {retry_after:.0f}s)" if retry_after else "",
+                )
+                last_err = RuntimeError("rate limited (HTTP 429)")
+                if attempt < max_retries:
+                    time.sleep(wait)
+                continue
+
             if resp.status_code >= 500:
                 last_err = RuntimeError(f"HTTP {resp.status_code}")
-                continue
-            if resp.status_code == 429:
-                delay = max(delay, 2.0)
-                last_err = RuntimeError("rate limited")
                 continue
             if resp.status_code != 200:
                 raise RuntimeError(f"HTTP {resp.status_code}")
@@ -382,7 +428,8 @@ def _fetch_stream_url_once(
             raise
         except Exception as exc:
             last_err = exc
-            if not is_post: break
+            if not is_post:
+                break
             break
 
     raise last_err
