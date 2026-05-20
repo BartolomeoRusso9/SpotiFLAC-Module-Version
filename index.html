@@ -174,7 +174,7 @@
 
     /* Right column: progress + log */
     #home-right {
-      width: 258px;
+      width: 500px;
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
@@ -697,7 +697,7 @@
         <div id="home-hero">
           <div id="hero-logo">🎵</div>
           <div id="hero-text">
-            <div id="hero-title">SpotiFLAC <span style="font-family:'JetBrains Mono';font-size:10px;font-weight:400;color:var(--muted);background:var(--yellow-dim);border:1px solid var(--yellow);padding:1px 6px;border-radius:5px;vertical-align:middle;">v0.5.7-b</span></div>
+            <div id="hero-title">SpotiFLAC <span style="font-family:'JetBrains Mono';font-size:10px;font-weight:400;color:var(--muted);background:var(--yellow-dim);border:1px solid var(--yellow);padding:1px 6px;border-radius:5px;vertical-align:middle;">v0.6.1</span></div>
             <div id="hero-sub">Tidal · Qobuz · Amazon · Deezer · Apple</div>
           </div>
         </div>
@@ -757,9 +757,7 @@
         <div id="progress-wrap">
           <div id="progress-label">
             <span id="progress-text">Waiting…</span>
-            <span id="progress-pct">0%</span>
           </div>
-          <div id="progress-bar-bg"><div id="progress-bar"></div></div>
         </div>
 
         <!-- Log panel -->
@@ -812,20 +810,11 @@
             <div class="panel-row">
               <span class="row-label">Audio Quality</span>
               <select id="config-quality">
-                <option value="LOSSLESS">LOSSLESS — CD 16‑bit (Tidal/Deezer)</option>
-                <option value="HI_RES_LOSSLESS">HI‑RES LOSSLESS — 24‑bit (Tidal)</option>
-                <option value="DOLBY_ATMOS">DOLBY ATMOS (Tidal)</option>
-                <option value="HIGH">HIGH — MP3 320 kbps</option>
-                <option value="LOW">LOW — reduced quality</option>
-                <option value="27">27 — Hi‑Res Max (Qobuz)</option>
-                <option value="7">7 — Hi‑Res (Qobuz)</option>
-                <option value="6">6 — CD Lossless (Qobuz)</option>
-                <option value="alac">ALAC — Lossless (Apple Music)</option>
-                <option value="atmos">ATMOS — Spatial Audio (Apple)</option>
-                <option value="aac">AAC (Apple Music)</option>
-                <option value="mp3_192">MP3 192 kbps (Pandora)</option>
-                <option value="aac_64">AAC 64 kbps (Pandora)</option>
-                <option value="aac_32">AAC 32 kbps (Pandora)</option>
+                <option value="LOSSLESS">LOSSLESS (FLAC/ALAC CD Quality)</option>
+                <option value="HI_RES_LOSSLESS">HI-RES_LOSSLESS (Up to 24-bit/192kHz)</option>
+                <option value="DOLBY_ATMOS">DOLBY ATMOS (Spatial Audio)</option>
+                <option value="HIGH">HIGH (MP3 320kbps / AAC 256kbps)</option>
+                <option value="LOW">NORMAL (MP3 128kbps / AAC 128kbps)</option>
               </select>
             </div>
             <div class="panel-row">
@@ -944,16 +933,6 @@
             </div>
           </div>
           <div class="settings-section">
-            <div class="section-title">Auth</div>
-            <div class="panel-row">
-              <span class="row-label">
-                Qobuz token (optional)
-                <small>x-user-auth-token from DevTools → Network</small>
-              </span>
-              <input type="password" id="config-qobuz-token" placeholder="leave empty to skip" style="width:180px;">
-            </div>
-          </div>
-          <div class="settings-section">
             <div class="section-title">Debug</div>
             <div class="panel-row">
               <span class="row-label">Log level</span>
@@ -963,8 +942,23 @@
               </select>
             </div>
           </div>
-        </div>
           <div class="settings-section">
+            <div class="section-title">Auth & Custom API</div>
+            <div class="panel-row">
+              <span class="row-label">
+                Qobuz token (optional)
+                <small>x-user-auth-token from DevTools → Network</small>
+              </span>
+              <input type="password" id="config-qobuz-token" placeholder="leave empty to skip" style="width:180px;">
+            </div>
+            <div class="panel-row">
+              <span class="row-label">
+                Custom Tidal API
+                <small>URL of your hifi-api instance</small>
+              </span>
+              <input type="text" id="config-tidal-api" placeholder="https://..." style="width:180px;">
+            </div>
+          </div> <div class="settings-section">
             <div class="section-title">Profiles</div>
             <div class="panel-row">
               <span class="row-label">Save Profile</span>
@@ -980,8 +974,7 @@
             </div>
           </div>
 
-        <!-- TAB: HEALTH CHECK ─────────────────────────────────────────────── -->
-        <div class="tab-content" id="tab-health">
+        </div> <div class="tab-content" id="tab-health">
 
           <div class="settings-section">
             <div class="section-title">Service Health Check</div>
@@ -1133,11 +1126,11 @@ const ALL_SERVICES = [
   { id: 'qobuz',      label: 'Qobuz',           badge: 'FLAC', checked: true  },
   { id: 'deezer',     label: 'Deezer',          badge: 'FLAC', checked: true  },
   { id: 'amazon',     label: 'Amazon Music',    badge: 'FLAC', checked: false },
-  { id: 'spoti',      label: 'SpotiDownloader', badge: 'FLAC', checked: false },
   { id: 'soundcloud', label: 'SoundCloud',      badge: 'MP3',  checked: false },
   { id: 'youtube',    label: 'YouTube Music',   badge: 'M4A',  checked: false },
   { id: 'apple',      label: 'Apple Music',     badge: 'M4A',  checked: false },
   { id: 'pandora',    label: 'Pandora',         badge: 'MP3',  checked: false },
+  { id: 'spoti',      label: 'SpotiDownloader', badge: 'FLAC', checked: false },
 ];
 const ALL_LYRICS_PROVIDERS = [
   { id: 'spotify',    label: 'Spotify',     checked: true },
@@ -1329,9 +1322,10 @@ function updateHealthResults(results) {
 // ── Python bridge ──────────────────────────────────────────────────────────────
 function updateLogFromPython(msg, type) { logMessage(msg, type || ''); }
 
-function setProgress(pct, label) {
-  $('progress-bar').style.width = pct + '%';
-  $('progress-pct').textContent = pct + '%';
+function app_set_progress(label) {
+  if (label) $('progress-text').textContent = label;
+}
+function setProgress(label) {
   if (label) $('progress-text').textContent = label;
 }
 
@@ -1369,65 +1363,6 @@ function logMessage(msg, type = '') {
 function clearLog() {
   $('logArea').innerHTML = '';
 }
-
-// ── Recent Fetches ─────────────────────────────────────────────────────────────
-const HISTORY_KEY = 'sf-fetch-history';
-const HISTORY_MAX = 6;
-
-function detectUrlType(url) {
-  if (!url) return 'track';
-  if (/\/album\//i.test(url))    return 'album';
-  if (/\/playlist\//i.test(url)) return 'playlist';
-  if (/\/artist\//i.test(url))   return 'artist';
-  return 'track';
-}
-
-function saveToHistory(url, title, artist, cover, trackCount) {
-  let hist = [];
-  try { hist = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch(e) {}
-  hist = hist.filter(h => h.url !== url);
-  hist.unshift({ url, title, artist, cover, trackCount, type: detectUrlType(url), ts: Date.now() });
-  hist = hist.slice(0, HISTORY_MAX);
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
-  renderRecentFetches();
-}
-
-function renderRecentFetches() {
-  let hist = [];
-  try { hist = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch(e) {}
-  const grid = $('recent-grid');
-  const section = $('recent-section');
-  if (!hist.length) { section.classList.add('hidden'); return; }
-  section.classList.remove('hidden');
-  grid.innerHTML = '';
-  hist.forEach(item => {
-    const card = document.createElement('div');
-    card.className = 'recent-card';
-    card.onclick = () => {
-      $('urlInput').value = item.url;
-      $('urlInput').focus();
-    };
-    const coverStyle = item.cover
-      ? `background-image:url('${item.cover}');`
-      : '';
-    const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1);
-    const typeEmoji = { album: '💿', playlist: '📋', track: '🎵', artist: '🎤' }[item.type] || '🎵';
-    const subLine = item.artist
-      ? `${item.artist}`
-      : item.trackCount ? `${item.trackCount} tracks` : '';
-    card.innerHTML = `
-      <div class="recent-cover" style="${coverStyle}">${item.cover ? '' : typeEmoji}</div>
-      <div class="recent-info">
-        <div class="recent-title">${item.title || item.url}</div>
-        ${subLine ? `<div class="recent-sub">${subLine}</div>` : ''}
-        <span class="recent-type-badge ${item.type}">${typeEmoji} ${typeLabel}${item.trackCount ? ` · ${item.trackCount}` : ''}</span>
-      </div>
-    `;
-    grid.appendChild(card);
-  });
-}
-
-renderRecentFetches();
 
 // ── Tracklist ──────────────────────────────────────────────────────────────────
 function showTracklist(tracksJson) {
@@ -1471,10 +1406,10 @@ function resetUI() {
   $('check-all').checked = true;
   $('track-count-badge').style.display = 'none';
   setProgress(0, 'Waiting…');
-  renderRecentFetches();
+  loadHistoryAndProfiles();
 }
 
-// ── Config builder ─────────────────────────────────────────────────────────────
+// buildConfig()
 function buildConfig() {
   const services    = getOrderedChecked('services-list');
   const lyricsProvs = getOrderedChecked('lyrics-list');
@@ -1482,6 +1417,7 @@ function buildConfig() {
   const loopVal  = parseInt($('config-loop').value)    || 0;
   const retries  = parseInt($('config-retries').value) || 0;
   const qToken   = $('config-qobuz-token').value.trim() || null;
+  const tApi     = $('config-tidal-api').value.trim() || null;
   const postCmd  = $('config-post-cmd')?.value?.trim() || '';
   const postAction = $('config-post-action').value;
   return {
@@ -1503,9 +1439,96 @@ function buildConfig() {
     post_download_action:    postAction,
     post_download_command:   postAction === 'command' ? postCmd : '',
     qobuz_token:             qToken,
+    tidal_custom_api:        tApi,
     loop:                    loopVal > 0 ? loopVal : null,
     log_level:               $('config-loglevel').value,
   };
+}
+
+// ── Integrazione Python Backend per Storia e Profili ─────────────────────────
+async function loadHistoryAndProfiles() {
+    if (!window.pywebview?.api) return;
+
+    // Load History
+    const hist = await window.pywebview.api.get_history();
+    renderRecentFetchesFromData(hist);
+
+    // Load Profiles
+    const profiles = await window.pywebview.api.get_profiles();
+    const select = $('profile-select');
+    select.innerHTML = '<option value="">Select a profile...</option>';
+    profiles.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = p;
+        select.appendChild(opt);
+    });
+}
+
+// Riscrivi renderRecentFetches in modo che riceva i dati da Python
+function renderRecentFetchesFromData(hist) {
+  const grid = $('recent-grid');
+  const section = $('recent-section');
+  if (!hist || !hist.length) { section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+  grid.innerHTML = '';
+  hist.forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'recent-card';
+    card.onclick = () => {
+      $('urlInput').value = item.url;
+      $('urlInput').focus();
+    };
+    const coverStyle = item.cover ? `background-image:url('${item.cover}');` : '';
+    const typeLabel = item.type ? item.type.charAt(0).toUpperCase() + item.type.slice(1) : 'Track';
+    const typeEmoji = { album: '💿', playlist: '📋', track: '🎵', artist: '🎤' }[item.type] || '🎵';
+    const subLine = item.artist ? `${item.artist}` : item.trackCount ? `${item.trackCount} tracks` : '';
+    card.innerHTML = `
+      <div class="recent-cover" style="${coverStyle}">${item.cover ? '' : typeEmoji}</div>
+      <div class="recent-info">
+        <div class="recent-title">${item.title || item.url}</div>
+        ${subLine ? `<div class="recent-sub">${subLine}</div>` : ''}
+        <span class="recent-type-badge ${item.type}">${typeEmoji} ${typeLabel}${item.trackCount ? ` · ${item.trackCount}` : ''}</span>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+// Aggiorna le funzioni Load e Save Profilo in HTML
+async function saveProfile() {
+    const name = $('profile-name').value.trim();
+    if (!name) return logMessage('Enter a profile name', 'error');
+    const cfg = buildConfig();
+    await window.pywebview.api.save_profile_data(name, cfg);
+    loadHistoryAndProfiles();
+}
+
+async function loadProfile() {
+    const name = $('profile-select').value;
+    if (!name) return;
+    const data = await window.pywebview.api.load_profile_data(name);
+    if (data) {
+        if (data.quality) $('config-quality').value = data.quality;
+        if (data.filename_format) $('config-filename').value = data.filename_format;
+        if (data.qobuz_token) $('config-qobuz-token').value = data.qobuz_token;
+        if (data.tidal_custom_api) $('config-tidal-api').value = data.tidal_custom_api;
+        
+        $('config-track-numbers').checked = !!data.use_track_numbers;
+        $('config-album-track-numbers').checked = !!data.use_album_track_numbers;
+        $('config-artist-subfolders').checked = !!data.use_artist_subfolders;
+        $('config-album-subfolders').checked = !!data.use_album_subfolders;
+        $('config-first-artist').checked = !!data.first_artist_only;
+        $('config-featuring').checked = !!data.include_featuring;
+        $('config-lyrics').checked = !!data.embed_lyrics;
+        $('config-enrich').checked = !!data.enrich_metadata;
+
+        onTrackNumChange();
+        onLyricsChange();
+        onEnrichChange();
+
+        logMessage(`Profile ${name} loaded.`, 'ok');
+    }
 }
 
 // ── Main action ────────────────────────────────────────────────────────────────
@@ -1551,19 +1574,6 @@ async function handleAction() {
   }
 }
 
-// Override updateMetadata to also save history
-const _origUpdateMetadata = updateMetadata;
-window.updateMetadata = function(data) {
-  _origUpdateMetadata(data);
-  try {
-    const d = typeof data === 'string' ? JSON.parse(data) : data;
-    const url = $('urlInput').value.trim();
-    if (url && d.title && d.title !== '—') {
-      const tc = (d.quality || '').match(/(\d+) tracks/);
-      saveToHistory(url, d.title, d.artist || '', d.cover || '', tc ? parseInt(tc[1]) : null);
-    }
-  } catch(e) {}
-};
 </script>
 </body>
 </html>
