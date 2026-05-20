@@ -3,11 +3,10 @@ import threading
 import json
 import os
 import logging
+import requests as req_lib
 
-# ── Default download folder ───────────────────────────────────────────────────
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
 
-# ── Logging handler → UI ─────────────────────────────────────────────────────
 class UILogHandler(logging.Handler):
     def __init__(self, api):
         super().__init__()
@@ -25,7 +24,7 @@ class UILogHandler(logging.Handler):
 
 class SpotiFLAC_API:
     def __init__(self):
-        self._window        = None  
+        self._window        = None
         self.download_dir   = DEFAULT_DOWNLOAD_DIR
         self.current_tracks = []
         self.current_url    = ""
@@ -36,11 +35,7 @@ class SpotiFLAC_API:
     def _on_loaded(self):
         self.log("Python Backend connected.", "info")
         self.log(f"Default download folder: {self.download_dir}", "info")
-        
-        # 1. Avvia l'health check in automatico all'avvio
         self.run_health_check(["tidal", "qobuz", "deezer", "apple", "soundcloud"])
-        
-        # 2. Richiedi all'UI di caricare storia e profili salvati in Python
         try:
             if self._window:
                 self._window.evaluate_js("window.loadHistoryAndProfiles();")
@@ -75,7 +70,7 @@ class SpotiFLAC_API:
         except Exception:
             pass
 
-    # ── API per Profili e Cronologia ──────────────────────────────────────────
+    # ── Profile & History API ─────────────────────────────────────────────────
 
     def get_history(self):
         try:
@@ -98,6 +93,29 @@ class SpotiFLAC_API:
         except Exception:
             return {}
 
+    def remove_history_item(self, url):
+        try:
+            from SpotiFLAC.core.session_memory import remove_url_from_history
+            remove_url_from_history(url)
+        except Exception:
+            pass
+
+    def get_network_status(self):
+        try:
+            resp = req_lib.get("https://ipapi.co/json/", timeout=10)
+            data = resp.json() if resp.status_code == 200 else {}
+            return {
+                "ip": data.get("ip", "Unavailable"),
+                "country_name": data.get("country_name", "Unknown"),
+                "country_code": data.get("country_code", ""),
+            }
+        except Exception:
+            return {
+                "ip": "Unavailable",
+                "country_name": "Unknown",
+                "country_code": "",
+            }
+
     def save_profile_data(self, name, cfg):
         try:
             from SpotiFLAC.core.profiles import save_profile
@@ -106,7 +124,7 @@ class SpotiFLAC_API:
         except Exception as e:
             self.log(f"Failed to save profile: {e}", "error")
 
-    # ── Window and folder controls ────────────────────────────────────────────
+    # ── Window controls ───────────────────────────────────────────────────────
 
     def WindowMinimise(self):
         if self._window:
@@ -132,14 +150,102 @@ class SpotiFLAC_API:
                 self.log(f"Download folder changed: {self.download_dir}", "ok")
                 try:
                     self._window.evaluate_js(f"window.updateFolderLabel({json.dumps(self.download_dir)});")
-                except:
+                except Exception:
                     pass
 
     def open_url(self, url):
         import webbrowser
         webbrowser.open(url)
 
-    # ── Phase 1: Metadata and track lookup ───────────────────────────────────
+    # ── Lyrics download (separate .lrc file) ──────────────────────────────────
+
+    def download_track_lyrics(self, track_data):
+        """Download and save lyrics as a separate .lrc file for a single track."""
+        threading.Thread(
+            target=self._download_lyrics_task,
+            args=(track_data,),
+            daemon=True,
+        ).start()
+
+    def _download_lyrics_task(self, track_data):
+        try:
+            title   = track_data.get("title", "Unknown")
+            artist  = track_data.get("artist", "")
+            isrc    = track_data.get("isrc", "")
+            dur_ms  = track_data.get("duration_ms", 0)
+            track_id = track_data.get("id", "")
+
+            self.log(f"Fetching lyrics for: {title}…", "info")
+
+            from SpotiFLAC.core.lyrics import fetch_lyrics
+            lyrics_text, provider = fetch_lyrics(
+                track_name  = title,
+                artist_name = artist,
+                duration_s  = dur_ms // 1000 if dur_ms else 0,
+                track_id    = track_id,
+                isrc        = isrc,
+            )
+
+            if not lyrics_text:
+                self.log(f"No lyrics found for: {title}", "error")
+                return
+
+            import re
+            safe_title  = re.sub(r'[\\/*?:"<>|]', "", title).strip()
+            safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
+            filename    = f"{safe_artist} - {safe_title}.lrc" if safe_artist else f"{safe_title}.lrc"
+            out_path    = os.path.join(self.download_dir, filename)
+
+            os.makedirs(self.download_dir, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(lyrics_text)
+
+            self.log(f"Lyrics saved: {filename} (via {provider})", "ok")
+
+        except Exception as e:
+            self.log(f"Lyrics download error: {e}", "error")
+
+    # ── Cover download (separate .jpg file) ───────────────────────────────────
+
+    def download_track_cover(self, track_data):
+        """Download and save album cover as a separate .jpg file."""
+        threading.Thread(
+            target=self._download_cover_task,
+            args=(track_data,),
+            daemon=True,
+        ).start()
+
+    def _download_cover_task(self, track_data):
+        try:
+            title     = track_data.get("title", "Unknown")
+            artist    = track_data.get("artist", "")
+            cover_url = track_data.get("cover", "")
+
+            if not cover_url:
+                self.log(f"No cover URL available for: {title}", "error")
+                return
+
+            self.log(f"Downloading cover for: {title}…", "info")
+
+            resp = req_lib.get(cover_url, timeout=15)
+            resp.raise_for_status()
+
+            import re
+            safe_title  = re.sub(r'[\\/*?:"<>|]', "", title).strip()
+            safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
+            filename    = f"{safe_artist} - {safe_title}.jpg" if safe_artist else f"{safe_title}.jpg"
+            out_path    = os.path.join(self.download_dir, filename)
+
+            os.makedirs(self.download_dir, exist_ok=True)
+            with open(out_path, "wb") as f:
+                f.write(resp.content)
+
+            self.log(f"Cover saved: {filename}", "ok")
+
+        except Exception as e:
+            self.log(f"Cover download error: {e}", "error")
+
+    # ── Phase 1: Metadata fetch ───────────────────────────────────────────────
 
     def fetch_metadata(self, url, include_featuring=False):
         self.current_url = url
@@ -173,36 +279,44 @@ class SpotiFLAC_API:
             self.current_tracks = tracks
             track_data = []
 
-            # Estrazione approfondita dei dati per la tabella e per le INFO (Punti 1 e 2)
             for i, t in enumerate(tracks):
                 track_data.append({
-                    "index": i,
-                    "title": getattr(t, 'title', f'Track {i+1}'),
-                    "artist": getattr(t, 'artists', ''),
-                    "cover": getattr(t, 'cover_url', ''),
-                    "duration_ms": getattr(t, 'duration_ms', getattr(t, 'duration', 0)),
-                    "explicit": getattr(t, 'explicit', False),
-                    "isrc": getattr(t, 'isrc', ''),
-                    "url": getattr(t, 'url', getattr(t, 'link', '')),
-                    "plays": getattr(t, 'plays', getattr(t, 'play_count', 0))
+                    "index":       i,
+                    "id":          getattr(t, 'id', ''),
+                    "title":       getattr(t, 'title', f'Track {i+1}'),
+                    "artist":      getattr(t, 'artists', ''),
+                    "cover":       getattr(t, 'cover_url', ''),
+                    "duration_ms": getattr(t, 'duration_ms', 0),
+                    "explicit":    getattr(t, 'explicit', False),
+                    "isrc":        getattr(t, 'isrc', ''),
+                    "external_url": getattr(t, 'external_url', ''),
                 })
 
             badge = f"FLAC — {len(tracks)} tracks" if len(tracks) > 1 else "FLAC"
-            
-            # Gestione nome per i link dell'artista (Punto 3)
-            if "/artist/" in url.lower() or "artist" in url.lower():
-                display_title = collection_name
+
+            # For artist URLs show only artist name
+            lower_url = url.lower()
+            is_artist = "/artist/" in lower_url
+            if is_artist:
+                display_title  = collection_name
                 display_artist = ""
             else:
-                display_title = collection_name
+                display_title  = collection_name
                 display_artist = tracks[0].artists if tracks else ""
 
-            self.set_metadata(display_title, display_artist, tracks[0].cover_url if tracks else "", badge)
+            self.set_metadata(display_title, display_artist,
+                              tracks[0].cover_url if tracks else "", badge)
 
-            self.log(f"Found: {collection_name} ({len(tracks)} track(s)). Choose the songs to download.", "ok")
+            self.log(f"Found: {collection_name} ({len(tracks)} track(s)). Choose songs to download.", "ok")
             self.set_progress("Ready for download.")
 
-            # Pass track data back to UI to show the list
+            try:
+                from SpotiFLAC.core.session_memory import add_url_to_history
+                cover = getattr(tracks[0], 'cover_url', '') if tracks else ''
+                add_url_to_history(url, label=collection_name, cover=cover)
+            except Exception:
+                pass
+
             try:
                 if self._window:
                     self._window.evaluate_js(f"window.showTracklist({json.dumps(track_data)});")
@@ -213,65 +327,62 @@ class SpotiFLAC_API:
             self.log(f"Error fetching metadata: {str(e)}", "error")
             self.set_progress("Error.")
 
-    # ── Phase 2: Actual download ──────────────────────────────────────────────
+    # ── Phase 2: Download ─────────────────────────────────────────────────────
 
     def download_tracks(self, selected_indices, config):
-        threading.Thread(target=self._download_task, args=(selected_indices, config), daemon=True).start()
+        threading.Thread(target=self._download_task,
+                         args=(selected_indices, config), daemon=True).start()
 
     def _download_task(self, selected_indices, config):
         sf_logger = logging.getLogger("SpotiFLAC")
         handler   = UILogHandler(self)
         handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
         sf_logger.addHandler(handler)
+        monitor_stop = None
+        monitor_thread = None
 
-        log_level_str = config.get("log_level", "INFO")
+        log_level_str    = config.get("log_level", "INFO")
         current_log_level = logging.DEBUG if log_level_str == "DEBUG" else logging.INFO
         sf_logger.setLevel(current_log_level)
 
         try:
             os.makedirs(self.download_dir, exist_ok=True)
 
-            quality              = config.get("quality", "LOSSLESS")
-            allow_fallback       = config.get("allow_fallback", True)
-            embed_lyrics         = config.get("lyrics", True)
-            enrich_metadata      = config.get("enrich_metadata", True)
-            services             = config.get("services", ["tidal", "qobuz", "deezer"])
-
-            filename_format      = config.get("filename_format", "{title} - {artist}")
-            use_track_numbers    = config.get("use_track_numbers", False)
+            quality               = config.get("quality", "LOSSLESS")
+            allow_fallback        = config.get("allow_fallback", True)
+            embed_lyrics          = config.get("lyrics", True)
+            enrich_metadata       = config.get("enrich_metadata", True)
+            services              = config.get("services", ["tidal", "qobuz", "deezer"])
+            filename_format       = config.get("filename_format", "{title} - {artist}")
+            use_track_numbers     = config.get("use_track_numbers", False)
             use_album_track_numbers = config.get("use_album_track_numbers", False)
             use_artist_subfolders = config.get("use_artist_subfolders", False)
             use_album_subfolders  = config.get("use_album_subfolders", False)
-            first_artist_only    = config.get("first_artist_only", False)
-            include_featuring    = config.get("include_featuring", False)
-
-            lyrics_providers     = config.get("lyrics_providers") or ["spotify", "apple", "musixmatch", "lrclib", "amazon"]
-            enrich_providers     = config.get("enrich_providers") or ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
-
-            track_max_retries    = int(config.get("track_max_retries", 0))
-            post_download_action = config.get("post_download_action", "none")
+            first_artist_only     = config.get("first_artist_only", False)
+            include_featuring     = config.get("include_featuring", False)
+            lyrics_providers      = config.get("lyrics_providers") or ["spotify", "apple", "musixmatch", "lrclib", "amazon"]
+            enrich_providers      = config.get("enrich_providers") or ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
+            track_max_retries     = int(config.get("track_max_retries", 0))
+            post_download_action  = config.get("post_download_action", "none")
             post_download_command = config.get("post_download_command", "")
-            qobuz_token          = config.get("qobuz_token") or None
-            tidal_custom_api     = config.get("tidal_custom_api") or None
-
-            loop_val             = config.get("loop", None)
-            loop_minutes         = int(loop_val) if loop_val else None
+            qobuz_token           = config.get("qobuz_token") or None
+            tidal_custom_api      = config.get("tidal_custom_api") or None
+            loop_val              = config.get("loop", None)
+            loop_minutes          = int(loop_val) if loop_val else None
 
             if not services:
-                self.log("Error: you must select at least one service/source.", "error")
+                self.log("Error: select at least one service.", "error")
                 return
 
-            # ── Costruzione corretta degli URL per le singole tracce ──────────
             if len(selected_indices) == len(self.current_tracks):
                 urls_to_download = [self.current_url]
-                self.log("Starting download of the entire album/playlist…", "info")
+                self.log("Downloading entire album/playlist…", "info")
             else:
                 urls_to_download = []
                 for i in selected_indices:
                     t = self.current_tracks[i]
-                    t_url = getattr(t, 'url', None) or getattr(t, 'link', None)
-                    t_id = getattr(t, 'id', None) or getattr(t, 'track_id', None)
-                    
+                    t_url = getattr(t, 'external_url', None) or getattr(t, 'url', None)
+                    t_id  = getattr(t, 'id', None)
                     if not t_url and t_id:
                         if "spotify" in self.current_url:
                             t_url = f"https://open.spotify.com/track/{t_id}"
@@ -279,19 +390,22 @@ class SpotiFLAC_API:
                             t_url = f"https://tidal.com/browse/track/{t_id}"
                         elif "apple" in self.current_url:
                             t_url = f"https://music.apple.com/track/{t_id}"
-                        elif "deezer" in self.current_url:
-                            t_url = f"https://www.deezer.com/track/{t_id}"
-                        
                     if t_url:
                         urls_to_download.append(t_url)
                     else:
-                        self.log(f"Could not resolve URL for '{t.title}'. It will be skipped.", "error")
+                        self.log(f"Could not resolve URL for '{t.title}'. Skipping.", "error")
 
             if not urls_to_download:
                 self.log("No valid URLs to download.", "error")
                 return
 
             self.set_progress(f"Downloading ({quality})…")
+            monitor_stop = threading.Event()
+            monitor_thread = threading.Thread(
+                target=self._download_stats_monitor,
+                args=(monitor_stop,), daemon=True
+            )
+            monitor_thread.start()
 
             from SpotiFLAC import SpotiFLAC
 
@@ -323,15 +437,30 @@ class SpotiFLAC_API:
                 )
 
             self.set_progress("Complete!")
-            self.log(f"All selected tracks saved to: {self.download_dir}", "ok")
+            self.log(f"All tracks saved to: {self.download_dir}", "ok")
+            try:
+                if self._window:
+                    self._window.evaluate_js("window.app_download_finished(true);")
+            except Exception:
+                pass
 
         except Exception as e:
             self.log(f"Download error: {str(e)}", "error")
             self.set_progress("Error.")
+            try:
+                if self._window:
+                    self._window.evaluate_js("window.app_download_finished(false);")
+            except Exception:
+                pass
         finally:
+            if monitor_stop is not None:
+                monitor_stop.set()
+            if monitor_thread is not None:
+                monitor_thread.join(timeout=1)
+            self._push_download_stats()
             sf_logger.removeHandler(handler)
 
-    # ── Health Check ─────────────────────────────────────────────────────────
+    # ── Health Check ──────────────────────────────────────────────────────────
 
     def run_health_check(self, services):
         threading.Thread(
@@ -340,11 +469,33 @@ class SpotiFLAC_API:
             daemon=True,
         ).start()
 
+    def _download_stats_monitor(self, stop_event):
+        try:
+            from SpotiFLAC.core.progress import DownloadManager
+            manager = DownloadManager()
+            while not stop_event.wait(0.25):
+                self._push_download_stats(manager.get_stats())
+        except Exception:
+            pass
+        finally:
+            self._push_download_stats()
+
+    def _push_download_stats(self, stats=None):
+        try:
+            if stats is None:
+                from SpotiFLAC.core.progress import DownloadManager
+                stats = DownloadManager().get_stats()
+            safe = json.dumps(stats)
+            if self._window:
+                self._window.evaluate_js(f"window.app_update_download_stats({safe});")
+        except Exception:
+            pass
+
     def _health_check_task(self, services):
         try:
             import importlib
             hc_module = importlib.import_module("SpotiFLAC.core.health_check")
-            hc_run = getattr(hc_module, "run_health_check")
+            hc_run    = getattr(hc_module, "run_health_check")
             self.log(f"Health check started for: {', '.join(services)}", "info")
             results = hc_run(services)
             data = [
@@ -360,17 +511,16 @@ class SpotiFLAC_API:
             ]
             ok_providers = [r.provider for r in results if r.ok]
             self.log(
-                f"Health check complete — {len([r for r in results if r.ok])}/{len(results)} endpoints OK.",
+                f"Health check — {len([r for r in results if r.ok])}/{len(results)} endpoints OK.",
                 "ok" if ok_providers else "error",
             )
-            # Pass results to UI
             try:
                 if self._window:
                     self._window.evaluate_js(f"window.updateHealthResults({json.dumps(data)});")
             except Exception:
                 pass
         except ImportError:
-            self.log("health_check module not found. Make sure SpotiFLAC is installed.", "error")
+            self.log("health_check module not found.", "error")
         except Exception as e:
             self.log(f"Health check error: {str(e)}", "error")
 

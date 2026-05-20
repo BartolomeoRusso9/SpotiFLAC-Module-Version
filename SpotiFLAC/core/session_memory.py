@@ -62,12 +62,12 @@ def set_last_folder(folder: str) -> None:
 def get_url_history() -> list[dict]:
     """
     Ritorna la cronologia URL in ordine dal più recente al meno recente.
-    Ogni entry è: {"url": str, "label": str, "at": int (unix timestamp)}
+    Ogni entry è: {"url": str, "label": str, "cover": str, "at": int (unix timestamp)}
     """
     return _load().get("url_history", [])
 
 
-def add_url_to_history(url: str, label: str = "") -> None:
+def add_url_to_history(url: str, label: str = "", cover: str = "") -> None:
     """
     Aggiunge un URL alla cronologia (o lo sposta in cima se già presente).
     Il label è una descrizione breve opzionale (es. nome della collection).
@@ -79,6 +79,7 @@ def add_url_to_history(url: str, label: str = "") -> None:
     history.insert(0, {
         "url":   url,
         "label": label or url[:65],
+        "cover": cover or "",
         "at":    int(time.time()),
     })
     data["url_history"] = history[:_MAX_HISTORY]

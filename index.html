@@ -4,56 +4,58 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SpotiFLAC</title>
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #0a0a0a;
-      --surface:   #111113;
-      --surface2:  #19191d;
-      --surface3:  #222227;
-      --border:    #2a2a30;
-      --border2:   #3a3a42;
-      --text:      #f0f0f4;
-      --text2:     #a0a0b0;
-      --muted:     #60606e;
-      --yellow:    #f5c000;
-      --yellow-d:  #c99800;
-      --yellow-bg: rgba(245,192,0,.1);
-      --yellow-glow: rgba(245,192,0,.25);
-      --green:     #22c55e;
-      --red:       #ef4444;
-      --blue:      #3b82f6;
-      --radius:    10px;
-      --radius-sm: 7px;
-      --t: 0.15s ease;
+      --bg:         #0a0a0a;
+      --surface:    #111113;
+      --surface2:   #19191d;
+      --surface3:   #222227;
+      --border:     #2a2a30;
+      --border2:    #3a3a42;
+      --text:       #f0f0f4;
+      --text2:      #a0a0b0;
+      --muted:      #60606e;
+      --yellow:     #f5c000;
+      --yellow-d:   #c99800;
+      --yellow-bg:  rgba(245,192,0,.1);
+      --yellow-glow:rgba(245,192,0,.25);
+      --green:      #22c55e;
+      --red:        #ef4444;
+      --blue:       #3b82f6;
+      --radius:     10px;
+      --radius-sm:  7px;
+      --t:          0.15s ease;
+      --app-font:   'Google Sans', 'Syne', sans-serif;
+    }
+
+    /* ── Light theme ── */
+    body.light-theme {
+      --bg:        #f5f5f7;
+      --surface:   #ffffff;
+      --surface2:  #f0f0f4;
+      --surface3:  #e5e5ea;
+      --border:    #d1d1d6;
+      --border2:   #c7c7cc;
+      --text:      #111113;
+      --text2:     #3a3a42;
+      --muted:     #8e8e93;
+      --yellow:    #d4a200;
+      --yellow-d:  #b88b00;
+      --yellow-bg: rgba(212,162,0,.12);
     }
 
     html, body { height: 100%; overflow: hidden; background: var(--bg); }
     body {
-      font-family: 'Google Sans', 'Syne', sans-serif;
+      font-family: var(--app-font);
       color: var(--text);
       display: flex; flex-direction: column;
-      user-select: none;
+      /* CRITICAL: no drag on body — only titlebar drags */
       -webkit-app-region: no-drag;
+      user-select: none;
       font-size: 13px;
-    }
-
-    body.light-theme {
-      --bg: #f5f5f7;
-      --surface: #ffffff;
-      --surface2: #f0f0f4;
-      --surface3: #e5e5ea;
-      --border: #d1d1d6;
-      --border2: #c7c7cc;
-      --text: #111113;
-      --text2: #3a3a42;
-      --muted: #8e8e93;
-      --yellow: #eab308;
-      --yellow-d: #ca8a04;
-      --yellow-bg: rgba(234, 179, 8, 0.15);
-      --yellow-glow: rgba(234, 179, 8, 0.3);
     }
 
     /* ── Titlebar ── */
@@ -64,31 +66,62 @@
       display: flex; align-items: center;
       padding: 0 14px;
       gap: 10px;
+      /* ONLY the titlebar itself drags */
       -webkit-app-region: drag;
       flex-shrink: 0;
       z-index: 200;
     }
-    .dots { display: flex; gap: 6px; -webkit-app-region: no-drag; }
+    /* Everything inside titlebar resets drag so clicks work */
+    #titlebar * { -webkit-app-region: no-drag; }
+    /* Allow dragging on the logo/title region */
+    #tb-logo, #tb-logo * { -webkit-app-region: drag; }
+
+    .dots { display: flex; gap: 6px; }
     .dot {
       width: 12px; height: 12px; border-radius: 50%; cursor: pointer;
-      transition: filter .15s; flex-shrink: 0;
+      transition: filter .15s, transform .15s; flex-shrink: 0;
     }
-    .dot:hover { filter: brightness(1.2); }
+    .dot:hover { filter: brightness(1.15); transform: scale(1.05); }
     .dot.c { background: #ff5f57; }
     .dot.m { background: #febc2e; }
     .dot.x { background: #28c840; }
+
     #tb-logo {
-      display: flex; align-items: center; gap: 7px;
-      font-weight: 800; font-size: 13px; letter-spacing: .05em;
-      -webkit-app-region: no-drag;
+      display: none;
     }
     #tb-logo .logo-icon {
       width: 22px; height: 22px;
-      background: var(--yellow);
-      border-radius: 6px;
+      background: var(--yellow); border-radius: 6px;
       display: flex; align-items: center; justify-content: center;
       font-size: 12px;
     }
+    #titlebar-network {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 14px; padding: 6px 10px;
+      color: var(--text2); font-size: 12px;
+      transition: opacity var(--t);
+    }
+    #titlebar-network.hidden { opacity: 0; pointer-events: none; visibility: hidden; }
+    .network-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 8px; border-radius: 999px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text);
+      font-weight: 600;
+    }
+    .network-ip {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text2); font-size: 11px; letter-spacing: .02em;
+      max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .network-eye {
+      border: none; background: var(--surface2); color: var(--text2);
+      width: 28px; height: 28px; border-radius: 999px;
+      cursor: pointer; display: inline-grid; place-items: center;
+      transition: background var(--t), color var(--t);
+    }
+    .network-eye:hover { background: var(--surface3); color: var(--yellow); }
     #tb-version {
       font-family: 'JetBrains Mono', monospace;
       font-size: 10px; font-weight: 500;
@@ -97,15 +130,6 @@
       padding: 1px 6px; border-radius: 4px;
     }
     .tb-spacer { flex: 1; }
-    .tb-btn {
-      width: 28px; height: 28px;
-      background: none; border: 1px solid transparent;
-      border-radius: 6px; color: var(--muted);
-      cursor: pointer; font-size: 14px;
-      display: flex; align-items: center; justify-content: center;
-      transition: all var(--t); -webkit-app-region: no-drag;
-    }
-    .tb-btn:hover { background: var(--surface2); border-color: var(--border); color: var(--text2); }
 
     /* ── Layout ── */
     #app-body { flex: 1; display: flex; overflow: hidden; }
@@ -134,59 +158,89 @@
     /* ── Content ── */
     #content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
-    /* ── View ── */
     .view { display: none; flex-direction: column; flex: 1; overflow: hidden; }
     .view.active { display: flex; }
 
-    /* ══════════════ HOME VIEW ══════════════ */
+    /* ══════════ HOME VIEW ══════════ */
     #view-home { overflow: hidden; }
 
-    /* ── Search bar row ── */
+    /* Search bar — NO country dropdown */
+    #home-hero {
+      padding: 18px 18px 12px;
+      display: flex; justify-content: center;
+    }
+    .hero-text {
+      max-width: 800px; text-align: center;
+    }
+    .hero-headline {
+      display: flex; align-items: center; justify-content: center; gap: 14px;
+      flex-wrap: wrap;
+    }
+    .hero-logo {
+      display: grid; place-items: center;
+      gap: 8px; text-align: center;
+    }
+    .hero-icon {
+      width: 56px; height: 56px; border-radius: 18px;
+      background: #1db954; display: grid; place-items: center;
+      color: #fff; font-size: 24px;
+      box-shadow: 0 18px 45px rgba(29,185,84,.16);
+    }
+    .hero-badge {
+      background: #f59e0b; color: #000; font-family: 'JetBrains Mono', monospace;
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      padding: 4px 10px; border-radius: 999px; text-transform: uppercase;
+    }
+    .hero-main {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center;
+    }
+    .hero-title {
+      font-size: 40px; font-weight: 900; color: var(--text);
+      letter-spacing: -.03em;
+    }
+    .hero-version {
+      display: inline-flex; align-items: center; justify-content: center;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
+      color: #000; background: #f5c000; padding: 4px 10px; border-radius: 20px;
+      box-shadow: 0 12px 24px rgba(245,192,0,.14);
+    }
+    .hero-subtitle {
+      margin-top: 10px; color: var(--text2); font-size: 14px;
+      max-width: 760px; line-height: 1.6; margin-left: auto; margin-right: auto;
+    }
     #search-bar {
-      padding: 14px 18px 12px;
+      padding: 8px 18px 16px;
+      display: flex; gap: 10px; align-items: center;
       border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
-      display: flex; gap: 8px; align-items: center;
+      flex-wrap: wrap;
+    }
+    .url-wrap { flex: 1; min-width: 0; }
+    #urlInput {
+      width: 100%; padding: 14px 16px 14px 40px;
+      font-size: 14px; border-radius: 16px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+    }
+    #fetchBtn {
+      min-width: 120px; height: 44px;
+      border-radius: 16px;
+      font-size: 14px;
+      box-shadow: 0 10px 30px rgba(37,99,235,.08);
     }
     .url-wrap { flex: 1; position: relative; }
     .url-icon {
-      position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
       color: var(--muted); pointer-events: none;
-    }
-    #urlInput {
-      width: 100%; padding: 9px 12px 9px 33px;
-      background: var(--surface2);
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius-sm);
-      color: var(--text); font-family: 'Syne', sans-serif; font-size: 12.5px;
-      outline: none; transition: border-color var(--t), box-shadow var(--t);
-      user-select: text;
     }
     #urlInput:focus { border-color: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-bg); }
     #urlInput::placeholder { color: var(--muted); font-size: 12px; }
     #urlInput:disabled { opacity: .45; }
-    .country-sel {
-      padding: 7px 10px; background: var(--surface2);
-      border: 1.5px solid var(--border); border-radius: var(--radius-sm);
-      color: var(--text); font-family: 'Syne', sans-serif; font-size: 12px;
-      cursor: pointer; outline: none; transition: border-color var(--t);
-    }
-    .country-sel:focus { border-color: var(--yellow); }
-    #fetchBtn {
-      padding: 0 18px; height: 36px;
-      background: var(--yellow); color: #000;
-      border: none; border-radius: var(--radius-sm);
-      font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700;
-      cursor: pointer; white-space: nowrap;
-      display: flex; align-items: center; gap: 7px;
-      transition: opacity var(--t), transform .1s;
-      flex-shrink: 0;
-    }
+
     #fetchBtn:hover { opacity: .88; }
     #fetchBtn:active { transform: scale(.96); }
     #fetchBtn:disabled { opacity: .35; cursor: not-allowed; }
 
-    /* ── Status bar ── */
+    /* Status bar */
     #status-bar {
       padding: 5px 18px;
       font-family: 'JetBrains Mono', monospace; font-size: 11px;
@@ -202,17 +256,13 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Main split: left result + right queue ── */
-    #main-split {
-      flex: 1; display: flex; overflow: hidden; min-height: 0;
-    }
+    /* Main split */
+    #main-split { flex: 1; display: flex; overflow: hidden; min-height: 0; }
 
-    /* ── Result panel ── */
-    #result-panel {
-      flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0;
-    }
+    /* Result panel */
+    #result-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 
-    /* ── Album card ── */
+    /* Album card */
     #album-card {
       margin: 14px 18px 0;
       background: var(--surface);
@@ -255,21 +305,17 @@
     .act-btn {
       display: flex; align-items: center; gap: 6px;
       padding: 6px 13px; border-radius: var(--radius-sm);
-      font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 600;
+      font-family: var(--app-font); font-size: 12px; font-weight: 600;
       cursor: pointer; border: 1.5px solid var(--border);
       transition: all var(--t);
     }
-    .act-btn.primary {
-      background: var(--yellow); color: #000; border-color: var(--yellow-d);
-    }
+    .act-btn.primary { background: var(--yellow); color: #000; border-color: var(--yellow-d); }
     .act-btn.primary:hover { opacity: .88; }
-    .act-btn.secondary {
-      background: var(--surface2); color: var(--text2);
-    }
+    .act-btn.secondary { background: var(--surface2); color: var(--text2); }
     .act-btn.secondary:hover { background: var(--surface3); border-color: var(--border2); color: var(--text); }
     .act-btn:active { transform: scale(.95); }
 
-    /* ── Track search + sort ── */
+    /* Track controls */
     #track-controls {
       margin: 12px 18px 8px;
       display: flex; gap: 8px; align-items: center; flex-shrink: 0;
@@ -279,7 +325,7 @@
       width: 100%; padding: 7px 11px 7px 30px;
       background: var(--surface2); border: 1.5px solid var(--border);
       border-radius: var(--radius-sm); color: var(--text);
-      font-family: 'Syne', sans-serif; font-size: 12px;
+      font-family: var(--app-font); font-size: 12px;
       outline: none; transition: border-color var(--t);
       user-select: text;
     }
@@ -301,21 +347,21 @@
     #sort-select {
       padding: 5px 8px; background: var(--surface2);
       border: 1.5px solid var(--border); border-radius: var(--radius-sm);
-      color: var(--text2); font-family: 'Syne', sans-serif; font-size: 12px;
+      color: var(--text2); font-family: var(--app-font); font-size: 12px;
       outline: none; cursor: pointer;
     }
-    #sort-select:focus { border-color: var(--yellow); }
 
-    /* ── Track table ── */
+    /* Track table */
     #track-table-wrap {
       flex: 1; overflow-y: auto; padding: 0 18px 14px; min-height: 0;
     }
     #track-table-wrap::-webkit-scrollbar { width: 4px; }
     #track-table-wrap::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
 
+    /* Columns: check | # | title+cover | duration | actions(4 btns) */
     .track-table-header {
       display: grid;
-      grid-template-columns: 28px 36px 1fr 80px 100px 130px;
+      grid-template-columns: 28px 36px 1fr 70px 150px;
       padding: 6px 10px;
       border-bottom: 1px solid var(--border);
       margin-bottom: 4px;
@@ -324,33 +370,37 @@
     }
     .track-row {
       display: grid;
-      grid-template-columns: 28px 36px 1fr 80px 100px 130px;
+      grid-template-columns: 28px 36px 1fr 70px 150px;
       align-items: center;
       padding: 5px 10px;
       border-radius: var(--radius-sm);
       transition: background var(--t); cursor: default;
     }
     .track-row:hover { background: var(--surface2); }
-    .track-row.downloading { background: rgba(245,192,0,.06); }
-    .track-row.done { background: rgba(34,197,94,.05); }
-    .track-row.failed { background: rgba(239,68,68,.05); }
+    .track-row.done    { background: rgba(34,197,94,.05); }
+    .track-row.failed  { background: rgba(239,68,68,.05); }
+
     .tr-check input { accent-color: var(--yellow); cursor: pointer; width: 14px; height: 14px; }
     .tr-num {
       font-family: 'JetBrains Mono', monospace; font-size: 11px;
       color: var(--muted); text-align: right; padding-right: 6px;
     }
     .tr-title-cell { display: flex; align-items: center; gap: 9px; min-width: 0; }
+
+    /* Cover thumbnail next to title */
     .tr-thumb {
-      width: 34px; height: 34px; border-radius: 5px;
+      width: 36px; height: 36px; border-radius: 5px;
       background: var(--surface3); flex-shrink: 0;
       display: flex; align-items: center; justify-content: center;
-      font-size: 16px; overflow: hidden;
+      font-size: 16px; overflow: hidden; border: 1px solid var(--border);
     }
-    .tr-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 5px; }
+    .tr-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 4px; }
+
     .tr-info { min-width: 0; }
     .tr-name {
       font-size: 12.5px; font-weight: 600; white-space: nowrap;
-      overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 5px;
+      overflow: hidden; text-overflow: ellipsis;
+      display: flex; align-items: center; gap: 5px;
     }
     .explicit-badge {
       background: var(--surface3); color: var(--text2);
@@ -359,37 +409,41 @@
       flex-shrink: 0; font-weight: 700;
     }
     .tr-artist { font-size: 11.5px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
     .tr-dur { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--text2); }
-    .tr-plays { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted); }
-    .tr-actions { display: flex; gap: 4px; align-items: center; }
+
+    /* 4-button action area */
+    .tr-actions { display: flex; gap: 3px; align-items: center; }
     .ta-btn {
-      width: 28px; height: 28px; border-radius: 6px;
+      width: 30px; height: 30px; border-radius: 6px;
       background: var(--surface2); border: 1px solid var(--border);
-      color: var(--muted); cursor: pointer; font-size: 13px;
+      color: var(--muted); cursor: pointer; font-size: 12px;
       display: flex; align-items: center; justify-content: center;
-      transition: all var(--t);
+      transition: all var(--t); flex-shrink: 0;
+      position: relative;
     }
     .ta-btn:hover { background: var(--surface3); border-color: var(--border2); color: var(--text2); }
-    .ta-btn.dl {
-      background: var(--yellow); color: #000; border-color: var(--yellow-d);
-    }
+    .ta-btn.dl { background: var(--yellow); color: #000; border-color: var(--yellow-d); }
     .ta-btn.dl:hover { opacity: .85; }
-    .ta-btn.dl:disabled { opacity: .35; cursor: not-allowed; }
-    .ta-btn.queued { background: rgba(245,192,0,.15); color: var(--yellow); border-color: var(--yellow-d); }
-    .ta-btn.dlg { background: rgba(34,197,94,.15); color: var(--green); border-color: #166534; }
-    .ta-btn.dlerr { background: rgba(239,68,68,.15); color: var(--red); border-color: #991b1b; }
+    .ta-btn.ta-lyrics:hover { color: #60a5fa; border-color: #3b82f6; }
+    .ta-btn.ta-cover:hover { color: #a78bfa; border-color: #7c3aed; }
+    .ta-btn.ta-link:hover { color: var(--green); border-color: #166534; }
 
-    /* ── Progress bar in track row ── */
-    .tr-progress-bar {
-      height: 2px; background: var(--border);
-      border-radius: 99px; overflow: hidden; margin-top: 3px; display: none;
+    /* Tooltip */
+    .ta-btn::after {
+      content: attr(data-tip);
+      position: absolute; bottom: calc(100% + 5px); left: 50%;
+      transform: translateX(-50%);
+      background: #222; color: #fff;
+      font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      padding: 3px 7px; border-radius: 4px; white-space: nowrap;
+      pointer-events: none; opacity: 0; transition: opacity .15s;
+      z-index: 100;
     }
-    .tr-progress-fill { height: 100%; background: var(--yellow); border-radius: 99px; transition: width .3s; }
+    .ta-btn:hover::after { opacity: 1; }
 
-    /* ── Recent fetches (shown when no tracks) ── */
-    #recent-wrap {
-      flex: 1; padding: 14px 18px; overflow-y: auto; min-height: 0;
-    }
+    /* Recent */
+    #recent-wrap { flex: 1; padding: 14px 18px; overflow-y: auto; min-height: 0; }
     #recent-wrap::-webkit-scrollbar { width: 4px; }
     #recent-wrap::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
     .recent-label {
@@ -398,87 +452,144 @@
     }
     #recent-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 170px));
+      justify-content: center;
+      gap: 12px;
+      max-width: 920px;
+      margin: 0 auto;
     }
     .recent-card {
-      background: var(--surface); border: 1.5px solid var(--border);
-      border-radius: var(--radius); overflow: hidden; cursor: pointer;
-      transition: border-color var(--t), transform .15s;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: calc(var(--radius) + 4px);
+      overflow: hidden; cursor: pointer;
+      transition: border-color var(--t), transform .15s, box-shadow .15s;
+      box-shadow: 0 8px 24px rgba(15,23,42,.06);
     }
-    .recent-card:hover { border-color: var(--yellow); transform: translateY(-2px); }
+    .recent-card:hover {
+      border-color: rgba(245,158,11,.45);
+      transform: translateY(-2px);
+      box-shadow: 0 14px 34px rgba(15,23,42,.12);
+    }
     .rc-cover {
       width: 100%; aspect-ratio: 1; background: var(--surface3);
       background-size: cover; background-position: center;
       display: flex; align-items: center; justify-content: center;
       font-size: 28px; color: var(--muted);
+      position: relative;
     }
+    .rc-remove {
+      position: absolute;
+      top: 6px; right: 6px;
+      width: 22px; height: 22px;
+      border: none; border-radius: 999px;
+      background: rgba(0,0,0,.4);
+      color: #fff; font-size: 12px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      opacity: .85; transition: opacity .2s ease;
+    }
+    .rc-remove:hover { opacity: 1; }
     .rc-info { padding: 8px; }
     .rc-title { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
     .rc-sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-    /* ── Queue panel ── */
-    #queue-panel {
-      width: 260px; flex-shrink: 0;
-      background: var(--surface);
-      border-left: 1px solid var(--border);
-      display: flex; flex-direction: column; overflow: hidden;
+    /* Queue drawer */
+    #queue-dock {
+      position: fixed; left: 20px; bottom: 20px;
+      z-index: 250;
+      display: none; grid-template-columns: auto 1fr auto;
+      align-items: center; gap: 14px;
+      padding: 14px 18px; background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px; cursor: pointer;
+      color: var(--text); box-shadow: 0 16px 40px rgba(0,0,0,.18);
+      transition: transform var(--t), background var(--t), border-color var(--t), opacity var(--t);
+      min-width: 240px;
     }
+    #queue-dock.visible { display: grid; }
+    #queue-dock:hover { transform: translateY(-1px); border-color: var(--yellow); }
+    #queue-dock .qd-icon {
+      width: 38px; height: 38px; border-radius: 14px;
+      background: var(--surface2); display: grid;
+      place-items: center; color: var(--yellow); font-size: 18px;
+    }
+    #queue-dock .qd-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+    #queue-dock .qd-downloaded {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px; font-weight: 700; color: #111827;
+      letter-spacing: .02em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #queue-dock .qd-speed {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px; color: #475569;
+    }
+    #queue-dock .qd-chevron {
+      font-size: 18px; color: #475569; line-height: 1;
+    }
+
+    #queue-drawer {
+      position: fixed; left: 20px; bottom: 70px;
+      width: min(360px, calc(100vw - 40px)); max-height: min(70vh, 420px);
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 18px; box-shadow: 0 30px 80px rgba(0,0,0,.22);
+      overflow: hidden; display: none; flex-direction: column;
+      z-index: 245;
+    }
+    #queue-drawer.open { display: flex; }
     #queue-header {
-      padding: 12px 14px 10px;
-      border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
+      padding: 14px 16px; border-bottom: 1px solid var(--border);
       display: flex; align-items: center; justify-content: space-between;
+      gap: 10px;
     }
-    #queue-header h3 { font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--text2); }
-    #queue-clear {
+    #queue-header h3 { font-size: 14px; font-weight: 700; letter-spacing: .04em; color: var(--text); }
+    #queue-clear,
+    #queue-close {
       background: none; border: none; color: var(--muted); cursor: pointer;
       font-size: 11px; font-family: 'JetBrains Mono', monospace;
-      padding: 2px 5px; border-radius: 4px;
+      padding: 4px 8px; border-radius: 8px;
       transition: color var(--t), background var(--t);
     }
-    #queue-clear:hover { color: var(--red); background: rgba(239,68,68,.1); }
+    #queue-clear:hover { color: var(--red); background: rgba(239,68,68,.12); }
+    #queue-close:hover { color: var(--text); background: var(--surface3); }
     #queue-list {
-      flex: 1; overflow-y: auto; padding: 8px;
-      display: flex; flex-direction: column; gap: 5px; min-height: 0;
+      flex: 1; overflow-y: auto; padding: 12px 14px 10px;
+      display: flex; flex-direction: column; gap: 8px; min-height: 0;
     }
-    #queue-list::-webkit-scrollbar { width: 3px; }
-    #queue-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
+    #queue-list::-webkit-scrollbar { width: 7px; }
+    #queue-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 99px; }
     .queue-item {
-      background: var(--surface2); border: 1.5px solid var(--border);
-      border-radius: var(--radius-sm); padding: 8px 10px;
-      display: flex; flex-direction: column; gap: 3px;
-      animation: fadeup .2s ease;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 14px; padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 6px;
+      animation: fadeup .18s ease;
     }
     @keyframes fadeup { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform:none; } }
-    .qi-title { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .qi-title  { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .qi-artist { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .qi-status {
-      display: flex; align-items: center; gap: 5px;
-      font-family: 'JetBrains Mono', monospace; font-size: 10.5px; margin-top: 2px;
-    }
+    .qi-status { display: flex; align-items: center; gap: 5px; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; margin-top: 2px; }
     .qi-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-    .qi-dot.waiting  { background: var(--muted); }
-    .qi-dot.active   { background: var(--yellow); animation: pulse .9s infinite; }
-    .qi-dot.done     { background: var(--green); }
-    .qi-dot.error    { background: var(--red); }
+    .qi-dot.waiting { background: var(--muted); }
+    .qi-dot.active  { background: var(--yellow); animation: pulse .9s infinite; }
+    .qi-dot.done    { background: var(--green); }
+    .qi-dot.error   { background: var(--red); }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
     .qi-progress { height: 2px; background: var(--border); border-radius: 99px; overflow: hidden; margin-top: 2px; }
     .qi-progress-fill { height: 100%; background: var(--yellow); border-radius: 99px; transition: width .3s; }
     #queue-empty {
       flex: 1; display: flex; flex-direction: column;
       align-items: center; justify-content: center; gap: 8px;
-      color: var(--muted); font-size: 11.5px; text-align: center;
-      padding: 20px;
+      color: var(--muted); font-size: 12px; text-align: center; padding: 24px;
     }
-    #queue-empty .q-icon { font-size: 32px; opacity: .3; }
+    #queue-empty .q-icon { font-size: 30px; opacity: .3; }
     #queue-start-btn {
-      margin: 8px; padding: 9px;
+      margin: 12px 14px 14px;
+      padding: 10px 14px;
       background: var(--yellow); color: #000;
-      border: none; border-radius: var(--radius-sm);
-      font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 700;
+      border: none; border-radius: 999px;
+      font-family: var(--app-font); font-size: 13px; font-weight: 700;
       cursor: pointer; transition: opacity var(--t);
       display: none;
+      align-self: stretch;
     }
     #queue-start-btn:hover { opacity: .88; }
     #queue-start-btn:disabled { opacity: .35; cursor: not-allowed; }
@@ -489,7 +600,7 @@
       display: flex; justify-content: space-between; align-items: center;
     }
 
-    /* ══════════════ LOGS VIEW ══════════════ */
+    /* ══════════ LOGS VIEW ══════════ */
     #view-logs { padding: 14px; }
     #log-panel {
       flex: 1; min-height: 0;
@@ -503,13 +614,12 @@
       display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
     }
     #log-header span { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-    #log-clear { background: none; border: none; color: var(--muted); cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 2px 5px; border-radius: 4px; transition: color var(--t); }
+    #log-clear { background: none; border: none; color: var(--muted); cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 2px 5px; border-radius: 4px; }
     #log-clear:hover { color: var(--text2); }
     #logArea {
       flex: 1; min-height: 0; overflow-y: auto;
       padding: 10px 12px; font-family: 'JetBrains Mono', monospace; font-size: 11px;
-      line-height: 1.8; background: #080808;
-      user-select: text;
+      line-height: 1.8; background: #080808; user-select: text;
     }
     #logArea::-webkit-scrollbar { width: 4px; }
     #logArea::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
@@ -522,7 +632,7 @@
     .log-msg.error { color: var(--red); }
     .log-msg.warn  { color: #fbbf24; }
 
-    /* ══════════════ SETTINGS VIEW ══════════════ */
+    /* ══════════ SETTINGS VIEW ══════════ */
     #view-settings { padding: 0; overflow: hidden; }
     .s-header { padding: 14px 18px 0; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; }
     .s-header h1 { font-size: 18px; font-weight: 800; }
@@ -534,7 +644,7 @@
     .tab-bar::-webkit-scrollbar { display: none; }
     .stab {
       padding: 8px 13px; background: none; border: none;
-      color: var(--muted); font-family: 'Syne', sans-serif; font-size: 12.5px; font-weight: 500;
+      color: var(--muted); font-family: var(--app-font); font-size: 12.5px; font-weight: 500;
       cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
       transition: color var(--t), border-color var(--t);
     }
@@ -554,16 +664,19 @@
     .s-label { color: var(--text2); font-size: 12.5px; font-weight: 500; flex-shrink: 0; }
     .s-label small { display: block; color: var(--muted); font-size: 10px; margin-top: 1px; font-family: 'JetBrains Mono', monospace; }
     .s-sep { height: 1px; background: var(--border); margin: 8px 0; }
+
     select, input[type="text"], input[type="password"], input[type="number"] {
       background: var(--surface2); color: var(--text);
       border: 1.5px solid var(--border); border-radius: var(--radius-sm);
       padding: 6px 10px; outline: none;
-      font-family: 'Syne', sans-serif; font-size: 12.5px; cursor: pointer;
+      font-family: var(--app-font); font-size: 12.5px; cursor: pointer;
       transition: border-color var(--t);
     }
     select:focus, input:focus { border-color: var(--yellow); }
     input[type="number"] { width: 70px; text-align: center; }
     input[type="text"].full, input[type="password"].full { width: 100%; }
+
+    /* Toggle */
     .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
     .toggle input { opacity: 0; width: 0; height: 0; }
     .toggle-sl {
@@ -579,19 +692,19 @@
     .toggle input:checked + .toggle-sl { background: var(--yellow-bg); border-color: var(--yellow); }
     .toggle input:checked + .toggle-sl::before { transform: translateX(16px) translateY(-50%); background: var(--yellow); }
 
-    /* Sort list */
+    /* Sortable lists */
     .sort-list { display: flex; flex-direction: column; gap: 4px; }
     .sort-item {
       display: flex; align-items: center; gap: 8px;
       padding: 7px 10px; background: var(--surface2);
       border: 1.5px solid var(--border); border-radius: var(--radius-sm);
-      cursor: grab; transition: border-color var(--t); -webkit-app-region: no-drag;
+      cursor: grab; transition: border-color var(--t);
     }
     .sort-item:hover { border-color: var(--border2); }
-    .sort-item.dragging { opacity: .3; }
+    .sort-item.dragging  { opacity: .3; }
     .sort-item.drag-over { border-color: var(--yellow); background: var(--yellow-bg); }
     .drag-h { color: var(--muted); font-size: 12px; cursor: grab; }
-    .svc-name { flex: 1; font-size: 12.5px; color: var(--text2); }
+    .svc-name  { flex: 1; font-size: 12.5px; color: var(--text2); }
     .svc-badge { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; padding: 1.5px 5px; border-radius: 4px; background: var(--surface3); color: var(--muted); border: 1px solid var(--border); }
 
     /* HC */
@@ -599,7 +712,7 @@
       display: inline-flex; align-items: center; gap: 7px;
       padding: 7px 16px; background: var(--yellow); color: #000;
       border: none; border-radius: var(--radius-sm);
-      font-family: 'Syne', sans-serif; font-size: 12.5px; font-weight: 700;
+      font-family: var(--app-font); font-size: 12.5px; font-weight: 700;
       cursor: pointer; transition: opacity var(--t);
     }
     #hc-run-btn:hover { opacity: .88; }
@@ -617,23 +730,22 @@
     }
     .hc-row.ok-r  { border-left: 3px solid var(--green); }
     .hc-row.err-r { border-left: 3px solid var(--red); }
-    .hc-ind { font-size: 10px; flex-shrink: 0; }
-    .hc-meth { padding: 1px 5px; background: var(--surface3); border: 1px solid var(--border); border-radius: 4px; font-size: 9px; color: var(--muted); }
-    .hc-url { flex: 1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hc-ind    { font-size: 10px; flex-shrink: 0; }
+    .hc-meth   { padding: 1px 5px; background: var(--surface3); border: 1px solid var(--border); border-radius: 4px; font-size: 9px; color: var(--muted); }
+    .hc-url    { flex: 1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hc-detail { color: var(--text2); flex-shrink: 0; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .hc-lat { color: var(--muted); flex-shrink: 0; width: 60px; text-align: right; }
+    .hc-lat    { color: var(--muted); flex-shrink: 0; width: 60px; text-align: right; }
     .hc-lat.good { color: var(--green); }
     .hc-lat.slow { color: #fbbf24; }
     #hc-spinner { display: none; width: 14px; height: 14px; border: 2px solid var(--border2); border-top-color: var(--yellow); border-radius: 50%; animation: spin .7s linear infinite; }
 
-    /* ── Utility ── */
     .hidden { display: none !important; }
     :focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
   </style>
 </head>
 <body>
 
-<!-- Titlebar -->
+<!-- Titlebar — only this element has -webkit-app-region: drag -->
 <div id="titlebar">
   <div class="dots">
     <div class="dot c" onclick="pyWin('Quit')" title="Close"></div>
@@ -646,44 +758,64 @@
     <span id="tb-version">v0.6.1</span>
   </div>
   <div class="tb-spacer"></div>
+  <div id="titlebar-network" class="hidden">
+    <span class="network-pill" id="tb-network-country">Italy (IT)</span>
+    <button class="network-eye" id="tb-network-eye" onclick="togglePublicIp()" title="Show public IP">👁</button>
+    <span class="network-ip" id="tb-network-ip">•••</span>
+  </div>
 </div>
 
-<!-- App Body -->
 <div id="app-body">
 
   <!-- Sidebar -->
   <nav id="sidebar">
-    <button class="nav-btn active" id="nav-home" onclick="switchView('home')" title="Home">
+    <button class="nav-btn active" id="nav-home"     onclick="switchView('home')"     title="Home">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 3l9 6.5V21H15v-5h-6v5H3z"/></svg>
     </button>
-    <button class="nav-btn" id="nav-logs" onclick="switchView('logs')" title="Logs">
+    <button class="nav-btn" id="nav-logs"     onclick="switchView('logs')"     title="Logs">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
     </button>
     <button class="nav-btn" id="nav-settings" onclick="switchView('settings')" title="Settings">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
     <div class="nav-spacer"></div>
-    <button class="nav-btn" onclick="pyWin('open_url', 'https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/issues')" title="Segnala un Bug">
+    <!-- Bug report — links to GitHub Issues -->
+    <button class="nav-btn" title="Report a Bug on GitHub"
+      onclick="pyWin('open_url', 'https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/issues')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
     </button>
-    <button class="nav-btn" onclick="pyWin('choose_folder')" title="Choose folder">
+    <button class="nav-btn" title="Choose download folder" onclick="pyWin('choose_folder')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     </button>
   </nav>
 
-  <!-- Content -->
   <div id="content">
 
     <!-- HOME -->
     <div class="view active" id="view-home">
-      <!-- Search bar -->
+      <!-- Search bar — NO country dropdown -->
+      <div id="home-hero">
+        <div class="hero-text">
+          <div class="hero-headline">
+            <div class="hero-logo">
+              <div class="hero-icon">🎧</div>
+              <div class="hero-badge">HI-RES</div>
+            </div>
+            <div class="hero-main">
+              <div class="hero-title">SpotiFLAC</div>
+              <span id="hero-version" class="hero-version">v0.6.1</span>
+            </div>
+          </div>
+          <div class="hero-subtitle">Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required.</div>
+        </div>
+      </div>
       <div id="search-bar">
         <div class="url-wrap">
           <span class="url-icon">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
           </span>
           <input id="urlInput" type="text"
-            placeholder="Paste Spotify, Tidal, Apple Music, Deezer, YouTube or Pandora link…"
+            placeholder="Paste Spotify, Tidal, Apple Music, YouTube or Pandora link…"
             onkeydown="if(event.key==='Enter') onFetch()">
         </div>
         <button id="fetchBtn" onclick="onFetch()">
@@ -692,18 +824,15 @@
         </button>
       </div>
 
-      <!-- Status bar -->
       <div id="status-bar">
         <div class="spinner" id="spinner"></div>
         <span id="status-text">Ready — paste a link and press Fetch</span>
       </div>
 
-      <!-- Main split -->
       <div id="main-split">
-        <!-- Result panel -->
         <div id="result-panel">
 
-          <!-- Album card (hidden until fetch) -->
+          <!-- Album card -->
           <div id="album-card" class="hidden">
             <div id="album-cover">🎵</div>
             <div id="album-info">
@@ -711,8 +840,6 @@
               <div id="album-title">—</div>
               <div id="album-meta">
                 <span id="album-artist">—</span>
-                <span class="dot-sep">·</span>
-                <span id="album-date">—</span>
                 <span class="dot-sep">·</span>
                 <span id="album-tracks-count">— tracks</span>
               </div>
@@ -725,21 +852,14 @@
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 12 11 14 15 10"/></svg>
                   Download Selected
                 </button>
-                <button class="act-btn secondary" id="info-btn">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                </button>
-                <button class="act-btn secondary" id="img-btn">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                </button>
               </div>
             </div>
-            <!-- close -->
             <button onclick="closeAlbumCard()" style="background:none;border:none;color:var(--muted);cursor:pointer;position:absolute;top:10px;right:10px;font-size:16px;line-height:1;padding:3px;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
 
-          <!-- Track controls (hidden until fetch) -->
+          <!-- Track controls -->
           <div id="track-controls" class="hidden">
             <div id="track-search-wrap">
               <span class="ts-icon">
@@ -748,59 +868,66 @@
               <input id="trackSearch" type="text" placeholder="Search tracks…" oninput="filterTracks()">
             </div>
             <div class="sort-wrap">
-              <button class="sort-btn" title="Reverse sort" onclick="reverseTracks()">
+              <button class="sort-btn" title="Reverse" onclick="reverseTracks()">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
               </button>
               <select id="sort-select" onchange="sortTracks()">
                 <option value="default">Default</option>
                 <option value="title">Title</option>
                 <option value="duration">Duration</option>
-                <option value="plays">Plays</option>
               </select>
             </div>
           </div>
 
-          <!-- Track table (hidden until fetch) -->
+          <!-- Track table — columns: check | # | title+cover | duration | 4 actions -->
           <div id="track-table-wrap" class="hidden">
             <div class="track-table-header">
               <div><input type="checkbox" id="check-all" onchange="toggleAll(this)" style="accent-color:var(--yellow);width:14px;height:14px;cursor:pointer;"></div>
               <div>#</div>
               <div>Title</div>
-              <div>Duration</div>
-              <div>Plays</div>
+              <div>Time</div>
               <div>Actions</div>
             </div>
             <div id="track-rows"></div>
           </div>
 
-          <!-- Recent fetches (shown when no tracks) -->
+          <!-- Recent fetches -->
           <div id="recent-wrap">
             <div class="recent-label">Recent Fetches</div>
             <div id="recent-grid"></div>
           </div>
 
         </div><!-- /result-panel -->
+      </div><!-- /main-split -->
 
-        <!-- Queue panel -->
-        <div id="queue-panel">
-          <div id="queue-header">
-            <h3>DOWNLOAD QUEUE</h3>
-            <button id="queue-clear" onclick="clearQueue()">clear</button>
-          </div>
-          <div id="queue-list">
-            <div id="queue-empty">
-              <div class="q-icon">📥</div>
-              <div>No items in queue.<br>Add tracks to start downloading.</div>
-            </div>
-          </div>
-          <button id="queue-start-btn" onclick="startDownloadQueue()">▶ Start Downloads</button>
-          <div id="queue-counter">
-            <span id="q-count">0 tracks</span>
-            <span id="q-done" style="color:var(--green)"></span>
+      <div id="queue-dock" onclick="toggleQueueDrawer()" title="Open download queue">
+        <div class="qd-icon">⬇</div>
+        <div class="qd-body">
+          <div class="qd-downloaded" id="qd-downloaded">0.00 MB</div>
+          <div class="qd-speed" id="qd-speed">0.00 MB/s</div>
+        </div>
+        <div class="qd-chevron">›</div>
+      </div>
+      <div id="queue-drawer">
+        <div id="queue-header">
+          <h3>Download Queue</h3>
+          <div>
+            <button id="queue-clear" onclick="clearQueue()">Clear</button>
+            <button id="queue-close" onclick="toggleQueueDrawer()">✕</button>
           </div>
         </div>
-
-      </div><!-- /main-split -->
+        <div id="queue-list">
+          <div id="queue-empty">
+            <div class="q-icon">📥</div>
+            <div>No items in queue.<br>Add tracks to start downloading.</div>
+          </div>
+        </div>
+        <button id="queue-start-btn" onclick="startDownloadQueue()">▶ Start Downloads</button>
+        <div id="queue-counter">
+          <span id="q-count">0 tracks</span>
+          <span id="q-done" style="color:var(--green)"></span>
+        </div>
+      </div>
     </div><!-- /view-home -->
 
     <!-- LOGS -->
@@ -833,10 +960,12 @@
         <button class="stab"        onclick="switchTab('files',this)">📄 Files</button>
         <button class="stab"        onclick="switchTab('features',this)">✨ Features</button>
         <button class="stab"        onclick="switchTab('advanced',this)">⚙ Advanced</button>
+        <button class="stab"        onclick="switchTab('appearance',this)">🎨 Appearance</button>
         <button class="stab"        onclick="switchTab('health',this)">🩺 Health</button>
       </div>
       <div class="s-body">
 
+        <!-- SOURCES -->
         <div class="tc active" id="tc-sources">
           <div class="s-section">
             <div class="s-title">Audio Sources — drag to reorder priority</div>
@@ -848,18 +977,19 @@
               <span class="s-label">Audio Quality</span>
               <select id="config-quality">
                 <option value="LOSSLESS">LOSSLESS (FLAC/ALAC)</option>
-                <option value="HI_RES_LOSSLESS">HI-RES LOSSLESS (24-bit/192kHz)</option>
+                <option value="HI_RES_LOSSLESS">HI-RES LOSSLESS (24-bit)</option>
                 <option value="DOLBY_ATMOS">DOLBY ATMOS</option>
                 <option value="HIGH">HIGH (MP3 320 / AAC 256)</option>
                 <option value="LOW">NORMAL (MP3 128)</option>
               </select>
             </div>
             <div class="s-row">
-              <label><input type="checkbox" id="config-fallback" checked> <span>Auto quality fallback</span></label>
+              <label><input type="checkbox" id="config-fallback"> <span>Auto quality fallback</span></label>
             </div>
           </div>
         </div>
 
+        <!-- FILES -->
         <div class="tc" id="tc-files">
           <div class="s-section">
             <div class="s-title">Filename Format</div>
@@ -875,10 +1005,11 @@
             <div class="s-title">Folder Organization</div>
             <div class="s-row"><label><input type="checkbox" id="config-artist-sub"><span>Artist subfolders</span></label></div>
             <div class="s-row"><label><input type="checkbox" id="config-album-sub"><span>Album subfolders</span></label></div>
-            <div class="s-row"><label><input type="checkbox" id="config-first-artist"><span>First artist only in tags & filename</span></label></div>
+            <div class="s-row"><label><input type="checkbox" id="config-first-artist"><span>First artist only in tags &amp; filename</span></label></div>
           </div>
         </div>
 
+        <!-- FEATURES -->
         <div class="tc" id="tc-features">
           <div class="s-section">
             <div class="s-row"><label><input type="checkbox" id="config-featuring"><span>Include featuring tracks (artist URL only)</span></label></div>
@@ -901,28 +1032,10 @@
           </div>
         </div>
 
+        <!-- ADVANCED -->
         <div class="tc" id="tc-advanced">
           <div class="s-section">
-            <div class="s-title">Aspetto (Appearance)</div>
-            <div class="s-row">
-              <span class="s-label">Tema</span>
-              <select id="config-theme" onchange="changeTheme()">
-                <option value="dark">Scuro (Dark)</option>
-                <option value="light">Chiaro (Light)</option>
-              </select>
-            </div>
-            <div class="s-row">
-              <span class="s-label">Font App</span>
-              <select id="config-font" onchange="changeFont()">
-                <option value="'Google Sans', 'Syne', sans-serif">Google Sans</option>
-                <option value="'Syne', sans-serif">Syne</option>
-                <option value="'Inter', sans-serif">Inter</option>
-                <option value="Arial, sans-serif">Arial</option>
-              </select>
-            </div>
-          </div>
-          <div class="s-section">
-            <div class="s-title">Retry & Loop</div>
+            <div class="s-title">Retry &amp; Loop</div>
             <div class="s-row">
               <span class="s-label">Extra retries per track<small>Cycles through all providers</small></span>
               <input type="number" id="config-retries" value="0" min="0" max="10">
@@ -948,7 +1061,7 @@
             </div>
           </div>
           <div class="s-section">
-            <div class="s-title">Auth & Custom APIs</div>
+            <div class="s-title">Auth &amp; Custom APIs</div>
             <div class="s-row">
               <span class="s-label">Qobuz token<small>x-user-auth-token from DevTools</small></span>
               <input type="password" id="config-qobuz-token" placeholder="leave empty" style="width:180px;">
@@ -983,6 +1096,39 @@
           </div>
         </div>
 
+        <!-- APPEARANCE — theme + font -->
+        <div class="tc" id="tc-appearance">
+          <div class="s-section">
+            <div class="s-title">Theme</div>
+            <div class="s-row">
+              <span class="s-label">Color Mode</span>
+              <select id="config-theme" onchange="changeTheme()">
+                <option value="auto" selected>Auto</option>
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </div>
+          </div>
+          <div class="s-section">
+            <div class="s-title">Font</div>
+            <div class="s-row">
+              <span class="s-label">App Font<small>Default: Google Sans</small></span>
+              <select id="config-font" onchange="changeFont()">
+                <option value="'Google Sans', 'Syne', sans-serif" selected>Google Sans</option>
+                <option value="'Syne', sans-serif">Syne</option>
+                <option value="'Inter', sans-serif">Inter</option>
+                <option value="'JetBrains Mono', monospace">JetBrains Mono</option>
+                <option value="Georgia, serif">Georgia</option>
+                <option value="Arial, sans-serif">Arial</option>
+              </select>
+            </div>
+            <div class="s-row">
+              <span class="s-label" style="font-size:11px;color:var(--muted);">Preview: The quick brown fox jumps over the lazy dog.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- HEALTH -->
         <div class="tc" id="tc-health">
           <div class="s-section">
             <div class="s-title">Service Health Check</div>
@@ -1004,71 +1150,57 @@
 </div><!-- /app-body -->
 
 <script>
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const ts = () => new Date().toLocaleTimeString('it-IT');
 
-// ── View switching ──────────────────────────────────────────────────────────
+// ── View switching ───────────────────────────────────────────────────────────
 function switchView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-btn[id^="nav-"]').forEach(b => b.classList.remove('active'));
   $('view-' + name)?.classList.add('active');
   $('nav-' + name)?.classList.add('active');
+  const networkBar = $('titlebar-network');
+  if (name === 'settings') {
+    networkBar?.classList.remove('hidden');
+    loadNetworkStatus();
+  } else {
+    networkBar?.classList.add('hidden');
+  }
 }
 
-// ── Theme ────────────────────────────────────────────────────────────────────
-// This UI is dark-only (like the screenshot), but let's support toggling
-let theme = 'dark';
-function cycleTheme() {
-  // Nothing to cycle for now — dark only; can extend later
+let networkStatus = { ip: '', country_name: 'Italy', country_code: 'IT' };
+
+function loadNetworkStatus() {
+  if (!window.pywebview?.api) {
+    networkStatus = { ip: '127.0.0.1', country_name: 'Italy', country_code: 'IT' };
+    $('tb-network-country').textContent = `${networkStatus.country_name} (${networkStatus.country_code})`;
+    $('tb-network-ip').textContent = '•••';
+    return;
+  }
+  window.pywebview.api.get_network_status().then(status => {
+    if (!status) return;
+    networkStatus = status;
+    const country = status.country_name || 'Unknown';
+    const code = status.country_code || '';
+    $('tb-network-country').textContent = `${country}${code ? ' (' + code + ')' : ''}`;
+    $('tb-network-ip').textContent = '•••';
+  }).catch(() => {
+    $('tb-network-country').textContent = 'Unknown';
+    $('tb-network-ip').textContent = '•••';
+  });
 }
 
-// Gestione Tema e Font
-function changeTheme() {
-  if ($('config-theme').value === 'light') document.body.classList.add('light-theme');
-  else document.body.classList.remove('light-theme');
+function togglePublicIp() {
+  const ipEl = $('tb-network-ip');
+  if (!ipEl) return;
+  if (ipEl.textContent === '•••') {
+    ipEl.textContent = networkStatus.ip || 'Unavailable';
+  } else {
+    ipEl.textContent = '•••';
+  }
 }
 
-function changeFont() {
-  document.body.style.fontFamily = $('config-font').value;
-}
-
-// Nuova Info Traccia Unificata
-function showTrackInfo(i) {
-  const t = currentTracks[i];
-  if(!t) return;
-  const dur = t.duration_ms ? formatDuration(t.duration_ms) : 'Sconosciuta';
-  const plays = t.plays ? Number(t.plays).toLocaleString('it-IT') : 'Sconosciute';
-  
-  const infoMsg = `🎵 TITOLO: ${t.title || 'N/D'}
-👤 ARTISTA: ${t.artist || t.artists || 'N/D'}
-🏷️ ISRC: ${t.isrc || 'N/D'}
-⏱️ DURATA: ${dur}
-▶️ RIPRODUZIONI: ${plays}
-🔗 LINK: ${t.url || 'N/D'}
-🖼️ COVER: ${t.cover || 'N/D'}`;
-  
-  alert(infoMsg);
-  logMessage(`Info: ${t.title} | ISRC: ${t.isrc || 'N/D'}`, 'info');
-}
-
-// Fix Attivazione Download All e Selected
-function downloadAll() {
-  const all = currentTracks.map((_, i) => i);
-  addToQueue(all);
-  logMessage(`Added ${all.length} tracks to queue`, 'info');
-  startDownloadQueue(); // Attiva automaticamente il processo
-}
-
-function downloadSelected() {
-  const sel = [...document.querySelectorAll('.track-cb:checked')].map(cb => parseInt(cb.value));
-  if (!sel.length) { setStatus('No tracks selected.'); return; }
-  addToQueue(sel);
-  logMessage(`Added ${sel.length} selected tracks to queue`, 'info');
-  startDownloadQueue(); // Attiva automaticamente il processo
-}
-
-// ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(name, btn) {
   document.querySelectorAll('.stab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tc').forEach(c => c.classList.remove('active'));
@@ -1076,7 +1208,43 @@ function switchTab(name, btn) {
   $('tc-' + name).classList.add('active');
 }
 
-// ── Settings conditionals ─────────────────────────────────────────────────────
+// ── Appearance ───────────────────────────────────────────────────────────────
+function applyTheme(mode) {
+  if (mode === 'light') {
+    document.body.classList.add('light-theme');
+  } else if (mode === 'dark') {
+    document.body.classList.remove('light-theme');
+  } else {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.body.classList.toggle('light-theme', !prefersDark);
+  }
+}
+
+function changeTheme() {
+  const val = $('config-theme').value;
+  applyTheme(val);
+  try { localStorage.setItem('spotiflac-theme-mode', val); } catch (e) {}
+}
+
+function syncSystemTheme(e) {
+  const val = $('config-theme')?.value || 'auto';
+  if (val === 'auto') applyTheme('auto');
+}
+
+function loadThemeFromStorage() {
+  const stored = (() => {
+    try { return localStorage.getItem('spotiflac-theme-mode'); } catch (e) { return null; }
+  })() || 'auto';
+  if ($('config-theme')) $('config-theme').value = stored;
+  applyTheme(stored);
+}
+
+function changeFont() {
+  const font = $('config-font').value;
+  document.documentElement.style.setProperty('--app-font', font);
+}
+
+// ── Settings helpers ─────────────────────────────────────────────────────────
 function onTNChange() {
   $('album-track-row').style.display = $('config-track-numbers').checked ? 'flex' : 'none';
 }
@@ -1094,53 +1262,70 @@ function onPostChange() {
   $('post-cmd-row').style.display = $('config-post-action').value === 'command' ? 'flex' : 'none';
 }
 
-// ── Sortable lists ────────────────────────────────────────────────────────────
+// ── Sortable lists ───────────────────────────────────────────────────────────
 function makeSortable(el) {
   let drag = null;
   function onDS(e) { drag = e.currentTarget; setTimeout(() => drag?.classList.add('dragging'), 0); }
-  function onDE() { drag?.classList.remove('dragging'); el.querySelectorAll('.sort-item').forEach(i=>i.classList.remove('drag-over')); drag=null; }
+  function onDE() {
+    drag?.classList.remove('dragging');
+    el.querySelectorAll('.sort-item').forEach(i => i.classList.remove('drag-over'));
+    drag = null;
+  }
   function onDO(e) {
     e.preventDefault();
     if (!drag || drag.parentElement !== el) return;
     const items = [...el.querySelectorAll('.sort-item:not(.dragging)')];
-    const after = items.find(i => e.clientY < i.getBoundingClientRect().top + i.getBoundingClientRect().height/2);
-    items.forEach(i=>i.classList.remove('drag-over'));
+    const after = items.find(i => e.clientY < i.getBoundingClientRect().top + i.getBoundingClientRect().height / 2);
+    items.forEach(i => i.classList.remove('drag-over'));
     if (after) { after.classList.add('drag-over'); el.insertBefore(drag, after); }
     else el.appendChild(drag);
   }
   const apply = () => {
     el.querySelectorAll('.sort-item').forEach(item => {
-      item.setAttribute('draggable','true');
-      item.removeEventListener('dragstart',onDS); item.removeEventListener('dragend',onDE);
-      item.addEventListener('dragstart',onDS); item.addEventListener('dragend',onDE);
+      item.setAttribute('draggable', 'true');
+      item.removeEventListener('dragstart', onDS); item.removeEventListener('dragend', onDE);
+      item.addEventListener('dragstart', onDS); item.addEventListener('dragend', onDE);
     });
   };
   el.addEventListener('dragover', onDO);
-  el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) el.querySelectorAll('.sort-item').forEach(i=>i.classList.remove('drag-over')); });
+  el.addEventListener('dragleave', e => {
+    if (!el.contains(e.relatedTarget)) el.querySelectorAll('.sort-item').forEach(i => i.classList.remove('drag-over'));
+  });
   apply(); return apply;
 }
 
-// ── Data ──────────────────────────────────────────────────────────────────────
+// ── Data definitions ─────────────────────────────────────────────────────────
 const ALL_SERVICES = [
-  {id:'tidal',label:'Tidal',badge:'FLAC',on:true},{id:'qobuz',label:'Qobuz',badge:'FLAC',on:true},
-  {id:'deezer',label:'Deezer',badge:'FLAC',on:true},{id:'amazon',label:'Amazon Music',badge:'FLAC',on:false},
-  {id:'spoti',label:'SpotiDownloader',badge:'FLAC',on:false},{id:'soundcloud',label:'SoundCloud',badge:'MP3',on:false},
-  {id:'youtube',label:'YouTube Music',badge:'M4A',on:false},{id:'apple',label:'Apple Music',badge:'M4A',on:false},
-  {id:'pandora',label:'Pandora',badge:'MP3',on:false},
+  { id:'tidal',       label:'Tidal',          badge:'FLAC', on:true  },
+  { id:'qobuz',       label:'Qobuz',          badge:'FLAC', on:true  },
+  { id:'deezer',      label:'Deezer',         badge:'FLAC', on:true  },
+  { id:'amazon',      label:'Amazon Music',   badge:'FLAC', on:true  },
+  { id:'spoti',       label:'SpotiDownloader',badge:'FLAC', on:false },
+  { id:'soundcloud',  label:'SoundCloud',     badge:'MP3',  on:false },
+  { id:'youtube',     label:'YouTube Music',  badge:'M4A',  on:false },
+  { id:'apple',       label:'Apple Music',    badge:'M4A',  on:false },
+  { id:'pandora',     label:'Pandora',        badge:'MP3',  on:false },
 ];
 const ALL_LYRICS = [
-  {id:'spotify',label:'Spotify',on:true},{id:'apple',label:'Apple Music',on:true},
-  {id:'musixmatch',label:'Musixmatch',on:true},{id:'lrclib',label:'LRCLib',on:true},{id:'amazon',label:'Amazon',on:true},
+  { id:'spotify',    label:'Spotify',    on:false },
+  { id:'apple',      label:'Apple Music',on:true  },
+  { id:'musixmatch', label:'Musixmatch', on:false },
+  { id:'lrclib',     label:'LRCLib',     on:true  },
+  { id:'amazon',     label:'Amazon',     on:true  },
 ];
 const ALL_ENRICH = [
-  {id:'deezer',label:'Deezer',on:true},{id:'apple',label:'Apple Music',on:true},
-  {id:'qobuz',label:'Qobuz',on:true},{id:'tidal',label:'Tidal',on:true},{id:'soundcloud',label:'SoundCloud',on:true},
+  { id:'deezer',     label:'Deezer',     on:true },
+  { id:'apple',      label:'Apple Music',on:true },
+  { id:'qobuz',      label:'Qobuz',      on:true },
+  { id:'tidal',      label:'Tidal',      on:true },
+  { id:'soundcloud', label:'SoundCloud', on:true },
 ];
 
 function buildSortItem(item) {
   const d = document.createElement('div');
-  d.className = 'sort-item'; d.dataset.value = item.id;
-  d.innerHTML = `<span class="drag-h">⠿</span><input type="checkbox" ${item.on?'checked':''} onclick="event.stopPropagation()"><span class="svc-name">${item.label}</span>${item.badge?`<span class="svc-badge">${item.badge}</span>`:''}`;
+  d.className = 'sort-item';
+  d.dataset.value = item.id;
+  d.innerHTML = `<span class="drag-h">⠿</span><input type="checkbox" ${item.on ? 'checked' : ''} onclick="event.stopPropagation()"><span class="svc-name">${item.label}</span>${item.badge ? `<span class="svc-badge">${item.badge}</span>` : ''}`;
   return d;
 }
 function populateList(id, items) {
@@ -1149,39 +1334,47 @@ function populateList(id, items) {
   makeSortable(el);
 }
 function getChecked(id) {
-  return [...$(id).querySelectorAll('.sort-item')].filter(el=>el.querySelector('input[type="checkbox"]').checked).map(el=>el.dataset.value);
+  return [...$(id).querySelectorAll('.sort-item')]
+    .filter(el => el.querySelector('input[type="checkbox"]').checked)
+    .map(el => el.dataset.value);
 }
 
 populateList('services-list', ALL_SERVICES);
-populateList('lyrics-list', ALL_LYRICS.map(x=>({...x,badge:null})));
-populateList('enrich-list', ALL_ENRICH.map(x=>({...x,badge:null})));
+populateList('lyrics-list',   ALL_LYRICS.map(x => ({ ...x, badge: null })));
+populateList('enrich-list',   ALL_ENRICH.map(x => ({ ...x, badge: null })));
 
-// ── HC chips ──────────────────────────────────────────────────────────────────
-const HC_SVCS = ['tidal','qobuz','deezer','amazon','apple','soundcloud','youtube','pandora','spoti'];
-const hcDefOn = new Set(['tidal','qobuz','deezer']);
+// ── HC chips ─────────────────────────────────────────────────────────────────
+const HC_SVCS  = ['tidal','qobuz','deezer','amazon','apple','soundcloud','youtube','pandora','spoti'];
+const hcDefOn  = new Set(['tidal','qobuz','deezer']);
+
 function buildHcChips() {
   const c = $('hc-chips'); c.innerHTML = '';
   HC_SVCS.forEach(s => {
-    const on = hcDefOn.has(s);
+    const on  = hcDefOn.has(s);
     const lbl = document.createElement('label');
-    lbl.style.cssText = `display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;cursor:pointer;border:1.5px solid ${on?'var(--yellow)':'var(--border)'};background:${on?'var(--yellow-bg)':'var(--surface2)'};font-size:11.5px;font-weight:500;color:var(--text2);transition:border-color .15s,background .15s;user-select:none;-webkit-app-region:no-drag;`;
-    const cb = document.createElement('input'); cb.type='checkbox'; cb.checked=on; cb.dataset.svc=s; cb.style.accentColor='var(--yellow)';
-    cb.addEventListener('change',()=>{ lbl.style.borderColor=cb.checked?'var(--yellow)':'var(--border)'; lbl.style.background=cb.checked?'var(--yellow-bg)':'var(--surface2)'; });
+    lbl.style.cssText = `display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;cursor:pointer;border:1.5px solid ${on ? 'var(--yellow)' : 'var(--border)'};background:${on ? 'var(--yellow-bg)' : 'var(--surface2)'};font-size:11.5px;font-weight:500;color:var(--text2);transition:border-color .15s,background .15s;user-select:none;`;
+    const cb  = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = on; cb.dataset.svc = s;
+    cb.style.accentColor = 'var(--yellow)';
+    cb.addEventListener('change', () => {
+      lbl.style.borderColor = cb.checked ? 'var(--yellow)' : 'var(--border)';
+      lbl.style.background  = cb.checked ? 'var(--yellow-bg)' : 'var(--surface2)';
+    });
     lbl.appendChild(cb); lbl.appendChild(document.createTextNode(s));
     c.appendChild(lbl);
   });
 }
 buildHcChips();
 
-// ── State ─────────────────────────────────────────────────────────────────────
-let currentTracks = [];
-let currentUrl = '';
-let queue = []; // {id, title, artist, status: 'waiting'|'active'|'done'|'error', progress: 0}
-let queueDone = 0;
-let isDownloading = false;
+// ── State ────────────────────────────────────────────────────────────────────
+let currentTracks  = [];
+let currentUrl     = '';
+let queue          = [];
+let queueStats     = { downloaded:'0.00 MB', speed:'0.00 MB/s' };
+let isDownloading  = false;
 
-// ── Logging (Python bridge) ──────────────────────────────────────────────────
-function logMessage(msg, type='') {
+// ── Logging ──────────────────────────────────────────────────────────────────
+function logMessage(msg, type = '') {
   const area = $('logArea');
   const line = document.createElement('div');
   line.className = 'log-line';
@@ -1190,14 +1383,15 @@ function logMessage(msg, type='') {
   area.scrollTop = area.scrollHeight;
 }
 function clearLog() { $('logArea').innerHTML = ''; }
-// Python calls these
-window.app_log = (msg, type='') => logMessage(msg, type);
+
+// ── Python bridge ─────────────────────────────────────────────────────────────
+window.app_log         = (msg, type = '') => logMessage(msg, type);
 window.app_set_progress = (label) => { if (label) setStatus(label); };
 window.app_set_metadata = (data) => {
   try {
     const d = typeof data === 'string' ? JSON.parse(data) : data;
     setAlbumCard(d.title, d.artist, d.cover, d.quality);
-  } catch(e){}
+  } catch(e) {}
 };
 window.updateFolderLabel = (path) => {
   $('folder-path').textContent = path; $('folder-path').title = path;
@@ -1206,45 +1400,80 @@ window.updateHealthResults = (results) => {
   const data = typeof results === 'string' ? JSON.parse(results) : results;
   renderHealthResults(data);
 };
+window.app_update_download_stats = (payload) => {
+  try {
+    const data = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    if (!data) return;
+    queueStats.downloaded = `${Number(data.total_downloaded || 0).toFixed(2)} MB`;
+    queueStats.speed = `${Number(data.current_speed || 0).toFixed(2)} MB/s`;
+    if (Array.isArray(data.queue)) {
+      data.queue.forEach(stat => {
+        const qi = queue.findIndex(q => q.id && stat.id && q.id === stat.id);
+        if (qi < 0) return;
+        const item = queue[qi];
+        if (stat.status === 'downloading') item.status = 'active';
+        else if (stat.status === 'completed') item.status = 'done';
+        else if (stat.status === 'failed') item.status = 'error';
+        if (stat.total_size > 0) {
+          item.progress = Math.min(100, Math.round((stat.progress / stat.total_size) * 100));
+        } else if (stat.status === 'completed') {
+          item.progress = 100;
+        }
+      });
+    }
+    renderQueue();
+  } catch (e) {
+    console.warn('Failed to parse download stats', e);
+  }
+};
 window.showTracklist = (tracksJson) => {
   const tracks = typeof tracksJson === 'string' ? JSON.parse(tracksJson) : tracksJson;
   renderTracks(tracks);
+  $('fetchBtn').disabled = false;
+};
+window.app_download_finished = (success = true) => {
+  const activeItems = queue.map((item, qi) => item.status === 'active' ? qi : -1).filter(i => i >= 0);
+  if (!activeItems.length) return;
+  activeItems.forEach(qi => updateQueueItem(qi, success ? 'done' : 'error', success ? 100 : 0));
+  isDownloading = false;
+  $('queue-start-btn').disabled = false;
+  setStatus(success ? 'Download complete! ✓' : 'Error during download.');
+  logMessage(success ? 'All downloads finished.' : 'Download failed.', success ? 'ok' : 'error');
 };
 window.loadHistoryAndProfiles = async () => {
   if (!window.pywebview?.api) return;
   try {
-    const hist = await window.pywebview.api.get_history();
+    const hist     = await window.pywebview.api.get_history();
     renderRecent(hist);
     const profiles = await window.pywebview.api.get_profiles();
-    const sel = $('profile-select');
-    sel.innerHTML = '<option value="">Select…</option>';
-    profiles.forEach(p => { const o = document.createElement('option'); o.value=p; o.textContent=p; sel.appendChild(o); });
+    const sel      = $('profile-select');
+    sel.innerHTML  = '<option value="">Select…</option>';
+    profiles.forEach(p => {
+      const o = document.createElement('option'); o.value = p; o.textContent = p;
+      sel.appendChild(o);
+    });
   } catch(e) { logMessage('Could not load history/profiles: ' + e, 'warn'); }
 };
 
-// ── Status bar ─────────────────────────────────────────────────────────────────
-function setStatus(msg, loading=false) {
+// ── Status bar ────────────────────────────────────────────────────────────────
+function setStatus(msg, loading = false) {
   $('status-text').textContent = msg;
-  $('spinner').style.display = loading ? 'block' : 'none';
+  $('spinner').style.display   = loading ? 'block' : 'none';
 }
 
-// ── Album card ─────────────────────────────────────────────────────────────────
+// ── Album card ────────────────────────────────────────────────────────────────
 function setAlbumCard(title, artist, coverUrl, quality) {
-  $('album-title').textContent = title || '—';
-  $('album-artist').textContent = artist || '—';
-  // Cover
+  $('album-title').textContent  = title  || '—';
+  $('album-artist').textContent = artist || '';
+  $('album-meta').style.display = artist ? '' : 'none'; // hide meta row if no artist (artist URL)
   const coverEl = $('album-cover');
-  if (coverUrl) {
-    coverEl.innerHTML = `<img src="${coverUrl}" alt="cover" onerror="this.parentElement.innerHTML='🎵'">`;
-  } else {
-    coverEl.innerHTML = '🎵';
-  }
+  if (coverUrl) coverEl.innerHTML = `<img src="${coverUrl}" alt="cover" onerror="this.parentElement.innerHTML='🎵'">`;
+  else          coverEl.innerHTML = '🎵';
   $('album-card').classList.remove('hidden');
 }
-function updateAlbumMeta(date, trackCount, type='Album') {
-  $('album-date').textContent = date || '';
+function updateAlbumMeta(trackCount, type = 'Album') {
   $('album-tracks-count').textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
-  $('album-type-badge').textContent = type;
+  $('album-type-badge').textContent   = type;
 }
 function closeAlbumCard() {
   $('album-card').classList.add('hidden');
@@ -1252,14 +1481,29 @@ function closeAlbumCard() {
   $('track-table-wrap').classList.add('hidden');
   $('recent-wrap').style.display = '';
   $('dl-selected-btn').style.display = 'none';
-  currentTracks = [];
+  currentTracks  = [];
+  queue          = [];
+  isDownloading  = false;
+  renderQueue();
+  $('queue-start-btn').style.display = 'none';
   setStatus('Ready — paste a link and press Fetch');
-  $('fetchBtn').disabled = false;
-  $('urlInput').disabled = false;
+  $('fetchBtn').disabled  = false;
+  $('urlInput').disabled  = false;
   loadHistoryAndProfiles();
 }
 
-// ── Track rendering ────────────────────────────────────────────────────────────
+// ── Escape HTML ───────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function formatDuration(ms) {
+  if (!ms) return '—';
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60); const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+// ── Track rendering ───────────────────────────────────────────────────────────
 function renderTracks(tracks) {
   currentTracks = tracks;
   const container = $('track-rows');
@@ -1271,12 +1515,23 @@ function renderTracks(tracks) {
     row.id = `track-row-${i}`;
 
     const explicit = t.explicit ? `<span class="explicit-badge">E</span>` : '';
+    // Cover thumbnail
     const thumb = t.cover
-      ? `<div class="tr-thumb"><img src="${t.cover}" alt="" onerror="this.parentElement.innerHTML='🎵'"></div>`
+      ? `<div class="tr-thumb"><img src="${escHtml(t.cover)}" alt="" onerror="this.parentElement.innerHTML='🎵'"></div>`
       : `<div class="tr-thumb">🎵</div>`;
 
-    const dur = t.duration_ms ? formatDuration(t.duration_ms) : (t.duration || '—');
-    const plays = t.plays ? Number(t.plays).toLocaleString('it-IT') : '—';
+    const dur = formatDuration(t.duration_ms);
+
+    // 4 action buttons:
+    // 1. Download (main)  2. Download Lyrics  3. Download Cover  4. Open Spotify link
+    const extUrl  = t.external_url || '';
+    const linkBtn = extUrl
+      ? `<button class="ta-btn ta-link" data-tip="Open in Spotify" onclick="openExternal(${i})">
+           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+         </button>`
+      : `<button class="ta-btn" data-tip="No link" disabled style="opacity:.3">
+           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+         </button>`;
 
     row.innerHTML = `
       <div class="tr-check"><input type="checkbox" class="track-cb" value="${i}" checked onchange="onCheckChange()"></div>
@@ -1286,23 +1541,26 @@ function renderTracks(tracks) {
         <div class="tr-info">
           <div class="tr-name">${escHtml(t.title || '?')} ${explicit}</div>
           <div class="tr-artist">${escHtml(t.artist || t.artists || '')}</div>
-          <div class="tr-progress-bar" id="pb-${i}"><div class="tr-progress-fill" id="pf-${i}" style="width:0%"></div></div>
         </div>
       </div>
       <div class="tr-dur">${dur}</div>
-      <div class="tr-plays">${plays}</div>
       <div class="tr-actions">
-        <button class="ta-btn dl" id="dl-btn-${i}" onclick="downloadSingle(${i})" title="Download">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <button class="ta-btn dl" data-tip="Download" onclick="downloadSingle(${i})">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>
-        <button class="ta-btn" title="Info Traccia" onclick="showTrackInfo(${i})">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <button class="ta-btn ta-lyrics" data-tip="Save Lyrics (.lrc)" onclick="downloadLyrics(${i})">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
         </button>
+        <button class="ta-btn ta-cover" data-tip="Save Cover (.jpg)" onclick="downloadCover(${i})">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        </button>
+        ${linkBtn}
       </div>
     `;
     container.appendChild(row);
   });
 
+  updateAlbumMeta(tracks.length);
   $('track-controls').classList.remove('hidden');
   $('track-table-wrap').classList.remove('hidden');
   $('recent-wrap').style.display = 'none';
@@ -1310,107 +1568,169 @@ function renderTracks(tracks) {
   onCheckChange();
 }
 
-function escHtml(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-function formatDuration(ms) {
-  const s = Math.floor(ms/1000);
-  const m = Math.floor(s/60); const sec = s%60;
-  return `${m}:${sec.toString().padStart(2,'0')}`;
+// ── Track actions ─────────────────────────────────────────────────────────────
+function openExternal(i) {
+  const t   = currentTracks[i];
+  const url = t?.external_url;
+  if (!url) { logMessage('No external URL for this track', 'warn'); return; }
+  if (window.pywebview?.api) window.pywebview.api.open_url(url);
+  else window.open(url, '_blank');
 }
 
+function downloadLyrics(i) {
+  const t = currentTracks[i];
+  if (!t) return;
+  logMessage(`Fetching lyrics: ${t.title}…`, 'info');
+  if (window.pywebview?.api) window.pywebview.api.download_track_lyrics(t);
+  else logMessage('Python not connected — demo mode', 'warn');
+}
+
+function downloadCover(i) {
+  const t = currentTracks[i];
+  if (!t) return;
+  logMessage(`Downloading cover: ${t.title}…`, 'info');
+  if (window.pywebview?.api) window.pywebview.api.download_track_cover(t);
+  else logMessage('Python not connected — demo mode', 'warn');
+}
+
+// ── Check all ────────────────────────────────────────────────────────────────
 function toggleAll(cb) {
   document.querySelectorAll('.track-cb').forEach(c => c.checked = cb.checked);
   onCheckChange();
 }
 function onCheckChange() {
   const checked = document.querySelectorAll('.track-cb:checked').length;
-  const total = document.querySelectorAll('.track-cb').length;
-  $('check-all').checked = checked === total;
+  const total   = document.querySelectorAll('.track-cb').length;
+  $('check-all').checked       = checked === total;
   $('check-all').indeterminate = checked > 0 && checked < total;
 }
-
 function filterTracks() {
   const q = $('trackSearch').value.toLowerCase();
   document.querySelectorAll('.track-row').forEach(row => {
-    const title = row.querySelector('.tr-name')?.textContent?.toLowerCase() || '';
+    const title  = row.querySelector('.tr-name')?.textContent?.toLowerCase()   || '';
     const artist = row.querySelector('.tr-artist')?.textContent?.toLowerCase() || '';
     row.style.display = (!q || title.includes(q) || artist.includes(q)) ? '' : 'none';
   });
 }
 function reverseTracks() {
-  const container = $('track-rows');
-  const rows = [...container.children];
-  rows.reverse().forEach(r => container.appendChild(r));
+  const c = $('track-rows'); const rows = [...c.children];
+  rows.reverse().forEach(r => c.appendChild(r));
 }
 function sortTracks() {
   const val = $('sort-select').value;
   if (val === 'default') { renderTracks(currentTracks); return; }
   const sorted = [...currentTracks];
-  if (val === 'title') sorted.sort((a,b) => (a.title||'').localeCompare(b.title||''));
-  else if (val === 'duration') sorted.sort((a,b) => (a.duration_ms||0) - (b.duration_ms||0));
-  else if (val === 'plays') sorted.sort((a,b) => (b.plays||0) - (a.plays||0));
+  if (val === 'title')    sorted.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+  if (val === 'duration') sorted.sort((a, b) => (a.duration_ms || 0) - (b.duration_ms || 0));
   renderTracks(sorted);
 }
 
-function showCover(i) {
-  const t = currentTracks[i];
-  if (t?.cover) logMessage(`Cover URL: ${t.cover}`, 'info');
-}
-
-// ── Recent fetches ─────────────────────────────────────────────────────────────
+// ── Recent fetches ────────────────────────────────────────────────────────────
 function renderRecent(hist) {
-  const grid = $('recent-grid');
-  grid.innerHTML = '';
+  const grid = $('recent-grid'); grid.innerHTML = '';
   if (!hist || !hist.length) {
     grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--muted);padding:10px 0;">No recent fetches yet.</div>';
     return;
   }
   hist.slice(0, 16).forEach(item => {
-    const card = document.createElement('div');
+    const card  = document.createElement('div');
     card.className = 'recent-card';
     card.onclick = () => { $('urlInput').value = item.url || ''; $('urlInput').focus(); };
-    const coverStyle = item.cover ? `background-image:url('${item.cover}');` : '';
-    const emoji = {album:'💿',playlist:'📋',track:'🎵',artist:'🎤'}[item.type] || '🎵';
+    const emoji  = { album:'💿', playlist:'📋', track:'🎵', artist:'🎤' }[item.type] || '🎵';
+    const coverUrl = item.cover || item.cover_url || item.image || '';
+    const coverS = coverUrl ? `background-image:url('${coverUrl}');` : '';
     card.innerHTML = `
-      <div class="rc-cover" style="${coverStyle}">${item.cover ? '' : emoji}</div>
+      <div class="rc-cover" style="${coverS}">${coverUrl ? '' : emoji}</div>
       <div class="rc-info">
-        <div class="rc-title">${escHtml(item.title || item.url || '—')}</div>
-        <div class="rc-sub">${escHtml(item.artist || item.label || '')}</div>
+        <div class="rc-title">${escHtml(item.title || item.label || item.url || '—')}</div>
+        <div class="rc-sub">${escHtml(item.artist || '')}</div>
       </div>
     `;
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'rc-remove';
+    removeBtn.title = 'Remove from history';
+    removeBtn.textContent = '✕';
+    removeBtn.onclick = e => { e.stopPropagation(); removeRecent(item.url); };
+    card.querySelector('.rc-cover').appendChild(removeBtn);
     grid.appendChild(card);
   });
 }
 
-// ── Download queue ─────────────────────────────────────────────────────────────
+async function removeRecent(url) {
+  if (!url || !window.pywebview?.api) return;
+  try {
+    await window.pywebview.api.remove_history_item(url);
+    const hist = await window.pywebview.api.get_history();
+    renderRecent(hist);
+  } catch (e) {
+    logMessage('Could not remove history item: ' + e, 'error');
+  }
+}
+
+// ── Download queue ────────────────────────────────────────────────────────────
 function addToQueue(indices) {
+  console.log('addToQueue called', { indices, currentTracksLength: currentTracks.length, queueLengthBefore: queue.length });
   indices.forEach(i => {
     const t = currentTracks[i];
-    if (!t) return;
-    // avoid duplicates
-    if (queue.find(q => q.index === i)) return;
-    queue.push({ index: i, title: t.title, artist: t.artist || t.artists || '', status: 'waiting', progress: 0 });
+    if (!t) {
+      console.warn('Skipped invalid track index', i);
+      return;
+    }
+    if (queue.find(q => q.index === i)) {
+      console.warn('Track already in queue', i);
+      return;
+    }
+    const itemId = t.id || t.external_url || `queue-${i}-${Math.random().toString(16).slice(2)}`;
+    queue.push({
+      id: itemId,
+      index: i,
+      title: t.title,
+      artist: t.artist || t.artists || '',
+      status: 'waiting',
+      progress: 0,
+    });
   });
+  console.log('queue state after add', { queueLengthAfter: queue.length, queue });
   renderQueue();
-  $('queue-start-btn').style.display = queue.length > 0 ? 'block' : 'none';
-  $('queue-empty').style.display = queue.length > 0 ? 'none' : 'flex';
+  $('queue-start-btn').style.display  = queue.length > 0 ? 'block' : 'none';
+  $('queue-empty').style.display      = queue.length > 0 ? 'none'  : 'flex';
 }
+
 function renderQueue() {
-  const list = $('queue-list');
-  // Preserve existing items, add new ones
-  list.innerHTML = '';
+  const list = $('queue-list'); list.innerHTML = '';
+  let empty = $('queue-empty');
+  if (!empty) {
+    empty = document.createElement('div');
+    empty.id = 'queue-empty';
+    empty.innerHTML = `
+      <div class="q-icon">📥</div>
+      <div>No items in queue.<br>Add tracks to start downloading.</div>
+    `;
+  }
+
+  const dock = $('queue-dock');
   if (queue.length === 0) {
-    $('queue-empty').style.display = 'flex'; list.appendChild($('queue-empty'));
-    $('q-count').textContent = '0 tracks';
+    queueStats = { downloaded:'0.00 MB', speed:'0.00 MB/s' };
+    if (dock) dock.classList.remove('visible');
+    $('queue-drawer')?.classList.remove('open');
+
+    empty.style.display = 'flex';
+    list.appendChild(empty);
+    $('q-count').textContent = '0 tracks'; $('q-done').textContent = '';
+    const downloaded = $('qd-downloaded');
+    const speed = $('qd-speed');
+    if (downloaded) downloaded.textContent = queueStats.downloaded;
+    if (speed) speed.textContent = queueStats.speed;
     return;
   }
-  $('queue-empty').style.display = 'none';
+
+  empty.style.display = 'none';
+  if (dock) dock.classList.add('visible');
   queue.forEach((item, qi) => {
+    const statusText = { waiting:'Waiting…', active:'Downloading…', done:'Done ✓', error:'Failed ✗' }[item.status];
+    const dotClass   = { waiting:'waiting', active:'active', done:'done', error:'error' }[item.status];
     const el = document.createElement('div');
     el.className = 'queue-item'; el.id = `qi-${qi}`;
-    const statusText = {waiting:'Waiting…',active:'Downloading…',done:'Done',error:'Failed'}[item.status];
-    const dotClass = {waiting:'waiting',active:'active',done:'done',error:'error'}[item.status];
     el.innerHTML = `
       <div class="qi-title">${escHtml(item.title)}</div>
       <div class="qi-artist">${escHtml(item.artist)}</div>
@@ -1422,132 +1742,151 @@ function renderQueue() {
   $('q-count').textContent = `${queue.length} track${queue.length !== 1 ? 's' : ''}`;
   const done = queue.filter(q => q.status === 'done').length;
   $('q-done').textContent = done > 0 ? `${done} done` : '';
-}
-function clearQueue() {
-  queue = []; queueDone = 0; isDownloading = false;
-  renderQueue();
-  $('queue-start-btn').style.display = 'none';
-  $('q-done').textContent = '';
-  setStatus('Queue cleared.');
-}
-function updateQueueItem(qi, status, progress) {
-  if (qi < 0 || qi >= queue.length) return;
-  queue[qi].status = status;
-  queue[qi].progress = progress;
-  const el = $(`qi-${qi}`);
-  if (!el) return;
-  const dot = el.querySelector('.qi-dot');
-  const statusEl = el.querySelector('.qi-status span');
-  const fill = $(`qpf-${qi}`);
-  const statusText = {waiting:'Waiting…',active:'Downloading…',done:'Done',error:'Failed'}[status];
-  const dotClass = {waiting:'waiting',active:'active',done:'done',error:'error'}[status];
-  if (dot) { dot.className = 'qi-dot ' + dotClass; }
-  if (statusEl) statusEl.textContent = statusText;
-  if (fill) fill.style.width = progress + '%';
+  const downloaded = $('qd-downloaded');
+  const speed = $('qd-speed');
+  if (downloaded) downloaded.textContent = queueStats.downloaded;
+  if (speed) speed.textContent = queueStats.speed;
 }
 
-// ── Downloads ──────────────────────────────────────────────────────────────────
-function downloadSingle(i) {
-  addToQueue([i]);
-  logMessage(`Added "${currentTracks[i]?.title}" to queue`, 'info');
+function toggleQueueDrawer() {
+  const drawer = $('queue-drawer');
+  if (!drawer) return;
+  drawer.classList.toggle('open');
 }
+
+function updateQueueItem(qi, status, progress) {
+  if (qi < 0 || qi >= queue.length) return;
+  queue[qi].status = status; queue[qi].progress = progress;
+  renderQueue();
+}
+
+function clearQueue() {
+  queue = []; isDownloading = false;
+  queueStats = { downloaded:'0.00 MB', speed:'0.00 MB/s' };
+  renderQueue();
+  $('queue-start-btn').style.display = 'none';
+  setStatus('Queue cleared.');
+}
+
+// ── Download functions (actually work!) ───────────────────────────────────────
+function downloadSingle(i) {
+  console.log('downloadSingle clicked', { index:i, currentTracksLength: currentTracks.length });
+  addToQueue([i]);
+  startDownloadQueue();
+}
+
 function downloadAll() {
+  console.log('downloadAll clicked', { currentTracksLength: currentTracks.length });
   const all = currentTracks.map((_, i) => i);
+  if (!all.length) { setStatus('No tracks loaded.'); return; }
   addToQueue(all);
   logMessage(`Added ${all.length} tracks to queue`, 'info');
+  setStatus(`Added ${all.length} tracks to queue.`);
+  startDownloadQueue();
 }
+
 function downloadSelected() {
   const sel = [...document.querySelectorAll('.track-cb:checked')].map(cb => parseInt(cb.value));
+  console.log('downloadSelected clicked', { selectedIndices: sel });
   if (!sel.length) { setStatus('No tracks selected.'); return; }
   addToQueue(sel);
-  logMessage(`Added ${sel.length} selected tracks to queue`, 'info');
+  logMessage(`Added ${sel.length} tracks to queue`, 'info');
+  setStatus(`Added ${sel.length} tracks to queue.`);
+  startDownloadQueue();
 }
+
 async function startDownloadQueue() {
   const waiting = queue.filter(q => q.status === 'waiting');
-  if (!waiting.length) { setStatus('No waiting tracks in queue.'); return; }
+  if (!waiting.length) return;
   if (isDownloading) { setStatus('Download already running…'); return; }
   isDownloading = true;
   $('queue-start-btn').disabled = true;
-  setStatus(`Downloading ${waiting.length} tracks…`, true);
 
-  const config = buildConfig();
+  // Mark all waiting as active
+  for (let qi = 0; qi < queue.length; qi++) {
+    if (queue[qi].status === 'waiting') updateQueueItem(qi, 'active', 0);
+  }
+  setStatus(`Downloading ${waiting.length} track(s)…`, true);
+
+  const config  = buildConfig();
+  const indices = waiting.map(w => w.index);
 
   if (window.pywebview?.api) {
-    // Map queue indices to actual track list indices, then to URLs
-    const indices = waiting.map(w => w.index);
-    for (let qi = 0; qi < queue.length; qi++) {
-      if (queue[qi].status === 'waiting') {
-        updateQueueItem(qi, 'active', 0);
-        renderQueue();
+    try {
+      const op = window.pywebview.api.download_tracks(indices, config);
+      if (op && typeof op.catch === 'function') {
+        op.catch(e => {
+          for (let qi = 0; qi < queue.length; qi++) {
+            if (queue[qi].status === 'active') updateQueueItem(qi, 'error', 0);
+          }
+          isDownloading = false;
+          $('queue-start-btn').disabled = false;
+          logMessage('Download error: ' + e, 'error');
+          setStatus('Error during download.');
+        });
       }
+    } catch(e) {
+      for (let qi = 0; qi < queue.length; qi++) {
+        if (queue[qi].status === 'active') updateQueueItem(qi, 'error', 0);
+      }
+      isDownloading = false;
+      $('queue-start-btn').disabled = false;
+      logMessage('Download error: ' + e, 'error');
+      setStatus('Error during download.');
     }
-    await window.pywebview.api.download_tracks(indices, config);
-    // Mark all as done after Python finishes
-    for (let qi = 0; qi < queue.length; qi++) {
-      if (queue[qi].status === 'active') updateQueueItem(qi, 'done', 100);
-    }
-    renderQueue();
-    isDownloading = false;
-    $('queue-start-btn').disabled = false;
-    setStatus('Download batch complete!');
   } else {
     // Demo simulation
     for (let qi = 0; qi < queue.length; qi++) {
-      if (queue[qi].status !== 'waiting') continue;
-      updateQueueItem(qi, 'active', 0); renderQueue();
-      await new Promise(r => setTimeout(r, 400));
+      if (queue[qi].status !== 'active') continue;
       for (let p = 20; p <= 100; p += 20) {
-        updateQueueItem(qi, 'active', p); renderQueue();
+        updateQueueItem(qi, 'active', p);
         await new Promise(r => setTimeout(r, 80));
       }
-      updateQueueItem(qi, 'done', 100); renderQueue();
+      updateQueueItem(qi, 'done', 100);
     }
+    setStatus('Download complete! (demo)');
     isDownloading = false;
     $('queue-start-btn').disabled = false;
-    setStatus('Download complete! (demo)');
+    setStatus('Complete — queue finished.');
   }
 }
 
-// ── Main fetch action ──────────────────────────────────────────────────────────
+// ── Main fetch action ─────────────────────────────────────────────────────────
 async function onFetch() {
   const url = $('urlInput').value.trim();
   if (!url) { setStatus('Please enter a URL.'); return; }
-  $('fetchBtn').disabled = true;
+  $('fetchBtn').disabled  = true;
+  $('urlInput').disabled  = true;
   setStatus('Fetching metadata…', true);
   logMessage(`Fetching: ${url}`, 'info');
-  const includeFeaturing = $('config-featuring').checked;
-
   currentUrl = url;
 
+  const includeFeaturing = $('config-featuring').checked;
+
   if (window.pywebview?.api) {
+    // Python will call showTracklist() and set_metadata()
     await window.pywebview.api.fetch_metadata(url, includeFeaturing);
-    // Python will call showTracklist, app_set_metadata, app_set_progress
-    $('fetchBtn').disabled = false;
+    $('urlInput').disabled = false;
+    // fetchBtn is re-enabled in showTracklist callback
   } else {
-    // Demo
+    // Demo mode
     setTimeout(() => {
-      setAlbumCard('ICEMAN', 'Drake', '', 'FLAC · 18 tracks');
-      updateAlbumMeta('2026-05-15', 3, 'Album');
+      setAlbumCard('ICEMAN', 'Drake', '', 'FLAC · 3 tracks');
       const demo = [
-        {title:'Make Them Cry',artist:'Drake',duration_ms:307000,plays:27297552,explicit:true,cover:'',isrc:'USRC12345678',external_url:''},
-        {title:'Dust',artist:'Drake',duration_ms:189000,plays:24270546,explicit:true,cover:'',isrc:'USRC12345679',external_url:''},
-        {title:'Whisper My Name',artist:'Drake',duration_ms:222000,plays:27654253,explicit:true,cover:'',isrc:'USRC12345680',external_url:''},
+        { index:0, id:'abc1', title:'Make Them Cry', artist:'Drake', duration_ms:307000, explicit:true,  cover:'', isrc:'USRC12345678', external_url:'https://open.spotify.com/track/abc1' },
+        { index:1, id:'abc2', title:'Dust',          artist:'Drake', duration_ms:189000, explicit:true,  cover:'', isrc:'USRC12345679', external_url:'https://open.spotify.com/track/abc2' },
+        { index:2, id:'abc3', title:'Whisper My Name',artist:'Drake',duration_ms:222000, explicit:false, cover:'', isrc:'USRC12345680', external_url:'https://open.spotify.com/track/abc3' },
       ];
       renderTracks(demo);
-      setStatus(`Found: ICEMAN (3 tracks)`, false);
+      setStatus('Found: ICEMAN (3 tracks) — demo mode', false);
       $('fetchBtn').disabled = false;
-      logMessage('Demo metadata loaded (Python not connected)', 'warn');
+      $('urlInput').disabled = false;
+      logMessage('Demo data loaded (Python not connected)', 'warn');
     }, 800);
   }
 }
 
-// ── Python backend init ────────────────────────────────────────────────────────
-window.addEventListener('pywebviewready', () => {
-  logMessage('Python backend connected.', 'ok');
-  loadHistoryAndProfiles();
-});
-
-// ── Build config ───────────────────────────────────────────────────────────────
+// ── Build config ──────────────────────────────────────────────────────────────
 function buildConfig() {
   return {
     services:               getChecked('services-list').length ? getChecked('services-list') : ['tidal'],
@@ -1564,20 +1903,20 @@ function buildConfig() {
     use_album_subfolders:   $('config-album-sub').checked,
     first_artist_only:      $('config-first-artist').checked,
     include_featuring:      $('config-featuring').checked,
-    track_max_retries:      parseInt($('config-retries').value)||0,
+    track_max_retries:      parseInt($('config-retries').value) || 0,
     post_download_action:   $('config-post-action').value,
-    post_download_command:  $('config-post-cmd')?.value?.trim()||'',
-    qobuz_token:            $('config-qobuz-token').value.trim()||null,
-    tidal_custom_api:       $('config-tidal-api').value.trim()||null,
-    loop:                   parseInt($('config-loop').value)||null,
+    post_download_command:  $('config-post-cmd')?.value?.trim() || '',
+    qobuz_token:            $('config-qobuz-token').value.trim() || null,
+    tidal_custom_api:       $('config-tidal-api').value.trim()  || null,
+    loop:                   parseInt($('config-loop').value) || null,
     log_level:              $('config-loglevel').value,
   };
 }
 
-// ── Profiles ───────────────────────────────────────────────────────────────────
+// ── Profiles ──────────────────────────────────────────────────────────────────
 async function saveProfile() {
   const name = $('profile-name').value.trim();
-  if (!name) return logMessage('Enter a profile name', 'error');
+  if (!name) { logMessage('Enter a profile name', 'error'); return; }
   if (window.pywebview?.api) {
     await window.pywebview.api.save_profile_data(name, buildConfig());
     logMessage(`Profile '${name}' saved.`, 'ok');
@@ -1589,73 +1928,84 @@ async function loadProfile() {
   if (!name || !window.pywebview?.api) return;
   const data = await window.pywebview.api.load_profile_data(name);
   if (!data) return;
-  if (data.quality) $('config-quality').value = data.quality;
-  if (data.filename_format) $('config-filename').value = data.filename_format;
-  if (data.qobuz_token) $('config-qobuz-token').value = data.qobuz_token;
-  if (data.tidal_custom_api) $('config-tidal-api').value = data.tidal_custom_api;
+  if (data.quality)          $('config-quality').value   = data.quality;
+  if (data.filename_format)  $('config-filename').value  = data.filename_format;
+  if (data.qobuz_token)      $('config-qobuz-token').value = data.qobuz_token;
+  if (data.tidal_custom_api) $('config-tidal-api').value   = data.tidal_custom_api;
   $('config-track-numbers').checked = !!data.use_track_numbers; onTNChange();
-  $('config-lyrics').checked = data.embed_lyrics !== false; onLyricsChange();
-  $('config-enrich').checked = data.enrich_metadata !== false; onEnrichChange();
+  $('config-lyrics').checked        = data.embed_lyrics !== false; onLyricsChange();
+  $('config-enrich').checked        = data.enrich_metadata !== false; onEnrichChange();
   logMessage(`Profile '${name}' loaded.`, 'ok');
 }
 
-// ── Health check ───────────────────────────────────────────────────────────────
+// ── Health check ──────────────────────────────────────────────────────────────
 async function runHealthCheck() {
-  const svcs = [...$('hc-chips').querySelectorAll('input:checked')].map(c=>c.dataset.svc);
+  const svcs = [...$('hc-chips').querySelectorAll('input:checked')].map(c => c.dataset.svc);
   if (!svcs.length) { $('hc-status').textContent = 'Select at least one service.'; return; }
-  $('hc-run-btn').disabled = true;
+  $('hc-run-btn').disabled     = true;
   $('hc-spinner').style.display = 'block';
-  $('hc-status').textContent = `Checking ${svcs.length} service(s)…`;
-  $('hc-results').innerHTML = '';
+  $('hc-status').textContent   = `Checking ${svcs.length} service(s)…`;
+  $('hc-results').innerHTML    = '';
   if (window.pywebview?.api) {
     await window.pywebview.api.run_health_check(svcs);
   } else {
     setTimeout(() => {
       const demo = svcs.flatMap(p => [
-        {provider:p,method:'GET',url:`https://api.example.com/${p}`,ok:Math.random()>.3,latency:Math.floor(80+Math.random()*400),detail:Math.random()>.3?'ok':'timeout'},
-        {provider:p,method:'GET',url:'https://api.zarz.moe/v1/health',ok:true,latency:Math.floor(60+Math.random()*150),detail:'Zarz OK'},
+        { provider:p, method:'GET', url:`https://api.example.com/${p}`, ok:Math.random() > .3, latency:Math.floor(80 + Math.random() * 400), detail:Math.random() > .3 ? 'ok' : 'timeout' },
+        { provider:p, method:'GET', url:'https://api.zarz.moe/v1/health', ok:true, latency:Math.floor(60 + Math.random() * 150), detail:'Zarz OK' },
       ]);
       renderHealthResults(demo);
     }, 800);
   }
 }
+
 function renderHealthResults(data) {
-  $('hc-run-btn').disabled = false;
+  $('hc-run-btn').disabled      = false;
   $('hc-spinner').style.display = 'none';
-  const okCount = data.filter(r=>r.ok).length;
+  const okCount = data.filter(r => r.ok).length;
   $('hc-status').textContent = `${okCount}/${data.length} endpoints OK`;
   const provMap = {};
-  data.forEach(r => { if(!provMap[r.provider]) provMap[r.provider]=[]; provMap[r.provider].push(r); });
-  const container = $('hc-results');
-  container.innerHTML = '';
+  data.forEach(r => { if (!provMap[r.provider]) provMap[r.provider] = []; provMap[r.provider].push(r); });
+  const container = $('hc-results'); container.innerHTML = '';
   Object.entries(provMap).forEach(([prov, rows]) => {
-    const anyOk = rows.some(r=>r.ok);
-    const group = document.createElement('div');
+    const anyOk = rows.some(r => r.ok);
+    const group  = document.createElement('div');
     group.className = 'hc-prov-group s-section'; group.style.padding = '10px 12px';
-    group.innerHTML = `<div class="hc-prov-name"><span class="hc-dot ${anyOk?'ok':'err'}"></span>${prov} <span style="font-size:10px;font-weight:400;color:var(--muted)">${rows.filter(r=>r.ok).length}/${rows.length}</span></div>`;
+    group.innerHTML = `<div class="hc-prov-name"><span class="hc-dot ${anyOk ? 'ok' : 'err'}"></span>${prov} <span style="font-size:10px;font-weight:400;color:var(--muted)">${rows.filter(r => r.ok).length}/${rows.length}</span></div>`;
     rows.forEach(r => {
-      const lat = r.latency < 0 ? 'timeout' : `${r.latency}ms`;
+      const lat      = r.latency < 0 ? 'timeout' : `${r.latency}ms`;
       const latClass = r.latency < 0 ? '' : r.latency < 300 ? 'good' : 'slow';
       const shortUrl = r.url.length > 48 ? '…' + r.url.slice(-46) : r.url;
       const row = document.createElement('div');
-      row.className = `hc-row ${r.ok?'ok-r':'err-r'}`;
-      row.innerHTML = `<span class="hc-ind">${r.ok?'✓':'✗'}</span><span class="hc-meth">${r.method}</span><span class="hc-url" title="${r.url}">${shortUrl}</span><span class="hc-detail" title="${r.detail}">${r.detail}</span><span class="hc-lat ${latClass}">${lat}</span>`;
+      row.className = `hc-row ${r.ok ? 'ok-r' : 'err-r'}`;
+      row.innerHTML = `<span class="hc-ind">${r.ok ? '✓' : '✗'}</span><span class="hc-meth">${r.method}</span><span class="hc-url" title="${r.url}">${shortUrl}</span><span class="hc-detail" title="${r.detail}">${r.detail}</span><span class="hc-lat ${latClass}">${lat}</span>`;
       group.appendChild(row);
     });
     container.appendChild(group);
   });
 }
 
-// ── Window controls ────────────────────────────────────────────────────────────
-function pyWin(method) { window.pywebview?.api?.[method]?.(); }
+// ── Window controls (no-drag safe wrappers) ───────────────────────────────────
+function pyWin(method, arg) {
+  if (arg !== undefined) window.pywebview?.api?.[method]?.(arg);
+  else window.pywebview?.api?.[method]?.();
+}
 
-// ── Boot ───────────────────────────────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────────────────────────
+window.addEventListener('pywebviewready', () => {
+  logMessage('Python backend connected.', 'ok');
+  loadHistoryAndProfiles();
+});
+
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncSystemTheme);
+loadThemeFromStorage();
+
 setTimeout(() => {
   if (!window.pywebview) {
-    logMessage('Running in browser mode (Python not connected). Demo data available.', 'warn');
+    logMessage('Running in browser (demo mode — Python not connected)', 'warn');
     renderRecent([
-      {title:'ICEMAN',artist:'Drake',type:'album',cover:'',url:'https://open.spotify.com/album/0OAv7DCME2AV4q1KPO95HY'},
-      {title:'Certified Lover Boy',artist:'Drake',type:'album',cover:'',url:'https://open.spotify.com/album/3SpBlxme9WbeUDTbAcVsBN'},
+      { title:'ICEMAN', label:'ICEMAN', url:'https://open.spotify.com/album/0OAv7DCME2AV4q1KPO95HY' },
+      { title:'Certified Lover Boy', label:'CLB', url:'https://open.spotify.com/album/3SpBlxme9WbeUDTbAcVsBN' },
     ]);
   }
 }, 500);

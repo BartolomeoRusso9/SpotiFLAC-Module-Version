@@ -566,10 +566,11 @@ class SpotiflacDownloader:
         if not is_soundcloud and not is_pandora:
             tracks = self._resolve_isrc_bulk(tracks)
 
-        # Update URL history with collection name
+        # Update URL history with collection name and cover art
         try:
             from .core.session_memory import add_url_to_history
-            add_url_to_history(url, label=collection_name)
+            cover_url = tracks[0].cover_url if tracks and getattr(tracks[0], 'cover_url', '') else ''
+            add_url_to_history(url, label=collection_name, cover=cover_url)
         except Exception as exc:
             logger.debug("[downloader] Failed operation: %s", exc)
 

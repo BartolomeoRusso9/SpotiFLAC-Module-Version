@@ -34,6 +34,18 @@ class TrackMetadata(BaseModel):
     genre:        str        = ""
     bpm:          int        = 0
     extra_info:   dict       = {}
+    upc:          str        = ""                         
+    publisher:    str        = ""                   
+    total_discs:  int        = 1                
+    album_type:   str        = ""               
+    preview_url:  str        = ""                
+    album_id:     str        = ""                  
+    album_url:    str        = ""                 
+    artist_id:    str        = ""                  
+    artist_url:   str        = ""
+    artists_data: list = field(
+        default_factory=list
+    )
 
     @field_validator("title", "artists", "album", "album_artist", mode="before")
     @classmethod

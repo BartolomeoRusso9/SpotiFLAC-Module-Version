@@ -124,18 +124,34 @@ class DownloadManager:
 
     def get_stats(self) -> dict:
         with self._lock:
-            counts = {s: 0 for s in DownloadStatus}
-            for item in self._queue:
-                counts[item.status] += 1
+            queued = sum(1 for item in self._queue if item.status == DownloadStatus.QUEUED)
+            completed = sum(1 for item in self._queue if item.status == DownloadStatus.COMPLETED)
+            failed = sum(1 for item in self._queue if item.status == DownloadStatus.FAILED)
+            skipped = sum(1 for item in self._queue if item.status == DownloadStatus.SKIPPED)
+            active_bytes = sum(item.progress for item in self._queue if item.status == DownloadStatus.DOWNLOADING)
             return {
                 "is_downloading":   self.is_downloading,
                 "current_speed":    self.current_speed,
-                "total_downloaded": self.total_downloaded,
-                "queued":           counts[DownloadStatus.QUEUED],
-                "completed":        counts[DownloadStatus.COMPLETED],
-                "failed":           counts[DownloadStatus.FAILED],
-                "skipped":          counts[DownloadStatus.SKIPPED],
-                "queue":            [vars(i) for i in self._queue],
+                "total_downloaded": self.total_downloaded + active_bytes,
+                "queued":           queued,
+                "completed":        completed,
+                "failed":           failed,
+                "skipped":          skipped,
+                "queue":            [
+                    {
+                        "id":         item.id,
+                        "track_name": item.track_name,
+                        "artist_name": item.artist_name,
+                        "album_name": item.album_name,
+                        "spotify_id": item.spotify_id,
+                        "status":     item.status.value,
+                        "progress":   item.progress,
+                        "total_size": item.total_size,
+                        "speed":      item.speed,
+                        "file_path":  item.file_path,
+                    }
+                    for item in self._queue
+                ],
             }
     def reset(self) -> None:
         """Pulisce lo stato tra sessioni di download distinte."""
