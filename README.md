@@ -55,6 +55,17 @@ SpotiFLAC features a smart Interactive Wizard that guides you step-by-step. On l
 
 ---
 
+## Graphical User Interface (GUI)
+
+SpotiFLAC now features a beautiful webview-based Graphical User Interface. To launch the GUI directly, use the `--gui` flag:
+
+```bash
+spotiflac --gui
+```
+> (Or python launcher.py --gui if running from source)
+
+---
+
 ```python
 from SpotiFLAC import SpotiFLAC
 

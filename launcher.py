@@ -108,6 +108,11 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
 )
     parser.add_argument("--loop", "-l", type=int, default=None)
     parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch the graphical user interface (app.py)"
+    )
 
     # ── Profile ─────────────────────────────────────────────────────────────
     profile_grp = parser.add_argument_group("Profile")
@@ -194,6 +199,16 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
 
 def main() -> None:
     check_for_updates()
+
+    # ── Lancio della GUI se richiesto ─────────────────────────────────
+    if "--gui" in sys.argv:
+        try:
+            import app
+            app.run_gui()
+        except ImportError:
+            from SpotiFLAC import app
+            app.run_gui()
+        return
 
     if len(sys.argv) == 1:
         # ── Interactive wizard ─────────────────────────────────────────────

@@ -9,7 +9,6 @@ DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC
 
 # ── Logging handler → UI ─────────────────────────────────────────────────────
 class UILogHandler(logging.Handler):
-    """Captures SpotiFLAC module logs and forwards them to the UI."""
     def __init__(self, api):
         super().__init__()
         self.api = api
@@ -26,20 +25,27 @@ class UILogHandler(logging.Handler):
 
 class SpotiFLAC_API:
     def __init__(self):
-        self._window        = None  # Changed to private to prevent PyWebView inspection recursion
-        self._stop_anim     = threading.Event()
-        self._anim_thread   = None
+        self._window        = None  
         self.download_dir   = DEFAULT_DOWNLOAD_DIR
         self.current_tracks = []
         self.current_url    = ""
 
     def set_window(self, window):
         self._window = window
-        self._on_loaded()
 
     def _on_loaded(self):
         self.log("Python Backend connected.", "info")
         self.log(f"Default download folder: {self.download_dir}", "info")
+        
+        # 1. Avvia l'health check in automatico all'avvio
+        self.run_health_check(["tidal", "qobuz", "deezer", "apple", "soundcloud"])
+        
+        # 2. Richiedi all'UI di caricare storia e profili salvati in Python
+        try:
+            if self._window:
+                self._window.evaluate_js("window.loadHistoryAndProfiles();")
+        except Exception:
+            pass
 
     # ── UI communication ──────────────────────────────────────────────────────
 
@@ -52,11 +58,11 @@ class SpotiFLAC_API:
         except Exception:
             pass
 
-    def set_progress(self, pct, label=""):
+    def set_progress(self, label=""):
         safe_label = json.dumps(label)
         try:
             if self._window:
-                self._window.evaluate_js(f"window.app_set_progress({pct}, {safe_label});")
+                self._window.evaluate_js(f"window.app_set_progress({safe_label});")
         except Exception:
             pass
 
@@ -69,25 +75,65 @@ class SpotiFLAC_API:
         except Exception:
             pass
 
+    # ── API per Profili e Cronologia ──────────────────────────────────────────
+
+    def get_history(self):
+        try:
+            from SpotiFLAC.core.session_memory import get_url_history
+            return get_url_history()
+        except Exception:
+            return []
+
+    def get_profiles(self):
+        try:
+            from SpotiFLAC.core.profiles import list_profiles
+            return list_profiles()
+        except Exception:
+            return []
+
+    def load_profile_data(self, name):
+        try:
+            from SpotiFLAC.core.profiles import get_profile
+            return get_profile(name) or {}
+        except Exception:
+            return {}
+
+    def save_profile_data(self, name, cfg):
+        try:
+            from SpotiFLAC.core.profiles import save_profile
+            save_profile(name, cfg)
+            self.log(f"Profile '{name}' saved successfully.", "ok")
+        except Exception as e:
+            self.log(f"Failed to save profile: {e}", "error")
+
     # ── Window and folder controls ────────────────────────────────────────────
 
     def WindowMinimise(self):
-        if webview.windows:
-            threading.Thread(target=webview.windows[0].minimize, daemon=True).start()
+        if self._window:
+            self._window.minimize()
 
     def WindowToggleMaximise(self):
-        if webview.windows:
-            threading.Thread(target=webview.windows[0].toggle_fullscreen, daemon=True).start()
+        if self._window:
+            self._window.toggle_fullscreen()
 
     def Quit(self):
-        if webview.windows:
-            threading.Thread(target=webview.windows[0].destroy, daemon=True).start()
+        if self._window:
+            try:
+                self._window.destroy()
+            except Exception:
+                pass
+        os._exit(0)
 
     def choose_folder(self):
-        """Opens the folder dialog to choose the download directory."""
-        if result and len(result) > 0:
-            self.download_dir = result[0]
-            self.log(f"Download folder changed: {self.download_dir}", "ok")
+        if self._window:
+            result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+            if result and len(result) > 0:
+                self.download_dir = result[0]
+                self.log(f"Download folder changed: {self.download_dir}", "ok")
+                try:
+                    self._window.evaluate_js(f"window.updateFolderLabel({json.dumps(self.download_dir)});")
+                except:
+                    pass
 
     # ── Phase 1: Metadata and track lookup ───────────────────────────────────
 
@@ -101,7 +147,7 @@ class SpotiFLAC_API:
 
     def _fetch_metadata_task(self, url, include_featuring=False):
         try:
-            self.set_progress(15, "Fetching metadata…")
+            self.set_progress("Fetching metadata…")
             self.log(f"Analysing URL: {url}", "info")
 
             if "tidal.com" in url:
@@ -134,16 +180,22 @@ class SpotiFLAC_API:
             self.set_metadata(tracks[0].title, tracks[0].artists, tracks[0].cover_url or "", badge)
 
             self.log(f"Found: {collection_name} ({len(tracks)} track(s)). Choose the songs to download.", "ok")
-            self.set_progress(100, "Pronto per il download.")
+            self.set_progress("Pronto per il download.")
+
+            # Pass track data back to UI to show the list
+            try:
+                if self._window:
+                    self._window.evaluate_js(f"window.showTracklist({json.dumps(track_data)});")
+            except Exception:
+                pass
 
         except Exception as e:
             self.log(f"Error fetching metadata: {str(e)}", "error")
-            self.set_progress(0, "Error.")
+            self.set_progress("Error.")
 
     # ── Phase 2: Actual download ──────────────────────────────────────────────
 
     def download_tracks(self, selected_indices, config):
-        """Starts the download in the background based on selected indices and settings."""
         threading.Thread(target=self._download_task, args=(selected_indices, config), daemon=True).start()
 
     def _download_task(self, selected_indices, config):
@@ -152,7 +204,6 @@ class SpotiFLAC_API:
         handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
         sf_logger.addHandler(handler)
 
-        # Log level
         log_level_str = config.get("log_level", "INFO")
         current_log_level = logging.DEBUG if log_level_str == "DEBUG" else logging.INFO
         sf_logger.setLevel(current_log_level)
@@ -160,7 +211,6 @@ class SpotiFLAC_API:
         try:
             os.makedirs(self.download_dir, exist_ok=True)
 
-            # ── Extract all options from UI ───────────────────────────────────
             quality              = config.get("quality", "LOSSLESS")
             allow_fallback       = config.get("allow_fallback", True)
             embed_lyrics         = config.get("lyrics", True)
@@ -182,16 +232,16 @@ class SpotiFLAC_API:
             post_download_action = config.get("post_download_action", "none")
             post_download_command = config.get("post_download_command", "")
             qobuz_token          = config.get("qobuz_token") or None
+            tidal_custom_api     = config.get("tidal_custom_api") or None
 
             loop_val             = config.get("loop", None)
             loop_minutes         = int(loop_val) if loop_val else None
 
-            # ── Validate services ─────────────────────────────────────────────
             if not services:
                 self.log("Error: you must select at least one service/source.", "error")
                 return
 
-            # ── Build list of URLs to download ───────────────────────────────
+            # ── Costruzione corretta degli URL per le singole tracce ──────────
             if len(selected_indices) == len(self.current_tracks):
                 urls_to_download = [self.current_url]
                 self.log("Starting download of the entire album/playlist…", "info")
@@ -200,13 +250,18 @@ class SpotiFLAC_API:
                 for i in selected_indices:
                     t = self.current_tracks[i]
                     t_url = getattr(t, 'url', None) or getattr(t, 'link', None)
-                    if not t_url and getattr(t, 'track_id', None):
+                    t_id = getattr(t, 'id', None) or getattr(t, 'track_id', None)
+                    
+                    if not t_url and t_id:
                         if "spotify" in self.current_url:
-                            t_url = f"https://open.spotify.com/track/{t.track_id}"
+                            t_url = f"https://open.spotify.com/track/{t_id}"
                         elif "tidal" in self.current_url:
-                            t_url = f"https://tidal.com/browse/track/{t.track_id}"
+                            t_url = f"https://tidal.com/browse/track/{t_id}"
                         elif "apple" in self.current_url:
-                            t_url = f"https://music.apple.com/track/{t.track_id}"
+                            t_url = f"https://music.apple.com/track/{t_id}"
+                        elif "deezer" in self.current_url:
+                            t_url = f"https://www.deezer.com/track/{t_id}"
+                        
                     if t_url:
                         urls_to_download.append(t_url)
                     else:
@@ -216,9 +271,7 @@ class SpotiFLAC_API:
                 self.log("No valid URLs to download.", "error")
                 return
 
-            # ── Progress bar animation + download ────────────────────────────
-            self.set_progress(25, "Initialising services…")
-            self._start_progress_animation(25, 95, f"Downloading ({quality})…")
+            self.set_progress(f"Downloading ({quality})…")
 
             from SpotiFLAC import SpotiFLAC
 
@@ -241,6 +294,7 @@ class SpotiFLAC_API:
                     enrich_metadata         = enrich_metadata,
                     enrich_providers        = enrich_providers,
                     qobuz_token             = qobuz_token,
+                    tidal_custom_api        = tidal_custom_api,
                     track_max_retries       = track_max_retries,
                     post_download_action    = post_download_action,
                     post_download_command   = post_download_command,
@@ -248,14 +302,12 @@ class SpotiFLAC_API:
                     loop                    = loop_minutes,
                 )
 
-            self._stop_progress_animation()
-            self.set_progress(100, "Complete!")
+            self.set_progress("Complete!")
             self.log(f"All selected tracks saved to: {self.download_dir}", "ok")
 
         except Exception as e:
-            self._stop_progress_animation()
             self.log(f"Download error: {str(e)}", "error")
-            self.set_progress(0, "Error.")
+            self.set_progress("Error.")
         finally:
             sf_logger.removeHandler(handler)
 
@@ -271,7 +323,7 @@ class SpotiFLAC_API:
     def _health_check_task(self, services):
         try:
             import importlib
-            hc_module = importlib.import_module("SpotiFLAC.health_check")
+            hc_module = importlib.import_module("SpotiFLAC.core.health_check")
             hc_run = getattr(hc_module, "run_health_check")
             self.log(f"Health check started for: {', '.join(services)}", "info")
             results = hc_run(services)
@@ -291,39 +343,28 @@ class SpotiFLAC_API:
                 f"Health check complete — {len([r for r in results if r.ok])}/{len(results)} endpoints OK.",
                 "ok" if ok_providers else "error",
             )
+            # Pass results to UI
+            try:
+                if self._window:
+                    self._window.evaluate_js(f"window.updateHealthResults({json.dumps(data)});")
+            except Exception:
+                pass
         except ImportError:
             self.log("health_check module not found. Make sure SpotiFLAC is installed.", "error")
         except Exception as e:
             self.log(f"Health check error: {str(e)}", "error")
 
-    # ── Progress bar animation ────────────────────────────────────────────────
 
-    def _start_progress_animation(self, start_pct, end_pct, label):
-        self._stop_anim.clear()
-        import time
-        def _animate():
-            pct, step = float(start_pct), (end_pct - start_pct) / 180
-            while not self._stop_anim.is_set() and pct < end_pct:
-                self.set_progress(int(pct), label)
-                pct += step
-                time.sleep(1)
-        self._anim_thread = threading.Thread(target=_animate, daemon=True)
-        self._anim_thread.start()
-
-    def _stop_progress_animation(self):
-        self._stop_anim.set()
-        if self._anim_thread:
-            self._anim_thread.join(timeout=2)
-        self._anim_thread = None
-
-
-if __name__ == '__main__':
+def run_gui():
     api = SpotiFLAC_API()
     html_path = os.path.join(os.path.dirname(__file__), 'index.html')
     window = webview.create_window(
         'SpotiFLAC', url=html_path, js_api=api,
-        width=750, height=730, min_size=(650, 580),
+        width=1300, height=850, min_size=(650, 580),
         frameless=True, background_color='#0a0a0a'
     )
     api.set_window(window)
     webview.start(http_server=True)
+
+if __name__ == '__main__':
+    run_gui()
