@@ -32,12 +32,28 @@
 
     html, body { height: 100%; overflow: hidden; background: var(--bg); }
     body {
-      font-family: 'Syne', sans-serif;
+      font-family: 'Google Sans', 'Syne', sans-serif;
       color: var(--text);
       display: flex; flex-direction: column;
       user-select: none;
       -webkit-app-region: no-drag;
       font-size: 13px;
+    }
+
+    body.light-theme {
+      --bg: #f5f5f7;
+      --surface: #ffffff;
+      --surface2: #f0f0f4;
+      --surface3: #e5e5ea;
+      --border: #d1d1d6;
+      --border2: #c7c7cc;
+      --text: #111113;
+      --text2: #3a3a42;
+      --muted: #8e8e93;
+      --yellow: #eab308;
+      --yellow-d: #ca8a04;
+      --yellow-bg: rgba(234, 179, 8, 0.15);
+      --yellow-glow: rgba(234, 179, 8, 0.3);
     }
 
     /* ── Titlebar ── */
@@ -630,7 +646,6 @@
     <span id="tb-version">v0.6.1</span>
   </div>
   <div class="tb-spacer"></div>
-  <button class="tb-btn" id="themeBtn" onclick="cycleTheme()" title="Toggle theme">☀️</button>
 </div>
 
 <!-- App Body -->
@@ -648,6 +663,9 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
     <div class="nav-spacer"></div>
+    <button class="nav-btn" onclick="pyWin('open_url', 'https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/issues')" title="Segnala un Bug">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    </button>
     <button class="nav-btn" onclick="pyWin('choose_folder')" title="Choose folder">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     </button>
@@ -668,11 +686,6 @@
             placeholder="Paste Spotify, Tidal, Apple Music, Deezer, YouTube or Pandora link…"
             onkeydown="if(event.key==='Enter') onFetch()">
         </div>
-        <select class="country-sel" id="country-sel">
-          <option value="IT">IT</option><option value="US">US</option><option value="GB">GB</option>
-          <option value="DE">DE</option><option value="FR">FR</option><option value="ES">ES</option>
-          <option value="JP">JP</option><option value="AU">AU</option><option value="BR">BR</option>
-        </select>
         <button id="fetchBtn" onclick="onFetch()">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Fetch
@@ -890,6 +903,25 @@
 
         <div class="tc" id="tc-advanced">
           <div class="s-section">
+            <div class="s-title">Aspetto (Appearance)</div>
+            <div class="s-row">
+              <span class="s-label">Tema</span>
+              <select id="config-theme" onchange="changeTheme()">
+                <option value="dark">Scuro (Dark)</option>
+                <option value="light">Chiaro (Light)</option>
+              </select>
+            </div>
+            <div class="s-row">
+              <span class="s-label">Font App</span>
+              <select id="config-font" onchange="changeFont()">
+                <option value="'Google Sans', 'Syne', sans-serif">Google Sans</option>
+                <option value="'Syne', sans-serif">Syne</option>
+                <option value="'Inter', sans-serif">Inter</option>
+                <option value="Arial, sans-serif">Arial</option>
+              </select>
+            </div>
+          </div>
+          <div class="s-section">
             <div class="s-title">Retry & Loop</div>
             <div class="s-row">
               <span class="s-label">Extra retries per track<small>Cycles through all providers</small></span>
@@ -989,6 +1021,51 @@ function switchView(name) {
 let theme = 'dark';
 function cycleTheme() {
   // Nothing to cycle for now — dark only; can extend later
+}
+
+// Gestione Tema e Font
+function changeTheme() {
+  if ($('config-theme').value === 'light') document.body.classList.add('light-theme');
+  else document.body.classList.remove('light-theme');
+}
+
+function changeFont() {
+  document.body.style.fontFamily = $('config-font').value;
+}
+
+// Nuova Info Traccia Unificata
+function showTrackInfo(i) {
+  const t = currentTracks[i];
+  if(!t) return;
+  const dur = t.duration_ms ? formatDuration(t.duration_ms) : 'Sconosciuta';
+  const plays = t.plays ? Number(t.plays).toLocaleString('it-IT') : 'Sconosciute';
+  
+  const infoMsg = `🎵 TITOLO: ${t.title || 'N/D'}
+👤 ARTISTA: ${t.artist || t.artists || 'N/D'}
+🏷️ ISRC: ${t.isrc || 'N/D'}
+⏱️ DURATA: ${dur}
+▶️ RIPRODUZIONI: ${plays}
+🔗 LINK: ${t.url || 'N/D'}
+🖼️ COVER: ${t.cover || 'N/D'}`;
+  
+  alert(infoMsg);
+  logMessage(`Info: ${t.title} | ISRC: ${t.isrc || 'N/D'}`, 'info');
+}
+
+// Fix Attivazione Download All e Selected
+function downloadAll() {
+  const all = currentTracks.map((_, i) => i);
+  addToQueue(all);
+  logMessage(`Added ${all.length} tracks to queue`, 'info');
+  startDownloadQueue(); // Attiva automaticamente il processo
+}
+
+function downloadSelected() {
+  const sel = [...document.querySelectorAll('.track-cb:checked')].map(cb => parseInt(cb.value));
+  if (!sel.length) { setStatus('No tracks selected.'); return; }
+  addToQueue(sel);
+  logMessage(`Added ${sel.length} selected tracks to queue`, 'info');
+  startDownloadQueue(); // Attiva automaticamente il processo
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
@@ -1218,17 +1295,8 @@ function renderTracks(tracks) {
         <button class="ta-btn dl" id="dl-btn-${i}" onclick="downloadSingle(${i})" title="Download">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>
-        <button class="ta-btn" title="Preview" onclick="logMessage('Preview not available in desktop app','warn')">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        </button>
-        <button class="ta-btn" title="Info" onclick="logMessage('Track: ${escHtml(t.title||'')} | ISRC: ${escHtml(t.isrc||'N/A')}','info')">
+        <button class="ta-btn" title="Info Traccia" onclick="showTrackInfo(${i})">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        </button>
-        <button class="ta-btn" title="Cover" onclick="showCover(${i})">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        </button>
-        <button class="ta-btn" title="Open externally" onclick="logMessage('External URL: ${escHtml(t.external_url||'')}','info')">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
         </button>
       </div>
     `;

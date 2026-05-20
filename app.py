@@ -135,6 +135,10 @@ class SpotiFLAC_API:
                 except:
                     pass
 
+    def open_url(self, url):
+        import webbrowser
+        webbrowser.open(url)
+
     # ── Phase 1: Metadata and track lookup ───────────────────────────────────
 
     def fetch_metadata(self, url, include_featuring=False):
@@ -169,18 +173,34 @@ class SpotiFLAC_API:
             self.current_tracks = tracks
             track_data = []
 
+            # Estrazione approfondita dei dati per la tabella e per le INFO (Punti 1 e 2)
             for i, t in enumerate(tracks):
                 track_data.append({
                     "index": i,
                     "title": getattr(t, 'title', f'Track {i+1}'),
-                    "artist": getattr(t, 'artists', '')
+                    "artist": getattr(t, 'artists', ''),
+                    "cover": getattr(t, 'cover_url', ''),
+                    "duration_ms": getattr(t, 'duration_ms', getattr(t, 'duration', 0)),
+                    "explicit": getattr(t, 'explicit', False),
+                    "isrc": getattr(t, 'isrc', ''),
+                    "url": getattr(t, 'url', getattr(t, 'link', '')),
+                    "plays": getattr(t, 'plays', getattr(t, 'play_count', 0))
                 })
 
             badge = f"FLAC — {len(tracks)} tracks" if len(tracks) > 1 else "FLAC"
-            self.set_metadata(tracks[0].title, tracks[0].artists, tracks[0].cover_url or "", badge)
+            
+            # Gestione nome per i link dell'artista (Punto 3)
+            if "/artist/" in url.lower() or "artist" in url.lower():
+                display_title = collection_name
+                display_artist = ""
+            else:
+                display_title = collection_name
+                display_artist = tracks[0].artists if tracks else ""
+
+            self.set_metadata(display_title, display_artist, tracks[0].cover_url if tracks else "", badge)
 
             self.log(f"Found: {collection_name} ({len(tracks)} track(s)). Choose the songs to download.", "ok")
-            self.set_progress("Pronto per il download.")
+            self.set_progress("Ready for download.")
 
             # Pass track data back to UI to show the list
             try:
@@ -361,7 +381,7 @@ def run_gui():
     window = webview.create_window(
         'SpotiFLAC', url=html_path, js_api=api,
         width=1300, height=850, min_size=(650, 580),
-        frameless=True, background_color='#0a0a0a'
+        frameless=True, easy_drag=False, background_color='#0a0a0a'
     )
     api.set_window(window)
     webview.start(http_server=True)
