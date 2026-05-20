@@ -38,7 +38,11 @@ from .providers import (
 )
 from .core import TrackMetadata, DownloadResult
 
+<<<<<<< Updated upstream
 __version__ = "0.5.6"
+=======
+__version__ = "0.5.8"
+>>>>>>> Stashed changes
 
 __all__ = [
     "SpotiFLAC",
@@ -88,6 +92,7 @@ def SpotiFLAC(
         track_max_retries:     int              = 0,
         post_download_action:  str              = "none",
         post_download_command: str              = "",
+        tidal_custom_api:      str | None       = None,
 ) -> None:
     """
     Scarica tracce/album/playlist da Spotify, Tidal, Apple Music, SoundCloud o YouTube.
@@ -123,6 +128,7 @@ def SpotiFLAC(
         track_max_retries       = track_max_retries,
         post_download_action    = post_download_action,
         post_download_command   = post_download_command,
+        tidal_custom_api        = tidal_custom_api,
     )
 
     try:

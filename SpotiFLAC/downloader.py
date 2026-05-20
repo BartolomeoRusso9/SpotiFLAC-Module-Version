@@ -64,6 +64,7 @@ class DownloadOptions:
     # Shell command (used when action == "command")
     # Supported placeholders: {folder} {succeeded} {failed}
     post_download_command:   str             = ""
+    tidal_custom_api:        str | None      = None
 
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
@@ -73,6 +74,8 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
         logger.warning("Unknown provider: %s", name)
         return None
     kwargs = {"qobuz_token": opts.qobuz_token} if name in ("tidal", "qobuz") else {}
+    if name == "tidal" and opts.tidal_custom_api:
+        kwargs["custom_api_url"] = opts.tidal_custom_api
     return cls(**kwargs)
 
 
