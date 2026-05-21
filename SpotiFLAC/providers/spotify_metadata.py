@@ -1,23 +1,3 @@
-"""
-SpotifyMetadataProvider — improved.
-
-Changes vs previous version:
-  - parse_spotify_url now raises InvalidUrlError instead of returning None
-  - ArtistSimple dataclass with id/name/external_url (mirrored from Go)
-  - TrackMetadata gets: preview_url, upc, publisher, total_discs,
-    album_id, album_url, artist_id, artist_url, artists_data, album_type
-  - get_album_tracks propagates UPC and label from album to every track
-  - get_album_tracks computes total_discs from disc_number values
-  - get_artist_albums passes album_type down to each TrackMetadata
-  - get_preview_url(): scrapes embed page for mp3 URL (mirrors Go GetPreviewURL)
-  - _fetch_composer(): scrapes JSON-LD composer credits from embed page
-  - get_track() accepts fetch_composer=True to enrich composer field
-  - _get() handles full URLs (needed by _paginate for next-page links)
-  - _build_artists_data() helper to construct ArtistSimple list
-
-NOTE: TrackMetadata in core/models.py must be extended with the new fields
-listed in the MODELS PATCH section at the bottom of this file.
-"""
 from __future__ import annotations
 
 import base64
@@ -269,28 +249,151 @@ class SpotifyMetadataClient:
             return ""
 
     def get_album_tracks(self, album_id: str) -> tuple[dict, list[TrackMetadata]]:
-        """
-        Recupera l'album completo e tutte le sue tracce.
+        # --- TENTATIVO CON SOLUZIONE 2: GRAPHQL (Velocità Go-Level) ---
+        try:
+            from ..core.spotfetch import SpotifyWebClient
+            logger.info(f"[spotify] Tentativo di recupero album {album_id} rapido tramite GraphQL...")
+            
+            web_client = SpotifyWebClient()
+            web_client.initialize()
+            
+            all_items = []
+            offset = 0
+            limit = 1000
+            album_data_gql = {}
+            
+            while True:
+                payload = {
+                    "operationName": "getAlbum",
+                    "variables": {
+                        "uri": f"spotify:album:{album_id}",
+                        "locale": "",
+                        "offset": offset,
+                        "limit": limit
+                    },
+                    "extensions": {
+                        "persistedQuery": {
+                            "version": 1,
+                            "sha256Hash": "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10"
+                        }
+                    }
+                }
+                
+                response = web_client.query(payload)
+                album_union = response.get("data", {}).get("albumUnion", {})
+                
+                if not album_data_gql:
+                    album_data_gql = album_union
+                    
+                tracks_v2 = album_union.get("tracksV2", {})
+                items = tracks_v2.get("items", [])
+                
+                if not items:
+                    break
+                    
+                all_items.extend(items)
+                
+                total_count = tracks_v2.get("totalCount", 0)
+                if len(all_items) >= total_count or len(items) < limit:
+                    break
+                    
+                offset += limit
+            
+            if all_items:
+                album_name = album_data_gql.get("name", "Unknown Album")
+                album_url = f"https://open.spotify.com/album/{album_id}"
+                
+                cover_sources = album_data_gql.get("coverArt", {}).get("sources", [])
+                cover_url = cover_sources[0].get("url", "") if cover_sources else ""
+                
+                album_artists_list = [a.get("profile", {}).get("name", "Unknown") for a in album_data_gql.get("artists", {}).get("items", [])]
+                album_artist = ", ".join(album_artists_list) if album_artists_list else "Unknown Artist"
+                
+                publisher = album_data_gql.get("label", "")
+                release_date = album_data_gql.get("date", {}).get("isoString", "")
+                if release_date:
+                    release_date = release_date[:10]
+                    
+                total_discs = album_data_gql.get("discs", {}).get("totalCount", 1)
+                total_tracks = tracks_v2.get("totalCount", len(all_items))
+                
+                graphql_tracks = []
+                for idx, item in enumerate(all_items):
+                    track_data = item.get("track", {})
+                    track_id = track_data.get("id", "")
+                    track_uri = track_data.get("uri", "")
+                    if not track_id and ":" in track_uri:
+                        track_id = track_uri.split(":")[-1]
+                        
+                    if not track_id:
+                        continue
+                        
+                    title = track_data.get("name", "Unknown")
+                    
+                    artists_list = [a.get("profile", {}).get("name", "Unknown") for a in track_data.get("artists", {}).get("items", [])]
+                    artists_str = ", ".join(artists_list) if artists_list else album_artist
+                    
+                    duration_ms = track_data.get("duration", {}).get("totalMilliseconds", 0)
+                    
+                    # Generazione ArtistSimple interna
+                    artists_data_list = []
+                    for art_item in track_data.get("artists", {}).get("items", []):
+                        a_uri = art_item.get("uri", "")
+                        a_id = a_uri.split(":")[-1] if ":" in a_uri else ""
+                        a_name = art_item.get("profile", {}).get("name", "")
+                        if a_id:
+                            artists_data_list.append(ArtistSimple(
+                                id=a_id, 
+                                name=a_name, 
+                                external_url=f"https://open.spotify.com/artist/{a_id}"
+                            ))
 
-        Migliorie rispetto alla versione precedente:
-          - estrae UPC da album.external_ids e lo propaga a ogni traccia
-          - estrae label (publisher) dall'album e lo propaga
-          - calcola total_discs dal max(disc_number) delle tracce
-          - espone preview_url, album_id, album_url, artist_id, artist_url,
-            artists_data per ogni traccia
-        """
+                    first_artist = artists_data_list[0] if artists_data_list else ArtistSimple("", "", "")
+                    
+                    meta = TrackMetadata(
+                        id=track_id,
+                        title=title,
+                        artists=artists_str,
+                        album=album_name,
+                        album_artist=album_artist,
+                        isrc="",  # Lasciamo fare la risoluzione veloce in bulk al downloader
+                        track_number=track_data.get("trackNumber", idx + 1),
+                        disc_number=track_data.get("discNumber", 1),
+                        total_tracks=total_tracks,
+                        duration_ms=duration_ms,
+                        release_date=release_date,
+                        cover_url=cover_url,
+                        external_url=f"https://open.spotify.com/track/{track_id}",
+                        copyright="",
+                        composer="",
+                        upc="",
+                        publisher=publisher,
+                        total_discs=total_discs,
+                        album_type="album",
+                        preview_url="",
+                        album_id=album_id,
+                        album_url=album_url,
+                        artist_id=first_artist.id,
+                        artist_url=first_artist.external_url,
+                        artists_data=artists_data_list
+                    )
+                    graphql_tracks.append(meta)
+                
+                mock_album = {"name": album_name, "id": album_id, "label": publisher, "external_ids": {}}
+                logger.info(f"[spotify] GraphQL completato. {len(graphql_tracks)} tracce album estratte.")
+                return mock_album, graphql_tracks
+
+        except Exception as exc:
+            logger.warning(f"[spotify] GraphQL fallito su album ({exc}). Eseguo il fallback sulla REST API...")
+
+        # --- FALLBACK: LOGICA RESTRITTIVA REST API ---
         album     = self._get(f"/albums/{album_id}")
         raw_items = list(self._paginate(f"{_API_BASE}/albums/{album_id}/tracks?limit=50"))
 
-        # Dati a livello di album da propagare alle tracce
         upc       = (album.get("external_ids") or {}).get("upc", "")
         publisher = album.get("label", "")
-        total_discs = max(
-            (item.get("disc_number", 1) for item in raw_items),
-            default=1,
-        )
+        total_discs = max((item.get("disc_number", 1) for item in raw_items), default=1)
 
-        # Recupero ISRC: prima dalla cache, poi a blocchi di 50
         isrc_map: dict[str, str] = {}
         missing: list[str] = []
 
@@ -313,23 +416,142 @@ class SpotifyMetadataClient:
                     isrc_map[tid] = isrc
                     if isrc:
                         put_cached_isrc(tid, isrc)
-            except Exception as exc:
-                logger.warning("[spotify] batch ISRC fallito: %s", exc)
+            except Exception:
+                pass
 
         tracks: list[TrackMetadata] = [
             self._track_from_album_item(
-                item, album,
-                isrc=isrc_map.get(item["id"], ""),
-                upc=upc,
-                publisher=publisher,
-                total_discs=total_discs,
-            )
-            for item in raw_items
+                item, album, isrc=isrc_map.get(item["id"], ""), upc=upc,
+                publisher=publisher, total_discs=total_discs,
+            ) for item in raw_items
         ]
-
         return album, tracks
 
     def get_playlist_tracks(self, playlist_id: str) -> tuple[dict, list[TrackMetadata]]:
+        # --- TENTATIVO CON SOLUZIONE 2: GRAPHQL (Velocità Go-Level) ---
+        try:
+            from ..core.spotfetch import SpotifyWebClient
+            logger.info("[spotify] Tentativo di recupero playlist rapido tramite GraphQL...")
+            
+            web_client = SpotifyWebClient()
+            web_client.initialize()
+            
+            all_items = []
+            offset = 0
+            limit = 1000
+            playlist_name = "Unknown Playlist"
+            
+            while True:
+                payload = {
+                    "operationName": "fetchPlaylist",
+                    "variables": {
+                        "uri": f"spotify:playlist:{playlist_id}",
+                        "offset": offset,
+                        "limit": limit,
+                        "enableWatchFeedEntrypoint": False
+                    },
+                    "extensions": {
+                        "persistedQuery": {
+                            "version": 1,
+                            "sha256Hash": "bb67e0af06e8d6f52b531f97468ee4acd44cd0f82b988e15c2ea47b1148efc77"
+                        }
+                    }
+                }
+                
+                response = web_client.query(payload)
+                playlist_v2 = response.get("data", {}).get("playlistV2", {})
+                if not playlist_name or playlist_name == "Unknown Playlist":
+                    playlist_name = playlist_v2.get("name", "Unknown Playlist")
+                    
+                content = playlist_v2.get("content", {})
+                items = content.get("items", [])
+                
+                if not items:
+                    break
+                    
+                all_items.extend(items)
+                
+                total_count = content.get("totalCount", 0)
+                if len(all_items) >= total_count or len(items) < limit:
+                    break
+                    
+                offset += limit
+            
+            if all_items:
+                graphql_tracks = []
+                for item in all_items:
+                    track_data = item.get("itemV2", {}).get("data", {})
+                    track_id = track_data.get("id", "")
+                    track_uri = track_data.get("uri", "")
+                    if not track_id and ":" in track_uri:
+                        track_id = track_uri.split(":")[-1]
+                        
+                    if not track_id:
+                        continue
+                        
+                    title = track_data.get("name", "Unknown")
+                    raw_plays = track_data.get("playcount")
+                    
+                    # 2. Controlliamo se Spotify ci ha restituito un dizionario o un testo
+                    if isinstance(raw_plays, dict):
+                        plays_str = str(raw_plays.get("value") or raw_plays.get("total") or "0")
+                    else:
+                        plays_str = str(raw_plays or "0")
+
+                    # 3. Estraiamo anche l'etichetta Explicit (E) come in Go
+                    is_explicit = track_data.get("contentRating", {}).get("label") == "EXPLICIT"
+                    # -------------------------------------
+                    
+                    # Estrazione e formattazione autori
+                    artists_list = [a.get("profile", {}).get("name", "Unknown") for a in track_data.get("artists", {}).get("items", [])]
+                    artists_str = ", ".join(artists_list) if artists_list else "Unknown Artist"
+                    
+                    # Estrazione info album
+                    album_data = track_data.get("albumOfTrack", {})
+                    album_name = album_data.get("name", "Unknown")
+                    
+                    album_artists_list = [a.get("profile", {}).get("name", "Unknown") for a in album_data.get("artists", {}).get("items", [])]
+                    album_artist = ", ".join(album_artists_list) if album_artists_list else (artists_list[0] if artists_list else "Unknown Artist")
+                    
+                    # URL Copertina 
+                    cover_sources = album_data.get("coverArt", {}).get("sources", [])
+                    cover_url = cover_sources[0].get("url", "") if cover_sources else ""
+                    
+                    duration_ms = track_data.get("trackDuration", {}).get("totalMilliseconds", 0)
+                    
+                    # Se hai aggiornato il modello TrackMetadata con plays e is_explicit
+                    meta = TrackMetadata(
+                        id=track_id,
+                        title=title,
+                        artists=artists_str,
+                        album=album_name,
+                        album_artist=album_artist,
+                        isrc="",
+                        track_number=track_data.get("trackNumber", 0) or 0,
+                        disc_number=1,
+                        total_tracks=0,
+                        duration_ms=duration_ms,
+                        release_date="",
+                        cover_url=cover_url,
+                        external_url=f"https://open.spotify.com/track/{track_id}",
+                        copyright="",
+                        composer="",
+                        plays=plays_str,           # <--- ORA E' SEMPRE UNA STRINGA PULITA (es. "1504200")
+                        is_explicit=is_explicit    # <--- True o False
+                    )
+                    graphql_tracks.append(meta)
+                
+                mock_playlist = {
+                    "name": playlist_name,
+                    "id": playlist_id
+                }
+                logger.info(f"[spotify] GraphQL completato con successo! Estratte {len(graphql_tracks)} tracce all'istante.")
+                return mock_playlist, graphql_tracks
+
+        except Exception as exc:
+            logger.warning(f"[spotify] GraphQL fallito ({exc}). Eseguo il fallback sulla REST API tradizionale...")
+
+        # --- FALLBACK: LOGICA RESTRITTIVA REST API (Già Presente) ---
         playlist = self._get(f"/playlists/{playlist_id}")
         tracks: list[TrackMetadata] = []
 
@@ -371,7 +593,7 @@ class SpotifyMetadataClient:
 
         for item in self._paginate(
             f"{_API_BASE}/artists/{artist_id}/albums"
-            f"?include_groups={include_groups}&limit=50"
+            f"?include_groups={include_groups}&limit=50", delay=0.0
         ):
             aid         = item.get("id")
             album_group = item.get("album_group", "album")
@@ -625,47 +847,3 @@ class SpotifyMetadataClient:
             artist_url   = first_artist.external_url,
             artists_data = artists_data,
         )
-
-
-# ===========================================================================
-# MODELS PATCH — aggiungere i seguenti campi a TrackMetadata in core/models.py
-# ===========================================================================
-#
-# from dataclasses import dataclass, field
-# from typing import TYPE_CHECKING
-# if TYPE_CHECKING:
-#     from ..providers.spotify_metadata import ArtistSimple
-#
-# @dataclass
-# class TrackMetadata:
-#     # campi esistenti ...
-#     id: str
-#     title: str
-#     artists: str
-#     album: str
-#     album_artist: str
-#     isrc: str
-#     track_number: int
-#     disc_number: int
-#     total_tracks: int
-#     duration_ms: int
-#     release_date: str
-#     cover_url: str
-#     external_url: str
-#     copyright: str
-#     composer: str
-#
-#     # --- campi nuovi da aggiungere ---
-#     upc: str = ""                         # UPC del rilascio (album)
-#     publisher: str = ""                   # etichetta discografica (album.label)
-#     total_discs: int = 1                  # numero totale di dischi nell'album
-#     album_type: str = ""                  # album | single | appears_on | compilation
-#     preview_url: str = ""                 # mp3 preview (30s), diretto dall'API REST
-#     album_id: str = ""                    # Spotify ID dell'album
-#     album_url: str = ""                   # URL web dell'album
-#     artist_id: str = ""                   # Spotify ID del primo artista
-#     artist_url: str = ""                  # URL web del primo artista
-#     artists_data: list = field(           # lista ArtistSimple {id, name, external_url}
-#         default_factory=list
-#     )
-# ===========================================================================

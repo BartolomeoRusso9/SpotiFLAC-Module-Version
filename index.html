@@ -264,7 +264,8 @@
 
     /* Album card */
     #album-card {
-      margin: 14px 18px 0;
+      max-width: 1200px;
+      margin: 14px auto 0;
       background: var(--surface);
       border: 1.5px solid var(--border);
       border-radius: var(--radius);
@@ -317,7 +318,8 @@
 
     /* Track controls */
     #track-controls {
-      margin: 12px 18px 8px;
+      max-width: 1200px;
+      margin: 12px auto 8px;
       display: flex; gap: 8px; align-items: center; flex-shrink: 0;
     }
     #track-search-wrap { flex: 1; position: relative; }
@@ -358,19 +360,22 @@
     #track-table-wrap::-webkit-scrollbar { width: 4px; }
     #track-table-wrap::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
 
-    /* Columns: check | # | title+cover | duration | actions(4 btns) */
+    /* Columns: check | # | title+cover | duration | playcount | actions(4 btns) */
     .track-table-header {
+      max-width: 1200px;
+      margin: 0 auto 4px auto;
       display: grid;
-      grid-template-columns: 28px 36px 1fr 70px 150px;
+      grid-template-columns: 28px 36px 1fr 60px 120px 150px;
       padding: 6px 10px;
       border-bottom: 1px solid var(--border);
-      margin-bottom: 4px;
-      font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+      font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
       color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
     }
     .track-row {
+      max-width: 1200px;
+      margin: 0 auto;
       display: grid;
-      grid-template-columns: 28px 36px 1fr 70px 150px;
+      grid-template-columns: 28px 36px 1fr 60px 120px 150px;
       align-items: center;
       padding: 5px 10px;
       border-radius: var(--radius-sm);
@@ -382,7 +387,7 @@
 
     .tr-check input { accent-color: var(--yellow); cursor: pointer; width: 14px; height: 14px; }
     .tr-num {
-      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      font-family: 'JetBrains Mono', monospace; font-size: 13px;
       color: var(--muted); text-align: right; padding-right: 6px;
     }
     .tr-title-cell { display: flex; align-items: center; gap: 9px; min-width: 0; }
@@ -398,7 +403,7 @@
 
     .tr-info { min-width: 0; }
     .tr-name {
-      font-size: 12.5px; font-weight: 600; white-space: nowrap;
+      font-size: 14.5px; font-weight: 600; white-space: nowrap;
       overflow: hidden; text-overflow: ellipsis;
       display: flex; align-items: center; gap: 5px;
     }
@@ -408,9 +413,10 @@
       padding: 1px 4px; border-radius: 3px; border: 1px solid var(--border2);
       flex-shrink: 0; font-weight: 700;
     }
-    .tr-artist { font-size: 11.5px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tr-artist { font-size: 13.5px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-    .tr-dur { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--text2); }
+    .tr-dur { font-family: 'JetBrains Mono', monospace; font-size: 13.5px; color: var(--text2); }
+    .tr-playcount { font-family: 'JetBrains Mono', monospace; font-size: 13.5px; color: var(--text2); text-align: left; }
 
     /* 4-button action area */
     .tr-actions { display: flex; gap: 3px; align-items: center; }
@@ -875,17 +881,19 @@
                 <option value="default">Default</option>
                 <option value="title">Title</option>
                 <option value="duration">Duration</option>
+                <option value="playcount">Playcount</option>
               </select>
             </div>
           </div>
 
-          <!-- Track table — columns: check | # | title+cover | duration | 4 actions -->
+          <!-- Track table — columns: check | # | title+cover | duration | plays |4 actions -->
           <div id="track-table-wrap" class="hidden">
             <div class="track-table-header">
               <div><input type="checkbox" id="check-all" onchange="toggleAll(this)" style="accent-color:var(--yellow);width:14px;height:14px;cursor:pointer;"></div>
               <div>#</div>
               <div>Title</div>
               <div>Time</div>
+              <div>Plays</div>
               <div>Actions</div>
             </div>
             <div id="track-rows"></div>
@@ -1471,9 +1479,21 @@ function setAlbumCard(title, artist, coverUrl, quality) {
   else          coverEl.innerHTML = '🎵';
   $('album-card').classList.remove('hidden');
 }
-function updateAlbumMeta(trackCount, type = 'Album') {
+function updateAlbumMeta(trackCount) {
   $('album-tracks-count').textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
-  $('album-type-badge').textContent   = type;
+
+  let badgeType = 'ALBUM';
+  const url = currentUrl.toLowerCase();
+  
+  if (url.includes('/track/')) {
+    badgeType = 'TRACK';
+  } else if (url.includes('/playlist/')) {
+    badgeType = 'PLAYLIST';
+  } else if (url.includes('/artist/')) {
+    badgeType = 'ARTIST';
+  }
+
+  $('album-type-badge').textContent = badgeType;
 }
 function closeAlbumCard() {
   $('album-card').classList.add('hidden');
@@ -1521,6 +1541,7 @@ function renderTracks(tracks) {
       : `<div class="tr-thumb">🎵</div>`;
 
     const dur = formatDuration(t.duration_ms);
+    const playcount = t.playcount ? String(t.playcount).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '—';
 
     // 4 action buttons:
     // 1. Download (main)  2. Download Lyrics  3. Download Cover  4. Open Spotify link
@@ -1544,6 +1565,7 @@ function renderTracks(tracks) {
         </div>
       </div>
       <div class="tr-dur">${dur}</div>
+      <div class="tr-playcount">${playcount}</div>
       <div class="tr-actions">
         <button class="ta-btn dl" data-tip="Download" onclick="downloadSingle(${i})">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -1622,6 +1644,11 @@ function sortTracks() {
   const sorted = [...currentTracks];
   if (val === 'title')    sorted.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
   if (val === 'duration') sorted.sort((a, b) => (a.duration_ms || 0) - (b.duration_ms || 0));
+  if (val === 'playcount') sorted.sort((a, b) => {
+    const pc_a = parseInt(a.playcount || '0', 10) || 0;
+    const pc_b = parseInt(b.playcount || '0', 10) || 0;
+    return pc_b - pc_a;
+  });
   renderTracks(sorted);
 }
 
@@ -1873,9 +1900,9 @@ async function onFetch() {
     setTimeout(() => {
       setAlbumCard('ICEMAN', 'Drake', '', 'FLAC · 3 tracks');
       const demo = [
-        { index:0, id:'abc1', title:'Make Them Cry', artist:'Drake', duration_ms:307000, explicit:true,  cover:'', isrc:'USRC12345678', external_url:'https://open.spotify.com/track/abc1' },
-        { index:1, id:'abc2', title:'Dust',          artist:'Drake', duration_ms:189000, explicit:true,  cover:'', isrc:'USRC12345679', external_url:'https://open.spotify.com/track/abc2' },
-        { index:2, id:'abc3', title:'Whisper My Name',artist:'Drake',duration_ms:222000, explicit:false, cover:'', isrc:'USRC12345680', external_url:'https://open.spotify.com/track/abc3' },
+        { index:0, id:'abc1', title:'Make Them Cry', artist:'Drake', duration_ms:307000, explicit:true,  cover:'', isrc:'USRC12345678', external_url:'https://open.spotify.com/track/abc1', playcount:'1234567' },
+        { index:1, id:'abc2', title:'Dust',          artist:'Drake', duration_ms:189000, explicit:true,  cover:'', isrc:'USRC12345679', external_url:'https://open.spotify.com/track/abc2', playcount:'987654' },
+        { index:2, id:'abc3', title:'Whisper My Name',artist:'Drake',duration_ms:222000, explicit:false, cover:'', isrc:'USRC12345680', external_url:'https://open.spotify.com/track/abc3', playcount:'456789' },
       ];
       renderTracks(demo);
       setStatus('Found: ICEMAN (3 tracks) — demo mode', false);
@@ -2002,7 +2029,6 @@ loadThemeFromStorage();
 
 setTimeout(() => {
   if (!window.pywebview) {
-    logMessage('Running in browser (demo mode — Python not connected)', 'warn');
     renderRecent([
       { title:'ICEMAN', label:'ICEMAN', url:'https://open.spotify.com/album/0OAv7DCME2AV4q1KPO95HY' },
       { title:'Certified Lover Boy', label:'CLB', url:'https://open.spotify.com/album/3SpBlxme9WbeUDTbAcVsBN' },

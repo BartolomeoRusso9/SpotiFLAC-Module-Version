@@ -278,11 +278,45 @@ class SpotiFLAC_API:
 
             self.current_tracks = tracks
             track_data = []
+            
+            # Retrieve playcount from Spotify if applicable (non-blocking)
+            playcount_map = {}
+            if "spotify.com" in url:
+                try:
+                    self.log("Attempting to fetch playcount…", "info")
+                    from SpotiFLAC.core.spotfetch import SpotifyWebClient
+                    sp_client = SpotifyWebClient()
+                    
+                    try:
+                        # Initialize with timeout (5 seconds)
+                        sp_client.initialize()
+                        
+                        # Try to extract playlist ID from URL
+                        import re
+                        playlist_match = re.search(r'playlist[:/]([a-zA-Z0-9]+)', url)
+                        if playlist_match:
+                            playlist_id = playlist_match.group(1)
+                            playcount_map = sp_client.get_playlist_stats(playlist_id)
+                        else:
+                            # For individual tracks, get playcount per track
+                            for t in tracks:
+                                track_id = getattr(t, 'id', '')
+                                if track_id:
+                                    stats = sp_client.get_track_stats(track_id)
+                                    if stats.get('playcount'):
+                                        playcount_map[track_id] = stats.get('playcount')
+                    except Exception as auth_err:
+                        self.log(f"Playcount unavailable: {type(auth_err).__name__}", "info")
+                        
+                except Exception as e:
+                    pass  # Silently skip playcount on any error
 
             for i, t in enumerate(tracks):
+                track_id = getattr(t, 'id', '')
+                playcount = playcount_map.get(track_id, '') if playcount_map else ''
                 track_data.append({
                     "index":       i,
-                    "id":          getattr(t, 'id', ''),
+                    "id":          track_id,
                     "title":       getattr(t, 'title', f'Track {i+1}'),
                     "artist":      getattr(t, 'artists', ''),
                     "cover":       getattr(t, 'cover_url', ''),
@@ -290,6 +324,7 @@ class SpotiFLAC_API:
                     "explicit":    getattr(t, 'explicit', False),
                     "isrc":        getattr(t, 'isrc', ''),
                     "external_url": getattr(t, 'external_url', ''),
+                    "playcount":   playcount,
                 })
 
             badge = f"FLAC — {len(tracks)} tracks" if len(tracks) > 1 else "FLAC"
