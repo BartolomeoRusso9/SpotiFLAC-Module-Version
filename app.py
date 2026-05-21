@@ -313,7 +313,8 @@ class SpotiFLAC_API:
 
             for i, t in enumerate(tracks):
                 track_id = getattr(t, 'id', '')
-                playcount = playcount_map.get(track_id, '') if playcount_map else ''
+                _pc_val = playcount_map.get(track_id, '') if playcount_map else ''
+                playcount = _pc_val.get('playcount', '') if isinstance(_pc_val, dict) else _pc_val
                 track_data.append({
                     "index":       i,
                     "id":          track_id,
@@ -348,7 +349,20 @@ class SpotiFLAC_API:
             try:
                 from SpotiFLAC.core.session_memory import add_url_to_history
                 cover = getattr(tracks[0], 'cover_url', '') if tracks else ''
-                add_url_to_history(url, label=collection_name, cover=cover)
+                _lower = url.lower()
+                if '/track/' in _lower or 'watch?v=' in _lower or 'youtu.be' in _lower:
+                    _url_type = 'track'
+                elif '/album/' in _lower:
+                    _url_type = 'album'
+                elif '/playlist/' in _lower or ('list=' in _lower and 'olak5uy_' not in _lower):
+                    _url_type = 'playlist'
+                elif '/artist/' in _lower:
+                    _url_type = 'artist'
+                else:
+                    _url_type = ''
+                _artist = getattr(tracks[0], 'artists', '') if tracks and _url_type == 'track' else ''
+                add_url_to_history(url, label=collection_name, cover=cover,
+                                   track_count=len(tracks), url_type=_url_type, artist=_artist)
             except Exception:
                 pass
 

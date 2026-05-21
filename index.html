@@ -388,7 +388,7 @@
     .tr-check input { accent-color: var(--yellow); cursor: pointer; width: 14px; height: 14px; }
     .tr-num {
       font-family: 'JetBrains Mono', monospace; font-size: 13px;
-      color: var(--muted); text-align: right; padding-right: 6px;
+      color: var(--muted); text-align: left; padding-right: 6px;
     }
     .tr-title-cell { display: flex; align-items: center; gap: 9px; min-width: 0; }
 
@@ -454,49 +454,55 @@
     #recent-wrap::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
     .recent-label {
       font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .08em; color: var(--muted); margin-bottom: 10px;
+      letter-spacing: .08em; color: var(--muted); margin-bottom: 14px;
     }
     #recent-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 170px));
+      grid-template-columns: repeat(auto-fill, minmax(170px, 210px));
       justify-content: center;
-      gap: 12px;
-      max-width: 920px;
+      gap: 14px;
+      max-width: 1150px;
       margin: 0 auto;
     }
     .recent-card {
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: calc(var(--radius) + 4px);
+      border-radius: 14px;
       overflow: hidden; cursor: pointer;
       transition: border-color var(--t), transform .15s, box-shadow .15s;
-      box-shadow: 0 8px 24px rgba(15,23,42,.06);
+      box-shadow: 0 4px 16px rgba(15,23,42,.06);
     }
     .recent-card:hover {
-      border-color: rgba(245,158,11,.45);
-      transform: translateY(-2px);
-      box-shadow: 0 14px 34px rgba(15,23,42,.12);
+      border-color: rgba(245,158,11,.5);
+      transform: translateY(-3px);
+      box-shadow: 0 16px 40px rgba(15,23,42,.14);
     }
     .rc-cover {
       width: 100%; aspect-ratio: 1; background: var(--surface3);
       background-size: cover; background-position: center;
       display: flex; align-items: center; justify-content: center;
-      font-size: 28px; color: var(--muted);
+      font-size: 32px; color: var(--muted);
       position: relative;
     }
     .rc-remove {
-      position: absolute;
-      top: 6px; right: 6px;
-      width: 22px; height: 22px;
+      position: absolute; top: 7px; right: 7px;
+      width: 24px; height: 24px;
       border: none; border-radius: 999px;
-      background: rgba(0,0,0,.4);
-      color: #fff; font-size: 12px; cursor: pointer;
+      background: rgba(0,0,0,.55); color: #fff;
+      font-size: 11px; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
-      opacity: .85; transition: opacity .2s ease;
+      opacity: 0; transition: opacity .2s ease;
     }
-    .rc-remove:hover { opacity: 1; }
-    .rc-info { padding: 8px; }
-    .rc-title { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
-    .rc-sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .recent-card:hover .rc-remove { opacity: 1; }
+    .rc-remove:hover { background: rgba(239,68,68,.85) !important; opacity: 1 !important; }
+    .rc-info { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 3px; }
+    .rc-title { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rc-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rc-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 600; letter-spacing: .01em;
+      padding: 3px 9px; border-radius: 999px;
+      align-self: flex-start; margin-top: 5px;
+    }
 
     /* Queue drawer */
     #queue-dock {
@@ -812,7 +818,7 @@
               <span id="hero-version" class="hero-version">v0.6.1</span>
             </div>
           </div>
-          <div class="hero-subtitle">Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required.</div>
+          <div class="hero-subtitle">Get Spotify tracks in true FLAC from Tidal, Qobuz, Deezer & Amazon Music — no account required.</div>
         </div>
       </div>
       <div id="search-bar">
@@ -1653,32 +1659,66 @@ function sortTracks() {
 }
 
 // ── Recent fetches ────────────────────────────────────────────────────────────
+function detectUrlType(url) {
+  if (!url) return '';
+  const u = url.toLowerCase();
+  if (u.includes('/track/') || u.includes('watch?v=') || u.includes('youtu.be/')) return 'track';
+  if (u.includes('/album/') || (u.includes('playlist') && u.includes('olak5uy_'))) return 'album';
+  if (u.includes('/playlist/') || (u.includes('list=') && !u.includes('olak5uy_'))) return 'playlist';
+  if (u.includes('/artist/') || u.includes('/browse/artist')) return 'artist';
+  return '';
+}
+ 
 function renderRecent(hist) {
   const grid = $('recent-grid'); grid.innerHTML = '';
   if (!hist || !hist.length) {
     grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--muted);padding:10px 0;">No recent fetches yet.</div>';
     return;
   }
+  const BADGE_CFG = {
+    playlist: { label:'Playlist', color:'#a855f7', bg:'rgba(168,85,247,.15)', icon:'☰' },
+    artist:   { label:'Artist',   color:'#f97316', bg:'rgba(249,115,22,.15)',  icon:'♪' },
+    album:    { label:'Album',    color:'#22c55e', bg:'rgba(34,197,94,.15)',   icon:'◎' },
+    track:    { label:'Track',    color:'#3b82f6', bg:'rgba(59,130,246,.15)',  icon:'♩' },
+  };
   hist.slice(0, 16).forEach(item => {
-    const card  = document.createElement('div');
+    const card = document.createElement('div');
     card.className = 'recent-card';
     card.onclick = () => { $('urlInput').value = item.url || ''; $('urlInput').focus(); };
-    const emoji  = { album:'💿', playlist:'📋', track:'🎵', artist:'🎤' }[item.type] || '🎵';
+ 
     const coverUrl = item.cover || item.cover_url || item.image || '';
-    const coverS = coverUrl ? `background-image:url('${coverUrl}');` : '';
+    const coverBg  = coverUrl ? `background-image:url('${escHtml(coverUrl)}');` : '';
+ 
+    const urlType = item.url_type || detectUrlType(item.url || '');
+    const badge   = BADGE_CFG[urlType] || null;
+ 
+    // Subtitle: artist name for tracks, count for everything else
+    const trackCount = item.track_count || 0;
+    let subtitle = '';
+    if (urlType === 'track') {
+      subtitle = escHtml(item.artist || '');
+    } else if (trackCount > 0) {
+      const unit = urlType === 'artist' ? 'albums' : 'tracks';
+      subtitle = `${trackCount} ${unit}`;
+    }
+ 
+    const badgeHtml = badge
+      ? `<span class="rc-badge" style="color:${badge.color};background:${badge.bg};">${badge.icon} ${badge.label}</span>`
+      : '';
+    const subHtml = subtitle ? `<div class="rc-sub">${subtitle}</div>` : '';
+ 
     card.innerHTML = `
-      <div class="rc-cover" style="${coverS}">${coverUrl ? '' : emoji}</div>
+      <div class="rc-cover" style="${coverBg}">${coverUrl ? '' : '🎵'}
+        <button class="rc-remove" title="Remove from history"
+          onclick="event.stopPropagation();removeRecent(this.closest('.recent-card').dataset.url)">✕</button>
+      </div>
       <div class="rc-info">
         <div class="rc-title">${escHtml(item.title || item.label || item.url || '—')}</div>
-        <div class="rc-sub">${escHtml(item.artist || '')}</div>
+        ${subHtml}
+        ${badgeHtml}
       </div>
     `;
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'rc-remove';
-    removeBtn.title = 'Remove from history';
-    removeBtn.textContent = '✕';
-    removeBtn.onclick = e => { e.stopPropagation(); removeRecent(item.url); };
-    card.querySelector('.rc-cover').appendChild(removeBtn);
+    card.dataset.url = item.url || '';
     grid.appendChild(card);
   });
 }

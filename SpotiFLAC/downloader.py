@@ -570,10 +570,14 @@ class SpotiflacDownloader:
         try:
             from .core.session_memory import add_url_to_history
             cover_url = tracks[0].cover_url if tracks and getattr(tracks[0], 'cover_url', '') else ''
-            add_url_to_history(url, label=collection_name, cover=cover_url)
+            _url_type = info.get("type", "")
+            if _url_type == "artist_discography":
+                _url_type = "artist"
+            _artist = tracks[0].artists if tracks and _url_type == 'track' else ''
+            add_url_to_history(url, label=collection_name, cover=cover_url,
+                               track_count=len(tracks), url_type=_url_type, artist=_artist)
         except Exception as exc:
             logger.debug("[downloader] Failed operation: %s", exc)
-
         return self._run_worker(tracks, collection_name, info, is_album, is_playlist, opts=effective_opts)
 
     @staticmethod
