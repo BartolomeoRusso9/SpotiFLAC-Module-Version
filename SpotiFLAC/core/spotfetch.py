@@ -249,3 +249,56 @@ class SpotifyWebClient:
         except Exception as exc:
             logger.debug(f"[spotfetch] Errore recupero stats playlist {playlist_id}: {exc}")
             return {}
+
+    def get_artist_discography(self, artist_id: str, order: str = "DATE_DESC") -> list[dict[str, Any]]:
+        """
+        Recupera la lista di release della discografia di un artista tramite GraphQL.
+        Restituisce gli elementi di `data.artistUnion.discography.all.items`.
+        """
+        all_items: list[dict[str, Any]] = []
+        offset = 0
+        limit = 50
+
+        while True:
+            payload = {
+                "operationName": "queryArtistDiscographyAll",
+                "variables": {
+                    "uri": f"spotify:artist:{artist_id}",
+                    "offset": offset,
+                    "limit": limit,
+                    "order": order,
+                },
+                "extensions": {
+                    "persistedQuery": {
+                        "version": 1,
+                        "sha256Hash": "5e07d323febb57b4a56a42abbf781490e58764aa45feb6e3dc0591564fc56599"
+                    }
+                }
+            }
+
+            try:
+                data = self.query(payload)
+            except Exception as exc:
+                logger.debug(f"[spotfetch] Errore recupero discografia artista {artist_id}: {exc}")
+                break
+
+            discography = data.get("data", {}).get("artistUnion", {}).get("discography", {})
+            all_data = discography.get("all", {})
+            items = all_data.get("items", [])
+            if not items:
+                break
+
+            all_items.extend(item for item in items if isinstance(item, dict))
+
+            total_count = all_data.get("totalCount", 0) or 0
+            try:
+                total_count = int(total_count)
+            except Exception:
+                total_count = len(all_items)
+
+            if len(all_items) >= total_count or len(items) < limit:
+                break
+
+            offset += limit
+
+        return all_items

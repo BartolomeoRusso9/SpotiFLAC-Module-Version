@@ -898,7 +898,7 @@ class PandoraProvider(BaseProvider):
             for candidate in (dest_mp3, dest_m4a):
                 if self._file_exists(candidate):
                     fmt = "mp3" if candidate.suffix == ".mp3" else "m4a"
-                    return DownloadResult.ok(self.name, str(candidate), fmt=fmt)
+                    return DownloadResult.skipped(self.name, str(candidate), fmt=fmt)
 
             # 3. Avvia MusicBrainz in background
             mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None

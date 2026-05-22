@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass, field
 
 from .core.console import print_track_header, print_summary
@@ -131,6 +132,9 @@ def download_one(
             )
 
             if result.success:
+                if result.skipped:
+                    logger.info("[%s] ⏭ %s — %s", provider.name, metadata.artists, metadata.title)
+                    return result
                 if opts.output_path and result.file_path:
                     import shutil
                     _, ext = os.path.splitext(result.file_path)
@@ -235,7 +239,9 @@ class DownloadWorker:
                 track, out_dir, self._providers, self._opts, position, self._is_album
             )
 
-            if result.success:
+            if result.success and result.skipped:
+                manager.skip_download(track.id)
+            elif result.success:
                 size_mb = (
                     os.path.getsize(result.file_path) / (1024 * 1024)
                     if result.file_path and os.path.exists(result.file_path)
@@ -389,29 +395,29 @@ class SpotiflacDownloader:
             if is_tidal:
                 from .providers.tidal_metadata import TidalMetadataClient
                 client = TidalMetadataClient()
-                collection_name, tracks = client.get_url(
+                collection_name, tracks, *collection_cover = client.get_url(
                     url, include_featuring=self._opts.include_featuring
                 )
             elif is_apple:
                 from .providers.apple_music_metadata import AppleMusicMetadataClient
                 client = AppleMusicMetadataClient()
-                collection_name, tracks = client.get_url(
+                collection_name, tracks, *collection_cover = client.get_url(
                     url, include_featuring=self._opts.include_featuring
                 )
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
                 client = SoundCloudProvider()
-                collection_name, tracks = client.get_url(url)
+                collection_name, tracks, *collection_cover = client.get_url(url)
             elif is_youtube:
                 from .providers.youtube import YouTubeProvider
                 client = YouTubeProvider()
-                collection_name, tracks = client.get_url(url)
+                collection_name, tracks, *collection_cover = client.get_url(url)
             elif is_pandora:
                 from .providers.pandora import PandoraProvider
                 client = PandoraProvider()
-                collection_name, tracks = client.get_url(url)
+                collection_name, tracks, *collection_cover = client.get_url(url)
             else:
-                collection_name, tracks = self._client.get_url(
+                collection_name, tracks, *collection_cover = self._client.get_url(
                     url, include_featuring=self._opts.include_featuring
                 )
         except SpotiflacError:
@@ -504,8 +510,10 @@ class SpotiflacDownloader:
     ) -> list[TrackMetadata]:
         effective = opts if opts is not None else self._opts
         manager = DownloadManager()
-        for t in tracks:
-            manager.add_to_queue(t.id, t.title, t.artists, t.album, t.id)
+        for i, t in enumerate(tracks):
+            track_item_id = t.id or t.external_url or f"queue-{i}-{uuid.uuid4().hex}"
+            track_spotify_id = t.id or t.external_url or track_item_id
+            manager.add_to_queue(track_item_id, t.title, t.artists, t.album, track_spotify_id)
 
         worker = DownloadWorker(
             tracks          = tracks,

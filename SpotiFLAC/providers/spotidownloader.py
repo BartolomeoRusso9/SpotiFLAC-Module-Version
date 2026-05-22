@@ -187,7 +187,7 @@ class SpotiDownloaderProvider(BaseProvider):
             )
 
             if self._file_exists(dest):
-                return DownloadResult.ok(self.name, str(dest), fmt="flac")
+                return DownloadResult.skipped(self.name, str(dest), fmt="flac")
 
             # 4. Scarica il file FLAC
             self._http.stream_to_file(

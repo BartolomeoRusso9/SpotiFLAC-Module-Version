@@ -7,8 +7,8 @@ import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Iterator
-from urllib.parse import urlparse, parse_qs
+from typing import Any, Iterator
+from urllib.parse import urlparse, parse_qs, quote
 
 import requests
 
@@ -116,6 +116,45 @@ def _artist_in_track(artist_name: str, track_artists: str) -> bool:
         if _normalize_artist(artist) == name_norm:
             return True
     return False
+
+
+def _extract_discography_release(item: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        return {}
+    releases = item.get("releases")
+    if isinstance(releases, dict):
+        release_items = releases.get("items") or []
+        if isinstance(release_items, list) and release_items:
+            first = release_items[0]
+            if isinstance(first, dict):
+                return first
+    album = item.get("album")
+    if isinstance(album, dict):
+        return album
+    return {}
+
+
+def _normalize_release_type(release_type: str) -> str:
+    if not isinstance(release_type, str):
+        return "single"
+    normalized = release_type.upper()
+    if normalized == "ALBUM":
+        return "album"
+    if normalized == "COMPILATION":
+        return "compilation"
+    return "single"
+
+
+def _extract_release_id(release: dict[str, Any]) -> str:
+    if not isinstance(release, dict):
+        return ""
+    release_id = release.get("id", "") or ""
+    if release_id:
+        return release_id
+    uri = release.get("uri", "")
+    if isinstance(uri, str) and ":" in uri:
+        return uri.split(":")[-1]
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +287,29 @@ class SpotifyMetadataClient:
             logger.debug("[spotify] preview URL fallito per %s: %s", track_id, exc)
             return ""
 
+    def search_tracks(self, query: str, limit: int = 20) -> list[TrackMetadata]:
+        """Search Spotify tracks by query (case-insensitive substring).
+
+        Uses the public REST `/search` endpoint and returns a list of
+        `TrackMetadata` instances.
+        """
+        if not query:
+            return []
+        q = quote(query)
+        try:
+            data = self._get(f"/search?q={q}&type=track&limit={int(limit)}")
+            items = (data.get("tracks") or {}).get("items", [])
+            results: list[TrackMetadata] = []
+            for item in items:
+                try:
+                    tm = self._track_from_raw(item)
+                    results.append(tm)
+                except Exception:
+                    continue
+            return results
+        except Exception:
+            return []
+
     def get_album_tracks(self, album_id: str) -> tuple[dict, list[TrackMetadata]]:
         # --- TENTATIVO CON SOLUZIONE 2: GRAPHQL (Velocità Go-Level) ---
         try:
@@ -348,31 +410,41 @@ class SpotifyMetadataClient:
                                 external_url=f"https://open.spotify.com/artist/{a_id}"
                             ))
 
+
+                    preview_url = track_data.get("previewUrl") or track_data.get("preview_url") or ""
+                    raw_plays = track_data.get("playcount")
+                    if isinstance(raw_plays, dict):
+                        plays_str = str(raw_plays.get("value") or raw_plays.get("total") or "0")
+                    else:
+                        plays_str = str(raw_plays or "0")
+                    is_explicit = track_data.get("contentRating", {}).get("label") == "EXPLICIT"
                     first_artist = artists_data_list[0] if artists_data_list else ArtistSimple("", "", "")
-                    
+
                     meta = TrackMetadata(
                         id=track_id,
                         title=title,
                         artists=artists_str,
                         album=album_name,
                         album_artist=album_artist,
-                        isrc="",  # Lasciamo fare la risoluzione veloce in bulk al downloader
-                        track_number=track_data.get("trackNumber", idx + 1),
-                        disc_number=track_data.get("discNumber", 1),
-                        total_tracks=total_tracks,
+                        isrc="",
+                        track_number=track_data.get("trackNumber", 0) or 0,
+                        disc_number=1,
+                        total_tracks=0,
                         duration_ms=duration_ms,
-                        release_date=release_date,
+                        release_date="",
                         cover_url=cover_url,
                         external_url=f"https://open.spotify.com/track/{track_id}",
                         copyright="",
                         composer="",
+                        plays=plays_str,           
+                        is_explicit=is_explicit,
                         upc="",
-                        publisher=publisher,
-                        total_discs=total_discs,
+                        publisher="",
+                        total_discs=1,
                         album_type="album",
-                        preview_url="",
-                        album_id=album_id,
-                        album_url=album_url,
+                        preview_url=preview_url,
+                        album_id="",
+                        album_url="",
                         artist_id=first_artist.id,
                         artist_url=first_artist.external_url,
                         artists_data=artists_data_list
@@ -478,6 +550,30 @@ class SpotifyMetadataClient:
                 offset += limit
             
             if all_items:
+                playlist_cover = ""
+                if playlist_v2:
+                    # 1. Gestione corretta della struttura GraphQL per "images"
+                    images_data = playlist_v2.get("images")
+                    if isinstance(images_data, dict):
+                        items = images_data.get("items", [])
+                        if items and isinstance(items[0], dict):
+                            sources = items[0].get("sources", [])
+                            if sources:
+                                playlist_cover = sources[0].get("url", "")
+                    elif isinstance(images_data, list):
+                        # Fallback nel caso tornasse una lista classica
+                        playlist_cover = self._best_image(images_data)
+
+                    # 2. Fallback su 'image'
+                    if not playlist_cover:
+                        image_obj = playlist_v2.get("image") or {}
+                        if isinstance(image_obj, dict):
+                            playlist_cover = self._best_image(image_obj.get("sources", []))
+                            
+                    # 3. Fallback su 'coverArt'
+                    if not playlist_cover and isinstance(playlist_v2.get("coverArt"), dict):
+                        playlist_cover = self._best_image(playlist_v2["coverArt"].get("sources", []))
+
                 graphql_tracks = []
                 for item in all_items:
                     track_data = item.get("itemV2", {}).get("data", {})
@@ -518,6 +614,7 @@ class SpotifyMetadataClient:
                     cover_url = cover_sources[0].get("url", "") if cover_sources else ""
                     
                     duration_ms = track_data.get("trackDuration", {}).get("totalMilliseconds", 0)
+                    preview_url = track_data.get("previewUrl") or track_data.get("preview_url") or ""
                     
                     # Se hai aggiornato il modello TrackMetadata con plays e is_explicit
                     meta = TrackMetadata(
@@ -536,6 +633,7 @@ class SpotifyMetadataClient:
                         external_url=f"https://open.spotify.com/track/{track_id}",
                         copyright="",
                         composer="",
+                        preview_url=preview_url,
                         plays=plays_str,           # <--- ORA E' SEMPRE UNA STRINGA PULITA (es. "1504200")
                         is_explicit=is_explicit    # <--- True o False
                     )
@@ -543,16 +641,21 @@ class SpotifyMetadataClient:
                 
                 mock_playlist = {
                     "name": playlist_name,
-                    "id": playlist_id
+                    "id": playlist_id,
+                    "cover_url": playlist_cover
                 }
                 logger.info(f"[spotify] GraphQL completato con successo! Estratte {len(graphql_tracks)} tracce all'istante.")
-                return mock_playlist, graphql_tracks
+                return mock_playlist, graphql_tracks, playlist_cover
 
         except Exception as exc:
             logger.warning(f"[spotify] GraphQL fallito ({exc}). Eseguo il fallback sulla REST API tradizionale...")
 
         # --- FALLBACK: LOGICA RESTRITTIVA REST API (Già Presente) ---
         playlist = self._get(f"/playlists/{playlist_id}")
+        playlist_cover = self._best_image(playlist.get("images", []) or [])
+        if not playlist_cover and isinstance(playlist.get("image"), dict):
+            playlist_cover = self._best_image(playlist["image"].get("sources", []))
+
         tracks: list[TrackMetadata] = []
 
         for item in self._paginate(f"{_API_BASE}/playlists/{playlist_id}/tracks?limit=100"):
@@ -561,7 +664,7 @@ class SpotifyMetadataClient:
                 continue
             tracks.append(self._track_from_raw(track))
 
-        return playlist, tracks
+        return playlist, tracks, playlist_cover
 
     def get_artist_albums(
             self,
@@ -590,17 +693,47 @@ class SpotifyMetadataClient:
 
         # (album_id, album_group, is_featuring)
         albums_to_fetch: list[tuple[str, str, bool]] = []
+        allowed_groups = set(include_groups.split(","))
 
-        for item in self._paginate(
-            f"{_API_BASE}/artists/{artist_id}/albums"
-            f"?include_groups={include_groups}&limit=50", delay=0.0
-        ):
-            aid         = item.get("id")
-            album_group = item.get("album_group", "album")
-            if not aid or aid in seen_album_ids:
-                continue
-            seen_album_ids.add(aid)
-            albums_to_fetch.append((aid, album_group, album_group in _FEATURING_GROUPS))
+        try:
+            from ..core.spotfetch import SpotifyWebClient
+            logger.info(f"[spotify] Tentativo di recupero discografia artista {artist_id} tramite GraphQL...")
+
+            web_client = SpotifyWebClient()
+            web_client.initialize()
+            items = web_client.get_artist_discography(artist_id)
+
+            for item in items:
+                release = _extract_discography_release(item)
+                if not release:
+                    continue
+
+                aid = _extract_release_id(release)
+                if not aid or aid in seen_album_ids:
+                    continue
+
+                album_group = _normalize_release_type(release.get("type", ""))
+                if album_group not in allowed_groups:
+                    continue
+
+                seen_album_ids.add(aid)
+                albums_to_fetch.append((aid, album_group, album_group in _FEATURING_GROUPS))
+
+            if not albums_to_fetch and items:
+                raise ValueError("GraphQL returned discography items but no valid releases.")
+
+        except Exception as exc:
+            logger.warning(f"[spotify] GraphQL discografia artista fallito ({exc}). Eseguo fallback REST... ")
+            for item in self._paginate(
+                f"{_API_BASE}/artists/{artist_id}/albums"
+                f"?include_groups={include_groups}&limit=50", delay=0.0
+            ):
+                aid         = item.get("id")
+                album_group = item.get("album_group", "album")
+                if not aid or aid in seen_album_ids:
+                    continue
+                seen_album_ids.add(aid)
+                albums_to_fetch.append((aid, album_group, album_group in _FEATURING_GROUPS))
 
         # Fetch parallelo (max 5 richieste contemporanee)
         results: dict[str, tuple[list[TrackMetadata], str, bool]] = {}
@@ -642,6 +775,9 @@ class SpotifyMetadataClient:
                     seen_isrc.add(track.isrc)
                 tracks.append(track)
 
+        if any(not getattr(track, "preview_url", "") for track in tracks):
+            tracks = self._fill_missing_preview_urls(tracks)
+
         return artist, tracks
 
     def get_url(
@@ -667,8 +803,11 @@ class SpotifyMetadataClient:
             return album.get("name", "Unknown Album"), tracks
 
         if t == "playlist":
-            pl, tracks = self.get_playlist_tracks(info["id"])
-            return pl.get("name", "Unknown Playlist"), tracks
+            result  = self.get_playlist_tracks(info["id"])
+            pl      = result[0]
+            tracks  = result[1]
+            cover   = result[2] if len(result) > 2 else (tracks[0].cover_url if tracks else "")
+            return pl.get("name", "Unknown Playlist"), tracks, cover
 
         if t in ("artist", "artist_discography"):
             artist, tracks = self.get_artist_albums(
@@ -737,6 +876,37 @@ class SpotifyMetadataClient:
     def _replace(track: TrackMetadata, **kwargs) -> TrackMetadata:
         """Restituisce una nuova TrackMetadata con i campi aggiornati."""
         return track.__class__(**{**track.__dict__, **kwargs})
+
+    def _fill_missing_preview_urls(self, tracks: list[TrackMetadata]) -> list[TrackMetadata]:
+        """Recupera in parallelo i preview_url mancanti per tracce Spotify."""
+        missing_ids = [track.id for track in tracks if not getattr(track, "preview_url", "") and track.id]
+        if not missing_ids:
+            return tracks
+
+        preview_map: dict[str, str] = {}
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_id = {
+                executor.submit(self.get_preview_url, track_id): track_id
+                for track_id in missing_ids
+            }
+            for future in as_completed(future_to_id):
+                track_id = future_to_id[future]
+                try:
+                    preview_url = future.result()
+                    if preview_url:
+                        preview_map[track_id] = preview_url
+                except Exception:
+                    continue
+
+        if not preview_map:
+            return tracks
+
+        result_tracks: list[TrackMetadata] = []
+        for track in tracks:
+            if not getattr(track, "preview_url", "") and track.id in preview_map:
+                track = self._replace(track, preview_url=preview_map[track.id])
+            result_tracks.append(track)
+        return result_tracks
 
     def _track_from_raw(self, data: dict) -> TrackMetadata:
         """

@@ -599,7 +599,7 @@ class SoundCloudProvider(BaseProvider):
             extension=".mp3",
         )
         if self._file_exists(dest):
-            return DownloadResult.ok(self.name, str(dest), fmt="mp3")
+            return DownloadResult.skipped(self.name, str(dest), fmt="mp3")
 
         # ── 3. Download effettivo ─────────────────────────────────────────
         try:

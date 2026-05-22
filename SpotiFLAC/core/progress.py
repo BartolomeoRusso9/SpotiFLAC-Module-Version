@@ -122,6 +122,15 @@ class DownloadManager:
                     break
             self.is_downloading = False
 
+    def skip_download(self, item_id: str) -> None:
+        with self._lock:
+            for item in self._queue:
+                if item.id == item_id:
+                    item.status     = DownloadStatus.SKIPPED
+                    item.end_time   = time.time()
+                    break
+            self.is_downloading = False
+
     def get_stats(self) -> dict:
         with self._lock:
             queued = sum(1 for item in self._queue if item.status == DownloadStatus.QUEUED)

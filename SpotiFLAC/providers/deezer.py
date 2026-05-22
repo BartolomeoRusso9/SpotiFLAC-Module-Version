@@ -469,7 +469,7 @@ class DeezerProvider(BaseProvider):
                 first_artist_only=first_artist_only,
             )
             if self._file_exists(dest):
-                return DownloadResult.ok(self.name, str(dest))
+                return DownloadResult.skipped(self.name, str(dest))
 
             from ..core.musicbrainz import AsyncMBFetch
             mb_fetcher = AsyncMBFetch(isrc_to_use) if isrc_to_use else None

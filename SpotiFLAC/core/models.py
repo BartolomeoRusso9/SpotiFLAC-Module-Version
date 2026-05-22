@@ -155,6 +155,7 @@ class DownloadResult(BaseModel):
     file_path:  str | None = None
     format:     Literal["flac", "mp3", "m4a"] | None = None
     error:      str | None = None
+    skipped:    bool = False
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "DownloadResult":
@@ -167,6 +168,11 @@ class DownloadResult(BaseModel):
     def ok(cls, provider: str, file_path: str,
            fmt: Literal["flac", "mp3", "m4a"] = "flac") -> "DownloadResult":
         return cls(success=True, provider=provider, file_path=file_path, format=fmt)
+
+    @classmethod
+    def skipped(cls, provider: str, file_path: str,
+                fmt: Literal["flac", "mp3", "m4a"] | None = None) -> "DownloadResult":
+        return cls(success=True, provider=provider, file_path=file_path, format=fmt, skipped=True)
 
     @classmethod
     def fail(cls, provider: str, error: str) -> "DownloadResult":
