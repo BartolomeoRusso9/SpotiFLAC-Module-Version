@@ -221,9 +221,9 @@
       max-width: 760px; line-height: 1.6; margin-left: auto; margin-right: auto;
     }
     #search-bar {
-      padding: 16px 18px; /* Spaziatura standard un po' più ampia */
+      padding: 16px 18px; 
       display: flex; 
-      gap: 8px; /* Equivalente a gap-2 */
+      gap: 8px; 
       align-items: center;
       border-bottom: 1px solid var(--border);
       flex-wrap: wrap;
@@ -275,19 +275,19 @@
     
     #urlInput {
       width: 100%; 
-      height: 40px; /* Equivalente a h-10 */
-      padding: 0 32px 0 40px; /* Equivalente a pl-10 e pr-8 */
+      height: 40px; 
+      padding: 0 32px 0 40px; 
       font-size: 14px; 
-      border-radius: 8px; /* Arrotondamento stile shadcn/ui */
+      border-radius: 8px; 
       background: var(--input-bg);
       color: var(--input-text);
       border: 1px solid var(--input-border);
     }
     #fetchBtn {
       width: 40px;
-      height: 40px; /* Equivalente a h-10 */
+      height: 40px; 
       padding: 0;
-      border-radius: 8px; /* Arrotondamento stile shadcn/ui */
+      border-radius: 8px; 
       font-size: 14px;
       font-weight: 500;
       display: inline-flex;
@@ -302,7 +302,7 @@
     .url-wrap { flex: 1; position: relative; }
     .url-icon {
       position: absolute; 
-      left: 12px; /* Equivalente a left-3 */
+      left: 12px; 
       top: 50%; 
       transform: translateY(-50%);
       color: var(--muted); 
@@ -783,16 +783,19 @@
 
     /* ══════════ SETTINGS VIEW ══════════ */
     #view-settings { padding: 0; overflow: hidden; }
-    .s-header { padding: 20px 18px 0; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+    /* Padding modificato per non aver più bisogno del s-meta che faceva da offset */
+    .s-header { padding: 20px 18px 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
     .s-header h1 { font-size: 22px; font-weight: 900; letter-spacing: -.04em; }
     .s-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .s-actions .act-btn { padding: 12px 18px; font-size: 13px; min-height: 44px; border-radius: 14px; }
-    .s-actions .act-btn.secondary { background: var(--surface2); color: var(--text2); border-color: var(--border); }
-    .s-actions .act-btn.secondary:hover { background: var(--surface3); color: var(--text); }
+    /* Modificata background di .act-btn.secondary in var(--surface) per renderla bianca */
+    .s-actions .act-btn.secondary { background: var(--surface); color: var(--text2); border-color: var(--border); }
+    .s-actions .act-btn.secondary:hover { background: var(--surface2); color: var(--text); }
     .s-actions .act-btn.primary { background: var(--yellow); color: #000; border-color: transparent; }
     .s-actions .act-btn.primary:hover { opacity: .92; }
-    .s-meta { padding: 0 18px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .folder-pill { display: inline-flex; align-items: center; gap: 8px; background: var(--surface2); border: 1px solid var(--border); color: var(--text2); padding: 9px 14px; border-radius: 999px; font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    
+    /* Folder pill impostato con sfondo bianco var(--surface) */
+    .folder-pill { display: inline-flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); color: var(--text2); padding: 9px 14px; border-radius: 999px; font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .folder-pill::before { content: '📁'; display: inline-block; }
     .tab-bar {
       display: flex; padding: 0 18px 18px;
@@ -801,12 +804,12 @@
     }
     .tab-bar::-webkit-scrollbar { display: none; }
     .stab {
-      padding: 11px 18px; background: var(--surface2); border: 1px solid var(--border);
+      padding: 11px 18px; background: var(--surface); border: 1px solid var(--border);
       color: var(--muted); font-family: var(--app-font); font-size: 13px; font-weight: 600;
       cursor: pointer; border-radius: 999px; white-space: nowrap;
       transition: color var(--t), background var(--t), border-color var(--t), transform var(--t);
     }
-    .stab:hover { background: var(--surface3); color: var(--text); transform: translateY(-1px); }
+    .stab:hover { background: var(--surface2); color: var(--text); transform: translateY(-1px); }
     .stab.active { color: #000; background: var(--yellow); border-color: transparent; }
     .s-body { flex: 1; overflow-y: auto; padding: 14px 18px 18px; min-height: 0; }
     .s-body::-webkit-scrollbar { width: 3px; }
@@ -838,7 +841,7 @@
     .s-sep { height: 1px; background: var(--border); margin: 8px 0; }
 
     select, input[type="text"], input[type="password"], input[type="number"] {
-      background: var(--surface2); color: var(--text);
+      background: var(--surface); color: var(--text);
       border: 1.5px solid var(--border); border-radius: var(--radius-sm);
       padding: 6px 10px; outline: none;
       font-family: var(--app-font); font-size: 12.5px; cursor: pointer;
@@ -937,23 +940,16 @@
       display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;
       margin-bottom: 6px;
     }
+    /* Status card ridotto e reso più compatto */
     .status-card {
-      display: flex; flex-direction: column; justify-content: space-between; gap: 14px;
-      padding: 18px; border-radius: 22px; background: #fff;
-      border: 1px solid var(--border2); box-shadow: 0 18px 36px rgba(0,0,0,.05);
+      padding: 16px 18px; border-radius: 18px; background: #fff;
+      border: 1px solid var(--border2); box-shadow: 0 12px 24px rgba(0,0,0,.04);
     }
-    .status-card-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-    .status-card-left { display: flex; align-items: center; gap: 14px; }
-    .status-card-name { font-size: 15px; font-weight: 700; color: var(--text); }
-    .status-card-btn {
-      align-self: flex-end; padding: 10px 14px; min-width: 92px;
-      border: 1px solid var(--border); border-radius: 999px;
-      background: var(--surface2); color: var(--text); font-size: 12.5px; font-weight: 700;
-      cursor: pointer; transition: background var(--t), border-color var(--t), opacity var(--t);
-    }
-    .status-card-btn:hover { background: var(--yellow-bg); border-color: var(--yellow); }
-    .status-card-btn:disabled { opacity: .55; cursor: default; }
-
+    .status-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .status-card-left { display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1; }
+    .status-card-name { font-size: 15px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .status-icon-dot { flex-shrink: 0; font-weight: 600; }
+    
     /* HC */
     .hc-prov-group { margin-bottom: 8px; }
     .hc-prov-name { font-size: 12px; font-weight: 700; color: var(--text2); display: flex; align-items: center; gap: 5px; margin-bottom: 4px; }
@@ -1024,7 +1020,6 @@
 </head>
 <body>
 
-<!-- Titlebar — only this element has -webkit-app-region: drag -->
 <div id="titlebar">
   <div class="dots">
     <div class="dot c" onclick="pyWin('Quit')" title="Close"></div>
@@ -1039,7 +1034,6 @@
 
 <div id="app-body">
 
-  <!-- Sidebar -->
   <nav id="sidebar">
     <button class="nav-btn active" id="nav-home"     onclick="switchView('home')"     title="Home" data-label="Home">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 3l9 6.5V21H15v-5h-6v5H3z"/></svg>
@@ -1051,21 +1045,15 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
     <div class="nav-spacer"></div>
-    <!-- Bug report — links to GitHub Issues -->
     <button class="nav-btn" title="Report a Bug on GitHub" data-label="Report a Bug"
       onclick="pyWin('open_url', 'https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/issues')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-    </button>
-    <button class="nav-btn" title="Choose download folder" data-label="Choose Folder" onclick="pyWin('choose_folder')">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     </button>
   </nav>
 
   <div id="content">
 
-    <!-- HOME -->
     <div class="view active" id="view-home">
-      <!-- Search bar — NO country dropdown -->
       <div id="home-hero">
         <div class="hero-text">
           <div class="hero-headline">
@@ -1109,7 +1097,6 @@
       <div id="main-split">
         <div id="result-panel">
 
-          <!-- Album card -->
           <div id="album-card" class="hidden">
             <div id="album-cover">🎵</div>
             <div id="album-info">
@@ -1136,7 +1123,6 @@
             </button>
           </div>
 
-          <!-- Track controls -->
           <div id="track-controls" class="hidden">
             <div id="track-search-wrap">
               <span class="ts-icon">
@@ -1157,7 +1143,6 @@
             </div>
           </div>
 
-          <!-- Track table — columns: check | # | title+cover | duration | plays |4 actions -->
           <div id="track-table-wrap" class="hidden">
             <div class="track-table-header">
               <div><input type="checkbox" id="check-all" onchange="toggleAll(this)" style="accent-color:var(--yellow);width:14px;height:14px;cursor:pointer;"></div>
@@ -1170,16 +1155,12 @@
             <div id="track-rows"></div>
           </div>
 
-          <!-- Recent fetches -->
           <div id="recent-wrap">
             <div class="recent-label">Recent Fetches</div>
             <div id="recent-grid"></div>
           </div>
 
-        </div><!-- /result-panel -->
-      </div><!-- /main-split -->
-
-      <div id="queue-dock" onclick="toggleQueueDrawer()" title="Open download queue">
+        </div></div><div id="queue-dock" onclick="toggleQueueDrawer()" title="Open download queue">
         <div class="qd-icon"><img src="assets/icons/xbatchdl.svg" alt="Download"></div>
         <div class="qd-body">
           <div class="qd-downloaded" id="qd-downloaded">0.00 MB</div>
@@ -1220,10 +1201,7 @@
           <div id="queue-counter"><span id="q-count">0 tracks</span><span id="q-done"></span></div>
         </div>
       </div>
-    </div><!-- /view-home -->
-
-    <!-- LOGS -->
-    <div class="view" id="view-logs">
+    </div><div class="view" id="view-logs">
       <div id="log-panel">
         <div id="log-header">
           <span>Terminal Logs</span>
@@ -1238,7 +1216,6 @@
       </div>
     </div>
 
-    <!-- SETTINGS -->
     <div class="view" id="view-settings">
       <div class="s-header">
       <h1>Settings</h1>
@@ -1248,9 +1225,7 @@
         <button class="act-btn primary" type="button" onclick="saveSettings()">Save Changes</button>
       </div>
     </div>
-    <div class="s-meta">
-      <span class="folder-pill" id="folder-path">~/Music/SpotiFLAC</span>
-    </div>
+    
     <div class="tab-bar">
         <button class="stab active" onclick="switchTab('general',this)">General</button>
         <button class="stab" onclick="switchTab('download',this)">Download</button>
@@ -1260,7 +1235,6 @@
       </div>
       <div class="s-body">
 
-        <!-- GENERAL -->
         <div class="tc active" id="tc-general">
           <div class="s-section">
             <div class="s-title">Logging</div>
@@ -1315,7 +1289,6 @@
           </div>
         </div>
 
-        <!-- DOWNLOAD -->
         <div class="tc" id="tc-download">
           <div class="s-section">
             <div class="s-title">Audio Sources</div>
@@ -1323,7 +1296,7 @@
             <div id="services-list" class="sort-list"></div>
           </div>
           <div class="s-section">
-            <div class="s-title">Retry &amp; Loop</div>
+            <div class="s-title">Retry & Loop</div>
             <div class="s-row">
               <span class="s-label">Extra retries per track<small>Cycles through all providers</small></span>
               <input type="number" id="config-retries" value="0" min="0" max="10">
@@ -1349,7 +1322,7 @@
             </div>
           </div>
           <div class="s-section">
-            <div class="s-title">Auth &amp; Custom APIs</div>
+            <div class="s-title">Auth & Custom APIs</div>
             <div class="s-row">
               <span class="s-label">Qobuz token<small>x-user-auth-token from DevTools</small></span>
               <input type="password" id="config-qobuz-token" placeholder="leave empty" style="width:180px;">
@@ -1374,8 +1347,17 @@
           </div>
         </div>
 
-        <!-- FILES -->
         <div class="tc" id="tc-files">
+          <div class="s-section">
+            <div class="s-title">Download Location</div>
+            <div class="s-row" style="justify-content: flex-start; gap: 12px;">
+              <button class="act-btn secondary" type="button" onclick="pyWin('choose_folder')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                Choose Folder
+              </button>
+              <span class="folder-pill" id="folder-path">~/Music/SpotiFLAC</span>
+            </div>
+          </div>
           <div class="s-section">
             <div class="s-title">Filename Format</div>
             <div class="s-row"><span class="s-label" style="font-size:11px;color:var(--muted);">{title} {artist} {album} {album_artist} {year} {track} {disc} {isrc} {position}</span></div>
@@ -1390,11 +1372,10 @@
             <div class="s-title">Folder Organization</div>
             <div class="s-row"><label><input type="checkbox" id="config-artist-sub"><span>Artist subfolders</span></label></div>
             <div class="s-row"><label><input type="checkbox" id="config-album-sub"><span>Album subfolders</span></label></div>
-            <div class="s-row"><label><input type="checkbox" id="config-first-artist"><span>First artist only in tags &amp; filename</span></label></div>
+            <div class="s-row"><label><input type="checkbox" id="config-first-artist"><span>First artist only in tags & filename</span></label></div>
           </div>
         </div>
 
-        <!-- METADATA -->
         <div class="tc" id="tc-metadata">
           <div class="s-section">
             <div class="s-row"><label><input type="checkbox" id="config-featuring" checked><span>Include featuring tracks (artist URL only)</span></label></div>
@@ -1417,7 +1398,6 @@
           </div>
         </div>
 
-        <!-- STATUS -->
         <div class="tc" id="tc-status">
           <div class="s-section status-panel">
             <div class="status-panel-header">
@@ -1431,21 +1411,15 @@
               </div>
             </div>
             <div id="status-services-grid" class="status-grid"></div>
-            <div id="hc-summary" class="status-summary" style="font-size:12px;color:var(--muted);margin-top:8px;margin-bottom:12px;">Select a service to run a check.</div>
           </div>
           <div id="hc-results"></div>
         </div>
 
         <div class="s-footer">
         </div>
-      </div><!-- /s-body -->
-    </div><!-- /view-settings -->
-    <div id="save-toast" class="save-toast hidden">Impostazioni salvate.</div>
+      </div></div><div id="save-toast" class="save-toast hidden">Impostazioni salvate.</div>
 
-  </div><!-- /content -->
-</div><!-- /app-body -->
-
-<script>
+  </div></div><script>
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const ts = () => new Date().toLocaleTimeString('it-IT');
@@ -1781,6 +1755,7 @@ const API_SOURCES = [
   { id:'soundcloud', type:'soundcloud', name:'SoundCloud',    url:'' },
   { id:'youtube',    type:'youtube',    name:'YouTube Music', url:'' },
   { id:'pandora',    type:'pandora',    name:'Pandora',       url:'' },
+  { id:'spoti',      type:'spoti',      name:'SpotiDownloader', url:'' },
 ];
 let apiStatusState = {
   checkingSources: {},
@@ -1813,7 +1788,6 @@ function renderPlatformIcon(type) {
 function buildStatusCard(source) {
   const status = apiStatusState.statuses[source.id] || 'idle';
   const checking = apiStatusState.checkingSources[source.id] === true;
-  const buttonId = `check-btn-${source.id}`;
   return `<div class="status-card">
     <div class="status-card-header">
       <div class="status-card-left">
@@ -1822,7 +1796,6 @@ function buildStatusCard(source) {
       </div>
       ${renderStatusIcon(checking ? 'checking' : status)}
     </div>
-    <button id="${buttonId}" class="status-card-btn" onclick="checkOne('${source.id}')" ${checking ? 'disabled' : ''}>${checking ? 'Checking...' : 'Check'}</button>
   </div>`;
 }
 
@@ -1844,7 +1817,7 @@ function updateOverallStatus(okCount, totalCount) {
   const online = okCount > 0;
   el.className = `status-overall ${online ? 'online' : 'offline'}`;
   el.querySelector('.status-overall-icon').textContent = online ? '✓' : '✗';
-  el.querySelector('.status-overall-text').textContent = totalCount > 0 ? `${okCount}/${totalCount} endpoints OK` : 'No checks yet';
+  el.querySelector('.status-overall-text').textContent = totalCount > 0 ? `${okCount}/${totalCount} providers OK` : 'No checks yet';
 }
 
 function checkAll() {
@@ -2086,7 +2059,7 @@ function closeAlbumCard() {
 
 // ── Escape HTML ───────────────────────────────────────────────────────────────
 function escHtml(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 }
 function formatDuration(ms) {
   if (!ms) return '—';
@@ -2305,15 +2278,6 @@ function setPreviewButtonState(button, active) {
     : `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14a1 1 0 0 0 1 1h3l5 3V4L9 7H6a1 1 0 0 0-1 1z"/></svg>`;
 }
 
-function setPreviewButtonState(button, active) {
-  if (!button) return;
-  button.classList.toggle('active', active);
-  button.dataset.tip = active ? 'Pause preview' : 'Play 30s Preview';
-  button.innerHTML = active
-    ? `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>`
-    : `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14a1 1 0 0 0 1 1h3l5 3V4L9 7H6a1 1 0 0 0-1 1z"/></svg>`;
-}
-
 // ── Check all ────────────────────────────────────────────────────────────────
 function toggleAll(cb) {
   document.querySelectorAll('.track-cb').forEach(c => c.checked = cb.checked);
@@ -2449,9 +2413,9 @@ function renderRecent(hist) {
   }
   const BADGE_CFG = {
     playlist: { label:'Playlist', color:'#a855f7', bg:'rgba(168,85,247,.15)', icon:'☰' },
-    artist:   { label:'Artist',   color:'#f97316', bg:'rgba(249,115,22,.15)',  icon:'♪' },
-    album:    { label:'Album',    color:'#22c55e', bg:'rgba(34,197,94,.15)',   icon:'◎' },
-    track:    { label:'Track',    color:'#3b82f6', bg:'rgba(59,130,246,.15)',  icon:'♩' },
+    artist:   { label:'Artist',  color:'#f97316', bg:'rgba(249,115,22,.15)',  icon:'♪' },
+    album:    { label:'Album',   color:'#22c55e', bg:'rgba(34,197,94,.15)',   icon:'◎' },
+    track:    { label:'Track',   color:'#3b82f6', bg:'rgba(59,130,246,.15)',  icon:'♩' },
   };
   hist.slice(0, 16).forEach(item => {
     const card = document.createElement('div');
@@ -2923,12 +2887,17 @@ async function loadProfile() {
 
 // ── Health check ──────────────────────────────────────────────────────────────
 function renderHealthResults(data) {
-  const okCount = data.filter(r => r.ok).length;
-  const totalCount = Array.isArray(data) ? data.length : 0;
-  updateStatusSummary(`${okCount}/${totalCount} endpoints OK`);
-  updateOverallStatus(okCount, totalCount);
+  // Raggruppiamo prima per provider
   const provMap = {};
   data.forEach(r => { if (!provMap[r.provider]) provMap[r.provider] = []; provMap[r.provider].push(r); });
+
+  // Calcoliamo i provider totali e quelli con almeno un endpoint funzionante (ok)
+  const totalProviders = Object.keys(provMap).length;
+  const okProviders = Object.values(provMap).filter(rows => rows.some(r => r.ok)).length;
+
+  updateStatusSummary(`${okProviders}/${totalProviders} providers OK`);
+  updateOverallStatus(okProviders, totalProviders);
+  
   const container = $('hc-results'); container.innerHTML = '';
   Object.entries(provMap).forEach(([prov, rows]) => {
     const anyOk = rows.some(r => r.ok);
