@@ -56,7 +56,6 @@ class DownloadOptions:
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
     )
     qobuz_token:             str | None      = None
-    include_featuring:       bool            = False
 
     # ── New fields ───────────────────────────────────────────────────────
     track_max_retries:       int             = 0
@@ -401,9 +400,7 @@ class SpotiflacDownloader:
             elif is_apple:
                 from .providers.apple_music_metadata import AppleMusicMetadataClient
                 client = AppleMusicMetadataClient()
-                collection_name, tracks, *collection_cover = client.get_url(
-                    url, include_featuring=self._opts.include_featuring
-                )
+                collection_name, tracks, *collection_cover = client.get_url(url)
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
                 client = SoundCloudProvider()
@@ -417,9 +414,7 @@ class SpotiflacDownloader:
                 client = PandoraProvider()
                 collection_name, tracks, *collection_cover = client.get_url(url)
             else:
-                collection_name, tracks, *collection_cover = self._client.get_url(
-                    url, include_featuring=self._opts.include_featuring
-                )
+                collection_name, tracks, *collection_cover = self._client.get_url(url)
         except SpotiflacError:
             raise
         except Exception as exc:

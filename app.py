@@ -401,15 +401,15 @@ class SpotiFLAC_API:
 
     # ── Phase 1: Metadata fetch ───────────────────────────────────────────────
 
-    def fetch_metadata(self, url, include_featuring=False):
+    def fetch_metadata(self, url):
         self.current_url = url
         threading.Thread(
             target=self._fetch_metadata_task,
-            args=(url, include_featuring),
+            args=(url,),
             daemon=True,
         ).start()
 
-    def _fetch_metadata_task(self, url, include_featuring=False):
+    def _fetch_metadata_task(self, url):
         try:
             self.set_progress("Recupero metadati…")
             self.log(f"Analisi input: {url}", "info")
@@ -436,24 +436,27 @@ class SpotiFLAC_API:
                 # ── Ricerca testuale — sempre SpotifyMetadataClient ─────────────
                 from SpotiFLAC.providers.spotify_metadata import SpotifyMetadataClient
                 client = SpotifyMetadataClient()
+            # Dopo aver scelto il client, prima di client.get_url()
+            if not is_url:
+                self.log("Ricerca testuale: usa search_provider_async.", "error")
+                self.set_progress("")
+                return
     
             # ── Chiamata universale ────────────────────────────────────────────
             # get_url ora restituisce (nome, tracce) OPPURE (nome, tracce, cover)
-            result          = client.get_url(stripped, include_featuring=include_featuring)
+            result          = client.get_url(stripped)
             collection_name = result[0]
             tracks          = result[1]
             collection_cover = result[2] if len(result) > 2 else ""
             collection_meta  = result[3] if len(result) > 3 else {}
 
-            # cover: usa quella esplicita, poi il cover della prima traccia
+            # cover: usa quella esplicita, poi il cover della prima traccia quando non è playlist
             cover = collection_cover or ""
             if not cover:
-                # Use track cover only when the collection itself has no cover and
-                # the URL is not a playlist. Playlist cards should not display
-                # the first track cover as if it were the playlist cover.
                 lower_url = url.lower()
-                if "/album/" in lower_url or "/artist/" in lower_url or lower_url.startswith("spotify:album:") or lower_url.startswith("spotify:artist:"):
-                    cover = getattr(tracks[0], "cover_url", "") if tracks else ""
+                is_playlist = ("/playlist/" in lower_url) or ("list=" in lower_url and "olak5uy_" not in lower_url)
+                if not is_playlist and tracks:
+                    cover = getattr(tracks[0], "cover_url", "") or ""
 
             if not tracks:
                 self.log("No tracks found at this URL.", "error")
@@ -477,6 +480,7 @@ class SpotiFLAC_API:
                         import re
                         playlist_match = re.search(r'playlist[:/]([a-zA-Z0-9]+)', url)
                         track_match = re.search(r'track[:/]([a-zA-Z0-9]+)', url)
+                        album_match = re.search(r'album[:/]([A-Za-z0-9]+)', url)
                         lower_url = url.lower()
                         is_artist = "/artist/" in lower_url or "spotify:artist:" in lower_url
 
@@ -490,22 +494,14 @@ class SpotiFLAC_API:
                             stats = sp_client.get_track_stats(track_id)
                             if stats.get('playcount'):
                                 playcount_map[track_id] = stats.get('playcount')
+                        elif album_match:
+                            self.log("Attempting to fetch playcount for album (fast mode)…", "info")
+                            album_id = album_match.group(1)
+                            playcount_map = sp_client.get_album_stats(album_id)
                         elif is_artist:
-                            track_ids = [
-                                getattr(t, 'id', '')
-                                for t in tracks
-                                if getattr(t, 'id', '') and not getattr(t, 'plays', '')
-                            ]
-                            if track_ids:
-                                self.log(
-                                    f"Attempting to fetch playcount for artist tracks ({len(track_ids)} tracks)…",
-                                    "info"
-                                )
-                                playcount_map = self._fetch_track_playcounts(sp_client, track_ids)
-                            else:
-                                playcount_map = {}
+                            self.log("Playcounts per gli artisti ignorati per velocizzare il caricamento...", "info")
+                            playcount_map = {}
                         else:
-                            # Fallback for other multi-track URLs; avoid extremely slow serial fetch
                             pass
                     except Exception as auth_err:
                         self.log(f"Playcount unavailable: {type(auth_err).__name__}", "info")
@@ -528,8 +524,9 @@ class SpotiFLAC_API:
                 
                 _pc_val = playcount_map.get(track_id, '') if playcount_map else ''
                 playcount = _pc_val.get('playcount', '') if isinstance(_pc_val, dict) else _pc_val
-                if not playcount:
-                    playcount = getattr(t, 'plays', '')
+                if not playcount or playcount == "0":
+                    fallback_plays = getattr(t, 'plays', '')
+                    playcount = fallback_plays if fallback_plays and fallback_plays != "0" else ""
 
                 track_data.append({
                     "index":        i,
@@ -598,8 +595,8 @@ class SpotiFLAC_API:
                     _url_type = 'artist'
                 else:
                     _url_type = ''
-                if not cover and _url_type in ('album', 'artist'):
-                    cover = getattr(tracks[0], 'cover_url', '') if tracks else ''
+                if not cover and tracks:
+                    cover = getattr(tracks[0], 'cover_url', '') or ''
                 _artist = getattr(tracks[0], 'artists', '') if tracks and _url_type == 'track' else ''
                 add_url_to_history(url, label=collection_name, cover=cover,
                                    track_count=len(tracks), url_type=_url_type, artist=_artist)
@@ -648,7 +645,6 @@ class SpotiFLAC_API:
             use_artist_subfolders = config.get("use_artist_subfolders", False)
             use_album_subfolders  = config.get("use_album_subfolders", False)
             first_artist_only     = config.get("first_artist_only", False)
-            include_featuring     = config.get("include_featuring", False)
             lyrics_providers      = config.get("lyrics_providers") or ["spotify", "apple", "musixmatch", "lrclib", "amazon"]
             enrich_providers      = config.get("enrich_providers") or ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
             track_max_retries     = int(config.get("track_max_retries", 0))
@@ -711,7 +707,6 @@ class SpotiFLAC_API:
                     use_artist_subfolders   = use_artist_subfolders,
                     use_album_subfolders    = use_album_subfolders,
                     first_artist_only       = first_artist_only,
-                    include_featuring       = include_featuring,
                     embed_lyrics            = embed_lyrics,
                     lyrics_providers        = lyrics_providers,
                     enrich_metadata         = enrich_metadata,

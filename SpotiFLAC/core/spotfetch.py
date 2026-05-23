@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 import requests
+from urllib3 import Retry
 
 # Utilizza il path relativo corretto in base a dove hai salvato spotfetch.py
 from ..core.spotify_totp import generate_spotify_totp
@@ -118,6 +119,92 @@ class SpotifyWebClient:
         self._get_access_token()
         self._get_client_token()
 
+    def extract_cover_image(self, cover_data: dict) -> dict:
+        """Algoritmo avanzato di risoluzione delle copertine, estrae la massima risoluzione tramite Hash."""
+        if not cover_data:
+            return {}
+
+        sources = cover_data.get("sources", [])
+        if not sources:
+            square = cover_data.get("squareCoverImage", {}).get("image", {}).get("data", {})
+            sources = square.get("sources", [])
+
+        if not sources:
+            return {}
+
+        filtered = []
+        for s in sources:
+            if not isinstance(s, dict):
+                continue
+            url = s.get("url", "")
+            if not url:
+                continue
+            width = s.get("width") or s.get("maxWidth") or 0
+            height = s.get("height") or s.get("maxHeight") or 0
+            
+            if (width > 64 and height > 64) or (width == 0 and height == 0 and url):
+                filtered.append({"url": url, "width": width, "height": height})
+
+        filtered.sort(key=lambda x: x["width"])
+
+        small_url, medium_url, fallback_url, image_id = "", "", "", ""
+        for s in filtered:
+            w, url = s["width"], s["url"]
+            if w == 300: small_url = url
+            elif w == 640: medium_url = url
+            elif w == 0: fallback_url = url
+
+            if not image_id and url:
+                for prefix in ["ab67616d0000b273", "ab67616d00001e02", "ab67616d00004851"]:
+                    if prefix in url:
+                        image_id = url.split(prefix)[-1]
+                        break
+                if not image_id and "/image/" in url:
+                    part = url.split("/image/")[-1].split("?")[0]
+                    if len(part) > 20:
+                        image_id = part
+
+        large_url = f"https://i.scdn.co/image/ab67616d000082c1{image_id}" if image_id else ""
+
+        res = {}
+        if small_url: res["small"] = small_url
+        if medium_url: res["medium"] = medium_url
+        if large_url: res["large"] = large_url
+        if not res and fallback_url:
+            res = {"small": fallback_url, "medium": fallback_url, "large": fallback_url}
+
+        return res
+
+    def get_track_composer(self, track_id: str) -> str:
+        """Query nativa GraphQL per ottenere i compositori senza scraping HTML."""
+        payload = {
+            "variables": {
+                "trackUri": f"spotify:track:{track_id}",
+                "contributorsLimit": 100,
+                "contributorsOffset": 0,
+            },
+            "operationName": "queryTrackCreditsModal",
+            "extensions": {
+                "persistedQuery": {
+                    "version": 1,
+                    "sha256Hash": "e2ca40d46cf1fde36562261ccec754f23fb31b561877252e9fe0d6834aabb84b"
+                }
+            }
+        }
+        try:
+            data = self.query(payload)
+            items = data.get("data", {}).get("trackUnion", {}).get("creditsTrait", {}).get("contributors", {}).get("items", [])
+            composers = []
+            for item in items:
+                if item.get("role", "").strip().lower() == "composer":
+                    name = item.get("name", "").strip()
+                    if name and name not in composers:
+                        composers.append(name)
+            return ", ".join(composers)
+        except Exception as exc:
+            logger.debug(f"[spotfetch] Errore recupero compositori per {track_id}: {exc}")
+            return ""
+
     def query(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Esegue una query GraphQL autorizzata puntando all'endpoint pathfinder/v2/query."""
         if not (self.access_token and self.client_token):
@@ -134,9 +221,24 @@ class SpotifyWebClient:
         # Allineato a Go: endpoint query V2
         resp = self._session.post("https://api-partner.spotify.com/pathfinder/v2/query", json=payload, headers=headers)
         logger.debug(f"[spotfetch] Response status: {resp.status_code}")
+
+        if resp.status_code == 401 and Retry:
+            logger.debug("[spotfetch] Token scaduto. Auto-rinnovo in corso...")
+            self.access_token = ""
+            self.initialize()
+            return self.query(payload, retry=False)
         
         if resp.status_code != 200:
             logger.error(f"[spotfetch] GraphQL query failed: HTTP {resp.status_code} | {resp.text[:500]}")
+            # Alcune risposte (es. 412 Invalid query hash) contengono un body JSON
+            # che i chiamanti possono interpretare per fare un fallback; non
+            # trasformiamo immediatamente tutto in un'eccezione per semplificare
+            # la logica di fallback a livello superiore.
+            if resp.status_code == 412:
+                try:
+                    return resp.json()
+                except Exception:
+                    return {"error": resp.text}
             resp.raise_for_status()
         
         result = resp.json()
@@ -248,6 +350,68 @@ class SpotifyWebClient:
             
         except Exception as exc:
             logger.debug(f"[spotfetch] Errore recupero stats playlist {playlist_id}: {exc}")
+            return {}
+        
+    def get_album_stats(self, album_id: str, offset: int = 0, limit: int = 100) -> dict:
+        """
+        Recupera il playcount di tutte le tracce di un album in un'unica richiesta GraphQL.
+        Restituisce un dizionario con track_id come chiave.
+        """
+        payload = {
+            "operationName": "getAlbum",
+            "variables": {
+                "uri": f"spotify:album:{album_id}",
+                "locale": "",
+                "offset": offset,
+                "limit": limit
+            },
+            "extensions": {
+                "persistedQuery": {
+                    "version": 1,
+                    "sha256Hash": "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10"
+                }
+            }
+        }
+        
+        stats_map = {}
+        try:
+            data = self.query(payload)
+            
+            # Estrai items dall'album
+            album_union = data.get("data", {}).get("albumUnion", {})
+            tracks_v2 = album_union.get("tracksV2", {})
+            items = tracks_v2.get("items", [])
+            
+            for idx, item in enumerate(items):
+                try:
+                    track = item.get("track", {})
+                    if not track:
+                        continue
+                        
+                    track_uri = track.get("uri", "")
+                    track_id = track.get("id", "")
+                    if not track_id and ":" in track_uri:
+                        track_id = track_uri.split(":")[-1]
+                    
+                    if not track_id:
+                        continue
+                    
+                    # Estrai playcount
+                    playcount = track.get("playcount", "")
+                    
+                    stats_map[track_id] = {
+                        "playcount": str(playcount) if playcount else "",
+                        "rank": "",
+                        "status": ""
+                    }
+                except Exception as item_err:
+                    logger.debug(f"[spotfetch] Error processing album item {idx}: {item_err}")
+                    continue
+            
+            return stats_map
+            
+        except Exception as exc:
+            logger.debug(f"[spotfetch] Errore recupero stats album {album_id}: {exc}")
             return {}
 
     def get_artist_discography(self, artist_id: str, order: str = "DATE_DESC") -> list[dict[str, Any]]:

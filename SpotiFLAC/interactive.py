@@ -364,7 +364,6 @@ def _summary(cfg: dict) -> None:
     if cfg["use_artist_subfolders"]:    flags.append("artist-subfolders")
     if cfg["use_album_subfolders"]:     flags.append("album-subfolders")
     if cfg["first_artist_only"]:        flags.append("first-artist-only")
-    if cfg["include_featuring"]:        flags.append("include-featuring")
     row("Options", ", ".join(flags) if flags else "none")
 
     row("Lyrics", "enabled (" + ", ".join(cfg["lyrics_providers"]) + ")" if cfg["embed_lyrics"] else "disabled")
@@ -675,23 +674,7 @@ def run_interactive() -> dict:
         cfg["use_album_subfolders"]    = _ask_bool("Create album subfolders?", cfg["use_album_subfolders"])
         cfg["first_artist_only"]       = _ask_bool("Use only the first artist in tags and filename?", cfg["first_artist_only"])
 
-    # ── 7. Featuring ─────────────────────────────────────────────────────────
-    _section("7 · Featuring")
-
-    lower_url = cfg["url"].lower()
-    is_artist_url = (
-            "/artist/" in lower_url
-            or ("UC" in cfg["url"] and "youtube.com" in lower_url)
-    )
-
-    if is_artist_url:
-        print(f"  {DIM('Also downloads tracks where the artist appears as a featured artist.')}")
-        cfg["include_featuring"] = _ask_bool("Include featuring tracks?", cfg.get("include_featuring", False))
-    else:
-        print(f"  {YELLOW('⏭  Skipped:')} {DIM('URL is not an artist page.')}")
-        cfg["include_featuring"] = False
-
-    # ── 8. Lyrics ────────────────────────────────────────────────────────────
+    # ── 7. Lyrics ────────────────────────────────────────────────────────────
     _section("8 · Lyrics")
     cfg["embed_lyrics"] = _ask_bool("Embed synchronized lyrics?", cfg.get("embed_lyrics", True))
 
@@ -705,7 +688,7 @@ def run_interactive() -> dict:
     else:
         cfg["lyrics_providers"] = cfg.get("lyrics_providers") or ["lrclib", "apple", "amazon"]
 
-    # ── 9. Metadata enrichment ──────────────────────────────────────────────
+    # ── 8. Metadata enrichment ──────────────────────────────────────────────
     _section("9 · Metadata Enrichment")
     print(f"  {DIM('Adds genre, BPM, label, HD cover, MusicBrainz IDs, and more.')}")
     cfg["enrich_metadata"] = _ask_bool("Enable metadata enrichment?", cfg.get("enrich_metadata", True))
@@ -720,8 +703,8 @@ def run_interactive() -> dict:
     else:
         cfg["enrich_providers"] = cfg.get("enrich_providers") or ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
 
-    # ── 10. Retry ────────────────────────────────────────────────────────────
-    _section("10 · Retry on Failure")
+    # ── 9. Retry ────────────────────────────────────────────────────────────
+    _section("9 · Retry on Failure")
     print(f"  {DIM('Extra download attempts per track if all providers fail on first try.')}")
     print(f"  {DIM('Each retry waits exponentially longer (2s, 4s, 8s…).')}")
     default_retries = cfg.get("track_max_retries", 0)
@@ -731,8 +714,8 @@ def run_interactive() -> dict:
     except ValueError:
         cfg["track_max_retries"] = 0
 
-    # ── 11. Post-download Action ─────────────────────────────────────────────
-    _section("11 · Post-Download Action")
+    # ── 10. Post-download Action ─────────────────────────────────────────────
+    _section("10 · Post-Download Action")
     print(f"  {DIM('Action to perform automatically when all downloads finish.')}")
 
     action_options = ["none", "open_folder", "notify", "command"]
@@ -753,7 +736,7 @@ def run_interactive() -> dict:
     else:
         cfg["post_download_command"] = cfg.get("post_download_command", "")
 
-    # ── 12. Optional Tokens ──────────────────────────────────────────────────
+    # ── 11. Optional Tokens ──────────────────────────────────────────────────
     _section("12 · Optional Tokens")
     cfg["qobuz_token"] = _ask("Qobuz auth token (leave blank to skip)", "") or None
 
@@ -797,7 +780,6 @@ def _print_cli_command(cfg: dict) -> None:
     if cfg["use_artist_subfolders"]:    parts.append("--use-artist-subfolders")
     if cfg["use_album_subfolders"]:     parts.append("--use-album-subfolders")
     if cfg["first_artist_only"]:        parts.append("--first-artist-only")
-    if cfg["include_featuring"]:        parts.append("--include-featuring")
     if not cfg["embed_lyrics"]:
         parts.append("--no-lyrics")
     else:
