@@ -40,19 +40,126 @@ def _safe_duration_ms(raw: Any) -> int:
         return int(raw.get("totalMilliseconds") or 0)
     return int(raw or 0)
 
-def _extract_artist_names(artists_data: dict) -> list[str]:
-    """Estrae i nomi degli artisti dalla struttura GraphQL."""
-    return [
-        a.get("profile", {}).get("name", "Unknown")
-        for a in artists_data.get("items", [])
-    ]
+def _extract_artist_names(artists_data: Any) -> list[str]:
+    """Estrae i nomi degli artisti dalla struttura GraphQL o da liste alternative."""
+    if isinstance(artists_data, dict):
+        items = artists_data.get("items", [])
+        if isinstance(items, list) and items:
+            names = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                profile = item.get("profile")
+                if isinstance(profile, dict):
+                    name = profile.get("name")
+                else:
+                    name = item.get("name")
+                if isinstance(name, str) and name:
+                    names.append(name)
+            return names
 
-def _join_artists(artists_data: dict) -> str:
+        profile = artists_data.get("profile")
+        if isinstance(profile, dict):
+            name = profile.get("name")
+            return [name] if isinstance(name, str) and name else []
+
+        name = artists_data.get("name")
+        if isinstance(name, str) and name:
+            return [name]
+
+        return []
+
+    if isinstance(artists_data, list):
+        names = []
+        for item in artists_data:
+            if not isinstance(item, dict):
+                continue
+            profile = item.get("profile")
+            if isinstance(profile, dict):
+                name = profile.get("name")
+            else:
+                name = item.get("name")
+            if isinstance(name, str) and name:
+                names.append(name)
+        return names
+
+    return []
+
+
+def _join_artists(artists_data: Any) -> str:
     names = _extract_artist_names(artists_data)
-    return ", ".join(names) if names else "Unknown Artist"
+    return ", ".join(names) if names else ""
+
 
 def _best_cover(cover_urls: dict) -> str:
     return cover_urls.get("large") or cover_urls.get("medium") or cover_urls.get("small", "")
+
+
+def _extract_playlist_owner(playlist_v2: dict) -> str:
+    owner_data = playlist_v2.get("owner") or {}
+    if not owner_data:
+        owner_v2 = playlist_v2.get("ownerV2") or {}
+        if isinstance(owner_v2, dict):
+            owner_data = owner_v2.get("data") or {}
+    if not isinstance(owner_data, dict):
+        return ""
+
+    profile = owner_data.get("profile")
+    if isinstance(profile, dict):
+        return profile.get("name", "") or owner_data.get("displayName", "") or owner_data.get("name", "")
+
+    return owner_data.get("displayName", "") or owner_data.get("name", "")
+
+
+def _extract_playlist_cover(playlist_v2: dict) -> str:
+    images = playlist_v2.get("images") or {}
+    if isinstance(images, dict):
+        items = images.get("items") or []
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                sources = item.get("sources") or []
+                if isinstance(sources, list):
+                    for source in sources:
+                        if isinstance(source, dict):
+                            url = source.get("url")
+                            if isinstance(url, str) and url:
+                                return url
+
+        sources = images.get("sources") or []
+        if isinstance(sources, list):
+            for source in sources:
+                if isinstance(source, dict):
+                    url = source.get("url")
+                    if isinstance(url, str) and url:
+                        return url
+
+    images_v2 = playlist_v2.get("imagesV2") or {}
+    if isinstance(images_v2, dict):
+        items = images_v2.get("items") or []
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                sources = item.get("sources") or []
+                if isinstance(sources, list):
+                    for source in sources:
+                        if isinstance(source, dict):
+                            url = source.get("url")
+                            if isinstance(url, str) and url:
+                                return url
+
+        sources = images_v2.get("sources") or []
+        if isinstance(sources, list):
+            for source in sources:
+                if isinstance(source, dict):
+                    url = source.get("url")
+                    if isinstance(url, str) and url:
+                        return url
+
+    return ""
+
 
 def _track_url(track_id: str) -> str:
     return f"https://open.spotify.com/track/{track_id}"
@@ -340,11 +447,10 @@ class SpotifyMetadataClient:
                 playlist_desc = playlist_v2.get("description", "")
                 f_raw = playlist_v2.get("followers")
                 followers = f_raw.get("totalCount", 0) if isinstance(f_raw, dict) else int(f_raw or 0)
-                owner_data = playlist_v2.get("owner", {})
-                playlist_owner = owner_data.get("displayName") or owner_data.get("name") or ""
+                playlist_owner = _extract_playlist_owner(playlist_v2)
                 playlist_cover = _best_cover(
                     self.web_client.extract_cover_image(playlist_v2.get("images", {}))
-                )
+                ) or _extract_playlist_cover(playlist_v2)
 
             content = playlist_v2.get("content", {})
             items = content.get("items", [])
@@ -367,10 +473,13 @@ class SpotifyMetadataClient:
             if not track_id:
                 continue
 
-            artists_list = _extract_artist_names(track_data.get("artists", {}))
             album_data = track_data.get("albumOfTrack", {})
+            artists_list = _extract_artist_names(track_data.get("artists", {}))
+            if not artists_list:
+                artists_list = _extract_artist_names(album_data.get("artists", {})) or ["Unknown Artist"]
+
             cover_urls = self.web_client.extract_cover_image(album_data.get("coverArt", {}))
-            album_artists = _join_artists(album_data.get("artists", {})) or (artists_list[0] if artists_list else "Unknown")
+            album_artists = _join_artists(album_data.get("artists", {})) or artists_list[0]
 
             tracks.append(TrackMetadata(
                 id=track_id,
@@ -388,7 +497,7 @@ class SpotifyMetadataClient:
                 external_url=_track_url(track_id),
                 copyright="",
                 composer="",
-                preview_url=track_data.get("previewUrl", ""),
+                preview_url=track_data.get("previewUrl", "") or track_data.get("preview_url", ""),
                 plays=_safe_playcount(track_data.get("playcount")),
                 is_explicit=(track_data.get("contentRating", {}).get("label") == "EXPLICIT"),
             ))
@@ -491,10 +600,14 @@ class SpotifyMetadataClient:
                     )
                 elif kind == "playlist":
                     owner = node.get("owner", {})
+                    if not owner:
+                        owner_v2 = node.get("ownerV2", {})
+                        if isinstance(owner_v2, dict):
+                            owner = owner_v2.get("data") or {}
                     entry["owner"] = owner.get("displayName") or owner.get("name") or ""
                     entry["cover_url"] = _best_cover(
                         self.web_client.extract_cover_image(node.get("images", {}))
-                    )
+                    ) or _extract_playlist_cover(node)
                 results.append(entry)
             return results
 
