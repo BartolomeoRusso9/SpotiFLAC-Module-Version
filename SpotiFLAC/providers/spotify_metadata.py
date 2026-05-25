@@ -295,14 +295,12 @@ class SpotifyMetadataClient:
         }
         data = self.web_client.query(payload)
         track_union = data.get("data", {}).get("trackUnion", {})
-        print("--- DUMP TRACK UNION KEYS ---")
-        print(list(track_union.keys()))
 
         album_data = track_union.get("albumOfTrack", {})
         cover = _best_cover(self.web_client.extract_cover_image(album_data.get("coverArt", {})))
         
         # ------------------------------------------------------------------
-        # Estrazione Artisti (FIX per nuovo schema Spotify)
+        # Artist extraction logic:
         # ------------------------------------------------------------------
         artists_list = []
         
