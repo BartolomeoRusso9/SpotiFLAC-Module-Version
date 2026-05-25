@@ -318,6 +318,7 @@ class SpotifyMetadataClient:
             copyright="",
             composer=composer_str,
             preview_url=track_union.get("previewUrl", ""),
+            preview_url=track_union.get("previewUrl") or self.web_client.get_preview_url(track_id),
             plays=_safe_playcount(track_union.get("playcount")),
             is_explicit=(track_union.get("contentRating", {}).get("label") == "EXPLICIT"),
         )
