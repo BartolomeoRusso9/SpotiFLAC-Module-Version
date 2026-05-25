@@ -59,6 +59,28 @@
       --button-border: rgba(0,0,0,0.08);
     }
 
+    /* ── Dark theme ── */
+    body.dark-theme {
+      --bg:        #0a0a0a;
+      --surface:   #1a1a1a;
+      --surface2:  #2a2a2e;
+      --surface3:  #1e1e22;
+      --border:    #3a3a42;
+      --border2:   #4a4a52;
+      --text:      #f5f5f7;
+      --text2:     #d0d0d4;
+      --muted:     #8e8e93;
+      --yellow:    #ffd60a;
+      --yellow-d:  #f0b000;
+      --yellow-bg: rgba(255,214,10,.15);
+      --input-bg:   #1a1a1a;
+      --input-text: #f5f5f7;
+      --input-border: rgba(255,255,255,0.1);
+      --button-bg:  #2a2a2e;
+      --button-text:#f5f5f7;
+      --button-border: rgba(255,255,255,0.1);
+    }
+
     html, body { height: 100%; overflow: hidden; background: var(--bg); }
     body {
       font-family: var(--app-font);
@@ -79,16 +101,15 @@
       display: flex; align-items: center;
       padding: 0 14px;
       gap: 10px;
-      /* ONLY the titlebar itself drags */
       -webkit-app-region: drag;
       flex-shrink: 0;
       z-index: 200;
     }
-    /* Everything inside titlebar resets drag so clicks work */
-    #titlebar * { -webkit-app-region: no-drag; }
-    /* Allow dragging on the logo/title region */
-    #tb-logo, #tb-logo * { -webkit-app-region: drag; }
-
+    
+    /* Disabilita il drag SOLO sul contenitore dei bottoni colorati, così rimangono cliccabili */
+    #titlebar .dots { 
+      -webkit-app-region: no-drag; 
+    }
     .dots { display: flex; gap: 6px; }
     .dot {
       width: 12px; height: 12px; border-radius: 50%; cursor: pointer;
@@ -718,45 +739,64 @@
       position: relative;
       width: min(700px, calc(100vw - 40px));
       max-height: min(78vh, 760px);
-      background: #ffffff;
+      background: var(--surface);
+      border: 1px solid var(--border);
       border-radius: 22px;
-      box-shadow: 0 40px 120px rgba(15,23,42,.18);
+      box-shadow: 0 40px 120px rgba(0,0,0,.18);
       overflow: hidden;
       display: flex; flex-direction: column;
       z-index: 245;
     }
+
     .queue-panel header {
       display: flex; align-items: center; justify-content: space-between;
       padding: 22px 24px 16px;
       gap: 14px;
     }
-    .queue-panel h3 { margin: 0; font-size: 20px; font-weight: 800; color: #111827; }
+    .queue-panel h3 { margin: 0; font-size: 20px; font-weight: 800; color: var(--text); }
+    .export-link {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 14px; color: var(--text2); cursor: pointer;
+      border-radius: 14px; padding: 8px 10px;
+      background: transparent; border: none;
+      transition: background var(--t), color var(--t);
+    }
+    .export-link:hover { background: var(--surface2); color: var(--text); }
+    .export-link svg { width: 16px; height: 16px; }
+
     .queue-actions { display: flex; align-items: center; gap: 10px; }
     .clear-link {
       display: inline-flex; align-items: center; gap: 8px;
-      font-size: 14px; color: #475569; cursor: pointer;
-      border-radius: 14px; padding: 8px 10px;
+      font-size: 14px; color: var(--text2); cursor: pointer;
+      border-radius: 14px; padding: 8px 10px; border: none; background: transparent;
       transition: background var(--t), color var(--t);
     }
-    .clear-link:hover { background: #f8fafc; color: #111827; }
+    .clear-link:hover { background: var(--surface2); color: var(--text); }
     .clear-link svg { width: 16px; height: 16px; }
     .close-btn {
       width: 38px; height: 38px; border-radius: 14px;
       display: grid; place-items: center;
-      border: 1px solid #e2e8f0; background: #ffffff;
-      color: #475569; cursor: pointer;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text2); cursor: pointer;
     }
+    .close-btn:hover { background: var(--surface2); color: var(--text); }
     .queue-summary {
       padding: 0 24px 16px;
       display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px;
     }
     .queue-summary .qs-item {
       display: flex; align-items: center; gap: 12px;
-      padding: 14px 12px; background: #f8fafc;
-      border-radius: 16px; border: 1px solid #e2e8f0;
-      color: #475569; font-size: 13px;
+      padding: 14px 12px; background: var(--surface2);
+      border-radius: 16px; border: 1px solid var(--border);
+      color: var(--text2); font-size: 13px;
     }
-    .queue-summary .qs-item strong { color: #111827; font-weight: 700; }
+    .queue-summary .qs-item strong { color: var(--text); font-weight: 700; }
+    .queue-stats-bar {
+      padding: 0 24px 16px;
+      display: flex; gap: 20px;
+      font-size: 13px; color: var(--text2);
+    }
+    .queue-stats-bar strong { color: var(--text); font-family: 'JetBrains Mono', monospace; }
     .queue-summary .qs-icon {
       width: 34px; height: 34px; border-radius: 12px;
       display: grid; place-items: center; background: #eef2ff;
@@ -787,41 +827,28 @@
 
     .queue-empty {
       flex: 1; display: flex; align-items: center; justify-content: center;
-      color: #9ca3af; font-size: 16px; text-align: center;
+      color: var(--muted); font-size: 16px; text-align: center;
       padding: 36px 12px;
     }
     .queue-empty .q-icon { font-size: 36px; margin-bottom: 10px; opacity: .32; }
     .queue-list { display: flex; flex-direction: column; gap: 14px; }
     .queue-item {
-      background: #f8fafc; border: 1px solid #e2e8f0;
+      background: var(--surface2); border: 1px solid var(--border);
       border-radius: 18px; padding: 18px;
       display: flex; flex-direction: column; gap: 12px;
     }
-    .queue-item .qi-top { display: flex; align-items: center; gap: 14px; }
-    .queue-item .qi-icon { width: 40px; height: 40px; border-radius: 14px; display: grid; place-items: center; background: #ffffff; color: #0ea5e9; font-size: 18px; }
-    .queue-item .qi-meta { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-    .queue-item .qi-title { font-size: 14px; font-weight: 700; color: #111827; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .queue-item .qi-artist { font-size: 12px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .queue-item .qi-title { font-size: 14px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .queue-item .qi-artist { font-size: 12px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .queue-item .qi-pill.done { background: var(--surface); color: var(--text2); border: 1px solid var(--border); font-weight: 600; }
     .queue-item .qi-pill { padding: 5px 12px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: capitalize; white-space: nowrap; }
     .queue-item .qi-pill.waiting { background: #fef3c7; color: #92400e; }
     .queue-item .qi-pill.active { background: #dbeafe; color: #1d4ed8; }
-    .queue-item .qi-pill.done { background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; font-weight: 600; }
     .queue-item .qi-pill.error { background: #fee2e2; color: #b91c1c; }
     .queue-item .qi-bottom { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6b7280; }
     .queue-item .qi-bottom-meta { display: flex; flex-direction: column; gap: 3px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: #6b7280; }
     .queue-item .qi-bottom-meta .qi-bm-path { color: #9ca3af; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
     @keyframes fadeup { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform:none; } }
-    #queue-start-btn {
-      margin: 0 24px 20px;
-      padding: 12px 16px;
-      background: var(--yellow); color: #000;
-      border: none; border-radius: 999px;
-      font-family: var(--app-font); font-size: 13px; font-weight: 700;
-      cursor: pointer; transition: opacity var(--t);
-      display: none; align-self: stretch;
-    }
-    #queue-start-btn:hover { opacity: .9; }
-    #queue-start-btn:disabled { opacity: .4; cursor: not-allowed; }
+
     #queue-counter {
       padding: 0 24px 22px;
       font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6b7280;
@@ -874,19 +901,24 @@
     .folder-pill { display: inline-flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); color: var(--text2); padding: 9px 14px; border-radius: 999px; font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .folder-pill::before { content: '📁'; display: inline-block; }
     .tab-bar {
-      display: flex; padding: 0 18px 18px;
+      display: flex; padding: 0 18px;
       border-bottom: 1px solid var(--border);
-      flex-shrink: 0; gap: 8px; margin-top: 0; overflow-x: auto;
+      flex-shrink: 0; gap: 4px; margin-top: 0; overflow-x: auto;
     }
     .tab-bar::-webkit-scrollbar { display: none; }
     .stab {
-      padding: 11px 18px; background: var(--surface); border: 1px solid var(--border);
-      color: var(--muted); font-family: var(--app-font); font-size: 13px; font-weight: 600;
-      cursor: pointer; border-radius: 999px; white-space: nowrap;
-      transition: color var(--t), background var(--t), border-color var(--t), transform var(--t);
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 20px; background: transparent; border: 1px solid transparent; border-bottom: none;
+      color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
+      cursor: pointer; border-radius: 8px 8px 0 0; white-space: nowrap;
+      transition: all var(--t); margin-bottom: -1px;
     }
-    .stab:hover { background: var(--surface2); color: var(--text); transform: translateY(-1px); }
-    .stab.active { color: #000; background: var(--yellow); border-color: transparent; }
+    .stab svg { width: 18px; height: 18px; stroke-width: 2.2; }
+    .stab:hover { background: var(--surface2); }
+    .stab.active { 
+      color: #000; background: var(--yellow); 
+      border-color: var(--yellow); border-bottom: 1px solid var(--yellow); 
+    }
     .s-body { flex: 1; overflow-y: auto; padding: 14px 18px 18px; min-height: 0; }
     .s-body::-webkit-scrollbar { width: 3px; }
     .s-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
@@ -1074,19 +1106,19 @@
     /* ── Action button feedback states ── */
     @keyframes ta-spin { to { transform: rotate(360deg); } }
     .ta-spin { animation: ta-spin .65s linear infinite; transform-origin: center; }
-    .ta-btn.ta-loading {
+    .ta-btn.ta-loading, .act-btn.ta-loading {
       pointer-events: none;
       color: var(--text2) !important;
       border-color: var(--border2) !important;
       background: var(--surface2) !important;
     }
-    .ta-btn.ta-state-success {
+    .ta-btn.ta-state-success, .act-btn.ta-state-success {
       background: rgba(34,197,94,.12) !important;
       border-color: var(--green) !important;
       color: var(--green) !important;
       pointer-events: none;
     }
-    .ta-btn.ta-state-error {
+    .ta-btn.ta-state-error, .act-btn.ta-state-error {
       background: rgba(239,68,68,.12) !important;
       border-color: var(--red) !important;
       color: var(--red) !important;
@@ -1567,7 +1599,7 @@
             </div>
           </div>
         </div></div><div id="queue-dock" onclick="toggleQueueDrawer()" title="Open download queue">
-        <div class="qd-icon"><img src="assets/icons/xbatchdl.svg" alt="Download"></div>
+        <div class="qd-icon"><img src="assets/icons/download.svg" alt="Download"></div>
         <div class="qd-body">
           <div class="qd-downloaded" id="qd-downloaded">0.00 MB</div>
           <div class="qd-speed" id="qd-speed">0.00 MB/s</div>
@@ -1582,6 +1614,10 @@
               <h3>Download Queue</h3>
             </div>
             <div class="queue-actions">
+              <button class="export-link" onclick="exportFailures()" title="Export Failures to File">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Export Failures</span>
+              </button>
               <button class="clear-link" onclick="clearQueue()" title="Clear history">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
                 <span>Clear History</span>
@@ -1589,21 +1625,29 @@
               <button class="close-btn" onclick="toggleQueueDrawer()" aria-label="Close queue">✕</button>
             </div>
           </header>
+          
           <div class="queue-summary">
             <div class="qs-item queued"><span class="qs-icon">⏱</span><strong id="q-queued">0</strong>Queued</div>
             <div class="qs-item completed"><span class="qs-icon">✓</span><strong id="q-completed">0</strong>Completed</div>
             <div class="qs-item skipped"><span class="qs-icon">📄</span><strong id="q-skipped">0</strong>Skipped</div>
             <div class="qs-item failed"><span class="qs-icon">✕</span><strong id="q-failed">0</strong>Failed</div>
           </div>
+
+          <div class="queue-stats-bar">
+            <div>Downloaded: <strong id="qsb-downloaded">0.00 MB</strong></div>
+            <div>Speed: <strong id="qsb-speed">0.00 MB/s</strong></div>
+            <div>Duration: <strong id="qd-duration">0s</strong></div>
+          </div>
+
           <div class="queue-content">
             <div id="queue-list">
               <div id="queue-empty" class="queue-empty">
-                <div class="q-icon">📥</div>
+                <div class="q-icon"></div>
                 <div>Add tracks to start</div>
               </div>
             </div>
           </div>
-          <button id="queue-start-btn" onclick="startDownloadQueue()">▶ Start Downloads</button>
+
           <div id="queue-counter"><span id="q-count">0 tracks</span><span id="q-done"></span></div>
         </div>
       </div>
@@ -1633,11 +1677,26 @@
     </div>
     
     <div class="tab-bar">
-        <button class="stab active" onclick="switchTab('general',this)">General</button>
-        <button class="stab" onclick="switchTab('download',this)">Download</button>
-        <button class="stab" onclick="switchTab('files',this)">Files</button>
-        <button class="stab" onclick="switchTab('metadata',this)">Metadata</button>
-        <button class="stab" onclick="switchTab('status',this)">Status</button>
+        <button class="stab active" onclick="switchTab('general',this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/><circle cx="17" cy="14" r="2.5"/><path d="M17 10v1.5"/><path d="M17 16.5v1.5"/><path d="M14 14h1.5"/><path d="M18.5 14H20"/></svg>
+          General
+        </button>
+        <button class="stab" onclick="switchTab('download',this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download
+        </button>
+        <button class="stab" onclick="switchTab('files',this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/><circle cx="16" cy="14" r="2"/><path d="M16 11v1"/><path d="M16 16v1"/><path d="M13 14h1"/><path d="M18 14h1"/></svg>
+          Files
+        </button>
+        <button class="stab" onclick="switchTab('metadata',this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          Metadata
+        </button>
+        <button class="stab" onclick="switchTab('status',this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><path d="M6 10v4"/><path d="M10 6v8"/><path d="M14 10v4"/><path d="M18 6v8"/><circle cx="6" cy="18" r="1"/><circle cx="10" cy="18" r="1"/></svg>
+          Status
+        </button>
       </div>
       <div class="s-body">
 
@@ -1884,12 +1943,20 @@ function switchTab(name, btn) {
 // ── Appearance ───────────────────────────────────────────────────────────────
 function applyTheme(mode) {
   if (mode === 'light') {
+    document.body.classList.remove('dark-theme');
     document.body.classList.add('light-theme');
   } else if (mode === 'dark') {
     document.body.classList.remove('light-theme');
+    document.body.classList.add('dark-theme');
   } else {
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    document.body.classList.toggle('light-theme', !prefersDark);
+    if (prefersDark) {
+      document.body.classList.remove('light-theme');
+      document.body.classList.add('dark-theme');
+    } else {
+      document.body.classList.remove('dark-theme');
+      document.body.classList.add('light-theme');
+    }
   }
 }
 
@@ -2175,8 +2242,8 @@ let apiStatusState = {
 function renderStatusIcon(status) {
   if (status === 'online') return '<span class="status-icon-dot online">✓</span>';
   if (status === 'offline') return '<span class="status-icon-dot offline">✗</span>';
-  if (status === 'checking') return '<span class="status-icon-dot checking">⏳</span>';
-  return '<span class="status-icon-dot idle">—</span>';
+  if (status === 'checking') return '<span class="status-icon-dot checking"></span>';
+  return '<span class="status-icon-dot idle"></span>';
 }
 
 function renderPlatformIcon(type) {
@@ -2191,7 +2258,7 @@ function renderPlatformIcon(type) {
     youtube: 'youtube.svg',
     musicbrainz: 'musicbrainz_l.png',
   };
-  const iconFile = iconMap[type] || 'spotiflac.svg';
+  const iconFile = iconMap[type] || 'spotubedl.svg';
   return `<span class="svc-icon icon-image ${type}"><img src="assets/icons/${iconFile}" alt="${type}"></span>`;
 }
 
@@ -2335,12 +2402,12 @@ let previewPlayingIndex = -1;
 function stopCurrentPreview() {
   if (previewAudio) {
     previewAudio.pause();
-    previewAudio.removeAttribute('src'); // Rimuove la sorgente
-    previewAudio.load(); // Forza il browser a rilasciare la sessione media!
+    previewAudio.removeAttribute('src'); // Removes the source
+    previewAudio.load(); // Forces the browser to release the media session
   }
   if (previewPlayingIndex >= 0) {
-    const prevBtn = document.querySelector(`button.ta-preview[data-preview-index="${previewPlayingIndex}"]`);
-    if (prevBtn) setPreviewButtonState(prevBtn, false);
+    const prevBtns = document.querySelectorAll(`button.ta-preview[data-preview-index="${previewPlayingIndex}"]`);
+    prevBtns.forEach(btn => setPreviewButtonState(btn, false));
     previewPlayingIndex = -1;
   }
 }
@@ -2428,12 +2495,26 @@ window.showTracklist = (tracksJson) => {
 };
 window.app_download_finished = (success = true) => {
   const activeItems = queue.map((item, qi) => item.status === 'active' ? qi : -1).filter(i => i >= 0);
-  if (!activeItems.length) return;
-  activeItems.forEach(qi => updateQueueItem(qi, success ? 'done' : 'error', success ? 100 : 0));
-  isDownloading = false;
-  $('queue-start-btn').disabled = false;
-  setStatus(success ? 'Download complete! ✓' : 'Error during download.');
-  logMessage(success ? 'All downloads finished.' : 'Download failed.', success ? 'ok' : 'error');
+  
+  // Close out items from the completed batch
+  if (activeItems.length > 0) {
+    activeItems.forEach(qi => updateQueueItem(qi, success ? 'done' : 'error', success ? 100 : 0));
+  }
+  
+  // Check if there are still any downloads running concurrently
+  const stillActive = queue.some(q => q.status === 'active');
+  if (!stillActive) {
+    isDownloading = false;
+    resetQueueDuration();
+    setStatus(success ? 'Download complete! ✓' : 'Error during download.');
+    logMessage(success ? 'All downloads finished.' : 'Download failed.', success ? 'ok' : 'error');
+  }
+  
+  // Safety fallback: trigger any newly added tracks that got stuck
+  const waiting = queue.filter(q => q.status === 'waiting');
+  if (waiting.length > 0) {
+    startDownloadQueue();
+  }
 };
 window.loadHistoryAndProfiles = async () => {
   if (!window.pywebview?.api) return;
@@ -2685,7 +2766,6 @@ function closeAlbumCard() {
   queue          = [];
   isDownloading  = false;
   renderQueue();
-  $('queue-start-btn').style.display = 'none';
   setStatus('Ready — paste a link and press Fetch');
   $('fetchBtn').disabled  = false;
   $('urlInput').disabled  = false;
@@ -2776,7 +2856,7 @@ function renderTracks(tracks, page = 1) {
       
       // Lazy Loading: il pulsante è sempre abilitato, ma recupererà il preview al click se necessario
       const previewBtn = `<button class="ta-btn ta-preview" data-preview-index="${globalIndex}" data-track-id="${t.id || ''}" data-tip="Play Preview" onclick="playPreview(${globalIndex})">
-             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14a1 1 0 0 0 1 1h3l5 3V4L9 7H6a1 1 0 0 0-1 1z"/></svg>
+             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
            </button>`;
 
       const extUrl  = t.external_url || t.externalUrl || t.link || t.url || '';
@@ -2926,36 +3006,39 @@ function openExternal(i) {
 }
 
 function downloadLyrics(i) {
-  const t   = currentTracks[i];
+  const t = currentTracks[i];
   if (!t) return;
-  const btn = document.querySelector(`#track-row-${i} .ta-btn.ta-lyrics`)
-         || document.querySelector(`.ta-lyrics[data-track-index="${i}"]`);
-  setTaBtnState(btn, 'loading');
+  
+  // Select both the hidden table button and the visible card button
+  const btns = document.querySelectorAll(`#track-row-${i} .ta-btn.ta-lyrics, .ta-lyrics[data-track-index="${i}"]`);
+  btns.forEach(btn => setTaBtnState(btn, 'loading'));
   logMessage(`Fetching lyrics: ${t.title}…`, 'info');
+  
   if (window.pywebview?.api) {
     Promise.resolve(window.pywebview.api.download_track_lyrics(t))
-      .then(() => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); })
-      .catch(() => { setTaBtnState(btn, 'error');   resetTaBtnAfter(btn, 2200); });
+      .then(() => { btns.forEach(btn => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }); })
+      .catch(() => { btns.forEach(btn => { setTaBtnState(btn, 'error'); resetTaBtnAfter(btn, 2200); }); });
   } else {
     logMessage('Python not connected — demo mode', 'warn');
-    setTimeout(() => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }, 700);
+    setTimeout(() => { btns.forEach(btn => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }); }, 700);
   }
 }
 
 function downloadCover(i) {
-  const t   = currentTracks[i];
+  const t = currentTracks[i];
   if (!t) return;
-  const btn = document.querySelector(`#track-row-${i} .ta-btn.ta-cover`)
-         || document.querySelector(`.ta-cover[data-track-index="${i}"]`);
-  setTaBtnState(btn, 'loading');
+  
+  const btns = document.querySelectorAll(`#track-row-${i} .ta-btn.ta-cover, .ta-cover[data-track-index="${i}"]`);
+  btns.forEach(btn => setTaBtnState(btn, 'loading'));
   logMessage(`Downloading cover: ${t.title}…`, 'info');
+  
   if (window.pywebview?.api) {
     Promise.resolve(window.pywebview.api.download_track_cover(t))
-      .then(() => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); })
-      .catch(() => { setTaBtnState(btn, 'error');   resetTaBtnAfter(btn, 2200); });
+      .then(() => { btns.forEach(btn => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }); })
+      .catch(() => { btns.forEach(btn => { setTaBtnState(btn, 'error'); resetTaBtnAfter(btn, 2200); }); });
   } else {
     logMessage('Python not connected — demo mode', 'warn');
-    setTimeout(() => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }, 700);
+    setTimeout(() => { btns.forEach(btn => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }); }, 700);
   }
 }
 
@@ -2963,8 +3046,8 @@ function playPreview(i) {
   const t = currentTracks[i];
   let previewUrl = t?.preview_url || t?.previewUrl || t?.preview || t?.preview_uri || t?.previewUri || '';
   
-  const button = document.querySelector(`button.ta-preview[data-preview-index="${i}"]`);
-  const trackId = button?.dataset.trackId || t?.id || '';
+  const buttons = document.querySelectorAll(`button.ta-preview[data-preview-index="${i}"]`);
+  const trackId = buttons[0]?.dataset.trackId || t?.id || '';
 
   if (!t || !trackId) {
     logMessage('Track ID missing', 'warn');
@@ -2979,60 +3062,60 @@ function playPreview(i) {
     document.body.appendChild(previewAudio);
 
     previewAudio.addEventListener('ended', () => {
-      stopCurrentPreview(); // Rilascia i tasti quando la preview finisce naturalmente
+      stopCurrentPreview(); 
     });
   }
 
   // Toggle pause if already playing this track
   if (previewPlayingIndex === i && !previewAudio.paused) {
-    stopCurrentPreview(); // Ferma e rilascia i tasti
+    stopCurrentPreview(); 
     return;
   }
 
   // Stop previous track
   if (previewPlayingIndex !== -1 && previewPlayingIndex !== i) {
-    stopCurrentPreview(); // Ferma la traccia precedente
+    stopCurrentPreview(); 
   }
 
-  // Show spinner while loading
-  setTaBtnState(button, 'loading');
+  // Show spinner while loading on all matched buttons
+  buttons.forEach(b => setTaBtnState(b, 'loading'));
 
-  // Se preview_url è vuoto, recuperalo dal backend (lazy loading)
   if (!previewUrl) {
     console.log(`Fetching preview for track ${trackId}…`);
     pywebview.api.get_track_preview(trackId).then((url) => {
       if (url) {
         previewUrl = url;
-        t.preview_url = url; // Aggiorna la traccia in cache
-        playPreviewWithUrl(i, previewUrl, button, t);
+        t.preview_url = url; 
+        playPreviewWithUrl(i, previewUrl, buttons, t);
       } else {
-        setTaBtnState(button, 'error');
-        setTimeout(() => setTaBtnState(button, 'default'), 2200);
+        buttons.forEach(b => setTaBtnState(b, 'error'));
+        setTimeout(() => buttons.forEach(b => setTaBtnState(b, 'default')), 2200);
         logMessage('No preview available for this track', 'warn');
       }
     }).catch((err) => {
       console.error('Error fetching preview:', err);
-      setTaBtnState(button, 'error');
-      setTimeout(() => setTaBtnState(button, 'default'), 2200);
+      buttons.forEach(b => setTaBtnState(b, 'error'));
+      setTimeout(() => buttons.forEach(b => setTaBtnState(b, 'default')), 2200);
       logMessage('Failed to fetch preview', 'error');
     });
   } else {
-    // Altrimenti, usa direttamente il preview_url
-    playPreviewWithUrl(i, previewUrl, button, t);
+    playPreviewWithUrl(i, previewUrl, buttons, t);
   }
 }
 
-function playPreviewWithUrl(i, previewUrl, button, t) {
+function playPreviewWithUrl(i, previewUrl, buttons, t) {
   previewAudio.src = previewUrl;
   previewAudio.currentTime = 0;
   previewAudio.play().then(() => {
-    button.classList.remove('ta-loading', 'ta-state-success', 'ta-state-error');
-    setPreviewButtonState(button, true);
+    buttons.forEach(b => {
+      b.classList.remove('ta-loading', 'ta-state-success', 'ta-state-error');
+      setPreviewButtonState(b, true);
+    });
     previewPlayingIndex = i;
     logMessage(`Playing preview: ${t.title}`, 'info');
   }).catch(() => {
-    setTaBtnState(button, 'error');
-    setTimeout(() => setTaBtnState(button, 'default'), 2200);
+    buttons.forEach(b => setTaBtnState(b, 'error'));
+    setTimeout(() => buttons.forEach(b => setTaBtnState(b, 'default')), 2200);
     logMessage('Preview playback failed, opening in browser…', 'warn');
     window.open(previewUrl, '_blank');
   });
@@ -3056,8 +3139,8 @@ function setPreviewButtonState(button, active) {
   // Cambio icona dinamico mantenendo le proporzioni corrette
   button.innerHTML = active
     ? `<svg width="${svgSize}" height="${svgSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>`
-    : `<svg width="${svgSize}" height="${svgSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14a1 1 0 0 0 1 1h3l5 3V4L9 7H6a1 1 0 0 0-1 1z"/></svg>`;
-}
+    : `<svg width="${svgSize}" height="${svgSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+  }
 
 // ── Effetto Typewriter per il Placeholder ──
 // ── Effetto Typewriter per il Placeholder ──
@@ -3397,20 +3480,26 @@ function addToQueue(indices) {
   });
   console.log('queue state after add', { queueLengthAfter: queue.length, queue });
   renderQueue();
-  $('queue-start-btn').style.display  = queue.length > 0 ? 'block' : 'none';
-  $('queue-empty').style.display      = queue.length > 0 ? 'none'  : 'flex';
+  const emptyMsg = $('queue-empty');
+  if (emptyMsg) emptyMsg.style.display = queue.length > 0 ? 'none' : 'flex';
   return added;
 }
 
 function updateQueueDuration() {
   const durationEl = $('qd-duration');
   if (!durationEl) return;
+  
   if (!queueStartTime) {
     durationEl.textContent = '0s';
     return;
   }
+  
+  // Calculate elapsed time in seconds
   const seconds = Math.floor((Date.now() - queueStartTime) / 1000);
-  durationEl.textContent = `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  
+  durationEl.textContent = m > 0 ? `${m}m ${s}s` : `${seconds}s`;
 }
 
 function resetQueueDuration() {
@@ -3476,40 +3565,33 @@ function renderQueue() {
       : 'Queued';
     const pillClass = `qi-pill ${item.status}`;
 
-    // Icon SVG per status
-    const iconHtml = item.status === 'done'
-      ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>`
-      : item.status === 'error'
-      ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`
-      : item.status === 'skipped'
-      ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`
-      : `⬇`;
-
-    // Bottom section: for done show artist•album, size, path; otherwise show statusText
+    // Define the bottom section HTML (size and path for completed tracks, status text for others)
     let bottomHtml;
     if (item.status === 'done') {
-      const artistAlbum = item.album
-        ? `${escHtml(item.artist)} • ${escHtml(item.album)}`
-        : escHtml(item.artist);
       const sizeHtml = item.file_size_mb > 0
         ? `<span>${item.file_size_mb.toFixed(2)} MB</span>`
         : '';
       const pathHtml = item.file_path
         ? `<span class="qi-bm-path" title="${escHtml(item.file_path)}">${escHtml(item.file_path)}</span>`
         : '';
-      bottomHtml = `<div class="qi-bottom-meta">${artistAlbum ? `<span>${artistAlbum}</span>` : ''}${sizeHtml}${pathHtml}</div>`;
+      bottomHtml = (sizeHtml || pathHtml) ? `<div class="qi-bottom-meta">${sizeHtml}${pathHtml}</div>` : '';
     } else {
       bottomHtml = `<div class="qi-bottom">${statusText}</div>`;
     }
 
     const el = document.createElement('div');
     el.className = 'queue-item'; el.id = `qi-${qi}`;
+    
+    // Combine artist and album with a middle dot (•) if the album metadata exists
+    const artistAlbumText = item.album
+      ? `${escHtml(item.artist)} • ${escHtml(item.album)}`
+      : escHtml(item.artist);
+    
     el.innerHTML = `
       <div class="qi-top">
-        <div class="qi-icon" style="background:none;font-size:0;">${iconHtml}</div>
         <div class="qi-meta">
           <div class="qi-title">${escHtml(item.title)}</div>
-          ${item.status !== 'done' ? `<div class="qi-artist">${escHtml(item.artist)}</div>` : ''}
+          <div class="qi-artist">${artistAlbumText}</div>
         </div>
         <div class="${pillClass}">${statusLabel}</div>
       </div>
@@ -3517,13 +3599,23 @@ function renderQueue() {
     `;
     list.appendChild(el);
   });
+  
   $('q-count').textContent = `${queue.length} track${queue.length !== 1 ? 's' : ''}`;
   const done = queue.filter(q => q.status === 'done').length;
   $('q-done').textContent = done > 0 ? `${done} done` : '';
+  
+  // Sync the new Stats Bar inside the drawer
+  const qsbDownloaded = $('qsb-downloaded');
+  const qsbSpeed = $('qsb-speed');
+  if (qsbDownloaded) qsbDownloaded.textContent = queueStats.downloaded;
+  if (qsbSpeed) qsbSpeed.textContent = queueStats.speed;
+
+  // Sync the Dock indicators
   const downloaded = $('qd-downloaded');
   const speed = $('qd-speed');
   if (downloaded) downloaded.textContent = queueStats.downloaded;
   if (speed) speed.textContent = queueStats.speed;
+  
   updateQueueDuration();
 }
 
@@ -3544,108 +3636,151 @@ function clearQueue() {
   queueStats = { downloaded:'0.00 MB', speed:'0.00 MB/s' };
   resetQueueDuration();
   renderQueue();
-  $('queue-start-btn').style.display = 'none';
   setStatus('Queue cleared.');
+}
+
+function exportFailures() {
+  const failures = queue.filter(q => q.status === 'error');
+  
+  if (!failures.length) {
+    showToast('No failed tracks to export.');
+    logMessage('Export aborted: No failed tracks found.', 'info');
+    return;
+  }
+  
+  // Construct the text content for the file
+  let text = 'SpotiFLAC Failed Downloads Export\n';
+  text += 'Date: ' + new Date().toLocaleString() + '\n';
+  text += 'Total Failures: ' + failures.length + '\n';
+  text += '-'.repeat(40) + '\n\n';
+  
+  failures.forEach(f => {
+    text += `Title:  ${f.title || 'Unknown'}\n`;
+    text += `Artist: ${f.artist || 'Unknown'}\n`;
+    text += `ID/URL: ${f.spotify_id || f.id || 'Unknown'}\n`;
+    text += '-'.repeat(40) + '\n';
+  });
+  
+  // Create and trigger the download blob
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  
+  a.href = url;
+  a.download = `spotiflac_failures_${Date.now()}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  
+  // Cleanup
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  
+  showToast(`${failures.length} failures exported.`);
+  logMessage(`Exported ${failures.length} failed tracks to text file.`, 'ok');
 }
 
 // ── Download functions (actually work!) ───────────────────────────────────────
 function downloadSingle(i) {
-  console.log('downloadSingle clicked', { index:i, currentTracksLength: currentTracks.length });
   addToQueue([i]);
   startDownloadQueue();
 }
 
 function downloadAll() {
-  console.log('downloadAll clicked', { currentTracksLength: currentTracks.length });
   const all = currentTracks.map((_, i) => i);
+  console.log('[downloadAll] Total tracks:', all.length);
   if (!all.length) { setStatus('No tracks loaded.'); return; }
-  const added = addToQueue(all);
-  if (added) {
-    logMessage(`Added ${all.length} tracks to queue`, 'info');
-  } else {
-    logMessage('All tracks are already in the queue.', 'info');
-  }
-  setStatus(`Starting download…`);
+  addToQueue(all);
+  console.log('[downloadAll] Queue length after addToQueue:', queue.length);
   startDownloadQueue();
+  $('queue-drawer').classList.add('open');
 }
 
 function downloadSelected() {
   const sel = [...document.querySelectorAll('.track-cb:checked')].map(cb => parseInt(cb.value));
-  console.log('downloadSelected clicked', { selectedIndices: sel });
+  console.log('[downloadSelected] Selected tracks:', sel.length);
   if (!sel.length) { setStatus('No tracks selected.'); return; }
-  const added = addToQueue(sel);
-  if (added) {
-    logMessage(`Added ${sel.length} tracks to queue`, 'info');
-  } else {
-    logMessage('Selected tracks are already in the queue.', 'info');
-  }
-  setStatus(`Starting download…`);
+  addToQueue(sel);
+  console.log('[downloadSelected] Queue length after addToQueue:', queue.length);
   startDownloadQueue();
+  $('queue-drawer').classList.add('open');
 }
 
+// Execute downloads immediately without waiting for previous batches
 async function startDownloadQueue() {
+  console.log('[startDownloadQueue] Starting... Queue status:', queue.map(q => q.status));
+  
   const waiting = queue.filter(q => q.status === 'waiting');
+  console.log('[startDownloadQueue] Waiting items:', waiting.length);
+  
   if (!waiting.length) {
-    setStatus('No waiting downloads in queue.');
+    console.warn('[startDownloadQueue] No waiting items, returning');
     return false;
   }
-  if (isDownloading) { setStatus('Download already running…'); return false; }
+
+  console.log('[startDownloadQueue] Proceeding with download for:', waiting.length, 'items');
+
+
+
+  // Force downloading state but do NOT block concurrent executions
   isDownloading = true;
-  $('queue-start-btn').disabled = true;
 
-  // Mark all waiting as active
-  for (let qi = 0; qi < queue.length; qi++) {
-    if (queue[qi].status === 'waiting') updateQueueItem(qi, 'active', 0);
-  }
-  setStatus(`Downloading ${waiting.length} track(s)…`, true);
-
-  const config  = buildConfig();
-  const indices = waiting.map(w => w.index);
-
+  // Start duration timer if it's the first active batch
   if (!queueStartTime) {
     queueStartTime = Date.now();
     updateQueueDuration();
     queueDurationInterval = setInterval(updateQueueDuration, 1000);
   }
 
+  // Mark all currently waiting items as active
+  for (let qi = 0; qi < queue.length; qi++) {
+    if (queue[qi].status === 'waiting') updateQueueItem(qi, 'active', 0);
+  }
+  
+  setStatus(`Downloading track(s)…`, true);
+
+  const config = buildConfig();
+  const indices = waiting.map(w => w.index);
+  console.log('[startDownloadQueue] Indices to download:', indices);
+  console.log('[startDownloadQueue] Config:', config);
+  console.log('[startDownloadQueue] pywebview available:', !!window.pywebview?.api);
+
   if (window.pywebview?.api) {
     try {
+      console.log('[startDownloadQueue] Calling download_tracks with indices:', indices);
+      // Send the tracks directly to the Python backend
       const op = window.pywebview.api.download_tracks(indices, config);
+      console.log('[startDownloadQueue] download_tracks returned:', op);
       if (op && typeof op.catch === 'function') {
         op.catch(e => {
-          for (let qi = 0; qi < queue.length; qi++) {
-            if (queue[qi].status === 'active') updateQueueItem(qi, 'error', 0);
-          }
-          isDownloading = false;
-          $('queue-start-btn').disabled = false;
-          resetQueueDuration();
+          console.error('[startDownloadQueue] Download error:', e);
+          indices.forEach(idx => {
+            const qi = queue.findIndex(q => q.index === idx);
+            if (qi >= 0 && queue[qi].status === 'active') updateQueueItem(qi, 'error', 0);
+          });
           logMessage('Download error: ' + e, 'error');
           setStatus('Error during download.');
         });
       }
     } catch(e) {
-      for (let qi = 0; qi < queue.length; qi++) {
-        if (queue[qi].status === 'active') updateQueueItem(qi, 'error', 0);
-      }
-      isDownloading = false;
-      $('queue-start-btn').disabled = false;
+      console.error('[startDownloadQueue] Exception:', e);
       logMessage('Download error: ' + e, 'error');
-      setStatus('Error during download.');
     }
   } else {
-    // Demo simulation
-    for (let qi = 0; qi < queue.length; qi++) {
-      if (queue[qi].status !== 'active') continue;
-      for (let p = 20; p <= 100; p += 20) {
-        updateQueueItem(qi, 'active', p);
-        await new Promise(r => setTimeout(r, 80));
-      }
-      updateQueueItem(qi, 'done', 100);
+    console.warn('[startDownloadQueue] pywebview not available, using demo fallback');
+    // Demo fallback for immediate download execution
+    for (let idx of indices) {
+      const qi = queue.findIndex(q => q.index === idx);
+      if (qi < 0 || queue[qi].status !== 'active') continue;
+      
+      const demoProgress = async () => {
+        for (let p = 20; p <= 100; p += 20) {
+          updateQueueItem(qi, 'active', p);
+          await new Promise(r => setTimeout(r, 150));
+        }
+        updateQueueItem(qi, 'done', 100);
+      };
+      demoProgress();
     }
-    setStatus('Download complete! (demo)');
-    isDownloading = false;
-    $('queue-start-btn').disabled = false;
-    setStatus('Complete — queue finished.');
   }
 }
 
