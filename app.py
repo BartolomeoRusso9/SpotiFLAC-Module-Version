@@ -329,8 +329,6 @@ class SpotiFLAC_API:
             dur_ms  = track_data.get("duration_ms", 0)
             track_id = track_data.get("id", "")
 
-            self.log(f"Fetching lyrics for: {title}…", "info")
-
             from SpotiFLAC.core.lyrics import fetch_lyrics
             lyrics_text, provider = fetch_lyrics(
                 track_name  = title,
@@ -554,8 +552,8 @@ class SpotiFLAC_API:
                     "index":        i,
                     "id":           track_id,
                     "title":        title,
-                    "artist":       artist,   # Passiamo la stringa formattata
-                    "album":        album,    # AGGIUNTO: ora passa l'album
+                    "artist":       artist,
+                    "album":        album,
                     "cover":        getattr(t, 'cover_url', ''),
                     "duration_ms":  getattr(t, 'duration_ms', 0),
                     "explicit":     getattr(t, 'is_explicit', False),
