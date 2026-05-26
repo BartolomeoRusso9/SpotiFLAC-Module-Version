@@ -667,10 +667,9 @@ class SpotifyMetadataClient:
                         self.web_client.extract_cover_image(node.get("coverArt", {}))
                     )
                 elif kind == "artist":
+                    cover_data = node.get("visualIdentity") or node.get("visuals", {}).get("avatarImage", {})
                     entry["cover_url"] = _best_cover(
-                        self.web_client.extract_cover_image(
-                            node.get("visuals", {}).get("avatarImage", {})
-                        )
+                        self.web_client.extract_cover_image(cover_data)
                     )
                 elif kind == "playlist":
                     owner = node.get("owner", {})
@@ -685,11 +684,16 @@ class SpotifyMetadataClient:
                 results.append(entry)
             return results
 
+        tracks_data = search_v2.get("tracksV2") or search_v2.get("tracks") or {}
+        albums_data = search_v2.get("albumsV2") or search_v2.get("albums") or {}
+        artists_data = search_v2.get("artistsV2") or search_v2.get("artists") or {}
+        playlists_data = search_v2.get("playlistsV2") or search_v2.get("playlists") or {}
+
         return {
-            "tracks": _parse_tracks(search_v2.get("tracksV2", {}).get("items", [])),
-            "albums":    _parse_simple(search_v2.get("albums",    {}).get("items", []), "album"),
-            "artists":   _parse_simple(search_v2.get("artists",   {}).get("items", []), "artist"),
-            "playlists": _parse_simple(search_v2.get("playlists", {}).get("items", []), "playlist"),
+            "tracks": _parse_tracks(tracks_data.get("items", [])),
+            "albums":    _parse_simple(albums_data.get("items", []), "album"),
+            "artists":   _parse_simple(artists_data.get("items", []), "artist"),
+            "playlists": _parse_simple(playlists_data.get("items", []), "playlist"),
         }
 
     def search_by_type(
