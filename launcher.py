@@ -90,12 +90,6 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     parser.add_argument("--use-artist-subfolders",   action="store_true", dest="use_artist_subfolders",   default=pd.get("use_artist_subfolders", False))
     parser.add_argument("--use-album-subfolders",    action="store_true", dest="use_album_subfolders",    default=pd.get("use_album_subfolders", False))
     parser.add_argument("--first-artist-only",       action="store_true", dest="first_artist_only",       default=pd.get("first_artist_only", False))
-    parser.add_argument(
-        "--include-featuring",
-        action  = "store_true",
-        dest    = "include_featuring",
-        default = pd.get("include_featuring", False),
-    )
     parser.add_argument("--qobuz-token", default=None, dest="qobuz_token")
     # In parse_args(), nel gruppo esistente o uno nuovo:
     parser.add_argument(
@@ -108,6 +102,11 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
 )
     parser.add_argument("--loop", "-l", type=int, default=None)
     parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch the graphical user interface (app.py)"
+    )
 
     # ── Profile ─────────────────────────────────────────────────────────────
     profile_grp = parser.add_argument_group("Profile")
@@ -195,6 +194,16 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
 def main() -> None:
     check_for_updates()
 
+    # ── Lancio della GUI se richiesto ─────────────────────────────────
+    if "--gui" in sys.argv:
+        try:
+            import app
+            app.run_gui()
+        except ImportError:
+            from SpotiFLAC import app
+            app.run_gui()
+        return
+
     if len(sys.argv) == 1:
         # ── Interactive wizard ─────────────────────────────────────────────
         cfg = run_interactive()
@@ -223,7 +232,6 @@ def main() -> None:
             enrich_providers         = cfg["enrich_providers"],
             qobuz_token              = cfg.get("qobuz_token"),
             tidal_custom_api         = cfg.get("tidal_custom_api") or None,
-            include_featuring        = cfg["include_featuring"],
             track_max_retries        = cfg.get("track_max_retries", 0),
             post_download_action     = cfg.get("post_download_action", "none"),
             post_download_command    = cfg.get("post_download_command", ""),
@@ -268,7 +276,6 @@ def main() -> None:
             enrich_providers         = args.enrich_providers,
             qobuz_token              = qobuz_token,
             tidal_custom_api         = args.tidal_custom_api or None,
-            include_featuring        = args.include_featuring,
             track_max_retries        = args.retries,
             post_download_action     = args.post_action,
             post_download_command    = args.post_command,
@@ -291,7 +298,6 @@ def main() -> None:
                     "lyrics_providers":      args.lyrics_providers,
                     "enrich_metadata":       args.enrich,
                     "enrich_providers":      args.enrich_providers,
-                    "include_featuring":     args.include_featuring,
                     "track_max_retries":     args.retries,
                     "post_download_action":  args.post_action,
                     "post_download_command": args.post_command,

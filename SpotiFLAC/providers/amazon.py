@@ -577,10 +577,16 @@ class AmazonProvider(BaseProvider):
         if zarz_result and os.path.exists(zarz_result[0]):
             return zarz_result
 
+        # Messaggio di debug esplicito quando fallisce api.zarz
+        logger.info("[amazon] Download with %s didn't work for ASIN %s. Starting fallback. (QUALITY WILL BE FORCED TO LOSSLESS)", zarz_url, asin)
+
+        # Da qui in poi, se non usiamo Zarz, forziamo la qualità esposta a "lossless"
+        fallback_quality = "lossless"
+
         # --- TENTATIVO 2: SPOTBYE 1 (POST) ---
         logger.info("[amazon] Zarz failed. Falling back to Spotbye1 API...")
         spotbye1_url = API_ENDPOINTS['spotbye1']['base_url']
-        print_source_banner("amazon", spotbye1_url, quality)
+        print_source_banner("amazon", spotbye1_url, fallback_quality)
 
         try:
             return self._download_from_spotbye1_api(asin, output_dir)
@@ -590,11 +596,11 @@ class AmazonProvider(BaseProvider):
         # --- TENTATIVO 3: SPOTBYE 2 (GET) ---
         logger.info("[amazon] Spotbye1 failed. Falling back to Spotbye2 API...")
         spotbye2_url = API_ENDPOINTS['spotbye2']['base_url']
-        print_source_banner("amazon", spotbye2_url, quality)
+        print_source_banner("amazon", spotbye2_url, fallback_quality)
 
         # Se anche questo fallisce, l'eccezione salirà normalmente fermando il downloader
         return self._download_from_spotbye_api(asin, output_dir, provider_key="spotbye2")
-
+    
     # ------------------------------------------------------------------
     # Metadata embedding (fallback for .m4a only)
     # ------------------------------------------------------------------
@@ -719,7 +725,7 @@ class AmazonProvider(BaseProvider):
                 position, include_track_num, use_album_track_num, first_artist_only,
             )
             if self._file_exists(dest):
-                return DownloadResult.ok(self.name, str(dest))
+                return DownloadResult.skipped(self.name, str(dest))
 
             from ..core.musicbrainz import AsyncMBFetch
             mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None

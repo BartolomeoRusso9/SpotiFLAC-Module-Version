@@ -5,7 +5,7 @@ Sostituiscono i dict raw per garantire validazione, coercizione e zero KeyError.
 from __future__ import annotations
 import re
 from typing import Literal, Any
-from pydantic import BaseModel, field_validator, model_validator, ValidationInfo
+from pydantic import BaseModel, field_validator, model_validator, ValidationInfo, Field
 
 
 # ---------------------------------------------------------------------------
@@ -13,7 +13,7 @@ from pydantic import BaseModel, field_validator, model_validator, ValidationInfo
 # ---------------------------------------------------------------------------
 
 class TrackMetadata(BaseModel):
-    """Tutti i campi relativi a una traccia Spotify."""
+    # Campi Base
     id:           str
     title:        str
     artists:      str
@@ -23,17 +23,32 @@ class TrackMetadata(BaseModel):
     track_number: int        = 0
     disc_number:  int        = 1
     total_tracks: int        = 0
-    total_discs:  int        = 1
+    total_discs:  int        = 1  # Definito una sola volta
     duration_ms:  int        = 0
     release_date: str        = ""
     cover_url:    str        = ""
     external_url: str        = ""
     copyright:    str        = ""
-    publisher:    str        = ""
+    publisher:    str        = ""  # Definito una sola volta
     composer:     str        = ""
     genre:        str        = ""
     bpm:          int        = 0
-    extra_info:   dict       = {}
+    extra_info:   dict       = Field(default_factory=dict) # Usa Field
+    upc:          str        = ""
+    album_type:   str        = ""
+    preview_url:  str        = ""
+    album_id:     str        = ""
+    album_url:    str        = ""
+    artist_id:    str        = ""
+    artist_url:   str        = ""
+    artists_data: list       = Field(default_factory=list) 
+    plays:        str        = "0"
+    is_explicit:  bool       = False
+    status:       str        = ""
+    rank:         str        = ""
+    description:  str        = ""
+    avatar_url:   str        = ""
+    header_url:   str        = ""
 
     @field_validator("title", "artists", "album", "album_artist", mode="before")
     @classmethod
@@ -140,6 +155,7 @@ class DownloadResult(BaseModel):
     file_path:  str | None = None
     format:     Literal["flac", "mp3", "m4a"] | None = None
     error:      str | None = None
+    skipped:    bool = False
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "DownloadResult":
@@ -152,6 +168,11 @@ class DownloadResult(BaseModel):
     def ok(cls, provider: str, file_path: str,
            fmt: Literal["flac", "mp3", "m4a"] = "flac") -> "DownloadResult":
         return cls(success=True, provider=provider, file_path=file_path, format=fmt)
+
+    @classmethod
+    def skipped(cls, provider: str, file_path: str,
+                fmt: Literal["flac", "mp3", "m4a"] | None = None) -> "DownloadResult":
+        return cls(success=True, provider=provider, file_path=file_path, format=fmt, skipped=True)
 
     @classmethod
     def fail(cls, provider: str, error: str) -> "DownloadResult":

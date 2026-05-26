@@ -192,7 +192,22 @@ class AppleMusicMetadataClient:
         album_data = results[0]
         tracks_data = album_data.get("relationships", {}).get("tracks", {}).get("data", [])
         tracks = [self._parse_item(item, album_data) for item in tracks_data]
-        return album_data, tracks
+        
+        # Formatta il dizionario album con i campi necessari
+        album_attr = album_data.get("attributes", {})
+        artwork_url = album_attr.get("artwork", {}).get("url", "").replace("{w}x{h}", "3000x3000")
+        release_date = album_attr.get("releaseDate", "").split("T")[0]
+        
+        formatted_album = {
+            "attributes": {
+                "name": album_attr.get("name", "Unknown"),
+                "releaseDate": release_date,
+                "artwork": {"url": artwork_url},
+            }
+        }
+        formatted_album["attributes"]["trackCount"] = len(tracks)
+        
+        return formatted_album, tracks
 
     def get_playlist_tracks(self, playlist_id: str, storefront: str = "us") -> tuple[dict, list[TrackMetadata]]:
         data = self._get(f"/{storefront}/playlists/{playlist_id}", {"include": "tracks"})
@@ -320,24 +335,31 @@ class AppleMusicMetadataClient:
     # Entry point pubblico
     # ------------------------------------------------------------------
 
-    def get_url(self, url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata]]:
+    def get_url(self, url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata], str, dict]:
         info = parse_apple_music_url(url)
         t = info["type"]
         storefront = info.get("storefront", "us") # Estrae lo storefront per propagarlo
 
         if t == "track":
             meta = self.get_track(info["id"], storefront=storefront)
-            return meta.title, [meta]
+            return meta.title, [meta], meta.cover_url, {}
 
         if t == "album":
             album, tracks = self.get_album_tracks(info["id"], storefront=storefront)
             name = album.get("attributes", {}).get("name", "Unknown Album")
-            return name, tracks
+            release_date = album.get("attributes", {}).get("releaseDate", "")
+            artwork_url = album.get("attributes", {}).get("artwork", {}).get("url", "").replace("{w}x{h}", "3000x3000")
+            album_meta = {
+                "release_date": release_date,
+                "track_count": len(tracks),
+            }
+            return name, tracks, artwork_url, album_meta
 
         if t == "playlist":
             playlist, tracks = self.get_playlist_tracks(info["id"], storefront=storefront)
             name = playlist.get("attributes", {}).get("name", "Unknown Playlist")
-            return name, tracks
+            artwork_url = playlist.get("attributes", {}).get("artwork", {}).get("url", "").replace("{w}x{h}", "3000x3000")
+            return name, tracks, artwork_url, {}
 
         if t == "artist":
             artist, tracks = self.get_artist_albums(
@@ -346,7 +368,8 @@ class AppleMusicMetadataClient:
                 storefront=storefront
             )
             name = artist.get("attributes", {}).get("name", "Unknown Artist")
-            return name, tracks
+            artwork_url = artist.get("attributes", {}).get("artwork", {}).get("url", "").replace("{w}x{h}", "3000x3000")
+            return name, tracks, artwork_url, {}
 
         raise SpotiflacError(
             ErrorKind.INVALID_URL,

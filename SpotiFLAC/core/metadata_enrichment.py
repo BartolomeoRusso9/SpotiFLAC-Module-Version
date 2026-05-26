@@ -345,6 +345,10 @@ class _TidalMeta:
                     data = fut.result()
                     if data:
                         result = data
+                        winning_api = futs[fut]
+                        with self._apis_lock:
+                            if winning_api in self._apis:
+                                self._apis.remove(winning_api)
                         break
                 except Exception:
                     pass

@@ -1,33 +1,177 @@
-"""
-SpotifyMetadataProvider — refactored.
-"""
 from __future__ import annotations
-import base64
+
 import logging
-import time
-from typing import Iterator
-from urllib.parse import urlparse, parse_qs
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import requests
-import unicodedata
 import re
+import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from typing import Any
+from urllib.parse import urlparse, parse_qs
 
-from ..core.errors import AuthError, NetworkError, InvalidUrlError, SpotiflacError, ErrorKind
+from ..core.spotfetch import SpotifyWebClient
+from ..core.errors import InvalidUrlError, SpotiflacError, ErrorKind
 from ..core.models import TrackMetadata
-from ..core.isrc_cache import get_cached_isrc, put_cached_isrc
 
 logger = logging.getLogger(__name__)
 
-_CLIENT_ID     = base64.b64decode("ODNlNDQzMGI0NzAwNDM0YmFhMjEyMjhhOWM3ZDExYzU=").decode()
-_CLIENT_SECRET = base64.b64decode("OWJiOWUxMzFmZjI4NDI0Y2I2YTQyMGFmZGY0MWQ0NGE=").decode()
-_TOKEN_URL     = "https://accounts.spotify.com/api/token"
-_API_BASE      = "https://api.spotify.com/v1"
+_FEATURING_GROUPS = frozenset({"appears_on", "compilation"})
+_DISCOGRAPHY_SUBTYPES = frozenset({"all", "album", "single", "compilation"})
 
+@dataclass(frozen=True)
+class ArtistSimple:
+    """Artista con ID e URL esterno, per uso downstream."""
+    id: str
+    name: str
+    external_url: str
+
+# ---------------------------------------------------------------------------
+# Helper interni — evitano ripetizioni nei metodi del client
+# ---------------------------------------------------------------------------
+
+def _safe_playcount(raw: Any) -> str:
+    """Legge il playcount sia da dict che da valore scalare."""
+    if isinstance(raw, dict):
+        return str(raw.get("value") or "0")
+    return str(raw or "0")
+
+def _safe_duration_ms(raw: Any) -> int:
+    """Legge la durata in ms sia da dict che da valore scalare."""
+    if isinstance(raw, dict):
+        return int(raw.get("totalMilliseconds") or 0)
+    return int(raw or 0)
+
+def _extract_artist_names(artists_data: Any) -> list[str]:
+    """Estrae i nomi degli artisti dalla struttura GraphQL o da liste alternative."""
+    if isinstance(artists_data, dict):
+        items = artists_data.get("items", [])
+        if isinstance(items, list) and items:
+            names = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                profile = item.get("profile")
+                if isinstance(profile, dict):
+                    name = profile.get("name")
+                else:
+                    name = item.get("name")
+                if isinstance(name, str) and name:
+                    names.append(name)
+            return names
+
+        profile = artists_data.get("profile")
+        if isinstance(profile, dict):
+            name = profile.get("name")
+            return [name] if isinstance(name, str) and name else []
+
+        name = artists_data.get("name")
+        if isinstance(name, str) and name:
+            return [name]
+
+        return []
+
+    if isinstance(artists_data, list):
+        names = []
+        for item in artists_data:
+            if not isinstance(item, dict):
+                continue
+            profile = item.get("profile")
+            if isinstance(profile, dict):
+                name = profile.get("name")
+            else:
+                name = item.get("name")
+            if isinstance(name, str) and name:
+                names.append(name)
+        return names
+
+    return []
+
+
+def _join_artists(artists_data: Any) -> str:
+    names = _extract_artist_names(artists_data)
+    return ", ".join(names) if names else ""
+
+
+def _best_cover(cover_urls: dict) -> str:
+    return cover_urls.get("large") or cover_urls.get("medium") or cover_urls.get("small", "")
+
+
+def _extract_playlist_owner(playlist_v2: dict) -> str:
+    owner_data = playlist_v2.get("owner") or {}
+    if not owner_data:
+        owner_v2 = playlist_v2.get("ownerV2") or {}
+        if isinstance(owner_v2, dict):
+            owner_data = owner_v2.get("data") or {}
+    if not isinstance(owner_data, dict):
+        return ""
+
+    profile = owner_data.get("profile")
+    if isinstance(profile, dict):
+        return profile.get("name", "") or owner_data.get("displayName", "") or owner_data.get("name", "")
+
+    return owner_data.get("displayName", "") or owner_data.get("name", "")
+
+
+def _extract_playlist_cover(playlist_v2: dict) -> str:
+    images = playlist_v2.get("images") or {}
+    if isinstance(images, dict):
+        items = images.get("items") or []
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                sources = item.get("sources") or []
+                if isinstance(sources, list):
+                    for source in sources:
+                        if isinstance(source, dict):
+                            url = source.get("url")
+                            if isinstance(url, str) and url:
+                                return url
+
+        sources = images.get("sources") or []
+        if isinstance(sources, list):
+            for source in sources:
+                if isinstance(source, dict):
+                    url = source.get("url")
+                    if isinstance(url, str) and url:
+                        return url
+
+    images_v2 = playlist_v2.get("imagesV2") or {}
+    if isinstance(images_v2, dict):
+        items = images_v2.get("items") or []
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                sources = item.get("sources") or []
+                if isinstance(sources, list):
+                    for source in sources:
+                        if isinstance(source, dict):
+                            url = source.get("url")
+                            if isinstance(url, str) and url:
+                                return url
+
+        sources = images_v2.get("sources") or []
+        if isinstance(sources, list):
+            for source in sources:
+                if isinstance(source, dict):
+                    url = source.get("url")
+                    if isinstance(url, str) and url:
+                        return url
+
+    return ""
+
+
+def _track_url(track_id: str) -> str:
+    return f"https://open.spotify.com/track/{track_id}"
+
+# ---------------------------------------------------------------------------
+# Parsing URL e Utilità
+# ---------------------------------------------------------------------------
 
 def parse_spotify_url(uri: str) -> dict[str, str]:
     u = urlparse(uri)
 
+    # embed.spotify.com → redirect tramite query param ?uri=
     if u.netloc == "embed.spotify.com":
         qs = parse_qs(u.query)
         if not qs.get("uri"):
@@ -43,19 +187,32 @@ def parse_spotify_url(uri: str) -> dict[str, str]:
         if len(parts) > 1 and parts[1].startswith("intl-"):
             parts = parts[1:]
     elif not u.scheme and not u.netloc:
-        return {"type": "playlist", "id": u.path}
+        path = u.path.strip()
+        # ID bare da 22 caratteri → trattato come playlist
+        if re.match(r"^[A-Za-z0-9]{22}$", path):
+            return {"type": "playlist", "id": path}
+        raise InvalidUrlError(uri)
     else:
-        return None
+        raise InvalidUrlError(uri)
 
     if len(parts) == 3 and parts[1] in ("album", "track", "playlist", "artist"):
         return {"type": parts[1], "id": parts[2].split("?")[0]}
+
+    # Playlist annidata (/user/<uid>/playlist/<id>)
     if len(parts) == 5 and parts[3] == "playlist":
         return {"type": "playlist", "id": parts[4].split("?")[0]}
-    if len(parts) >= 4 and parts[1] == "artist":
-        dtype = "artist_discography" if parts[3] == "discography" else "artist"
-        return {"type": dtype, "id": parts[2].split("?")[0]}
 
-    return None
+    if len(parts) >= 4 and parts[1] == "artist":
+        artist_id = parts[2].split("?")[0]
+        if parts[3] == "discography":
+            # Supporto sub-type: all / album / single / compilation
+            sub = parts[4].split("?")[0] if len(parts) >= 5 else "all"
+            if sub not in _DISCOGRAPHY_SUBTYPES:
+                sub = "all"
+            return {"type": "artist_discography", "id": artist_id, "group": sub}
+        return {"type": "artist", "id": artist_id}
+
+    raise InvalidUrlError(uri)
 
 
 def _normalize_artist(s: str) -> str:
@@ -65,327 +222,634 @@ def _normalize_artist(s: str) -> str:
     s = re.sub(r"[^a-z0-9 ]", "", s)
     return re.sub(r"\s+", " ", s).strip()
 
+
 def _artist_in_track(artist_name: str, track_artists: str) -> bool:
     name_norm = _normalize_artist(artist_name)
-    for artist in track_artists.split(","):
-        if _normalize_artist(artist) == name_norm:
-            return True
-    return False
+    return any(
+        _normalize_artist(a) == name_norm
+        for a in track_artists.split(",")
+    )
 
+
+def _extract_discography_release(item: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        return {}
+    releases = item.get("releases")
+    if isinstance(releases, dict):
+        release_items = releases.get("items") or []
+        if isinstance(release_items, list) and release_items:
+            first = release_items[0]
+            if isinstance(first, dict):
+                return first
+    album = item.get("album")
+    if isinstance(album, dict):
+        return album
+    return {}
+
+
+def _normalize_release_type(release_type: str) -> str:
+    if not isinstance(release_type, str):
+        return "single"
+    normalized = release_type.upper()
+    if normalized == "ALBUM":
+        return "album"
+    if normalized == "COMPILATION":
+        return "compilation"
+    return "single"
+
+
+def _extract_release_id(release: dict[str, Any]) -> str:
+    if not isinstance(release, dict):
+        return ""
+    release_id = release.get("id") or ""
+    if release_id:
+        return release_id
+    uri = release.get("uri", "")
+    if isinstance(uri, str) and ":" in uri:
+        return uri.split(":")[-1]
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Client GraphQL Unificato
+# ---------------------------------------------------------------------------
 
 class SpotifyMetadataClient:
     def __init__(self, timeout_s: int = 10) -> None:
-        self._timeout    = timeout_s
-        self._session    = requests.Session()
-        self._token      = ""
-        self._token_exp  = 0.0
+        self.web_client = SpotifyWebClient()
+        self.web_client.initialize()
 
-    def _ensure_token(self) -> str:
-        if self._token and time.time() < self._token_exp - 60:
-            return self._token
-
-        auth = base64.b64encode(f"{_CLIENT_ID}:{_CLIENT_SECRET}".encode()).decode()
-        resp = self._session.post(
-            _TOKEN_URL,
-            headers = {"Authorization": f"Basic {auth}",
-                       "Content-Type": "application/x-www-form-urlencoded"},
-            data    = {"grant_type": "client_credentials"},
-            timeout = self._timeout,
-        )
-        if resp.status_code != 200:
-            raise AuthError("spotify", f"Token request failed: HTTP {resp.status_code}")
-
-        body = resp.json()
-        token = body.get("access_token")
-        if not token:
-            raise AuthError("spotify", "No access_token in token response")
-
-        self._token     = token
-        self._token_exp = time.time() + body.get("expires_in", 3600)
-        return self._token
-
-    def _get(self, path: str, **kwargs) -> dict:
-        token = self._ensure_token()
-        for attempt in range(3):                          # ← add retry loop
-            resp = self._session.get(
-                f"{_API_BASE}/{path.lstrip('/')}",
-                headers = {"Authorization": f"Bearer {token}"},
-                timeout = self._timeout,
-                **kwargs,
-            )
-            if resp.status_code == 429:
-                retry_after = int(resp.headers.get("Retry-After", 5)) + 1
-                logger.info("[spotify] Rate limited — sleeping %ss", retry_after)
-                time.sleep(retry_after)
-                continue
-            if resp.status_code in (502, 503, 504) and attempt < 2:   # ← retry transients
-                wait = 1.5 * (attempt + 1)
-                logger.warning("[spotify] HTTP %s — retry %d/2 in %.1fs",
-                               resp.status_code, attempt + 1, wait)
-                time.sleep(wait)
-                continue
-            if resp.status_code != 200:
-                raise NetworkError("spotify", f"HTTP {resp.status_code} from {path}")
-            return resp.json()
-        raise NetworkError("spotify", f"HTTP {resp.status_code} from {path} after retries")
-
-    def _paginate(self, url: str, delay: float = 0.5) -> Iterator[dict]:
-        while url:
-            data  = self._get(url.replace(f"{_API_BASE}/", ""))
-            items = data.get("items", [])
-            yield from items
-            url = (data.get("next") or "").split("&locale=")[0] or ""
-            if url and delay > 0:
-                time.sleep(delay)
+    # ------------------------------------------------------------------
+    # Traccia singola
+    # ------------------------------------------------------------------
 
     def get_track(self, track_id: str) -> TrackMetadata:
-        data = self._get(f"/tracks/{track_id}")
-        return self._track_from_raw(data)
+        """Recupera metadati completi per una singola traccia, compositore incluso."""
+        payload = {
+            "operationName": "getTrack",
+            "variables": {"uri": f"spotify:track:{track_id}"},
+            "extensions": {"persistedQuery": {
+                "version": 1,
+                "sha256Hash": "612585ae06ba435ad26369870deaae23b5c8800a256cd8a57e08eddc25a37294",
+            }},
+        }
+        data = self.web_client.query(payload)
+        track_union = data.get("data", {}).get("trackUnion", {})
+
+        album_data = track_union.get("albumOfTrack", {})
+        cover = _best_cover(self.web_client.extract_cover_image(album_data.get("coverArt", {})))
+        
+        # ------------------------------------------------------------------
+        # Artist extraction logic:
+        # ------------------------------------------------------------------
+        artists_list = []
+        
+        # 1. Estrai il primo artista
+        first = track_union.get("firstArtist")
+        if first:
+            artists_list.extend(_extract_artist_names(first))
+            
+        # 2. Estrai gli altri artisti
+        others = track_union.get("otherArtists")
+        if others:
+            artists_list.extend(_extract_artist_names(others))
+
+        # 3. Fallback all'album se necessario
+        if not artists_list:
+            artists_list = _extract_artist_names(album_data.get("artists", {}))
+            
+        # 4. Fallback finale se tutto fallisce
+        if not artists_list:
+            artists_list = ["Unknown Artist"]
+
+        artists_str = ", ".join(artists_list)
+        # ------------------------------------------------------------------
+        
+        composer_str = self.web_client.get_track_composer(track_id)
+        
+        c_items = album_data.get("copyright", {}).get("items", [])
+        copyright_str = " \u00B7 ".join([c.get("text", "") for c in c_items if c.get("text")]) if c_items else ""
+
+        return TrackMetadata(
+            id=track_id,
+            title=track_union.get("name", "Unknown"),
+            artists=artists_str,
+            album=album_data.get("name", "Unknown"),
+            album_artist=artists_str,
+            isrc="",
+            track_number=track_union.get("trackNumber") or 0,
+            disc_number=track_union.get("discNumber") or 1,
+            total_tracks=0,
+            duration_ms=_safe_duration_ms(track_union.get("duration")),
+            release_date=album_data.get("date", {}).get("isoString", ""),
+            cover_url=cover,
+            external_url=_track_url(track_id),
+            copyright=copyright_str,
+            composer=composer_str,
+            preview_url="",
+            plays=_safe_playcount(track_union.get("playcount")),
+            is_explicit=(track_union.get("contentRating", {}).get("label") == "EXPLICIT"),
+        )
+
+    # ------------------------------------------------------------------
+    # Lazy Loading - Anteprima traccia
+    # ------------------------------------------------------------------
+
+    def get_track_preview(self, track_id: str) -> str:
+        """Recupera l'URL di anteprima di una traccia al momento della richiesta (lazy loading).
+        
+        Questo metodo è pensato per essere invocato solo quando l'utente clicca su 'play' o 'preview'
+        nella GUI, evitando richieste di rete durante il caricamento iniziale della lista.
+        
+        Args:
+            track_id: ID della traccia Spotify
+            
+        Returns:
+            URL dell'anteprima MP3 (stringa vuota se non disponibile)
+        """
+        try:
+            preview_url = self.web_client.get_preview_url(track_id)
+            return preview_url or ""
+        except Exception as e:
+            logger.debug(f"[spotify] Failed to fetch preview for track {track_id}: {e}")
+            return ""
+
+    # ------------------------------------------------------------------
+    # Album
+    # ------------------------------------------------------------------
 
     def get_album_tracks(self, album_id: str) -> tuple[dict, list[TrackMetadata]]:
-        album = self._get(f"/albums/{album_id}")
-        raw_items = list(self._paginate(f"{_API_BASE}/albums/{album_id}/tracks?limit=50"))
+        """Recupera tutte le tracce di un album con paginazione completa."""
+        limit = 1000
+        all_items: list[Any] = []
+        album_union: dict = {}
 
-        missing_isrc_ids = []
-        isrc_map = {}
+        offset = 0
+        while True:
+            payload = {
+                "operationName": "getAlbum",
+                "variables": {
+                    "uri": f"spotify:album:{album_id}",
+                    "locale": "",
+                    "offset": offset,
+                    "limit": limit,
+                },
+                "extensions": {"persistedQuery": {
+                    "version": 1,
+                    "sha256Hash": "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10",
+                }},
+            }
+            data = self.web_client.query(payload)
+            au = data.get("data", {}).get("albumUnion", {})
 
-        # 1. Cache prima
-        for item in raw_items:
-            track_id = item["id"]
-            cached = get_cached_isrc(track_id)
-            if cached:
-                isrc_map[track_id] = cached
-            else:
-                missing_isrc_ids.append(track_id)
+            # Salva i metadati dell'album solo al primo giro
+            if not album_union:
+                album_union = au
 
-        # 2. Recupero ISRC mancanti a blocchi di 50
-        for i in range(0, len(missing_isrc_ids), 50):
-            chunk = missing_isrc_ids[i:i+50]
-            try:
-                ids_str = ",".join(chunk)
-                data = self._get(f"/tracks?ids={ids_str}")
-                for full_track in data.get("tracks", []):
-                    if full_track:
-                        tid = full_track["id"]
-                        tisrc = full_track.get("external_ids", {}).get("isrc", "")
-                        isrc_map[tid] = tisrc
-                        if tisrc:
-                            put_cached_isrc(tid, tisrc)
-            except Exception as exc:
-                logger.warning("[spotify] Fallimento nel recupero batch degli ISRC: %s", exc)
+            tracks_v2 = au.get("tracksV2", {})
+            items = tracks_v2.get("items", [])
+            if not items:
+                break
 
-        # 3. Costruzione TrackMetadata
+            all_items.extend(items)
+            total_count = tracks_v2.get("totalCount", 0)
+            if len(all_items) >= total_count or len(items) < limit:
+                break
+            offset += limit
+
+        album_name = album_union.get("name", "Unknown Album")
+        cover = _best_cover(self.web_client.extract_cover_image(album_union.get("coverArt", {})))
+        album_artists = _join_artists(album_union.get("artists", {}))
+        release_date = album_union.get("date", {}).get("isoString", "")
+        total_tracks = album_union.get("tracksV2", {}).get("totalCount", 0)
+
+        c_items = album_union.get("copyright", {}).get("items", [])
+        copyright_str = " \u00B7 ".join([c.get("text", "") for c in c_items if c.get("text")]) if c_items else ""
+
         tracks: list[TrackMetadata] = []
-        for item in raw_items:
-            track_id = item["id"]
-            isrc = isrc_map.get(track_id, "")
-            tracks.append(self._track_from_album_item(item, album, isrc))
-
-        return album, tracks
-
-    def get_playlist_tracks(self, playlist_id: str) -> tuple[dict, list[TrackMetadata]]:
-        playlist = self._get(f"/playlists/{playlist_id}")
-        tracks: list[TrackMetadata] = []
-
-        for item in self._paginate(f"{_API_BASE}/playlists/{playlist_id}/tracks?limit=100"):
-            track = item.get("track")
-            if not track or not track.get("id"):
+        for item in all_items:
+            track_node = item.get("track", {})
+            
+            track_id = track_node.get("id")
+            if not track_id:
+                uri = track_node.get("uri", "")
+                if ":" in uri:
+                    track_id = uri.split(":")[-1]
+            
+            if not track_id:
                 continue
-            tracks.append(self._track_from_raw(track))
 
-        return playlist, tracks
+            track_artists = _join_artists(track_node.get("artists", {})) or album_artists
+
+            tracks.append(TrackMetadata(
+                id=track_id,
+                title=track_node.get("name", "Unknown"),
+                artists=track_artists,
+                album=album_name,
+                album_artist=album_artists,
+                isrc="",
+                track_number=track_node.get("trackNumber") or 0,
+                disc_number=track_node.get("discNumber") or 1,
+                total_tracks=total_tracks,
+                duration_ms=_safe_duration_ms(track_node.get("duration")),
+                release_date=release_date,
+                cover_url=cover,
+                external_url=_track_url(track_id),
+                copyright=copyright_str,
+                composer="",
+                preview_url="",
+                plays=_safe_playcount(track_node.get("playcount")),
+                is_explicit=(track_node.get("contentRating", {}).get("label") == "EXPLICIT"),
+            ))
+
+        return {"name": album_name, "cover_url": cover, "release_date": release_date}, tracks
+
+    # ------------------------------------------------------------------
+    # Playlist
+    # ------------------------------------------------------------------
+
+    def get_playlist_tracks(self, playlist_id: str) -> tuple[dict, list[TrackMetadata], str]:
+        limit = 1000
+        offset = 0
+        all_items: list[Any] = []
+        playlist_name = "Unknown Playlist"
+        playlist_cover = playlist_owner = playlist_desc = ""
+        followers = 0
+
+        while True:
+            payload = {
+                "operationName": "fetchPlaylist",
+                "variables": {
+                    "uri": f"spotify:playlist:{playlist_id}",
+                    "offset": offset,
+                    "limit": limit,
+                    "enableWatchFeedEntrypoint": False,
+                },
+                "extensions": {"persistedQuery": {
+                    "version": 1,
+                    "sha256Hash": "bb67e0af06e8d6f52b531f97468ee4acd44cd0f82b988e15c2ea47b1148efc77",
+                }},
+            }
+            response = self.web_client.query(payload)
+            playlist_v2 = response.get("data", {}).get("playlistV2", {})
+
+            if playlist_name == "Unknown Playlist" and playlist_v2:
+                playlist_name = playlist_v2.get("name", "Unknown Playlist")
+                playlist_desc = playlist_v2.get("description", "")
+                f_raw = playlist_v2.get("followers")
+                followers = f_raw.get("totalCount", 0) if isinstance(f_raw, dict) else int(f_raw or 0)
+                playlist_owner = _extract_playlist_owner(playlist_v2)
+                playlist_cover = _best_cover(
+                    self.web_client.extract_cover_image(playlist_v2.get("images", {}))
+                ) or _extract_playlist_cover(playlist_v2)
+
+            content = playlist_v2.get("content", {})
+            items = content.get("items", [])
+            if not items:
+                break
+
+            all_items.extend(items)
+            if len(all_items) >= content.get("totalCount", 0) or len(items) < limit:
+                break
+            offset += limit
+
+        tracks: list[TrackMetadata] = []
+        for item in all_items:
+            track_data = item.get("itemV2", {}).get("data", {})
+            track_id = track_data.get("id")
+            if not track_id:
+                uri = track_data.get("uri", "")
+                if ":" in uri:
+                    track_id = uri.split(":")[-1]
+            if not track_id:
+                continue
+
+            album_data = track_data.get("albumOfTrack", {})
+            artists_list = _extract_artist_names(track_data.get("artists", {}))
+            if not artists_list:
+                artists_list = _extract_artist_names(album_data.get("artists", {})) or ["Unknown Artist"]
+
+            cover_urls = self.web_client.extract_cover_image(album_data.get("coverArt", {}))
+            album_artists = _join_artists(album_data.get("artists", {})) or artists_list[0]
+
+            c_items = album_data.get("copyright", {}).get("items", [])
+            copyright_str = " \u00B7 ".join([c.get("text", "") for c in c_items if c.get("text")]) if c_items else ""
+
+            tracks.append(TrackMetadata(
+                id=track_id,
+                title=track_data.get("name", "Unknown"),
+                artists=", ".join(artists_list) if artists_list else "Unknown",
+                album=album_data.get("name", "Unknown"),
+                album_artist=album_artists,
+                isrc="",
+                track_number=track_data.get("trackNumber") or 0,
+                disc_number=1,
+                total_tracks=0,
+                duration_ms=_safe_duration_ms(track_data.get("trackDuration")),
+                release_date="",
+                cover_url=_best_cover(cover_urls),
+                external_url=_track_url(track_id),
+                copyright=copyright_str,
+                composer="",
+                preview_url="",
+                plays=_safe_playcount(track_data.get("playcount")),
+                is_explicit=(track_data.get("contentRating", {}).get("label") == "EXPLICIT"),
+            ))
+
+        info = {
+            "name": playlist_name,
+            "owner": playlist_owner,
+            "cover_url": playlist_cover,
+            "description": playlist_desc,
+            "followers": followers,
+            "source": "Spotify",
+        }
+        return info, tracks, playlist_cover
+
+    # ------------------------------------------------------------------
+    # Ricerca
+    # ------------------------------------------------------------------
+
+    _SEARCH_HASH = "fcad5a3e0d5af727fb76966f06971c19cfa2275e6ff7671196753e008611873c"
+
+    def _search_payload(self, query: str, limit: int, offset: int = 0) -> dict:
+        return {
+            "operationName": "searchDesktop",
+            "variables": {
+                "searchTerm": query,
+                "offset": offset,
+                "limit": limit,
+                "numberOfTopResults": 5,
+                "includeAudiobooks": True,
+                "includeArtistHasConcertsField": False,
+                "includePreReleases": True,
+                "includeAuthors": False,
+            },
+            "extensions": {"persistedQuery": {"version": 1, "sha256Hash": self._SEARCH_HASH}},
+        }
+
+    def search(self, query: str, limit: int = 20) -> dict[str, list]:
+        """Ricerca unificata: restituisce tracce, album, artisti e playlist."""
+        try:
+            data = self.web_client.query(self._search_payload(query, limit))
+            search_v2 = data.get("data", {}).get("searchV2", {})
+        except Exception as e:
+            logger.debug(f"[spotify] Search error: {e}")
+            return {"tracks": [], "albums": [], "artists": [], "playlists": []}
+
+        def _parse_tracks(items: list) -> list[TrackMetadata]:
+            results = []
+            for item in items:
+                t = item.get("item", {}).get("data", {})
+                if not t.get("id"):
+                    continue
+                album_node = t.get("albumOfTrack", {})
+                cover = _best_cover(self.web_client.extract_cover_image(album_node.get("coverArt", {})))
+                artists_str = _join_artists(t.get("artists", {}))
+                results.append(TrackMetadata(
+                    id=t["id"],
+                    title=t.get("name", "Unknown"),
+                    artists=artists_str,
+                    album=album_node.get("name", "Unknown"),
+                    album_artist=artists_str,
+                    isrc="",
+                    track_number=0,
+                    disc_number=1,
+                    total_tracks=0,
+                    duration_ms=_safe_duration_ms(t.get("duration")),
+                    release_date="",
+                    cover_url=cover,
+                    external_url=_track_url(t["id"]),
+                    copyright="",
+                    composer="",
+                    preview_url="",
+                    plays=_safe_playcount(t.get("playcount")),
+                    is_explicit=(t.get("contentRating", {}).get("label") == "EXPLICIT"),
+                ))
+            return results
+
+        def _parse_simple(items: list, kind: str) -> list[dict]:
+            results = []
+            for item in items:
+                node = item.get("data") or item.get("item", {}).get("data", {})
+                # La GraphQL di Spotify non espone sempre un campo `id` diretto su
+                # album/artist/playlist: l'ID è embedded nell'URI
+                # (es. "spotify:album:4aawyAB9vmqN3uQ7FjRGTy").
+                # Proviamo prima il campo diretto, poi estraiamo dall'URI.
+                node_id: str = node.get("id") or ""
+                if not node_id:
+                    uri = node.get("uri", "")
+                    if isinstance(uri, str) and ":" in uri:
+                        node_id = uri.split(":")[-1]
+                if not node_id:
+                    continue
+                entry: dict[str, Any] = {
+                    "id": node_id,
+                    "type": kind,
+                    "subtitle": kind.capitalize(),
+                    "name": node.get("name") or node.get("profile", {}).get("name", "Unknown"),
+                    "external_url": f"https://open.spotify.com/{kind}/{node_id}",
+                }
+                if kind == "album":
+                    entry["artists"] = _join_artists(node.get("artists", {}))
+                    entry["release_date"] = node.get("date", {}).get("isoString", "")
+                    entry["cover_url"] = _best_cover(
+                        self.web_client.extract_cover_image(node.get("coverArt", {}))
+                    )
+                elif kind == "artist":
+                    cover_data = node.get("visualIdentity") or node.get("visuals", {}).get("avatarImage", {})
+                    entry["cover_url"] = _best_cover(
+                        self.web_client.extract_cover_image(cover_data)
+                    )
+                elif kind == "playlist":
+                    owner = node.get("owner", {})
+                    if not owner:
+                        owner_v2 = node.get("ownerV2", {})
+                        if isinstance(owner_v2, dict):
+                            owner = owner_v2.get("data") or {}
+                    entry["owner"] = owner.get("displayName") or owner.get("name") or ""
+                    entry["cover_url"] = _best_cover(
+                        self.web_client.extract_cover_image(node.get("images", {}))
+                    ) or _extract_playlist_cover(node)
+                results.append(entry)
+            return results
+
+        tracks_data = search_v2.get("tracksV2") or search_v2.get("tracks") or {}
+        albums_data = search_v2.get("albumsV2") or search_v2.get("albums") or {}
+        artists_data = search_v2.get("artistsV2") or search_v2.get("artists") or {}
+        playlists_data = search_v2.get("playlistsV2") or search_v2.get("playlists") or {}
+
+        return {
+            "tracks": _parse_tracks(tracks_data.get("items", [])),
+            "albums":    _parse_simple(albums_data.get("items", []), "album"),
+            "artists":   _parse_simple(artists_data.get("items", []), "artist"),
+            "playlists": _parse_simple(playlists_data.get("items", []), "playlist"),
+        }
+
+    def search_by_type(
+        self,
+        query: str,
+        kind: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list:
+        """Ricerca filtrata per un singolo tipo: track | album | artist | playlist."""
+        if kind not in ("track", "album", "artist", "playlist"):
+            raise ValueError(f"Tipo non valido: {kind!r}. Valori ammessi: track, album, artist, playlist")
+        results = self.search(query, limit=limit)
+        key = "tracks" if kind == "track" else f"{kind}s"
+        return results.get(key, [])[offset:]
+
+    # Mantenuto per retrocompatibilità
+    def search_tracks(self, query: str, limit: int = 20) -> list[TrackMetadata]:
+        return self.search(query, limit=limit)["tracks"]
+
+    # ------------------------------------------------------------------
+    # Artista
+    # ------------------------------------------------------------------
+
+    def get_artist_profile(self, artist_id: str) -> dict:
+        payload = {
+            "operationName": "queryArtistOverview",
+            "variables": {"uri": f"spotify:artist:{artist_id}", "locale": ""},
+            "extensions": {"persistedQuery": {
+                "version": 1,
+                "sha256Hash": "446130b4a0aa6522a686aafccddb0ae849165b5e0436fd802f96e0243617b5d8",
+            }},
+        }
+        try:
+            response = self.web_client.query(payload)
+            artist_data = response.get("data", {}).get("artistUnion", {})
+            if not artist_data:
+                return {}
+
+            profile = artist_data.get("profile", {})
+            stats = artist_data.get("stats", {})
+
+            avatar_node = artist_data.get("visuals", {}).get("avatarImage", {})
+            sources = avatar_node.get("sources", []) or avatar_node.get("data", {}).get("sources", [])
+            avatar_url = sources[0].get("url") if sources else None
+
+            h_node = artist_data.get("headerImage", {})
+            h_sources = h_node.get("sources", []) or h_node.get("data", {}).get("sources", [])
+            header_url = h_sources[0].get("url") if h_sources else None
+
+            return {
+                "id": artist_id,
+                "profile": {
+                    "name": profile.get("name", ""),
+                    "biography": re.sub(r"<[^>]+>", "", profile.get("biography", {}).get("text", "")),
+                    "verified": bool(profile.get("verified", False)),
+                },
+                "stats": {
+                    "followers": int(stats.get("followers") or 0),
+                    "listeners": int(stats.get("monthlyListeners") or 0),
+                    "rank": int(stats["worldRank"]) if stats.get("worldRank") else None,
+                },
+                "avatar": avatar_url,
+                "header": header_url,
+                "discography_total": int(
+                    artist_data.get("discography", {}).get("all", {}).get("totalCount") or 0
+                ),
+            }
+        except Exception as e:
+            logger.warning(f"[spotify] Profile fetch failed: {e}")
+            return {"profile": {"name": "Unknown"}, "stats": {}}
 
     def get_artist_albums(
-            self,
-            # FIX: "appears_on" rimosso dal default.
-            # - "album" e "single" sono release proprie dell'artista → tutti i brani inclusi.
-            # - "appears_on" scarica i metadati di interi album di altri artisti poi filtra:
-            #   troppo costoso per default, va abilitato esplicitamente.
-            # - "compilation" è gestito separatamente con filtro featuring.
-            artist_id: str,
-            include_groups: str = "album,single",
-            include_featuring: bool = False,
+        self,
+        artist_id: str,
+        include_groups: str = "album,single",
     ) -> tuple[dict, list[TrackMetadata]]:
-        """
-        Recupera la discografia completa di un artista Spotify.
+        artist_info = self.get_artist_profile(artist_id)
 
-        include_groups: album, single, appears_on, compilation (separati da virgola).
+        items = self.web_client.get_artist_discography(artist_id)
+        allowed_groups = (
+            {"album", "single", "appears_on", "compilation"}
+            if include_groups == "all"
+            else set(include_groups.split(","))
+        )
 
-        Logica featuring:
-        - album / single    → tutti i brani inclusi (release proprie)
-        - appears_on        → solo le tracce dove l'artista compare effettivamente
-        - compilation       → solo le tracce dove l'artista compare effettivamente
-        """
-        artist = self._get(f"/artists/{artist_id}")
-        artist_name = artist.get("name", "")
-        tracks: list[TrackMetadata] = []
-        seen_isrc: set[str] = set()
-        seen_album_ids: set[str] = set()
+        albums_to_fetch: list[str] = []
+        seen: set[str] = set()
 
-        # Raccogliamo tutti gli album con il loro tipo di relazione
-        # album_group: "album" | "single" | "appears_on" | "compilation"
-        albums_to_fetch: list[tuple[str, bool]] = []
-        if include_featuring:
-            groups = set(include_groups.split(","))
-            groups.update(["appears_on", "compilation"])
-            include_groups = ",".join(groups)
-
-        for item in self._paginate(
-                f"{_API_BASE}/artists/{artist_id}/albums"
-                f"?include_groups={include_groups}&limit=50"
-        ):
-            album_id    = item.get("id")
-            album_group = item.get("album_group", "album")
-
-            if not album_id or album_id in seen_album_ids:
+        for item in items:
+            release = _extract_discography_release(item)
+            aid = _extract_release_id(release)
+            if not aid or aid in seen:
                 continue
-            seen_album_ids.add(album_id)
+            if _normalize_release_type(release.get("type", "")) not in allowed_groups:
+                continue
+            seen.add(aid)
+            albums_to_fetch.append(aid)
 
-            # is_featuring=True → filtra solo le tracce dove l'artista compare come artista
-            # Per album e single propri, tutti i brani vengono inclusi (is_featuring=False)
-            is_featuring = album_group in ("appears_on", "compilation")
-            albums_to_fetch.append((album_id, is_featuring))
-
-        # Fetch parallelo dei metadati (max 5 richieste simultanee per rispettare rate limit)
-        # Fetch parallelo dei metadati (max 5 richieste simultanee per rispettare rate limit)
+        all_tracks: list[TrackMetadata] = []
         with ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_album = {
-                executor.submit(self.get_album_tracks, aid): (aid, is_feat)
-                for aid, is_feat in albums_to_fetch
-            }
-
-            # Raccogliamo i risultati indicizzati per album_id
-            results: dict[str, tuple[list, bool]] = {}
-            for future in as_completed(future_to_album):
-                album_id, is_featuring = future_to_album[future]
+            futures = {executor.submit(self.get_album_tracks, aid): aid for aid in albums_to_fetch}
+            for future in as_completed(futures):
                 try:
-                    _, album_tracks = future.result()
-                    results[album_id] = (album_tracks, is_featuring)
-                except Exception as exc:
-                    logger.warning("[spotify] album %s saltato: %s", album_id, exc)
-
-        # Ricostruiamo in ordine originale (albums_to_fetch è ordinato)
-        for album_id, is_featuring in albums_to_fetch:
-            if album_id not in results:
-                continue
-            album_tracks, _ = results[album_id]
-            for track in album_tracks:
-                if track.isrc and track.isrc in seen_isrc:
-                    logger.debug(
-                        "[spotify] duplicato saltato: %s (ISRC %s)",
-                        track.title, track.isrc,
-                    )
+                    _, track_list = future.result()
+                    all_tracks.extend(track_list)
+                except Exception:
                     continue
-                if is_featuring and not _artist_in_track(artist_name, track.artists):
-                    logger.debug(
-                        "[spotify] traccia saltata (artista assente): %s — %s",
-                        track.title, track.artists,
-                    )
-                    continue
-                if track.isrc:
-                    seen_isrc.add(track.isrc)
-                tracks.append(track)
-        return artist, tracks
 
-    def get_url(self, spotify_url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata]]:
+        return artist_info, all_tracks
+
+    # ------------------------------------------------------------------
+    # Dispatcher principale
+    # ------------------------------------------------------------------
+
+    def get_url(
+        self,
+        spotify_url: str,
+        include_featuring: bool = False,
+    ) -> tuple[str, list[TrackMetadata], str, dict]:
         info = parse_spotify_url(spotify_url)
-        if info is None:
-            return "Unknown", []
-        t    = info["type"]
+        t = info["type"]
+        logger.info(f"[DEBUG] URL tipo: {t}, ID: {info['id']}")
+
+        routing_metadata = {
+            "genre_source_preference": "musicbrainz" if t == "album" else "provider",
+        }
 
         if t == "track":
             meta = self.get_track(info["id"])
-            return meta.title, [meta]
+            return meta.title, [meta], "", routing_metadata
 
         if t == "album":
             album, tracks = self.get_album_tracks(info["id"])
-            name = album.get("name", "Unknown Album")
-            return name, tracks
+            album_meta = {
+                "cover_url": album.get("cover_url", ""),
+                "release_date": album.get("release_date", ""),
+                "track_count": len(tracks),
+            }
+            album_meta.update(routing_metadata)
+            return album.get("name", "Unknown Album"), tracks, album.get("cover_url", ""), album_meta
 
         if t == "playlist":
-            pl, tracks = self.get_playlist_tracks(info["id"])
-            name = pl.get("name", "Unknown Playlist")
-            return name, tracks
+            playlist, tracks, cover = self.get_playlist_tracks(info["id"])
+            playlist.update(routing_metadata)
+            return playlist.get("name", "Unknown Playlist"), tracks, cover, playlist
 
         if t in ("artist", "artist_discography"):
-            artist, tracks = self.get_artist_albums(
-                info["id"],
-                include_featuring=include_featuring,
-            )
-            return artist.get("name", "Unknown Artist"), tracks
+            # Rispetta il sub-type della discografia se presente nell'URL
+            group = info.get("group", "album,single")
+            if group == "all":
+                group = "all"
+            artist, tracks = self.get_artist_albums(info["id"], include_groups=group)
+            artist_meta = {
+                "name":              artist.get("profile", {}).get("name", "Unknown Artist"),
+                "profile":           artist.get("profile", {}),
+                "followers":         artist.get("stats", {}).get("followers"),
+                "listeners":         artist.get("stats", {}).get("listeners"),
+                "rank":              artist.get("stats", {}).get("rank"),
+                "avatar":            artist.get("avatar"),
+                "header":            artist.get("header"),
+                "verified":          artist.get("profile", {}).get("verified", False),
+                "biography":         artist.get("profile", {}).get("biography", ""),
+                "discography_total": artist.get("discography_total", 0),
+            }
+            artist_meta.update(routing_metadata)
+            return artist_meta["name"], tracks, artist_meta.get("avatar", ""), artist_meta
 
-        raise SpotiflacError(
-            ErrorKind.INVALID_URL,
-            f"Unsupported Spotify URL type: {t}",
-        )
-
-    @staticmethod
-    def _format_artists(artists: list[dict] | str) -> str:
-        if isinstance(artists, str):
-            return artists
-        return ", ".join(
-            # Use 'or' so that if get() returns None, it falls back to "Unknown"
-            str(a.get("name") or "Unknown") if isinstance(a, dict) else str(a)
-            for a in artists
-        )
-
-    @staticmethod
-    def _best_image(images: list[dict]) -> str:
-        return images[0].get("url", "") if images else ""
-
-    def _track_from_raw(self, data: dict) -> TrackMetadata:
-        album       = data.get("album", {})
-        artists     = self._format_artists(data.get("artists", []))
-        album_artists = self._format_artists(album.get("artists", []) or data.get("artists", []))
-        cover       = self._best_image(
-            album.get("images") or data.get("images", [])
-        )
-        copyrights = album.get("copyrights", [])
-        copyright_text = copyrights[0].get("text", "") if copyrights else ""
-        return TrackMetadata(
-            id           = data.get("id", ""),
-            title        = data.get("name", "Unknown"),
-            artists      = artists,
-            album        = album.get("name", data.get("album_name", "Unknown")),
-            album_artist = album_artists,
-            isrc         = data.get("external_ids", {}).get("isrc", ""),
-            track_number = data.get("track_number", 0),
-            disc_number  = data.get("disc_number", 1),
-            total_tracks = album.get("total_tracks", 0),
-            duration_ms  = data.get("duration_ms", 0),
-            release_date = album.get("release_date", "") or "",
-            cover_url    = cover,
-            external_url = data.get("external_urls", {}).get("spotify", ""),
-            copyright    = copyright_text,
-            composer     = ""
-        )
-
-    def _track_from_album_item(
-            self,
-            item:  dict,
-            album: dict,
-            isrc:  str,
-    ) -> TrackMetadata:
-        artists       = self._format_artists(item.get("artists", []))
-        album_artists = self._format_artists(album.get("artists", []))
-        cover         = self._best_image(album.get("images", []))
-        copyrights = album.get("copyrights", [])
-        copyright_text = copyrights[0].get("text", "") if copyrights else ""
-
-        return TrackMetadata(
-            id           = item.get("id", ""),
-            title        = item.get("name", "Unknown"),
-            artists      = artists,
-            album        = album.get("name", "Unknown"),
-            album_artist = album_artists,
-            isrc         = isrc,
-            track_number = item.get("track_number", 0),
-            disc_number  = item.get("disc_number", 1),
-            total_tracks = album.get("total_tracks", 0),
-            duration_ms  = item.get("duration_ms", 0),
-            release_date = album.get("release_date", "") or "",
-            cover_url    = cover,
-            external_url = item.get("external_urls", {}).get("spotify", ""),
-            copyright    = copyright_text,
-            composer     = ""
-        )
+        raise SpotiflacError(ErrorKind.INVALID_URL, f"Tipo Spotify non supportato: {t}")

@@ -239,7 +239,14 @@ class TidalMetadataClient:
         album = preloaded_album if preloaded_album else self._get(f"/albums/{album_id}")
         items = self._paginate(f"/albums/{album_id}/tracks")
         tracks = [self._track_from_album_item(item, album) for item in items]
-        return album, tracks
+        
+        # Formatta il dizionario album con i campi necessari
+        formatted_album = {
+            "title": album.get("title", "Unknown"),
+            "cover_url": self._cover_url(album),
+            "releaseDate": album.get("releaseDate", ""),
+        }
+        return formatted_album, tracks
 
     # ------------------------------------------------------------------
     # Fetch playlist completa (con paginazione)
@@ -382,24 +389,28 @@ class TidalMetadataClient:
     # Entry point pubblico
     # ------------------------------------------------------------------
 
-    def get_url(self, tidal_url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata]]:
+    def get_url(self, tidal_url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata], str, dict]:
         """
-        Riceve un URL Tidal e restituisce (nome_collezione, [TrackMetadata]).
+        Riceve un URL Tidal e restituisce (nome_collezione, [TrackMetadata], cover, metadati).
         """
         info = parse_tidal_url(tidal_url)
         t    = info["type"]
 
         if t == "track":
             meta = self.get_track(info["id"])
-            return meta.title, [meta]
+            return meta.title, [meta], meta.cover_url, {}
 
         if t == "album":
             album, tracks = self.get_album_tracks(info["id"])
-            return album.get("title", "Unknown Album"), tracks
+            album_meta = {
+                "release_date": album.get("releaseDate", ""),
+                "track_count": len(tracks),
+            }
+            return album.get("title", "Unknown Album"), tracks, album.get("cover_url", ""), album_meta
 
         if t == "playlist":
             playlist, tracks = self.get_playlist_tracks(info["id"])
-            return playlist.get("title", "Unknown Playlist"), tracks
+            return playlist.get("title", "Unknown Playlist"), tracks, playlist.get("cover_url", ""), {}
 
         if t in ("artist", "artist_discography"):
             # Mappatura path URL → filtri API Tidal
@@ -420,7 +431,7 @@ class TidalMetadataClient:
                 include_groups,
                 include_featuring=include_featuring,
             )
-            return artist.get("name", "Unknown Artist"), tracks
+            return artist.get("name", "Unknown Artist"), tracks, artist.get("avatar", ""), {}
 
         raise SpotiflacError(
             ErrorKind.INVALID_URL,

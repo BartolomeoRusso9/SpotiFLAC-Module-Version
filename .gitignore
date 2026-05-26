@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 temp/
 /.idea
+/assets/cache

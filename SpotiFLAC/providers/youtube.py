@@ -548,7 +548,7 @@ class YouTubeProvider(BaseProvider):
                 extension=".m4a",
             )
             if self._file_exists(dest):
-                return DownloadResult.ok(self.name, str(dest), fmt="m4a")
+                return DownloadResult.skipped(self.name, str(dest), fmt="m4a")
 
             is_native_yt = metadata.extra_info.get("provider") == "youtube"
             looks_like_yt_id = len(metadata.id) == 11 and not metadata.id.startswith("spotify:")
