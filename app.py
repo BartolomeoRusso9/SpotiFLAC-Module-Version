@@ -161,66 +161,192 @@ class SpotiFLAC_API:
         except Exception:
             return {}
 
-    def search_provider(self, query, limit=20):
+    def search_provider(self, query, limit=50):
         """Search music providers (Spotify) for metadata matching `query`.
 
-        Returns a list of plain dicts serializable to JSON.
+        Returns a dictionary with 4 sections: tracks, albums, artists, playlists (max 50 results each).
         """
         try:
             from SpotiFLAC.providers.spotify_metadata import SpotifyMetadataClient
             client = SpotifyMetadataClient()
-            tracks = client.search_tracks(query, limit=limit)
-            out = []
-            for t in tracks:
-                out.append({
+            # client.search() restituisce già un dizionario con i 4 array
+            results = client.search(query, limit=limit)
+            
+            out = {
+                "tracks": [],
+                "albums": [],
+                "artists": [],
+                "playlists": []
+            }
+            
+            # --- Tracks ---
+            for t in results.get("tracks", [])[:limit]:
+                out["tracks"].append({
                     "id": getattr(t, 'id', ''),
-                    "title": getattr(t, 'title', ''),
-                    "artist": getattr(t, 'artists', ''),
+                    "name": getattr(t, 'title', ''),      # Formato Go
+                    "title": getattr(t, 'title', ''),     # Formato Legacy
+                    "type": "track",
+                    "artists": getattr(t, 'artists', ''), # Formato Go
+                    "artist": getattr(t, 'artists', ''),  # Formato Legacy
+                    "album_name": getattr(t, 'album', ''),
                     "album": getattr(t, 'album', ''),
                     "duration_ms": getattr(t, 'duration_ms', 0),
-                    "cover": getattr(t, 'cover_url', ''),
+                    "images": getattr(t, 'cover_url', ''), # Formato Go
+                    "cover": getattr(t, 'cover_url', ''),  # Formato Legacy
+                    "external_urls": getattr(t, 'external_url', ''),
                     "external_url": getattr(t, 'external_url', ''),
                     "preview_url": getattr(t, 'preview_url', ''),
                     "playcount": getattr(t, 'plays', ''),
+                    "is_explicit": getattr(t, 'is_explicit', False),
                     "explicit": getattr(t, 'is_explicit', False),
                     "isrc": getattr(t, 'isrc', ''),
                     "provider": "spotify",
                 })
+                
+            # --- Albums ---
+            for a in results.get("albums", [])[:limit]:
+                out["albums"].append({
+                    "id": a.get("id", ""),
+                    "name": a.get("name", ""),
+                    "title": a.get("name", ""),
+                    "type": "album",
+                    "artists": a.get("artists", ""),
+                    "artist": a.get("artists", ""),
+                    "images": a.get("cover_url", ""),
+                    "cover": a.get("cover_url", ""),
+                    "release_date": a.get("release_date", ""),
+                    "external_urls": a.get("external_url", ""),
+                    "external_url": a.get("external_url", ""),
+                    "provider": "spotify",
+                })
+
+            # --- Artists ---
+            for art in results.get("artists", [])[:limit]:
+                out["artists"].append({
+                    "id": art.get("id", ""),
+                    "name": art.get("name", ""),
+                    "title": art.get("name", ""),
+                    "type": "artist",
+                    "images": art.get("cover_url", ""),
+                    "cover": art.get("cover_url", ""),
+                    "external_urls": art.get("external_url", ""),
+                    "external_url": art.get("external_url", ""),
+                    "provider": "spotify",
+                })
+
+            # --- Playlists ---
+            for p in results.get("playlists", [])[:limit]:
+                out["playlists"].append({
+                    "id": p.get("id", ""),
+                    "name": p.get("name", ""),
+                    "title": p.get("name", ""),
+                    "type": "playlist",
+                    "owner": p.get("owner", ""),
+                    "images": p.get("cover_url", ""),
+                    "cover": p.get("cover_url", ""),
+                    "external_urls": p.get("external_url", ""),
+                    "external_url": p.get("external_url", ""),
+                    "provider": "spotify",
+                })
+
             return out
         except Exception as e:
             self.log(f"search_provider error: {e}", "error")
-            return []
+            return {"tracks": [], "albums": [], "artists": [], "playlists": []}
 
     def _search_provider_thread(self, query, limit):
         try:
             from SpotiFLAC.providers.spotify_metadata import SpotifyMetadataClient
             client = SpotifyMetadataClient()
-            tracks = client.search_tracks(query, limit=limit)
-            out = []
-            for t in tracks:
-                out.append({
+            results = client.search(query, limit=limit)
+            
+            out = {
+                "tracks": [],
+                "albums": [],
+                "artists": [],
+                "playlists": []
+            }
+            
+            # --- Tracks ---
+            for t in results.get("tracks", [])[:limit]:
+                out["tracks"].append({
                     "id": getattr(t, 'id', ''),
+                    "name": getattr(t, 'title', ''),
                     "title": getattr(t, 'title', ''),
+                    "type": "track",
+                    "artists": getattr(t, 'artists', ''),
                     "artist": getattr(t, 'artists', ''),
+                    "album_name": getattr(t, 'album', ''),
                     "album": getattr(t, 'album', ''),
                     "duration_ms": getattr(t, 'duration_ms', 0),
+                    "images": getattr(t, 'cover_url', ''),
                     "cover": getattr(t, 'cover_url', ''),
+                    "external_urls": getattr(t, 'external_url', ''),
                     "external_url": getattr(t, 'external_url', ''),
                     "preview_url": getattr(t, 'preview_url', ''),
                     "playcount": getattr(t, 'plays', ''),
+                    "is_explicit": getattr(t, 'is_explicit', False),
                     "explicit": getattr(t, 'is_explicit', False),
                     "isrc": getattr(t, 'isrc', ''),
                     "provider": "spotify",
                 })
+
+            # --- Albums ---
+            for a in results.get("albums", [])[:limit]:
+                out["albums"].append({
+                    "id": a.get("id", ""),
+                    "name": a.get("name", ""),
+                    "title": a.get("name", ""),
+                    "type": "album",
+                    "artists": a.get("artists", ""),
+                    "artist": a.get("artists", ""),
+                    "images": a.get("cover_url", ""),
+                    "cover": a.get("cover_url", ""),
+                    "release_date": a.get("release_date", ""),
+                    "external_urls": a.get("external_url", ""),
+                    "external_url": a.get("external_url", ""),
+                    "provider": "spotify",
+                })
+
+            # --- Artists ---
+            for art in results.get("artists", [])[:limit]:
+                out["artists"].append({
+                    "id": art.get("id", ""),
+                    "name": art.get("name", ""),
+                    "title": art.get("name", ""),
+                    "type": "artist",
+                    "images": art.get("cover_url", ""),
+                    "cover": art.get("cover_url", ""),
+                    "external_urls": art.get("external_url", ""),
+                    "external_url": art.get("external_url", ""),
+                    "provider": "spotify",
+                })
+
+            # --- Playlists ---
+            for p in results.get("playlists", [])[:limit]:
+                out["playlists"].append({
+                    "id": p.get("id", ""),
+                    "name": p.get("name", ""),
+                    "title": p.get("name", ""),
+                    "type": "playlist",
+                    "owner": p.get("owner", ""),
+                    "images": p.get("cover_url", ""),
+                    "cover": p.get("cover_url", ""),
+                    "external_urls": p.get("external_url", ""),
+                    "external_url": p.get("external_url", ""),
+                    "provider": "spotify",
+                })
+
             payload = json.dumps(out)
             if self._window:
+                # Il JS ora riceverà un oggetto completo come nella versione Go
                 self._window.evaluate_js(f"window.app_handle_provider_search_results({payload});")
         except Exception as e:
             msg = json.dumps(str(e))
             if self._window:
                 self._window.evaluate_js(f"window.app_handle_provider_search_error({msg});")
 
-    def search_provider_async(self, query, limit=20):
+    def search_provider_async(self, query, limit=50): # Limite di default aggiornato a 50
         if not query:
             return {"status": "empty"}
         threading.Thread(target=self._search_provider_thread, args=(query, limit), daemon=True).start()
