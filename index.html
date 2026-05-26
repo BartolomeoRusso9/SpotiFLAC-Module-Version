@@ -2298,6 +2298,12 @@ function updateSaveButtonVisual() {
         btn.style.borderColor = "var(--yellow-d)";
     }
 }
+
+function clearSearchUI() {
+    const container = $('text-search-results');
+    if (container) container.innerHTML = ''; // Svuota il messaggio
+    $('text-search-container')?.classList.add('hidden'); // Nasconde il contenitore
+}
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const ts = () => new Date().toLocaleTimeString('it-IT');
@@ -3631,27 +3637,6 @@ function renderTracks(tracks, page = 1) {
       
       // Mostra/nascondi paginazione
       updatePaginationControls(totalPages);
-
-      // --- PUNTO E: CARICAMENTO IMMAGINI DA CACHE ---
-      if (window.pywebview?.api?.cache_image) {
-          // Estrae URL univoci dalla pagina corrente
-          const urlsToCache = [...new Set(pageTrackS.map(tr => tr.cover_url || tr.cover || tr.image).filter(Boolean))];
-          urlsToCache.forEach(u => {
-              window.pywebview.api.cache_image(u).then(cachedUrl => {
-                  if (cachedUrl && cachedUrl !== u) {
-                      // Trova tutti gli elementi con questo URL e sostituisce il link con quello della cache
-                      document.querySelectorAll('.tr-thumb').forEach(el => {
-                          if (el.dataset.url === u) {
-                              el.style.backgroundImage = `url('${cachedUrl}')`;
-                              const img = el.querySelector('img');
-                              if (img) img.src = cachedUrl;
-                          }
-                      });
-                  }
-              });
-          });
-      }
-      // ----------------------------------------------
     }
   };
 
@@ -4000,6 +3985,10 @@ const placeholderLinks = [
   "https://pandora.app.link/abcd123"
 ];
 
+const searchPlaceholderLinks = [
+  "Drake", "Taylor Swift", "Latest Hits", "Techno", "Summer Vibes", "Lo-fi"
+];
+
 let phIndex = 0;
 let phCharIndex = 0;
 let phIsDeleting = false;
@@ -4008,14 +3997,10 @@ let phTimeout;
 function runTypewriter() {
   const mode = $('searchMode').value;
   const input = $('urlInput');
-
-  // Se siamo in modalità "Search", fermiamo l'animazione
-  if (mode === 'search') {
-    clearTimeout(phTimeout);
-    return;
-  }
-
-  const currentText = placeholderLinks[phIndex];
+  
+  // Scegli l'array giusto in base alla modalità
+  const links = (mode === 'search') ? searchPlaceholderLinks : placeholderLinks;
+  const currentText = links[phIndex];
 
   if (phIsDeleting) {
     input.placeholder = currentText.substring(0, phCharIndex - 1);
@@ -4025,22 +4010,16 @@ function runTypewriter() {
     phCharIndex++;
   }
 
-  // Velocità: 25ms per cancellare, 60ms per scrivere
-  let typeSpeed = phIsDeleting ? 25 : 60; 
+  let typeSpeed = phIsDeleting ? 25 : 60;
 
   if (!phIsDeleting && phCharIndex === currentText.length) {
-    typeSpeed = 2500; // Pausa di 2.5s quando ha finito di scrivere tutto il link
+    typeSpeed = 2500;
     phIsDeleting = true;
   } else if (phIsDeleting && phCharIndex === 0) {
     phIsDeleting = false;
-    let newIndex;
-    do {
-      newIndex = Math.floor(Math.random() * placeholderLinks.length);
-    } while (newIndex === phIndex && placeholderLinks.length > 1); // Evita che esca lo stesso due volte di fila
-    
-    phIndex = newIndex;
-    
-    typeSpeed = 400; 
+    // Scegli un indice casuale dall'array corrente
+    phIndex = Math.floor(Math.random() * links.length);
+    typeSpeed = 400;
   }
 
   phTimeout = setTimeout(runTypewriter, typeSpeed);
@@ -4100,8 +4079,17 @@ function renderRecentSearches() {
     });
 }
 
-// 2. Modifica toggleSearchMode() per nascondere il tasto fetch e scambiare il grid
 function toggleSearchMode() {
+    clearSearchUI();
+    clearTimeout(_searchDebounceTimer);
+    _searchDebounceTimer = null;
+    
+    // Resetta le variabili del typewriter
+    phIsDeleting = false;
+    phCharIndex = 0;
+    phIndex = 0;
+    clearTimeout(phTimeout);
+
     const toggle = $('searchModeToggle');
     const input = $('urlInput');
     const mode = $('searchMode');
@@ -4111,15 +4099,15 @@ function toggleSearchMode() {
 
     if (mode.value === 'link') {
         mode.value = 'search';
-        clearTimeout(phTimeout);
-        input.placeholder = 'Search Spotify with keywords, artist or track name…';
         toggle.classList.add('active');
         icon.textContent = '🔎';
         label.textContent = 'Search';
         toggle.title = 'Switch to Fetch Mode';
         
-        fetchBtn.style.display = 'none'; // Nasconde il tasto Fetch
-        renderRecentSearches();          // Mostra le ricerche recenti
+        fetchBtn.style.display = 'none';
+        renderRecentSearches();
+        
+        input.placeholder = searchPlaceholderLinks[0];
     } else {
         mode.value = 'link';
         toggle.classList.remove('active');
@@ -4127,17 +4115,15 @@ function toggleSearchMode() {
         label.textContent = 'Fetch';
         toggle.title = 'Switch to Search Mode';
         
-        fetchBtn.style.display = 'inline-flex'; // Ripristina tasto Fetch
-        // Ricarica history dei Fetches
+        fetchBtn.style.display = 'inline-flex';
+        
         const rl = $('recent-wrap').querySelector('.recent-label');
         if (rl) rl.textContent = 'RECENT FETCHES';
         if (window.pywebview?.api) window.pywebview.api.get_history().then(renderRecent);
         
-        phIsDeleting = false;
-        phCharIndex = 0;
-        clearTimeout(phTimeout);
-        runTypewriter();
+        input.placeholder = placeholderLinks[0];
     }
+    runTypewriter();
 }
 
 function updateSearchMode() {
@@ -4199,6 +4185,9 @@ function renderCodeResults(results) {
 
 window.app_handle_provider_search_results = function(results) {
   const isSearchMode = $('searchMode')?.value === 'search';
+  if (!isSearchMode) { 
+    return; 
+  }
   if (!isSearchMode) {
     setFetchingState('success');
   } else {
@@ -4351,6 +4340,7 @@ function onSearchResultClick(url) {
 }
 
 window.app_handle_provider_search_error = function(message) {
+  clearSearchUI();
   setFetchingState('error');
   $('track-rows').innerHTML = `<div class="queue-empty">Provider search failed.</div>`;
   $('track-controls').classList.add('hidden');
@@ -4878,14 +4868,19 @@ function setFetchingState(state, customMsg = null) {
     toast.classList.add('show');
     toastTimeout = setTimeout(() => toast.classList.remove('show'), 3000);
   } 
+  // Cerca questa parte dentro setFetchingState e modificala così:
   else if (state === 'error') {
     toast.style.alignItems = 'center';
     iconContainer.className = 'ft-icon error';
     iconContainer.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
-    textContainer.innerHTML = `<div class="ft-title" style="font-weight: 600;">error occurred</div>`;
+    
+    // USIAMO customMsg se passato, altrimenti il default
+    const errorTitle = customMsg || 'error occurred';
+    textContainer.innerHTML = `<div class="ft-title" style="font-weight: 600;">${escHtml(errorTitle)}</div>`;
+    
     toast.classList.add('show');
     toastTimeout = setTimeout(() => toast.classList.remove('show'), 3000);
-  } 
+  }
   else if (state === 'hide') {
     toast.classList.remove('show');
   }
@@ -4893,14 +4888,35 @@ function setFetchingState(state, customMsg = null) {
 
 // ── Main fetch action ─────────────────────────────────────────────────────────
 async function onFetch() {
-  // ANTI-SPAM: Blocca le richieste se stiamo già caricando
   if (isFetchingData) return;
 
   const mode = $('searchMode').value;
   const url = $('urlInput').value.trim();
-  if (!url) { setStatus('Please enter a URL or search term.'); return; }
+  // 1. Controllo base: l'input non deve essere vuoto in nessuna modalità
+  if (!url) {
+    setFetchingState('error', "Input empty. Please enter a URL or search term.");
+    return;
+  }
 
-  // Avvia il caricamento: blocca la UI e mostra il toast blu
+  if (mode === 'search') {
+     saveRecentSearch(url);
+  }
+
+  if (mode === 'link') {
+    const isUrl = url.startsWith('http') || url.startsWith('https') || url.startsWith('spotify:');
+    if (!isUrl) {
+      setFetchingState('error', "Invalid URL. Please enter a valid URL.");
+      return; // Blocca l'esecuzione
+    }
+  }
+
+  if (mode === 'search') {
+    if (url.length < 2) {
+      setFetchingState('error', "Search term not valid. Please enter a non-link search term.");
+      return;
+    }
+  }
+
   setFetchingState('start');
 
   if (mode === 'search') {
@@ -5076,6 +5092,7 @@ $('urlInput').addEventListener('input', function() {
 
   // Clear results if query is empty
   if (!query) {
+    clearSearchUI();
     _lastSearchQuery = '';
     clearTimeout(_searchDebounceTimer);
     const container = $('text-search-results');
