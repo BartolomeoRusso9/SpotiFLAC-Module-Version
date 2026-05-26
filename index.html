@@ -440,6 +440,7 @@
       max-width: min(100%, 950px);
       margin: 12px auto 8px;
       display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+      justify-content: space-between;
       padding: 0 32px;
     }
     #track-search-wrap { flex: 1; position: relative; }
@@ -1785,7 +1786,7 @@
             </span>
             <input id="urlInput" type="text"
               placeholder="Paste Spotify, Tidal, Apple Music, YouTube or Pandora link…"
-              onkeydown="if(event.key==='Enter') onFetch()">
+              onkeydown="if(event.key==='Enter' && $('searchMode').value === 'link') onFetch()">
           </div>
           <button id="fetchBtn" onclick="onFetch()" title="Fetch" aria-label="Fetch">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -3411,7 +3412,8 @@ function renderTracks(tracks, page = 1) {
       const coverUrl = t.cover_url || t.cover || t.image || '';
       let thumb;
       if (coverUrl) {
-        thumb = `<div class="tr-thumb" style="background-image:url('${encodeURI(coverUrl)}')">
+        // AGGIUNTO data-url QUI SOTTO
+        thumb = `<div class="tr-thumb" data-url="${escHtml(coverUrl)}" style="background-image:url('${encodeURI(coverUrl)}')">
                    <img src="${escHtml(coverUrl)}" alt="cover" loading="lazy" decoding="async" onerror="this.parentElement.innerHTML='🎵';console.warn('cover load failed', this.src)">
                  </div>`;
       } else {
@@ -3505,6 +3507,27 @@ function renderTracks(tracks, page = 1) {
       
       // Mostra/nascondi paginazione
       updatePaginationControls(totalPages);
+
+      // --- PUNTO E: CARICAMENTO IMMAGINI DA CACHE ---
+      if (window.pywebview?.api?.cache_image) {
+          // Estrae URL univoci dalla pagina corrente
+          const urlsToCache = [...new Set(pageTrackS.map(tr => tr.cover_url || tr.cover || tr.image).filter(Boolean))];
+          urlsToCache.forEach(u => {
+              window.pywebview.api.cache_image(u).then(cachedUrl => {
+                  if (cachedUrl && cachedUrl !== u) {
+                      // Trova tutti gli elementi con questo URL e sostituisce il link con quello della cache
+                      document.querySelectorAll('.tr-thumb').forEach(el => {
+                          if (el.dataset.url === u) {
+                              el.style.backgroundImage = `url('${cachedUrl}')`;
+                              const img = el.querySelector('img');
+                              if (img) img.src = cachedUrl;
+                          }
+                      });
+                  }
+              });
+          });
+      }
+      // ----------------------------------------------
     }
   };
 
@@ -3919,10 +3942,78 @@ function onCheckChange() {
     selectBtn.style.display = checked > 0 ? 'flex' : 'none';
   }
 }
+// 1. Gestione Ricerche Recenti nel LocalStorage
+function saveRecentSearch(query) {
+    if (!query || query.length < 2) return;
+    let searches = JSON.parse(localStorage.getItem('recent_searches') || '[]');
+    searches = searches.filter(s => s !== query);
+    searches.unshift(query);
+    if (searches.length > 15) searches.pop();
+    localStorage.setItem('recent_searches', JSON.stringify(searches));
+}
+
+function renderRecentSearches() {
+    const searches = JSON.parse(localStorage.getItem('recent_searches') || '[]');
+    const grid = $('recent-grid');
+    grid.innerHTML = '';
+    const label = $('recent-wrap').querySelector('.recent-label');
+    if (label) label.textContent = 'RECENT SEARCHES';
+    
+    searches.forEach(q => {
+        const card = document.createElement('div');
+        card.className = 'recent-card';
+        card.style.padding = '12px 14px';
+        card.style.display = 'flex';
+        card.style.alignItems = 'center';
+        card.style.gap = '10px';
+        card.innerHTML = `<span style="font-size:16px;">🔎</span><span class="rc-title" style="font-size:13px; color:var(--text);">${escHtml(q)}</span>`;
+        card.onclick = () => {
+            $('urlInput').value = q;
+            // Se hai un listener su oninput triggera la ricerca:
+            $('urlInput').dispatchEvent(new Event('input'));
+        };
+        grid.appendChild(card);
+    });
+}
+
+// 2. Modifica toggleSearchMode() per nascondere il tasto fetch e scambiare il grid
 function toggleSearchMode() {
-  const hiddenMode = $('searchMode');
-  hiddenMode.value = hiddenMode.value === 'search' ? 'link' : 'search';
-  updateSearchMode();
+    const toggle = $('searchModeToggle');
+    const input = $('urlInput');
+    const mode = $('searchMode');
+    const icon = $('searchModeIcon');
+    const label = $('searchModeText');
+    const fetchBtn = $('fetchBtn');
+
+    if (mode.value === 'link') {
+        mode.value = 'search';
+        clearTimeout(phTimeout);
+        input.placeholder = 'Search Spotify with keywords, artist or track name…';
+        toggle.classList.add('active');
+        icon.textContent = '🔎';
+        label.textContent = 'Search';
+        toggle.title = 'Switch to Fetch Mode';
+        
+        fetchBtn.style.display = 'none'; // Nasconde il tasto Fetch
+        renderRecentSearches();          // Mostra le ricerche recenti
+    } else {
+        mode.value = 'link';
+        toggle.classList.remove('active');
+        icon.textContent = '🔗';
+        label.textContent = 'Fetch';
+        toggle.title = 'Switch to Search Mode';
+        
+        fetchBtn.style.display = 'inline-flex'; // Ripristina tasto Fetch
+        // Ricarica history dei Fetches
+        const rl = $('recent-wrap').querySelector('.recent-label');
+        if (rl) rl.textContent = 'RECENT FETCHES';
+        if (window.pywebview?.api) window.pywebview.api.get_history().then(renderRecent);
+        
+        phIsDeleting = false;
+        phCharIndex = 0;
+        clearTimeout(phTimeout);
+        runTypewriter();
+    }
 }
 
 function updateSearchMode() {
