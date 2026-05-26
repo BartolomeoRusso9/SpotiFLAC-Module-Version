@@ -437,13 +437,24 @@
 
     /* Track controls */
     #track-controls {
+      width: 100%; /* AGGIUNTO: forza il contenitore a prendere tutto lo spazio */
       max-width: min(100%, 950px);
       margin: 12px auto 8px;
-      display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+      display: flex; gap: 16px; align-items: center; flex-shrink: 0;
       justify-content: space-between;
-      padding: 0 32px;
+      padding: 0 14px; /* MODIFICATO: da 32px a 14px per allinearlo alla tabella */
     }
-    #track-search-wrap { flex: 1; position: relative; }
+    #track-search-wrap { 
+      flex: 1; 
+      position: relative; 
+      min-width: 0; /* Impedisce che la barra rompa il layout restringendo la finestra */
+    }
+    .sort-wrap { 
+      display: flex; 
+      align-items: center; 
+      gap: 6px; 
+      flex-shrink: 0; /* Impedisce che il menu si rimpicciolisca o si sposti male */
+    }
     #trackSearch {
       width: 100%; padding: 7px 11px 7px 30px;
       background: var(--surface2); border: 1.5px solid var(--border);
