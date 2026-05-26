@@ -1533,6 +1533,17 @@
   grid-column: 1 / -1; color: var(--muted);
   font-size: 13px; padding: 32px 0; text-align: center;
 }
+
+/* ── ARTIST CARD ENHANCEMENTS ── */
+.artist-verified-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  vertical-align: middle; margin-left: 7px; flex-shrink: 0;
+}
+#album-subtitle.artist-bio {
+  font-size: 12.5px; color: var(--text2); line-height: 1.6;
+  display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical;
+  overflow: hidden; margin-bottom: 8px;
+}
   </style>
 </head>
 <body>
@@ -2747,44 +2758,69 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
     </button>
     
   `;
-  $('album-title').textContent   = title  || '—';
+  $('album-title').innerHTML = escHtml(title || '—') + (artistVerified
+    ? ` <span class="artist-verified-badge" title="Verified Artist"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="#1d9bf0"/><path d="M8 12.5l2.5 2.5 5.5-5.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
+    : '');
   $('album-artist').textContent  = artist || '';
   const subtitle = $('album-subtitle');
   
   // For artists, show rank or listeners; for playlists, show quality
-  let subtitleText = '';
-  if (artistRank) {
-    subtitleText = `Rank #${artistRank}`;
-  } else if (artistListeners) {
-    subtitleText = `${Number(artistListeners).toLocaleString()} monthly listeners`;
-  } else if (description) {
-    subtitleText = description;
-  } else if (quality) {
-    subtitleText = quality;
+  const isArtistCard = !!(artistRank || artistListeners || artistVerified || artistBiography);
+
+  if (isArtistCard) {
+    const bio = artistBiography || description || '';
+    subtitle.textContent = bio;
+    subtitle.className = bio ? 'artist-bio' : '';
+    subtitle.style.display = bio ? '' : 'none';
+  } else {
+    subtitle.textContent = description || quality || '';
+    subtitle.className = '';
+    subtitle.style.display = (description || quality) ? '' : 'none';
   }
-  
-  subtitle.textContent = subtitleText;
-  subtitle.style.display = subtitleText ? '' : 'none';
 
   const ownerEl = $('album-owner');
   const followersEl = $('album-followers');
   const sourceEl = $('album-source');
   const metaDetails = $('album-meta-details');
-
-  // For artists, show verified status and listeners
-  if (artistListeners !== undefined || artistVerified) {
-    ownerEl.textContent = '';
-    followersEl.textContent = artistListeners ? `${Number(artistListeners).toLocaleString()} listeners` : '';
-    sourceEl.textContent = artistVerified ? '✓ Verified' : '';
-  } else {
-    ownerEl.textContent = owner || '';
-    const followerCount = Number(followers);
-    followersEl.textContent = !Number.isNaN(followerCount) ? `${followerCount.toLocaleString()} followers` : '';
-    sourceEl.textContent = source || '';
+  const avatarEl = $('album-owner-avatar');
+  
+  // Crea un contenitore sicuro per le statistiche artista senza rompere l'HTML originale
+  let artistStatsRow = $('artist-stats-row');
+  if (!artistStatsRow) {
+    artistStatsRow = document.createElement('div');
+    artistStatsRow.id = 'artist-stats-row';
+    artistStatsRow.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    metaDetails.insertBefore(artistStatsRow, metaDetails.firstChild);
   }
   
-  const hasMetaDetails = !!(ownerEl.textContent || followersEl.textContent || sourceEl.textContent);
-  metaDetails.classList.toggle('hidden', !hasMetaDetails);
+  const ownerRow = $('album-owner-row');
+
+  if (isArtistCard) {
+    const parts = [];
+    if (artistRank)      parts.push(`#${artistRank} rank`);
+    if (followers)       parts.push(`${Number(followers).toLocaleString('it-IT')} followers`);
+    if (artistListeners) parts.push(`${Number(artistListeners).toLocaleString('it-IT')} listeners`);
+    
+    artistStatsRow.innerHTML = parts.map(p => `<span>${escHtml(p)}</span>`).join('<span class="dot-sep"> · </span>');
+    artistStatsRow.style.display = 'flex';
+    if (ownerRow) ownerRow.style.display = 'none'; // Nasconde la riga originale mantenendola intatta
+    
+    metaDetails.classList.remove('hidden');
+    if (avatarEl) avatarEl.classList.add('hidden');
+  } else {
+    artistStatsRow.style.display = 'none';
+    if (ownerRow) ownerRow.style.display = 'flex';
+    
+    if (ownerEl) ownerEl.textContent = owner || '';
+    const followerCount = Number(followers);
+    if (followersEl) followersEl.textContent = !Number.isNaN(followerCount) ? `${followerCount.toLocaleString()} followers` : '';
+    if (sourceEl) sourceEl.textContent = source || '';
+  }
+
+  if (!isArtistCard) {
+    const hasMetaDetails = !!((ownerEl && ownerEl.textContent) || (followersEl && followersEl.textContent) || (sourceEl && sourceEl.textContent));
+    metaDetails.classList.toggle('hidden', !hasMetaDetails);
+  }
 
   // If owner present, prefer showing owner as the album artist (playlist behavior)
   const artistEl = $('album-artist');
@@ -2794,8 +2830,6 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
     artistEl.textContent = artist || '';
   }
 
-  // Avatar fallback: show initial if owner exists
-  const avatarEl = $('album-owner-avatar');
   if (owner) {
     avatarEl.textContent = owner.trim().charAt(0).toUpperCase();
     avatarEl.classList.remove('hidden');
@@ -2805,9 +2839,8 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   }
 
   const descriptionEl = $('album-description');
-  const displayDescription = artistBiography || description;
-  if (displayDescription) {
-    descriptionEl.textContent = displayDescription;
+  if (!isArtistCard && description) {
+    descriptionEl.textContent = description;
     descriptionEl.classList.add('visible');
   } else {
     descriptionEl.textContent = '';
@@ -2835,6 +2868,21 @@ function updateAlbumMeta(trackCount) {
   }
 
   $('album-type-badge').textContent = badgeType;
+
+  if (badgeType === 'ARTIST') {
+    const albumSet = new Set(
+      currentTracks.map(t => t.album || t.album_name || t.release).filter(Boolean)
+    );
+    let albumTracksLine = $('artist-album-tracks-line');
+    if (!albumTracksLine) {
+      albumTracksLine = document.createElement('div');
+      albumTracksLine.id = 'artist-album-tracks-line';
+      albumTracksLine.style.cssText = 'font-size:12px;color:var(--text2);margin-top:5px;';
+      $('album-meta-details')?.appendChild(albumTracksLine);
+    }
+    const ac = albumSet.size;
+    albumTracksLine.textContent = `${ac} album${ac !== 1 ? 's' : ''} · ${trackCount} track${trackCount !== 1 ? 's' : ''}`;
+  }
   
   // Per gli album, mostra artista, data e numero di tracce nel subtitle
   if (badgeType === 'ALBUM') {
@@ -2856,12 +2904,17 @@ function updateAlbumMeta(trackCount) {
     subtitleEl.textContent = subtitleText;
     subtitleEl.style.display = subtitleText ? '' : 'none';
   }
+
+  
   
   const artistEl = $('album-artist');
   const hasArtist = Boolean(artistEl.textContent && artistEl.textContent.trim());
   $('album-meta').classList.toggle('no-artist', !hasArtist);
   artistEl.style.display = hasArtist ? '' : 'none';
-  $('album-tracks-count').textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
+  const trackCountEl = $('album-tracks-count');
+  if (trackCountEl) {
+    trackCountEl.textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
+  }
   $('album-meta').style.display = '';
   // Aggiorna anche l'etichetta dell'intestazione della tabella tracce
   setPlaycountHeaderLabel(badgeType === 'PLAYLIST' ? 'Album' : 'Playcount');
@@ -3234,7 +3287,7 @@ function renderTracks(tracks, page = 1) {
       // Se è una pagina artista, inietta la sezione album sopra le tracce
       const urlLower = (currentUrl || '').toLowerCase();
       const isArtist = urlLower.includes('/artist/') || urlLower.includes('spotify:artist:') || urlLower.includes('/browse/artist');
-      document.getElementById('artist-albums-section')?.remove();
+      document.getElementById('artist-tabs-section')?.remove();
       if (isArtist) injectArtistTabs(tracks);
       const isTrackUrl = urlLower.includes('/track/') || urlLower.includes('spotify:track:') || urlLower.includes('watch?v=') || urlLower.includes('youtu.be/');
       if (isTrackUrl && tracks.length === 1) {
