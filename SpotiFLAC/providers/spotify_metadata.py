@@ -597,6 +597,16 @@ class SpotifyMetadataClient:
             logger.debug(f"[spotify] Search error: {e}")
             return {"tracks": [], "albums": [], "artists": [], "playlists": []}
 
+        # ── DIAGNOSTIC: logga il primo item grezzo per ogni tipo ──────────────
+        import json as _json
+        for _key in ("albums", "artists", "playlists", "tracksV2"):
+            _items = search_v2.get(_key, {}).get("items", [])
+            if _items:
+                logger.warning(f"[DIAG] {_key} first item raw:\n{_json.dumps(_items[0], indent=2, default=str)[:800]}")
+            else:
+                logger.warning(f"[DIAG] {_key}: NO ITEMS (key absent or empty)")
+        # ─────────────────────────────────────────────────────────────────────
+
         def _parse_tracks(items: list) -> list[TrackMetadata]:
             results = []
             for item in items:
@@ -631,14 +641,23 @@ class SpotifyMetadataClient:
         def _parse_simple(items: list, kind: str) -> list[dict]:
             results = []
             for item in items:
-                node = item.get("item", {}).get("data", {})
-                if not node.get("id"):
+                node = item.get("data") or item.get("item", {}).get("data", {})
+                # La GraphQL di Spotify non espone sempre un campo `id` diretto su
+                # album/artist/playlist: l'ID è embedded nell'URI
+                # (es. "spotify:album:4aawyAB9vmqN3uQ7FjRGTy").
+                # Proviamo prima il campo diretto, poi estraiamo dall'URI.
+                node_id: str = node.get("id") or ""
+                if not node_id:
+                    uri = node.get("uri", "")
+                    if isinstance(uri, str) and ":" in uri:
+                        node_id = uri.split(":")[-1]
+                if not node_id:
                     continue
                 entry: dict[str, Any] = {
-                    "id": node["id"],
+                    "id": node_id,
                     "type": kind,
-                    "name": node.get("name", "Unknown"),
-                    "external_url": f"https://open.spotify.com/{kind}/{node['id']}",
+                    "name": node.get("name") or node.get("profile", {}).get("name", "Unknown"),
+                    "external_url": f"https://open.spotify.com/{kind}/{node_id}",
                 }
                 if kind == "album":
                     entry["artists"] = _join_artists(node.get("artists", {}))
