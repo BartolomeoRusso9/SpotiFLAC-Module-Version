@@ -2769,7 +2769,7 @@ function updateOverallStatus(okCount, totalCount) {
 }
 
 function checkAll() {
-  setFetchingState('start', 'Checking provider status...');
+  setFetchingState('start', 'checking provider status...');
   const sources = API_SOURCES.map((source) => source.id);
   sources.forEach((sourceId) => {
     apiStatusState.checkingSources[sourceId] = true;
