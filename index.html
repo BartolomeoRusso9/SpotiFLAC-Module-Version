@@ -3170,6 +3170,14 @@ function switchArtistTab(tabName) {
 // ── Track rendering ───────────────────────────────────────────────────────────
 function renderTracks(tracks, page = 1) {
   stopCurrentPreview();
+  
+  // Salva l'ordine di partenza per poterlo ripristinare in seguito
+  tracks.forEach((t, idx) => {
+    if (t._originalIndex === undefined) {
+      t._originalIndex = idx;
+    }
+  });
+
   currentTracks = tracks;
   currentPage = page;
   
@@ -3766,8 +3774,15 @@ function reverseTracks() {
 }
 function sortTracks() {
   const val = $('sort-select').value;
-  if (val === 'default') { renderTracks(currentTracks, 1); return; }
-  const sorted = [...currentTracks];
+  const sorted = [...currentTracks]; // Lavora sempre su una copia
+  
+  // Ripristina l'array usando l'indice nascosto salvato in precedenza
+  if (val === 'default') { 
+    sorted.sort((a, b) => a._originalIndex - b._originalIndex);
+    renderTracks(sorted, 1); 
+    return; 
+  }
+  
   const pc = t => parseInt(t.plays ?? t.playcount ?? t.playCount ?? t.plays_count ?? '0', 10) || 0;
   if (val === 'title_asc')     sorted.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
   if (val === 'title_desc')    sorted.sort((a, b) => (b.title || '').localeCompare(a.title || ''));
@@ -3873,29 +3888,33 @@ function addToQueue(indices) {
   console.log('addToQueue called', { indices, currentTracksLength: currentTracks.length, queueLengthBefore: queue.length });
   let added = false;
   indices.forEach(i => {
-    const t = currentTracks[i];
-    if (!t) {
-      console.warn('Skipped invalid track index', i);
-      return;
-    }
-    if (queue.find(q => q.index === i)) {
-      console.warn('Track already in queue', i);
-      return;
-    }
-    const itemId = t.id || t.external_url || `queue-${i}-${Math.random().toString(16).slice(2)}`;
-    const spotifyId = t.id || t.external_url || itemId;
-    queue.push({
-      id: itemId,
-      spotify_id: spotifyId,
-      index: i,
-      title: t.title,
-      artist: t.artist || t.artists || '',
-      album: t.album || '',
-      status: 'waiting',
-      progress: 0,
-      file_path: '',
-      file_size_mb: 0,
-    });
+      const t = currentTracks[i];
+      if (!t) {
+        console.warn('Skipped invalid track index', i);
+        return;
+      }
+
+      // Usa l'indice originale per evitare che Python scarichi la traccia sbagliata
+      const realIndex = t._originalIndex !== undefined ? t._originalIndex : i;
+
+      if (queue.find(q => q.index === realIndex)) {
+        console.warn('Track already in queue', realIndex);
+        return;
+      }
+      const itemId = t.id || t.external_url || `queue-${realIndex}-${Math.random().toString(16).slice(2)}`;
+      const spotifyId = t.id || t.external_url || itemId;
+      queue.push({
+        id: itemId,
+        spotify_id: spotifyId,
+        index: realIndex,
+        title: t.title,
+        artist: t.artist || t.artists || '',
+        album: t.album || '',
+        status: 'waiting',
+        progress: 0,
+        file_path: '',
+        file_size_mb: 0,
+      });
     added = true;
   });
   console.log('queue state after add', { queueLengthAfter: queue.length, queue });
