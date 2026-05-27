@@ -25,16 +25,22 @@ pip install SpotiFLAC
 
 ## Quick Start
 
-The easiest way to use SpotiFLAC is through the built-in Interactive Wizard. Just run the command without any arguments:
+The easiest way to use SpotiFLAC is through the Graphical User Interface. Just run the command without any arguments:
 ```bash
-SpotiFLAC
+spotiflac
 ```
 > (Or python launcher.py if running from source)
 
 ---
 ## Interactive Mode
 
-SpotiFLAC features a smart Interactive Wizard that guides you step-by-step. On launch it automatically runs a **service health check** before asking any questions, so you always know which providers are reachable.
+SpotiFLAC features a smart Interactive Wizard that guides you step-by-step. To launch the wizard, use the `--interactive` flag:
+```bash
+spotiflac --interactive
+```
+> (Or python launcher.py --interactive if running from source)
+
+On launch it automatically runs a **service health check** before asking any questions, so you always know which providers are reachable.
 
 **What the wizard does at startup:**
 
@@ -57,12 +63,12 @@ SpotiFLAC features a smart Interactive Wizard that guides you step-by-step. On l
 
 ## Graphical User Interface (GUI)
 
-SpotiFLAC now features a beautiful webview-based Graphical User Interface. To launch the GUI directly, use the `--gui` flag:
+SpotiFLAC now features a beautiful webview-based Graphical User Interface. The GUI is the default interface and launches automatically when you run SpotiFLAC without arguments:
 
 ```bash
-spotiflac --gui
+spotiflac
 ```
-> (Or python launcher.py --gui if running from source)
+> (Or python launcher.py if running from source)
 
 ---
 

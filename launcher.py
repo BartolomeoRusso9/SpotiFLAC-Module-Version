@@ -103,9 +103,9 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     parser.add_argument("--loop", "-l", type=int, default=None)
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument(
-        "--gui",
+        "--interactive",
         action="store_true",
-        help="Launch the graphical user interface (app.py)"
+        help="Launch interactive mode (wizard)"
     )
 
     # ── Profile ─────────────────────────────────────────────────────────────
@@ -194,23 +194,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
 def main() -> None:
     import importlib.util, importlib.resources
 
-    if "--gui" in sys.argv:
-        search_dirs = [
-            os.path.dirname(os.path.abspath(__file__)),
-            os.getcwd(),
-        ]
-        # Also check where the package data landed
-        try:
-            import app as _app_module
-            search_dirs.insert(0, os.path.dirname(_app_module.__file__))
-        except ImportError:
-            pass
-
-        from app import run_gui
-        run_gui()
-        return
-    if len(sys.argv) == 1:
-        # ── Interactive wizard ─────────────────────────────────────────────
+    # Interactive mode (explicit flag)
+    if "--interactive" in sys.argv:
         cfg = run_interactive()
 
         log_level = logging.WARNING
@@ -241,77 +226,95 @@ def main() -> None:
             post_download_action     = cfg.get("post_download_action", "none"),
             post_download_command    = cfg.get("post_download_command", ""),
         )
+        return
 
-    else:
-        # ── CLI mode ──────────────────────────────────────────────────────
-        profile_defaults: dict = {}
-        if "--profile" in sys.argv:
-            idx = sys.argv.index("--profile")
-            if idx + 1 < len(sys.argv):
-                profile_defaults = _load_profile_into_defaults(sys.argv[idx + 1])
+    # GUI mode (default when no arguments)
+    if len(sys.argv) == 1:
+        search_dirs = [
+            os.path.dirname(os.path.abspath(__file__)),
+            os.getcwd(),
+        ]
+        # Also check where the package data landed
+        try:
+            import app as _app_module
+            search_dirs.insert(0, os.path.dirname(_app_module.__file__))
+        except ImportError:
+            pass
 
-        file_cfg = load_config()
-        merged_defaults = {**file_cfg, **profile_defaults}
+        from app import run_gui
+        run_gui()
+        return
 
-        args = parse_args(profile_defaults=merged_defaults)
+    # ── CLI mode ──────────────────────────────────────────────────────
+    profile_defaults: dict = {}
+    if "--profile" in sys.argv:
+        idx = sys.argv.index("--profile")
+        if idx + 1 < len(sys.argv):
+            profile_defaults = _load_profile_into_defaults(sys.argv[idx + 1])
 
-        quality     = args.quality     or merged_defaults.get("quality", "LOSSLESS")
-        qobuz_token = args.qobuz_token or merged_defaults.get("qobuz_token")
+    file_cfg = load_config()
+    merged_defaults = {**file_cfg, **profile_defaults}
 
-        log_level = logging.DEBUG if args.verbose else logging.WARNING
-        logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    args = parse_args(profile_defaults=merged_defaults)
 
-        SpotiFLAC(
-            url                      = args.url,
-            output_dir               = args.output_dir,
-            services                 = args.service,
-            filename_format           = args.filename_format,
-            use_track_numbers        = args.use_track_numbers,
-            use_album_track_numbers  = args.use_album_track_numbers,
-            use_artist_subfolders    = args.use_artist_subfolders,
-            use_album_subfolders     = args.use_album_subfolders,
-            loop                     = args.loop,
-            quality                  = quality,
-            first_artist_only         = args.first_artist_only,
-            log_level                = log_level,
-            output_path              = args.output_path,
-            embed_lyrics             = args.embed_lyrics,
-            lyrics_providers         = args.lyrics_providers,
-            enrich_metadata          = args.enrich,
-            enrich_providers         = args.enrich_providers,
-            qobuz_token              = qobuz_token,
-            tidal_custom_api         = args.tidal_custom_api or None,
-            track_max_retries        = args.retries,
-            post_download_action     = args.post_action,
-            post_download_command    = args.post_command,
-        )
+    quality     = args.quality     or merged_defaults.get("quality", "LOSSLESS")
+    qobuz_token = args.qobuz_token or merged_defaults.get("qobuz_token")
 
-        if args.save_profile:
-            try:
-                from SpotiFLAC.core.profiles import save_profile
-                profile_cfg = {
-                    "services":              args.service,
-                    "quality":               quality,
-                    "filename_format":        args.filename_format,
-                    "use_track_numbers":     args.use_track_numbers,
-                    "use_album_track_numbers": args.use_album_track_numbers,
-                    "use_artist_subfolders": args.use_artist_subfolders,
-                    "use_album_subfolders":  args.use_album_subfolders,
-                    "first_artist_only":      args.first_artist_only,
-                    "allow_fallback":        True,
-                    "embed_lyrics":          args.embed_lyrics,
-                    "lyrics_providers":      args.lyrics_providers,
-                    "enrich_metadata":       args.enrich,
-                    "enrich_providers":      args.enrich_providers,
-                    "track_max_retries":     args.retries,
-                    "post_download_action":  args.post_action,
-                    "post_download_command": args.post_command,
-                    "tidal_custom_api":      args.tidal_custom_api,
-                }
-                save_profile(args.save_profile, profile_cfg)
-                print(f"[profile] Saved as: {args.save_profile}")
-            except Exception as exc:
-                print(f"[profile] Save error: {exc}")
+    log_level = logging.DEBUG if args.verbose else logging.WARNING
+    logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+    SpotiFLAC(
+        url                      = args.url,
+        output_dir               = args.output_dir,
+        services                 = args.service,
+        filename_format           = args.filename_format,
+        use_track_numbers        = args.use_track_numbers,
+        use_album_track_numbers  = args.use_album_track_numbers,
+        use_artist_subfolders    = args.use_artist_subfolders,
+        use_album_subfolders     = args.use_album_subfolders,
+        loop                     = args.loop,
+        quality                  = quality,
+        first_artist_only         = args.first_artist_only,
+        log_level                = log_level,
+        output_path              = args.output_path,
+        embed_lyrics             = args.embed_lyrics,
+        lyrics_providers         = args.lyrics_providers,
+        enrich_metadata          = args.enrich,
+        enrich_providers         = args.enrich_providers,
+        qobuz_token              = qobuz_token,
+        tidal_custom_api         = args.tidal_custom_api or None,
+        track_max_retries        = args.retries,
+        post_download_action     = args.post_action,
+        post_download_command    = args.post_command,
+    )
+
+    if args.save_profile:
+        try:
+            from SpotiFLAC.core.profiles import save_profile
+            profile_cfg = {
+                "services":              args.service,
+                "quality":               quality,
+                "filename_format":        args.filename_format,
+                "use_track_numbers":     args.use_track_numbers,
+                "use_album_track_numbers": args.use_album_track_numbers,
+                "use_artist_subfolders": args.use_artist_subfolders,
+                "use_album_subfolders":  args.use_album_subfolders,
+                "first_artist_only":      args.first_artist_only,
+                "allow_fallback":        True,
+                "embed_lyrics":          args.embed_lyrics,
+                "lyrics_providers":      args.lyrics_providers,
+                "enrich_metadata":       args.enrich,
+                "enrich_providers":      args.enrich_providers,
+                "track_max_retries":     args.retries,
+                "post_download_action":  args.post_action,
+                "post_download_command": args.post_command,
+                "tidal_custom_api":      args.tidal_custom_api,
+            }
+            save_profile(args.save_profile, profile_cfg)
+            print(f"[profile] Saved as: {args.save_profile}")
+        except Exception as exc:
+            print(f"[profile] Save error: {exc}")
+
 
 
 if __name__ == "__main__":
