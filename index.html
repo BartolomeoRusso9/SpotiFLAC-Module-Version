@@ -1765,7 +1765,7 @@
   </div>
   <div id="tb-logo">
     <span>SpotiFLAC</span>
-    <span id="tb-version">v7.1.7</span>
+    <span id="tb-version">v0.6.6</span>
   </div>
 </div>
 
@@ -1799,7 +1799,7 @@
             </div>
             <div class="hero-main">
               <div class="hero-title">SpotiFLAC</div>
-              <span id="hero-version" class="hero-version">v0.6.1</span>
+              <span id="hero-version" class="hero-version">v0.6.6</span>
             </div>
           </div>
           <div class="hero-subtitle">Get Spotify tracks in true FLAC from Tidal, Qobuz, Deezer & Amazon Music — no account required.</div>
@@ -4929,12 +4929,11 @@ async function onFetch() {
       window.pywebview.api.search_provider_async(url, 50)
         .then(() => {
           setStatus(`Searching "${url}"...`, true);
-          // Non sbloccare qui! Ci penserà app_handle_provider_search_results
         })
         .catch((e) => {
           setStatus('Errore nella ricerca provider.', false);
           logMessage('Search error: ' + e, 'error');
-          setFetchingState('error'); // Sblocca e mostra errore
+          setFetchingState('error');
         });
     } else {
       const searchUrl = `https://open.spotify.com/search/$${encodeURIComponent(url)}`;
@@ -4983,12 +4982,12 @@ function buildConfig() {
     lyrics_providers:       getChecked('lyrics-list'),
     enrich_metadata:        $('config-enrich').checked,
     enrich_providers:       getChecked('enrich-list'),
-    filename_format:        $('config-filename').value.trim() || '{title} - {artist}',
+    filename_format:         $('config-filename').value.trim() || '{title} - {artist}',
     use_track_numbers:      $('config-track-numbers').checked,
     use_album_track_numbers:$('config-album-track-numbers').checked,
     use_artist_subfolders:  $('config-artist-sub').checked,
     use_album_subfolders:   $('config-album-sub').checked,
-    first_artist_only:      $('config-first-artist').checked,
+    first_artist_only:       $('config-first-artist').checked,
     track_max_retries:      parseInt($('config-retries').value) || 0,
     post_download_action:   $('config-post-action').value,
     post_download_command:  $('config-post-cmd')?.value?.trim() || '',

@@ -25,6 +25,9 @@ _APPLE_UA = (
     "Chrome/145.0.0.0 Safari/537.36"
 )
 
+# Compilazione globale della regex per evitare overhead a ogni chiamata
+_JWT_PATTERN = re.compile(r'(eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)')
+
 # ---------------------------------------------------------------------------
 # URL parsing
 # ---------------------------------------------------------------------------
@@ -109,13 +112,9 @@ class AppleMusicMetadataClient:
         try:
             res = self._session.get("https://music.apple.com/us/browse", timeout=self._timeout)
 
-            # L'intestazione del token JWT di Apple è cambiata.
-            # Usiamo una regex universale per JWT: Header(eyJ) . Payload(eyJ) . Signature
-            jwt_pattern = re.compile(r'(eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)')
-
-            # 1. Ricerca globale nell'HTML
+            # 1. Ricerca globale nell'HTML utilizzando la regex pre-compilata
             unquoted_html = urllib.parse.unquote(res.text)
-            for match in jwt_pattern.finditer(unquoted_html):
+            for match in _JWT_PATTERN.finditer(unquoted_html):
                 token = match.group(1)
                 # I token di Apple Music sono molto lunghi (>200 caratteri). Evitiamo falsi positivi.
                 if len(token) > 150:
@@ -123,14 +122,13 @@ class AppleMusicMetadataClient:
                     return token
 
             # 2. Fallback: Ricerca in tutti i file Javascript della pagina
-            # (In caso Apple decida di spostare il token nei bundle JS asincroni)
             js_scripts = re.findall(r'<script[^>]+src="([^"]+\.js)"', res.text)
             for js_url in js_scripts:
                 if js_url.startswith('/'):
                     js_url = "https://music.apple.com" + js_url
                 try:
                     js_res = self._session.get(js_url, timeout=self._timeout)
-                    for match in jwt_pattern.finditer(urllib.parse.unquote(js_res.text)):
+                    for match in _JWT_PATTERN.finditer(urllib.parse.unquote(js_res.text)):
                         token = match.group(1)
                         if len(token) > 150:
                             self._auth_token = token
@@ -380,7 +378,7 @@ class AppleMusicMetadataClient:
     # Conversione dati API → TrackMetadata
     # ------------------------------------------------------------------
 
-    def _parse_item(self, item: dict, parent_album: dict = None) -> TrackMetadata:
+    def _parse_item(self, item: dict, parent_album: dict | None = None) -> TrackMetadata:
         attr = item.get("attributes", {})
         album_attr = parent_album.get("attributes", {}) if parent_album else {}
 
@@ -405,6 +403,6 @@ class AppleMusicMetadataClient:
             release_date = release_date,
             cover_url    = cover_url,
             external_url = attr.get("url", ""),
-            copyright    = album_attr.get("copyright", ""), # Ora recuperabile dall'album
-            composer     = attr.get("composerName", "")     # Fornito nativamente da AMP
+            copyright    = album_attr.get("copyright", ""),
+            composer     = attr.get("composerName", "")
         )

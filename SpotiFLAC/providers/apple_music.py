@@ -6,6 +6,7 @@ import time
 import urllib.parse
 
 import requests
+from collections import OrderedDict
 
 from .base import BaseProvider
 from ..core.console import print_source_banner, print_quality_fallback
@@ -28,11 +29,13 @@ API_ENDPOINTS = {
 
 class AppleMusicProvider(BaseProvider):
     name = "apple-music"
+    MAX_POLLING_WAIT_S = 600
 
     def __init__(self, timeout_s: int = 30, proxy_api_key: str = "") -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
         self._session = self._http._session
-        self._url_cache = {}
+        self._url_cache = OrderedDict() # Modificato per funzionare come cache LRU
+        self._cache_limit = 200
 
         headers = {
             "User-Agent": _DEFAULT_UA,
@@ -73,7 +76,10 @@ class AppleMusicProvider(BaseProvider):
             query = f"{title} {first_artist}"
 
             cache_key = f"search_{query}_{isrc}"
+            
+            # Controllo cache LRU
             if cache_key in self._url_cache:
+                self._url_cache.move_to_end(cache_key) # Segna come usato di recente
                 return self._url_cache[cache_key]
 
             url = f"https://itunes.apple.com/search?term={urllib.parse.quote(query)}&entity=song&limit=10"
@@ -86,6 +92,7 @@ class AppleMusicProvider(BaseProvider):
             best_score = -1
 
             for r in results:
+                # ... (nessuna modifica alla logica degli score)
                 score = 0
                 r_isrc = r.get("isrc", "")
 
@@ -105,7 +112,11 @@ class AppleMusicProvider(BaseProvider):
                     best_score = score
                     best_match = r.get("trackViewUrl")
 
+            # Inserimento cache LRU e controllo limite
             self._url_cache[cache_key] = best_match
+            if len(self._url_cache) > self._cache_limit:
+                self._url_cache.popitem(last=False) # Rimuove l'elemento più vecchio
+
             return best_match
 
         except Exception as e:
@@ -177,13 +188,13 @@ class AppleMusicProvider(BaseProvider):
 
             # Polling in attesa del completamento
             max_wait_s = 60 * 10  # 10 minutes — was 60 * 60 (1 hour)
-            deadline = time.time() + max_wait_s
+            deadline = time.time() + self.MAX_POLLING_WAIT_S
 
             poll_count = 0
             while time.time() < deadline:
                 poll_count += 1
                 if poll_count % 12 == 0:  # every ~30s
-                    elapsed = int(time.time() - (deadline - max_wait_s))
+                    elapsed = int(time.time() - (deadline - self.MAX_POLLING_WAIT_S))
                     print(f"  ⏳ Apple Music: waiting for job {job_id[:8]}… ({elapsed}s elapsed)")
                 st_resp = self._session.get(f"{API_ENDPOINTS['proxy_queued']}/status/{job_id}", timeout=15)
                 st_resp.raise_for_status()

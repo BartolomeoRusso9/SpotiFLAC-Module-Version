@@ -28,15 +28,18 @@ from urllib.parse import urlparse
 import requests
 import unicodedata
 import re
+from urllib.parse import urlparse
 
 from ..core.errors import AuthError, NetworkError, InvalidUrlError, SpotiflacError, ErrorKind
 from ..core.models import TrackMetadata
 
 logger = logging.getLogger(__name__)
 
-_TIDAL_CLIENT_ID = "CzET4vdadNUFQ5JU"
-_TIDAL_API_BASE  = "https://api.tidal.com/v1"
-_TIDAL_COUNTRY   = "US"
+_TIDAL_CLIENT_ID   = "49YxDN9a2aFV6RTG"
+_TIDAL_API_BASE    = "https://api.tidal.com/v1"
+_TIDAL_COUNTRY     = "US"
+_TIDAL_LOCALE      = "en_US"
+_TIDAL_DEVICE_TYPE = "BROWSER"
 _TIDAL_UA        = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -44,6 +47,52 @@ _TIDAL_UA        = (
 )
 
 _TIDAL_DOMAINS = {"listen.tidal.com", "tidal.com", "www.tidal.com"}
+
+def is_tidal_url(url: str) -> bool:
+    """Return True if the URL belongs to Tidal, including deep links."""
+    url_lower = url.lower().strip()
+    if url_lower.startswith("tidal:"):
+        return True
+    try:
+        return urlparse(url).netloc in _TIDAL_DOMAINS
+    except Exception:
+        return False
+
+def parse_tidal_url(url: str) -> dict[str, str]:
+    """
+    Parse a Tidal URL or deep link and return {"type": ..., "id": ...}.
+    Supports: "track", "album", "playlist", "artist", "artist_discography".
+    """
+    # Handle deep links like tidal://track/12345
+    deep_link_match = re.match(r"^tidal:\/\/\/?(track|album|artist|playlist)\/([^?#/]+)", url, re.IGNORECASE)
+    if deep_link_match:
+        return {"type": deep_link_match.group(1).lower(), "id": deep_link_match.group(2)}
+
+    # Handle prefixes like tidal:track:12345
+    prefix_match = re.match(r"^tidal:(track|album|artist|playlist):([^?#/]+)", url, re.IGNORECASE)
+    if prefix_match:
+        return {"type": prefix_match.group(1).lower(), "id": prefix_match.group(2)}
+
+    # Standard HTTPS parsing
+    u = urlparse(url)
+    path = u.path.strip("/")
+
+    if path.startswith("browse/"):
+        path = path[len("browse/"):]
+
+    parts = [p for p in path.split("/") if p]
+
+    if len(parts) >= 2 and parts[0] in ("track", "album", "playlist", "artist"):
+        entity_type = parts[0]
+        entity_id   = parts[1].split("?")[0]
+
+        if entity_type == "artist" and len(parts) >= 3 and parts[2] == "discography":
+            group = parts[3] if len(parts) >= 4 else "all"
+            return {"type": "artist_discography", "id": entity_id, "group": group}
+
+        return {"type": entity_type, "id": entity_id}
+
+    raise InvalidUrlError(url) 
 
 # Dimensione pagina per le richieste paginate (max consentito dall'API Tidal)
 _PAGE_SIZE = 100
@@ -139,7 +188,11 @@ class TidalMetadataClient:
     # ------------------------------------------------------------------
 
     def _get(self, path: str, extra_params: dict | None = None) -> dict:
-        params = {"countryCode": _TIDAL_COUNTRY}
+        params = {
+        "countryCode": _TIDAL_COUNTRY,
+        "locale": _TIDAL_LOCALE,
+        "deviceType": _TIDAL_DEVICE_TYPE
+    }
         if extra_params:
             params.update(extra_params)
 

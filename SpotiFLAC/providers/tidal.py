@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import threading
+import unicodedata
 import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
@@ -97,6 +98,36 @@ import random as _random
 _api_cooldown_lock:     threading.Lock       = threading.Lock()
 _api_cooldown_until:    dict[str, float]     = {}   # url → epoch_s
 
+import re
+import unicodedata
+
+def _clean_title(value: str) -> str:
+    """
+    Clean track titles from common suffixes (remaster, live, etc.)
+    to improve search matching accuracy, mirroring the JS logic.
+    """
+    cleaned = value.lower()
+    patterns = [
+        "remaster", "remastered", "deluxe", "bonus", "single",
+        "album version", "radio edit", "original mix", "extended",
+        "club mix", "remix", "live", "acoustic", "demo"
+    ]
+
+    changed = True
+    while changed:
+        changed = False
+        def replacer(match):
+            nonlocal changed
+            content = match.group(0).lower()
+            for p in patterns:
+                if p in content:
+                    changed = True
+                    return " "
+            return match.group(0)
+
+        cleaned = re.sub(r"\([^)]*\)|\[[^\]]*\]", replacer, cleaned)
+
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 def _mark_api_rate_limited(api_url: str, wait_s: float) -> None:
     """Registra un cooldown per `api_url` valido per i prossimi `wait_s` secondi."""
@@ -342,9 +373,13 @@ class ManifestResult(NamedTuple):
     init_url:   str
     media_urls: list[str]
     mime_type:  str
+    sample_rate: int
 
 
 def parse_manifest(manifest_b64: str) -> ManifestResult:
+    """
+    Decode and parse a Tidal manifest payload (either BTS JSON or MPD XML).
+    """
     try:
         raw = base64.b64decode(manifest_b64)
     except Exception as exc:
@@ -358,7 +393,8 @@ def parse_manifest(manifest_b64: str) -> ManifestResult:
             urls = data.get("urls", [])
             mime = data.get("mimeType", "")
             if urls:
-                return ManifestResult(urls[0], "", [], mime)
+                # BTS JSON payloads usually lack explicit sample rates in this node
+                return ManifestResult(urls[0], "", [], mime, 0)
             raise ValueError("no URLs in BTS manifest")
         except Exception as exc:
             raise ParseError("tidal", f"BTS manifest parse failed: {exc}", exc)
@@ -367,8 +403,18 @@ def parse_manifest(manifest_b64: str) -> ManifestResult:
 
 
 def _parse_dash_manifest(text: str) -> ManifestResult:
+    """
+    Parse a DASH (MPD) XML manifest to extract initialization, 
+    media segment URLs, and the audio sampling rate.
+    """
     init_url = media_template = ""
     segment_count = 0
+    sample_rate = 0
+
+    # Extract sample rate using a robust regex search, mirroring the JS logic
+    sr_match = re.search(r'audioSamplingRate="(\d+)"', text, re.IGNORECASE)
+    if sr_match:
+        sample_rate = int(sr_match.group(1))
 
     try:
         mpd = ET.fromstring(text)
@@ -384,6 +430,7 @@ def _parse_dash_manifest(text: str) -> ManifestResult:
     except Exception:
         pass
 
+    # Fallback to regex if XML parsing fails or is incomplete
     if not init_url or not media_template or segment_count == 0:
         m_init  = re.search(r'initialization="([^"]+)"', text)
         m_media = re.search(r'media="([^"]+)"', text)
@@ -403,7 +450,7 @@ def _parse_dash_manifest(text: str) -> ManifestResult:
     media_urls     = [media_template.replace("$Number$", str(i))
                       for i in range(1, segment_count + 1)]
 
-    return ManifestResult("", init_url, media_urls, "")
+    return ManifestResult("", init_url, media_urls, "", sample_rate)
 
 
 # ---------------------------------------------------------------------------
@@ -816,17 +863,27 @@ class TidalProvider(BaseProvider):
     # File download
     # ------------------------------------------------------------------
 
-    def _download_file(self, url_or_manifest: str, dest: Path) -> None:
+    def _download_file(self, url_or_manifest: str, dest: Path) -> int:
+        """
+        Route the download process based on whether the source is a manifest or direct URL.
+        Returns the sample rate (int) if extracted, or 0 by default.
+        """
         if url_or_manifest.startswith("MANIFEST:"):
-            self._download_from_manifest(url_or_manifest.removeprefix("MANIFEST:"), dest)
+            return self._download_from_manifest(url_or_manifest.removeprefix("MANIFEST:"), dest)
         else:
             self._http.stream_to_file(url_or_manifest, str(dest), self._progress_cb)
+            return 0
 
-    def _download_from_manifest(self, manifest_b64: str, dest: Path) -> None:
+    def _download_from_manifest(self, manifest_b64: str, dest: Path) -> int:
+        """
+        Download tracks from a manifest and return the extracted sample rate.
+        Returns 0 if the sample rate could not be determined.
+        """
         result = parse_manifest(manifest_b64)
+        
         if result.direct_url and "flac" in result.mime_type.lower():
             self._http.stream_to_file(result.direct_url, str(dest), self._progress_cb)
-            return
+            return result.sample_rate
 
         tmp = dest.with_suffix(".m4a.tmp")
         try:
@@ -841,6 +898,8 @@ class TidalProvider(BaseProvider):
                     tmp.unlink()
                 except OSError:
                     pass
+        
+        return result.sample_rate
 
     def _download_segments(self, init_url: str, media_urls: list[str], dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -949,7 +1008,29 @@ class TidalProvider(BaseProvider):
                 else self._get_download_url(track_id, quality)
             )
 
-            self._download_file(dl_url, dest)
+            # Capture the sample rate from the download process
+            sample_rate = self._download_file(dl_url, dest)
+            
+            if sample_rate > 0:
+                logger.info("[tidal] Extracted true sample rate from manifest: %d Hz", sample_rate)
+
+            expected_s = metadata.duration_ms // 1000
+            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
+            if not valid:
+                raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
+
+            mb_tags: dict[str, str] = {}
+            res: dict = {}
+            if mb_fetcher:
+                res = mb_fetcher.future.result()
+
+            mb_tags = mb_result_to_tags(res)
+            
+            # --- NUOVO: Aggiungiamo il sample rate personalizzato ai tag ---
+            if sample_rate > 0:
+                mb_tags["SAMPLERATE"] = str(sample_rate)
+
+            _print_mb_summary(mb_tags)
 
             expected_s = metadata.duration_ms // 1000
             valid, err_msg = validate_downloaded_track(str(dest), expected_s)
