@@ -38,7 +38,7 @@ from .providers import (
 )
 from .core import TrackMetadata, DownloadResult
 
-__version__ = "0.6.8"
+__version__ = "0.6.9"
 
 __all__ = [
     "SpotiFLAC",
