@@ -227,8 +227,7 @@ def main() -> None:
             post_download_command    = cfg.get("post_download_command", ""),
         )
         return
-
-    # GUI mode (default when no arguments)
+    
     if len(sys.argv) == 1:
         search_dirs = [
             os.path.dirname(os.path.abspath(__file__)),

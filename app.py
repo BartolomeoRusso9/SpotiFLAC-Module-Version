@@ -6,6 +6,7 @@ import sys
 import subprocess
 import logging
 import requests as req_lib
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
@@ -1176,9 +1177,15 @@ class SpotiFLAC_API:
 
 def run_gui():
     api = SpotiFLAC_API()
-    html_path = os.path.join(os.path.dirname(__file__), 'index.html')
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    html_path = os.path.join(base_path, 'index.html')
+    if not os.path.exists(html_path):
+        raise FileNotFoundError(
+            f"index.html not found at expected location: {html_path}"
+        )
+    file_url = Path(html_path).as_uri()
     window = webview.create_window(
-        'SpotiFLAC', url=html_path, js_api=api,
+        'SpotiFLAC', url=file_url, js_api=api,
         width=1300, height=850, min_size=(650, 580),
         frameless=True, easy_drag=False, background_color='#0a0a0a'
     )
