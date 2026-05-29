@@ -1747,3 +1747,65 @@
   display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical;
   overflow: hidden; margin-bottom: 8px;
 }
+
+/* =========================================
+   RESPONSIVITY ADJUSTMENTS
+   ========================================= */
+
+@media (max-width: 900px) {
+  .search-container { flex-direction: column; gap: 10px; height: auto; padding: 10px; }
+  .url-wrap { width: 100%; }
+  
+  /* Nascondi Playcount e Duration in modo forzato sia nell'header che nelle righe */
+  .track-table-header > div:nth-child(4),
+  .track-table-header > div:nth-child(5),
+  .track-row > div:nth-child(4),
+  .track-row > div:nth-child(5) { 
+    display: none !important; 
+  }
+  
+  /* Layout aggiornato per le 4 colonne rimanenti (Checkbox, #, Titolo, Azioni) */
+  .track-table-header, .track-row { 
+    grid-template-columns: 24px 30px 1fr 140px !important; 
+  }
+}
+
+@media (max-width: 600px) {
+  #main-split { flex-direction: column; }
+  
+  /* Nascondi anche l'indice (#) su smartphone */
+  .track-table-header > div:nth-child(2),
+  .track-row > div:nth-child(2) { 
+    display: none !important; 
+  }
+  
+  /* Layout per 3 colonne: Checkbox, Titolo, Azioni */
+  .track-table-header, .track-row { 
+    grid-template-columns: 24px 1fr 130px !important; 
+  }
+}
+
+/* =========================================
+   SKELETON ANIMATIONS
+   ========================================= */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface2) 25%, var(--border) 50%, var(--surface2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.5s infinite linear;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-pulse {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-text { height: 16px; margin: 4px 0; width: 80%; border-radius: 4px; }
+.skeleton-text.short { width: 40%; }
+.skeleton-row { 
+  display: grid; 
+  grid-template-columns: 40px 30px 1fr 80px 80px 90px; 
+  gap: 10px; 
+  padding: 12px 10px; 
+  border-bottom: 1px solid var(--border);
+}

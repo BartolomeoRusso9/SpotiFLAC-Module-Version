@@ -1,6 +1,43 @@
 let isDirty = false;
 let initialSettings = {};
 
+function showSkeletonTracks(count = 5) {
+  const container = $('track-rows');
+  if (!container) return;
+  
+  // Svuota la tabella e inserisci gli skeleton con lo STESSO grid delle tracce reali
+  container.innerHTML = Array(count).fill(0).map(() => `
+    <div class="track-row" style="pointer-events: none; border-bottom: 1px solid var(--border);">
+      <div><div class="skeleton" style="width:14px; height:14px; border-radius:2px;"></div></div>
+      <div><div class="skeleton" style="width:16px; height:14px;"></div></div>
+      <div class="tr-title-cell">
+        <div class="skeleton" style="width:44px; height:44px; border-radius:6px; flex-shrink:0;"></div>
+        <div style="display:flex; flex-direction:column; gap:6px; width:100%;">
+          <div class="skeleton skeleton-text" style="margin:0; width:70%;"></div>
+          <div class="skeleton skeleton-text short" style="margin:0; width:40%;"></div>
+        </div>
+      </div>
+      <div><div class="skeleton skeleton-text" style="margin:0 auto; width:50%;"></div></div>
+      <div><div class="skeleton skeleton-text" style="margin:0 22px 0 auto; width:40px;"></div></div>
+      <div class="tr-actions">
+        <div class="skeleton" style="width:30px; height:30px; border-radius:6px;"></div>
+        <div class="skeleton" style="width:30px; height:30px; border-radius:6px;"></div>
+        <div class="skeleton" style="width:30px; height:30px; border-radius:6px;"></div>
+        <div class="skeleton" style="width:30px; height:30px; border-radius:6px;"></div>
+      </div>
+    </div>
+  `).join("");
+  
+  $('track-table-wrap').classList.remove('hidden');
+  
+  // Nascondi i recenti
+  if ($('recent-wrap')) $('recent-wrap').style.display = 'none'; 
+  
+  // Nascondi l'header della tabella finché non arrivano i dati veri
+  const header = document.querySelector('.track-table-header');
+  if (header) header.style.display = 'none';
+}
+
 // Inizializza lo stato dopo aver caricato le impostazioni
 function initSettingsTracking() {
     initialSettings = buildConfig();
@@ -53,23 +90,6 @@ function switchView(name) {
 }
 
 let networkStatus = { ip: '', country_name: 'Italy', country_code: 'IT' };
-
-function loadNetworkStatus() {
-  if (!window.pywebview?.api) {
-    networkStatus = { ip: '127.0.0.1', country_name: 'Italy', country_code: 'IT' };
-    $('tb-network-country').textContent = `${networkStatus.country_name} (${networkStatus.country_code})`;
-    return;
-  }
-  window.pywebview.api.get_network_status().then(status => {
-    if (!status) return;
-    networkStatus = status;
-    const country = status.country_name || 'Unknown';
-    const code = status.country_code || '';
-    $('tb-network-country').textContent = `${country}${code ? ' (' + code + ')' : ''}`;
-  }).catch(() => {
-    $('tb-network-country').textContent = 'Unknown';
-  });
-}
 
 function togglePublicIp() {
   /* removed by design */
@@ -1237,6 +1257,8 @@ function renderTracks(tracks, page = 1) {
   
   const container = $('track-rows');
   container.innerHTML = '';
+  const header = document.querySelector('.track-table-header');
+  if (header) header.style.display = '';
   const renderToken = ++trackRenderToken;
   const batchSize = 40;
   let index = 0;
@@ -2674,6 +2696,7 @@ async function onFetch() {
   setStatus('Fetching metadata…', true);
   logMessage(`Fetching: ${url}`, 'info');
   currentUrl = url;
+  showSkeletonTracks(5);
 
   if (window.pywebview?.api) {
     try {
@@ -2834,24 +2857,21 @@ $('urlInput').addEventListener('input', function() {
   _searchDebounceTimer = setTimeout(() => {
     _lastSearchQuery = query;
 
-    // Show a lightweight searching indicator inside the results container
-    const container = $('text-search-results');
-    if (container) {
-      container.innerHTML = `
-        <div style="padding: 24px; text-align: center; color: var(--muted); font-size: 12px;">
-          <svg style="animation: spin .8s linear infinite; display:inline-block; vertical-align:middle; margin-right:6px;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-          Searching for <strong style="color:var(--text)">${escHtml(query)}</strong>…
-        </div>`;
-    }
-    $('text-search-container')?.classList.remove('hidden');
-    $('track-table-wrap')?.classList.add('hidden');
+    // INIZIO MODIFICA: Invece del vecchio testo di caricamento, mostriamo gli Skeleton!
+    // Chiamiamo la funzione che hai appena creato
+    showSkeletonTracks(6); // Mostra 6 righe "fantasma" che pulsano
+    
+    // Assicurati che il contenitore della tabella sia visibile
+    $('track-table-wrap')?.classList.remove('hidden');
+    $('text-search-container')?.classList.add('hidden');
+    // FINE MODIFICA
 
     if (window.pywebview?.api) {
       window.pywebview.api.search_provider_async(query, 50).catch(e => {
         logMessage('Real-time search error: ' + e, 'error');
       });
     }
-  }, 350); // 350ms debounce
+  }, 350);
 });
 
 setTimeout(() => {

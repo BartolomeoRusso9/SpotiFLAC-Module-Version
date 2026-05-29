@@ -4,10 +4,9 @@ import difflib
 import logging
 import time
 import urllib.parse
-
-import requests
 from collections import OrderedDict
-
+import httpx
+from ..core.http import NetworkManager
 from .base import BaseProvider
 from ..core.console import print_source_banner, print_quality_fallback
 from ..core.download_validation import validate_downloaded_track
@@ -33,7 +32,7 @@ class AppleMusicProvider(BaseProvider):
 
     def __init__(self, timeout_s: int = 30, proxy_api_key: str = "") -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
-        self._session = self._http._session
+        self._session = NetworkManager.get_sync_client()
         self._url_cache = OrderedDict() # Modificato per funzionare come cache LRU
         self._cache_limit = 200
 
@@ -156,7 +155,7 @@ class AppleMusicProvider(BaseProvider):
                 if data.get("success") and data.get("stream_url"):
                     record_success(self.name, API_ENDPOINTS["proxy_direct"])
                     return API_ENDPOINTS["proxy_direct"], data["stream_url"]
-        except requests.HTTPError as e:
+        except httpx.HTTPStatusError as e:
             err_msg = e.response.json().get("error") if e.response.text else str(e)
             logger.debug("[apple-music] app2 rejected for %s: %s", codec, err_msg)
             record_failure(self.name, API_ENDPOINTS["proxy_direct"])

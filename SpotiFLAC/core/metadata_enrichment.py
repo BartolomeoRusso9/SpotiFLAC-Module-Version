@@ -1,27 +1,4 @@
 # SpotiFLAC/core/metadata_enrichment.py
-"""
-Multi-provider metadata enrichment — ottimizzato per latenza.
-
-Fix e miglioramenti rispetto alla versione precedente:
-
-BUG CRITICO (#1): il `with ThreadPoolExecutor() as pool:` bloccava il thread principale
-  finché TUTTI i worker non terminavano, anche dopo che `as_completed` aveva già
-  sollevato TimeoutError. Con Tidal che cercava sequenzialmente su 20+ API con timeout
-  7s ciascuna, la funzione impiegava 40+ secondi. Fix: pool esplicito con
-  shutdown(wait=False, cancel_futures=True).
-
-BUG CRITICO (#2): _TidalMeta.__init__ faceva una richiesta HTTP al gist GitHub
-  ad ogni chiamata a enrich_metadata() (ogni traccia), aggiungendo latenza fissa.
-
-Ottimizzazioni:
-  3. Cache ISRC in memoria (TTL 1h) — stessa traccia non viene mai ri-fetchata.
-  4. Provider singleton — istanziazione una sola volta per processo.
-  5. _TidalMeta: ricerca parallela sulle API (era sequenziale → potenzialmente infinita).
-  6. _TidalMeta: riusa la lista API già cached da tidal.py, refresh in background.
-  7. Timeout HTTP ridotti a 4s (era 7s) — per enrichment la velocità conta più della resilienza.
-  8. Early-exit: appena tutti i campi principali sono popolati, i future rimasti vengono ignorati.
-  9. _SoundCloudMeta: salta l'init costoso se il provider non è ancora warmato.
-"""
 from __future__ import annotations
 
 import logging
@@ -33,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as
 from dataclasses import dataclass, field
 from typing import Any
 
-import requests
+from .http import NetworkManager
 
 logger = logging.getLogger(__name__)
 
@@ -129,15 +106,14 @@ class _DeezerMeta:
     BASE = "https://api.deezer.com/2.0"
 
     def __init__(self) -> None:
-        self._s = requests.Session()
-        self._s.headers["User-Agent"] = _UA
+        self._client = NetworkManager.get_sync_client()
 
     def fetch(self, isrc: str) -> EnrichedMetadata:
         out = EnrichedMetadata()
         if not isrc:
             return out
         try:
-            r = self._s.get(f"{self.BASE}/track/isrc:{isrc}", timeout=_HTTP_TIMEOUT)
+            r = self._client.get(f"{self.BASE}/track/isrc:{isrc}", timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA})
             if r.status_code != 200:
                 return out
             d = r.json()
@@ -146,8 +122,8 @@ class _DeezerMeta:
 
             album_id = d.get("album", {}).get("id")
             if album_id:
-                ar = self._s.get(f"{self.BASE}/album/{album_id}", timeout=_HTTP_TIMEOUT)
-                if ar.ok:
+                ar = self._client.get(f"{self.BASE}/album/{album_id}", timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA})
+                if ar.is_success:  # In httpx si usa is_success al posto di ok
                     ad = ar.json()
                     genres = ad.get("genres", {}).get("data", [])
                     if genres:
@@ -163,7 +139,6 @@ class _DeezerMeta:
             logger.debug("[meta/deezer] %s", exc)
         return out
 
-
 # ---------------------------------------------------------------------------
 # Provider: Apple Music (iTunes Search API — gratuita, no auth)
 # ---------------------------------------------------------------------------
@@ -172,8 +147,7 @@ class _AppleMusicMeta:
     SEARCH = "https://itunes.apple.com/search"
 
     def __init__(self) -> None:
-        self._s = requests.Session()
-        self._s.headers["User-Agent"] = _UA
+        self._client = NetworkManager.get_sync_client()
 
     def fetch(self, track_name: str, artist_name: str, isrc: str = "") -> EnrichedMetadata:
         out = EnrichedMetadata()
@@ -190,25 +164,27 @@ class _AppleMusicMeta:
         try:
             # 1. Tentativo per ISRC
             if isrc:
-                r = self._s.get(
+                r = self._client.get(
                     self.SEARCH,
                     params={"term": isrc, "media": "music", "entity": "song",
                             "limit": 1, "country": "US"},
+                    headers={"User-Agent": _UA},
                     timeout=_HTTP_TIMEOUT,
                 )
-                if r.ok:
+                if r.is_success:
                     results = r.json().get("results", [])
                     if results:
                         return results[0]
 
             # 2. Ricerca testuale
-            r = self._s.get(
+            r = self._client.get(
                 self.SEARCH,
                 params={"term": f"{title} {artist}", "media": "music", "entity": "song",
                         "limit": 5, "country": "US"},
+                headers={"User-Agent": _UA},
                 timeout=_HTTP_TIMEOUT,
             )
-            if not r.ok:
+            if not r.is_success:
                 return None
             results = r.json().get("results", [])
             if not results:
@@ -221,8 +197,7 @@ class _AppleMusicMeta:
         except Exception as exc:
             logger.debug("[meta/apple] %s", exc)
             return None
-
-
+        
 # ---------------------------------------------------------------------------
 # Provider: Tidal — ottimizzato con ricerca parallela e API list cached
 # ---------------------------------------------------------------------------
@@ -247,8 +222,7 @@ _TIDAL_APIS_BUILTIN = [
 
 class _TidalMeta:
     def __init__(self) -> None:
-        self._s = requests.Session()
-        self._s.headers["User-Agent"] = _UA
+        self._client = NetworkManager.get_sync_client()
         self._apis: list[str] = []
         self._apis_ready = False
         self._apis_lock = threading.Lock()
@@ -308,8 +282,8 @@ class _TidalMeta:
                 f"{base}/search?s={query}&limit=3",
         ):
             try:
-                r = self._s.get(endpoint, timeout=_HTTP_TIMEOUT)
-                if not r.ok:
+                r = self._client.get(endpoint, timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA})
+                if not r.is_success:
                     continue
                 data  = r.json()
                 items = data if isinstance(data, list) else data.get("tracks", {}).get("items", [])

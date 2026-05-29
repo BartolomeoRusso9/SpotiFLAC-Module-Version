@@ -7,9 +7,9 @@ import sys
 import subprocess
 import logging
 import re
-import requests as req_lib
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from SpotiFLAC.core.http import NetworkManager
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
 
@@ -562,8 +562,8 @@ class SpotiFLAC_API:
             safe_title  = re.sub(r'[\\/*?:"<>|]', "", title).strip()
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
             safe_owner  = re.sub(r'[\\/*?:"<>|]', "", owner).strip()
-
-            resp = req_lib.get(cover_url, timeout=15)
+            client = NetworkManager.get_sync_client()
+            resp = client.get(cover_url, timeout=15)
             resp.raise_for_status()
 
             # Determine folder structure based on type
@@ -610,8 +610,8 @@ class SpotiFLAC_API:
                 return
 
             self.log(f"Downloading album cover: {artist} - {title}…", "info")
-
-            resp = req_lib.get(cover_url, timeout=15)
+            client = NetworkManager.get_sync_client()
+            resp = client.get(cover_url, timeout=15)
             resp.raise_for_status()
 
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
@@ -658,7 +658,8 @@ class SpotiFLAC_API:
                 continue
 
             try:
-                resp = req_lib.get(cover_url, timeout=15)
+                client = NetworkManager.get_sync_client()
+                resp = client.get(cover_url, timeout=15)
                 resp.raise_for_status()
 
                 safe_title  = re.sub(r'[\\/*?:"<>|]', "", title).strip()
