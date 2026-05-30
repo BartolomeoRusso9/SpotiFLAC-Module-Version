@@ -228,7 +228,7 @@ class DownloadWorker:
         base_out  = self._resolve_output_dir()
 
         install_console_interception()
-        ProgressManager.initialize_master_bar(total, description="Batch")
+        ProgressManager.initialize_master_bar(total, description="Progress")
         try:
             return self._run_downloads(manager, total, base_out, start)
         finally:
