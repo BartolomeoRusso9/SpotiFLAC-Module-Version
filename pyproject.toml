@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "0.7.1"
+version = "0.7.2"
 description = "Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -33,13 +33,17 @@ classifiers = [
 ]
 
 dependencies = [
-    "requests>=2.32.3",
+    "httpx[http2]>=0.27.0",
     "mutagen>=1.47.0",
     "pydantic>=2.7.0",
     "cryptography>=42.0.0",
     "pycryptodome>=3.20.0",
     "packaging>=23.0",
     "yt-dlp>=2024.04.09",
+    "tqdm>=4.66.0",
+    "pywebview>=5.0.0",
+    "aiofiles>=23.2.1",
+    "tenacity>=8.3.0",
 ]
 
 [project.urls]
@@ -48,11 +52,14 @@ dependencies = [
 "Bug Tracker" = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/issues"
 
 [project.scripts]
-spotiflac = "launcher:main"
+spotiflac = "backend.launcher:main"
 
 [tool.setuptools]
 py-modules = ["launcher", "app"]
 include-package-data = true
+
+[tool.setuptools.package-dir]
+"" = "backend"
 
 [tool.setuptools.packages.find]
 include = ["SpotiFLAC*"]

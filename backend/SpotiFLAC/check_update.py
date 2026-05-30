@@ -1,14 +1,15 @@
 import importlib.metadata
-import requests
 from packaging.version import Version
+from .core.http import NetworkManager
 
 def check_for_updates():
     package_name = "spotiflac"
+    client = NetworkManager.get_sync_client()
 
     try:
         current_version = importlib.metadata.version(package_name)
 
-        resp = requests.get(f"https://pypi.org/pypi/{package_name}/json", timeout=2)
+        resp = client.get(f"https://pypi.org/pypi/{package_name}/json", timeout=2)
 
         if resp.status_code == 200:
             latest_version = resp.json()["info"]["version"]

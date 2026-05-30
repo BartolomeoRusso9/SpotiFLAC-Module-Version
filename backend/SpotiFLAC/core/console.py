@@ -3,8 +3,48 @@ import sys
 from tqdm import tqdm 
 
 _BANNER_WIDTH = 60
+_MAX_API_FAILURES_PER_PROVIDER = 6
+_api_failure_state: dict[str, dict[str, object]] = {}
+
+
+def _reset_api_failure_state() -> None:
+    global _api_failure_state
+    _api_failure_state = {}
+
+
+def _should_print_api_failure(provider: str, api: str, reason: str) -> bool:
+    normalized_reason = _clean_error(reason)
+    provider_state = _api_failure_state.setdefault(provider, {
+        "seen": set(),
+        "printed": 0,
+        "suppressed": 0,
+        "summary_shown": False,
+    })
+    key = (api, normalized_reason)
+    if key in provider_state["seen"]:
+        return False
+    provider_state["seen"].add(key)
+    if provider_state["printed"] < _MAX_API_FAILURES_PER_PROVIDER:
+        provider_state["printed"] += 1
+        return True
+    provider_state["suppressed"] += 1
+    return False
+
+
+def _maybe_print_api_failure_summary(provider: str) -> None:
+    provider_state = _api_failure_state.get(provider)
+    if provider_state is None or provider_state["suppressed"] == 0:
+        return
+    if provider_state["summary_shown"]:
+        return
+    provider_state["summary_shown"] = True
+    suppressed = provider_state["suppressed"]
+    with tqdm.get_lock():
+        tqdm.write(f"  ... {suppressed} more {provider} API failures suppressed", file=sys.stderr)
+
 
 def print_track_header(position: int, total: int, title: str, artists: str, album: str) -> None:
+    _reset_api_failure_state()
     pos = f"[{position}/{total}]"
     summary = f"Track {pos} {title[:40]!s} — {artists[:40]!s} ({album[:32]!s})"
     with tqdm.get_lock():
@@ -43,8 +83,14 @@ def print_summary(total: int, succeeded: int, failed: list[tuple[str, str, str]]
         tqdm.write(summary, file=sys.stderr)
 
 def print_api_failure(provider: str, api: str, reason: str) -> None:
+    if not _should_print_api_failure(provider, api, reason):
+        _maybe_print_api_failure_summary(provider)
+        return
+
     with tqdm.get_lock():
         tqdm.write(f"  ✗  {provider}  ·  {_shorten_api(api)}  ·  {_clean_error(reason)}", file=sys.stderr)
+
+    _maybe_print_api_failure_summary(provider)
 
 def print_quality_fallback(provider: str, from_q: str, to_q: str) -> None:
     with tqdm.get_lock():
@@ -66,8 +112,18 @@ def _clean_error(err: str) -> str:
     err_str = str(err)
     if "Max retries exceeded" in err_str or "NameResolutionError" in err_str:
         return "Connection timeout / Unreachable"
-    if "Read timed out" in err_str:
+    if "nodename nor servname provided" in err_str or "Name or service not known" in err_str:
+        return "DNS resolution failed"
+    if "Read timed out" in err_str or "Timeout" in err_str:
         return "Read timed out"
+    if "HTTP 503" in err_str:
+        return "HTTP 503 Service Unavailable"
+    if "HTTP 502" in err_str:
+        return "HTTP 502 Bad Gateway"
+    if "HTTP 404" in err_str:
+        return "HTTP 404 Not Found"
+    if "HTTP 400" in err_str:
+        return "HTTP 400 Bad Request"
     if "403 Client Error: Forbidden" in err_str:
         return "HTTP 403 Forbidden (Cloudflare/WAF blocked)"
     if "Expecting value: line 1" in err_str or "invalid JSON" in err_str.lower():

@@ -25,7 +25,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
-import requests
+import httpx
+from ..core.http import NetworkManager
 import unicodedata
 import re
 from urllib.parse import urlparse
@@ -176,7 +177,7 @@ class TidalMetadataClient:
 
     def __init__(self, timeout_s: int = 15) -> None:
         self._timeout = timeout_s
-        self._session = requests.Session()
+        self._session = NetworkManager.get_sync_client()
         self._session.headers.update({
             "X-Tidal-Token": _TIDAL_CLIENT_ID,
             "Accept":        "application/json",
@@ -202,7 +203,13 @@ class TidalMetadataClient:
         # più 429 consecutivi e permette al massimo _MAX_RATE_LIMIT_RETRIES tentativi.
         _MAX_RATE_LIMIT_RETRIES = 3
         for _attempt in range(_MAX_RATE_LIMIT_RETRIES + 1):
-            resp = self._session.get(url, params=params, timeout=self._timeout)
+            try:
+                resp = self._session.get(url, params=params, timeout=self._timeout)
+            except httpx.RequestError as exc:
+                if _attempt >= _MAX_RATE_LIMIT_RETRIES:
+                    raise NetworkError("tidal_metadata", f"Errore di rete su {path}: {exc}")
+                time.sleep(2)
+                continue
 
             if resp.status_code == 401:
                 raise AuthError("tidal_metadata", "Token Tidal non valido o scaduto")

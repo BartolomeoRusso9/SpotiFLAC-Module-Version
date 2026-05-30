@@ -9,8 +9,8 @@ import time
 import difflib
 import urllib.parse
 from typing import Any
-
-import requests
+from ..core.http import NetworkManager
+import httpx
 
 from ..core.tagger import embed_metadata, EmbedOptions
 
@@ -71,7 +71,7 @@ class DeezerProvider(BaseProvider):
 
     def __init__(self, timeout_s: int = 30) -> None:
         super().__init__(timeout_s=timeout_s)
-        self._session = requests.Session()
+        self._session = NetworkManager.get_sync_client()
         self._session.headers.update({"User-Agent": _DEFAULT_UA})
 
         self._track_cache:  dict[str, _CacheEntry] = {}
@@ -130,7 +130,7 @@ class DeezerProvider(BaseProvider):
                     continue
                 resp.raise_for_status()
                 return resp.json()
-            except (requests.Timeout, requests.ConnectionError) as exc:
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
                 last_err = exc
                 continue
             except Exception as exc:
@@ -454,7 +454,7 @@ class DeezerProvider(BaseProvider):
                 first_artist_only=first_artist_only,
             )
             if self._file_exists(dest):
-                return DownloadResult.skipped(self.name, str(dest))
+                return DownloadResult.skipped_result(self.name, str(dest))
 
             from ..core.musicbrainz import AsyncMBFetch
             mb_fetcher = AsyncMBFetch(isrc_to_use) if isrc_to_use else None

@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cd /Users/User/Documents/GitHub/SpotiFLAC-Module-Version && python - <<'PY'\nimport os\nfrom pathlib import Path\n\n# Get list of all modules in backend core and providers\nbackend_core = Path\\(\"backend/SpotiFLAC/core\"\\)\nbackend_providers = Path\\(\"backend/SpotiFLAC/providers\"\\)\n\nstub_core = Path\\(\"SpotiFLAC/core\"\\)\nstub_providers = Path\\(\"SpotiFLAC/providers\"\\)\n\n# Create stubs for all backend core modules\nfor py_file in backend_core\\.glob\\(\"\\*\\.py\"\\):\n    if py_file\\.name == \"__init__\\.py\":\n        continue\n    module_name = py_file\\.stem\n    stub_file = stub_core / f\"\\{module_name\\}\\.py\"\n    stub_content = f'''\"\"\"Stub for \\{module_name\\} module - re-exports from backend\\.\"\"\"\nfrom backend\\.SpotiFLAC\\.core\\.\\{module_name\\} import \\*\n'''\n    stub_file\\.write_text\\(stub_content\\)\n    print\\(f\"Created \\{stub_file\\}\"\\)\n\n# Create stubs for all backend provider modules\nfor py_file in backend_providers\\.glob\\(\"\\*\\.py\"\\):\n    if py_file\\.name == \"__init__\\.py\":\n        continue\n    module_name = py_file\\.stem\n    stub_file = stub_providers / f\"\\{module_name\\}\\.py\"\n    stub_content = f'''\"\"\"Stub for \\{module_name\\} provider - re-exports from backend\\.\"\"\"\nfrom backend\\.SpotiFLAC\\.providers\\.\\{module_name\\} import \\*\n'''\n    stub_file\\.write_text\\(stub_content\\)\n    print\\(f\"Created \\{stub_file\\}\"\\)\n\nprint\\(\"\\\\n✓ All stubs created!\"\\)\nPY$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

@@ -4,10 +4,12 @@ import logging
 import os
 import re
 import time
-from typing import Dict, List, Optional, Any
+import difflib
+from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import quote
 
-import requests
+import httpx  
+from ..core.http import NetworkManager  
 
 from .base import BaseProvider
 from ..core.http import HttpClient
@@ -29,7 +31,7 @@ class SoundCloudProvider(BaseProvider):
         self.client_id_expiry = 0
         self._sc_version = ""
         self.cobalt_api  = "https://api.zarz.moe/v1/dl/cobalt/"
-        self.session     = requests.Session()
+        self.session     = NetworkManager.get_sync_client() 
         self.session.headers.update({
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -44,15 +46,21 @@ class SoundCloudProvider(BaseProvider):
 
     def _fetch_client_id(self) -> str:
         logger.info("[SC] Fetching SoundCloud client_id...")
-        res = self.session.get("https://soundcloud.com/")
-        res.raise_for_status()
+        try:
+            res = self.session.get("https://soundcloud.com/")
+            res.raise_for_status()
+        except httpx.RequestError as e:
+            raise ValueError(f"Network error fetching soundcloud.com: {e}")
+        except httpx.HTTPStatusError as e:
+            raise ValueError(f"HTTP error fetching soundcloud.com: {e.response.status_code}")
+            
         body = res.text
 
         # Controlla se la versione SC è cambiata — evita fetch inutili
         version_match = re.search(r'__sc_version="(\d{10})"', body)
         if version_match:
             new_version = version_match.group(1)
-            if new_version == getattr(self, '_sc_version', '') and self.client_id:
+            if new_version == self._sc_version and self.client_id:
                 logger.info("[SC] SoundCloud version unchanged, reusing client_id")
                 return self.client_id
             self._sc_version = new_version
@@ -86,8 +94,8 @@ class SoundCloudProvider(BaseProvider):
                             return candidate
                 if cm:
                     return cm.group(1)
-            except Exception as e:
-                logger.debug("[SC] Bundle fetch failed for %s: %s", url, e)
+            except httpx.RequestError as e:
+                logger.debug("[SC] Bundle fetch network failed for %s: %s", url, e)
 
         raise ValueError("Could not find SoundCloud client_id")
 
@@ -96,11 +104,12 @@ class SoundCloudProvider(BaseProvider):
             self.client_id = self._fetch_client_id()
             self.client_id_expiry = time.time() + 86400
 
-    def _api_get(self, endpoint: str, params: Dict = None) -> Any:
+    def _api_get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
         self._ensure_client_id()
         params = dict(params or {})
         params["client_id"] = self.client_id
         url = f"{self.api_url}/{endpoint}"
+        
         res = self.session.get(url, params=params)
         if res.status_code == 401:
             logger.info("[SC] Got 401, refreshing client_id...")
@@ -108,6 +117,7 @@ class SoundCloudProvider(BaseProvider):
             self._ensure_client_id()
             params["client_id"] = self.client_id
             res = self.session.get(url, params=params)
+            
         res.raise_for_status()
         return res.json()
 
@@ -124,7 +134,7 @@ class SoundCloudProvider(BaseProvider):
             return url.replace("-large.", "-t500x500.")
         return url
 
-    def _format_track(self, data: Dict) -> Optional[Dict]:
+    def _format_track(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not data or not data.get("id"):
             return None
         user = data.get("user", {})
@@ -172,9 +182,9 @@ class SoundCloudProvider(BaseProvider):
         Prova prima il tag og:url nell'HTML, poi il canonical.
         """
         try:
-            res = self.session.get(url, timeout=10, allow_redirects=True)
+            res = self.session.get(url, timeout=10, follow_redirects=True) 
             # Metodo 1: URL finale dopo redirect
-            final = res.url
+            final = str(res.url)
             if 'soundcloud.com' in final and 'on.soundcloud.com' not in final:
                 return self._clean_url(final)
             # Metodo 2: og:url nel body
@@ -185,6 +195,8 @@ class SoundCloudProvider(BaseProvider):
                 m = re.search(pattern, res.text, re.IGNORECASE)
                 if m and 'soundcloud.com' in m.group(1):
                     return self._clean_url(m.group(1))
+        except httpx.RequestError as e:
+            logger.warning("[SC] Short link resolution network failed: %s", e)
         except Exception as e:
             logger.warning("[SC] Short link resolution failed: %s", e)
         return url
@@ -201,11 +213,11 @@ class SoundCloudProvider(BaseProvider):
     # CORE PROVIDER METHODS
     # ==========================================
 
-    def get_track(self, track_id: str) -> Dict:
+    def get_track(self, track_id: str) -> Dict[str, Any]:
         data = self._api_get(f"tracks/{track_id}")
         return self._format_track(data)
 
-    def get_playlist_or_album(self, playlist_id: str) -> Dict:
+    def get_playlist_or_album(self, playlist_id: str) -> Dict[str, Any]:
         data   = self._api_get(f"playlists/{playlist_id}", {"representation": "full"})
         tracks = []
         need_full_fetch = []
@@ -227,6 +239,8 @@ class SoundCloudProvider(BaseProvider):
                     track = self._format_track(t)
                     if track:
                         tracks.append(track)
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                logger.debug("[SC] Batch track fetch network failed: %s", e)
             except Exception as e:
                 logger.debug("[SC] Batch track fetch failed: %s", e)
 
@@ -241,7 +255,7 @@ class SoundCloudProvider(BaseProvider):
             "cover_url": self._get_hires_artwork(data.get("artwork_url")),
         }
 
-    def search(self, query: str, search_type: str = "tracks", limit: int = 20) -> List[Dict]:
+    def search(self, query: str, search_type: str = "tracks", limit: int = 20) -> List[Dict[str, Any]]:
         data    = self._api_get(
             f"search/{search_type}", {"q": query, "limit": limit, "access": "playable"}
         )
@@ -304,6 +318,8 @@ class SoundCloudProvider(BaseProvider):
                 data = self._api_get("tracks", {"ids": ",".join(batch)})
                 if isinstance(data, list):
                     results.extend(data)
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                logger.warning("[SC] Batch fetch network failed: %s", e)
             except Exception as e:
                 logger.warning("[SC] Batch fetch failed: %s", e)
         return results
@@ -370,14 +386,16 @@ class SoundCloudProvider(BaseProvider):
                         tracks.append(self._track_data_to_metadata(item))
 
                 next_href = page.get("next_href")
-                # La next_href di SoundCloud include già il client_id — nessuna
-                # aggiunta necessaria, ma verifichiamo per sicurezza.
+                # La next_href di SoundCloud include già il client_id
                 if next_href and "client_id" not in next_href:
                     next_href += f"&client_id={self.client_id}"
 
                 if next_href:
                     time.sleep(0.3)
 
+            except httpx.RequestError as e:
+                logger.warning("[SC] User tracks pagination network failed: %s", e)
+                break
             except Exception as e:
                 logger.warning("[SC] User tracks pagination failed: %s", e)
                 break
@@ -385,11 +403,54 @@ class SoundCloudProvider(BaseProvider):
         return tracks
 
     # ==========================================
+    # MATCHING
+    # ==========================================
+
+    def _find_best_match(self, tracks: List[Dict[str, Any]], target_title: str, target_artist: str, target_duration: int) -> Optional[Dict[str, Any]]:
+        if not tracks:
+            return None
+
+        best_score = -1
+        best_track = None
+
+        target_title_norm = target_title.lower().strip()
+        target_artist_norm = target_artist.lower().strip()
+
+        for t in tracks:
+            t_title = t.get("name", "").lower().strip()
+            t_artist = t.get("artists", "").lower().strip()
+            t_duration = t.get("duration_ms", 0)
+            
+            score = 0
+            
+            # 1. Similarity del Titolo (Max 50 punti)
+            score += difflib.SequenceMatcher(None, target_title_norm, t_title).ratio() * 50
+            
+            # 2. Similarity dell'Artista (Max 30 punti)
+            score += difflib.SequenceMatcher(None, target_artist_norm, t_artist).ratio() * 30
+            
+            # 3. Differenza di Durata (Max 20 punti)
+            if target_duration > 0 and t_duration > 0:
+                diff_ms = abs(target_duration - t_duration)
+                if diff_ms < 10000: # Meno di 10 secondi di differenza
+                    score += (1 - (diff_ms / 10000)) * 20
+
+            if score > best_score:
+                best_score = score
+                best_track = t
+
+        # Soglia minima di accettazione
+        if best_score < 40:
+            return None
+            
+        return best_track
+
+    # ==========================================
     # ENTRY POINT UNIFICATO
     # ==========================================
 
-    def get_url(self, url: str) -> tuple[str, List[TrackMetadata]]:
-        url = self._normalize_url(url)   # ← pulizia centralizzata
+    def get_url(self, url: str) -> Tuple[str, List[TrackMetadata]]:
+        url = self._normalize_url(url)
         self._ensure_client_id()
 
         resolve_url = (
@@ -417,7 +478,6 @@ class SoundCloudProvider(BaseProvider):
         else:
             raise ValueError(f"Tipo URL SoundCloud non supportato: {kind}")
 
-    # get_metadata_from_url rimane per retrocompatibilità, ora delega a get_url
     def get_metadata_from_url(self, url: str) -> TrackMetadata:
         _, tracks = self.get_url(url)
         if not tracks:
@@ -434,9 +494,7 @@ class SoundCloudProvider(BaseProvider):
             track_permalink: str = None,
             audio_format: str = "mp3",
     ) -> Optional[str]:
-        # track_id può essere None quando arriva da Odesli (solo permalink disponibile)
-        # In quel caso saltiamo la chiamata API e andiamo direttamente a Cobalt
-        track_data: Dict = {}
+        track_data: Dict[str, Any] = {}
         if track_id is not None:
             try:
                 track_data   = self._api_get(f"tracks/{track_id}")
@@ -453,8 +511,12 @@ class SoundCloudProvider(BaseProvider):
                             )
                             if res.status_code == 200:
                                 return res.json().get("url")
+                        except httpx.RequestError as e:
+                            logger.warning("[SC] Direct stream fetch network failed: %s", e)
                         except Exception as e:
                             logger.warning("[SC] Direct stream fetch failed: %s", e)
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                logger.warning("[SC] Track API lookup network failed: %s", e)
             except Exception as e:
                 logger.warning("[SC] Track API lookup failed: %s", e)
 
@@ -467,27 +529,26 @@ class SoundCloudProvider(BaseProvider):
                     "downloadMode":  "audio",
                     "filenameStyle": "basic",
                 }
+                # Dinamico per evitare blocchi
                 cobalt_headers = {
                     "Accept":     "application/json",
-                    "User-Agent": (
-                        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-                        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-                        "Version/16.0 Mobile/15E148 Safari/604.1"
-                    ),
+                    "User-Agent": self.session.headers.get("User-Agent", "SpotiFLAC-Mobile"),
                 }
                 res = self.session.post(self.cobalt_api, json=payload, headers=cobalt_headers)
                 if res.status_code == 200:
                     cobalt_data = res.json()
                     if cobalt_data.get("status") in ("tunnel", "redirect"):
                         return cobalt_data.get("url")
+            except httpx.RequestError as e:
+                logger.debug("[SC] Cobalt fallback network failed: %s", e)
             except Exception as e:
                 logger.debug("[SC] Cobalt fallback failed: %s", e)
 
         return None
 
     def _pick_best_transcoding(
-            self, transcodings: List[Dict], prefer_format: str
-    ) -> Optional[Dict]:
+            self, transcodings: List[Dict[str, Any]], prefer_format: str
+    ) -> Optional[Dict[str, Any]]:
         best       = None
         best_score = -1
         for t in transcodings:
@@ -572,20 +633,27 @@ class SoundCloudProvider(BaseProvider):
             except Exception as e:
                 logger.warning("[SC] Odesli resolution error: %s", e)
                 
-            # TENTATIVO 2: Fallback (Come in index.js) - Ricerca nativa
+            # TENTATIVO 2: Fallback con ricerca intelligente
             if not dl_url:
                 search_query = f"{metadata.title} {metadata.artists}".strip()
                 logger.info("[SC] Odesli failed. Native search for: '%s'", search_query)
                 try:
                     search_results = self.search(search_query, limit=5)
-                    if search_results:
-                        # Prendiamo il primo risultato della ricerca
-                        best_track = search_results[0]
+                    best_track = self._find_best_match(
+                        search_results, 
+                        metadata.title, 
+                        metadata.artists, 
+                        metadata.duration_ms
+                    )
+                    
+                    if best_track:
                         logger.info("[SC] Found fallback via search: %s (ID: %s)", best_track.get("name"), best_track.get("id"))
                         dl_url = self.get_download_url(
                             track_id        = best_track.get("id"),
                             track_permalink = best_track.get("permalink_url"),
                         )
+                    else:
+                        logger.warning("[SC] No suitable fallback track found matching criteria.")
                 except Exception as e:
                     logger.warning("[SC] Fallback search failed: %s", e)
 
@@ -599,12 +667,14 @@ class SoundCloudProvider(BaseProvider):
             extension=".mp3",
         )
         if self._file_exists(dest):
-            return DownloadResult.skipped(self.name, str(dest), fmt="mp3")
+            return DownloadResult.skipped_result(self.name, str(dest), fmt="mp3")
 
         # ── 3. Download effettivo ─────────────────────────────────────────
         try:
             os.makedirs(output_dir, exist_ok=True)
             logger.info("[SC] Downloading: %s", dest.name)
+            # Viene mantenuto self._http.stream_to_file per garantire la compatibilità
+            # col sistema di progressione nativo dell'app principale.
             self._http.stream_to_file(dl_url, str(dest), self._progress_cb)
 
         except Exception as e:

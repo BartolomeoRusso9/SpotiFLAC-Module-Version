@@ -1,6 +1,7 @@
 from __future__ import annotations
 import io
 import logging
+import queue
 import sys
 import threading
 import time
@@ -239,64 +240,128 @@ class ProgressManager:
     _slot_map: dict[str, int] = {}
     _master_bar: tqdm | None = None
     _master_enabled: bool = False
+    _event_queue: queue.Queue[tuple[str, str, int, int | None]] = queue.Queue()
+    _ui_thread: threading.Thread | None = None
+    _ui_stop: threading.Event = threading.Event()
+    _lock = threading.RLock()
+
+    @classmethod
+    def _start_ui_thread(cls) -> None:
+        with cls._lock:
+            if cls._ui_thread and cls._ui_thread.is_alive():
+                return
+            cls._ui_stop.clear()
+            cls._ui_thread = threading.Thread(
+                target=cls._process_events,
+                name="SpotiFLAC-ProgressUI",
+                daemon=True,
+            )
+            cls._ui_thread.start()
+
+    @classmethod
+    def _stop_ui_thread(cls) -> None:
+        with cls._lock:
+            cls._ui_stop.set()
+            thread = cls._ui_thread
+            cls._ui_thread = None
+        if thread and thread.is_alive():
+            thread.join(timeout=1.0)
+
+    @classmethod
+    def _process_events(cls) -> None:
+        while not cls._ui_stop.is_set() or not cls._event_queue.empty():
+            try:
+                item_id, track_name, current_bytes, total_bytes = cls._event_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            with tqdm.get_lock():
+                with cls._lock:
+                    bar = cls._bars.get(item_id)
+                    if bar is None:
+                        # Create the bar lazily on the UI thread.
+                        bar = cls.create_bar(item_id, track_name, total_bytes)
+
+                    if total_bytes != bar.total:
+                        bar.total = total_bytes
+
+                    if current_bytes < bar.n:
+                        bar.reset(total=total_bytes)
+                        bar.update(current_bytes)
+                    else:
+                        delta = current_bytes - bar.n
+                        if delta > 0:
+                            bar.update(delta)
+
+                    if total_bytes is not None and current_bytes >= total_bytes:
+                        cls.release_bar(item_id)
+
+    @classmethod
+    def enqueue_progress(cls, item_id: str, track_name: str, current_bytes: int, total_bytes: int | None) -> None:
+        cls._start_ui_thread()
+        cls._event_queue.put((item_id, track_name, current_bytes, total_bytes))
 
     @classmethod
     def _allocate_slot(cls, item_id: str) -> int:
-        if item_id in cls._slot_map:
-            return cls._slot_map[item_id]
+        with cls._lock:
+            if item_id in cls._slot_map:
+                return cls._slot_map[item_id]
 
-        used_slots = set(cls._slot_map.values())
-        slot = 0
-        while slot in used_slots:
-            slot += 1
+            used_slots = set(cls._slot_map.values())
+            slot = 0
+            while slot in used_slots:
+                slot += 1
 
-        cls._slot_map[item_id] = slot
-        return slot
+            cls._slot_map[item_id] = slot
+            return slot
 
     @classmethod
     def get_effective_position(cls, slot: int) -> int:
-        return slot + (1 if cls._master_enabled else 0)
+        with cls._lock:
+            return slot + (1 if cls._master_enabled else 0)
 
     @classmethod
     def create_bar(cls, item_id: str, track_name: str, total_bytes: int | None) -> tqdm:
-        if item_id in cls._bars:
-            return cls._bars[item_id]
+        with cls._lock:
+            if item_id in cls._bars:
+                return cls._bars[item_id]
 
-        slot = cls._allocate_slot(item_id)
-        display_name = track_name.strip()
-        if len(display_name) > 18:
-            display_name = display_name[:15] + "..."
+            slot = cls._allocate_slot(item_id)
+            display_name = track_name.strip()
+            if len(display_name) > 18:
+                display_name = display_name[:15] + "..."
 
-        bar = tqdm(
-            total        = total_bytes if total_bytes and total_bytes > 0 else None,
-            unit         = "B",
-            unit_scale   = True,
-            unit_divisor = 1024,
-            desc         = f"Track: {display_name:<18}",
-            leave        = False,
-            position     = cls.get_effective_position(slot),
-            dynamic_ncols= True,
-            miniters     = 1,
-            smoothing    = 0.2,
-            file         = sys.__stderr__,
-        )
+            bar = tqdm(
+                total        = total_bytes if total_bytes and total_bytes > 0 else None,
+                unit         = "B",
+                unit_scale   = True,
+                unit_divisor = 1024,
+                desc         = f"Track: {display_name:<18}",
+                leave        = False,
+                position     = cls.get_effective_position(slot),
+                dynamic_ncols= True,
+                miniters     = 1,
+                smoothing    = 0.2,
+                file         = sys.__stderr__,
+            )
 
-        cls._bars[item_id] = bar
-        return bar
+            cls._bars[item_id] = bar
+            return bar
 
     @classmethod
     def release_bar(cls, item_id: str) -> None:
-        bar = cls._bars.pop(item_id, None)
-        if bar is None:
-            cls._slot_map.pop(item_id, None)
-            return
+        with cls._lock:
+            bar = cls._bars.pop(item_id, None)
+            if bar is None:
+                cls._slot_map.pop(item_id, None)
+                return
 
-        try:
-            bar.clear()
-            bar.close()
-        except Exception:
-            pass
-        cls._slot_map.pop(item_id, None)
+            try:
+                bar.clear()
+                bar.close()
+            except Exception:
+                pass
+            cls._slot_map.pop(item_id, None)
 
     @classmethod
     def clear_item(cls, item_id: str) -> None:
@@ -305,62 +370,68 @@ class ProgressManager:
 
     @classmethod
     def clear_all(cls) -> None:
+        cls._stop_ui_thread()
         with tqdm.get_lock():
-            for item_id in list(cls._bars):
-                cls.release_bar(item_id)
-            cls._slot_map.clear()
+            with cls._lock:
+                for item_id in list(cls._bars):
+                    cls.release_bar(item_id)
+                cls._slot_map.clear()
             cls.clear_master_bar()
 
     @classmethod
-    def initialize_master_bar(cls, total_items: int, description: str = "Batch", at_top: bool = True) -> None:
+    def initialize_master_bar(cls, total_items: int, description: str = "Progress", at_top: bool = True) -> None:
         if not at_top:
             raise ValueError("Only top-aligned master bar is supported by ProgressManager at this time.")
 
         with tqdm.get_lock():
-            cls.clear_master_bar()
-            cls._master_enabled = True
-            cls._master_bar = tqdm(
-                total        = total_items,
-                desc         = description,
-                leave        = True,
-                position     = 0,
-                dynamic_ncols= True,
-                miniters     = 1,
-                file         = sys.__stderr__,
-            )
+            with cls._lock:
+                cls.clear_master_bar()
+                cls._master_enabled = True
+                cls._master_bar = tqdm(
+                    total        = total_items,
+                    desc         = description,
+                    leave        = True,
+                    position     = 0,
+                    dynamic_ncols= True,
+                    miniters     = 1,
+                    file         = sys.__stderr__,
+                )
 
     @classmethod
     def clear_master_bar(cls) -> None:
         with tqdm.get_lock():
-            if cls._master_bar is None:
-                cls._master_enabled = False
-                return
+            with cls._lock:
+                if cls._master_bar is None:
+                    cls._master_enabled = False
+                    return
 
-            try:
-                cls._master_bar.clear()
-                cls._master_bar.close()
-            except Exception:
-                pass
-            cls._master_bar = None
-            cls._master_enabled = False
+                try:
+                    cls._master_bar.clear()
+                    cls._master_bar.close()
+                except Exception:
+                    pass
+                cls._master_bar = None
+                cls._master_enabled = False
 
     @classmethod
     def increment_master(cls, step: int = 1) -> None:
         with tqdm.get_lock():
-            if cls._master_bar is None:
-                return
+            with cls._lock:
+                if cls._master_bar is None:
+                    return
 
-            cls._master_bar.update(step)
-            cls._master_bar.refresh()
+                cls._master_bar.update(step)
+                cls._master_bar.refresh()
 
     @classmethod
     def reset_master_total(cls, total_items: int) -> None:
         with tqdm.get_lock():
-            if cls._master_bar is None:
-                return
+            with cls._lock:
+                if cls._master_bar is None:
+                    return
 
-            cls._master_bar.reset(total=total_items)
-            cls._master_bar.refresh()
+                cls._master_bar.reset(total=total_items)
+                cls._master_bar.refresh()
 
 
 class ProgressCallback:
@@ -378,40 +449,7 @@ class ProgressCallback:
     def __call__(self, current_bytes: int, total_bytes: int) -> None:
         current_bytes = max(0, current_bytes)
         total_bytes = total_bytes if total_bytes > 0 else None
-        now = time.time()
-
-        with tqdm.get_lock():
-            bar = ProgressManager.create_bar(self._item_id, self._track_name, total_bytes)
-            newly_created = bar.n == 0 and self._last_refresh_time == 0.0
-            reset_needed = current_bytes < self._last_reported_bytes
-
-            if total_bytes != bar.total:
-                bar.total = total_bytes
-
-            if reset_needed:
-                bar.reset(total=total_bytes)
-                self._bytes_since_refresh = 0
-                self._last_refresh_time = now
-                self._last_reported_bytes = 0
-
-            delta = current_bytes - self._last_reported_bytes
-            if delta > 0:
-                self._bytes_since_refresh += delta
-
-            self._last_reported_bytes = current_bytes
-            is_complete = total_bytes is not None and current_bytes >= total_bytes
-            do_refresh = newly_created or reset_needed or (now - self._last_refresh_time >= 0.15) or is_complete
-
-            if do_refresh:
-                if self._bytes_since_refresh > 0:
-                    bar.update(self._bytes_since_refresh)
-                    self._bytes_since_refresh = 0
-                else:
-                    bar.refresh()
-                self._last_refresh_time = now
-
-                if is_complete:
-                    ProgressManager.release_bar(self._item_id)
+        ProgressManager.enqueue_progress(self._item_id, self._track_name, current_bytes, total_bytes)
 
     @classmethod
     def clear_item(cls, item_id: str) -> None:

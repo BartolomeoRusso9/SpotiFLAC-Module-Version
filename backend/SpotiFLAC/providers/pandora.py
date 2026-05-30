@@ -18,8 +18,8 @@ import re
 from typing import Callable
 from urllib.parse import urlparse, urlencode, quote
 
-import requests
-
+import httpx
+from ..core.http import NetworkManager
 from .base import BaseProvider
 from ..core.console import print_source_banner
 from ..core.download_validation import validate_downloaded_track
@@ -347,7 +347,7 @@ class PandoraProvider(BaseProvider):
 
     def __init__(self, timeout_s: int = 30) -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
-        self._session = requests.Session()
+        self._session = NetworkManager.get_sync_client()
         self._session.headers.update({
             "Accept":     "application/json",
             "User-Agent": _MOBILE_UA,
@@ -455,12 +455,11 @@ class PandoraProvider(BaseProvider):
                 "User-Agent": _MOBILE_UA,
             },
             timeout=15,
-            allow_redirects=True,
+            follow_redirects=True,
         )
 
-        # Se il redirect porta già a pandora.com, usiamo l'URL finale
-        if resp.url and "pandora.com/" in resp.url and "pandora.app.link" not in resp.url:
-            return _normalize_secure_url(resp.url)
+        if resp.url and "pandora.com/" in str(resp.url) and "pandora.app.link" not in str(resp.url):
+            return _normalize_secure_url(str(resp.url))
 
         if resp.status_code != 200:
             raise RuntimeError(f"Pandora app link returned HTTP {resp.status_code}")
@@ -898,7 +897,7 @@ class PandoraProvider(BaseProvider):
             for candidate in (dest_mp3, dest_m4a):
                 if self._file_exists(candidate):
                     fmt = "mp3" if candidate.suffix == ".mp3" else "m4a"
-                    return DownloadResult.skipped(self.name, str(candidate), fmt=fmt)
+                    return DownloadResult.skipped_result(self.name, str(candidate), fmt=fmt)
 
             # 3. Avvia MusicBrainz in background
             mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
@@ -939,7 +938,7 @@ class PandoraProvider(BaseProvider):
                     return DownloadResult.fail(self.name, "No downloadable Pandora stream available")
 
             stream_url = _normalize_secure_url(selected["url"])
-            ext        = _output_extension_for_link(selected)   # ".mp3" o ".m4a"
+            ext        = _output_extension_for_link(selected)
             fmt_str    = "mp3" if ext == ".mp3" else "m4a"
 
             # Aggiusta l'estensione del percorso finale

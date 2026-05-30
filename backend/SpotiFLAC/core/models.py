@@ -170,8 +170,8 @@ class DownloadResult(BaseModel):
         return cls(success=True, provider=provider, file_path=file_path, format=fmt)
 
     @classmethod
-    def skipped(cls, provider: str, file_path: str,
-                fmt: Literal["flac", "mp3", "m4a"] | None = None) -> "DownloadResult":
+    def skipped_result(cls, provider: str, file_path: str,
+                       fmt: Literal["flac", "mp3", "m4a"] | None = None) -> "DownloadResult":
         return cls(success=True, provider=provider, file_path=file_path, format=fmt, skipped=True)
 
     @classmethod

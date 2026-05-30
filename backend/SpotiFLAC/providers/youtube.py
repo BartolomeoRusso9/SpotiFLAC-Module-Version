@@ -5,11 +5,12 @@ import logging
 import os
 import re
 import yt_dlp
-import time
-from typing import Callable, List, Optional, Tuple, Dict, Any
+from pathlib import Path
+from typing import Callable, List, Optional, Tuple, Dict, Any, Iterator
 from urllib.parse import quote, urlparse, parse_qs
 
-import requests
+import httpx
+from ..core.http import NetworkManager
 from mutagen.id3 import (
     ID3, ID3NoHeaderError,
     TIT2, TPE1, TALB, TPE2, TDRC, TRCK, TPOS, APIC, TPUB, WXXX, COMM,
@@ -49,7 +50,7 @@ class YouTubeProvider(BaseProvider):
 
     def __init__(self, timeout_s: int = 120) -> None:
         super().__init__(timeout_s=timeout_s)
-        self._session = requests.Session()
+        self._session = NetworkManager.get_sync_client()
         self._session.headers.update({"User-Agent": _DEFAULT_UA})
         # Cache per evitare richieste multiple a Odesli/Deezer per la stessa traccia
         self._enrichment_cache: Dict[str, Dict] = {}
@@ -135,7 +136,8 @@ class YouTubeProvider(BaseProvider):
         try:
             header = data.get("header", {}).get("musicDetailHeaderRenderer", {})
             title = header.get("title", {}).get("runs", [{}])[0].get("text", title)
-        except: pass
+        except (KeyError, IndexError, TypeError, AttributeError): 
+            pass
 
         tracks = []
         self._parse_tracks_from_data(data, tracks)
@@ -186,32 +188,36 @@ class YouTubeProvider(BaseProvider):
                     external_url=f"https://music.youtube.com/watch?v={v_id}",
                     extra_info={"provider": "youtube"}
                 ))
-            except:
+            except (KeyError, IndexError, TypeError, AttributeError) as e:
+                logger.debug(f"[youtube] Errore nel parsing della traccia: {e}")
                 continue
 
         return len(track_list) - count_before
 
     def _get_continuation_token(self, data: Dict) -> Optional[str]:
         tokens = self._find_key_recursive(data, "continuation")
-        return tokens[0] if tokens else None
+        return next(tokens, None)
 
     def _fetch_continuation(self, token: str) -> Optional[Dict]:
         url = f"https://music.youtube.com/youtubei/v1/browse?alt=json&ctoken={quote(token)}&continuation={quote(token)}"
         try:
             resp = self._session.post(url, json={"context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}}}, timeout=10)
-            return resp.json() if resp.ok else None
-        except: return None
+            return resp.json() if resp.is_success else None
+        except httpx.RequestError as e: 
+            logger.debug(f"[youtube] Errore di rete in _fetch_continuation: {e}")
+            return None
 
-    def _find_key_recursive(self, data: Any, key: str) -> List[Any]:
-        results = []
+    def _find_key_recursive(self, data: Any, key: str) -> Iterator[Any]:
+        """Generatore per cercare chiavi ricorsivamente nei dizionari e nelle liste."""
         if isinstance(data, dict):
             for k, v in data.items():
-                if k == key: results.append(v)
-                else: results.extend(self._find_key_recursive(v, key))
+                if k == key: 
+                    yield v
+                else: 
+                    yield from self._find_key_recursive(v, key)
         elif isinstance(data, list):
             for item in data:
-                results.extend(self._find_key_recursive(item, key))
-        return results
+                yield from self._find_key_recursive(item, key)
 
     # ------------------------------------------------------------------
     # Odesli & Deezer Metadata Enrichment (Portato da JS)
@@ -252,6 +258,8 @@ class YouTubeProvider(BaseProvider):
                                 if dz_data.get("isrc"):
                                     metadata.isrc = dz_data["isrc"]
                                     logger.info(f"[youtube] ISRC recuperato via fallback Deezer API: {metadata.isrc}")
+                        except httpx.RequestError as e:
+                            logger.warning(f"[youtube] Deezer API fallback errore di rete: {e}")
                         except Exception as e:
                             logger.warning(f"[youtube] Deezer API fallback fallito: {e}")
 
@@ -260,11 +268,12 @@ class YouTubeProvider(BaseProvider):
                 if yt_info and yt_info.get("url"):
                     return yt_info["url"]
 
+        except httpx.RequestError as exc:
+            logger.warning(f"[youtube] Odesli API enrichTrack errore di rete: {exc}")
         except Exception as exc:
             logger.warning(f"[youtube] Odesli API enrichTrack failed: {exc}")
         
         return None
-
 
     def _get_youtube_url(self, metadata: TrackMetadata) -> str:
         if metadata.external_url:
@@ -304,12 +313,14 @@ class YouTubeProvider(BaseProvider):
             resp.raise_for_status()
 
             data = resp.json()
-            video_ids = self._find_key_recursive(data, "videoId")
+            first_vid = next(self._find_key_recursive(data, "videoId"), None)
 
-            if video_ids:
-                video_url = f"https://music.youtube.com/watch?v={video_ids[0]}"
+            if first_vid:
+                video_url = f"https://music.youtube.com/watch?v={first_vid}"
                 logger.info(f"[youtube] Direct search resolved: {video_url}")
                 return video_url
+        except httpx.RequestError as exc:
+            logger.warning(f"[youtube] Direct search errore di rete: {exc}")
         except Exception as exc:
             logger.warning(f"[youtube] Direct search failed: {exc}")
 
@@ -337,15 +348,16 @@ class YouTubeProvider(BaseProvider):
             def warning(self, msg): pass
             def error(self, msg): pass
 
-        # Allineamento dei client (Android VR, iOS, mweb) come bypass implementati in index.js
-        # yt-dlp utilizza questi alias nella sintassi moderna per aggirare i blocchi 403 / PO token
+        # Costruisce il template output in maniera sicura cross-platform
+        out_tmpl = str(Path(dest_path).with_suffix('.%(ext)s'))
+
         ydl_opts = {
             'format': 'bestaudio/best',
             'quiet': True,
             'no_warnings': True,
             'noprogress': True,
             'logger': MuteLogger(),
-            'outtmpl': dest_path.rsplit('.', 1)[0] + '.%(ext)s',
+            'outtmpl': out_tmpl,
             'extractor_args': {
                 'youtube': [
                     'player_client=android,mweb,ios',  # Catena di client come definito nel JS
@@ -423,6 +435,9 @@ class YouTubeProvider(BaseProvider):
                     if dl_url:
                         logger.info(f"[youtube] Cobalt URL generato con successo da {api_url}")
                         return dl_url
+            except httpx.RequestError as exc:
+                logger.debug(f"[youtube] Errore di rete Cobalt su {base_url}: {exc}")
+                continue
             except Exception as exc:
                 logger.debug(f"[youtube] Fallimento Cobalt su {base_url}: {exc}")
                 continue
@@ -466,6 +481,8 @@ class YouTubeProvider(BaseProvider):
                 if dl_url and dl_url.startswith("http"):
                     logger.info("[youtube] YT1D URL generated successfully")
                     return dl_url
+        except httpx.RequestError as exc:
+            logger.warning(f"[youtube] yt1d fallback network error: {exc}")
         except Exception as exc:
             logger.warning(f"[youtube] yt1d fallback failed: {exc}")
         return None
@@ -529,7 +546,7 @@ class YouTubeProvider(BaseProvider):
                 extension=".m4a",
             )
             if self._file_exists(dest):
-                return DownloadResult.skipped(self.name, str(dest), fmt="m4a")
+                return DownloadResult.skipped_result(self.name, str(dest), fmt="m4a")
 
             is_native_yt = metadata.extra_info.get("provider") == "youtube"
             looks_like_yt_id = len(metadata.id) == 11 and not metadata.id.startswith("spotify:")
@@ -589,6 +606,12 @@ class YouTubeProvider(BaseProvider):
                         continue
 
             if not download_success:
+                # Pulizia di sicurezza nel caso i fallback falliscano definitivamente
+                if os.path.exists(str(dest)):
+                    try:
+                        os.remove(str(dest))
+                    except OSError:
+                        pass
                 return DownloadResult.fail(self.name, "All YouTube download sources failed (Direct, Cobalt, YT1D)")
 
             # Validazione del file finale

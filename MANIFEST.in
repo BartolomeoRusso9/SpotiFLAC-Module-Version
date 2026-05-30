@@ -1,2 +1,4 @@
-include SpotiFLAC/index.html
-recursive-include SpotiFLAC/assets *
+include frontend/index.html
+include frontend/app.js
+include frontend/styles.css
+recursive-include frontend/assets *

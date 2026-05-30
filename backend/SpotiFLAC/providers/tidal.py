@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote
 
-import requests
+import httpx
+from ..core.http import NetworkManager
 
 from .base import BaseProvider
 from ..core.console import (
@@ -97,9 +98,6 @@ import random as _random
 
 _api_cooldown_lock:     threading.Lock       = threading.Lock()
 _api_cooldown_until:    dict[str, float]     = {}   # url → epoch_s
-
-import re
-import unicodedata
 
 def _clean_title(value: str) -> str:
     """
@@ -259,7 +257,8 @@ def _save_tidal_api_list_state_locked(state: dict) -> None:
 
 
 def _fetch_tidal_api_urls_from_gist() -> list[str]:
-    resp = requests.get(_TIDAL_API_GIST_URL, timeout=10, headers={"User-Agent": _TIDAL_USER_AGENT})
+    client = NetworkManager.get_sync_client()
+    resp = client.get(_TIDAL_API_GIST_URL, timeout=10, headers={"User-Agent": _TIDAL_USER_AGENT})
     if resp.status_code != 200:
         raise RuntimeError(f"Tidal API gist returned status {resp.status_code}")
     try:
@@ -473,6 +472,8 @@ def _fetch_tidal_url_once(
 
     delay     = _RETRY_DELAY_S
     last_err: Exception = RuntimeError("no attempts made")
+    
+    client = NetworkManager.get_sync_client() # <-- AGGIUNTO
 
     for attempt in range(_MAX_RETRIES + 1):
         if attempt > 0:
@@ -494,7 +495,7 @@ def _fetch_tidal_url_once(
                 # Response: payload.data.data.attributes.uri  → raw MPD URL
                 # ----------------------------------------------------------------
                 if quality == "DOLBY_ATMOS":
-                    resp = requests.post(
+                    resp = client.post( 
                         api_cleaning,
                         json={"id": str(track_id), "endpoint": "manifests", "formats": ["EAC3_JOC"]},
                         headers=headers,
@@ -529,7 +530,7 @@ def _fetch_tidal_url_once(
                     # Fetch the MPD document and return it as base64 so the
                     # existing _download_from_manifest / parse_manifest path
                     # handles it transparently.
-                    mpd_resp = requests.get(
+                    mpd_resp = client.get( 
                         manifest_uri,
                         headers={
                             "Accept": "application/dash+xml,text/xml,application/xml;q=0.9,*/*;q=0.8",
@@ -544,7 +545,7 @@ def _fetch_tidal_url_once(
                 # ----------------------------------------------------------------
                 # All other qualities: POST {id, quality}
                 # ----------------------------------------------------------------
-                resp = requests.post(
+                resp = client.post( 
                     api_cleaning,
                     json={"id": str(track_id), "quality": quality},
                     headers=headers,
@@ -552,7 +553,7 @@ def _fetch_tidal_url_once(
                 )
             else:
                 url = f"{api_cleaning}/track/?id={track_id}&quality={quality}"
-                resp = requests.get(url, headers=headers, timeout=timeout_s)
+                resp = client.get(url, headers=headers, timeout=timeout_s) 
 
             if resp.status_code == 429:
                 # Legge Retry-After dall'header se presente; altrimenti usa il default.
@@ -594,7 +595,7 @@ def _fetch_tidal_url_once(
 
             last_err = RuntimeError("no download URL or manifest in response")
 
-        except (requests.Timeout, requests.ConnectionError) as exc:
+        except (httpx.TimeoutException, httpx.ConnectError) as exc: 
             last_err = exc
             continue
         except Exception as exc:
@@ -602,7 +603,6 @@ def _fetch_tidal_url_once(
             break
 
     raise last_err
-
 
 def _fetch_tidal_url_parallel(
         apis:      list[str],
@@ -667,7 +667,7 @@ class TidalProvider(BaseProvider):
             custom_api_url:  str | None       = None,   # ← nuovo parametro
     ) -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
-        self._session = self._http._session
+        self._session = NetworkManager.get_sync_client()
         self._session.headers.update({"User-Agent": self._random_ua()})
 
         try:
@@ -712,7 +712,8 @@ class TidalProvider(BaseProvider):
             isrc:        str = "",
             duration_ms: int = 0,
     ) -> str | None:
-        clean_track  = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", track_name).strip()
+        # Usa la funzione globale _clean_title per un matching coerente con JS
+        clean_track  = _clean_title(track_name)
         clean_artist = artist_name.split(",")[0].strip()
         query        = quote(f"{clean_artist} {clean_track}")
 
@@ -726,14 +727,13 @@ class TidalProvider(BaseProvider):
                 try:
                     resp = self._session.get(endpoint, timeout=7)
                     if resp.status_code == 429:
-                        # Rispetta Retry-After se presente, poi prova la prossima API
                         wait_s = float(resp.headers.get("Retry-After", _RATE_LIMIT_DEFAULT))
                         _mark_api_rate_limited(base, wait_s)
                         logger.debug("[tidal] search rate-limited su %s, salto (cooldown %.0fs)", base, wait_s)
-                        break   # inutile provare altri endpoint della stessa API
+                        break
                     if resp.status_code != 200:
                         continue
-                    t_id = self._extract_best_track_id(resp.json(), clean_track, clean_artist, isrc, duration_ms)
+                    t_id = self._extract_best_track_id(resp.json(), track_name, clean_artist, isrc, duration_ms)
                     if t_id:
                         _clear_api_rate_limit(base)
                         return f"https://listen.tidal.com/track/{t_id}"
@@ -764,20 +764,21 @@ class TidalProvider(BaseProvider):
 
         best_id = None
         best_score = 0.0
+        
+        # Pulizia del titolo richiesto per lo scoring
+        clean_req_title = _clean_title(track_name)
 
         for item in _iter_items(data):
             if not isinstance(item, dict): continue
             t_id = str(item.get("id") or item.get("track_id") or "")
             if not t_id: continue
 
-            # Match esatto ISRC (vince sempre)
             if isrc and item.get("isrc", "").upper() == isrc.upper():
                 return t_id
 
-            # Fallback avanzato tramite scoring testuale + durata (dal JS)
             t_title = item.get("title", "")
+            t_title_clean = _clean_title(t_title)
 
-            # Estrazione artista (gestisce vari formati API di Tidal)
             t_artist = ""
             artists_list = item.get("artists", [])
             if artists_list and isinstance(artists_list, list):
@@ -788,10 +789,10 @@ class TidalProvider(BaseProvider):
             t_dur = item.get("duration", 0) * 1000
 
             score = 0.0
-            score += difflib.SequenceMatcher(None, track_name.lower(), t_title.lower()).ratio() * 60
-            score += difflib.SequenceMatcher(None, artist_name.split(',')[0].lower(), t_artist.lower()).ratio() * 40
+            # Confronto usando le stringhe pulite
+            score += difflib.SequenceMatcher(None, clean_req_title, t_title_clean).ratio() * 60
+            score += difflib.SequenceMatcher(None, artist_name.lower(), t_artist.lower()).ratio() * 40
 
-            # Bonus se la durata combacia (+/- 10 secondi)
             if duration_ms > 0 and t_dur > 0:
                 if abs(duration_ms - t_dur) <= 10000:
                     score += 20
@@ -800,7 +801,6 @@ class TidalProvider(BaseProvider):
                 best_score = score
                 best_id = t_id
 
-        # Restituiamo solo se il punteggio è decente (evita di scaricare cover a caso)
         if best_id and best_score > 60:
             return best_id
 
@@ -863,35 +863,41 @@ class TidalProvider(BaseProvider):
     # File download
     # ------------------------------------------------------------------
 
-    def _download_file(self, url_or_manifest: str, dest: Path) -> int:
+    def _download_file(self, url_or_manifest: str, dest: Path, quality: str) -> tuple[int, Path]:
         """
         Route the download process based on whether the source is a manifest or direct URL.
-        Returns the sample rate (int) if extracted, or 0 by default.
+        Returns the (sample rate, final_dest_path).
         """
         if url_or_manifest.startswith("MANIFEST:"):
-            return self._download_from_manifest(url_or_manifest.removeprefix("MANIFEST:"), dest)
+            return self._download_from_manifest(url_or_manifest.removeprefix("MANIFEST:"), dest, quality)
         else:
-            self._http.stream_to_file(url_or_manifest, str(dest), self._progress_cb)
-            return 0
+            # Per url diretti non DASH, scarica e impacchetta correttamente
+            tmp = dest.with_suffix(".tmp")
+            self._http.stream_to_file(url_or_manifest, str(tmp), self._progress_cb)
+            final_dest = self._mux_audio(tmp, dest, quality)
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+            return 0, final_dest
 
-    def _download_from_manifest(self, manifest_b64: str, dest: Path) -> int:
+    def _download_from_manifest(self, manifest_b64: str, dest: Path, quality: str) -> tuple[int, Path]:
         """
-        Download tracks from a manifest and return the extracted sample rate.
-        Returns 0 if the sample rate could not be determined.
+        Download tracks from a manifest, mux them based on quality, and return (sample_rate, final_dest).
         """
         result = parse_manifest(manifest_b64)
         
-        if result.direct_url and "flac" in result.mime_type.lower():
-            self._http.stream_to_file(result.direct_url, str(dest), self._progress_cb)
-            return result.sample_rate
-
-        tmp = dest.with_suffix(".m4a.tmp")
+        tmp = dest.with_suffix(".tmp")
+        final_dest = dest
         try:
             if result.direct_url:
                 self._http.stream_to_file(result.direct_url, str(tmp), self._progress_cb)
             else:
                 self._download_segments(result.init_url, result.media_urls, tmp)
-            self._ffmpeg_to_flac(tmp, dest)
+            
+            # Delega il muxing: converte in FLAC solo se la traccia è lossless
+            final_dest = self._mux_audio(tmp, dest, quality)
         finally:
             if tmp.exists():
                 try:
@@ -899,7 +905,7 @@ class TidalProvider(BaseProvider):
                 except OSError:
                     pass
         
-        return result.sample_rate
+        return result.sample_rate, final_dest
 
     def _download_segments(self, init_url: str, media_urls: list[str], dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -941,24 +947,43 @@ class TidalProvider(BaseProvider):
                             pass
 
     @staticmethod
-    def _ffmpeg_to_flac(src: Path, dst: Path) -> None:
+    def _mux_audio(src: Path, dst: Path, quality: str) -> Path:
+        """
+        Usa FFmpeg per impacchettare l'audio. 
+        Se la qualità è lossy o Atmos, usa -c:a copy e cambia estensione in .m4a 
+        per non distruggere i metadati spaziali. Altrimenti converte in FLAC.
+        """
         si = None
         if os.name == "nt":
             si = subprocess.STARTUPINFO()
             si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
+        quality_norm = _normalize_quality(quality)
+        # Identifica se la traccia non deve essere riconvertita in FLAC
+        is_lossy = quality_norm in ("DOLBY_ATMOS", "HIGH", "LOW")
+
+        final_dst = dst.with_suffix(".m4a") if is_lossy else dst.with_suffix(".flac")
+
+        cmd = ["ffmpeg", "-y", "-i", str(src), "-vn"]
+        if is_lossy:
+            cmd.extend(["-c:a", "copy"])
+        else:
+            cmd.extend(["-c:a", "flac"])
+        
+        cmd.append(str(final_dst))
+
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(src), "-vn", "-c:a", "flac", str(dst)],
-            capture_output=True, text=True, startupinfo=si,
+            cmd, capture_output=True, text=True, startupinfo=si,
         )
         if result.returncode != 0:
-            m4a = dst.with_suffix(".m4a")
-            src.rename(m4a)
+            failed_file = final_dst.with_suffix(".failed")
+            src.rename(failed_file)
             raise SpotiflacError(
                 ErrorKind.FILE_IO,
-                f"ffmpeg failed (M4A saved as {m4a.name}): {result.stderr}",
+                f"ffmpeg failed (Stream saved as {failed_file.name}): {result.stderr}",
                 "tidal",
             )
+        return final_dst
 
     # ------------------------------------------------------------------
     # Public download interface
@@ -999,23 +1024,30 @@ class TidalProvider(BaseProvider):
                 metadata, output_dir, filename_format,
                 position, include_track_num, use_album_track_num, first_artist_only,
             )
-            if self._file_exists(dest):
-                return DownloadResult.skipped(self.name, str(dest))
+            if self._file_exists(dest) or self._file_exists(dest.with_suffix(".m4a")):
+                existing_path = dest if self._file_exists(dest) else dest.with_suffix(".m4a")
+                return DownloadResult.skipped_result(self.name, str(existing_path))
 
-            dl_url = (
-                self._get_download_url_with_fallback(track_id, quality)
-                if allow_fallback
-                else self._get_download_url(track_id, quality)
-            )
+            actual_quality = quality
+            try:
+                dl_url = (
+                    self._get_download_url_with_fallback(track_id, quality)
+                    if allow_fallback
+                    else self._get_download_url(track_id, quality)
+                )
+            except Exception as e:
+                raise e # Il fallback è già stato loggato internamente
 
-            # Capture the sample rate from the download process
-            sample_rate = self._download_file(dl_url, dest)
+            # Riceviamo il percorso effettivo (dest finale) in caso sia stato salvato in .m4a
+            sample_rate, final_dest = self._download_file(dl_url, dest, quality)
             
             if sample_rate > 0:
                 logger.info("[tidal] Extracted true sample rate from manifest: %d Hz", sample_rate)
 
             expected_s = metadata.duration_ms // 1000
-            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
+            
+            # ATTENZIONE: Usiamo final_dest per la validazione da qui in poi!
+            valid, err_msg = validate_downloaded_track(str(final_dest), expected_s)
             if not valid:
                 raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
 
@@ -1031,19 +1063,6 @@ class TidalProvider(BaseProvider):
 
             _print_mb_summary(mb_tags)
 
-            expected_s = metadata.duration_ms // 1000
-            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
-            if not valid:
-                raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
-
-            mb_tags: dict[str, str] = {}
-            res: dict = {}
-            if mb_fetcher:
-                res = mb_fetcher.future.result()
-
-            mb_tags = mb_result_to_tags(res)
-            _print_mb_summary(mb_tags)
-
             opts = EmbedOptions(
                 first_artist_only       = first_artist_only,
                 cover_url               = metadata.cover_url,
@@ -1055,15 +1074,17 @@ class TidalProvider(BaseProvider):
                 enrich_qobuz_token      = self._qobuz_token or "",
                 is_album                = is_album,
             )
-            embed_metadata(str(dest), metadata, opts, session=self._session)
+            
+            # Embed metadata usando la path aggiornata
+            embed_metadata(str(final_dest), metadata, opts, session=self._session)
+            return DownloadResult.ok(self.name, str(final_dest))
 
-            return DownloadResult.ok(self.name, str(dest))
         except SpotiflacError as exc:
             logger.error("[tidal] %s", exc)
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
             logger.exception("[tidal] unexpected error")
-            return DownloadResult.fail(self.name, f"unexpected: {exc}")
+            return DownloadResult.fail(self.name, str(exc))
 
     # ------------------------------------------------------------------
     # Utilities

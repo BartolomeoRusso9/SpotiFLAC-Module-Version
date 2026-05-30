@@ -7,10 +7,10 @@ import logging
 import os
 import re
 import json
+import httpx
 import subprocess
 from typing import Callable
-
-import requests
+from ..core.http import NetworkManager
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import PictureType
@@ -110,7 +110,7 @@ class AmazonProvider(BaseProvider):
 
     def __init__(self, timeout_s: int = 120) -> None:
         super().__init__(timeout_s=timeout_s)
-        self._session = requests.Session()
+        self._session = NetworkManager.get_sync_client()
         self._session.headers.update({"User-Agent": _DEFAULT_UA})
 
     def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
@@ -123,7 +123,7 @@ class AmazonProvider(BaseProvider):
             headers: dict | None = None,
             params: dict | None = None,
             payload: dict | None = None
-    ) -> requests.Response:
+    ):
         config = API_ENDPOINTS.get(provider_key)
         if not config:
             raise ValueError(f"Unknown provider: {provider_key}")
@@ -323,7 +323,7 @@ class AmazonProvider(BaseProvider):
                     time.sleep(delay)
                     continue
                 break
-            except requests.RequestException as exc:
+            except (httpx.RequestError, httpx.ConnectError) as exc:
                 logger.warning("[amazon] Zarz API connection error: %s", exc)
                 break
 
@@ -689,7 +689,7 @@ class AmazonProvider(BaseProvider):
                 position, include_track_num, use_album_track_num, first_artist_only,
             )
             if self._file_exists(dest):
-                return DownloadResult.skipped(self.name, str(dest))
+                return DownloadResult.skipped_result(self.name, str(dest))
 
             from ..core.musicbrainz import AsyncMBFetch
             mb_fetcher = AsyncMBFetch(metadata.isrc) if getattr(metadata, "isrc", None) else None
