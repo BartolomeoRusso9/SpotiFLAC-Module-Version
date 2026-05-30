@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 
-import requests
+import httpx  
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .base import BaseProvider
@@ -25,7 +25,7 @@ from ..core.errors import (
     TrackNotFoundError, NetworkError,
     ParseError, SpotiflacError, ErrorKind,
 )
-from ..core.http import RetryConfig
+from ..core.http import RetryConfig, NetworkManager  
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.provider_stats import record_success, record_failure, prioritize_providers
@@ -222,7 +222,7 @@ def _save_cached_credentials(creds: QobuzCredentials) -> None:
         logger.warning("Failed to write Qobuz credentials cache: %s", exc)
 
 
-def _scrape_credentials(session: requests.Session) -> QobuzCredentials:
+def _scrape_credentials(session: httpx.Client) -> QobuzCredentials: 
     headers = {"User-Agent": _DEFAULT_UA}
     resp    = session.get(f"{_OPEN_URL}1", headers=headers, timeout=15)
     resp.raise_for_status()
@@ -310,7 +310,7 @@ def _backoff_delay(attempt: int, server_hint_s: float | None = None) -> float:
     return max(0.1, base + jitter)
 
 
-def _parse_retry_after(resp: requests.Response) -> float | None:
+def _parse_retry_after(resp: httpx.Response) -> float | None: 
     """Reads the Retry-After header (seconds or HTTP-date). Returns None if missing/malformed."""
     raw = resp.headers.get("Retry-After", "").strip()
     if not raw:
@@ -332,7 +332,8 @@ def _parse_retry_after(resp: requests.Response) -> float | None:
 def _get_gdstudio_ts9(host: str) -> str:
     """Retrieves the 9-digit timestamp from the GDStudio server."""
     try:
-        r = requests.get(f"https://{host}/time", timeout=5)
+        client = NetworkManager.get_sync_client() 
+        r = client.get(f"https://{host}/time", timeout=5)
         if r.status_code == 200:
             ts = r.text.strip()
             if len(ts) >= 9:
@@ -371,7 +372,7 @@ def _fetch_stream_url_once(
     last_err: Exception = RuntimeError("no attempts made")
 
     # Use a local session to reuse connections if redirects occur
-    with requests.Session() as session:
+    with httpx.Client() as session: 
         for attempt in range(max_retries + 1):
             if attempt > 0:
                 delay = _backoff_delay(attempt)
@@ -413,7 +414,7 @@ def _fetch_stream_url_once(
                     url = f"{api_base}?ID={track_id}&quality={wjhe_q}&format={wjhe_f}"
                     
                     # WJHE might perform a direct redirect (301/302/307)
-                    resp = session.get(url, headers=headers, timeout=timeout_s, allow_redirects=False)
+                    resp = session.get(url, headers=headers, timeout=timeout_s, follow_redirects=False) 
                     
                     if resp.status_code in (301, 302, 303, 307, 308):
                         loc = resp.headers.get("Location")
@@ -489,7 +490,7 @@ def _fetch_stream_url_once(
 
                 last_err = RuntimeError("no download URL in response")
 
-            except (requests.Timeout, requests.ConnectionError) as exc:
+            except (httpx.TimeoutException, httpx.ConnectError) as exc: 
                 last_err = exc
                 continue
             except RuntimeError:
@@ -560,7 +561,7 @@ class QobuzProvider(BaseProvider):
             retry     = RetryConfig(max_attempts=2),
             headers   = {"User-Agent": _DEFAULT_UA, "Accept": "application/json"},
         )
-        self._session    = self._http._session
+        self._session    = NetworkManager.get_sync_client() 
         self._creds:      QobuzCredentials | None = None
         self._creds_lock = threading.Lock()
         self._qobuz_token = qobuz_token or os.environ.get("QOBUZ_AUTH_TOKEN")
@@ -616,7 +617,7 @@ class QobuzProvider(BaseProvider):
             force_refresh:      bool = False,
             use_fallback_token: bool = False,
             _depth:             int  = 0,
-    ) -> requests.Response:
+    ) -> httpx.Response: 
         if creds is None:
             creds = self._get_credentials(force_refresh=force_refresh)
 
@@ -873,7 +874,7 @@ class QobuzProvider(BaseProvider):
             return DownloadResult.fail(self.name, f"unexpected: {exc}")
 
     @staticmethod
-    def _raise_api_error(resp: requests.Response, endpoint: str) -> None:
+    def _raise_api_error(resp: httpx.Response, endpoint: str) -> None: 
         try:
             msg = resp.json().get("message", f"HTTP {resp.status_code}")
         except Exception:
