@@ -1229,12 +1229,44 @@ class SpotiFLAC_API:
 def run_gui():
     api = SpotiFLAC_API()
 
-    base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    html_path = os.path.join(base_path, 'frontend', 'index.html')
+    # Try several candidate locations for the frontend files to be robust
+    candidates = []
 
-    if not os.path.exists(html_path):
+    # 1) frontend next to the installed module file (site-packages/frontend)
+    site_packages_frontend = os.path.join(os.path.dirname(__file__), 'frontend', 'index.html')
+    candidates.append(site_packages_frontend)
+
+    # 2) frontend inside the SpotiFLAC package (if present)
+    try:
+        import SpotiFLAC as _sp_pkg
+        pkg_frontend = os.path.join(os.path.dirname(_sp_pkg.__file__), 'frontend', 'index.html')
+        candidates.append(pkg_frontend)
+    except Exception:
+        pass
+
+    # 3) original heuristic (parent of site-packages, e.g. lib/pythonX.Y/frontend)
+    original_frontend = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend', 'index.html'))
+    candidates.append(original_frontend)
+
+    # 4) installation data dir (some installers place data files under the install prefix)
+    try:
+        import sysconfig
+        data_dir = sysconfig.get_paths().get('data')
+        if data_dir:
+            candidates.append(os.path.join(data_dir, 'frontend', 'index.html'))
+    except Exception:
+        pass
+
+    # Pick the first existing candidate
+    html_path = None
+    for p in candidates:
+        if os.path.exists(p):
+            html_path = p
+            break
+
+    if not html_path:
         raise FileNotFoundError(
-            f"index.html not found at expected location: {html_path}"
+            f"index.html not found. Tried: {candidates}"
         )
     file_url = Path(html_path).as_uri()
     window = webview.create_window(

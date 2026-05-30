@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "0.7.5"
+version = "0.7.6"
 description = "Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -58,6 +58,38 @@ spotiflac = "launcher:main"
 py-modules = ["launcher", "app"]
 packages = { find = { where = ["backend"], include = ["SpotiFLAC*"] } }
 include-package-data = true
+
+[tool.setuptools.data-files]
+"frontend" = [
+    "frontend/index.html",
+    "frontend/app.js",
+    "frontend/styles.css",
+]
+
+"frontend/assets/icons" = [
+    "frontend/assets/icons/am.png",
+    "frontend/assets/icons/amzn.png",
+    "frontend/assets/icons/download.svg",
+    "frontend/assets/icons/dzr.png",
+    "frontend/assets/icons/logo.svg",
+    "frontend/assets/icons/lrclib.png",
+    "frontend/assets/icons/musicbrainz_d.png",
+    "frontend/assets/icons/musicbrainz_l.png",
+    "frontend/assets/icons/musixmatch.svg",
+    "frontend/assets/icons/next.svg",
+    "frontend/assets/icons/pandora.svg",
+    "frontend/assets/icons/qbz.png",
+    "frontend/assets/icons/songlink_d.png",
+    "frontend/assets/icons/songlink_l.png",
+    "frontend/assets/icons/songstats.png",
+    "frontend/assets/icons/soundcloud.svg",
+    "frontend/assets/icons/spotify.svg",
+    "frontend/assets/icons/spotubedl.svg",
+    "frontend/assets/icons/tidal_d.png",
+    "frontend/assets/icons/tidal_l.png",
+    "frontend/assets/icons/xbatchdl.svg",
+    "frontend/assets/icons/youtube.svg",
+]
 
 [tool.setuptools.package-dir]
 "" = "backend"
