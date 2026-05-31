@@ -412,7 +412,12 @@ class SpotiFLAC_API:
 
     def WindowToggleMaximise(self):
         if self._window:
-            self._window.toggle_fullscreen()
+            if getattr(self, '_is_maximized', False):
+                self._window.restore()
+                self._is_maximized = False
+            else:
+                self._window.maximize()
+                self._is_maximized = True
 
     def Quit(self):
         if self._window:
@@ -1271,7 +1276,8 @@ def run_gui():
     file_url = Path(html_path).as_uri()
     window = webview.create_window(
         'SpotiFLAC', url=file_url, js_api=api,
-        width=1300, height=850, min_size=(650, 580),
+        width=1300, height=850, 
+        min_size=(1000, 800),
         frameless=True, easy_drag=False, background_color='#0a0a0a'
     )
     api.set_window(window)

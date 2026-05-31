@@ -281,6 +281,18 @@ def _map_musicdl_quality(quality: str) -> str:
     return "cd"
 
 
+def _map_local_api_quality(quality: str) -> str:
+    """Mappa la qualità numerica di SpotiFLAC a quella supportata dall'API locale."""
+    if quality in ("27", "DOLBY_ATMOS", "HI_RES_LOSSLESS", "HI_RES"):
+        return "hi96"
+    elif quality == "7":
+        return "hi24"
+    elif quality == "5":
+        return "mp3"
+    # Qualità 6 (Lossless) o fallback default
+    return "flac"
+
+
 # ---------------------------------------------------------------------------
 # Fetch logic for mixed APIs (GET / POST)
 # ---------------------------------------------------------------------------
@@ -357,6 +369,11 @@ def _fetch_stream_url_once(
         timeout_s: int = _API_TIMEOUT_S,
 ) -> str:
     api_cleaning = api_base.rstrip('/')
+    
+    # Rilevamento API locale configurata dall'utente
+    local_api_url = os.environ.get("QOBUZ_LOCAL_API_URL", "http://localhost:8000").rstrip('/')
+    is_local_api = (api_cleaning == local_api_url) and bool(local_api_url)
+    
     is_zarz = "zarz.moe" in api_cleaning
     is_musicdl = "musicdl.me" in api_cleaning
     is_gdstudio = "gdstudio" in api_cleaning
@@ -371,7 +388,6 @@ def _fetch_stream_url_once(
     }
     last_err: Exception = RuntimeError("no attempts made")
 
-    # Use a local session to reuse connections if redirects occur
     with httpx.Client() as session: 
         for attempt in range(max_retries + 1):
             if attempt > 0:
@@ -383,7 +399,12 @@ def _fetch_stream_url_once(
                 time.sleep(delay)
 
             try:
-                if is_gdstudio:
+                if is_local_api:
+                    local_q = _map_local_api_quality(quality)
+                    url = f"{api_cleaning}/download-url/{track_id}?quality={local_q}"
+                    resp = session.get(url, headers=headers, timeout=timeout_s)
+
+                elif is_gdstudio:
                     host = urlparse(api_base).netloc
                     ts9 = _get_gdstudio_ts9(host)
                     br = "999" if quality in ("27", "7") else "740" if quality in ("", "6") else "320"
@@ -409,11 +430,9 @@ def _fetch_stream_url_once(
                     q_map = {"27": 2000, "7": 2000, "6": 1000, "": 1000}
                     wjhe_q = q_map.get(quality, 1000)
                     
-                    # Strictly enforce FLAC format
                     wjhe_f = "flac" 
                     url = f"{api_base}?ID={track_id}&quality={wjhe_q}&format={wjhe_f}"
                     
-                    # WJHE might perform a direct redirect (301/302/307)
                     resp = session.get(url, headers=headers, timeout=timeout_s, follow_redirects=False) 
                     
                     if resp.status_code in (301, 302, 303, 307, 308):
@@ -433,7 +452,6 @@ def _fetch_stream_url_once(
                     }
                     
                     post_headers = {"User-Agent": _ZARZ_USER_AGENT if is_zarz else _DEFAULT_UA}
-                    # Inject X-Debug-Key for MusicDL
                     if is_musicdl:
                         post_headers["X-Debug-Key"] = _get_qobuz_musicdl_key()
                         post_headers["Content-Type"] = "application/json"
@@ -475,7 +493,6 @@ def _fetch_stream_url_once(
                     last_err = RuntimeError("invalid JSON in response")
                     continue
 
-                # Standard fallback error handling
                 if isinstance(data.get("error"), str) and data["error"].strip():
                     raise RuntimeError(data["error"].strip())
                 if isinstance(data.get("detail"), str) and data["detail"].strip():
@@ -693,17 +710,14 @@ class QobuzProvider(BaseProvider):
 
             title_lower = title.lower()
 
-            # Loop through results and assign a score (port of scoreTrackCandidate logic)
             for item in items:
                 t_title = item.get("title", "").lower()
 
-                # If there is an exact or near-exact match
                 if title_lower == t_title or title_lower in t_title or t_title in title_lower:
                     score = 900
                 else:
                     score = difflib.SequenceMatcher(None, title_lower, t_title).ratio() * 100
 
-                # Prioritize Hi-Res tracks (like JS does)
                 if item.get("maximum_bit_depth", 0) >= 24:
                     score += 10
 
@@ -723,14 +737,20 @@ class QobuzProvider(BaseProvider):
             
         chain = _QUALITY_FALLBACK.get(quality, [quality])
         
-        # Retrieve all APIs, including GDStudio and WJHE added previously
         try:
             all_apis = list(_STREAM_APIS) + list(_POST_APIS) + list(_GDSTUDIO_APIS) + list(_WJHE_APIS)
         except NameError:
             all_apis = list(_STREAM_APIS) + list(_POST_APIS)
             
         ordered_apis = prioritize_providers("qobuz", all_apis)
-        # Remove endpoints that already returned a preview
+
+        # Iniezione dell'API Locale Custom come prima priorità assoluta
+        local_api_url = os.environ.get("QOBUZ_LOCAL_API_URL", "http://localhost:8000").rstrip('/')
+        if local_api_url:
+            if local_api_url in ordered_apis:
+                ordered_apis.remove(local_api_url)
+            ordered_apis.insert(0, local_api_url)
+
         ordered_apis = [api for api in ordered_apis if api not in exclude_apis]
         
         if not allow_fallback:
@@ -804,6 +824,46 @@ class QobuzProvider(BaseProvider):
             track_id = track.get("id")
             if not track_id:
                 raise TrackNotFoundError(self.name, "Missing track ID in Qobuz response")
+            # ==========================================================
+            # INIZIO: INTEGRAZIONE METADATI DIRETTAMENTE DA QOBUZ
+            # ==========================================================
+            album_data = track.get("album", {})
+            
+            # 1. Copertina Originale ad Altissima Risoluzione (sovrascrive quella compressa di Spotify)
+            images = album_data.get("image", {})
+            qobuz_cover = images.get("large") or images.get("small")
+            if qobuz_cover:
+                # Trasformiamo l'URL per scaricare l'immagine originale (senza resize)
+                metadata.cover_url = qobuz_cover.replace("_600.jpg", "_max.jpg").replace("_230.jpg", "_max.jpg")
+                
+            # 2. Date, Copyright e Compositore
+            metadata.release_date = track.get("release_date_original") or album_data.get("release_date_original") or metadata.release_date
+            metadata.copyright = track.get("copyright") or album_data.get("copyright") or metadata.copyright
+            
+            composer_obj = track.get("composer")
+            if composer_obj and composer_obj.get("name"):
+                metadata.composer = composer_obj["name"]
+                
+            # 3. Tag Extra (Genere, Etichetta Discografica, UPC/Barcode)
+            qobuz_extra_tags = {}
+            if album_data.get("genre") and album_data["genre"].get("name"):
+                qobuz_extra_tags["GENRE"] = album_data["genre"]["name"]
+                
+            if album_data.get("label") and album_data["label"].get("name"):
+                qobuz_extra_tags["LABEL"] = album_data["label"]["name"]
+                qobuz_extra_tags["ORGANIZATION"] = album_data["label"]["name"]
+                
+            if album_data.get("upc"):
+                qobuz_extra_tags["BARCODE"] = album_data["upc"]
+                
+            if track.get("isrc"):
+                metadata.isrc = track["isrc"]
+                
+            if track.get("track_number"):
+                metadata.track_number = track["track_number"]
+                
+            if album_data.get("tracks_count"):
+                metadata.total_tracks = album_data["tracks_count"]
             dest = self._build_output_path(
                 metadata, output_dir, filename_format,
                 position, include_track_num, use_album_track_num, first_artist_only,
@@ -832,16 +892,15 @@ class QobuzProvider(BaseProvider):
 
                 self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
 
-                # Verify if the downloaded file is a preview
                 valid, err = validate_downloaded_track(str(dest), expected_s)
                 if not valid:
                     logger.warning("[qobuz] API %s returned invalid file: %s. Blacklisting endpoint and retrying...", winner_api, err)
-                    record_failure("qobuz", winner_api)  # Penalize this API in priority stats
+                    record_failure("qobuz", winner_api)  
                     excluded_apis.add(winner_api)
                     last_err = err
-                    continue # Relaunch the loop skipping the newly blacklisted API
+                    continue 
                 
-                break # File passed validation, exit the loop
+                break 
 
             mb_tags: dict[str, str] = {}
             res: dict = {}
@@ -849,6 +908,7 @@ class QobuzProvider(BaseProvider):
                 res = mb_fetcher.future.result()
 
             mb_tags = mb_result_to_tags(res)
+            mb_tags.update(qobuz_extra_tags)
             _print_mb_summary(mb_tags)
 
             opts = EmbedOptions(
