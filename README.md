@@ -424,7 +424,7 @@ SpotiFLAC(
 
 SpotiFLAC can use an optional self-hosted Qobuz stream API for improved reliability and reduced rate limits. If you do not provide a local API URL, Qobuz requests are attempted anonymously.
 
-**How to deploy your own instance:** [github.com/BartolomeoRusso9/qobuz-api](https://github.com/BartolomeoRusso9/qobuz-api)
+> **How to deploy your own instance:** [github.com/BartolomeoRusso9/qobuz-api](https://github.com/BartolomeoRusso9/qobuz-api)
 
 ### How to Apply Qobuz Local API URL in SpotiFLAC
 
