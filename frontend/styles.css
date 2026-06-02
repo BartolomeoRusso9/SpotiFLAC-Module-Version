@@ -109,9 +109,19 @@
       transition: filter .15s, transform .15s; flex-shrink: 0;
     }
     .dot:hover { filter: brightness(1.15); transform: scale(1.05); }
+    
+    /* ── macOS style (default) ── */
     .dot.c { background: #ff5f57; }
     .dot.m { background: #febc2e; }
     .dot.x { background: #28c840; }
+    
+    /* ── Windows style ── */
+    body.windows-style .dot {
+      width: 14px; height: 14px; border-radius: 2px;
+    }
+    body.windows-style .dot.c { background: #e81828; }
+    body.windows-style .dot.m { background: #f0ad4e; }
+    body.windows-style .dot.x { background: #28a745; }
 
     #tb-logo {
       display: none;

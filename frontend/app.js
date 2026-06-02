@@ -1,6 +1,37 @@
 let isDirty = false;
 let initialSettings = {};
 
+// ── Detect OS and apply system-specific styles ──────────────────────────────
+function detectAndApplyOSStyles() {
+  // Rileva il sistema operativo dal user agent
+  const userAgent = navigator.userAgent.toLowerCase();
+  let detectedOS = 'mac'; // Default to macOS (colorful dots)
+
+  if (userAgent.includes('win')) {
+    detectedOS = 'windows';
+  } else if (userAgent.includes('linux')) {
+    detectedOS = 'linux';
+  } else if (userAgent.includes('x11')) {
+    detectedOS = 'linux';
+  }
+
+  // Se è Windows, applica la classe CSS per i pulsanti Windows
+  if (detectedOS === 'windows') {
+    document.body.classList.add('windows-style');
+  }
+
+  console.log(`[OS Detection] Detected OS: ${detectedOS}`);
+}
+
+// Esegui il rilevamento al caricamento della pagina
+document.addEventListener('DOMContentLoaded', detectAndApplyOSStyles);
+// Fallback se DOMContentLoaded è già stato scatenato
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', detectAndApplyOSStyles);
+} else {
+  detectAndApplyOSStyles();
+}
+
 function showSkeletonTracks(count = 5) {
   const container = $('track-rows');
   if (!container) return;
