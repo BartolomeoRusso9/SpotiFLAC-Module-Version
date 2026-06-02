@@ -14,17 +14,14 @@ def check_for_updates():
         if resp.status_code == 200:
             latest_version = resp.json()["info"]["version"]
 
-            # 1. Determine if update is available
             update_available = False
             try:
                 if Version(current_version) < Version(latest_version):
                     update_available = True
             except Exception:
-                # Fallback to string comparison if semver parsing fails
                 if current_version != latest_version:
                     update_available = True
 
-            # 2. If update is available, print the box
             if update_available:
                 width = 68
 

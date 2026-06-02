@@ -1,5 +1,25 @@
 # backend/SpotiFLAC/core/isrc_finder.py
 
+import logging
+import re
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+_SPOTIFY_TRACK_ID_RE = re.compile(r"^(?:spotify:track:|https?://(?:open\.spotify\.com|play\.spotify\.com)/track/)?([A-Za-z0-9]{22})(?:[/?].*)?$")
+
+
+def spotify_id_to_gid(track_id: str) -> str:
+    if not track_id or not isinstance(track_id, str):
+        raise ValueError("Invalid Spotify track identifier")
+
+    match = _SPOTIFY_TRACK_ID_RE.match(track_id.strip())
+    if not match:
+        raise ValueError(f"Invalid Spotify track identifier: {track_id}")
+
+    return match.group(1)
+
+
 class IsrcFinder:
     def __init__(self, http_client):
         self.http = http_client
