@@ -763,14 +763,14 @@ class QobuzProvider(BaseProvider):
         ordered_apis = prioritize_providers("qobuz", all_apis)
 
         # Iniezione dell'API Locale Custom come prima priorità assoluta
-        local_api_url = os.environ.get("QOBUZ_LOCAL_API_URL", "http://localhost:8000").rstrip('/')
-        if local_api_url:
-            if local_api_url in ordered_apis:
-                ordered_apis.remove(local_api_url)
-            ordered_apis.insert(0, local_api_url)
+        if self._local_api_url:
+            cleaned_local_api = self._local_api_url.rstrip('/')
+            if cleaned_local_api in ordered_apis:
+                ordered_apis.remove(cleaned_local_api)
+            ordered_apis.insert(0, cleaned_local_api)
 
         ordered_apis = [api for api in ordered_apis if api not in exclude_apis]
-        
+
         if not allow_fallback:
             chain = chain[:1]
 
