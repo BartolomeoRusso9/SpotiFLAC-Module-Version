@@ -31,7 +31,6 @@ _SOURCE   = "kuwo"
 # refuse only if the API returns a quality clearly below CD grade.
 _BR_LOSSLESS    = 999
 _BR_LOSSLESS_CD = 740
-_BR_HIGH        = 320
 
 
 class KuwoProvider(BaseProvider):
@@ -105,6 +104,7 @@ class KuwoProvider(BaseProvider):
             url       = data.get("url", "")
             actual_br = int(data.get("br", 0))
             if not url:
+                logger.warning("[kuwo] empty url for id=%s", track_id)
                 return "", 0
             if actual_br < 64:
                 logger.debug(

@@ -32,7 +32,6 @@ _SOURCE   = "joox"
 # reported is well below CD (< 128 kbps proxy for "clearly lossy").
 _BR_LOSSLESS    = 999
 _BR_LOSSLESS_CD = 740
-_BR_HIGH        = 320
 
 
 class JooxProvider(BaseProvider):
@@ -105,6 +104,7 @@ class JooxProvider(BaseProvider):
             url      = data.get("url", "")
             actual_br = int(data.get("br", 0))
             if not url:
+                logger.warning("[joox] empty url for id=%s", track_id)
                 return "", 0
             # Refuse completely silent/broken responses
             if actual_br < 64:

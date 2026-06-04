@@ -100,7 +100,8 @@ class NeteaseProvider(BaseProvider):
             url      = data.get("url", "")
             actual_br = int(data.get("br", 0))
             if not url:
-                return ""
+                logger.warning("[netease] empty url for id=%s", track_id)
+                return "", 0
             # Only accept lossless (740 = CD FLAC, 999 = Hi-Res FLAC)
             if actual_br < _BR_LOSSLESS_CD:
                 logger.debug(
