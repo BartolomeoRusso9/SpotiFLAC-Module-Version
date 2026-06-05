@@ -207,7 +207,7 @@ class AmazonProvider(BaseProvider):
             resp = self._session.post(
                 "https://api.zarz.moe/v1/resolve",
                 json={"url": source_url},
-                headers={"User-Agent": _DEFAULT_UA},
+                headers={"User-Agent": "SpotiFLAC-Mobile/4.5.0"},
                 timeout=15
             )
             if resp.status_code == 200:
@@ -221,7 +221,7 @@ class AmazonProvider(BaseProvider):
         except Exception as exc:
             logger.warning(f"[amazon] Zarz.moe resolve failed: {exc}")
 
-        # 2. SONGLINK API (Deezer ID) - Matching JS implementation
+        # 2. SONGLINK API (Deezer ID)
         deezer_id = getattr(metadata, "deezer_id", None)
         if deezer_id:
             try:
@@ -312,6 +312,8 @@ class AmazonProvider(BaseProvider):
         q = str(quality).lower().strip()
         if q in ["opus", "eac3", "mha1"]:
             return q
+        if q == "dolby_atmos":
+            return "eac3"
         return "flac"
 
     def _download_from_zarz_api(self, asin: str, output_dir: str, quality: str) -> tuple[str, dict] | None:
@@ -325,6 +327,13 @@ class AmazonProvider(BaseProvider):
 
         # API Call Wrapper per supportare il fallback FLAC e la logica di retry
         def _fetch_zarz(target_codec: str):
+            # Protezione Anti-Ban Zarz Aggiunta
+            try:
+                from ..core.http import zarz_rate_limiter
+                zarz_rate_limiter.wait_for_slot()
+            except ImportError:
+                pass
+                
             max_retries = 2
             base_delay = 3.0
             for attempt in range(max_retries):
@@ -346,7 +355,7 @@ class AmazonProvider(BaseProvider):
 
         resp = _fetch_zarz(codec)
         
-        # Fallback a FLAC se il codec richiesto (es. atmos) non è disponibile
+        # Fallback a FLAC se il codec richiesto non è disponibile
         if (not resp or resp.status_code != 200) and codec != "flac":
             logger.info("[amazon] Codec %s unavailable for ASIN: %s — falling back to FLAC", codec, asin)
             codec = "flac"
@@ -577,23 +586,19 @@ class AmazonProvider(BaseProvider):
             raise RuntimeError(f"Cannot extract ASIN from: {amazon_url}")
         asin = asin_match.group(1)
 
-        use_zarz = str(quality).upper().strip() != "LOSSLESS"
         fallback_quality = "LOSSLESS"
 
-        if use_zarz:
-            # 1. ZARZ API (Primary)
-            codec = self._quality_to_zarz_codec(quality)
-            zarz_url = f"{API_ENDPOINTS['zarz']['base_url']}/media?asin={asin}&codec={codec}"
-            display_quality = "Best Available Quality (up to 24-bit/48kHz)" if codec == "flac" else quality
-            print_source_banner("amazon", zarz_url, display_quality)
+        # 1. ZARZ API (Primary - FORZATA SEMPRE COME SCELTA INIZIALE)
+        codec = self._quality_to_zarz_codec(quality)
+        zarz_url = f"{API_ENDPOINTS['zarz']['base_url']}/media?asin={asin}&codec={codec}"
+        display_quality = "Best Available Quality (up to 24-bit/48kHz)" if codec == "flac" else quality
+        print_source_banner("amazon", zarz_url, display_quality)
 
-            zarz_result = self._download_from_zarz_api(asin, output_dir, quality)
-            if zarz_result and os.path.exists(zarz_result[0]):
-                return zarz_result
+        zarz_result = self._download_from_zarz_api(asin, output_dir, quality)
+        if zarz_result and os.path.exists(zarz_result[0]):
+            return zarz_result
 
-            logger.info("[amazon] Download with %s failed. Starting fallback (LOSSLESS forced)", zarz_url)
-        else:
-            logger.info("[amazon] Skipping Zarz API because quality is LOSSLESS; using Spotbye fallback directly")
+        logger.info("[amazon] Download with %s failed. Starting fallback (LOSSLESS forced)", zarz_url)
 
         # 2. SPOTBYE 1
         spotbye1_url = API_ENDPOINTS['spotbye1']['base_url']

@@ -362,10 +362,10 @@ const ALL_SERVICES = [
   { id:'qobuz',       label:'Qobuz',          badge:'FLAC', on:true,  icon:'Q',  iconClass:'qobuz', iconFile:'qbz.png' },
   { id:'deezer',      label:'Deezer',         badge:'FLAC', on:true,  icon:'D',  iconClass:'deezer', iconFile:'dzr.png' },
   { id:'amazon',      label:'Amazon Music',   badge:'FLAC', on:true,  icon:'AM', iconClass:'amazon', iconFile:'amzn.png' },
-  { id:'joox',        label:'Joox',           badge:'FLAC', on:false, icon:'JX', iconClass:'joox', iconFile:null },
-  { id:'netease',     label:'NetEase',        badge:'FLAC', on:false, icon:'NE', iconClass:'netease', iconFile:null },
-  { id:'migu',        label:'Migu',           badge:'FLAC', on:false, icon:'MG', iconClass:'migu', iconFile:null },
-  { id:'kuwo',        label:'Kuwo',           badge:'FLAC', on:false, icon:'KW', iconClass:'kuwo', iconFile:null },
+  { id:'joox',        label:'Joox',           badge:'FLAC', on:false, icon:'JX', iconClass:'joox', iconFile:'joox.svg' },
+  { id:'netease',     label:'NetEase',        badge:'FLAC', on:false, icon:'NE', iconClass:'netease', iconFile:'netease.svg' },
+  { id:'migu',        label:'Migu',           badge:'FLAC', on:false, icon:'MG', iconClass:'migu', iconFile:'migu.jpeg' },
+  { id:'kuwo',        label:'Kuwo',           badge:'FLAC', on:false, icon:'KW', iconClass:'kuwo', iconFile:'kuwo.png' },
   { id:'soundcloud',  label:'SoundCloud',     badge:'MP3',  on:false, icon:'SC', iconClass:'soundcloud', iconFile:'soundcloud.svg' },
   { id:'youtube',     label:'YouTube Music',  badge:'M4A',  on:false, icon:'YT', iconClass:'youtube', iconFile:'youtube.svg' },
   { id:'apple',       label:'Apple Music',    badge:'M4A',  on:false, icon:'AM', iconClass:'apple', iconFile:'am.png' },
@@ -519,6 +519,10 @@ function renderPlatformIcon(type) {
     pandora: 'pandora.svg',
     youtube: 'youtube.svg',
     musicbrainz: 'musicbrainz_l.png',
+    kuwo: 'kuwo.png',
+    joox: 'joox.svg',
+    netease: 'netease.svg',
+    migu: 'migu.jpeg',
   };
   const iconFile = iconMap[type] || 'spotubedl.svg';
   return `<span class="svc-icon icon-image ${type}"><img src="assets/icons/${iconFile}" alt="${type}"></span>`;
