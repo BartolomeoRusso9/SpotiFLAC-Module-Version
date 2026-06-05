@@ -137,6 +137,16 @@ def _normalize_quality(value: str) -> str:
     normalized = (value or "").strip().upper()
     if not normalized:
         return "LOSSLESS"
+    
+    # ── TRADUZIONE QUALITÀ QOBUZ -> TIDAL ──
+    if normalized in ("27", "7"):
+        return "HI_RES_LOSSLESS"
+    if normalized == "6":
+        return "LOSSLESS"
+    if normalized == "5":
+        return "HIGH"
+
+    # ── MAPPE STANDARD ──
     if normalized in ("DOLBY", "ATMOS", "DOLBY ATMOS"):
         return "DOLBY_ATMOS"
     if normalized in ("EAC3", "EC3", "EAC3_JOC"):
@@ -424,13 +434,21 @@ def _fetch_tidal_url_once(
             jitter = random.uniform(0, _RETRY_JITTER_S)
             actual_delay = delay + jitter
             logger.debug(
-                "[tidal] retry %d/%d for %s after %.2fs (delay=%.2f jitter=%.2f)",
-                attempt, _MAX_RETRIES, api, actual_delay, delay, jitter,
+                "[tidal] retry %d/%d for %s after %.2fs",
+                attempt, _MAX_RETRIES, api, actual_delay
             )
             time.sleep(actual_delay)
             delay *= 2
 
         try:
+            # Protezione Rate-Limit specifica per l'ecosistema Zarz
+            if is_post_api and "zarz.moe" in api_cleaning:
+                try:
+                    from ..core.http import zarz_rate_limiter
+                    zarz_rate_limiter.wait_for_slot()
+                except ImportError:
+                    pass
+
             if is_post_api:
                 if quality == "DOLBY_ATMOS":
                     resp = client.post( 
@@ -446,7 +464,10 @@ def _fetch_tidal_url_once(
                         last_err = RuntimeError(f"HTTP 429 (rate limited, retry-after={wait_s:.0f}s)")
                         continue
                     if resp.status_code != 200:
-                        last_err = RuntimeError(f"HTTP {resp.status_code}")
+                        err_text = resp.text[:100]
+                        try: err_text = resp.json().get("message") or err_text
+                        except: pass
+                        last_err = RuntimeError(f"HTTP {resp.status_code}: {err_text}")
                         continue
 
                     data = resp.json()
@@ -478,6 +499,7 @@ def _fetch_tidal_url_once(
                     _clear_api_rate_limit(api_cleaning)
                     return "MANIFEST:" + base64.b64encode(mpd_resp.content).decode()
 
+                # Paylod standard identico a index.js
                 resp = client.post( 
                     api_cleaning,
                     json={"id": str(track_id), "quality": quality},
@@ -494,13 +516,23 @@ def _fetch_tidal_url_once(
                 delay  = max(delay, wait_s)
                 last_err = RuntimeError(f"HTTP 429 (rate limited, retry-after={wait_s:.0f}s)")
                 continue
+            
             if resp.status_code != 200:
-                last_err = RuntimeError(f"HTTP {resp.status_code}")
+                err_text = resp.text[:100]
+                try: 
+                    p = resp.json()
+                    err_text = p.get("message") or p.get("error") or err_text
+                except: pass
+                last_err = RuntimeError(f"HTTP {resp.status_code} - {err_text}")
                 continue
 
             data = resp.json()
 
             if isinstance(data, dict):
+                if data.get("success") is False:
+                    last_err = RuntimeError(data.get("message") or "API Error")
+                    continue
+
                 inner_data = data.get("data", {})
                 manifest = inner_data.get("manifest") if isinstance(inner_data, dict) else None
 

@@ -3,7 +3,7 @@ import sys
 from tqdm import tqdm 
 
 _BANNER_WIDTH = 60
-_MAX_API_FAILURES_PER_PROVIDER = 6
+_MAX_API_FAILURES_PER_PROVIDER = 20
 _api_failure_state: dict[str, dict[str, object]] = {}
 
 
