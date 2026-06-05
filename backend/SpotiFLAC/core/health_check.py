@@ -206,6 +206,13 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     except ImportError:
         endpoints["spoti"] = [("GET", "https://api.spotidownloader.com/")]
 
+    # ── GD Studio API (Netease, Kuwo, Migu, Joox) ──────────────────────────
+    for provider in ["netease", "kuwo", "migu", "joox"]:
+        endpoints[provider] = [
+            ("GET", "https://music-api.gdstudio.xyz/api.php"),
+            ("GET", "https://music.wjhe.top/api/music/joox/url?ID=11259&quality=1000&format=flac")
+        ]
+
     return endpoints
 
 
@@ -213,7 +220,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 # Constants
 # ---------------------------------------------------------------------------
 
-_UA      = "SpotiFLAC-HealthCheck/1.0"
+_UA      = "SpotiFLAC-HealthCheck/4.5.0"
 _TIMEOUT = 5
 
 # Endpoint POST-only che non richiedono payload per rispondere (accettano body vuoto)

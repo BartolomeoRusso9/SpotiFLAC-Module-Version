@@ -27,8 +27,6 @@ _API_BASE = "https://music-api.gdstudio.xyz/api.php"
 _SOURCE   = "kuwo"
 
 # br=740 → 16-bit FLAC lossless, br=999 → 24-bit FLAC lossless.
-# Kuwo supports lossless (ape/flac); we always request 999 and
-# refuse only if the API returns a quality clearly below CD grade.
 _BR_LOSSLESS    = 999
 _BR_LOSSLESS_CD = 740
 
@@ -39,8 +37,7 @@ class KuwoProvider(BaseProvider):
 
     Kuwo Music (酷我音乐) is a major Chinese music streaming platform with a
     large catalogue that includes lossless FLAC streams for many tracks.
-    The provider always requests br=999 (24-bit Hi-Res) and falls back
-    gracefully to whatever quality the API actually returns.
+    Strictly handles Lossless and Hi-Res audio (FLAC). MP3 is not supported.
 
     API credit: GD音乐台 (music.gdstudio.xyz) — CC BY-NC 4.0, study use only.
     """
@@ -84,9 +81,7 @@ class KuwoProvider(BaseProvider):
         """
         Request a lossless stream URL (br=999) from Kuwo via GD Studio API.
         Returns (url, actual_br).
-
-        Kuwo's lossless catalogue is extensive; we accept br >= 740 as lossless
-        and br >= 128 as acceptable lossy (MP3/AAC). Returns ("", 0) on failure.
+        Rejects the stream if the API returns a lossy bitrate (< 740).
         """
         try:
             resp = self._session.get(
@@ -106,12 +101,15 @@ class KuwoProvider(BaseProvider):
             if not url:
                 logger.warning("[kuwo] empty url for id=%s", track_id)
                 return "", 0
-            if actual_br < 64:
+            
+            # Reject any lossy stream silently delivered by the API
+            if actual_br < _BR_LOSSLESS_CD:
                 logger.debug(
-                    "[kuwo] Track %s returned br=%d — likely unavailable",
+                    "[kuwo] Track %s returned lossy br=%d — rejected",
                     track_id, actual_br,
                 )
                 return "", actual_br
+            
             return url, actual_br
         except Exception as exc:
             logger.debug("[kuwo] Stream fetch failed for id=%s: %s", track_id, exc)
@@ -316,21 +314,13 @@ class KuwoProvider(BaseProvider):
             if not dl_url:
                 raise SpotiflacError(
                     ErrorKind.UNAVAILABLE,
-                    f"No stream available on Kuwo for id={raw_track_id}",
+                    f"No lossless stream available on Kuwo for id={raw_track_id}",
                     self.name,
                 )
 
             # ── 3. Determine file extension ───────────────────────────────
-            # Kuwo serves FLAC for lossless requests; MP3 otherwise
-            if actual_br >= _BR_LOSSLESS_CD:
-                extension = ".flac"
-            else:
-                extension = ".mp3"
-
-            quality_label = (
-                f"FLAC {actual_br}kbps" if extension == ".flac"
-                else f"MP3 {actual_br}kbps"
-            )
+            extension = ".flac"
+            quality_label = f"FLAC {actual_br}kbps"
 
             # ── 4. Cover art ──────────────────────────────────────────────
             cover_url = metadata.cover_url
@@ -347,8 +337,7 @@ class KuwoProvider(BaseProvider):
             )
 
             if self._file_exists(dest):
-                fmt = "flac" if extension == ".flac" else "mp3"
-                return DownloadResult.skipped_result(self.name, str(dest), fmt=fmt)
+                return DownloadResult.skipped_result(self.name, str(dest), fmt="flac")
 
             # ── 6. MusicBrainz async fetch ────────────────────────────────
             mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
@@ -400,28 +389,16 @@ class KuwoProvider(BaseProvider):
             # Inject Kuwo lyrics only if the normal providers found nothing
             if gd_lyrics and gd_lyrics.strip():
                 try:
-                    if extension == ".flac":
-                        from mutagen.flac import FLAC as _FLAC
-                        audio = _FLAC(str(dest))
-                        if "LYRICS" not in audio:
-                            audio["LYRICS"] = gd_lyrics
-                            audio.save()
-                            logger.debug("[kuwo] Kuwo lyrics embedded (%d chars)", len(gd_lyrics))
-                    else:
-                        from mutagen.id3 import ID3, USLT, ID3NoHeaderError
-                        try:
-                            audio = ID3(str(dest))
-                        except ID3NoHeaderError:
-                            audio = ID3()
-                        if not audio.get("USLT::eng"):
-                            audio.add(USLT(encoding=3, lang="eng", desc="", text=gd_lyrics))
-                            audio.save(str(dest), v2_version=3)
-                            logger.debug("[kuwo] Kuwo lyrics embedded (%d chars)", len(gd_lyrics))
+                    from mutagen.flac import FLAC as _FLAC
+                    audio = _FLAC(str(dest))
+                    if "LYRICS" not in audio:
+                        audio["LYRICS"] = gd_lyrics
+                        audio.save()
+                        logger.debug("[kuwo] Kuwo lyrics embedded (%d chars)", len(gd_lyrics))
                 except Exception as exc:
                     logger.warning("[kuwo] Lyrics embed failed: %s", exc)
 
-            fmt = "flac" if extension == ".flac" else "mp3"
-            return DownloadResult.ok(self.name, str(dest), fmt=fmt)
+            return DownloadResult.ok(self.name, str(dest), fmt="flac")
 
         except SpotiflacError as exc:
             logger.error("[%s] %s", self.name, exc)

@@ -33,9 +33,8 @@ class MiguProvider(BaseProvider):
     """
     Provider per Migu Music tramite l'API unificata (music.wjhe.top).
     
-    Supporta pienamente la scelta della qualità.
-    Se richiesto Lossless, tenterà di recuperare in ordine:
-    FLAC 24-bit -> FLAC 16-bit -> M4A 24-bit -> M4A.
+    Gestisce rigorosamente e in modo esclusivo audio Lossless e Hi-Res (FLAC, M4A).
+    Gli MP3 o i formati a bassa qualità non sono supportati e verranno rifiutati.
     """
 
     name = "migu"
@@ -76,25 +75,24 @@ class MiguProvider(BaseProvider):
     def _get_stream(self, track_id: str, quality_pref: str) -> tuple[str, str, str]:
         """
         Richiede un URL di stream per Migu basandosi sulla qualità richiesta.
-        Implementa il fallback gerarchico 24-bit -> 16-bit -> M4A.
+        Implementa il fallback gerarchico 24-bit -> 16-bit per formati FLAC/M4A.
+        Rifiuta attivamente MP3 e URL lossy generici.
         
         Ritorna una tupla: (url_stream, estensione_file, etichetta_qualità).
         """
         
-        # Ordine di tentativi in base alla qualità richiesta
-        attempts = []
+        # Ordine di tentativi strettamente ad alta qualità
         if quality_pref.upper() in ["LOSSLESS", "HI-RES", "FLAC", "MAX"]:
             attempts = [
                 (3000, "flac", "FLAC 24-bit"),
                 (1000, "flac", "FLAC 16-bit"),
                 (3000, "m4a",  "M4A 24-bit"),
-                (1000, "m4a",  "M4A"),
+                (1000, "m4a",  "M4A 16-bit"),
             ]
         else:
-            # Qualità standard (risparmio dati o non-lossless)
             attempts = [
-                (1000, "m4a",  "M4A"),
                 (1000, "flac", "FLAC 16-bit"),
+                (1000, "m4a",  "M4A 16-bit"),
             ]
             
         for q_val, fmt, label in attempts:
@@ -146,9 +144,12 @@ class MiguProvider(BaseProvider):
             data = resp.json()
             url = data.get("url", "")
             if url and "404" not in url:
-                ext = ".flac" if "flac" in url.lower() else ".mp3"
-                lbl = "FLAC (Fallback)" if ext == ".flac" else "MP3 (Fallback)"
-                return url, ext, lbl
+                if "flac" in url.lower():
+                    return url, ".flac", "FLAC (Fallback)"
+                elif "m4a" in url.lower() or "mp4" in url.lower():
+                    return url, ".m4a", "M4A (Fallback)"
+                else:
+                    logger.debug("[migu] Fallback URL returned lossy MP3 - rejected")
         except Exception:
             pass
 
@@ -342,7 +343,7 @@ class MiguProvider(BaseProvider):
             if not dl_url:
                 raise SpotiflacError(
                     ErrorKind.UNAVAILABLE,
-                    f"Nessuno stream disponibile su Migu per id={raw_track_id}",
+                    f"Nessun flusso lossless/hi-res disponibile su Migu per id={raw_track_id}",
                     self.name,
                 )
 
@@ -353,7 +354,7 @@ class MiguProvider(BaseProvider):
                 if pic_id:
                     cover_url = self._get_pic_url(pic_id)
 
-            # 4. Costruzione del percorso finale in base all'estensione ritornata (.flac o .m4a o .mp3)
+            # 4. Costruzione del percorso finale in base all'estensione ritornata (.flac o .m4a)
             dest = self._build_output_path(
                 metadata, output_dir, filename_format,
                 position, include_track_num, use_album_track_num, first_artist_only,
@@ -427,16 +428,6 @@ class MiguProvider(BaseProvider):
                             audio["\xa9lyr"] = migu_lyrics
                             audio.save()
                             logger.debug("[migu] Testo Migu aggiunto su M4A")
-                    else:
-                        from mutagen.id3 import ID3, USLT, ID3NoHeaderError
-                        try:
-                            audio = ID3(str(dest))
-                        except ID3NoHeaderError:
-                            audio = ID3()
-                        if not audio.get("USLT::eng"):
-                            audio.add(USLT(encoding=3, lang="eng", desc="", text=migu_lyrics))
-                            audio.save(str(dest), v2_version=3)
-                            logger.debug("[migu] Testo Migu aggiunto (%d chars)", len(migu_lyrics))
                 except Exception as exc:
                     logger.warning("[migu] Impossibile aggiungere il testo nativo: %s", exc)
 

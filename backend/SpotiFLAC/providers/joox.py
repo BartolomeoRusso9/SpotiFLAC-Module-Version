@@ -32,15 +32,11 @@ _SOURCE   = "joox"
 # ---------------------------------------------------------------------------
 _BR_HIRES       = 999  # 24-bit FLAC
 _BR_LOSSLESS_CD = 740  # 16-bit FLAC
-_BR_320         = 320  # 320kbps MP3
-_BR_128         = 128  # 128kbps MP3
 
 class JooxProvider(BaseProvider):
     """
     Provider for JOOX using WJHE and GD Studio API endpoints.
-
-    WJHE uses quality (1000, 3000) & format (flac, m4a).
-    GD Studio uses the legacy br parameter (999, 740, 320, 128).
+    Strictly handles Lossless and Hi-Res audio (FLAC, M4A). MP3 is not supported.
     """
 
     name = "joox"
@@ -98,9 +94,9 @@ class JooxProvider(BaseProvider):
             url       = data.get("url", "")
             actual_br = int(data.get("br", 0))
 
-            if not url or actual_br < 64:
+            if not url or actual_br < _BR_LOSSLESS_CD:
                 logger.debug(
-                    "[joox-gd] Empty or invalid stream for id=%s br=%d (actual=%d)",
+                    "[joox-gd] Empty or lossy stream rejected for id=%s br=%d (actual=%d)",
                     track_id, br, actual_br
                 )
                 return "", actual_br
@@ -154,28 +150,15 @@ class JooxProvider(BaseProvider):
                 ("FLAC16",  1000, "flac", _BR_LOSSLESS_CD, "FLAC 16bit"),
                 ("M4A24",   3000, "m4a",  None,            "M4A 24bit"),
                 ("M4A16",   1000, "m4a",  None,            "M4A 16bit"),
-                ("MP3_320", None, None,   _BR_320,         "MP3 320kbps"),
-                ("MP3_128", None, None,   _BR_128,         "MP3 128kbps"),
-            ]
-        elif q in ("LOSSLESS", "FLAC", "CD", "HQ"):
-            attempts = [
-                ("FLAC16",  1000, "flac", _BR_LOSSLESS_CD, "FLAC 16bit"),
-                ("M4A16",   1000, "m4a",  None,            "M4A 16bit"),
-                ("MP3_320", None, None,   _BR_320,         "MP3 320kbps"),
-                ("MP3_128", None, None,   _BR_128,         "MP3 128kbps"),
-            ]
-        elif q in ("MEDIUM", "HIGH", "320", "320KBPS", "MP3_320"):
-            attempts = [
-                ("MP3_320", None, None,   _BR_320,         "MP3 320kbps"),
-                ("MP3_128", None, None,   _BR_128,         "MP3 128kbps"),
             ]
         else:
             attempts = [
-                ("MP3_128", None, None,   _BR_128,         "MP3 128kbps"),
+                ("FLAC16",  1000, "flac", _BR_LOSSLESS_CD, "FLAC 16bit"),
+                ("M4A16",   1000, "m4a",  None,            "M4A 16bit"),
             ]
 
         for fmt_type, wjhe_q, wjhe_f, gd_br, label in attempts:
-            ext = ".flac" if "FLAC" in fmt_type else ".m4a" if "M4A" in fmt_type else ".mp3"
+            ext = ".flac" if "FLAC" in fmt_type else ".m4a"
 
             # 1. Try WJHE
             if wjhe_q and wjhe_f:
@@ -192,25 +175,17 @@ class JooxProvider(BaseProvider):
             if gd_br:
                 url_gd, actual_br = self._get_stream_gdstudio(track_id, br=gd_br)
                 if url_gd:
-                    # Prevent GD Studio from silently returning lossy when we asked for lossless
-                    if "FLAC" in fmt_type and actual_br < _BR_LOSSLESS_CD:
-                        continue
-                    if fmt_type == "MP3_320" and actual_br < _BR_320:
+                    # Prevent GD Studio from silently returning lossy
+                    if actual_br < _BR_LOSSLESS_CD:
                         continue
 
-                    final_ext = ".flac" if actual_br >= _BR_LOSSLESS_CD else ".mp3"
+                    final_ext = ".flac"
                     quality_label = f"{label} (GD {actual_br}kbps)"
                     logger.info(
                         "[joox] Stream obtained (GD): requested_br=%d actual_br=%d ext=%s",
                         gd_br, actual_br, final_ext,
                     )
                     return url_gd, final_ext, actual_br, quality_label
-
-        # Last-resort MP3 fallback via GD Studio
-        url_fb, actual_br_fb = self._get_stream_gdstudio(track_id, _BR_128)
-        if url_fb:
-            final_ext = ".flac" if actual_br_fb >= _BR_LOSSLESS_CD else ".mp3"
-            return url_fb, final_ext, actual_br_fb, f"MP3 {actual_br_fb}kbps (GD Fallback)"
 
         return "", "", 0, ""
 
@@ -497,15 +472,6 @@ class JooxProvider(BaseProvider):
                         if "\xa9lyr" not in audio:
                             audio["\xa9lyr"] = [gd_lyrics]
                             audio.save()
-                    else:
-                        from mutagen.id3 import ID3, USLT
-                        try:
-                            audio = ID3(str(dest))
-                        except Exception:
-                            audio = ID3()
-                        if not audio.get("USLT::eng"):
-                            audio.add(USLT(encoding=3, lang="eng", desc="", text=gd_lyrics))
-                            audio.save(str(dest), v2_version=3)
                     logger.debug("[joox] JOOX lyrics embedded (%d chars)", len(gd_lyrics))
                 except Exception as exc:
                     logger.warning("[joox] Lyrics embed failed: %s", exc)

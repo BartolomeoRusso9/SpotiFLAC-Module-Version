@@ -129,8 +129,10 @@ def _header() -> None:
 # Health Check
 # ---------------------------------------------------------------------------
 
-_ALL_SERVICES = ["tidal", "qobuz", "deezer", "amazon", "soundcloud", "apple", "youtube", "pandora", "spoti"]
-
+_ALL_SERVICES = [
+    "tidal", "qobuz", "deezer", "amazon", "soundcloud", "apple", 
+    "youtube", "pandora", "joox", "netease", "migu", "kuwo", "spoti"
+]
 def _run_health_check():
     try:
         from SpotiFLAC.core.health_check import run_health_check
@@ -553,7 +555,10 @@ def run_interactive() -> dict:
         print(f"  {DIM('Choose services and their priority order (first = highest priority).')}")
         cfg["services"] = _ask_multi(
             "Services (order = priority):",
-            options  = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple", "pandora"],
+            options  = [
+                "deezer", "tidal", "qobuz", "amazon", "joox", "netease", 
+                "migu", "kuwo", "spoti", "soundcloud", "youtube", "apple", "pandora"
+            ],
             defaults = ["tidal"],
             ordered  = True,
         )

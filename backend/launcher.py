@@ -59,12 +59,15 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
 
     parser.add_argument(
         "--service", "-s",
-        choices = ["deezer", "tidal", "qobuz", "amazon", "spoti", "soundcloud", "youtube", "apple", "pandora"],
+        choices = [
+            "deezer", "tidal", "qobuz", "amazon", "joox", "netease", 
+            "migu", "kuwo", "spoti", "soundcloud", "youtube", "apple", "pandora"
+        ],
         nargs   = "+",
         default = pd.get("services", ["tidal"]),
         metavar = "SERVICE",
         help    = "Audio providers in priority order (default: tidal). "
-                  "Choices: tidal, qobuz, deezer, amazon, spoti, soundcloud, youtube, apple, pandora",
+                  "Choices: tidal, qobuz, deezer, amazon, joox, netease, migu, kuwo, spoti, soundcloud, youtube, apple, pandora",
     )
     parser.add_argument(
         "--filename-format", "-f",

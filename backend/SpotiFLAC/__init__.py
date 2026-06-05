@@ -34,6 +34,10 @@ from .providers import (
     TidalProvider,
     AmazonProvider,
     AppleMusicProvider,
+    JooxProvider,
+    NeteaseProvider,
+    MiguProvider,
+    KuwoProvider,
     SpotifyMetadataClient,
 )
 from .core import TrackMetadata, DownloadResult
@@ -49,6 +53,10 @@ __all__ = [
     "TidalProvider",
     "AmazonProvider",
     "AppleMusicProvider",
+    "JooxProvider",
+    "NeteaseProvider",
+    "MiguProvider",
+    "KuwoProvider",
     "SpotifyMetadataClient",
     "TrackMetadata",
     "DownloadResult",
