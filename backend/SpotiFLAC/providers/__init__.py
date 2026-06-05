@@ -9,6 +9,10 @@ from .soundcloud import SoundCloudProvider
 from .youtube import YouTubeProvider
 from .pandora import PandoraProvider
 from .spotify_metadata import SpotifyMetadataClient, parse_spotify_url
+from .joox import JooxProvider
+from .netease import NeteaseProvider
+from .migu import MiguProvider
+from .kuwo import KuwoProvider
 
 __all__ = [
     "BaseProvider",
@@ -27,6 +31,10 @@ __all__ = [
 
 PROVIDER_REGISTRY: dict[str, type] = {
         "tidal":      TidalProvider,
+        "joox": JooxProvider,
+        "netease": NeteaseProvider,
+        "migu": MiguProvider,
+        "kuwo": KuwoProvider,
         "qobuz":      QobuzProvider,
         "amazon":     AmazonProvider,
         "deezer":     DeezerProvider,
