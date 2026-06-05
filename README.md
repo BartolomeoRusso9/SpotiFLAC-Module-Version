@@ -253,8 +253,10 @@ spotiflac https://open.spotify.com/album/... ./out \
 
 ---
  
-## Quick usage examples
- 
+## Per-Track Timeout
+
+Set `timeout_s` (Python) or `--timeout` (CLI) to cap the time SpotiFLAC will spend downloading a single track. If the download does not complete within the specified number of seconds, the process is terminated and the track is marked as failed — allowing the next provider or retry to take over.
+
 ```bash
 # CLI — skip any track that takes more than 3 minutes
 spotiflac https://open.spotify.com/album/... ./out --service tidal --timeout 180
@@ -268,6 +270,8 @@ SpotiFLAC(
     timeout_s=120,
 )
 ```
+
+> **Tip:** Pair `--timeout` with `--retries` so that a stalled track is automatically re-attempted against the next provider instead of blocking the entire queue indefinitely.
 
 ---
 
@@ -541,6 +545,7 @@ Program can also be ran by downloading the python files and calling <code>python
                         [--first-artist-only]
                         [--qobuz-local-api URL]
                         [--tidal-api URL]
+                        [--timeout seconds]
                         [--loop minutes]
                         [--verbose]
                         [--no-lyrics]
@@ -571,6 +576,7 @@ chmod +x SpotiFLAC-Linux-arm64
                         [--first-artist-only]
                         [--qobuz-local-api URL]
                         [--tidal-api URL]
+                        [--timeout seconds]
                         [--loop minutes]
                         [--verbose]
                         [--no-lyrics]
@@ -606,6 +612,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | **`first_artist_only`**        | `bool`  | `False`                                                   | Uses only the first artist in tags and filename.                                                                                                                                                                                                                             |
 | **`include_featuring`**        | `bool`  | `False`                                                   | When downloading an artist discography, also includes tracks where the artist appears as a featured artist.                                                                                                                                                                  |
 | **`tidal_custom_api`**         | `str`   | `None`                                                    | URL of a self-hosted [hifi-api](https://github.com/binimum/hifi-api) instance. Takes priority over all public mirrors.                                                                                                                                                       |
+| **`timeout_s`**                | `int`   | `None`                                                    | Per-track download timeout in **seconds**. If a single track download does not complete within this time, the process is terminated and the track is marked as failed. SpotiFLAC then moves on to the next provider or retry. Set to `None` (default) to disable the timeout. |
 | **`loop`**                     | `int`   | `None`                                                    | Duration in minutes to keep retrying **permanently failed** tracks after a full session completes.                                                                                                                                                                           |
 | **`track_max_retries`**        | `int`   | `0`                                                       | Extra download attempts **per track** when all providers fail on the first try. Each retry cycles through all providers again with exponential backoff (2 s → 4 s → 8 s …, capped at 30 s).                                                                                  |
 | **`quality`**                  | `str`   | `"LOSSLESS"`                                              | Download quality. Tidal: `"DOLBY_ATMOS"`, `"HI_RES_LOSSLESS"`, `"LOSSLESS"`, `"HIGH"`, `"LOW"`. Qobuz: `"6"` (CD), `"7"` (Hi-Res), `"27"` (Hi-Res Max). Apple Music: `"alac"`, `"atmos"`, `"ac3"`, `"aac"`, `"aac-legacy"`. Pandora: `"mp3_192"`, `"aac_64"`, `"aac_32"`.    |
@@ -652,6 +659,7 @@ When customizing the `filename_format` string, you can use the following dynamic
 | `--include-featuring`       |       | `False`                                       | Include tracks where the artist appears as a featured artist. Only applies to artist/discography URLs.                                                                                                      |
 | `--qobuz-local-api`         |       | `None`                                        | Optional local Qobuz stream API URL.                                                                                                                                                                         |
 | `--tidal-api`               |       | `None`                                        | URL of a self-hosted [hifi-api](https://github.com/binimum/hifi-api) instance. Takes priority over the built-in public mirror pool.                                                                         |
+| `--timeout`                 |       | `None`                                        | Per-track download timeout in **seconds**. If a track download stalls or takes longer than this limit, it is forcibly terminated and marked as failed, then SpotiFLAC moves to the next provider or retry. |
 | `--loop`                    | `-l`  | `None`                                        | Keep retrying permanently failed tracks every N minutes.                                                                                                                                                    |
 | `--retries`                 |       | `0`                                           | Extra per-track download attempts on failure. Cycles through all providers with exponential backoff.                                                                                                        |
 | `--verbose`                 | `-v`  | `False`                                       | Enable debug logging.                                                                                                                                                                                       |
