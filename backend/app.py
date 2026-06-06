@@ -1303,7 +1303,7 @@ class SpotiFLAC_API:
     def _health_check_task(self, services):
         try:
             import importlib
-            hc_module = importlib.import_module(".core.health_check", package=__package__)
+            hc_module = importlib.import_module("backend.core.health_check")
             hc_run    = getattr(hc_module, "run_health_check")
             self.log(f"Health check started for: {', '.join(services)}", "info")
             results = hc_run(services)
