@@ -1,4 +1,4 @@
-# SpotiFLAC/core/download_validation.py
+# backend/core/download_validation.py
 """
 Port di download_validation.go — rileva preview da 30s e mismatch di durata.
 """

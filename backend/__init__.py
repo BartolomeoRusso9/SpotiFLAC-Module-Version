@@ -2,7 +2,7 @@
 SpotiFLAC — Python module for downloading high quality music
 
 Minimum use:
-    from SpotiFLAC import SpotiFLAC
+    from backend import SpotiFLAC
     SpotiFLAC("URL_SPOTIFY", "./downloads")
 
 Advanced use:

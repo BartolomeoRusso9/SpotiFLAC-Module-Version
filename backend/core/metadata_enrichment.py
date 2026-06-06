@@ -1,4 +1,4 @@
-# SpotiFLAC/core/metadata_enrichment.py
+# backend/core/metadata_enrichment.py
 from __future__ import annotations
 
 import logging

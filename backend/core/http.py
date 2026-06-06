@@ -179,9 +179,14 @@ class HttpClient:
                             downloaded += len(chunk)
                             if progress_cb: progress_cb(downloaded, total)
             os.replace(temp, dest_path)
-        except Exception as exc:
-            if os.path.exists(temp): os.remove(temp)
-            raise NetworkError(self._provider, f"Stream failed: {exc}")
+        except httpx.RequestError as exc:
+            if os.path.exists(temp):
+                os.remove(temp)
+            raise NetworkError(self._provider, f"Stream failed: {exc}") from exc
+        except OSError:
+            if os.path.exists(temp):
+                os.remove(temp)
+            raise
 
     def _classic_stream_to_file(self, url: str, dest_path: str, progress_cb: Any, chunk_size: int, headers: dict):
         """Il metodo di fallback sequenziale se il server non supporta il multi-parte."""

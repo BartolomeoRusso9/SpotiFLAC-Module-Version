@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -76,13 +77,15 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
         logger.warning("Unknown provider: %s", name)
         return None
     kwargs = {}
+    if opts.timeout_s is not None:
+        kwargs["timeout_s"] = opts.timeout_s
+
     if name == "qobuz":
         kwargs["qobuz_token"] = opts.qobuz_token
         kwargs["local_api_url"] = opts.qobuz_local_api_url
-    elif name == "tidal":
-        kwargs["qobuz_token"] = opts.qobuz_token
-    if name == "tidal" and opts.tidal_custom_api:
+    elif name == "tidal" and opts.tidal_custom_api:
         kwargs["custom_api_url"] = opts.tidal_custom_api
+
     return cls(**kwargs)
 
 
@@ -107,12 +110,18 @@ def download_one(
     """
     import concurrent.futures as _cf
  
+    stop_event = threading.Event()
+
     def _run() -> DownloadResult:
         max_retries = opts.track_max_retries
         manager = DownloadManager()
         errors: dict[str, str] = {}
+        started_at = time.monotonic()
  
         for attempt in range(max_retries + 1):
+            if stop_event.is_set() or (opts.timeout_s and time.monotonic() - started_at >= opts.timeout_s):
+                return DownloadResult.fail("none", f"Download timed out after {opts.timeout_s}s")
+
             if attempt > 0:
                 wait = min(2 ** attempt, 30)
                 from tqdm import tqdm
@@ -177,6 +186,8 @@ def download_one(
             try:
                 return _future.result(timeout=opts.timeout_s)
             except _cf.TimeoutError:
+                stop_event.set()
+                _future.cancel()
                 safe_tqdm_write(
                     f"\n  ⏱  Timeout ({opts.timeout_s}s) reached for "
                     f"'{metadata.title}' — skipping track."

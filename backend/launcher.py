@@ -25,7 +25,11 @@ def load_config() -> dict:
     if os.path.exists(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                raw = json.load(f)
+            from .core.profiles import ProfileConfig
+            return ProfileConfig.model_validate(raw).model_dump(exclude_none=True)
+        except json.JSONDecodeError as e:
+            print(f"Error loading config.json: invalid JSON: {e}")
         except Exception as e:
             print(f"Error loading config.json: {e}")
     return {}
@@ -77,7 +81,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-path", "-o",
-        default = None,
+        default = pd.get("output_path", None),
         dest    = "output_path",
         metavar = "FILE",
         help    = "Exact output file path for single track downloads",
@@ -94,7 +98,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     parser.add_argument("--use-artist-subfolders",   action="store_true", dest="use_artist_subfolders",   default=pd.get("use_artist_subfolders", False))
     parser.add_argument("--use-album-subfolders",    action="store_true", dest="use_album_subfolders",    default=pd.get("use_album_subfolders", False))
     parser.add_argument("--first-artist-only",       action="store_true", dest="first_artist_only",       default=pd.get("first_artist_only", False))
-    parser.add_argument("--qobuz-local-api", default=None, dest="qobuz_local_api_url", metavar="URL")
+    parser.add_argument("--qobuz-local-api", default=pd.get("qobuz_local_api_url", None), dest="qobuz_local_api_url", metavar="URL")
     parser.add_argument(
         "--tidal-api",
         default = pd.get("tidal_custom_api", None),
@@ -103,11 +107,12 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         help    = "URL of a self-hosted hifi-api instance (https://github.com/binimum/hifi-api). "
                   "Takes priority over built-in API pool.",
     )
-    parser.add_argument("--loop", "-l", type=int, default=None)
-    parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--loop", "-l", type=int, default=pd.get("loop", None))
+    parser.add_argument("--verbose", "-v", action="store_true", default=pd.get("verbose", False))
     parser.add_argument(
         "--interactive",
         action="store_true",
+        default=pd.get("interactive", False),
         help="Launch interactive mode (wizard)"
     )
 
@@ -261,8 +266,11 @@ def main() -> None:
 
     args = parse_args(profile_defaults=merged_defaults)
 
-    quality             = args.quality     or merged_defaults.get("quality", "LOSSLESS")
+    quality             = args.quality or merged_defaults.get("quality", "LOSSLESS")
     qobuz_local_api_url = args.qobuz_local_api_url or merged_defaults.get("qobuz_local_api_url")
+    tidal_custom_api    = args.tidal_custom_api or merged_defaults.get("tidal_custom_api")
+    timeout_s           = args.timeout_s if args.timeout_s is not None else merged_defaults.get("timeout_s")
+    track_max_retries   = args.retries if args.retries is not None else merged_defaults.get("track_max_retries", 0)
 
     log_level = logging.DEBUG if args.verbose else logging.WARNING
     logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -286,11 +294,11 @@ def main() -> None:
         enrich_metadata          = args.enrich,
         enrich_providers         = args.enrich_providers,
         qobuz_local_api_url      = qobuz_local_api_url,
-        tidal_custom_api         = args.tidal_custom_api or None,
-        track_max_retries        = args.retries,
+        tidal_custom_api         = tidal_custom_api,
+        track_max_retries        = track_max_retries,
         post_download_action     = args.post_action,
         post_download_command    = args.post_command,
-        timeout_s                = args.timeout_s,
+        timeout_s                = timeout_s,
     )
 
     if args.save_profile:
@@ -310,12 +318,13 @@ def main() -> None:
                 "lyrics_providers":      args.lyrics_providers,
                 "enrich_metadata":       args.enrich,
                 "enrich_providers":      args.enrich_providers,
-                "track_max_retries":     args.retries,
+                "track_max_retries":     track_max_retries,
                 "post_download_action":  args.post_action,
                 "post_download_command": args.post_command,
-                "qobuz_local_api_url":   args.qobuz_local_api_url,
-                "tidal_custom_api":      args.tidal_custom_api,
-                "timeout_s":             args.timeout_s,
+                "qobuz_local_api_url":   qobuz_local_api_url,
+                "tidal_custom_api":      tidal_custom_api,
+                "timeout_s":             timeout_s,
+                "loop":                  args.loop,
             }
             save_profile(args.save_profile, profile_cfg)
             print(f"[profile] Saved as: {args.save_profile}")

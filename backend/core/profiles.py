@@ -15,20 +15,62 @@ from pathlib import Path
 import threading
 import logging
 
+from pydantic import BaseModel, Field, ValidationError
+
 logger = logging.getLogger(__name__)
 _io_lock = threading.Lock()
 _PROFILES_FILE = Path.home() / ".cache" / "spotiflac" / "profiles.json"
 
-# Chiavi che vengono salvate in un profilo (esclude URL, cartella, token personali)
-# Chiavi di runtime o sensibili che NON devono essere salvate in un profilo
-_EXCLUDE_FROM_PROFILE = ["url", "output_path", "qobuz_token"]
+
+class ProfileConfig(BaseModel):
+    services: list[str] = Field(default_factory=lambda: ["tidal"])
+    filename_format: str = "{title} - {artist}"
+    use_track_numbers: bool = False
+    use_album_track_numbers: bool = False
+    use_artist_subfolders: bool = False
+    use_album_subfolders: bool = False
+    first_artist_only: bool = False
+    allow_fallback: bool = True
+    quality: str = "LOSSLESS"
+    embed_lyrics: bool = True
+    lyrics_providers: list[str] = Field(
+        default_factory=lambda: ["spotify", "apple", "musixmatch", "amazon", "lrclib"]
+    )
+    enrich_metadata: bool = True
+    enrich_providers: list[str] = Field(
+        default_factory=lambda: ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
+    )
+    track_max_retries: int = 0
+    post_download_action: str = "none"
+    post_download_command: str = ""
+    qobuz_local_api_url: str | None = None
+    tidal_custom_api: str | None = None
+    timeout_s: int | None = None
+    loop: int | None = None
+    log_level: int | None = None
+    output_path: str | None = None
+
+    model_config = {"extra": "ignore"}
 
 
 def _load() -> dict:
     with _io_lock:
         try:
             if _PROFILES_FILE.exists():
-                return json.loads(_PROFILES_FILE.read_text(encoding="utf-8"))
+                raw = json.loads(_PROFILES_FILE.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    validated: dict[str, dict] = {}
+                    for name, profile in raw.items():
+                        if not isinstance(profile, dict):
+                            logger.debug("[profile] skipping invalid profile %s", name)
+                            continue
+                        try:
+                            validated[name] = ProfileConfig.model_validate(profile).model_dump(exclude_none=True)
+                        except ValidationError as exc:
+                            logger.warning("[profile] invalid profile %s: %s", name, exc)
+                    return validated
+        except json.JSONDecodeError as exc:
+            logger.warning("[profile] profiles.json is invalid JSON: %s", exc)
         except Exception as exc:
             logger.debug("[profile] Read error: %s", exc)
     return {}
@@ -63,9 +105,12 @@ def save_profile(name: str, cfg: dict) -> None:
     Sovrascrive eventuali profili preesistenti con lo stesso nome.
     """
     profiles = _load()
-    # Salva tutto tranne url, output_path e le chiavi interne (che iniziano con _)
-    profiles[name] = {k: v for k, v in cfg.items() if k not in _EXCLUDE_FROM_PROFILE and not k.startswith("_")}
-    profiles[name]["_saved_at"] = int(time.time())
+    validated = ProfileConfig.model_validate(cfg)
+    profile_data = validated.model_dump(exclude_none=True)
+    for runtime_key in ("url", "output_path", "qobuz_token"):
+        profile_data.pop(runtime_key, None)
+    profile_data["_saved_at"] = int(time.time())
+    profiles[name] = profile_data
     _write(profiles)
 
 

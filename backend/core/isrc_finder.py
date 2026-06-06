@@ -1,4 +1,4 @@
-# backend/SpotiFLAC/core/isrc_finder.py
+# backend/core/isrc_finder.py
 
 import logging
 import re

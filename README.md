@@ -73,7 +73,7 @@ spotiflac
 ---
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 # Simple Download
 SpotiFLAC(
@@ -117,7 +117,7 @@ SpotiFLAC supports the following URL formats for **Spotify**, **Tidal**, **Apple
 You can customize the download behavior, prioritize specific streaming services, and organize your files automatically into folders.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ",
@@ -141,7 +141,7 @@ SpotiFLAC can probe all provider endpoints before downloading to verify which on
 In **Interactive Mode** this runs automatically at startup. In code or scripts you can call it directly:
 
 ```python
-from SpotiFLAC.core.health_check import (
+from backend.core.health_check import (
     run_health_check,
     print_health_report,
     get_working_providers,
@@ -189,7 +189,7 @@ spotiflac https://... ./out --profile hires-tidal
 ### In Python
 
 ```python
-from SpotiFLAC.core.profiles import save_profile, get_profile, list_profiles
+from backend.core.profiles import save_profile, get_profile, list_profiles
 
 # Save
 save_profile("hires-tidal", {
@@ -213,7 +213,7 @@ Profiles are stored at `~/.cache/spotiflac/profiles.json`. In the Interactive Wi
 Pass a list of URLs to download them all in sequence. Failed tracks per URL are collected and can be retried with `loop`.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url=[
@@ -235,7 +235,7 @@ Set `track_max_retries` (Python) or `--retries` (CLI) to automatically retry fai
 Each retry cycles through **all configured providers** from the beginning, waiting exponentially longer between attempts (2 s → 4 s → 8 s …, capped at 30 s).
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://open.spotify.com/album/...",
@@ -264,7 +264,7 @@ Set `timeout_s` (Python) or `--timeout` (CLI) to cap the time SpotiFLAC will spe
 spotiflac https://open.spotify.com/album/... ./out --service tidal --timeout 180
  
 # Python API
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 SpotiFLAC(
     url="https://open.spotify.com/album/...",
     output_dir="./downloads",
@@ -306,7 +306,7 @@ spotiflac https://... ./out --post-action command --post-command "rsync -av {fol
 Download the complete discography of an artist. Duplicate tracks (same ISRC across different releases) are automatically skipped.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 # Spotify — albums + singles
 SpotiFLAC(url="https://open.spotify.com/artist/1Xyo4u8uXC1ZmMpatF05PJ", output_dir="./MusicLibrary",
@@ -332,7 +332,7 @@ spotiflac https://open.spotify.com/artist/... ./MusicLibrary \
 SoundCloud tracks are typically downloaded as MP3 128kbps, though the provider attempts to fetch the highest quality transcoding available (including Opus or Ogg if supported).
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 # Single track
 SpotiFLAC(url="https://soundcloud.com/artist/track-slug", output_dir="./downloads", services=["soundcloud"])
@@ -353,7 +353,7 @@ SpotiFLAC can use Deezer as a **download service** when sourcing tracks identifi
 > **Note:** Deezer URLs cannot be used as input — use a Spotify or Tidal link and set `deezer` as the service.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
@@ -369,7 +369,7 @@ SpotiFLAC(
 SpotiFLAC supports Apple Music as both an **input URL source** and a **download service**. The output format is **M4A** (ALAC lossless or AAC depending on quality).
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://music.apple.com/us/album/album-name/123456789?i=987654321",
@@ -388,7 +388,7 @@ SpotiFLAC(
 SpotiFLAC can download tracks, playlists and albums from **YouTube Music** (and standard YouTube). The output format is always **MP3**.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://music.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -404,7 +404,7 @@ SpotiFLAC(
 SpotiFLAC can download individual tracks from **Pandora** using both web URLs and app links. Output: **MP3** (`mp3_192` default) or **M4A** (`aac_64` / `aac_32`). Album and playlist downloads are not supported.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 # Web URL
 SpotiFLAC(url="https://www.pandora.com/artist/name/album/song/TR:12345678",
@@ -433,7 +433,7 @@ SpotiFLAC can use Joox as a **download service** when sourcing tracks identified
 > **Note:** Joox URLs cannot be used as input — use a Spotify or Tidal link and set `joox` as the service. Joox is primarily available in select Asian markets.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
@@ -451,7 +451,7 @@ SpotiFLAC can use NetEase Cloud Music as a **download service** when sourcing tr
 > **Note:** NetEase URLs cannot be used as input — use a Spotify or Tidal link and set `netease` as the service. NetEase is primarily available in China and may require a VPN in other regions.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
@@ -469,7 +469,7 @@ SpotiFLAC can use Migu Music as a **download service** when sourcing tracks iden
 > **Note:** Migu URLs cannot be used as input — use a Spotify or Tidal link and set `migu` as the service. Migu is primarily available in China and may require a VPN in other regions.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
@@ -487,7 +487,7 @@ SpotiFLAC can use Kuwo Music as a **download service** when sourcing tracks iden
 > **Note:** Kuwo URLs cannot be used as input — use a Spotify or Tidal link and set `kuwo` as the service. Kuwo is primarily available in China and may require a VPN in other regions.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
@@ -503,7 +503,7 @@ SpotiFLAC(
 For single track downloads you can specify the **exact file path** instead of relying on `output_dir` + `filename_format`.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
@@ -534,7 +534,7 @@ export QOBUZ_LOCAL_API_URL="https://localhost:8000"
 
 **Python:**
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="URL",
@@ -565,7 +565,7 @@ and point SpotiFLAC to it — it will always be tried first, before any public m
 ### Python
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from backend import SpotiFLAC
 
 SpotiFLAC(
     url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
