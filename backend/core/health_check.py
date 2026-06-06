@@ -17,7 +17,7 @@ from typing import NamedTuple
 from urllib.parse import urlparse
 
 import httpx
-from SpotiFLAC.core.http import NetworkManager
+from .http import NetworkManager
 
 # ---------------------------------------------------------------------------
 # Helper per la validazione del payload
@@ -71,7 +71,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     # ── Tidal ──────────────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.tidal import (
+        from providers.tidal import (
             _TIDAL_APIS_GET,
             _TIDAL_API_POST,
             get_tidal_api_list,
@@ -97,7 +97,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     # ── Qobuz ──────────────────────────────────────────────────────────────
     try:
         # Importiamo solo le API di download di terze parti, NON l'API ufficiale (_API_BASE)
-        from SpotiFLAC.providers.qobuz import _STREAM_APIS, _POST_APIS
+        from providers.qobuz import _STREAM_APIS, _POST_APIS
         qobuz_eps: list[tuple[str, str]] = []
         _QOBUZ_PROBE_ID = "3135556"
         
@@ -121,7 +121,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     # ── Deezer ─────────────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.deezer import _RESOLVER_URL
+        from providers.deezer import _RESOLVER_URL
         endpoints["deezer"] = [
             ("POST", _RESOLVER_URL),
             ("GET", "https://api.zarz.moe/v1/health"),
@@ -134,7 +134,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     # ── Amazon ─────────────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.amazon import API_ENDPOINTS
+        from providers.amazon import API_ENDPOINTS
         amazon_list: list[tuple[str, str]] = []
         for val in API_ENDPOINTS.values():
             if isinstance(val, dict):
@@ -155,7 +155,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     # ── Apple Music ────────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.apple_music import API_ENDPOINTS as APPLE_DL_ENDPOINTS
+        from providers.apple_music import API_ENDPOINTS as APPLE_DL_ENDPOINTS
         endpoints["apple"] = [
             ("POST", APPLE_DL_ENDPOINTS.get("proxy_direct", "https://api.zarz.moe/v1/dl/app2")),
             ("GET",  f"{APPLE_DL_ENDPOINTS.get('proxy_queued', 'https://api.zarz.moe/v1/dl/app')}/status/test"),
@@ -170,7 +170,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     # ── SoundCloud ─────────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.soundcloud import SoundCloudProvider
+        from providers.soundcloud import SoundCloudProvider
         sc = SoundCloudProvider.__new__(SoundCloudProvider)
         cobalt  = getattr(sc, "cobalt_api", "https://api.zarz.moe/v1/dl/cobalt/")
         endpoints["soundcloud"] = [
@@ -189,7 +189,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     # ── Pandora ────────────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.pandora import _API_BASE_URL, _DOWNLOAD_PATH
+        from providers.pandora import _API_BASE_URL, _DOWNLOAD_PATH
         endpoints["pandora"] = [
             ("GET",  f"{_API_BASE_URL}/v1/health"),
             ("POST", f"{_API_BASE_URL}{_DOWNLOAD_PATH}"),
@@ -201,7 +201,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     # ── SpotiDownloader ────────────────────────────────────────────────────
     try:
-        from SpotiFLAC.providers.spotidownloader import _API_BASE as SPOTI_API_BASE
+        from providers.spotidownloader import _API_BASE as SPOTI_API_BASE
         endpoints["spoti"] = [("GET", SPOTI_API_BASE)]
     except ImportError:
         endpoints["spoti"] = [("GET", "https://api.spotidownloader.com/")]

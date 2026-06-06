@@ -9,6 +9,7 @@ import logging
 import httpx
 import aiofiles
 import re
+import importlib.metadata
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .core.http import NetworkManager
@@ -45,8 +46,14 @@ class SpotiFLAC_API:
         self.log(f"Default download folder: {self.download_dir}", "info")
         self.run_health_check(["tidal", "qobuz", "deezer", "apple", "soundcloud", "spoti"])
         try:
+            app_version = importlib.metadata.version("SpotiFLAC")
+        except Exception:
+            app_version = "unknown"
+        try:
             if self._window:
                 self._window.evaluate_js("window.loadHistoryAndProfiles();")
+                self._window.evaluate_js(f"document.getElementById('tb-version').innerText = '{app_version}';")
+                self._window.evaluate_js(f"document.getElementById('hero-version').innerText = 'v{app_version}';")
         except Exception:
             pass
 

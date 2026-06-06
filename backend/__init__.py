@@ -25,6 +25,7 @@ Batch (more URL):
 """
 from __future__ import annotations
 import logging
+import importlib.metadata
 import sys
 
 from .downloader import SpotiflacDownloader, DownloadOptions
@@ -42,7 +43,10 @@ from .providers import (
 )
 from .core import TrackMetadata, DownloadResult
 
-__version__ = "0.9.0"
+try:
+    __version__ = importlib.metadata.version("SpotiFLAC")
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "unknown"
 
 __all__ = [
     "SpotiFLAC",

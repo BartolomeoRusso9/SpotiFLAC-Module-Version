@@ -47,13 +47,6 @@ _TIDAL_APIS_GET = [
     "https://tidal-api.binimum.org",
     "https://tidal.kinoplus.online",
     "https://triton.squid.wtf",
-    "https://vogel.qqdl.site",
-    "https://maus.qqdl.site",
-    "https://hund.qqdl.site",
-    "https://katze.qqdl.site",
-    "https://wolf.qqdl.site",
-    "https://hifi-one.spotisaver.net",
-    "https://hifi-two.spotisaver.net",
 ]
 
 _TIDAL_API_POST = [
