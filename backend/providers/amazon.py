@@ -471,7 +471,14 @@ class AmazonProvider(BaseProvider):
             params = None
             headers = {"X-Debug-Key": _get_amazon_debug_key()}
 
-        resp = self._make_api_request(provider_key=provider_key, endpoint=endpoint, headers=headers, payload=payload, params=params)
+        try:
+            resp = self._make_api_request(provider_key=provider_key, endpoint=endpoint, headers=headers, payload=payload, params=params)
+        except (httpx.RequestError, httpx.ConnectError) as exc:
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"{provider_key} API request failed: {exc}",
+                self.name,
+            ) from exc
 
         if resp.status_code != 200:
             err_msg = resp.json() if "application/json" in resp.headers.get("Content-Type", "") else resp.text
@@ -611,7 +618,14 @@ class AmazonProvider(BaseProvider):
         # 3. SPOTBYE 2
         spotbye2_url = API_ENDPOINTS['spotbye2']['base_url']
         print_source_banner("amazon", spotbye2_url, fallback_quality)
-        return self._download_from_spotbye_api(asin, output_dir, provider_key="spotbye2")
+        try:
+            return self._download_from_spotbye_api(asin, output_dir, provider_key="spotbye2")
+        except SpotiflacError as exc:
+            logger.warning("[amazon] Spotbye2 failed: %s", exc)
+            raise
+        except Exception as exc:
+            logger.warning("[amazon] Spotbye2 unexpected failure: %s", exc)
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"spotbye2 API failed: {exc}", self.name) from exc
     
     # ------------------------------------------------------------------
     # Metadata Embedding

@@ -173,7 +173,8 @@ def download_one(
                     return result
  
                 errors[provider.name] = result.error or "unknown error"
-                logger.warning("[%s] ✗ %s", provider.name, result.error)
+                safe_tqdm_write(f"  ✗  {provider.name}  ·  {result.error}", file=sys.stderr)
+                logger.debug("[%s] ✗ %s", provider.name, result.error)
  
         attempts_str = f"{max_retries + 1} attempt(s)"
         summary = "; ".join(f"{k}: {v}" for k, v in errors.items())
@@ -324,7 +325,8 @@ class DownloadWorker:
                 else:
                     err = result.error or "unknown"
                     self._failed.append((track.id, track.title, track.artists, err))
-                    logger.error("[worker] Failed: %s — %s: %s", track.title, track.artists, err)
+                    safe_tqdm_write(f"\n  ✗  Failed: {track.title} — {track.artists}: {err}", file=sys.stderr)
+                    logger.debug("[worker] Failed: %s — %s: %s", track.title, track.artists, err)
                     manager.fail_download(track.id, err)
                     from .core.progress import ProgressCallback
                     ProgressCallback.clear_item(track.id)

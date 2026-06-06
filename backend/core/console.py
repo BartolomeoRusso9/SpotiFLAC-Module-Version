@@ -83,14 +83,8 @@ def print_summary(total: int, succeeded: int, failed: list[tuple[str, str, str]]
         tqdm.write(summary, file=sys.stderr)
 
 def print_api_failure(provider: str, api: str, reason: str) -> None:
-    if not _should_print_api_failure(provider, api, reason):
-        _maybe_print_api_failure_summary(provider)
-        return
-
     with tqdm.get_lock():
         tqdm.write(f"  ✗  {provider}  ·  {_shorten_api(api)}  ·  {_clean_error(reason)}", file=sys.stderr)
-
-    _maybe_print_api_failure_summary(provider)
 
 def print_quality_fallback(provider: str, from_q: str, to_q: str) -> None:
     with tqdm.get_lock():

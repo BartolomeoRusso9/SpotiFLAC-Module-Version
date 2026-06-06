@@ -877,6 +877,15 @@ class QobuzProvider(BaseProvider):
             excluded_apis = set()
             valid = False
             last_err = None
+
+            mb_tags: dict[str, str] = {}
+            res: dict = {}
+            if mb_fetcher:
+                res = mb_fetcher.future.result()
+
+            mb_tags = mb_result_to_tags(res)
+            mb_tags.update(qobuz_extra_tags)
+            _print_mb_summary(mb_tags)
             
             while not valid:
                 try:
@@ -910,29 +919,38 @@ class QobuzProvider(BaseProvider):
                             logger.error("[qobuz] Failed to remove invalid file: %s", e)
                     continue 
                 
-                break 
+                try:
+                    opts = EmbedOptions(
+                        first_artist_only       = first_artist_only,
+                        cover_url               = metadata.cover_url,
+                        extra_tags              = mb_tags,
+                        embed_lyrics            = embed_lyrics,
+                        lyrics_providers        = lyrics_providers or [],
+                        enrich                  = enrich_metadata,
+                        enrich_providers        = enrich_providers,
+                        enrich_qobuz_token      = self._qobuz_token or "",
+                        is_album                = is_album,
+                    )
+                    embed_metadata(str(dest), metadata, opts, session=self._session)
+                except SpotiflacError as exc:
+                    message = str(exc).lower()
+                    if exc.kind == ErrorKind.FILE_IO and "not a valid flac file" in message:
+                        logger.warning(
+                            "[qobuz] API %s returned invalid FLAC file: %s. Blacklisting endpoint and retrying...",
+                            winner_api, exc,
+                        )
+                        record_failure("qobuz", winner_api)
+                        excluded_apis.add(winner_api)
+                        last_err = exc
+                        if os.path.exists(dest):
+                            try:
+                                os.remove(dest)
+                            except OSError as e:
+                                logger.error("[qobuz] Failed to remove invalid file: %s", e)
+                        continue
+                    raise
 
-            mb_tags: dict[str, str] = {}
-            res: dict = {}
-            if mb_fetcher:
-                res = mb_fetcher.future.result()
-
-            mb_tags = mb_result_to_tags(res)
-            mb_tags.update(qobuz_extra_tags)
-            _print_mb_summary(mb_tags)
-
-            opts = EmbedOptions(
-                first_artist_only       = first_artist_only,
-                cover_url               = metadata.cover_url,
-                extra_tags              = mb_tags,
-                embed_lyrics            = embed_lyrics,
-                lyrics_providers        = lyrics_providers or [],
-                enrich                  = enrich_metadata,
-                enrich_providers        = enrich_providers,
-                enrich_qobuz_token      = self._qobuz_token or "",
-                is_album                = is_album,
-            )
-            embed_metadata(str(dest), metadata, opts, session=self._session)
+                break
 
             return DownloadResult.ok(self.name, str(dest))
 

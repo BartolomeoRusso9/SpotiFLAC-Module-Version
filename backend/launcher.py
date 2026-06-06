@@ -273,7 +273,8 @@ def main() -> None:
     track_max_retries   = args.retries if args.retries is not None else merged_defaults.get("track_max_retries", 0)
 
     log_level = logging.DEBUG if args.verbose else logging.WARNING
-    logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    log_format = "%(levelname)s:%(name)s: %(message)s" if args.verbose else "%(levelname)s: %(message)s"
+    logging.basicConfig(level=log_level, format=log_format)
 
     SpotiFLAC(
         url                      = args.url,

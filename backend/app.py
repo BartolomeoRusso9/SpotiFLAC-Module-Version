@@ -1361,7 +1361,7 @@ class SpotiFLAC_API:
 
 
 def run_gui():
-    logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
     logging.getLogger('pywebview').setLevel(logging.WARNING)
     api = SpotiFLAC_API()
 
