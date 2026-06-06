@@ -37,6 +37,31 @@ class SpotiFLAC_API:
         self.download_dir   = DEFAULT_DOWNLOAD_DIR
         self.current_tracks = []
         self.current_url    = ""
+        self.app_version = "unknown"
+        # determine application version at construction time so JS can query it early
+        try:
+            v = importlib.metadata.version("SpotiFLAC")
+        except Exception:
+            v = "unknown"
+            try:
+                try:
+                    import tomllib
+                except Exception:
+                    tomllib = None
+                pyproj = Path(__file__).resolve().parents[1] / "pyproject.toml"
+                if pyproj.exists():
+                    if tomllib is not None:
+                        with pyproj.open("rb") as f:
+                            data = tomllib.load(f)
+                            v = data.get("project", {}).get("version", v)
+                    else:
+                        text = pyproj.read_text(encoding="utf-8")
+                        m = re.search(r'^version\s*=\s*"([^\"]+)"', text, re.MULTILINE)
+                        if m:
+                            v = m.group(1)
+            except Exception:
+                pass
+        self.app_version = v
 
     def set_window(self, window):
         self._window = window
@@ -45,10 +70,7 @@ class SpotiFLAC_API:
         self.log("Python Backend connected.", "info")
         self.log(f"Default download folder: {self.download_dir}", "info")
         self.run_health_check(["tidal", "qobuz", "deezer", "apple", "soundcloud", "spoti"])
-        try:
-            app_version = importlib.metadata.version("SpotiFLAC")
-        except Exception:
-            app_version = "unknown"
+        app_version = self.app_version
         try:
             if self._window:
                 self._window.evaluate_js("window.loadHistoryAndProfiles();")
@@ -56,6 +78,10 @@ class SpotiFLAC_API:
                 self._window.evaluate_js(f"document.getElementById('hero-version').innerText = 'v{app_version}';")
         except Exception:
             pass
+
+    # Expose simple getters to the frontend via pywebview
+    def get_version(self):
+        return self.app_version
 
     # ── UI communication ──────────────────────────────────────────────────────
 

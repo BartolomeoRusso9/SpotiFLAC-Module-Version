@@ -413,13 +413,34 @@ const DEFAULT_SETTINGS = {
   enrich_providers: ['deezer','apple','qobuz','tidal','soundcloud'],
 };
 
+// Ensure the version is populated even if pywebview API isn't ready yet
+async function fetchVersionWithRetry(retries = 10, delayMs = 200) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      if (window.pywebview?.api && typeof window.pywebview.api.get_version === 'function') {
+        const v = await window.pywebview.api.get_version();
+        const tb = document.getElementById('tb-version');
+        const hero = document.getElementById('hero-version');
+        if (tb) tb.innerText = v && v !== 'unknown' ? `v${v}` : 'v...';
+        if (hero) hero.innerText = v && v !== 'unknown' ? `v${v}` : 'v...';
+        return;
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => fetchVersionWithRetry(20, 200));
+
 function buildSortItem(item, index) {
   const d = document.createElement('div');
   d.className = `sort-item ${item.on ? '' : 'inactive'}`;
   d.dataset.value = item.id;
   
   const iconHtml = item.iconFile
-    ? `<span class="svc-icon ${item.iconClass} icon-image"><img src="assets/icons/${item.iconFile}" alt="${item.label}"></span>`
+    ? `<span class="svc-icon ${item.iconClass} icon-image"><img src="assets/icons/${item.iconFile}" alt="${item.label}" onerror="this.onerror=null; this.src='assets/icons/${item.id}.png';"></span>`
     : item.icon ? `<span class="svc-icon ${item.iconClass}">${item.icon}</span>` : '';
   
   // Aggiungiamo il numero (index + 1) e il checkbox
@@ -523,9 +544,11 @@ function renderPlatformIcon(type) {
     joox: 'joox.svg',
     netease: 'netease.svg',
     migu: 'migu.jpeg',
+    songstats: 'songstats.png',
+    spoti: 'spotubedl.svg',
   };
-  const iconFile = iconMap[type] || 'spotubedl.svg';
-  return `<span class="svc-icon icon-image ${type}"><img src="assets/icons/${iconFile}" alt="${type}"></span>`;
+  const iconFile = iconMap[type] || `${type}.svg`;
+  return `<span class="svc-icon icon-image ${type}"><img src="assets/icons/${iconFile}" alt="${type}" onerror="this.onerror=null; this.src='assets/icons/${type}.png';"></span>`;
 }
 
 function buildStatusCard(source) {
@@ -801,6 +824,13 @@ window.loadHistoryAndProfiles = async () => {
       const o = document.createElement('option'); o.value = p; o.textContent = p;
       sel.appendChild(o);
     });
+    try {
+      const v = await window.pywebview.api.get_version();
+      const tb = document.getElementById('tb-version');
+      const hero = document.getElementById('hero-version');
+      if (tb) tb.innerText = v;
+      if (hero) hero.innerText = v && v !== 'unknown' ? `v${v}` : 'v...';
+    } catch(e) { /* ignore */ }
   } catch(e) { logMessage('Could not load history/profiles: ' + e, 'warn'); }
 };
 
@@ -1898,6 +1928,9 @@ function toggleSearchMode() {
         renderRecentSearches();
         
         input.placeholder = searchPlaceholderLinks[0];
+        $('track-table-wrap')?.classList.add('hidden');
+        $('track-controls')?.classList.add('hidden');
+        $('album-card')?.classList.add('hidden');
     } else {
         mode.value = 'link';
         toggle.classList.remove('active');
@@ -1931,6 +1964,9 @@ function updateSearchMode() {
     icon.textContent = '🔎';
     label.textContent = 'Search';
     toggle.title = 'Switch to Fetch Mode';
+    $('track-table-wrap')?.classList.add('hidden');
+    $('track-controls')?.classList.add('hidden');
+    $('album-card')?.classList.add('hidden');
   } else {
     // Modalità Link: resetta e fai ripartire l'animazione
     toggle.classList.remove('active');
