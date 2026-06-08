@@ -1933,3 +1933,47 @@
   padding: 12px 10px; 
   border-bottom: 1px solid var(--border);
 }
+
+/* ── ffmpeg warning banner ── */
+.ffmpeg-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: rgba(239, 68, 68, .08);
+  border-bottom: 1px solid rgba(239, 68, 68, .25);
+  font-size: 12px;
+  color: var(--text2);
+  flex-shrink: 0;
+  animation: fadein .2s ease;
+}
+.ffmpeg-banner-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  color: var(--red);
+}
+.ffmpeg-banner-body {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.ffmpeg-banner-body strong { color: var(--red); }
+.ffmpeg-banner-link {
+  color: var(--yellow);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.ffmpeg-banner-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color var(--t);
+}
+.ffmpeg-banner-close:hover { color: var(--text2); }

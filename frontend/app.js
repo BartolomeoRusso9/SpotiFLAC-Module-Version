@@ -3125,3 +3125,31 @@ setTimeout(() => {
     ]);
   }
 }, 500);
+
+// ── ffmpeg warning banner ─────────────────────────────────────────────────
+window.showFfmpegWarning = function(result) {
+  // Evita banner duplicati
+  if ($('ffmpeg-warning-banner')) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'ffmpeg-warning-banner';
+  banner.className = 'ffmpeg-banner';
+  banner.innerHTML = `
+    <span class="ffmpeg-banner-icon">⚠</span>
+    <div class="ffmpeg-banner-body">
+      <strong>ffmpeg not found</strong>
+      <span>Tidal FLAC muxing and Amazon decryption will be unavailable.</span>
+      <a href="#" class="ffmpeg-banner-link"
+        onclick="event.preventDefault(); pyWin('open_url', 'https://ffmpeg.org/download.html')">
+        Download ffmpeg
+      </a>
+    </div>
+    <button class="ffmpeg-banner-close" onclick="this.closest('.ffmpeg-banner').remove()" title="Dismiss">✕</button>
+  `;
+
+  // Inserisci subito dopo la search bar
+  const searchBar = $('search-bar');
+  if (searchBar && searchBar.parentNode) {
+    searchBar.parentNode.insertBefore(banner, searchBar.nextSibling);
+  }
+};

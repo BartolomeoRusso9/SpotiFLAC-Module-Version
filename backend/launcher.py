@@ -213,9 +213,11 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
 
 def main() -> None:
     import importlib.util, importlib.resources
+    from .core.ffmpeg_check import print_ffmpeg_warning
 
     # Interactive mode (explicit flag)
     if "--interactive" in sys.argv:
+        print_ffmpeg_warning()
         cfg = run_interactive()
 
         log_level = logging.WARNING
@@ -255,6 +257,7 @@ def main() -> None:
         return
 
     # ── CLI mode ──────────────────────────────────────────────────────
+    print_ffmpeg_warning()
     profile_defaults: dict = {}
     if "--profile" in sys.argv:
         idx = sys.argv.index("--profile")
