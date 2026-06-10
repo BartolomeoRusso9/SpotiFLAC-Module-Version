@@ -391,9 +391,8 @@ class AmazonProvider(BaseProvider):
 
     def _download_from_squid_api(self, asin: str, output_dir: str, requested_quality: str) -> tuple[str, dict] | None:
         """
-        Download a FLAC track directly from amz.squid.wtf via GET /api/stream.
-        tier=best  → Ultra HD FLAC 24-bit
-        tier=hd    → HD FLAC 16-bit
+        Download a track directly from amz.squid.wtf via GET /api/stream.
+        Handles both native FLAC responses and M4A containers with FLAC stream inside.
         """
         logger.info("[amazon] Trying Squid API (ASIN: %s)", asin)
 
@@ -409,7 +408,14 @@ class AmazonProvider(BaseProvider):
         tier  = "best" if q_str in ["hi_res", "hires", "hi-res", "hi-res-lossless"] else "hd"
 
         params    = {"asin": asin, "country": "US", "tier": tier}
-        temp_file = os.path.join(output_dir, f"{asin}_squid.flac")
+        temp_file = os.path.join(output_dir, f"{asin}_squid.tmp")
+
+        def _cleanup() -> None:
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except OSError:
+                    pass
 
         max_attempts = 2
         base_delay_s = 1.0
@@ -437,35 +443,68 @@ class AmazonProvider(BaseProvider):
                         logger.warning("[amazon] Squid API returned HTTP %d", resp.status_code)
                         return None
 
-                    total     = int(resp.headers.get("content-length", 0))
-                    written   = 0
-                    validated = False
+                    total        = int(resp.headers.get("content-length", 0))
+                    written      = 0
+                    detected_ext: str | None = None
+                    format_error = False
 
                     with open(temp_file, "wb") as f:
                         for chunk in resp.iter_bytes(65536):
-                            if not validated:
-                                if len(chunk) >= 4 and chunk[:4] != b"fLaC":
+                            if detected_ext is None:
+                                if len(chunk) >= 4 and chunk[:4] == b"fLaC":
+                                    detected_ext = ".flac"
+                                elif len(chunk) >= 8 and chunk[4:8] == b"ftyp":
+                                    detected_ext = ".m4a"
+                                    logger.info("[amazon] Squid stream is M4A container (will demux if FLAC inside)")
+                                else:
                                     logger.warning(
-                                        "[amazon] Squid response is not FLAC (magic=%s)",
-                                        chunk[:4].hex(),
+                                        "[amazon] Squid response is unrecognized format (magic=%s)",
+                                        chunk[:min(8, len(chunk))].hex(),
                                     )
-                                    return None
-                                validated = True
+                                    format_error = True
+                                    break
                             f.write(chunk)
                             written += len(chunk)
                             if self._progress_cb and total:
                                 self._progress_cb(written, total)
 
-                logger.info("[amazon] Squid download complete — %.1f MB", written / 1024 / 1024)
-                return temp_file, {}
+                    if format_error:
+                        _cleanup()
+                        return None
+
+                # Rename to correct extension
+                final_file = os.path.join(output_dir, f"{asin}_squid{detected_ext}")
+                if os.path.exists(final_file):
+                    os.remove(final_file)
+                os.rename(temp_file, final_file)
+
+                # If M4A, check inner codec — demux to FLAC if it's FLAC inside (like the JS client does)
+                if detected_ext == ".m4a":
+                    inner_codec = self._get_codec(final_file)
+                    if inner_codec == "flac":
+                        flac_out = os.path.join(output_dir, f"{asin}_squid.flac")
+                        si = None
+                        if os.name == "nt":
+                            si = subprocess.STARTUPINFO()
+                            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        result = subprocess.run(
+                            [_ffmpeg_path(), "-y", "-i", final_file, "-c", "copy", flac_out],
+                            capture_output=True, startupinfo=si,
+                        )
+                        if result.returncode == 0 and os.path.exists(flac_out):
+                            os.remove(final_file)
+                            final_file = flac_out
+                            logger.info("[amazon] Squid: demuxed FLAC stream from M4A container")
+                        else:
+                            logger.warning("[amazon] Squid: FLAC demux failed, keeping M4A")
+
+                logger.info("[amazon] Squid download complete — %.1f MB (%s)",
+                            written / 1024 / 1024, os.path.splitext(final_file)[1])
+                return final_file, {}
 
             except Exception as exc:
                 logger.warning("[amazon] Squid error (attempt %d/%d): %s", attempt + 1, max_attempts, exc)
-                if os.path.exists(temp_file):
-                    try:
-                        os.remove(temp_file)
-                    except OSError:
-                        pass
+                _cleanup()
                 if attempt < max_attempts - 1:
                     time.sleep(base_delay_s * (attempt + 1))
                     continue
@@ -823,7 +862,7 @@ class AmazonProvider(BaseProvider):
 
         # 2. SQUID API (Fallback 1 — direct FLAC, no decryption)
         q_str       = str(quality).lower().strip()
-        squid_tier  = "best" if q_str in ["hi_res", "hires", "hi-res", "hi-res-lossless"] else "hd"
+        squid_tier  = "best" if q_str in ["hi_res", "hires", "hi-res", "hi-res-lossless", "hi_res_lossless" , "HI_RES", "HIRES", "HI-RES" ,"HI-RES-LOSSLESS", "HI_RES_LOSSLESS"] else "hd"
         print_source_banner("amazon", f"{_SQUID_BASE}/stream?asin={asin}&country=US&tier={squid_tier}", fallback_quality)
         try:
             squid_result = self._download_from_squid_api(asin, output_dir, quality)
