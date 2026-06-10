@@ -797,12 +797,6 @@ class SpotiFLAC_API:
 
     # ── Bulk: cover di tutte le tracce ───────────────────────────────────────────
 
-    def download_all_covers(self, tracks_data):
-        threading.Thread(target=self._run_async_covers, args=(tracks_data,), daemon=True).start()
-
-    def _run_async_covers(self, tracks_data):
-        asyncio.run(self._async_download_all_covers(tracks_data))
-
     def _download_all_covers_task(self, tracks_data):
         total   = len(tracks_data)
         success = 0
@@ -1358,11 +1352,9 @@ class SpotiFLAC_API:
 
     def _health_check_task(self, services):
         try:
-            import importlib
-            hc_module = importlib.import_module("backend.core.health_check")
-            hc_run    = getattr(hc_module, "run_health_check")
+            from .core.health_check import run_health_check as hc_run
             self.log(f"Health check started for: {', '.join(services)}", "info")
-            results = hc_run(services)
+            results = asyncio.run(hc_run(services))
             data = [
                 {
                     "provider": r.provider,
@@ -1442,7 +1434,7 @@ def run_gui():
         frameless=True, easy_drag=False, background_color='#0a0a0a'
     )
     api.set_window(window)
-    webview.start(http_server=True)
+    webview.start(api._on_loaded, http_server=True)
 
 if __name__ == '__main__':
     run_gui()

@@ -26,7 +26,7 @@ def safe_tqdm_write(msg: str, file: io.TextIOBase | None = None) -> None:
         tqdm.write(msg, file=file or sys.stdout)
 
 
-class TqdmLoggingHandler(logging.Handler):
+class TqdmLoggingHandler(logging.StreamHandler):
     def __init__(self) -> None:
         super().__init__()
         self._message_cache: dict[str, float] = {}
@@ -122,6 +122,11 @@ def uninstall_console_interception() -> None:
         sys.stdout = sys.__stdout__
     if isinstance(sys.stderr, _TqdmTextIOProxy):
         sys.stderr = sys.__stderr__
+
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        if isinstance(handler, TqdmLoggingHandler):
+            root.removeHandler(handler)
 
 
 class DownloadStatus(Enum):

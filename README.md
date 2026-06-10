@@ -624,7 +624,7 @@ Your support helps keep development going._
 
 ## API Credits
 
-[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [qobuz-api](https://github.com/BartolomeoRusso9/qobuz-api) ·[dabmusic.xyz](https://dabmusic.xyz) · [GD Studio Music API](https://music.gdstudio.xyz) · [Music Wjhe API](https://music.wjhe.top/) · [afkarxyz](https://github.com/afkarxyz) · [MusicBrainz](https://musicbrainz.org) · [SoundCloud](https://soundcloud.com) · [Apple Music](https://music.apple.com) · [YouTube Music](https://music.youtube.com) · [Pandora](https://www.pandora.com)
+[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [qobuz-api](https://github.com/BartolomeoRusso9/qobuz-api) ·[dabmusic.xyz](https://dabmusic.xyz) · [GD Studio Music API](https://music.gdstudio.xyz) · [Music Wjhe API](https://music.wjhe.top/) · [afkarxyz](https://github.com/afkarxyz) · [MusicBrainz](https://musicbrainz.org) · [SoundCloud](https://soundcloud.com) · [Apple Music](https://music.apple.com) · [YouTube Music](https://music.youtube.com) · [Pandora](https://www.pandora.com) · [squid.wtf](https://squid.wtf/)
 
 > [!TIP]
 >

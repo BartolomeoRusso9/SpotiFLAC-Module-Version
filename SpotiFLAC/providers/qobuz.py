@@ -65,6 +65,7 @@ _STREAM_APIS: list[str] = [
     "https://qbz.afkarxyz.qzz.io/api/track/",
     "https://qobuz.spotbye.qzz.io/api/track/",
     "https://qobuz.kennyy.com.br/api/download-music?",
+    "https://qobuz.squid.wtf/api/download-music?",
 ]
 
 _POST_APIS: list[str] = [
@@ -264,7 +265,7 @@ def _compute_signature(path: str, params: dict, timestamp: str, secret: str) -> 
 
 
 def _build_stream_url(api_base: str, track_id: int, quality: str) -> str:
-    if "kennyy.com.br" in api_base:
+    if "kennyy.com.br" in api_base or "squid.wtf" in api_base:
         return f"{api_base}track_id={track_id}&quality={quality}"
     if api_base.endswith("="):
         return f"{api_base}{track_id}&quality={quality}"
@@ -384,6 +385,7 @@ def _fetch_stream_url_once(
     is_musicdl = "musicdl.me" in api_cleaning
     is_gdstudio = "gdstudio" in api_cleaning
     is_wjhe = "wjhe.top" in api_cleaning
+    is_squid = "squid.wtf" in api_cleaning
     
     is_post = api_base in _POST_APIS or is_zarz or is_gdstudio
     max_retries = _MAX_RETRIES_POST if is_post else _MAX_RETRIES_GET
@@ -444,6 +446,102 @@ def _fetch_stream_url_once(
                     loc = resp.headers.get("Location")
                     if loc and loc.startswith("http"):
                         return loc
+
+            elif is_squid:
+                import struct
+                import base64
+                
+                parsed = urlparse(api_base)
+                origin = f"{parsed.scheme}://{parsed.netloc}"
+                
+                squid_headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "en-US,en;q=0.9",
+                }
+                
+                # 1. Recupera la challenge ALTCHA
+                current_ts = int(time.time() * 1000)
+                chal_resp = client.get(
+                    f"{origin}/api/altcha/challenge",
+                    params={"ts": current_ts},
+                    headers=squid_headers,
+                    timeout=timeout_s
+                )
+                chal_resp.raise_for_status()
+                
+                challenge_json_str = chal_resp.text
+                challenge_data = json.loads(challenge_json_str)
+                params = challenge_data["parameters"]
+                
+                # 2. Risoluzione PoW locale della challenge
+                salt_hex   = params.get("salt", "")
+                nonce_hex  = params["nonce"]
+                key_prefix = params["keyPrefix"]
+                algorithm  = params.get("algorithm", "SHA-256")
+                cost       = params.get("cost", 1)
+                key_length = params.get("keyLength", 32)
+
+                if algorithm != "SHA-256":
+                    raise ValueError(f"Algoritmo ALTCHA non supportato: {algorithm}")
+
+                salt_bytes  = bytes.fromhex(salt_hex) if salt_hex else b""
+                nonce_bytes = bytes.fromhex(nonce_hex)
+
+                start_time = time.time()
+                counter = 0
+
+                while True:
+                    password = nonce_bytes + struct.pack(">I", counter)
+                    for i in range(cost):
+                        data = (salt_bytes + password) if i == 0 else derived
+                        derived = hashlib.sha256(data).digest()[:key_length]
+
+                    hex_digest = derived.hex()
+                    if hex_digest.startswith(key_prefix):
+                        break
+                    counter += 1
+
+                elapsed = (time.time() - start_time) * 1000
+                min_elapsed = 160.0 + random.uniform(0, 20)
+                if elapsed < min_elapsed:
+                    time.sleep((min_elapsed - elapsed) / 1000.0)
+                    elapsed = min_elapsed
+
+                solution = {
+                    "counter":    counter,
+                    "derivedKey": hex_digest,
+                    "time":       round(elapsed, 1),
+                }
+                
+                # 3. Serializzazione payload ed invio POST di verifica
+                solution_json = json.dumps(solution, separators=(",", ":"))
+                payload_json  = f'{{"challenge":{challenge_json_str},"solution":{solution_json}}}'
+                payload = base64.b64encode(payload_json.encode()).decode()
+                
+                verify_resp = client.post(
+                    f"{origin}/api/altcha/verify",
+                    json={"payload": payload},
+                    headers={
+                        "Origin":  origin,
+                        "Referer": f"{origin}/",
+                        **squid_headers
+                    },
+                    timeout=timeout_s,
+                )
+                verify_resp.raise_for_status()
+                
+                # 4. Richiesta finale dell'URL di streaming del brano
+                url = _build_stream_url(api_base, track_id, quality)
+                resp = client.get(
+                    url,
+                    headers={
+                        "Origin":  origin,
+                        "Referer": f"{origin}/",
+                        **squid_headers
+                    },
+                    timeout=timeout_s
+                )
 
             elif is_post:
                 if is_zarz:

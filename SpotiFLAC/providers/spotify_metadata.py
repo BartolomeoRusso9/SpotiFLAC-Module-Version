@@ -283,6 +283,29 @@ class SpotifyMetadataClient:
     # Traccia singola
     # ------------------------------------------------------------------
 
+    def _get_album_artists(self, album_id: str) -> str:
+        """Query leggera: solo metadati album, nessuna traccia."""
+        payload = {
+            "operationName": "getAlbum",
+            "variables": {
+                "uri": f"spotify:album:{album_id}",
+                "locale": "",
+                "offset": 0,
+                "limit": 1,
+            },
+            "extensions": {"persistedQuery": {
+                "version": 1,
+                "sha256Hash": "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10",
+            }},
+        }
+        try:
+            data = self.web_client.query(payload)
+            album_union = data.get("data", {}).get("albumUnion", {})
+            return _join_artists(album_union.get("artists", {}))
+        except Exception as e:
+            logger.debug(f"[spotify] Failed to fetch album artists for {album_id}: {e}")
+            return ""
+
     def get_track(self, track_id: str) -> TrackMetadata:
         """Recupera metadati completi per una singola traccia, compositore incluso."""
         payload = {
@@ -298,6 +321,19 @@ class SpotifyMetadataClient:
 
         album_data = track_union.get("albumOfTrack", {})
         cover = _best_cover(self.web_client.extract_cover_image(album_data.get("coverArt", {})))
+
+        # albumOfTrack in getTrack non include artists → fetch separato
+        album_artists_str = _join_artists(album_data.get("artists", {}))
+        if not album_artists_str:
+            album_id = album_data.get("id") or ""
+            if not album_id:
+                uri = album_data.get("uri", "")
+                if isinstance(uri, str) and ":" in uri:
+                    album_id = uri.split(":")[-1]
+            if album_id:
+                album_artists_str = self._get_album_artists(album_id)
+            if not album_artists_str:
+                album_artists_str = "Unknown Artist"
         
         # ------------------------------------------------------------------
         # Artist extraction logic:
@@ -335,7 +371,7 @@ class SpotifyMetadataClient:
             title=track_union.get("name", "Unknown"),
             artists=artists_str,
             album=album_data.get("name", "Unknown"),
-            album_artist=artists_str,
+            album_artist=album_artists_str,
             isrc="",
             track_number=track_union.get("trackNumber") or 0,
             disc_number=track_union.get("discNumber") or 1,
@@ -604,14 +640,16 @@ class SpotifyMetadataClient:
                 if not t.get("id"):
                     continue
                 album_node = t.get("albumOfTrack", {})
+                track_artists_str = _join_artists(t.get("artists", {}))
+                album_artists_str = _join_artists(album_node.get("artists", {})) or track_artists_str
+
                 cover = _best_cover(self.web_client.extract_cover_image(album_node.get("coverArt", {})))
-                artists_str = _join_artists(t.get("artists", {}))
                 results.append(TrackMetadata(
                     id=t["id"],
                     title=t.get("name", "Unknown"),
-                    artists=artists_str,
+                    artists=track_artists_str,
                     album=album_node.get("name", "Unknown"),
-                    album_artist=artists_str,
+                    album_artist=album_artists_str,
                     isrc="",
                     track_number=0,
                     disc_number=1,

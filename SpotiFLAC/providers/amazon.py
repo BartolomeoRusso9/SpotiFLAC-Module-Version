@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import logging
 import os
@@ -30,6 +31,13 @@ _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
+)
+
+_SQUID_BASE = "https://amz.squid.wtf/api"
+_SQUID_UA   = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/149.0.0.0 Safari/537.36"
 )
 
 API_ENDPOINTS = {
@@ -123,6 +131,7 @@ class AmazonProvider(BaseProvider):
         super().__init__(timeout_s=timeout_s)
         self._session = NetworkManager.get_sync_client()
         self._session.headers.update({"User-Agent": _DEFAULT_UA})
+        self._squid_token: str | None = None
 
     def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
         super().set_progress_callback(cb)
@@ -147,7 +156,7 @@ class AmazonProvider(BaseProvider):
         return self._session.get(url, params=params, headers=headers, timeout=30)
 
     # ------------------------------------------------------------------
-    # Songlink / Fallback -> Amazon URL Resolver 
+    # Songlink / Fallback -> Amazon URL Resolver
     # ------------------------------------------------------------------
 
     def _format_amazon_url(self, raw_url: str) -> str:
@@ -184,7 +193,7 @@ class AmazonProvider(BaseProvider):
                     try:
                         data = json.loads(match.group(1))
                         amz_url = self._extract_amazon_from_json_ld(data)
-                        if amz_url: 
+                        if amz_url:
                             logger.info("[amazon] Resolved via Songstats ISRC")
                             return amz_url
                     except json.JSONDecodeError:
@@ -200,7 +209,7 @@ class AmazonProvider(BaseProvider):
             return self._format_amazon_url(f"https://music.amazon.com/tracks/{metadata.id}")
 
         track_id = metadata.id
-        
+
         # 1. ZARZ.MOE API (Spotify ID)
         source_url = f"https://open.spotify.com/track/{track_id}"
         try:
@@ -286,6 +295,179 @@ class AmazonProvider(BaseProvider):
         raise RuntimeError(f"Could not resolve Amazon URL for {track_id} via any method.")
 
     # ------------------------------------------------------------------
+    # Squid PoW Captcha + Direct FLAC Download
+    # ------------------------------------------------------------------
+
+    def _solve_pow(self, challenge: dict) -> dict:
+        """Solve the PBKDF2/SHA-256 proof-of-work challenge from amz.squid.wtf."""
+        p           = challenge["parameters"]
+        nonce_bytes = bytes.fromhex(p["nonce"])
+        salt        = bytes.fromhex(p["salt"])
+        cost        = p["cost"]
+        key_len     = p["keyLength"]
+        key_prefix  = p["keyPrefix"]
+
+        t0 = time.time()
+        counter = 0
+        while True:
+            password = nonce_bytes + counter.to_bytes(4, "big")
+            dk = hashlib.pbkdf2_hmac("sha256", password, salt, cost, dklen=key_len)
+            hex_key = binascii.hexlify(dk).decode()
+            if hex_key.startswith(key_prefix):
+                return {
+                    "counter":    counter,
+                    "derivedKey": hex_key,
+                    "time":       round((time.time() - t0) * 1000, 1),
+                }
+            counter += 1
+
+    def _get_squid_token(self, force_refresh: bool = False) -> str:
+        """Obtain (or reuse) a captcha token from amz.squid.wtf."""
+        if self._squid_token and not force_refresh:
+            return self._squid_token
+
+        _h = {
+            "accept":          "*/*",
+            "content-type":    "application/json",
+            "origin":          "https://amz.squid.wtf",
+            "referer":         "https://amz.squid.wtf/",
+            "user-agent":      _SQUID_UA,
+        }
+
+        try:
+            challenge = self._session.get(
+                f"{_SQUID_BASE}/captcha/challenge", headers=_h, timeout=15
+            ).json()
+
+            solution = self._solve_pow(challenge)
+
+            encoded = base64.b64encode(
+                json.dumps(
+                    {"challenge": challenge, "solution": solution},
+                    separators=(",", ":"),
+                ).encode()
+            ).decode()
+
+            resp = self._session.post(
+                f"{_SQUID_BASE}/captcha/verify",
+                json={"payload": encoded},
+                headers=_h,
+                timeout=15,
+            )
+            self._squid_token = resp.json()["token"]
+            logger.info(
+                "[amazon] Squid captcha OK — counter=%d, pow=%.0fms",
+                solution["counter"], solution["time"],
+            )
+            return self._squid_token
+
+        except Exception as exc:
+            raise RuntimeError(f"[amazon] Squid captcha failed: {exc}") from exc
+
+    def _download_from_squid_api(self, asin: str, output_dir: str, requested_quality: str) -> tuple[str, dict] | None:
+        """
+        Download a FLAC track directly from amz.squid.wtf.
+        The endpoint returns a raw binary FLAC stream (no decryption needed).
+        Retries with incremental backoff if the attempt fails auth or SSL drops.
+        """
+        logger.info("[amazon] Trying Squid API (ASIN: %s)", asin)
+
+        _h = {
+            "accept":          "*/*",
+            "content-type":    "application/json",
+            "origin":          "https://amz.squid.wtf",
+            "referer":         "https://amz.squid.wtf/",
+            "user-agent":      _SQUID_UA,
+        }
+
+        # Mappatura della qualità richiesta ai parametri dell'API di Squid
+        q_str = str(requested_quality).lower().strip()
+        squid_quality = 1 if q_str in ["hi_res", "hires", "hi-res", "hi-res-lossless"] else 2
+
+        payload = {
+            "asin":             asin,
+            "country":          "US",
+            "codec":            "flac",
+            "quality":          squid_quality,
+            "download_cover":   True,
+            "download_lyrics":  False,
+            "output_template":  "%(artist)s - %(title)s",
+        }
+
+        temp_file = os.path.join(output_dir, f"{asin}_squid.flac")
+        
+        max_attempts = 2
+        base_delay_s = 1.0
+
+        for attempt in range(max_attempts):
+            try:
+                # Forza il refresh del token se non siamo al primo tentativo
+                token = self._get_squid_token(force_refresh=(attempt > 0))
+                _h["x-captcha-token"] = token
+
+                with self._session.stream(
+                    "POST",
+                    f"{_SQUID_BASE}/download/track",
+                    json=payload,
+                    headers=_h,
+                    timeout=120,
+                ) as resp:
+
+                    # Gestione dei token rifiutati/scaduti
+                    if resp.status_code in (401, 403) and attempt < max_attempts - 1:
+                        logger.info("[amazon] Squid token rejected, refreshing…")
+                        self._squid_token = None
+                        time.sleep(base_delay_s)
+                        continue
+
+                    if resp.status_code != 200:
+                        logger.warning("[amazon] Squid API returned HTTP %d", resp.status_code)
+                        return None
+
+                    total   = int(resp.headers.get("content-length", 0))
+                    written = 0
+                    validated = False
+
+                    with open(temp_file, "wb") as f:
+                        for chunk in resp.iter_bytes(65536):
+                            # Validate FLAC magic on first chunk
+                            if not validated:
+                                if len(chunk) >= 4 and chunk[:4] != b"fLaC":
+                                    logger.warning(
+                                        "[amazon] Squid response is not FLAC (magic=%s)",
+                                        chunk[:4].hex(),
+                                    )
+                                    return None
+                                validated = True
+                                
+                            f.write(chunk)
+                            written += len(chunk)
+                            if self._progress_cb and total:
+                                self._progress_cb(written, total)
+
+                logger.info("[amazon] Squid download complete — %.1f MB", written / 1024 / 1024)
+                return temp_file, {}
+
+            except Exception as exc:
+                logger.warning("[amazon] Squid error (attempt %d/%d): %s", attempt + 1, max_attempts, exc)
+                
+                # Pulizia del file parziale danneggiato
+                if os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except OSError:
+                        pass
+                
+                # Se abbiamo ancora tentativi a disposizione, aspettiamo e riproviamo
+                if attempt < max_attempts - 1:
+                    sleep_time = base_delay_s * (attempt + 1)
+                    logger.info("[amazon] Retrying Squid connection in %.1fs...", sleep_time)
+                    time.sleep(sleep_time)
+                    continue
+
+        return None
+
+    # ------------------------------------------------------------------
     # Download + Decrypt
     # ------------------------------------------------------------------
 
@@ -325,15 +507,13 @@ class AmazonProvider(BaseProvider):
             "User-Agent": "SpotiFLAC-Mobile/4.5.0"
         }
 
-        # API Call Wrapper per supportare il fallback FLAC e la logica di retry
         def _fetch_zarz(target_codec: str):
-            # Protezione Anti-Ban Zarz Aggiunta
             try:
                 from ..core.http import zarz_rate_limiter
                 zarz_rate_limiter.wait_for_slot()
             except ImportError:
                 pass
-                
+
             max_retries = 2
             base_delay = 3.0
             for attempt in range(max_retries):
@@ -354,8 +534,7 @@ class AmazonProvider(BaseProvider):
             return None
 
         resp = _fetch_zarz(codec)
-        
-        # Fallback a FLAC se il codec richiesto non è disponibile
+
         if (not resp or resp.status_code != 200) and codec != "flac":
             logger.info("[amazon] Codec %s unavailable for ASIN: %s — falling back to FLAC", codec, asin)
             codec = "flac"
@@ -376,34 +555,38 @@ class AmazonProvider(BaseProvider):
                 return None
             data = data[0]
 
-        audio = data.get("audio", {})
-        stream_url = audio.get("url")
+        audio          = data.get("audio", {})
+        stream_url     = audio.get("url")
         decryption_key = audio.get("key", "").strip()
         returned_codec = audio.get("codec", codec)
 
-        # Mappatura metadati avanzata
         api_meta = {}
         m = data.get("meta", {})
         if m:
             api_meta = {
-                "title": m.get("title"),
-                "artist": m.get("artist"),
-                "album": m.get("album"),
+                "title":        m.get("title"),
+                "artist":       m.get("artist"),
+                "album":        m.get("album"),
                 "album_artist": m.get("albumArtist"),
                 "track_number": m.get("track"),
                 "total_tracks": m.get("trackTotal"),
-                "disc_number": m.get("disc"),
-                "total_discs": m.get("discTotal"),
-                "isrc": m.get("isrc"),
-                "genre": m.get("genre"),
-                "label": m.get("label"),
-                "copyright": m.get("copyright"),
+                "disc_number":  m.get("disc"),
+                "total_discs":  m.get("discTotal"),
+                "isrc":         m.get("isrc"),
+                "genre":        m.get("genre"),
+                "label":        m.get("label"),
+                "copyright":    m.get("copyright"),
                 "release_date": m.get("date"),
             }
 
         cover_url = data.get("cover", "")
         if cover_url:
-            api_meta["cover_url"] = cover_url.replace("{size}", "1200").replace("{jpegQuality}", "94").replace("{format}", "jpg")
+            api_meta["cover_url"] = (
+                cover_url
+                .replace("{size}", "1200")
+                .replace("{jpegQuality}", "94")
+                .replace("{format}", "jpg")
+            )
 
         if not stream_url:
             logger.warning("[amazon] No streamUrl in Zarz API response")
@@ -419,8 +602,7 @@ class AmazonProvider(BaseProvider):
             if os.path.exists(temp_file):
                 os.remove(temp_file)
             return None
-        
-        # Logica Muxer: EAC3, MHA1, OPUS richiedono .mp4. FLAC va in .flac
+
         if returned_codec in ["eac3", "mha1", "opus"]:
             ext = ".mp4"
         else:
@@ -462,17 +644,20 @@ class AmazonProvider(BaseProvider):
 
         if method == "POST":
             endpoint = "/track"
-            payload = {"asin": asin, "tier": "best", "country": "US"}
-            params = None
-            headers = {"X-Debug-Key": _get_amazon_debug_key(), "Content-Type": "application/json"}
+            payload  = {"asin": asin, "tier": "best", "country": "US"}
+            params   = None
+            headers  = {"X-Debug-Key": _get_amazon_debug_key(), "Content-Type": "application/json"}
         else:
             endpoint = f"/track/{asin}"
-            payload = None
-            params = None
-            headers = {"X-Debug-Key": _get_amazon_debug_key()}
+            payload  = None
+            params   = None
+            headers  = {"X-Debug-Key": _get_amazon_debug_key()}
 
         try:
-            resp = self._make_api_request(provider_key=provider_key, endpoint=endpoint, headers=headers, payload=payload, params=params)
+            resp = self._make_api_request(
+                provider_key=provider_key, endpoint=endpoint,
+                headers=headers, payload=payload, params=params,
+            )
         except (httpx.RequestError, httpx.ConnectError) as exc:
             raise SpotiflacError(
                 ErrorKind.UNAVAILABLE,
@@ -482,7 +667,11 @@ class AmazonProvider(BaseProvider):
 
         if resp.status_code != 200:
             err_msg = resp.json() if "application/json" in resp.headers.get("Content-Type", "") else resp.text
-            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"{provider_key} API returned {resp.status_code}: {err_msg}", self.name)
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"{provider_key} API returned {resp.status_code}: {err_msg}",
+                self.name,
+            )
 
         data           = resp.json()
         api_meta       = data.get("metadata", {})
@@ -491,7 +680,11 @@ class AmazonProvider(BaseProvider):
         captcha_token  = data.get("x-captcha-token") or data.get("xCaptchaToken")
 
         if not stream_url:
-            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"No streamUrl in {provider_key} API response", self.name)
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"No streamUrl in {provider_key} API response",
+                self.name,
+            )
 
         temp_file = os.path.join(output_dir, f"{asin}.enc")
         download_headers = {}
@@ -515,12 +708,16 @@ class AmazonProvider(BaseProvider):
                  "-i", temp_file, "-c", "copy", out],
                 capture_output=True, startupinfo=si,
             )
-            
+
             if os.path.exists(temp_file):
                 os.remove(temp_file)
-                
+
             if result.returncode != 0:
-                raise SpotiflacError(ErrorKind.FILE_IO, f"Decryption failed: {result.stderr.decode()[:100]}", self.name)
+                raise SpotiflacError(
+                    ErrorKind.FILE_IO,
+                    f"Decryption failed: {result.stderr.decode()[:100]}",
+                    self.name,
+                )
             return out, api_meta
 
         final = os.path.join(output_dir, f"{asin}.m4a")
@@ -539,20 +736,28 @@ class AmazonProvider(BaseProvider):
 
         if resp.status_code != 200:
             err_msg = resp.json() if "application/json" in resp.headers.get("Content-Type", "") else resp.text
-            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"spotbye1 API returned {resp.status_code}: {err_msg}", self.name)
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"spotbye1 API returned {resp.status_code}: {err_msg}",
+                self.name,
+            )
 
         data           = resp.json()
         api_meta       = data.get("metadata", {})
         stream_obj     = data.get("stream", {})
         drm_obj        = data.get("drm", {})
-        
+
         stream_url     = stream_obj.get("url")
         decryption_key = drm_obj.get("key")
         captcha_token  = stream_obj.get("headers", {}).get("x-captcha-token")
         returned_codec = stream_obj.get("codec", "flac")
 
         if not stream_url or not captcha_token:
-            raise SpotiflacError(ErrorKind.UNAVAILABLE, "No streamUrl or captcha token in response", self.name)
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                "No streamUrl or captcha token in response",
+                self.name,
+            )
 
         stream_headers = {"User-Agent": _DEFAULT_UA, "x-captcha-token": captcha_token}
         temp_file = os.path.join(output_dir, f"{asin}.enc")
@@ -560,7 +765,7 @@ class AmazonProvider(BaseProvider):
         self._http.stream_to_file(stream_url, temp_file, self._progress_cb, extra_headers=stream_headers)
 
         ext = ".flac" if returned_codec == "flac" else ".m4a"
-        
+
         if decryption_key:
             out = os.path.join(output_dir, f"{asin}{ext}")
             si = None
@@ -570,15 +775,19 @@ class AmazonProvider(BaseProvider):
 
             result = subprocess.run(
                 [_ffmpeg_path(), "-y", "-decryption_key", decryption_key.strip(),
-                "-i", temp_file, "-c", "copy", out],
+                 "-i", temp_file, "-c", "copy", out],
                 capture_output=True, startupinfo=si,
             )
-            
+
             if os.path.exists(temp_file):
                 os.remove(temp_file)
-                
+
             if result.returncode != 0:
-                raise SpotiflacError(ErrorKind.FILE_IO, f"Decryption failed: {result.stderr.decode()[:100]}", self.name)
+                raise SpotiflacError(
+                    ErrorKind.FILE_IO,
+                    f"Decryption failed: {result.stderr.decode()[:100]}",
+                    self.name,
+                )
             return out, api_meta
 
         final = os.path.join(output_dir, f"{asin}{ext}")
@@ -593,9 +802,9 @@ class AmazonProvider(BaseProvider):
             raise RuntimeError(f"Cannot extract ASIN from: {amazon_url}")
         asin = asin_match.group(1)
 
-        fallback_quality = "LOSSLESS"
+        fallback_quality = str(quality).upper()
 
-        # 1. ZARZ API (Primary - FORZATA SEMPRE COME SCELTA INIZIALE)
+        # 1. ZARZ API (Primary)
         codec = self._quality_to_zarz_codec(quality)
         zarz_url = f"{API_ENDPOINTS['zarz']['base_url']}/media?asin={asin}&codec={codec}"
         display_quality = "Best Available Quality (up to 24-bit/48kHz)" if codec == "flac" else quality
@@ -605,19 +814,30 @@ class AmazonProvider(BaseProvider):
         if zarz_result and os.path.exists(zarz_result[0]):
             return zarz_result
 
-        logger.info("[amazon] Download with %s failed. Starting fallback (LOSSLESS forced)", zarz_url)
+        logger.info("[amazon] Zarz failed. Trying Squid API…")
 
-        # 2. SPOTBYE 1
-        spotbye1_url = API_ENDPOINTS['spotbye1']['base_url']
-        print_source_banner("amazon", spotbye1_url, fallback_quality)
+        # 2. SQUID API (Fallback 1 — direct FLAC, no decryption)
+        print_source_banner("amazon", f"{_SQUID_BASE}/download/track", fallback_quality)
+        try:
+            squid_result = self._download_from_squid_api(asin, output_dir, quality)
+            if squid_result and os.path.exists(squid_result[0]):
+                return squid_result
+        except Exception as exc:
+            logger.warning("[amazon] Squid failed: %s", exc)
+
+        logger.info("[amazon] Squid failed. Trying Spotbye1…")
+
+        # 3. SPOTBYE 1 (Fallback 2)
+        print_source_banner("amazon", API_ENDPOINTS['spotbye1']['base_url'], fallback_quality)
         try:
             return self._download_from_spotbye1_api(asin, output_dir)
-        except Exception as e:
-            logger.warning("[amazon] Spotbye1 failed: %s", e)
+        except Exception as exc:
+            logger.warning("[amazon] Spotbye1 failed: %s", exc)
 
-        # 3. SPOTBYE 2
-        spotbye2_url = API_ENDPOINTS['spotbye2']['base_url']
-        print_source_banner("amazon", spotbye2_url, fallback_quality)
+        logger.info("[amazon] Spotbye1 failed. Trying Spotbye2…")
+
+        # 4. SPOTBYE 2 (Fallback 3)
+        print_source_banner("amazon", API_ENDPOINTS['spotbye2']['base_url'], fallback_quality)
         try:
             return self._download_from_spotbye_api(asin, output_dir, provider_key="spotbye2")
         except SpotiflacError as exc:
@@ -625,8 +845,12 @@ class AmazonProvider(BaseProvider):
             raise
         except Exception as exc:
             logger.warning("[amazon] Spotbye2 unexpected failure: %s", exc)
-            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"spotbye2 API failed: {exc}", self.name) from exc
-    
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"spotbye2 API failed: {exc}",
+                self.name,
+            ) from exc
+
     # ------------------------------------------------------------------
     # Metadata Embedding
     # ------------------------------------------------------------------
@@ -652,7 +876,7 @@ class AmazonProvider(BaseProvider):
         cover_data: bytes | None = None
         target_cover_url = (api_metadata and api_metadata.get("cover_url")) or cover_url
         target_cover_url = _fix_image_url(target_cover_url, size=1200)
-        
+
         if target_cover_url:
             try:
                 r = self._session.get(target_cover_url, timeout=15)
@@ -662,20 +886,19 @@ class AmazonProvider(BaseProvider):
                 logger.warning("[amazon] Cover download failed: %s", exc)
 
         api_meta = api_metadata or {}
-        
-        # Override with rich data if available
-        t_title = api_meta.get("title") or title
-        t_artist = api_meta.get("artist") or artist
-        t_album = api_meta.get("album") or album
+
+        t_title        = api_meta.get("title") or title
+        t_artist       = api_meta.get("artist") or artist
+        t_album        = api_meta.get("album") or album
         t_album_artist = api_meta.get("album_artist") or album_artist
-        t_date = api_meta.get("release_date") or date
-        
+        t_date         = api_meta.get("release_date") or date
+
         t_num   = _safe_int(api_meta.get("track_number") or track_num) or 1
         t_total = _safe_int(api_meta.get("total_tracks") or total_tracks) or 1
         d_num   = _safe_int(api_meta.get("disc_number") or disc_num) or 1
         d_total = _safe_int(api_meta.get("total_discs") or total_discs) or 1
-        
-        t_copy = api_meta.get("copyright") or copyright
+
+        t_copy  = api_meta.get("copyright") or copyright
         t_label = api_meta.get("label") or publisher
 
         try:
@@ -691,17 +914,16 @@ class AmazonProvider(BaseProvider):
                 audio["TRACKTOTAL"]  = str(t_total)
                 audio["DISCNUMBER"]  = str(d_num)
                 audio["DISCTOTAL"]   = str(d_total)
-                
-                if t_copy: audio["COPYRIGHT"]    = t_copy
-                if t_label: audio["ORGANIZATION"] = t_label
-                if url:    audio["URL"]          = url
-                
-                if api_meta.get("genre"): audio["GENRE"] = api_meta["genre"]
-                if api_meta.get("composer"): audio["COMPOSER"] = api_meta["composer"]
-                if api_meta.get("isrc"): audio["ISRC"] = api_meta["isrc"]
+
+                if t_copy:                    audio["COPYRIGHT"]    = t_copy
+                if t_label:                   audio["ORGANIZATION"] = t_label
+                if url:                       audio["URL"]          = url
+                if api_meta.get("genre"):     audio["GENRE"]        = api_meta["genre"]
+                if api_meta.get("composer"):  audio["COMPOSER"]     = api_meta["composer"]
+                if api_meta.get("isrc"):      audio["ISRC"]         = api_meta["isrc"]
                 if "is_explicit" in api_meta:
                     audio["ITUNESADVISORY"] = "1" if api_meta["is_explicit"] else "2"
-                    
+
                 if cover_data:
                     pic      = Picture()
                     pic.data = cover_data
@@ -720,16 +942,15 @@ class AmazonProvider(BaseProvider):
                 audio["\xa9day"] = t_date
                 audio["trkn"]    = [(t_num, t_total)]
                 audio["disk"]    = [(d_num, d_total)]
-                
-                if t_copy: audio["cprt"] = t_copy
-                if api_meta.get("genre"): audio["\xa9gen"] = api_meta["genre"]
-                if api_meta.get("composer"): audio["\xa9wrt"] = api_meta["composer"]
-                if api_meta.get("isrc"): audio["----:com.apple.iTunes:ISRC"] = api_meta["isrc"].encode()
-                if t_label: audio["----:com.apple.iTunes:LABEL"] = t_label.encode()
-                
+
+                if t_copy:                    audio["cprt"]                              = t_copy
+                if api_meta.get("genre"):     audio["\xa9gen"]                           = api_meta["genre"]
+                if api_meta.get("composer"):  audio["\xa9wrt"]                           = api_meta["composer"]
+                if api_meta.get("isrc"):      audio["----:com.apple.iTunes:ISRC"]        = api_meta["isrc"].encode()
+                if t_label:                   audio["----:com.apple.iTunes:LABEL"]       = t_label.encode()
                 if "is_explicit" in api_meta:
-                    audio["rtng"] = [2] if api_meta["is_explicit"] else [1] 
-                    
+                    audio["rtng"] = [2] if api_meta["is_explicit"] else [1]
+
                 if cover_data:
                     audio["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
                 audio.save()
@@ -747,18 +968,18 @@ class AmazonProvider(BaseProvider):
             metadata:            TrackMetadata,
             output_dir:          str,
             *,
-            filename_format:     str             = "{title} - {artist}",
-            position:            int             = 1,
-            include_track_num:   bool            = False,
-            use_album_track_num: bool            = False,
-            first_artist_only:   bool            = False,
-            allow_fallback:      bool            = True,
-            quality:             str             = "LOSSLESS",
-            embed_lyrics:        bool            = False,
+            filename_format:     str              = "{title} - {artist}",
+            position:            int              = 1,
+            include_track_num:   bool             = False,
+            use_album_track_num: bool             = False,
+            first_artist_only:   bool             = False,
+            allow_fallback:      bool             = True,
+            quality:             str              = "LOSSLESS",
+            embed_lyrics:        bool             = False,
             lyrics_providers:    list[str] | None = None,
-            enrich_metadata:     bool            = False,
+            enrich_metadata:     bool             = False,
             enrich_providers:    list[str] | None = None,
-            is_album:            bool            = False,
+            is_album:            bool             = False,
             **kwargs,
     ) -> DownloadResult:
         try:
@@ -772,9 +993,8 @@ class AmazonProvider(BaseProvider):
             from ..core.musicbrainz import AsyncMBFetch
             mb_fetcher = AsyncMBFetch(metadata.isrc) if getattr(metadata, "isrc", None) else None
 
-            # Risoluzione URL con la robustezza ereditata dalla logica JS
             amazon_url = self._resolve_amazon_url(metadata)
-            downloaded, api_metadata = self._download_from_api(amazon_url, output_dir, quality) 
+            downloaded, api_metadata = self._download_from_api(amazon_url, output_dir, quality)
 
             ext      = os.path.splitext(downloaded)[1] or ".m4a"
             dest_ext = str(dest).rsplit(".", 1)[0] + ext
@@ -784,7 +1004,7 @@ class AmazonProvider(BaseProvider):
                     os.remove(dest_ext)
                 os.replace(downloaded, dest_ext)
 
-            # ── MusicBrainz tags ──────────────────────────────────────────
+            # ── MusicBrainz tags ─────────────────────────────────────
             mb_tags: dict[str, str] = {}
             res: dict = {}
             if mb_fetcher:
@@ -793,25 +1013,25 @@ class AmazonProvider(BaseProvider):
             mb_tags = mb_result_to_tags(res)
 
             if api_metadata:
-                if api_metadata.get("genre"): mb_tags["GENRE"] = api_metadata["genre"]
-                if api_metadata.get("label"): mb_tags["LABEL"] = api_metadata["label"]
-                if api_metadata.get("isrc"): mb_tags["ISRC"] = api_metadata["isrc"]
-                if api_metadata.get("composer"): mb_tags["COMPOSER"] = api_metadata["composer"]
-                if api_metadata.get("copyright"): mb_tags["COPYRIGHT"] = api_metadata["copyright"]
+                if api_metadata.get("genre"):      mb_tags["GENRE"]           = api_metadata["genre"]
+                if api_metadata.get("label"):      mb_tags["LABEL"]           = api_metadata["label"]
+                if api_metadata.get("isrc"):       mb_tags["ISRC"]            = api_metadata["isrc"]
+                if api_metadata.get("composer"):   mb_tags["COMPOSER"]        = api_metadata["composer"]
+                if api_metadata.get("copyright"):  mb_tags["COPYRIGHT"]       = api_metadata["copyright"]
                 if "is_explicit" in api_metadata:
                     mb_tags["ITUNESADVISORY"] = "1" if api_metadata["is_explicit"] else "2"
 
-            # ── Embedding ────────────────────────────────────────────────
+            # ── Embedding ────────────────────────────────────────────
             if dest_ext.endswith(".flac"):
                 opts = EmbedOptions(
-                    first_artist_only    = first_artist_only,
-                    cover_url            = _fix_image_url(api_metadata.get("cover_url", metadata.cover_url)),
-                    embed_lyrics         = embed_lyrics,
-                    lyrics_providers     = lyrics_providers or [],
-                    enrich               = enrich_metadata,
-                    enrich_providers     = enrich_providers,
-                    is_album             = is_album,
-                    extra_tags           = mb_tags,
+                    first_artist_only = first_artist_only,
+                    cover_url         = _fix_image_url(api_metadata.get("cover_url", metadata.cover_url)),
+                    embed_lyrics      = embed_lyrics,
+                    lyrics_providers  = lyrics_providers or [],
+                    enrich            = enrich_metadata,
+                    enrich_providers  = enrich_providers,
+                    is_album          = is_album,
+                    extra_tags        = mb_tags,
                 )
                 embed_metadata(dest_ext, metadata, opts, session=self._session)
             else:
