@@ -118,7 +118,7 @@ class DeezerProvider(BaseProvider):
         """Unified internal method for HTTP GET/POST with retry logic."""
         is_zarz = url.startswith(("https://api.zarz.moe", "http://api.zarz.moe"))
         headers = {
-            "User-Agent": "SpotiFLAC-Mobile/4.5.0" if is_zarz else _DEFAULT_UA,
+            "User-Agent": "SpotiFLAC-Mobile/4.3.0" if is_zarz else _DEFAULT_UA,
         }
         if method.upper() == "POST":
             headers["Content-Type"] = "application/json"

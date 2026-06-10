@@ -3,7 +3,6 @@ from .qobuz import QobuzProvider
 from .tidal import TidalProvider
 from .amazon import AmazonProvider
 from .deezer import DeezerProvider
-from .spotidownloader import SpotiDownloaderProvider
 from .apple_music import AppleMusicProvider
 from .soundcloud import SoundCloudProvider
 from .youtube import YouTubeProvider
@@ -40,7 +39,6 @@ PROVIDER_REGISTRY: dict[str, type] = {
         "qobuz":      QobuzProvider,
         "amazon":     AmazonProvider,
         "deezer":     DeezerProvider,
-        "spoti":      SpotiDownloaderProvider,
         "apple":      AppleMusicProvider,
         "soundcloud": SoundCloudProvider,
         "youtube":    YouTubeProvider,

@@ -12,6 +12,8 @@ from __future__ import annotations
 from urllib.parse import urlparse
 import os
 import sys
+from .core.health_check import run_health_check
+import asyncio
 
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
 
@@ -131,12 +133,11 @@ def _header() -> None:
 
 _ALL_SERVICES = [
     "tidal", "qobuz", "deezer", "amazon", "soundcloud", "apple", 
-    "youtube", "pandora", "joox", "netease", "migu", "kuwo", "spoti", "flacdownloader"
+    "youtube", "pandora", "joox", "netease", "migu", "kuwo", "flacdownloader"
 ]
 def _run_health_check():
     try:
-        from .core.health_check import run_health_check
-        return run_health_check(_ALL_SERVICES, include_all_endpoints=True)
+        return asyncio.run(run_health_check(_ALL_SERVICES, include_all_endpoints=True))
     except Exception as e:
         print(f"  {RED(f'Health check error: {e}')}")
         return []
@@ -521,7 +522,7 @@ def run_interactive() -> dict:
         if add_fallback:
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options  = ["tidal", "qobuz", "deezer", "amazon", "spoti", "apple", "soundcloud"],
+                options  = ["tidal", "qobuz", "deezer", "amazon", "apple", "soundcloud"],
                 defaults = ["tidal"],
                 ordered  = True,
             )
@@ -533,7 +534,7 @@ def run_interactive() -> dict:
         if add_fallback:
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options  = ["tidal", "qobuz", "deezer", "amazon", "spoti", "youtube"],
+                options  = ["tidal", "qobuz", "deezer", "amazon", "youtube"],
                 defaults = ["tidal"],
                 ordered  = True,
             )
@@ -546,7 +547,7 @@ def run_interactive() -> dict:
         if add_fallback:
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options  = ["tidal", "qobuz", "deezer", "amazon", "spoti", "apple"],
+                options  = ["tidal", "qobuz", "deezer", "amazon", "apple"],
                 defaults = ["tidal"],
                 ordered  = True,
             )
@@ -557,7 +558,7 @@ def run_interactive() -> dict:
             "Services (order = priority):",
             options  = [
                 "deezer", "tidal", "qobuz", "amazon", "joox", "netease", 
-                "migu", "kuwo", "spoti", "soundcloud", "youtube", "apple", "pandora", "flacdownloader"
+                "migu", "kuwo", "soundcloud", "youtube", "apple", "pandora", "flacdownloader"
             ],
             defaults = ["tidal"],
             ordered  = True,

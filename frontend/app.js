@@ -370,7 +370,6 @@ const ALL_SERVICES = [
   { id:'youtube',     label:'YouTube Music',  badge:'M4A',  on:false, icon:'YT', iconClass:'youtube', iconFile:'youtube.svg' },
   { id:'apple',       label:'Apple Music',    badge:'M4A',  on:false, icon:'AM', iconClass:'apple', iconFile:'am.png' },
   { id:'pandora',     label:'Pandora',        badge:'MP3',  on:false, icon:'P',  iconClass:'pandora', iconFile:'pandora.svg' },
-  { id:'spoti',       label:'SpotiDownloader',badge:'FLAC', on:false, icon:'SD', iconClass:'spoti', iconFile:'spotubedl.svg' },
   { id:'flacdownloader', label:'FlacDownloader', badge:'FLAC', on:false, icon:'FD', iconClass:'flacdownloader', iconFile:'download.svg' },
 ];
 const ALL_LYRICS = [
@@ -490,7 +489,6 @@ const API_SOURCES = [
   { id:'soundcloud', type:'soundcloud', name:'SoundCloud',    url:'' },
   { id:'youtube',    type:'youtube',    name:'YouTube Music', url:'' },
   { id:'pandora',    type:'pandora',    name:'Pandora',       url:'' },
-  { id:'spoti',      type:'spoti',      name:'SpotiDownloader', url:'' },
   { id:'flacdownloader', type:'flacdownloader', name:'FlacDownloader', url:'' },
 ];
 let apiStatusState = {

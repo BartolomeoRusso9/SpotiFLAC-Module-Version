@@ -40,13 +40,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _TIDAL_APIS_GET = [
-    "https://eu-central.monochrome.tf",
-    "https://us-west.monochrome.tf",
-    "https://api.monochrome.tf",
-    "https://monochrome-api.samidy.com",
-    "https://tidal-api.binimum.org",
-    "https://tidal.kinoplus.online",
-    "https://triton.squid.wtf",
 ]
 
 _TIDAL_API_POST = [
@@ -434,7 +427,6 @@ def _fetch_tidal_url_once(
             delay *= 2
 
         try:
-            # Protezione Rate-Limit specifica per l'ecosistema Zarz
             if is_post_api and "zarz.moe" in api_cleaning:
                 try:
                     from ..core.http import zarz_rate_limiter
@@ -860,9 +852,6 @@ class TidalProvider(BaseProvider):
     @staticmethod
     def _mux_audio(src: Path, dst: Path, quality: str) -> Path:
         si = None
-        if os.name == "nt":
-            si = subprocess.STARTUPINFO()
-            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
         quality_norm = _normalize_quality(quality)
         is_lossy = quality_norm in ("DOLBY_ATMOS", "HIGH", "LOW")
