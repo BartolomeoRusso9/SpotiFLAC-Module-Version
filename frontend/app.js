@@ -95,6 +95,8 @@ function clearSearchUI() {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const ts = () => new Date().toLocaleTimeString('it-IT');
+// ── Inizializzazione Globale ──────────────────────────────────────────────────
+const toastMgr = new ToastManager();
 
 // ── View switching ───────────────────────────────────────────────────────────
 function switchView(name) {
@@ -251,17 +253,8 @@ document.querySelector('.s-body').addEventListener('input', (e) => {
     updateSaveButtonVisual();
 });
 
-function showToast(message) {
-  const toast = $('save-toast');
-  if (!toast) return;
-  toast.textContent = message;
-  toast.classList.remove('hidden');
-  toast.classList.add('show');
-  clearTimeout(toast._timeout);
-  toast._timeout = setTimeout(() => {
-    toast.classList.remove('show');
-    toast.classList.add('hidden');
-  }, 3200);
+function showToast(message, type = 'success') {
+  toastMgr[type](message);
 }
 
 async function saveSettings() {
@@ -276,7 +269,7 @@ async function saveSettings() {
     isDirty = false;
     initialSettings = cfg;
     updateSaveButtonVisual();
-    showToast('Settings saved.');
+    logMessage('Settings saved.', 'ok');
   } catch(e) {
     showToast('Unable to save settings.');
   }
@@ -584,8 +577,9 @@ function copyLogs() {
 
     if (navigator.clipboard) {
         navigator.clipboard.writeText(logsText).then(() => {
-            showToast('Logs copiati negli appunti!');
+            toastMgr.success('Logs copiati negli appunti!');
         }).catch(err => {
+            toastMgr.error('Errore durante la copia dei logs.');
         });
     } else {
         // Fallback per browser vecchi
@@ -595,7 +589,7 @@ function copyLogs() {
         textArea.select();
         document.execCommand("copy");
         document.body.removeChild(textArea);
-        showToast('Logs copiati (fallback).');
+        toastMgr.info('Logs copiati (fallback).');
     }
 }
 
@@ -780,19 +774,29 @@ function stopCurrentPreview() {
 let currentPage = 1;
 const TRACKS_PER_PAGE = 50;
 
-// ── Logging ──────────────────────────────────────────────────────────────────
+// ── Logging & Python bridge ──────────────────────────────────────────────────
 function logMessage(msg, type = '') {
+  // Scrivi nel pannello log UI
   const area = $('logArea');
-  const line = document.createElement('div');
-  line.className = 'log-line';
-  line.innerHTML = `<span class="log-ts">${ts()}</span><span class="log-msg ${type}">${escHtml(msg)}</span>`;
-  area.appendChild(line);
-  area.scrollTop = area.scrollHeight;
+  if (area) {
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = `<span class="log-ts">${ts()}</span><span class="log-msg ${type}">${escHtml(msg)}</span>`;
+    area.appendChild(line);
+    area.scrollTop = area.scrollHeight;
+  }
+
+  // Genera anche un Toast visuale basato sul tipo di evento!
+  if (type === 'ok') toastMgr.success(msg);
+  else if (type === 'error') toastMgr.error(msg);
+  else if (type === 'warn') toastMgr.warning(msg);
+  // Se non c'è tipo o è un info di routine ("info"), mostriamo info solo se ha rilevanza
+  else if (type === 'info') toastMgr.info(msg, { duration: 2500 });
 }
+
 function clearLog() { $('logArea').innerHTML = ''; }
 
-// ── Python bridge ─────────────────────────────────────────────────────────────
-window.app_log         = (msg, type = '') => logMessage(msg, type);
+window.app_log = (msg, type = '') => logMessage(msg, type);
 window.app_set_progress = (label) => { if (label) setStatus(label); };
 window.app_set_metadata = (data) => {
   try {
@@ -819,12 +823,36 @@ window.app_set_metadata = (data) => {
 window.updateFolderLabel = (path) => {
   $('folder-path').textContent = path; $('folder-path').title = path;
 };
+    let currentDownloadToastId = null;
+
     window.app_update_download_stats = (payload) => {
       try {
         const data = typeof payload === 'string' ? JSON.parse(payload) : payload;
         if (!data) return;
+        
         queueStats.downloaded = `${Number(data.total_downloaded || 0).toFixed(2)} MB`;
         queueStats.speed = `${Number(data.current_speed || 0).toFixed(2)} MB/s`;
+
+        if (isDownloading) {
+          const activeItem = queue.find(q => q.status === 'active');
+          if (activeItem) {
+            const msg = `
+              <div style="display:flex; justify-content:space-between; margin-top:4px;">
+                <span>${escHtml(activeItem.title)}</span>
+                <span>${activeItem.progress}%</span>
+              </div>
+              <div style="font-size:11px; color:var(--muted); margin-top:4px;">Speed: ${queueStats.speed}</div>
+            `;
+            
+            if (!currentDownloadToastId) {
+              currentDownloadToastId = toastMgr.loading(msg, { title: 'Downloading Tracks...' });
+            } else {
+              // Aggiorna il testo del toast esistente
+              const toastEl = document.getElementById(currentDownloadToastId);
+              if (toastEl) toastEl.querySelector('.toast-message').innerHTML = msg;
+            }
+          }
+        }
         if (Array.isArray(data.queue)) {
           data.queue.forEach(stat => {
             let qi = queue.findIndex(q => q.id && stat.id && q.id === stat.id);
@@ -854,6 +882,7 @@ window.updateFolderLabel = (path) => {
         console.warn('Failed to parse download stats', e);
       }
     };
+
 window.showTracklist = (tracksJson) => {
   setFetchingState('success');
   const tracks = typeof tracksJson === 'string' ? JSON.parse(tracksJson) : tracksJson;
@@ -861,12 +890,18 @@ window.showTracklist = (tracksJson) => {
   $('fetchBtn').disabled = false;
   $('text-search-container')?.classList.add('hidden');
 };
+
 window.app_download_finished = (success = true) => {
   const activeItems = queue.map((item, qi) => item.status === 'active' ? qi : -1).filter(i => i >= 0);
   
   // Close out items from the completed batch
   if (activeItems.length > 0) {
     activeItems.forEach(qi => updateQueueItem(qi, success ? 'done' : 'error', success ? 100 : 0));
+  }
+
+  if (currentDownloadToastId) {
+     toastMgr.dismiss(currentDownloadToastId);
+     currentDownloadToastId = null;
   }
   
   // Check if there are still any downloads running concurrently
@@ -2744,6 +2779,8 @@ async function startDownloadQueue() {
 let isFetchingData = false;
 let toastTimeout;
 
+let currentFetchToastId = null;
+
 function setFetchingState(state, customMsg = null) {
   // Backward compatibility
   if (state === true) state = 'start';
@@ -2752,7 +2789,6 @@ function setFetchingState(state, customMsg = null) {
   const rw = $('recent-wrap');
   const fetchBtn = $('fetchBtn');
   const urlInput = $('urlInput');
-  const toast = $('fetching-toast');
 
   // Update global lock state
   isFetchingData = (state === 'start');
@@ -2766,48 +2802,30 @@ function setFetchingState(state, customMsg = null) {
   const isSearchMode = $('searchMode')?.value === 'search';
   if (urlInput) urlInput.disabled = isFetchingData && !isSearchMode;
 
-  if (!toast) return;
-
-  const iconContainer = toast.querySelector('.ft-icon');
-  const textContainer = toast.querySelector('.ft-text');
-
-  clearTimeout(toastTimeout);
-
   if (state === 'start') {
-    toast.style.alignItems = 'flex-start';
-    iconContainer.className = 'ft-icon loading';
-    iconContainer.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
-    
-    // USIAMO customMsg se esiste, altrimenti il default
     const title = customMsg || 'fetching metadata...';
-    const desc = customMsg ? 'please wait...' : 'retrieving the information';
+    // Se c'è già un toast aperto, lo chiudiamo prima di aprirne un altro
+    if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
     
-    textContainer.innerHTML = `<div class="ft-title">${title}</div><div class="ft-desc loading">${desc}</div>`;
-    toast.classList.add('show');
+    currentFetchToastId = toastMgr.loading(
+      `<div class="ft-desc loading" style="font-size:12px; margin-top:2px; color:var(--text2);">please wait...</div>`, 
+      { title: title, position: 'bottom-left' } // Lo teniamo a sinistra come l'originale
+    );
   } 
   else if (state === 'success') {
-    toast.style.alignItems = 'center';
-    iconContainer.className = 'ft-icon success';
-    iconContainer.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`;
-    textContainer.innerHTML = `<div class="ft-title" style="font-weight: 600; font-family: var(--app-font); letter-spacing: 0.02em;">success</div>`;
-    toast.classList.add('show');
-    toastTimeout = setTimeout(() => toast.classList.remove('show'), 3000);
+    if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
+    toastMgr.success('success', { title: 'Completato', position: 'bottom-left', duration: 2500 });
+    currentFetchToastId = null;
   } 
-  // Cerca questa parte dentro setFetchingState e modificala così:
   else if (state === 'error') {
-    toast.style.alignItems = 'center';
-    iconContainer.className = 'ft-icon error';
-    iconContainer.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
-    
-    // USIAMO customMsg se passato, altrimenti il default
+    if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
     const errorTitle = customMsg || 'error occurred';
-    textContainer.innerHTML = `<div class="ft-title" style="font-weight: 600;">${escHtml(errorTitle)}</div>`;
-    
-    toast.classList.add('show');
-    toastTimeout = setTimeout(() => toast.classList.remove('show'), 3000);
+    toastMgr.error('Impossibile recuperare i dati', { title: errorTitle, position: 'bottom-left', duration: 3500 });
+    currentFetchToastId = null;
   }
   else if (state === 'hide') {
-    toast.classList.remove('show');
+    if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
+    currentFetchToastId = null;
   }
 }
 
