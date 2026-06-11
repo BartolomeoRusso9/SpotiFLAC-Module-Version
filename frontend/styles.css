@@ -1714,70 +1714,7 @@
       flex-shrink: 0;
     }
 
-    /* ── FETCHING TOAST ── */
-    #fetching-toast {
-      position: fixed;
-      bottom: 24px;
-      left: 72px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 16px 20px;
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.08);
-      z-index: 1000;
-      opacity: 0;
-      transform: translateY(15px);
-      pointer-events: none;
-      transition: all 0.3s ease;
-    }
-    
-    #fetching-toast.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    
-    .ft-icon {
-      color: #3b82f6;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-top: 2px;
-    }
-    
-    .ft-text {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    
-    .ft-title {
-      font-weight: 700;
-      font-size: 13px;
-      color: var(--text);
-    }
-    
-    .ft-desc {
-      font-size: 12px;
-      color: #3b82f6;
-      font-weight: 500;
-    }
-
-    /* Disable Recent Fetches interaction during loading */
-    #recent-wrap.fetching-disabled {
-      pointer-events: none;
-      opacity: 0.5;
-      transition: opacity 0.3s ease;
-    }
-    /* Toast State Colors */
-    .ft-icon.loading { color: #3b82f6; }
-    .ft-icon.success { color: #22c55e; }
-    .ft-icon.error { color: #ef4444; }
-    .ft-desc.loading { color: #3b82f6; }
-
-    /* ── SINGLE TRACK CARD ENHANCEMENTS ── */
+  /* ── SINGLE TRACK CARD ENHANCEMENTS ── */
 #album-cover .cover-duration {
   position: absolute; bottom: 6px; right: 6px;
   background: rgba(0,0,0,.72); color: #fff;
@@ -2070,3 +2007,119 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ==========================================================================
+   TOAST SYSTEM
+   ========================================================================== */
+.toast-container {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+/* Posizionamenti */
+.toast-container.bottom-right { bottom: 24px; right: 24px; }
+.toast-container.bottom-left { bottom: 24px; left: 24px; }
+.toast-container.top-right { top: 24px; right: 24px; flex-direction: column-reverse; }
+.toast-container.top-left { top: 24px; left: 24px; flex-direction: column-reverse; }
+.toast-container.top-center { top: 24px; left: 50%; transform: translateX(-50%); flex-direction: column-reverse; }
+.toast-container.bottom-center { bottom: 24px; left: 50%; transform: translateX(-50%); }
+
+.toast {
+  display: flex;
+  align-items: center;
+  background-color: var(--surface); /* Usa lo sfondo delle card del tuo tema */
+  color: var(--text);               /* Usa il colore del testo corretto */
+  padding: 14px 16px;
+  border-radius: 12px;              /* Angoli più smussati in stile SpotiFLAC */
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15); /* Ombra più morbida e moderna */
+  border: 1px solid var(--border);  /* Usa il bordo nativo del tema */
+  min-width: 280px;
+  max-width: 400px;
+  pointer-events: auto;
+  position: relative;
+  overflow: hidden;
+  border-left: 4px solid transparent;
+  font-family: var(--app-font, sans-serif);
+}
+
+/* Colori Tipo */
+.toast.success { border-left-color: var(--green, #22c55e); }
+.toast.success .toast-icon { color: var(--green, #22c55e); }
+.toast.error { border-left-color: var(--red, #ef4444); }
+.toast.error .toast-icon { color: var(--red, #ef4444); }
+.toast.warning { border-left-color: var(--yellow, #f59e0b); }
+.toast.warning .toast-icon { color: var(--yellow, #f59e0b); }
+.toast.info { border-left-color: var(--blue, #3b82f6); }
+.toast.info .toast-icon { color: var(--blue, #3b82f6); }
+.toast.loading { border-left-color: var(--text, #fff); }
+.toast.loading .toast-icon { color: var(--text, #fff); }
+
+.toast-icon {
+  width: 20px;
+  height: 20px;
+  margin-right: 14px;
+  flex-shrink: 0;
+}
+.toast-icon svg { width: 100%; height: 100%; }
+
+.toast-content {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toast-title {
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.toast-message {
+  font-size: 13px;
+  color: var(--text2); /* Colore del testo secondario dinamico */
+  line-height: 1.4;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: var(--muted); /* Colore icona dinamico */
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  margin-left: 12px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.toast-close:hover { 
+  color: var(--text); 
+}
+
+/* Progress Bar */
+.toast-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background-color: currentColor;
+  opacity: 0.3;
+  width: 100%;
+  transform-origin: left;
+  animation: toastProgress linear forwards;
+}
+
+/* Animations */
+@keyframes slideInRight { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slideInLeft { from { transform: translateX(-120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slideOutRight { from { transform: translateX(0); opacity: 1; } to { transform: translateX(120%); opacity: 0; } }
+@keyframes slideOutLeft { from { transform: translateX(0); opacity: 1; } to { transform: translateX(-120%); opacity: 0; } }
+@keyframes toastProgress { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@keyframes toastSpin { 100% { transform: rotate(360deg); } }
+
+.toast-spin { animation: toastSpin 1s linear infinite; }
