@@ -166,6 +166,50 @@
       border: 1px solid var(--yellow-d);
       padding: 1px 6px; border-radius: 4px;
     }
+    .update-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      background: #16a34a;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 999px;
+      padding: 0 7px;
+      margin-left: 8px;
+      cursor: pointer;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+    .update-badge.hidden {
+      display: none;
+    }
+    .update-badge:hover {
+      transform: translateY(-1px);
+    }
+    .hero-update-badge,
+    .clickable-version {
+      cursor: pointer;
+    }
+
+    .hero-update-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      background: #16a34a;
+      border-radius: 999px;
+      padding: 5px 12px;
+      margin-left: 10px;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+    .hero-update-badge:hover {
+      transform: translateY(-1px);
+    }
     .tb-spacer { flex: 1; }
 
     /* ── Layout ── */
