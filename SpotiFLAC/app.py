@@ -1466,6 +1466,7 @@ def run_gui():
             f"index.html not found. Tried: {candidates}"
         )
     file_url = Path(html_path).as_uri()
+    
     window = webview.create_window(
         'SpotiFLAC', url=file_url, js_api=api,
         width=1300, height=850, 
@@ -1473,7 +1474,9 @@ def run_gui():
         frameless=True, easy_drag=False, background_color='#0a0a0a'
     )
     api.set_window(window)
-    webview.start(api._on_loaded, http_server=True)
+    window.events.loaded += api._on_loaded
+    
+    webview.start(http_server=True)
 
 if __name__ == '__main__':
     run_gui()
