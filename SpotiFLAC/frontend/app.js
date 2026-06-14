@@ -399,7 +399,7 @@ const DEFAULT_SETTINGS = {
   tidal_custom_api: '',
   loop: 0,
   log_level: 'INFO',
-  services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora','spoti', "flacdownloader"],
+  services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora', "flacdownloader"],
   lyrics_providers: ['lrclib'],
   enrich_providers: ['deezer','apple','qobuz','tidal','soundcloud'],
 };
@@ -609,7 +609,6 @@ function renderPlatformIcon(type) {
     netease: 'netease.svg',
     migu: 'migu.jpeg',
     songstats: 'songstats.png',
-    spoti: 'spotubedl.svg',
     flacdownloader: 'flacdownloader.png',
   };
   const iconFile = iconMap[type] || `${type}.svg`;

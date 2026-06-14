@@ -8,6 +8,7 @@ import random
 import re
 import threading
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
@@ -54,12 +55,13 @@ _CREDS_CACHE_FILE = os.path.join(
     os.path.expanduser("~"), ".cache", "spotiflac", "qobuz-credentials.json"
 )
 
-_BUNDLE_RE    = re.compile(
-    r'<script[^>]+src="([^"]+/js/main\.js|/resources/[^"]+/js/main\.js)"'
-)
-_API_CONFIG_RE = re.compile(
-    r'app_id:"(?P<app_id>\d{9})",app_secret:"(?P<app_secret>[a-f0-9]{32})"'
-)
+_BUNDLE_RE    = re.compile(r'<script[^>]+src="([^"]+/js/main\.js|/resources/[^"]+/js/main\.js)"')
+_API_CONFIG_RE = re.compile(r'app_id:"(?P<app_id>\d{9})",app_secret:"(?P<app_secret>[a-f0-9]{32})"')
+_IMAGE_SIZE_RE = re.compile(r"_\d+\.jpg$")
+
+# Metadata API base URLs from manifest.json settings (primary + fallback).
+_META_API_PRIMARY  = "https://api.zarz.moe/v1/qbz"
+_META_API_FALLBACK = "https://api.zarz.moe/v1/qbz2"
 
 _STREAM_APIS: list[str] = [
     "https://qbz.afkarxyz.qzz.io/api/track/",
@@ -87,22 +89,23 @@ _WJHE_APIS: list[str] = [
 ]
 
 _QUALITY_FALLBACK: dict[str, list[str]] = {
-    "27":       ["27", "7", "6"],
-    "7":        ["7", "6"],
-    "6":        ["6"],
-    "5":        ["6"],
-    "":         ["6"],
-    "HI_RES":   ["27", "7", "6"],
-    "LOSSLESS": ["6"],
-    "HIGH":     ["6"],
-    "NORMAL":   ["6"],
-    "BEST":     ["6"],
+    "27":              ["27", "7", "6"],
+    "7":               ["7", "6"],
+    "6":               ["6"],
+    "5":               ["6"],
+    "":                ["6"],
+    "HI_RES_LOSSLESS": ["27", "7", "6"],
+    "HI_RES":          ["7", "6"],
+    "LOSSLESS":        ["6"],
+    "HIGH":            ["6"],
+    "NORMAL":          ["6"],
+    "BEST":            ["6"],
 }
 
 _TIDAL_TO_QOBUZ_QUALITY: dict[str, str] = {
     "DOLBY_ATMOS":     "27",
     "HI_RES_LOSSLESS": "27",
-    "HI_RES":          "27",
+    "HI_RES":          "7",
     "LOSSLESS":        "6",
     "HIGH":            "6",
     "LOW":             "6",
@@ -117,6 +120,53 @@ _RETRY_JITTER       = 0.25
 
 
 # ---------------------------------------------------------------------------
+# Text Normalization & Scoring (Ported from index.js)
+# ---------------------------------------------------------------------------
+
+def _remove_diacritics(text: str) -> str:
+    text = unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode("utf-8")
+    return text.replace("đ", "dj").replace("Đ", "dj").replace("ß", "ss").replace("ẞ", "ss").replace("æ", "ae").replace("Æ", "ae").replace("œ", "oe").replace("Œ", "oe")
+
+def _normalize_search_text(text: str) -> str:
+    if not text:
+        return ""
+    text = _remove_diacritics(text).lower()
+    text = re.sub(r'&', ' and ', text)
+    text = re.sub(r'[^\w\s]+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+def _score_track_candidate(query: str, track: dict) -> int:
+    query_norm = _normalize_search_text(query)
+    if not query_norm or not track:
+        return 0
+
+    title_norm = _normalize_search_text(track.get("title", ""))
+    
+    version = track.get("version", "").strip()
+    display_title = f"{track.get('title', '')} ({version})" if version else track.get("title", "")
+    display_norm = _normalize_search_text(display_title)
+
+    performer = track.get("performer", {}).get("name", "")
+    album_artist = track.get("album", {}).get("artist", {}).get("name", "")
+    artist_norm = _normalize_search_text(performer or album_artist)
+    album_norm = _normalize_search_text(track.get("album", {}).get("title", ""))
+    
+    score = 0
+
+    if query_norm == title_norm or query_norm == display_norm:
+        score += 1200
+    elif (title_norm and query_norm in title_norm) or (display_norm and query_norm in display_norm):
+        score += 420
+
+    if artist_norm and artist_norm in query_norm: score += 180
+    if album_norm and album_norm in query_norm: score += 100
+    if track.get("isrc", "").strip(): score += 15
+    if track.get("maximum_bit_depth", 0) >= 24: score += 10
+    if track.get("maximum_sampling_rate", 0) >= 88.2: score += 10
+
+    return score
+
+# ---------------------------------------------------------------------------
 # Credentials
 # ---------------------------------------------------------------------------
 @dataclass
@@ -128,11 +178,7 @@ class QobuzCredentials:
     user_auth_token: str | None = None
 
     def is_fresh(self) -> bool:
-        return (
-            bool(self.app_id)
-            and bool(self.app_secret)
-            and (time.time() - self.fetched_at) < _CREDS_TTL
-        )
+        return bool(self.app_id) and bool(self.app_secret) and (time.time() - self.fetched_at) < _CREDS_TTL
 
     def to_dict(self) -> dict:
         return {
@@ -163,7 +209,6 @@ class QobuzCredentials:
             user_auth_token=os.environ.get("QOBUZ_AUTH_TOKEN")
         )
 
-
 def _load_cached_credentials() -> QobuzCredentials | None:
     try:
         with open(_CREDS_CACHE_FILE, "r", encoding="utf-8") as f:
@@ -174,7 +219,6 @@ def _load_cached_credentials() -> QobuzCredentials | None:
         logger.warning("Failed to read Qobuz credentials cache: %s", exc)
         return None
 
-
 def _save_cached_credentials(creds: QobuzCredentials) -> None:
     try:
         os.makedirs(os.path.dirname(_CREDS_CACHE_FILE), exist_ok=True)
@@ -182,7 +226,6 @@ def _save_cached_credentials(creds: QobuzCredentials) -> None:
             json.dump(creds.to_dict(), f, indent=2)
     except Exception as exc:
         logger.warning("Failed to write Qobuz credentials cache: %s", exc)
-
 
 def _scrape_credentials(session: httpx.Client) -> QobuzCredentials: 
     headers = {"User-Agent": _DEFAULT_UA}
@@ -210,7 +253,6 @@ def _scrape_credentials(session: httpx.Client) -> QobuzCredentials:
         source     = bundle_url,
     )
 
-
 # ---------------------------------------------------------------------------
 # Signature & API Helpers
 # ---------------------------------------------------------------------------
@@ -228,7 +270,6 @@ def _compute_signature(path: str, params: dict, timestamp: str, secret: str) -> 
     payload += timestamp + secret
     return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
-
 def _build_stream_url(api_base: str, track_id: int, quality: str) -> str:
     if api_base in _QOBUZ_DL_:
         return f"{api_base}track_id={track_id}&quality={quality}"
@@ -236,43 +277,47 @@ def _build_stream_url(api_base: str, track_id: int, quality: str) -> str:
         return f"{api_base}{track_id}&quality={quality}"
     return f"{api_base}{track_id}?quality={quality}"
 
-
 def _map_musicdl_quality(quality: str) -> str:
-    if quality == "27":
+    if quality in ("27", "HI_RES_LOSSLESS", "DEFAULT", ""):
         return "hi-res-max"
-    if quality == "7":
+    if quality in ("7", "HI_RES"):
         return "hi-res"
     return "cd"
 
-
 def _map_local_api_quality(quality: str) -> str:
-    if quality in ("27", "DOLBY_ATMOS", "HI_RES_LOSSLESS", "HI_RES"):
+    if quality in ("27", "DOLBY_ATMOS", "HI_RES_LOSSLESS", "DEFAULT"):
         return "hi96"
-    elif quality == "7":
+    elif quality in ("7", "HI_RES"):
         return "hi24"
     elif quality == "5":
         return "mp3"
     return "flac"
 
-
 # ---------------------------------------------------------------------------
 # Fetch logic for mixed APIs (GET / POST)
 # ---------------------------------------------------------------------------
 def _extract_stream_url_from_json(data: dict) -> str | None:
-    for key in ("download_url", "url", "link"):
+    _URL_KEYS = ("download_url", "url", "link")
+    for key in _URL_KEYS:
         val = data.get(key)
         if isinstance(val, str) and val.strip():
             return val.strip()
 
     nested = data.get("data")
     if isinstance(nested, dict):
-        for key in ("download_url", "url", "link"):
+        for key in _URL_KEYS:
             val = nested.get(key)
             if isinstance(val, str) and val.strip():
                 return val.strip()
-
     return None
 
+def _extract_audio_quality_from_json(data: dict) -> tuple[int, int]:
+    nested = data.get("data") or {}
+    bit_depth   = int(data.get("bit_depth")   or nested.get("bit_depth")   or 0)
+    sample_rate = int(data.get("sampling_rate") or nested.get("sampling_rate") or 0)
+    if 0 < sample_rate < 1000:
+        sample_rate = round(sample_rate * 1000)
+    return bit_depth, sample_rate
 
 def _backoff_delay(attempt: int, server_hint_s: float | None = None) -> float:
     if server_hint_s is not None:
@@ -281,7 +326,6 @@ def _backoff_delay(attempt: int, server_hint_s: float | None = None) -> float:
         base = min(_RETRY_BASE_DELAY_S * (2 ** (attempt - 1)), _RETRY_MAX_DELAY_S)
     jitter = base * _RETRY_JITTER * (2 * random.random() - 1)
     return max(0.1, base + jitter)
-
 
 def _parse_retry_after(resp: httpx.Response) -> float | None: 
     raw = resp.headers.get("Retry-After", "").strip()
@@ -299,7 +343,6 @@ def _parse_retry_after(resp: httpx.Response) -> float | None:
         return max(0.0, secs)
     except Exception:
         return None
-
 
 _gdstudio_ts9_cache: dict[str, tuple[str, float]] = {}
 _gdstudio_ts9_lock  = threading.Lock()
@@ -330,7 +373,6 @@ def _build_gdstudio_signature(host: str, track_id: str, ts9: str) -> str:
     base = f"{host}|{version}|{ts9}|{escaped_track_id}"
     return hashlib.md5(base.encode("utf-8")).hexdigest().upper()[-8:]
 
-
 def _fetch_stream_url_once(
         client:        httpx.Client,
         api_base:      str,
@@ -339,7 +381,6 @@ def _fetch_stream_url_once(
         timeout_s:     int = _API_TIMEOUT_S,
         local_api_url: str | None = None,
 ) -> str:
-    """Modificato per accettare un client httpx condiviso, evitando overhead."""
     api_cleaning = api_base.rstrip('/')
     
     if local_api_url:
@@ -400,7 +441,6 @@ def _fetch_stream_url_once(
             elif is_wjhe:
                 q_map = {"27": 2000, "7": 2000, "6": 1000, "": 1000}
                 wjhe_q = q_map.get(quality, 1000)
-                
                 wjhe_f = "flac" 
                 url = f"{api_base}?ID={track_id}&quality={wjhe_q}&format={wjhe_f}"
                 
@@ -424,7 +464,6 @@ def _fetch_stream_url_once(
                     "Accept-Language": "en-US,en;q=0.9",
                 }
                 
-                # 1. Recupera la challenge ALTCHA
                 current_ts = int(time.time() * 1000)
                 chal_resp = client.get(
                     f"{origin}/api/altcha/challenge",
@@ -438,7 +477,6 @@ def _fetch_stream_url_once(
                 challenge_data = json.loads(challenge_json_str)
                 params = challenge_data["parameters"]
                 
-                # 2. Risoluzione PoW locale della challenge
                 salt_hex   = params.get("salt", "")
                 nonce_hex  = params["nonce"]
                 key_prefix = params["keyPrefix"]
@@ -478,7 +516,6 @@ def _fetch_stream_url_once(
                     "time":       round(elapsed, 1),
                 }
                 
-                # 3. Serializzazione payload ed invio POST di verifica
                 solution_json = json.dumps(solution, separators=(",", ":"))
                 payload_json  = f'{{"challenge":{challenge_json_str},"solution":{solution_json}}}'
                 payload = base64.b64encode(payload_json.encode()).decode()
@@ -495,7 +532,6 @@ def _fetch_stream_url_once(
                 )
                 verify_resp.raise_for_status()
                 
-                # 4. Richiesta finale dell'URL di streaming del brano
                 url = _build_stream_url(api_base, track_id, quality)
                 resp = client.get(
                     url,
@@ -517,7 +553,6 @@ def _fetch_stream_url_once(
                     "upload_to_r2": False,
                     "url": f"{_OPEN_URL}{track_id}"
                 }
-                
                 post_headers = {"User-Agent": _ZARZ_USER_AGENT if is_zarz else _DEFAULT_UA}
 
                 resp = client.post(
@@ -584,7 +619,6 @@ def _fetch_stream_url_once(
 
     raise last_err
 
-
 def _fetch_stream_url_parallel(
         client:        httpx.Client,
         apis:          list[str],
@@ -630,7 +664,6 @@ def _fetch_stream_url_parallel(
         f"All {len(apis)} Qobuz stream APIs failed.",
         "qobuz",
     )
-
 
 # ---------------------------------------------------------------------------
 # QobuzProvider
@@ -765,9 +798,7 @@ class QobuzProvider(BaseProvider):
         return items[0]
 
     def _search_by_text(self, title: str, artist: str) -> dict | None:
-        import difflib
         query = f"{title} {artist}".strip()
-
         try:
             resp = self._do_signed_get("track/search", {"query": query, "limit": "10"})
             if resp.status_code != 200:
@@ -778,24 +809,33 @@ class QobuzProvider(BaseProvider):
                 return None
 
             best_match = None
-            best_score = 0.0
-
-            title_lower = title.lower()
+            best_score = 0
 
             for item in items:
-                t_title = item.get("title", "").lower()
-
-                if title_lower == t_title or title_lower in t_title or t_title in title_lower:
-                    score = 900
-                else:
-                    score = difflib.SequenceMatcher(None, title_lower, t_title).ratio() * 100
-
-                if item.get("maximum_bit_depth", 0) >= 24:
-                    score += 10
-
+                score = _score_track_candidate(query, item)
                 if score > best_score:
                     best_score = score
                     best_match = item
+
+            # Ported Fallback Logic: Album Search Fallback (like searchTracksViaAlbumSearch in index.js)
+            if not best_match or best_score < 400:
+                album_resp = self._do_signed_get("album/search", {"query": query, "limit": "5"})
+                if album_resp.status_code == 200:
+                    albums = album_resp.json().get("albums", {}).get("items", [])
+                    for album in albums:
+                        album_id = album.get("id")
+                        if not album_id: continue
+                        # Fetch full album to score its tracks
+                        track_resp = self._do_signed_get("album/get", {"album_id": album_id})
+                        if track_resp.status_code == 200:
+                            album_data = track_resp.json()
+                            album_tracks = album_data.get("tracks", {}).get("items", [])
+                            for trk in album_tracks:
+                                trk["album"] = album_data
+                                score = _score_track_candidate(query, trk)
+                                if score > best_score:
+                                    best_score = score
+                                    best_match = trk
 
             return best_match
 
@@ -898,7 +938,7 @@ class QobuzProvider(BaseProvider):
             images = album_data.get("image", {})
             qobuz_cover = images.get("large") or images.get("small")
             if qobuz_cover:
-                metadata.cover_url = qobuz_cover.replace("_600.jpg", "_max.jpg").replace("_230.jpg", "_max.jpg")
+                metadata.cover_url = _IMAGE_SIZE_RE.sub("_max.jpg", qobuz_cover)
                 
             metadata.release_date = track.get("release_date_original") or album_data.get("release_date_original") or metadata.release_date
             metadata.copyright = track.get("copyright") or album_data.get("copyright") or metadata.copyright
@@ -997,14 +1037,23 @@ class QobuzProvider(BaseProvider):
 
                 self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
 
+                # Controllo Preview stringente basato sul file JS
                 valid, err = validate_downloaded_track(str(dest), expected_s)
                 if not valid:
+                    # Simulazione della logica validateDownloadedDuration del JS
+                    import librosa # Oppure mutuato dal vostro checker interno
+                    try:
+                        actual_duration = librosa.get_duration(filename=str(dest))
+                        if actual_duration <= 35 and expected_s > 45:
+                            err = "Preview-length audio detected (30s limit)"
+                    except Exception:
+                        pass
+                        
                     logger.warning("[qobuz] API %s returned invalid file: %s. Blacklisting endpoint and retrying...", winner_api, err)
                     record_failure("qobuz", winner_api)  
                     excluded_apis.add(winner_api)
                     last_err = err
                     
-                    # RIMOZIONE DEL FILE INVALIDO
                     if os.path.exists(dest):
                         try:
                             os.remove(dest)

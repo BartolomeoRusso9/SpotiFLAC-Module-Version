@@ -39,8 +39,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_TIDAL_APIS_GET = [
-]
+_TIDAL_APIS_GET = []
 
 _TIDAL_API_POST = [
     "https://api.zarz.moe/v1/dl/tid2",
@@ -74,8 +73,16 @@ _RATE_LIMIT_DEFAULT = 5.0
 _api_cooldown_lock:     threading.Lock       = threading.Lock()
 _api_cooldown_until:    dict[str, float]     = {}
 
+def _is_deterministic_error(message: str) -> bool:
+    """Verifica se l'errore ritornato è causato dalla traccia e non da un timeout di rete"""
+    text = str(message or "")
+    if not text:
+        return False
+    return bool(re.search(r"EAC3_JOC|did not report|PREVIEW asset|Invalid TIDAL|assetPresentation|missing manifest|returned no data", text, re.IGNORECASE))
+
 def _clean_title(value: str) -> str:
-    cleaned = value.lower()
+    """Pulisce il titolo in maniera approfondita, rimuovendo parentesi ed accenti (come index.js)"""
+    cleaned = str(value or "")
     patterns = [
         "remaster", "remastered", "deluxe", "bonus", "single",
         "album version", "radio edit", "original mix", "extended",
@@ -96,7 +103,15 @@ def _clean_title(value: str) -> str:
 
         cleaned = re.sub(r"\([^)]*\)|\[[^\]]*\]", replacer, cleaned)
 
-    return re.sub(r"\s+", " ", cleaned).strip()
+    # Rimuovi i diacritici e formatta come in JS (normalizeLooseTitle)
+    try:
+        cleaned = unicodedata.normalize("NFD", cleaned)
+        cleaned = "".join(c for c in cleaned if unicodedata.category(c) != "Mn")
+    except Exception:
+        pass
+    cleaned = re.sub(r"[\/\\_\-|.&+]", " ", cleaned)
+    cleaned = re.sub(r"[^\w\s]+", " ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip().lower()
 
 def _mark_api_rate_limited(api_url: str, wait_s: float) -> None:
     key = api_url.rstrip("/")
@@ -132,7 +147,7 @@ def _normalize_quality(value: str) -> str:
     if normalized == "5":
         return "HIGH"
 
-    # ── MAPPE STANDARD ──
+    # ── MAPPE STANDARD (come nel JS) ──
     if normalized in ("DOLBY", "ATMOS", "DOLBY ATMOS"):
         return "DOLBY_ATMOS"
     if normalized in ("EAC3", "EC3", "EAC3_JOC"):
@@ -453,6 +468,7 @@ def _fetch_tidal_url_once(
                         try: err_text = resp.json().get("message") or err_text
                         except: pass
                         last_err = RuntimeError(f"HTTP {resp.status_code}: {err_text}")
+                        if _is_deterministic_error(str(last_err)): break
                         continue
 
                     data = resp.json()
@@ -460,17 +476,17 @@ def _fetch_tidal_url_once(
                         attributes = data["data"]["data"]["attributes"]
                     except (KeyError, TypeError) as exc:
                         last_err = RuntimeError(f"Atmos manifest payload missing attributes: {exc}")
-                        continue
+                        break # Deterministic
 
                     formats = attributes.get("formats", [])
                     if "EAC3_JOC" not in [str(f).upper() for f in formats]:
                         last_err = RuntimeError("TIDAL API did not report EAC3_JOC for this track")
-                        continue
+                        break # Deterministic
 
                     manifest_uri = attributes.get("uri", "").strip()
                     if not manifest_uri:
                         last_err = RuntimeError("Atmos manifest URI was empty")
-                        continue
+                        break # Deterministic
 
                     mpd_resp = client.get( 
                         manifest_uri,
@@ -484,7 +500,6 @@ def _fetch_tidal_url_once(
                     _clear_api_rate_limit(api_cleaning)
                     return "MANIFEST:" + base64.b64encode(mpd_resp.content).decode()
 
-                # Paylod standard identico a index.js
                 resp = client.post( 
                     api_cleaning,
                     json={"id": str(track_id), "quality": quality},
@@ -509,6 +524,7 @@ def _fetch_tidal_url_once(
                     err_text = p.get("message") or p.get("error") or err_text
                 except: pass
                 last_err = RuntimeError(f"HTTP {resp.status_code} - {err_text}")
+                if _is_deterministic_error(str(last_err)): break
                 continue
 
             data = resp.json()
@@ -516,6 +532,7 @@ def _fetch_tidal_url_once(
             if isinstance(data, dict):
                 if data.get("success") is False:
                     last_err = RuntimeError(data.get("message") or "API Error")
+                    if _is_deterministic_error(str(last_err)): break
                     continue
 
                 inner_data = data.get("data", {})
@@ -528,7 +545,7 @@ def _fetch_tidal_url_once(
                     asset = inner_data.get("assetPresentation", "") if isinstance(inner_data, dict) else ""
                     if asset == "PREVIEW":
                         last_err = RuntimeError("returned PREVIEW instead of FULL")
-                        continue
+                        break # Deterministic
                     _clear_api_rate_limit(api_cleaning)
                     return "MANIFEST:" + manifest
 
@@ -539,13 +556,15 @@ def _fetch_tidal_url_once(
                         return str(item["OriginalTrackUrl"])
 
             last_err = RuntimeError("no download URL or manifest in response")
+            if _is_deterministic_error(str(last_err)): break
 
         except (httpx.TimeoutException, httpx.ConnectError) as exc: 
             last_err = exc
             continue
         except Exception as exc:
             last_err = exc
-            break
+            if _is_deterministic_error(str(last_err)): break
+            continue
 
     raise last_err
 
@@ -883,6 +902,16 @@ class TidalProvider(BaseProvider):
             )
         return final_dst
 
+    def _get_audio_duration_seconds(self, file_path: Path) -> int:
+        try:
+            cmd = [
+                "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", str(file_path)
+            ]
+            return int(float(subprocess.check_output(cmd, text=True).strip()))
+        except Exception:
+            return 0
+
     def download_track(
             self,
             metadata:   TrackMetadata,
@@ -941,6 +970,14 @@ class TidalProvider(BaseProvider):
             valid, err_msg = validate_downloaded_track(str(final_dest), expected_s)
             if not valid:
                 raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
+            
+            # Controllo Preview derivato dal Web JS
+            actual_s = self._get_audio_duration_seconds(final_dest)
+            if actual_s <= 35 and expected_s > 45:
+                # E' probabile che sia stato scaricato un preview limitato
+                if final_dest.exists():
+                    final_dest.unlink()
+                raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Tidal returned a limited preview track ({actual_s}s).", self.name)
 
             mb_tags: dict[str, str] = {}
             if mb_fetcher:

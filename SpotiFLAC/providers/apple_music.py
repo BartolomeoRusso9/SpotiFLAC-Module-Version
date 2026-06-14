@@ -29,14 +29,15 @@ API_ENDPOINTS = {
 
 class AppleMusicProvider(BaseProvider):
     name = "apple-music"
-    MAX_POLLING_WAIT_S = 600
+    # Allineato al default JS di downloadMaxWaitMinutes: 60 min
+    MAX_POLLING_WAIT_S = 3600
 
     def __init__(self, timeout_s: int = 30, proxy_api_key: str = "") -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
         self._session = NetworkManager.get_sync_client()
-        
+
         # Cache per gli URL di ricerca
-        self._url_cache: OrderedDict[str, str] = OrderedDict() 
+        self._url_cache: OrderedDict[str, str] = OrderedDict()
         self._cache_limit = 200
 
         headers = {
@@ -61,7 +62,7 @@ class AppleMusicProvider(BaseProvider):
         """Sfrutta l'API pubblica di iTunes per trovare l'URL della traccia delegando l'encoding a httpx."""
         try:
             resp = self._session.get(
-                "https://itunes.apple.com/lookup", 
+                "https://itunes.apple.com/lookup",
                 params={"isrc": isrc},
                 timeout=15
             )
@@ -78,7 +79,7 @@ class AppleMusicProvider(BaseProvider):
             first_artist = artists.split(",")[0].strip()
             query = f"{title} {first_artist}"
             cache_key = f"search_{query}_{isrc}"
-            
+
             # Controllo cache LRU
             if cache_key in self._url_cache:
                 self._url_cache.move_to_end(cache_key)
@@ -86,13 +87,13 @@ class AppleMusicProvider(BaseProvider):
 
             # Delegato encoding dell'URL e parametri a httpx
             resp = self._session.get(
-                "https://itunes.apple.com/search", 
+                "https://itunes.apple.com/search",
                 params={"term": query, "entity": "song", "limit": 10},
                 timeout=15
             )
             results = resp.json().get("results", [])
 
-            if not results: 
+            if not results:
                 return None
 
             best_match = None
@@ -125,7 +126,7 @@ class AppleMusicProvider(BaseProvider):
                     try:
                         self._url_cache.popitem(last=False)
                     except KeyError:
-                        pass # Protezione concorrenza estrema
+                        pass  # Protezione concorrenza estrema
 
             return best_match
 
@@ -156,13 +157,13 @@ class AppleMusicProvider(BaseProvider):
 
             if resp.headers.get("cf-mitigated", "").lower() == "challenge":
                 raise SpotiflacError(ErrorKind.NETWORK_ERROR, "Proxy bloccato da Cloudflare challenge", self.name)
-            
+
             resp.raise_for_status()
             data = resp.json()
             if data.get("success") and data.get("stream_url"):
                 record_success(self.name, API_ENDPOINTS["proxy_direct"])
                 return API_ENDPOINTS["proxy_direct"], data["stream_url"]
-                
+
         except httpx.HTTPStatusError as e:
             err_msg = e.response.json().get("error") if e.response.text else str(e)
             logger.debug("[apple-music] app2 rifiutato per %s: %s", codec, err_msg)
@@ -197,13 +198,13 @@ class AppleMusicProvider(BaseProvider):
             start_time = time.time()
             deadline = start_time + self.MAX_POLLING_WAIT_S
             poll_count = 0
-            
+
             while time.time() < deadline:
                 poll_count += 1
                 if poll_count % 12 == 0:  # Ogni ~30 secondi
                     elapsed = int(time.time() - start_time)
                     print(f"  ⏳ Apple Music: in attesa del job {job_id[:8]}... ({elapsed}s trascorsi)")
-                    
+
                 st_resp = self._session.get(f"{API_ENDPOINTS['proxy_queued']}/status/{job_id}", timeout=15)
                 st_resp.raise_for_status()
                 st_data = st_resp.json()
@@ -212,7 +213,7 @@ class AppleMusicProvider(BaseProvider):
                 if status == "completed":
                     record_success(self.name, API_ENDPOINTS["proxy_queued"])
                     return API_ENDPOINTS["proxy_queued"], f"{API_ENDPOINTS['proxy_queued']}/file/{job_id}"
-                
+
                 if status == "failed":
                     err = st_data.get('error', 'Errore API sconosciuto')
                     logger.warning("[apple-music] Errore API proxy per codec %s: %s", codec, err)
@@ -299,10 +300,15 @@ class AppleMusicProvider(BaseProvider):
                 if metadata.isrc:
                     track_url = self._resolve_track_url(metadata.isrc)
 
-                # FALLBACK: Se l'ISRC fallisce, cerca per Titolo e Artista
+                # FALLBACK: Se l'ISRC fallisce, cerca per Titolo, Artista, ISRC e durata
                 if not track_url:
                     logger.debug("[apple-music] ISRC non trovato, tentativo tramite ricerca testuale...")
-                    track_url = self._resolve_track_url_by_search(metadata.title, metadata.artists)
+                    track_url = self._resolve_track_url_by_search(
+                        metadata.title,
+                        metadata.artists,
+                        metadata.isrc or "",
+                        metadata.duration_ms,
+                    )
 
             if not track_url:
                 raise TrackNotFoundError(self.name, f"Traccia non trovata (ISRC: {metadata.isrc})")

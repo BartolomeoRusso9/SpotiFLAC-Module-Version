@@ -1,22 +1,6 @@
 """
 TidalMetadataClient — recupera metadati di tracce/album/playlist/artisti direttamente
 dall'API pubblica di Tidal quando l'URL di input è un link Tidal (non Spotify).
-
-URL supportati:
-  - https://listen.tidal.com/track/12345678
-  - https://tidal.com/browse/track/12345678
-  - https://listen.tidal.com/album/12345678
-  - https://tidal.com/browse/album/12345678
-  - https://listen.tidal.com/playlist/a1b2c3d4-e5f6-7890-abcd-ef1234567890
-  - https://tidal.com/browse/playlist/a1b2c3d4-e5f6-7890-abcd-ef1234567890
-  - https://listen.tidal.com/artist/12345678
-  - https://tidal.com/browse/artist/12345678
-  - https://listen.tidal.com/artist/12345678/discography/albums
-  - https://listen.tidal.com/artist/12345678/discography/singles
-
-L'ID della traccia viene inserito nel campo `TrackMetadata.id` con il prefisso
-"tidal_" (es. "tidal_12345678") in modo che TidalProvider possa riconoscerlo
-e saltare la fase di risoluzione Spotify→Tidal.
 """
 from __future__ import annotations
 
@@ -36,6 +20,7 @@ from ..core.models import TrackMetadata
 
 logger = logging.getLogger(__name__)
 
+# Configurazione sincronizzata con manifest.json
 _TIDAL_CLIENT_ID   = "49YxDN9a2aFV6RTG"
 _TIDAL_API_BASE    = "https://api.tidal.com/v1"
 _TIDAL_COUNTRY     = "US"
@@ -49,10 +34,8 @@ _TIDAL_UA        = (
 
 _TIDAL_DOMAINS = {"listen.tidal.com", "tidal.com", "www.tidal.com"}
 
-# Dimensione pagina per le richieste paginate (max consentito dall'API Tidal)
-_PAGE_SIZE = 100
+_PAGE_SIZE = 50  # Modificato a 50 in base a index.js pageSize
 
-# Valori validi per il parametro filter dell'endpoint /artists/{id}/albums
 _TIDAL_FILTER_ALBUMS       = "ALBUMS"
 _TIDAL_FILTER_EPSANDSINGLES = "EPSANDSINGLES"
 _TIDAL_FILTER_COMPILATIONS  = "COMPILATIONS"
@@ -76,31 +59,38 @@ def is_tidal_url(url: str) -> bool:
 def parse_tidal_url(url: str) -> dict[str, str]:
     """
     Analizza un URL Tidal o deep link e restituisce {"type": ..., "id": ...}.
-    Supporta: "track", "album", "playlist", "artist", "artist_discography".
-    Raises InvalidUrlError se il formato non è riconoscuto.
+    Sincronizzato con la logica parseURL di index.js.
     """
-    # Gestione deep link come tidal://track/12345
-    deep_link_match = re.match(r"^tidal:\/\/\/?(track|album|artist|playlist)\/([^?#/]+)", url, re.IGNORECASE)
-    if deep_link_match:
-        return {"type": deep_link_match.group(1).lower(), "id": deep_link_match.group(2)}
-
-    # Gestione prefissi come tidal:track:12345
-    prefix_match = re.match(r"^tidal:(track|album|artist|playlist):([^?#/]+)", url, re.IGNORECASE)
+    text = url.strip()
+    
+    # 1. Prefisso puro (es. tidal:track:12345)
+    prefix_match = re.match(r"^tidal:(track|album|artist|playlist):([^?#/]+)", text, re.IGNORECASE)
     if prefix_match:
         return {"type": prefix_match.group(1).lower(), "id": prefix_match.group(2)}
 
-    # Parsing HTTPS standard
-    u = urlparse(url)
+    # 2. Deep link (es. tidal://track/12345)
+    deep_link_match = re.match(r"^tidal:\/\/\/?(track|album|artist|playlist)\/([^?#/]+)", text, re.IGNORECASE)
+    if deep_link_match:
+        return {"type": deep_link_match.group(1).lower(), "id": deep_link_match.group(2)}
+
+    # 3. HTTPS URL
+    normalized = text
+    if not normalized.startswith("http://") and not normalized.startswith("https://"):
+        normalized = "https://" + normalized
+
+    u = urlparse(normalized)
+    if u.netloc.lower() not in _TIDAL_DOMAINS:
+        raise InvalidUrlError(url)
+
     path = u.path.strip("/")
-
-    if path.startswith("browse/"):
-        path = path[len("browse/"):]
-
-    parts = [p for p in path.split("/") if p]
+    parts = path.split("/")
+    
+    if len(parts) > 0 and parts[0] == "browse":
+        parts.pop(0)
 
     if len(parts) >= 2 and parts[0] in ("track", "album", "playlist", "artist"):
         entity_type = parts[0]
-        entity_id   = parts[1].split("?")[0]
+        entity_id   = parts[1]
 
         if entity_type == "artist" and len(parts) >= 3 and parts[2] == "discography":
             group = parts[3] if len(parts) >= 4 else "all"
@@ -115,13 +105,26 @@ def parse_tidal_url(url: str) -> dict[str, str]:
 # Helper
 # ---------------------------------------------------------------------------
 
-def _normalize_artist(s: str) -> str:
-    s = s.lower().strip()
-    s = unicodedata.normalize("NFD", s)
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    s = re.sub(r"[^a-z0-9 ]", "", s)
-    return re.sub(r"\s+", " ", s).strip()
+def _remove_diacritics(s: str) -> str:
+    """Rimuove accenti e caratteri speciali imitando removeDiacritics in index.js"""
+    try:
+        s = unicodedata.normalize("NFD", s)
+        s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    except Exception:
+        pass
+    
+    # Sostituzioni speciali come nel JS
+    s = re.sub(r"[đĐ]", "dj", s)
+    s = re.sub(r"[ßẞ]", "ss", s)
+    s = re.sub(r"[æÆ]", "ae", s)
+    s = re.sub(r"[œŒ]", "oe", s)
+    return s
 
+def _normalize_artist(s: str) -> str:
+    s = _remove_diacritics(s).lower()
+    s = re.sub(r"[&]", " and ", s)
+    s = re.sub(r"[^\w\s]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
 
 def _artist_in_track(artist_name: str, track_artists: str) -> bool:
     name_norm = _normalize_artist(artist_name)
@@ -138,7 +141,6 @@ def _artist_in_track(artist_name: str, track_artists: str) -> bool:
 class TidalMetadataClient:
     """
     Recupera metadati dall'API pubblica di Tidal v1.
-    Non richiede credenziali utente — usa solo il client token pubblico.
     """
 
     def __init__(self, timeout_s: int = 15) -> None:
@@ -149,10 +151,6 @@ class TidalMetadataClient:
             "Accept":        "application/json",
             "User-Agent":    _TIDAL_UA,
         })
-
-    # ------------------------------------------------------------------
-    # HTTP helper
-    # ------------------------------------------------------------------
 
     def _get(self, path: str, extra_params: dict[str, Any] | None = None) -> dict[str, Any]:
         params = {
@@ -203,15 +201,7 @@ class TidalMetadataClient:
 
         raise NetworkError("tidal_metadata", f"Impossibile completare la richiesta a {path}")
 
-    # ------------------------------------------------------------------
-    # Paginazione generica
-    # ------------------------------------------------------------------
-
     def _paginate(self, path: str, extra_params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        """
-        Recupera tutti gli elementi di un endpoint paginato Tidal.
-        Gestisce automaticamente offset e totalNumberOfItems.
-        """
         items:  list[dict[str, Any]] = []
         offset: int = 0
 
@@ -232,31 +222,19 @@ class TidalMetadataClient:
             if offset >= total or not page:
                 break
 
-            time.sleep(0.3)  # rispetta il rate limit
+            time.sleep(0.3)
 
         return items
-
-    # ------------------------------------------------------------------
-    # Fetch singola traccia
-    # ------------------------------------------------------------------
 
     def get_track(self, track_id: str) -> TrackMetadata:
         data = self._get(f"/tracks/{track_id}")
         return self._track_from_raw(data)
-
-    # ------------------------------------------------------------------
-    # Fetch album completo
-    # ------------------------------------------------------------------
 
     def get_album_tracks(
             self,
             album_id: str,
             preloaded_album: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], list[TrackMetadata]]:
-        """
-        Recupera tutte le tracce di un album.
-        Se preloaded_album è fornito, evita una chiamata HTTP aggiuntiva.
-        """
         album = preloaded_album if preloaded_album else self._get(f"/albums/{album_id}")
         items = self._paginate(f"/albums/{album_id}/tracks")
         tracks = [self._track_from_album_item(item, album) for item in items]
@@ -268,14 +246,7 @@ class TidalMetadataClient:
         }
         return formatted_album, tracks
 
-    # ------------------------------------------------------------------
-    # Fetch playlist completa (con paginazione)
-    # ------------------------------------------------------------------
-
     def get_playlist_tracks(self, playlist_uuid: str) -> tuple[dict[str, Any], list[TrackMetadata]]:
-        """
-        Recupera tutti i metadati di una playlist Tidal usando l'UUID.
-        """
         playlist  = self._get(f"/playlists/{playlist_uuid}")
         raw_items = self._paginate(f"/playlists/{playlist_uuid}/tracks")
 
@@ -296,19 +267,12 @@ class TidalMetadataClient:
 
         return playlist, tracks
 
-    # ------------------------------------------------------------------
-    # Fetch discografia artista
-    # ------------------------------------------------------------------
-
     def get_artist_albums(
             self,
             artist_id: str,
             include_groups: str = f"{_TIDAL_FILTER_ALBUMS},{_TIDAL_FILTER_EPSANDSINGLES}",
             include_featuring: bool = False,
     ) -> tuple[dict[str, Any], list[TrackMetadata]]:
-        """
-        Recupera la discografia completa di un artista Tidal.
-        """
         artist = self._get(f"/artists/{artist_id}")
         artist_name = artist.get("name", "")
         tracks: list[TrackMetadata] = []
@@ -346,7 +310,6 @@ class TidalMetadataClient:
                 seen_album_ids.add(album_id)
                 albums_to_fetch.append((album_id, album_data, is_compilation))
 
-        # Fetch parallelo delle tracce di ogni album (max 5 richieste simultanee)
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_album = {
                 executor.submit(self.get_album_tracks, aid, preloaded): (aid, is_comp)
@@ -377,14 +340,7 @@ class TidalMetadataClient:
                 
         return artist, tracks
 
-    # ------------------------------------------------------------------
-    # Entry point pubblico
-    # ------------------------------------------------------------------
-
     def get_url(self, tidal_url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata], str, dict[str, Any]]:
-        """
-        Riceve un URL Tidal e restituisce (nome_collezione, [TrackMetadata], cover, metadati).
-        """
         info = parse_tidal_url(tidal_url)
         t    = info["type"]
 
@@ -429,10 +385,6 @@ class TidalMetadataClient:
             f"Tipo Tidal non supportato: {t} (supportati: track, album, playlist, artist)",
         )
 
-    # ------------------------------------------------------------------
-    # Conversione dati API → TrackMetadata
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _format_artists(artists: list[dict[str, Any]] | None) -> str:
         if not artists:
@@ -474,6 +426,9 @@ class TidalMetadataClient:
                 total_tracks      = album_details.get("numberOfTracks", total_tracks)
                 album_artists_raw = album_details.get("artists") or album_artists_raw
 
+        # Garantisci fallback durata_ms se assente
+        duration_ms = int(data.get("duration", 0)) * 1000
+
         return TrackMetadata(
             id           = f"tidal_{data.get('id', '')}",
             title        = data.get("title", "Unknown"),
@@ -484,7 +439,7 @@ class TidalMetadataClient:
             track_number = data.get("trackNumber", 0),
             disc_number  = data.get("volumeNumber", 1),
             total_tracks = total_tracks,
-            duration_ms  = int(data.get("duration", 0)) * 1000,
+            duration_ms  = duration_ms,
             release_date = release_date,
             cover_url    = cover_url,
             external_url = data.get("url", ""),

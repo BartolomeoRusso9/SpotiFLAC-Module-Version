@@ -122,7 +122,7 @@ from backend import SpotiFLAC
 SpotiFLAC(
     url="https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ",
     output_dir="./MusicLibrary",
-    services=["qobuz", "amazon", "tidal", "spoti"],
+    services=["qobuz", "amazon", "tidal"],
     filename_format="{year} - {album}/{track}. {title}",
     use_artist_subfolders=True,
     use_album_subfolders=True,
@@ -437,7 +437,7 @@ Program can also be ran by downloading the python files and calling <code>python
 ```bash
 ./SpotiFLAC-Windows.exe url
                         output_dir
-                        [--service tidal qobuz deezer amazon spoti soundcloud youtube apple pandora joox netease migu kuwo]
+                        [--service tidal qobuz deezer amazon soundcloud youtube apple pandora joox netease migu kuwo]
                         [--filename-format "{title} - {artist}"]
                         [--output-path "files/song.flac"]
                         [--quality LOSSLESS]
@@ -468,7 +468,7 @@ Program can also be ran by downloading the python files and calling <code>python
 chmod +x SpotiFLAC-Linux-arm64
 ./SpotiFLAC-Linux-arm64 url
                         output_dir
-                        [--service tidal qobuz deezer amazon spoti soundcloud youtube apple pandora joox netease migu kuwo]
+                        [--service tidal qobuz deezer amazon soundcloud youtube apple pandora joox netease migu kuwo]
                         [--filename-format "{title} - {artist}"]
                         [--output-path "files/song.flac"]
                         [--quality LOSSLESS]
@@ -506,7 +506,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | **`url`**                      | `str` / `list[str]` | *Required*                                   | A single URL or a **list of URLs** (batch mode) for Spotify, Tidal, Apple Music, SoundCloud, YouTube or Pandora.                                                                                                                                                             |
 | **`output_dir`**               | `str`   | *Required*                                                | The destination directory path where the audio files will be saved.                                                                                                                                                                                                          |
 | **`output_path`**              | `str`   | `None`                                                    | Exact destination file path for **single track** downloads. Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies.                                                                                                |
-| **`services`**                 | `list`  | `["tidal"]`                                               | Specifies which services to use and their priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `spoti`, `soundcloud`, `youtube`, `apple`, `pandora`, `joox`, `netease`, `migu`, `kuwo`.                                                                            |
+| **`services`**                 | `list`  | `["tidal"]`                                               | Specifies which services to use and their priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `soundcloud`, `youtube`, `apple`, `pandora`, `joox`, `netease`, `migu`, `kuwo`.                                                                            |
 | **`filename_format`**          | `str`   | `"{title} - {artist}"`                                    | Format for naming downloaded files. See placeholders below.                                                                                                                                                                                                                  |
 | **`use_track_numbers`**        | `bool`  | `False`                                                   | Prefixes the filename with the track number.                                                                                                                                                                                                                                 |
 | **`use_album_track_numbers`**  | `bool`  | `False`                                                   | Uses the track's original album number instead of the download queue position.                                                                                                                                                                                               |
@@ -550,7 +550,7 @@ When customizing the `filename_format` string, you can use the following dynamic
 
 | Flag                        | Short | Default                                       | Description                                                                                                                                                                                                 |
 |-----------------------------|-------|-----------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--service`                 | `-s`  | `tidal`                                       | One or more providers in priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `spoti`, `soundcloud`, `youtube`, `apple`, `pandora`, `joox`, `netease`, `migu`, `kuwo`.                                                                            |
+| `--service`                 | `-s`  | `tidal`                                       | One or more providers in priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `soundcloud`, `youtube`, `apple`, `pandora`, `joox`, `netease`, `migu`, `kuwo`.                                                                            |
 | `--filename-format`         | `-f`  | `{title} - {artist}`                          | Filename template with placeholders.                                                                                                                                                                        |
 | `--output-path`             | `-o`  | `None`                                        | Exact output file path for single track downloads. Ignored for albums, playlists and discographies.                                                                                                         |
 | `--quality`                 | `-q`  | `LOSSLESS`                                    | Audio quality. Tidal: `DOLBY_ATMOS`, `HI_RES_LOSSLESS`, `LOSSLESS`, `HIGH`, `LOW`. Qobuz: `6`, `7`, `27`. Apple Music: `alac`, `atmos`, `ac3`, `aac`, `aac-legacy`. Pandora: `mp3_192`, `aac_64`, `aac_32`. |
