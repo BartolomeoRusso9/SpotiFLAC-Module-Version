@@ -6,6 +6,7 @@ import logging
 import os
 import random
 import re
+import subprocess
 import threading
 import time
 import unicodedata
@@ -887,6 +888,16 @@ class QobuzProvider(BaseProvider):
             self.name,
         )
 
+    def _get_audio_duration_seconds(self, file_path: str) -> int:
+        try:
+            cmd = [
+                "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", file_path
+            ]
+            return int(float(subprocess.check_output(cmd, text=True).strip()))
+        except Exception:
+            return 0
+
     def download_track(
             self,
             metadata:   TrackMetadata,
@@ -1037,17 +1048,11 @@ class QobuzProvider(BaseProvider):
 
                 self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
 
-                # Controllo Preview stringente basato sul file JS
                 valid, err = validate_downloaded_track(str(dest), expected_s)
                 if not valid:
-                    # Simulazione della logica validateDownloadedDuration del JS
-                    import librosa # Oppure mutuato dal vostro checker interno
-                    try:
-                        actual_duration = librosa.get_duration(filename=str(dest))
-                        if actual_duration <= 35 and expected_s > 45:
-                            err = "Preview-length audio detected (30s limit)"
-                    except Exception:
-                        pass
+                    actual_duration = self._get_audio_duration_seconds(str(dest))
+                    if actual_duration > 0 and actual_duration <= 35 and expected_s > 45:
+                        err = "Preview-length audio detected (30s limit)"
                         
                     logger.warning("[qobuz] API %s returned invalid file: %s. Blacklisting endpoint and retrying...", winner_api, err)
                     record_failure("qobuz", winner_api)  
