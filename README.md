@@ -7,7 +7,7 @@ Integrate **SpotiFLAC** directly into your Python projects. Perfect for building
 > **Looking for a standalone app?**
 ### [SpotiFLAC (Desktop)](https://github.com/afkarxyz/SpotiFLAC)
 
-Download music in true lossless FLAC from Tidal, Qobuz & Amazon Music for Windows, macOS & Linux
+Download music in true lossless FLAC from different providers for Windows, macOS & Linux
 
 ### [SpotiFLAC (Mobile)](https://github.com/zarzet/SpotiFLAC-Mobile)
 
@@ -624,7 +624,7 @@ Your support helps keep development going._
 
 ## API Credits
 
-[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [qobuz-api](https://github.com/BartolomeoRusso9/qobuz-api) ·[dabmusic.xyz](https://dabmusic.xyz) · [GD Studio Music API](https://music.gdstudio.xyz) · [Music Wjhe API](https://music.wjhe.top/) · [afkarxyz](https://github.com/afkarxyz) · [MusicBrainz](https://musicbrainz.org) · [SoundCloud](https://soundcloud.com) · [Apple Music](https://music.apple.com) · [YouTube Music](https://music.youtube.com) · [Pandora](https://www.pandora.com) · [squid.wtf](https://squid.wtf/)
+[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [qobuz-api](https://github.com/BartolomeoRusso9/qobuz-api) ·[dabmusic.xyz](https://dabmusic.xyz) · [GD Studio Music API](https://music.gdstudio.xyz) · [Music Wjhe API](https://music.wjhe.top/) · [afkarxyz](https://github.com/afkarxyz) · [MusicBrainz](https://musicbrainz.org) · [SoundCloud](https://soundcloud.com) · [Apple Music](https://music.apple.com) · [YouTube Music](https://music.youtube.com) · [Pandora](https://www.pandora.com) · [squid.wtf](https://squid.wtf) · [flacdownloader.com](https://flacdownloader.com)
 
 > [!TIP]
 >
