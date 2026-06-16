@@ -76,28 +76,57 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         tidal_eps.append(("GET", "https://api.zarz.moe/v1/health"))
         endpoints["tidal"] = tidal_eps
     except ImportError:
-        endpoints["tidal"] = [("GET", "https://api.zarz.moe/v1/health")]
+        endpoints["tidal"] = [
+            ("POST", "https://api.zarz.moe/v1/dl/tid2"),
+            ("GET", "https://api.zarz.moe/v1/health")
+        ]
 
     # ── Qobuz ──────────────────────────────────────────────────────────────
     try:
-        from ..providers.qobuz import _STREAM_APIS, _POST_APIS, _FLACDOWNLOADER_APIS
+        from ..providers.qobuz import (
+            _STREAM_APIS, _POST_APIS, _FLACDOWNLOADER_APIS, 
+            _QOBUZ_DL_, _GDSTUDIO_APIS, _WJHE_APIS
+        )
 
         qobuz_eps: list[tuple[str, str]] = []
         _QOBUZ_PROBE_ID = "3135556"
+        
         for url in _STREAM_APIS:
             if url.endswith("="):
                 qobuz_eps.append(("GET", f"{url}{_QOBUZ_PROBE_ID}&quality=6"))
             else:
                 qobuz_eps.append(("GET", f"{url}{_QOBUZ_PROBE_ID}?quality=6"))
+        
+        for url in _QOBUZ_DL_:
+            qobuz_eps.append(("GET", f"{url}track_id={_QOBUZ_PROBE_ID}&quality=6"))
+            
         for url in _POST_APIS:
             qobuz_eps.append(("POST", url))
+            
+        for url in _GDSTUDIO_APIS:
+            qobuz_eps.append(("POST", url))
+            
+        for url in _WJHE_APIS:
+            qobuz_eps.append(("GET", f"{url}?ID={_QOBUZ_PROBE_ID}&quality=1000&format=flac"))
+            
         for url in _FLACDOWNLOADER_APIS:
             qobuz_eps.append(("GET", f"{url.rstrip('/')}/prepare"))
+            
         qobuz_eps.append(("GET", "https://api.zarz.moe/v1/health"))
         qobuz_eps.append(("GET", "https://qbz.squid.wtf/"))
         endpoints["qobuz"] = qobuz_eps
     except ImportError:
         endpoints["qobuz"] = [
+            ("GET", "https://qbz.afkarxyz.qzz.io/api/track/3135556?quality=6"),
+            ("GET", "https://qobuz.spotbye.qzz.io/api/track/3135556?quality=6"),
+            ("GET", "https://qobuz.kennyy.com.br/api/download-music?track_id=3135556&quality=6"),
+            ("GET", "https://qobuz.squid.wtf/api/download-music?track_id=3135556&quality=6"),
+            ("GET", "https://mono.scavengerfurs.net/api/download-music?track_id=3135556&quality=6"),
+            ("POST", "https://api.zarz.moe/v1/dl/qbz"),
+            ("POST", "https://api.zarz.moe/v1/dl/qbz2"),
+            ("POST", "https://music.gdstudio.xyz/api.php"),
+            ("POST", "https://music.gdstudio.org/api.php"),
+            ("GET", "https://music.wjhe.top/api/music/qobuz/url?ID=3135556&quality=1000&format=flac"),
             ("GET", "https://flacdownloader.com/prepare"),
             ("GET", "https://api.zarz.moe/v1/health"),
             ("GET", "https://qbz.squid.wtf/")
@@ -106,7 +135,6 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     # ── Deezer ─────────────────────────────────────────────────────────────
     try:
         from ..providers.deezer import _RESOLVER_URL
-
         endpoints["deezer"] = [
             ("POST", _RESOLVER_URL),
             ("GET", "https://flacdownloader.com/prepare"),
@@ -121,75 +149,100 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     # ── Amazon ─────────────────────────────────────────────────────────────
     try:
-        from ..providers.amazon import API_ENDPOINTS
-
+        from ..providers.amazon import API_ENDPOINTS, _SQUID_BASE
         amazon_list: list[tuple[str, str]] = []
         for val in API_ENDPOINTS.values():
-            if isinstance(val, dict):
-                base_url = val.get("base_url", "")
-                if base_url:
-                    amazon_list.append(("POST", base_url))
-            elif isinstance(val, str):
-                amazon_list.append(("POST", val))
+            base_url = val.get("base_url")
+            method = val.get("method", "GET").upper()
+            if base_url:
+                amazon_list.append((method, base_url))
+        
+        amazon_list.append(("GET", f"{_SQUID_BASE}/captcha/challenge"))
+        amazon_list.append(("POST", "https://dl.musicdl.me/download"))
         amazon_list.append(("GET", "https://api.zarz.moe/v1/health"))
-        amazon_list.append(("GET",  "https://amz.squid.wtf/"))
+        amazon_list.append(("GET", "https://amz.squid.wtf/"))
         endpoints["amazon"] = amazon_list
     except ImportError:
         endpoints["amazon"] = [
             ("POST", "https://amz.spotbye.qzz.io/api"),
-            ("POST", "https://amazon.spotbye.qzz.io/api"),
-            ("GET",  "https://api.zarz.moe/v1/health"),
+            ("GET", "https://amazon.spotbye.qzz.io/api"),
+            ("GET", "https://api.zarz.moe/v1/dl/amazeamazeamaze"),
+            ("GET", "https://amz.squid.wtf/api/captcha/challenge"),
+            ("POST", "https://dl.musicdl.me/download"),
+            ("GET", "https://api.zarz.moe/v1/health"),
+            ("GET", "https://amz.squid.wtf/")
         ]
 
     # ── Apple Music ────────────────────────────────────────────────────────
     try:
         from ..providers.apple_music import API_ENDPOINTS as APPLE_DL_ENDPOINTS
-
         endpoints["apple"] = [
+            ("POST", APPLE_DL_ENDPOINTS.get("proxy_direct", "https://api.zarz.moe/v1/dl/app2")),
+            ("POST", f"{APPLE_DL_ENDPOINTS.get('proxy_queued', 'https://api.zarz.moe/v1/dl/app')}/download"),
             ("GET",  "https://api.zarz.moe/v1/health"),
         ]
     except ImportError:
         endpoints["apple"] = [
+            ("POST", "https://api.zarz.moe/v1/dl/app2"),
+            ("POST", "https://api.zarz.moe/v1/dl/app/download"),
             ("GET",  "https://api.zarz.moe/v1/health"),
         ]
 
     # ── SoundCloud ─────────────────────────────────────────────────────────
     try:
         from ..providers.soundcloud import SoundCloudProvider
-
         sc     = SoundCloudProvider.__new__(SoundCloudProvider)
         cobalt = getattr(sc, "cobalt_api", "https://api.zarz.moe/v1/dl/cobalt/")
         endpoints["soundcloud"] = [
             ("POST", cobalt),
+            ("POST", "https://co.wuk.sh/"),
+            ("POST", "https://cobalt.qiaeru.tech/"),
             ("GET",  "https://api.zarz.moe/v1/health"),
         ]
     except Exception:
         endpoints["soundcloud"] = [
             ("POST", "https://api.zarz.moe/v1/dl/cobalt/"),
+            ("POST", "https://co.wuk.sh/"),
+            ("POST", "https://cobalt.qiaeru.tech/"),
             ("GET",  "https://api.zarz.moe/v1/health"),
         ]
 
     # ── YouTube ────────────────────────────────────────────────────────────
-    # YouTube usa yt-dlp locale, nessun endpoint HTTP da sondare.
-    endpoints["youtube"] = []
+    endpoints["youtube"] = [
+        ("POST", "https://api.zarz.moe/v1/dl"),
+        ("POST", "https://co.wuk.sh/"),
+        ("POST", "https://cobalt.qiaeru.tech/"),
+        ("POST", "https://yt1d.io/wp-admin/admin-ajax.php")
+    ]
 
     # ── Pandora ────────────────────────────────────────────────────────────
     try:
         from ..providers.pandora import _API_BASE_URL, _DOWNLOAD_PATH
-
         endpoints["pandora"] = [
-            ("GET",  f"{_API_BASE_URL}/v1/health"),
             ("POST", f"{_API_BASE_URL}{_DOWNLOAD_PATH}"),
+            ("GET",  f"{_API_BASE_URL}/v1/health"),
         ]
     except ImportError:
-        endpoints["pandora"] = [("GET", "https://api.zarz.moe/v1/health")]
-
-    # ── GD Studio API (Netease, Kuwo, Migu, Joox) ──────────────────────────
-    for provider in ["netease", "kuwo", "migu", "joox"]:
-        endpoints[provider] = [
-            ("GET", "https://music-api.gdstudio.xyz/api.php"),
-            ("GET", "https://music.wjhe.top/api/music/joox/url?ID=11259&quality=1000&format=flac"),
+        endpoints["pandora"] = [
+            ("POST", "https://api.zarz.moe/v1/dl/pan"),
+            ("GET", "https://api.zarz.moe/v1/health")
         ]
+
+    # ── GD Studio API & WJHE (Netease, Kuwo, Migu, Joox) ───────────────────
+    endpoints["netease"] = [
+        ("GET", "https://music-api.gdstudio.xyz/api.php")
+    ]
+    endpoints["kuwo"] = [
+        ("GET", "https://music-api.gdstudio.xyz/api.php")
+    ]
+    endpoints["migu"] = [
+        ("GET", "https://music.wjhe.top/api.php"),
+        ("GET", "https://music.wjhe.top/api/music/migu/url")
+    ]
+    endpoints["joox"] = [
+        ("GET", "https://music-api.gdstudio.xyz/api.php"),
+        ("GET", "https://music.wjhe.top/api/music/joox/url?ID=11259&quality=1000&format=flac")
+    ]
 
     return endpoints
 
@@ -305,7 +358,7 @@ async def _check_one(
 
             else:
                 # Qualsiasi altro status (4xx diverso da 401, 3xx già seguiti) →
-                # il server è raggiungibile
+                # il server è raggiungibile, anche in assenza di body coretto (400 Bad Request)
                 ok = True
 
             return HealthResult(provider, url, method, ok, ms, detail)
@@ -387,8 +440,8 @@ async def _check_one(
                     detail = "Empty Body"
 
         elif resp.status_code in (404, 400):
-            # Mirror tidal/qobuz che risponde 404/400 su una track sonda è comunque attivo
-            if provider in ("tidal", "qobuz", "qbz"):
+            # Mirror tidal/qobuz/wuk/ecc che risponde 404/400 su una track sonda è comunque attivo
+            if provider in ("tidal", "qobuz", "qbz", "youtube", "soundcloud"):
                 ok, detail = True, f"HTTP {resp.status_code} (Reachable)"
 
         elif resp.status_code == 401:
@@ -483,14 +536,15 @@ async def run_health_check(
     results:   list[HealthResult]         = []
     task_list: list[tuple[str, str, str]] = []
 
-    # YouTube → sempre locale, nessuna rete
+    # YouTube: includiamo il check del binario locale, ma manteniamo 
+    # il provider in lista in modo che vengano testati anche Cobalt e YT1D.
     for svc in services:
         if svc == "youtube":
             results.append(
                 HealthResult("youtube", "yt-dlp (local binary)", "CLI", True, 0.0, "local")
             )
 
-    remaining = [s for s in services if s != "youtube"]
+    remaining = list(services)
     if not remaining:
         return results
 
