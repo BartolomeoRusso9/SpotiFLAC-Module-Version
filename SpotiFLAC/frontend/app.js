@@ -361,7 +361,6 @@ const ALL_SERVICES = [
   { id:'youtube',     label:'YouTube Music',  badge:'M4A',  on:false, icon:'YT', iconClass:'youtube', iconFile:'youtube.svg' },
   { id:'apple',       label:'Apple Music',    badge:'M4A',  on:false, icon:'AM', iconClass:'apple', iconFile:'am.png' },
   { id:'pandora',     label:'Pandora',        badge:'MP3',  on:false, icon:'P',  iconClass:'pandora', iconFile:'pandora.svg' },
-  { id:'flacdownloader', label:'FlacDownloader', badge:'FLAC', on:false, icon:'FD', iconClass:'flacdownloader', iconFile:'download.svg' },
 ];
 const ALL_LYRICS = [
   { id:'lrclib',     label:'LRCLib',     on:true,  iconFile:'lrclib.png', iconClass:'lrclib' },
@@ -399,7 +398,7 @@ const DEFAULT_SETTINGS = {
   tidal_custom_api: '',
   loop: 0,
   log_level: 'INFO',
-  services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora', "flacdownloader"],
+  services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
   lyrics_providers: ['lrclib'],
   enrich_providers: ['deezer','apple','qobuz','tidal','soundcloud'],
 };
@@ -552,7 +551,6 @@ const API_SOURCES = [
   { id:'soundcloud', type:'soundcloud', name:'SoundCloud',    url:'' },
   { id:'youtube',    type:'youtube',    name:'YouTube Music', url:'' },
   { id:'pandora',    type:'pandora',    name:'Pandora',       url:'' },
-  { id:'flacdownloader', type:'flacdownloader', name:'FlacDownloader', url:'' },
 ];
 let apiStatusState = {
   checkingSources: {},
@@ -609,7 +607,6 @@ function renderPlatformIcon(type) {
     netease: 'netease.svg',
     migu: 'migu.jpeg',
     songstats: 'songstats.png',
-    flacdownloader: 'flacdownloader.png',
   };
   const iconFile = iconMap[type] || `${type}.svg`;
   return `<span class="svc-icon icon-image ${type}"><img src="assets/icons/${iconFile}" alt="${type}" onerror="this.onerror=null; this.src='assets/icons/${type}.png';"></span>`;

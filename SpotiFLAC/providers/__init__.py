@@ -12,7 +12,6 @@ from .joox import JooxProvider
 from .netease import NeteaseProvider
 from .migu import MiguProvider
 from .kuwo import KuwoProvider
-from .flacdownloader import FlacDownloaderProvider
 
 __all__ = [
     "BaseProvider",
@@ -27,7 +26,6 @@ __all__ = [
     "PandoraProvider",
     "SpotifyMetadataClient",
     "parse_spotify_url",
-    "FlacDownloaderProvider",
 ]
 
 PROVIDER_REGISTRY: dict[str, type] = {
@@ -43,5 +41,4 @@ PROVIDER_REGISTRY: dict[str, type] = {
         "soundcloud": SoundCloudProvider,
         "youtube":    YouTubeProvider,
         "pandora":    PandoraProvider,
-        "flacdownloader": FlacDownloaderProvider,
     }

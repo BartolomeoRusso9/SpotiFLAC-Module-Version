@@ -89,6 +89,10 @@ _WJHE_APIS: list[str] = [
     "https://music.wjhe.top/api/music/qobuz/url",
 ]
 
+_FLACDOWNLOADER_APIS: list[str] = [
+    "https://flacdownloader.com",
+]
+
 _QUALITY_FALLBACK: dict[str, list[str]] = {
     "27":              ["27", "7", "6"],
     "7":               ["7", "6"],
@@ -298,7 +302,7 @@ def _map_local_api_quality(quality: str) -> str:
 # Fetch logic for mixed APIs (GET / POST)
 # ---------------------------------------------------------------------------
 def _extract_stream_url_from_json(data: dict) -> str | None:
-    _URL_KEYS = ("download_url", "url", "link")
+    _URL_KEYS = ("download_url", "url", "link", "u")
     for key in _URL_KEYS:
         val = data.get(key)
         if isinstance(val, str) and val.strip():
@@ -392,8 +396,9 @@ def _fetch_stream_url_once(
     is_gdstudio = "gdstudio" in api_cleaning
     is_wjhe = "wjhe.top" in api_cleaning
     is_squid = "squid.wtf" in api_cleaning
+    is_flacdownloader = "flacdownloader.com" in api_cleaning
     
-    is_post = api_base in _POST_APIS or is_zarz or is_gdstudio
+    is_post = api_base in _POST_APIS or is_zarz or is_gdstudio or is_flacdownloader
     max_retries = _MAX_RETRIES_POST if is_post else _MAX_RETRIES_GET
 
     headers = {
@@ -451,6 +456,34 @@ def _fetch_stream_url_once(
                     loc = resp.headers.get("Location")
                     if loc and loc.startswith("http"):
                         return loc
+
+            elif is_flacdownloader:
+                prep_url = f"{api_cleaning}/prepare"
+                prep_resp = client.get(prep_url, headers=headers, timeout=timeout_s)
+                
+                if prep_resp.status_code == 429:
+                    resp = prep_resp  # Lascia che il ciclo esterno gestisca il 429
+                elif prep_resp.status_code != 200:
+                    raise RuntimeError(f"HTTP {prep_resp.status_code} su /prepare (FlacDownloader)")
+                else:
+                    t_token = prep_resp.json().get("t")
+                    if not t_token:
+                        raise RuntimeError("FlacDownloader /prepare ha fallito: nessun token 't'")
+
+                    dl_url = f"{api_cleaning}/qobuz-asset"
+                    fd_headers = headers.copy()
+                    fd_headers["X-Dl-Token"] = t_token
+                    fd_headers["Referer"] = f"{api_cleaning}/it/download"
+
+                    fmt_map = {"27": 27, "7": 7, "6": 6, "5": 5, "HI_RES_LOSSLESS": 27, "HI_RES": 7, "LOSSLESS": 6}
+                    fmt_id = fmt_map.get(quality, 7) # Di default tenta HI_RES
+
+                    payload_fd = {
+                        "url": f"https://open.qobuz.com/track/{track_id}",
+                        "formatId": fmt_id
+                    }
+
+                    resp = client.post(dl_url, json=payload_fd, headers=fd_headers, timeout=timeout_s)
 
             elif is_squid:
                 import struct
@@ -519,11 +552,11 @@ def _fetch_stream_url_once(
                 
                 solution_json = json.dumps(solution, separators=(",", ":"))
                 payload_json  = f'{{"challenge":{challenge_json_str},"solution":{solution_json}}}'
-                payload = base64.b64encode(payload_json.encode()).decode()
+                payload_b64 = base64.b64encode(payload_json.encode()).decode()
                 
                 verify_resp = client.post(
                     f"{origin}/api/altcha/verify",
-                    json={"payload": payload},
+                    json={"payload": payload_b64},
                     headers={
                         "Origin":  origin,
                         "Referer": f"{origin}/",
@@ -850,7 +883,7 @@ class QobuzProvider(BaseProvider):
             
         chain = _QUALITY_FALLBACK.get(quality, [quality])
         
-        all_apis = list(_STREAM_APIS) + list(_POST_APIS) + list(_GDSTUDIO_APIS) + list(_WJHE_APIS)
+        all_apis = list(_STREAM_APIS) + list(_POST_APIS) + list(_GDSTUDIO_APIS) + list(_WJHE_APIS) + list(_FLACDOWNLOADER_APIS)
         ordered_apis = prioritize_providers("qobuz", all_apis)
 
         if self._local_api_url:

@@ -1397,8 +1397,7 @@
     .svc-icon.soundcloud,
     .svc-icon.youtube,
     .svc-icon.apple,
-    .svc-icon.pandora, 
-    .svc-icon.flacdownloader {
+    .svc-icon.pandora {
       background: var(--surface);
       color: var(--text);
     }

@@ -40,7 +40,6 @@ from .providers import (
     MiguProvider,
     KuwoProvider,
     SpotifyMetadataClient,
-    FlacDownloaderProvider,
 )
 from .core import TrackMetadata, DownloadResult
 
@@ -65,7 +64,6 @@ __all__ = [
     "SpotifyMetadataClient",
     "TrackMetadata",
     "DownloadResult",
-    "FlacDownloaderProvider",
 ]
 
 def _setup_logger(level: int):

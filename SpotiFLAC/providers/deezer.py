@@ -330,6 +330,68 @@ class DeezerProvider(BaseProvider):
             return False
 
     # ------------------------------------------------------------------
+    # Flacdownloader Fallback Integration
+    # ------------------------------------------------------------------
+
+    def _download_via_flacdownloader(self, track_id: str, title: str, artist: str, output_dir: str) -> Optional[Dict[str, Any]]:
+        """Logica integrata dello script test_deezer_flacdownloader.py usata come fallback."""
+        prepare_url = "https://flacdownloader.com/prepare"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Referer": "https://flacdownloader.com/it/download"
+        }
+
+        try:
+            logger.info("[flacdownloader] Esecuzione del passaggio 1: Richiesta a /prepare...")
+            resp_prepare = self._session.get(prepare_url, headers=headers, timeout=_API_TIMEOUT_S)
+            resp_prepare.raise_for_status()
+            
+            dati_prepare = resp_prepare.json()
+            token = dati_prepare.get("t")
+            
+            if not token:
+                logger.warning("[flacdownloader] Errore: Il campo 't' non è presente nella risposta.")
+                return None
+
+            logger.info("[flacdownloader] Esecuzione del passaggio 2: Richiesta del link di scaricamento...")
+            download_url = "https://flacdownloader.com/asset" 
+            headers["X-Dl-Token"] = token
+            payload = {
+                "url": f"https://www.deezer.com/track/{track_id}",
+                "title": title,
+                "artist": artist,
+                "format": "flac"
+            }
+
+            resp_download = self._session.post(download_url, json=payload, headers=headers, timeout=_API_TIMEOUT_S)
+            resp_download.raise_for_status()
+            dati_download = resp_download.json()
+            
+            link_scaricamento = dati_download.get("u")
+            if not link_scaricamento:
+                logger.warning("[flacdownloader] Error: No link found.")
+                return None
+
+            logger.info("[flacdownloader] Step 3: Starting audio file download...")
+            out_dir_path = Path(output_dir)
+            out_dir_path.mkdir(parents=True, exist_ok=True)
+            
+            file_extension = "flac"
+            filename = f"{self._safe(artist)} - {self._safe(title)}.{file_extension}"
+            file_path = out_dir_path / filename
+
+            # Usa il manager di download di rete built-in di SpotiFLAC
+            self._http.stream_to_file(link_scaricamento, str(file_path), self._progress_cb)
+
+            return {"file_path": str(file_path), "extension": file_extension}
+
+        except Exception as exc:
+            logger.warning(f"[flacdownloader] Si è verificato un errore durante il fallback: {exc}")
+            return None
+
+
+    # ------------------------------------------------------------------
     # Download raw FLAC via API
     # ------------------------------------------------------------------
 
@@ -353,13 +415,15 @@ class DeezerProvider(BaseProvider):
             api_data = self._post_json(_RESOLVER_URL, payload)
 
             if not api_data.get("success"):
-                logger.warning("[deezer] Unable to resolve link: %s", api_data.get("message", "Unknown error"))
-                return None
+                logger.warning("[deezer] Unable to resolve link via Zarz: %s", api_data.get("message", "Unknown error"))
+                logger.info("[deezer] Fallback: Trying with flacdownloader.com...")
+                return self._download_via_flacdownloader(str(track_id), meta["title"], meta["artist"], output_dir)
 
             download_url = api_data.get("direct_download_url") or api_data.get("download_url")
             if not download_url:
                 logger.warning("[deezer] No download URL returned by the resolver.")
-                return None
+                logger.info("[deezer] Fallback: Trying with flacdownloader.com...")
+                return self._download_via_flacdownloader(str(track_id), meta["title"], meta["artist"], output_dir)
 
             requires_decryption = api_data.get("requires_client_decryption", False)
             if not requires_decryption and api_data.get("direct_downloadable") is False:
@@ -371,7 +435,8 @@ class DeezerProvider(BaseProvider):
 
         except Exception as exc:
             logger.warning("[deezer] Resolver API failed: %s", exc)
-            return None
+            logger.info("[deezer] Fallback: Trying with flacdownloader.com...")
+            return self._download_via_flacdownloader(str(track_id), meta["title"], meta["artist"], output_dir)
 
         out_dir_path = Path(output_dir)
         out_dir_path.mkdir(parents=True, exist_ok=True)
@@ -386,7 +451,9 @@ class DeezerProvider(BaseProvider):
             logger.warning("[deezer] Download failed: %s", exc)
             if temp_path.exists():
                 temp_path.unlink()
-            return None
+            # Se il file stream fallisce, avvia comunque il fallback
+            logger.info("[deezer] Fallback: Trying with flacdownloader.com...")
+            return self._download_via_flacdownloader(str(track_id), meta["title"], meta["artist"], output_dir)
 
         if requires_decryption:
             logger.info("[deezer] Encrypted file detected. Starting Blowfish decryption...")
