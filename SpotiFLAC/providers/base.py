@@ -65,7 +65,7 @@ class BaseProvider(ABC):
             **kwargs,
     ) -> DownloadResult:
         """
-        Scarica la traccia e ritorna un DownloadResult.
+        Scarica la track e ritorna un DownloadResult.
 
         IMPORTANTE: le implementazioni NON devono propagare eccezioni al caller;
         should catch them and return DownloadResult.fail(...) in caso di errore.

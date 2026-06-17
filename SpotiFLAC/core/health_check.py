@@ -448,7 +448,7 @@ async def run_health_check(
     include_all_endpoints: bool = True,
 ) -> list[HealthResult]:
     """
-    Controlla in modo asincrono la raggiungibilità di tutti i provider indicati.
+    Check in modo asincrono la raggiungibilità di tutti i provider indicati.
     """
     results:   list[HealthResult]         = []
     task_list: list[tuple[str, str, str]] = []

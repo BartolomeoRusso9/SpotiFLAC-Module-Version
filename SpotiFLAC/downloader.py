@@ -292,7 +292,7 @@ class DownloadWorker:
     ) -> list[tuple[str, str, str]]:
         MAX_CONCURRENT_DOWNLOADS = 2
         
-        # Funzione helper che scarica una singola traccia
+        # Funzione helper che scarica una singola track
         def worker_task(i: int, track: TrackMetadata):
             position = i + 1
             # sys.stdout è ora _TqdmStdoutProxy: qualsiasi print() interno

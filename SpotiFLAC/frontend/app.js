@@ -866,7 +866,7 @@ window.updateFolderLabel = (path) => {
             if (!currentDownloadToastId) {
               currentDownloadToastId = toastMgr.loading(msg, { title: 'Downloading Tracks...' });
             } else {
-              // Aggiorna il testo del toast esistente
+              // Update il testo del toast esistente
               const toastEl = document.getElementById(currentDownloadToastId);
               if (toastEl) toastEl.querySelector('.toast-message').innerHTML = msg;
             }
@@ -1197,7 +1197,7 @@ function updateAlbumMeta(trackCount) {
     trackCountEl.textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
   }
   $('album-meta').style.display = '';
-  // Aggiorna anche l'etichetta dell'intestazione della tabella tracks
+  // Update anche l'etichetta dell'intestazione della tabella tracks
   setPlaycountHeaderLabel(badgeType === 'PLAYLIST' ? 'Album' : 'Playcount');
 }
 
@@ -1258,7 +1258,7 @@ function showSingleTrackCard(t) {
     section.style.display = 'none';
   }
 
-  // Bottoni azione specifici per la traccia
+  // Bottoni azione specifici per la track
   const previewUrl = t.preview_url || t.previewUrl || '';
   const extUrl     = t.external_url || t.externalUrl || t.link || '';
   const trackId    = t.id || '';
@@ -1516,7 +1516,7 @@ function renderTracks(tracks, page = 1) {
       const playcountCell = isPlaylist ? escHtml(albumName || '—') : playcount;
       let previewUrl = t.preview_url || '';
       
-      // Se non c'è, controlliamo se è una proprietà dell'oggetto traccia
+      // Se non c'è, controlliamo se è una proprietà dell'oggetto track
       if (!previewUrl && t.previewUrl) previewUrl = t.previewUrl;
       
       // Lazy Loading: il pulsante è sempre abilitato, ma recupererà il preview al click se necessario
@@ -1893,7 +1893,7 @@ function setPreviewButtonState(button, active) {
   const isCardBtn = button.classList.contains('act-btn');
   const svgSize = isCardBtn ? "13" : "11";
 
-  // Gestione dinamica dei tooltip
+  // Handling dinamica dei tooltip
   if (isCardBtn) {
     button.title = active ? 'Pause preview' : 'Play Preview';
   } else {
@@ -2003,7 +2003,7 @@ function onCheckChange() {
     selectBtn.style.display = checked > 0 ? 'flex' : 'none';
   }
 }
-// 1. Gestione Ricerche Recenti nel LocalStorage
+// 1. Handling Ricerche Recenti nel LocalStorage
 function saveRecentSearch(query) {
     if (!query || query.length < 2) return;
     let searches = JSON.parse(localStorage.getItem('recent_searches') || '[]');
@@ -2488,7 +2488,7 @@ function addToQueue(indices) {
         return;
       }
 
-      // Usa l'indice originale per evitare che Python scarichi la traccia sbagliata
+      // Usa l'indice originale per evitare che Python scarichi la track sbagliata
       const realIndex = t._originalIndex !== undefined ? t._originalIndex : i;
 
       if (queue.find(q => q.index === realIndex)) {

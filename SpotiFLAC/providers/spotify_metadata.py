@@ -303,7 +303,7 @@ class SpotifyMetadataClient:
     # ------------------------------------------------------------------
 
     def _get_album_artists(self, album_id: str) -> str:
-        """Query leggera: solo metadati album, nessuna traccia."""
+        """Query leggera: solo metadati album, nessuna track."""
         payload = {
             "operationName": "getAlbum",
             "variables": {
@@ -326,7 +326,7 @@ class SpotifyMetadataClient:
             return ""
 
     def get_track(self, track_id: str) -> TrackMetadata:
-        """Retrieves metadati completi per una singola traccia, compositore incluso."""
+        """Retrieves metadati completi per una singola track, compositore incluso."""
         payload = {
             "operationName": "getTrack",
             "variables": {"uri": f"spotify:track:{track_id}"},
@@ -411,17 +411,17 @@ class SpotifyMetadataClient:
         )
 
     # ------------------------------------------------------------------
-    # Lazy Loading - Anteprima traccia
+    # Lazy Loading - Anteprima track
     # ------------------------------------------------------------------
 
     def get_track_preview(self, track_id: str) -> str:
-        """Retrieves l'URL di anteprima di una traccia al momento della richiesta (lazy loading).
+        """Retrieves l'URL di anteprima di una track al momento della richiesta (lazy loading).
         
         Questo metodo è pensato per essere invocato solo quando l'utente clicca su 'play' o 'preview'
         nella GUI, evitando richieste di rete durante il caricamento iniziale della lista.
         
         Args:
-            track_id: ID della traccia Spotify
+            track_id: ID della track Spotify
             
         Returns:
             URL dell'anteprima MP3 (stringa vuota se non disponibile)

@@ -110,7 +110,7 @@ def SpotiFLAC(
         url: single URL (str) o lista di URL (list[str]) per il batch.
         output_dir: Cartella di destinazione.
         services: Provider in ordine di priorità (default: ["tidal"]).
-        track_max_retries: Tentativi extra per traccia in caso di fallimento (default: 0).
+        track_max_retries: Tentativi extra per track in caso di fallimento (default: 0).
         post_download_action: Azione al termine — "none" | "open_folder" | "notify" | "command".
         post_download_command: Comando shell da executere (con {folder}, {succeeded}, {failed}).
     """

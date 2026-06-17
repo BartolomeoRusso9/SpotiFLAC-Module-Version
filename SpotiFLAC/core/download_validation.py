@@ -36,7 +36,7 @@ def validate_downloaded_track(
     expected_seconds: int,
 ) -> tuple[bool, str]:
     """
-    Controlla che il file sloaded non sia una preview da 30s.
+    Check che il file sloaded non sia una preview da 30s.
     Returns (valido, messaggio_errore).
     Equivalent a ValidateDownloadedTrackDuration() del Go.
     """

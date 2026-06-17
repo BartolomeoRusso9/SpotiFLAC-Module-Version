@@ -63,13 +63,13 @@ def _extract_jwt_from_string(text: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 def is_apple_music_url(url: str) -> bool:
-    """Restituisce True se l'URL appartiene ad Apple Music."""
+    """Returns True se l'URL appartiene ad Apple Music."""
     return "music.apple.com" in url.lower()
 
 
 def parse_apple_music_url(url: str) -> dict[str, str]:
     """
-    Analizza un URL Apple Music e restituisce type, id e storefront.
+    Parse un URL Apple Music e restituisce type, id e storefront.
     Usa la stessa regex robusta di parseAppleMusicURL() in index.js.
     """
     url = (url or "").strip()
@@ -86,7 +86,7 @@ def parse_apple_music_url(url: str) -> dict[str, str]:
     kind       = m.group(2).lower()
     entity_id  = m.group(3)
 
-    # ?i=songId su un URL album → traccia singola
+    # ?i=songId su un URL album → track singola
     song_m = re.search(r"[?&]i=(\d+)", url)
     if kind == "album" and song_m:
         return {"type": "track", "id": song_m.group(1), "storefront": storefront}
@@ -152,7 +152,7 @@ class AppleMusicMetadataClient:
         self.close()
 
     # ------------------------------------------------------------------
-    # Gestione Token
+    # Handling Token
     # ------------------------------------------------------------------
 
     def _parse_token_expiry(self, token: str) -> None:
@@ -373,7 +373,7 @@ class AppleMusicMetadataClient:
         return playlist_data, tracks
 
     def _pagete_relationship(self, initial_path: str) -> list[dict[str, Any]]:
-        """Itera una relazione standalone (es. /artists/{id}/albums) seguendo i link `next`."""
+        """Iterate una relazione standalone (es. /artists/{id}/albums) seguendo i link `next`."""
         results: list[dict[str, Any]] = []
         next_url: str | None = initial_path
 

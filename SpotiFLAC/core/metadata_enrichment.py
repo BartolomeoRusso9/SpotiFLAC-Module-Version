@@ -58,7 +58,7 @@ class EnrichedMetadata:
         return tags
 
     def merge(self, other: "EnrichedMetadata", source: str) -> None:
-        """Aggiorna solo i campi vuoti con i dati dell'altro oggetto."""
+        """Update solo i campi vuoti con i dati dell'altro oggetto."""
         for attr in ("genre", "label", "bpm", "upc", "isrc", "cover_url_hd"):
             if not getattr(self, attr) and getattr(other, attr):
                 setattr(self, attr, getattr(other, attr))
@@ -238,7 +238,7 @@ class _TidalMeta:
         threading.Thread(target=self._refresh_bg, daemon=True).start()
 
     def _refresh_bg(self) -> None:
-        """Aggiorna la lista API in background senza bloccare l'enrichment."""
+        """Update la lista API in background senza bloccare l'enrichment."""
         try:
             from ..providers.tidal import refresh_tidal_api_list
             apis = refresh_tidal_api_list(force=False)
@@ -385,7 +385,7 @@ class _SoundCloudMeta:
         try:
             from ..providers.soundcloud import SoundCloudProvider
             p = SoundCloudProvider()
-            # Verifica che il client_id sia già disponibile (da cache)
+            # Verify che il client_id sia già disponibile (da cache)
             # senza fare richieste HTTP bloccanti durante l'enrichment
             if p.client_id or p.client_id_expiry > time.time():
                 self._provider = p
@@ -475,7 +475,7 @@ def enrich_metadata(
     Interroga i provider in parallelo e unisce i risultati.
 
     Args:
-        track_name:  Nome della traccia.
+        track_name:  Nome della track.
         artist_name: Artist principale.
         isrc:        ISRC (usato da Deezer e Qobuz).
         providers:   Lista ordinata di provider da usare.

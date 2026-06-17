@@ -292,7 +292,7 @@ def _profile_load_section(cfg: dict) -> dict:
 
         val_lower = val.lower()
         
-        # Gestione cancellazione profilo
+        # Handling cancellazione profilo
         if val_lower.startswith('d') and len(val_lower) > 1:
             num_str = val_lower[1:].strip()
             if num_str.isdigit():
@@ -304,7 +304,7 @@ def _profile_load_section(cfg: dict) -> dict:
                         print(f"\n  {GREEN('✓')} Profile {BOLD(prof_to_delete)} deleted.\n")
                     continue # Reload the updated menu
 
-        # Gestione caricamento profilo
+        # Handling caricamento profilo
         chosen_name: str | None = None
         if val.isdigit() and 1 <= int(val) <= len(profiles):
             chosen_name = profiles[int(val) - 1]

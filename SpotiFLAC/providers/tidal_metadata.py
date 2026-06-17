@@ -106,14 +106,14 @@ def parse_tidal_url(url: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 def _remove_diacritics(s: str) -> str:
-    """Rimuove accenti e caratteri speciali imitando removeDiacritics in index.js"""
+    """Removes accenti e caratteri speciali imitando removeDiacritics in index.js"""
     try:
         s = unicodedata.normalize("NFD", s)
         s = "".join(c for c in s if unicodedata.category(c) != "Mn")
     except Exception:
         pass
     
-    # Sostituzioni speciali come nel JS
+    # Replacements speciali come nel JS
     s = re.sub(r"[đĐ]", "dj", s)
     s = re.sub(r"[ßẞ]", "ss", s)
     s = re.sub(r"[æÆ]", "ae", s)

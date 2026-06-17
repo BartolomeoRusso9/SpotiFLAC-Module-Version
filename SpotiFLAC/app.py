@@ -980,16 +980,16 @@ class SpotiFLAC_API:
 
         self.log(f"All lyrics done — {success} saved, {skipped} skipped.", "ok")
 
-    # ── Lazy Loading - Anteprima traccia ──────────────────────────────────────
+    # ── Lazy Loading - Anteprima track ──────────────────────────────────────
 
     def get_track_preview(self, track_id: str) -> str:
-        """Retrieves l'URL di anteprima per una traccia (lazy loading).
+        """Retrieves l'URL di anteprima per una track (lazy loading).
         
         Questo metodo è invocato dalla GUI solo quando l'utente clicca su 'play' o 'preview'
         per evitare richieste di rete durante il caricamento iniziale della lista.
         
         Args:
-            track_id: ID della traccia Spotify
+            track_id: ID della track Spotify
             
         Returns:
             URL dell'anteprima MP3 (stringa vuota se non disponibile)

@@ -115,7 +115,7 @@ def _write(profiles: dict) -> None:
 
 
 def list_profiles() -> list[str]:
-    """Restituisce i nomi di tutti i profili salvati, in ordine alfabetico."""
+    """Returns i nomi di tutti i profili salvati, in ordine alfabetico."""
     return sorted(_load().keys())
 
 

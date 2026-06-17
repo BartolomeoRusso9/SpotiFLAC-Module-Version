@@ -42,7 +42,7 @@ def _save(data: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def get_last_folder() -> str:
-    """Restituisce l'ultima cartella di output usata, o stringa vuota."""
+    """Returns l'ultima cartella di output usata, o stringa vuota."""
     return _load().get("last_folder", "")
 
 
@@ -128,7 +128,7 @@ def clear_url_history() -> None:
 
 
 def remove_url_from_history(url: str) -> None:
-    """Rimuove un singolo URL dalla cronologia (accetta anche URI spotify:... e normalizza)."""
+    """Removes un singolo URL dalla cronologia (accetta anche URI spotify:... e normalizza)."""
     if not url:
         return
     nurl = _normalize_history_url(url)

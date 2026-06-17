@@ -2,11 +2,11 @@
 Multi-provider lyrics fetcher.
 
 Ordine di tentativo (configurabile via DEFAULT_LYRICS_PROVIDERS):
-  1. Spotify Web  — testo sincronizzato LRC (autenticazione anonima via TOTP, nessun token richiesto)
-  2. Apple Music  — testo sincronizzato LRC via paxsenix proxy
-  3. Musixmatch   — testo sincronizzato / plain via paxsenix proxy
+  1. Spotify Web  — testo synchronized LRC (autenticazione anonima via TOTP, nessun token richiesto)
+  2. Apple Music  — testo synchronized LRC via paxsenix proxy
+  3. Musixmatch   — testo synchronized / plain via paxsenix proxy
   4. Amazon Music — testo plain via API
-  5. LRCLIB       — testo sincronizzato / plain
+  5. LRCLIB       — testo synchronized / plain
 
 MODIFICA: il provider Spotify ora usa autenticazione anonima tramite TOTP
 (stessa logica di index.js). Non è più richiesto alcun cookie sp_dc.

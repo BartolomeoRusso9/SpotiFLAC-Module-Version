@@ -56,7 +56,7 @@ class AppleMusicProvider(BaseProvider):
         return "aac"
 
     def _resolve_track_url(self, isrc: str) -> str | None:
-        """Sfrutta l'API pubblica di iTunes per trovare l'URL della traccia delegando l'encoding a httpx."""
+        """Uses l'API pubblica di iTunes per trovare l'URL della track delegando l'encoding a httpx."""
         try:
             resp = self._session.get(
                 "https://itunes.apple.com/lookup",
@@ -133,7 +133,7 @@ class AppleMusicProvider(BaseProvider):
     def _get_stream_url(self, track_url: str, codec: str) -> tuple[str | None, str | None]:
         """
         Tenta prima il download diretto (app2). Se fallisce, ripiega su app in coda.
-        Restituisce una tupla (api_utilizzata, stream_url).
+        Returns una tupla (api_utilizzata, stream_url).
         """
         req_headers = {
             "Accept": "application/json",
@@ -276,7 +276,7 @@ class AppleMusicProvider(BaseProvider):
                 elif target_codec == "aac":
                     codecs_to_try.extend(["aac-legacy"])
 
-                # Rimuove duplicati preservando l'ordine
+                # Removes duplicati preservando l'ordine
                 codecs_to_try = list(dict.fromkeys(codecs_to_try))
 
             # Trigger Asincrono MusicBrainz

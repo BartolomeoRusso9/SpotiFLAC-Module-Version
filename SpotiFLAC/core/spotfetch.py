@@ -344,7 +344,7 @@ class SpotifyWebClient:
     
     def get_track_stats(self, track_id: str) -> dict:
         """
-        Retrieves il playcount di una singola traccia tramite API GraphQL interna Spotify.
+        Retrieves il playcount di una singola track tramite API GraphQL interna Spotify.
         """
         payload = {
             "operationName": "getTrack",
@@ -381,7 +381,7 @@ class SpotifyWebClient:
     def get_playlist_stats(self, playlist_id: str, offset: int = 0, limit: int = 100) -> dict:
         """
         Retrieves playcount, rank e status per le tracks all'interno di una playlist.
-        Restituisce un dizionario con track_id come chiave.
+        Returns un dizionario con track_id come chiave.
         """
         payload = {
             "operationName": "fetchPlaylist",
@@ -452,7 +452,7 @@ class SpotifyWebClient:
     def get_album_stats(self, album_id: str, offset: int = 0, limit: int = 100) -> dict:
         """
         Retrieves il playcount di tutte le tracks di un album in un'unica richiesta GraphQL.
-        Restituisce un dizionario con track_id come chiave.
+        Returns un dizionario con track_id come chiave.
         """
         payload = {
             "operationName": "getAlbum",
@@ -514,7 +514,7 @@ class SpotifyWebClient:
     def get_artist_discography(self, artist_id: str, order: str = "DATE_DESC") -> list[dict[str, Any]]:
         """
         Retrieves la lista di release della discografia di un artista tramite GraphQL.
-        Restituisce gli elementi di `data.artistUnion.discography.all.items`.
+        Returns gli elementi di `data.artistUnion.discography.all.items`.
         """
         all_items: list[dict[str, Any]] = []
         offset = 0

@@ -69,7 +69,7 @@ class SoundCloudProvider(BaseProvider):
             
         body = res.text
 
-        # Controlla se la versione SC è cambiata — evita fetch inutili
+        # Check se la versione SC è cambiata — evita fetch inutili
         version_match = self._REGEX_SC_VERSION.search(body)
         if version_match:
             new_version = version_match.group(1)
@@ -138,7 +138,7 @@ class SoundCloudProvider(BaseProvider):
     # ==========================================
 
     def _get_hires_artwork(self, url: str | None) -> str:
-        """Aggiorna l'URL copertina alla massima risoluzione disponibile."""
+        """Update l'URL copertina alla massima risoluzione disponibile."""
         if not url:
             return ""
         return url.replace("-large.", "-t500x500.") if "-large." in url else url
@@ -182,7 +182,7 @@ class SoundCloudProvider(BaseProvider):
 
     def _resolve_short_link(self, url: str) -> str:
         """
-        Segue il redirect di on.soundcloud.com e restituisce l'URL canonico.
+        Follows il redirect di on.soundcloud.com e restituisce l'URL canonico.
         """
         try:
             res = self.session.get(url, timeout=10, follow_redirects=True) 

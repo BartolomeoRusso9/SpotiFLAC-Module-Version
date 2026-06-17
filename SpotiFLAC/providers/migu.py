@@ -123,7 +123,7 @@ class MiguProvider(BaseProvider):
                     if text_resp.startswith("http"):
                         dl_url = text_resp
                         
-                # Verifica che l'URL sia valido e non porti a un MP3 di errore ("404.mp3")
+                # Verify che l'URL sia valido e non porti a un MP3 di errore ("404.mp3")
                 if dl_url and isinstance(dl_url, str) and dl_url.startswith("http"):
                     if "404" not in dl_url and "null" not in dl_url.lower():
                         logger.debug("[migu] Found stream using quality=%d format=%s", q_val, fmt)
