@@ -51,8 +51,8 @@ def print_track_header(position: int, total: int, title: str, artists: str, albu
         tqdm.write(summary, file=sys.stderr)
 
 def print_source_banner(provider: str, api: str, quality: str) -> None:
-    label = _shorten_api(api)
-    line  = f"[SOURCE] {provider.upper()} · {label} · {quality}"
+    provider_label = provider.upper()
+    line = f"[SOURCE] {provider_label} · {quality}"
     with tqdm.get_lock():
         tqdm.write(line, file=sys.stderr)
 
