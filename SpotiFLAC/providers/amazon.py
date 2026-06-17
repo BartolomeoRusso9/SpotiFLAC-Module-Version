@@ -13,6 +13,7 @@ import threading
 import subprocess
 import time
 from typing import Callable
+from urllib.parse import urlparse
 from ..core.http import NetworkManager
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from mutagen.flac import FLAC, Picture
@@ -344,11 +345,15 @@ class AmazonProvider(BaseProvider):
             self._start_prefetch_if_needed()
             return self._squid_token
 
+        _squid_ep = get_amazon_endpoint("squid")
+        parsed = urlparse(_squid_ep) if _squid_ep else None
+        origin = f"{parsed.scheme}://{parsed.netloc}" if parsed and parsed.scheme and parsed.netloc else "https://amz.squid.wtf"
+        referer = f"{origin}/"
         _h = {
             "accept":       "*/*",
             "content-type": "application/json",
-            "origin":       "https://amz.squid.wtf",
-            "referer":      "https://amz.squid.wtf/",
+            "origin":       origin,
+            "referer":      referer,
             "user-agent":   _SQUID_UA,
         }
         try:
@@ -398,14 +403,17 @@ class AmazonProvider(BaseProvider):
         """
         logger.info("[amazon] Trying Squid API (ASIN: %s)", asin)
  
+        _squid_ep = get_amazon_endpoint("squid")
+        parsed = urlparse(_squid_ep) if _squid_ep else None
+        origin = f"{parsed.scheme}://{parsed.netloc}" if parsed and parsed.scheme and parsed.netloc else "https://amz.squid.wtf"
+        referer = f"{origin}/"
         _h = {
             "accept":       "*/*",
             "content-type": "application/json",
-            "origin":       "https://amz.squid.wtf",
-            "referer":      "https://amz.squid.wtf/",
+            "origin":       origin,
+            "referer":      referer,
             "user-agent":   _SQUID_UA,
         }
-        _squid_ep = get_amazon_endpoint("squid")
         if not _squid_ep:
             logger.warning("[amazon] Squid endpoint not configured; skipping Squid fallback.")
             return None

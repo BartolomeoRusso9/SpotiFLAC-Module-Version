@@ -334,10 +334,12 @@ class DeezerProvider(BaseProvider):
     def _download_via_flacdownloader(self, track_id: str, title: str, artist: str, output_dir: str) -> Optional[Dict[str, Any]]:
         """Logica integrata dello script test_deezer_flacdownloader.py usata come fallback."""
         prepare_url = get_deezer_endpoint("flacdownloader_prepare")
+        parsed = urllib.parse.urlparse(prepare_url)
+        origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else "https://flacdownloader.com"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
             "Accept": "application/json",
-            "Referer": "https://flacdownloader.com/it/download"
+            "Referer": f"{origin}/it/download"
         }
 
         try:
