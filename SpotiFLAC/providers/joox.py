@@ -15,6 +15,7 @@ from ..core.tagger import embed_metadata, EmbedOptions
 from ..core.download_validation import validate_downloaded_track
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.endpoints import get_asian_provider_endpoint
+from ..core.quality import normalize_quality, map_musicdl_quality
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +106,27 @@ class JooxProvider(BaseProvider):
             logger.debug("[joox-gd] Stream fetch failed for id=%s: %s", track_id, exc)
         return "", 0
 
+
     def _get_stream_wjhe(self, track_id: str, quality: int = 1000, fmt: str = "flac") -> str:
+        # Accept canonical quality values; allow legacy numeric/br values too
+        if isinstance(quality, str):
+            # Map canonical -> numeric quality for WJHE/GDStudio
+            n = normalize_quality(quality)
+            if n == "HI_RES_LOSSLESS":
+                quality_val = 999
+            elif n == "HI_RES":
+                quality_val = 740
+            elif n == "LOSSLESS":
+                quality_val = 740
+            else:
+                quality_val = 320
+        else:
+            quality_val = quality
+
         url = get_asian_provider_endpoint("joox", "wjhe")
         params = {
             "ID":      track_id,
-            "quality": quality,
+            "quality": quality_val,
             "format":  fmt,
         }
         
@@ -377,8 +394,10 @@ class JooxProvider(BaseProvider):
                 }
 
             # ── 2. Fetch stream URL with quality-aware fallback chain ──────
+            # Map canonical quality to provider-specific request
+            q_norm = normalize_quality(quality) if isinstance(quality, str) else str(quality)
             dl_url, extension, actual_br, quality_label = self._get_stream_with_fallback(
-                raw_track_id, quality
+                raw_track_id, q_norm
             )
 
             if not dl_url:

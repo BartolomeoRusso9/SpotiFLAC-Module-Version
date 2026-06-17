@@ -20,6 +20,7 @@ from ..core.errors import SpotiflacError, ErrorKind
 from .base import BaseProvider
 from ..core.musicbrainz import mb_result_to_tags
 from ..core.endpoints import get_deezer_endpoint
+from ..core.quality import normalize_quality
 
 try:
     from Crypto.Cipher import Blowfish
@@ -494,6 +495,7 @@ class DeezerProvider(BaseProvider):
             **kwargs,
     ) -> DownloadResult:
 
+        quality = normalize_quality(quality) if isinstance(quality, str) else quality
         isrc_to_use = metadata.isrc
 
         if not isrc_to_use:

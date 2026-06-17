@@ -18,6 +18,7 @@ from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.provider_stats import record_success, record_failure
 from ..core.tagger import embed_metadata, _print_mb_summary, EmbedOptions
 from ..core.endpoints import get_apple_music_endpoint
+from ..core.quality import normalize_quality
 
 logger = logging.getLogger(__name__)
 
@@ -256,7 +257,15 @@ class AppleMusicProvider(BaseProvider):
             return DownloadResult.fail(self.name, "Nessun ISRC o URL Apple Music fornito per la risoluzione.")
 
         try:
-            target_codec = self._normalize_codec(quality)
+            nq = normalize_quality(quality)
+            if nq == "DOLBY_ATMOS":
+                target_codec = "atmos"
+            elif nq in ("HI_RES_LOSSLESS", "HI_RES", "LOSSLESS"):
+                target_codec = "alac"
+            elif nq in ("HIGH", "LOW"):
+                target_codec = "aac"
+            else:
+                target_codec = self._normalize_codec(quality)
             codecs_to_try = [target_codec]
 
             if allow_fallback:

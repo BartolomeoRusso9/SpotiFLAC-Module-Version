@@ -30,6 +30,7 @@ from ..core.models import TrackMetadata, DownloadResult
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.tagger import embed_metadata, _print_mb_summary, EmbedOptions
 from ..core.endpoints import get_pandora_base_and_path
+from ..core.quality import normalize_quality
 
 logger = logging.getLogger(__name__)
 
@@ -854,7 +855,18 @@ class PandoraProvider(BaseProvider):
                 return DownloadResult.fail(self.name, error_msg)
 
             cdn_links = payload.get("cdnLinks", {})
-            selected  = _select_quality_link(cdn_links, quality)
+            # Accept canonical quality values; Pandora expects mp3_192/aac_64/aac_32 tokens
+            q_norm = normalize_quality(quality) if isinstance(quality, str) else quality
+            pandora_token = None
+            if q_norm == "HIGH":
+                pandora_token = "mp3_192"
+            elif q_norm == "LOW":
+                pandora_token = "aac_32"
+            else:
+                # Default to mp3_192 for anything lossless/unknown
+                pandora_token = "mp3_192"
+
+            selected  = _select_quality_link(cdn_links, pandora_token)
 
             if not selected or not selected.get("url"):
                 if allow_fallback:

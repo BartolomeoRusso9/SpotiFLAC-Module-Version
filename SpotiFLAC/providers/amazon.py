@@ -27,6 +27,7 @@ from ..core.models import TrackMetadata, DownloadResult
 from ..core.musicbrainz import mb_result_to_tags
 from ..core.tagger import embed_metadata, EmbedOptions
 from ..core.endpoints import get_amazon_endpoint
+from ..core.quality import get_squid_tier, to_zarz_codec
 
 logger = logging.getLogger(__name__)
 
@@ -554,15 +555,8 @@ class AmazonProvider(BaseProvider):
             return "m4a"
 
     def _quality_to_zarz_codec(self, quality: str) -> str:
-        """Map quality string to Amazon/Zarz codec name."""
-        if not quality:
-            return "flac"
-        q = str(quality).lower().strip()
-        if q in ["opus", "eac3", "mha1"]:
-            return q
-        if q == "dolby_atmos":
-            return "eac3"
-        return "flac"
+        """Map quality string to Amazon/Zarz codec name (delegates to core.quality)."""
+        return to_zarz_codec(quality)
 
     def _download_from_zarz_api(self, asin: str, output_dir: str, quality: str) -> tuple[str, dict] | None:
         codec = self._quality_to_zarz_codec(quality)
@@ -967,8 +961,8 @@ class AmazonProvider(BaseProvider):
         logger.info("[amazon] Zarz failed. Trying Squid API…")
 
         # 2. SQUID API (Fallback 1 — direct FLAC, no decryption)
-        q_str       = str(quality).lower().strip()
-        squid_tier  = "best" if q_str in ["hi_res", "hires", "hi-res", "hi-res-lossless", "hi_res_lossless" , "HI_RES", "HIRES", "HI-RES" ,"HI-RES-LOSSLESS", "HI_RES_LOSSLESS"] else "hd"
+        q_str = str(quality)
+        squid_tier = get_squid_tier(q_str)
         print_source_banner("amazon", "", fallback_quality)
         try:
             squid_result = self._download_from_squid_api(asin, output_dir, quality)

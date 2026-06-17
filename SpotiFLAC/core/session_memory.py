@@ -68,18 +68,48 @@ def get_url_history() -> list[dict]:
     return _load().get("url_history", [])
 
 
+def _normalize_history_url(url: str) -> str:
+    """
+    Normalizza le URL salvate nella history.
+    - spotify:track:ID -> https://open.spotify.com/track/ID
+    - open.spotify.com/... -> https://open.spotify.com/...
+    - mantiene http(s) invariati
+    """
+    if not url:
+        return ""
+    s = str(url).strip()
+    try:
+        if s.startswith('spotify:'):
+            parts = s.split(':')
+            if len(parts) >= 3:
+                typ = parts[1]
+                id_part = ':'.join(parts[2:])
+                return f"https://open.spotify.com/{typ}/{id_part}"
+        if s.startswith('http://') or s.startswith('https://'):
+            return s
+        if s.startswith('open.spotify.com') or s.startswith('play.spotify.com'):
+            return f"https://{s}"
+        return s
+    except Exception:
+        return s
+
+
 def add_url_to_history(url: str, label: str = "", cover: str = "", track_count: int = 0, url_type: str = "", artist: str = "") -> None:
     """
     Aggiunge un URL alla cronologia (o lo sposta in cima se già presente).
     Il label è una descrizione breve opzionale (es. nome della collection).
+
+    Ora normalizza le URL in ingresso (es. spotify:... -> https://open.spotify.com/...).
     """
     if not url:
         return
+    nurl = _normalize_history_url(url)
     data    = _load()
-    history = [h for h in data.get("url_history", []) if h.get("url") != url]
+    # Rimuovi eventuali occorrenze della stessa URL normalizzata
+    history = [h for h in data.get("url_history", []) if h.get("url") != nurl]
     history.insert(0, {
-        "url":         url,
-        "label":       label or url[:65],
+        "url":         nurl,
+        "label":       label or nurl[:65],
         "cover":       cover or "",
         "track_count": track_count,
         "url_type":    url_type,
@@ -98,8 +128,11 @@ def clear_url_history() -> None:
 
 
 def remove_url_from_history(url: str) -> None:
-    """Rimuove un singolo URL dalla cronologia."""
+    """Rimuove un singolo URL dalla cronologia (accetta anche URI spotify:... e normalizza)."""
+    if not url:
+        return
+    nurl = _normalize_history_url(url)
     data    = _load()
-    history = [h for h in data.get("url_history", []) if h.get("url") != url]
+    history = [h for h in data.get("url_history", []) if h.get("url") != nurl]
     data["url_history"] = history
     _save(data)

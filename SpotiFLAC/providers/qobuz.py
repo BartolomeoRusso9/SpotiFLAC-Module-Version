@@ -34,6 +34,7 @@ from ..core.provider_stats import record_success, record_failure, prioritize_pro
 from ..core.tagger import _print_mb_summary, EmbedOptions
 from ..core.tagger import embed_metadata
 from ..core.endpoints import get_qobuz_endpoints
+from ..core.quality import map_musicdl_quality
 
 logger = logging.getLogger(__name__)
 
@@ -258,11 +259,7 @@ def _build_stream_url(api_base: str, track_id: int, quality: str) -> str:
     return f"{api_base}{track_id}?quality={quality}"
 
 def _map_musicdl_quality(quality: str) -> str:
-    if quality in ("27", "HI_RES_LOSSLESS", "DEFAULT", ""):
-        return "hi-res-max"
-    if quality in ("7", "HI_RES"):
-        return "hi-res"
-    return "cd"
+    return map_musicdl_quality(quality)
 
 def _map_local_api_quality(quality: str) -> str:
     if quality in ("27", "DOLBY_ATMOS", "HI_RES_LOSSLESS", "DEFAULT"):

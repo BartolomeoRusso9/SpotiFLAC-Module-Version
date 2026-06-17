@@ -43,6 +43,8 @@ class YouTubeProvider(BaseProvider):
         self._session.headers.update({"User-Agent": _DEFAULT_UA})
         self._enrichment_cache: dict[str, dict] = {}
 
+    # YouTube receives canonical quality; backend chooses best available via yt-dlp.
+
     def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
         super().set_progress_callback(cb)
 

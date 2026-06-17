@@ -33,6 +33,7 @@ from ..core.models import DownloadResult, TrackMetadata
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.tagger import EmbedOptions, _print_mb_summary, embed_metadata
 from ..core.endpoints import get_tidal_post_endpoints
+from ..core.quality import normalize_quality as _cq_normalize_quality, quality_fallback_chain as _cq_quality_fallback_chain
 
 logger = logging.getLogger(__name__)
 
@@ -134,28 +135,7 @@ def _clear_api_rate_limit(api_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _normalize_quality(value: str) -> str:
-    normalized = (value or "").strip().upper()
-    if not normalized:
-        return "LOSSLESS"
-    
-    # ── TRADUZIONE QUALITÀ QOBUZ -> TIDAL ──
-    if normalized in ("27", "7"):
-        return "HI_RES_LOSSLESS"
-    if normalized == "6":
-        return "LOSSLESS"
-    if normalized == "5":
-        return "HIGH"
-
-    # ── MAPPE STANDARD (come nel JS) ──
-    if normalized in ("DOLBY", "ATMOS", "DOLBY ATMOS"):
-        return "DOLBY_ATMOS"
-    if normalized in ("EAC3", "EC3", "EAC3_JOC"):
-        return "DOLBY_ATMOS"
-    if normalized in ("HIRES", "HI_RES", "MASTER"):
-        return "HI_RES_LOSSLESS"
-    if normalized == "FLAC":
-        return "LOSSLESS"
-    return normalized
+    return _cq_normalize_quality(value)
 
 _QUALITY_FALLBACK_CHAINS: dict[str, list[str]] = {
     "DOLBY_ATMOS":    ["DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"],
@@ -166,8 +146,7 @@ _QUALITY_FALLBACK_CHAINS: dict[str, list[str]] = {
 }
 
 def _quality_fallback_chain(quality: str) -> list[str]:
-    normalized = _normalize_quality(quality)
-    return _QUALITY_FALLBACK_CHAINS.get(normalized, [normalized or "LOSSLESS"])
+    return _cq_quality_fallback_chain(quality)
 
 # ---------------------------------------------------------------------------
 # API list manager

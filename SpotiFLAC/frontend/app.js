@@ -182,9 +182,32 @@ function changeFont() {
   } catch (e) {}
 }
 
+function qualityFallbackChain(q) {
+  const n = (q || '').toString().toUpperCase();
+  const chains = {
+      'DOLBY_ATMOS': ['DOLBY_ATMOS','HI_RES_LOSSLESS','LOSSLESS','HIGH','LOW'],
+      'HI_RES_LOSSLESS': ['HI_RES_LOSSLESS','LOSSLESS','HIGH','LOW'],
+      'LOSSLESS': ['LOSSLESS','HIGH','LOW'],
+      'HI_RES': ['HI_RES','LOSSLESS','HIGH','LOW'],
+      'HIGH': ['HIGH','LOW'],
+      'LOW': ['LOW']
+  };
+  return chains[n] || [n || 'LOSSLESS'];
+}
+
 function applySettings(settings = {}) {
   const cfg = { ...DEFAULT_SETTINGS, ...settings };
-  if ($('config-quality')) $('config-quality').value = cfg.quality;
+  if ($('config-quality')) {
+      $('config-quality').value = cfg.quality;
+      // show fallback chain as tooltip
+      $('config-quality').title = qualityFallbackChain(cfg.quality).join(' → ');
+      // update tooltip when user changes selection (use onchange to avoid duplicate listeners)
+      $('config-quality').onchange = function() {
+          const val = $('config-quality').value;
+          $('config-quality').title = qualityFallbackChain(val).join(' → ');
+          isDirty = true; updateSaveButtonVisual();
+      };
+  }
   if ($('config-fallback')) $('config-fallback').checked = cfg.allow_fallback;
   if ($('config-theme')) $('config-theme').value = cfg.theme;
   if ($('config-font')) $('config-font').value = cfg.font;
@@ -2352,7 +2375,30 @@ function detectUrlType(url) {
   if (u.includes('spotify:artist:') || u.includes('/artist/') || u.includes('/browse/artist')) return 'artist';
   return '';
 }
- 
+
+// Convert legacy Spotify URIs (spotify:track:ID) and similar short URIs into web links
+function normalizeHistoryUrl(url) {
+  if (!url) return '';
+  const u = String(url).trim();
+  try {
+    if (u.startsWith('spotify:')) {
+      const parts = u.split(':');
+      if (parts.length >= 3) {
+        const type = parts[1];
+        const id = parts.slice(2).join(':');
+        return `https://open.spotify.com/${type}/${id}`;
+      }
+    }
+    // If it already looks like an http(s) link, return as-is
+    if (u.startsWith('http://') || u.startsWith('https://')) return u;
+    // Support bare open.spotify.com/... without protocol
+    if (u.startsWith('open.spotify.com') || u.startsWith('play.spotify.com')) return `https://${u}`;
+    return u;
+  } catch (e) {
+    return url;
+  }
+}
+
 function renderRecent(hist) {
   const grid = $('recent-grid'); grid.innerHTML = '';
   if (!hist || !hist.length) {
@@ -2368,13 +2414,14 @@ function renderRecent(hist) {
   hist.slice(0, 16).forEach(item => {
     const card = document.createElement('div');
     card.className = 'recent-card';
-    card.onclick = () => {
-      const link = item.url || '';
-      if (!link) return;
-      $('urlInput').value = link;
-      highlightRecentCard(link);
-      onFetch();
-    };
+  const rawUrl = item.url || '';
+  const link = normalizeHistoryUrl(rawUrl);
+  card.onclick = () => {
+    if (!link) return;
+    $('urlInput').value = link;
+    highlightRecentCard(link);
+    onFetch();
+  };
  
     const coverUrl = item.cover || item.cover_url || item.image || '';
     const coverBg  = coverUrl ? `background-image:url('${encodeURI(coverUrl)}');` : '';
@@ -2408,7 +2455,7 @@ function renderRecent(hist) {
         ${badgeHtml}
       </div>
     `;
-    card.dataset.url = item.url || '';
+    card.dataset.url = link || item.url || '';
     grid.appendChild(card);
   });
 }

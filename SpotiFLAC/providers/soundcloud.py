@@ -16,6 +16,7 @@ from ..core.link_resolver import LinkResolver
 from ..core.models import DownloadResult, TrackMetadata
 from ..core.tagger import embed_metadata, EmbedOptions
 from ..core.endpoints import get_soundcloud_cobalt
+from ..core.quality import normalize_quality
 
 logger = logging.getLogger(__name__)
 
@@ -541,19 +542,23 @@ class SoundCloudProvider(BaseProvider):
                 or metadata.extra_info.get("exclusive")
                 or (metadata.external_url and "soundcloud.com" in metadata.external_url)
         )
+        q_norm = normalize_quality(quality)
+        # SoundCloud only provides lossy formats; prefer mp3/progressive. Keep mp3 for compatibility.
+        audio_format = "mp3"
         dl_url = None
 
         if is_native:
             dl_url = self.get_download_url(
                 track_id        = metadata.id,
                 track_permalink = metadata.external_url or None,
+                audio_format     = audio_format,
             )
         else:
             try:
                 resolver = LinkResolver(HttpClient("odesli"))
                 links    = resolver.resolve_all(metadata.id)
                 if sc_url := links.get("soundcloud"):
-                    dl_url = self.get_download_url(track_id=None, track_permalink=sc_url)
+                    dl_url = self.get_download_url(track_id=None, track_permalink=sc_url, audio_format=audio_format)
             except Exception as e:
                 logger.warning("[SC] Odesli resolution error: %s", e)
                 
@@ -564,7 +569,7 @@ class SoundCloudProvider(BaseProvider):
                     search_results = self.search(search_query, limit=5)
                     if best_track := self._find_best_match(search_results, metadata.title, metadata.artists, metadata.duration_ms):
                         logger.info("[SC] Found fallback via search: %s (ID: %s)", best_track.get("name"), best_track.get("id"))
-                        dl_url = self.get_download_url(track_id=best_track.get("id"), track_permalink=best_track.get("permalink_url"))
+                        dl_url = self.get_download_url(track_id=best_track.get("id"), track_permalink=best_track.get("permalink_url"), audio_format=audio_format)
                     else:
                         logger.warning("[SC] No suitable fallback track found matching criteria.")
                 except Exception as e:

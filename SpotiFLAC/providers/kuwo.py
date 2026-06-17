@@ -15,6 +15,7 @@ from ..core.tagger import embed_metadata, EmbedOptions
 from ..core.download_validation import validate_downloaded_track
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.endpoints import get_asian_provider_endpoint
+from ..core.quality import normalize_quality
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ _SOURCE   = "kuwo"
 _BR_LOSSLESS    = 999
 _BR_LOSSLESS_CD = 740
 
+
+from ..core.quality import normalize_quality
 
 class KuwoProvider(BaseProvider):
     """
@@ -309,6 +312,9 @@ class KuwoProvider(BaseProvider):
                 }
 
             # ── 2. Fetch stream URL ───────────────────────────────────────
+            # Accept canonical quality from downloader; default to lossless
+            q = normalize_quality(quality) if isinstance(quality, str) else "LOSSLESS"
+            # If user requested looser quality, still prefer lossless for Kuwo
             dl_url, actual_br = self._get_stream(raw_track_id)
             if not dl_url:
                 raise SpotiflacError(

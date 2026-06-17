@@ -78,20 +78,21 @@ class NeteaseProvider(BaseProvider):
             logger.debug("[netease] Search failed for '%s': %s", query, exc)
         return []
 
-    def _get_stream(self, track_id: str) -> str:
+    def _get_stream(self, track_id: str, requested_quality: str | int = _BR_LOSSLESS) -> tuple[str, int]:
         """
         Request a lossless FLAC stream URL (br=999) from Netease.
-        Returns the URL string, or empty string if the API can only serve
+        Returns the (url, br) tuple, or ('', 0) if the API can only serve
         a lossy format (actual br < 740).
         """
         try:
+            br_val = requested_quality if isinstance(requested_quality, int) else _BR_LOSSLESS
             resp = self._session.get(
                 get_asian_provider_endpoint(self.name, "gdstudio"),
                 params={
                     "types":  "url",
                     "source": _SOURCE,
                     "id":     track_id,
-                    "br":     _BR_LOSSLESS,
+                    "br":     br_val,
                 },
                 timeout=10,
             )
@@ -108,11 +109,11 @@ class NeteaseProvider(BaseProvider):
                     "[netease] Track %s returned br=%d (lossy) — refusing",
                     track_id, actual_br,
                 )
-                return ""
-            return url
+                return "", actual_br
+            return url, actual_br
         except Exception as exc:
             logger.debug("[netease] Stream fetch failed for id=%s: %s", track_id, exc)
-        return ""
+        return "", 0
 
     def _get_pic_url(self, pic_id: str, size: int = 500) -> str:
         """Fetch album art URL from pic_id."""
