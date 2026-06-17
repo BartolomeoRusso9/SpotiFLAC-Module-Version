@@ -215,12 +215,17 @@ class AmazonProvider(BaseProvider):
         # 1. ZARZ.MOE API (Spotify ID)
         source_url = f"https://open.spotify.com/track/{track_id}"
         try:
-            resp = self._session.post(
-                "https://api.zarz.moe/v1/resolve",
-                json={"url": source_url},
-                headers={"User-Agent": "SpotiFLAC-Mobile/4.5.0"},
-                timeout=15
-            )
+            _zarz_base = get_amazon_endpoint("zarz")
+            if _zarz_base:
+                _zarz_url = f"{_zarz_base.rstrip('/')}/resolve"
+                resp = self._session.post(
+                    _zarz_url,
+                    json={"url": source_url},
+                    headers={"User-Agent": "SpotiFLAC-Mobile/4.5.0"},
+                    timeout=15
+                )
+            else:
+                resp = None
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("success") and "AmazonMusic" in data.get("songUrls", {}):
