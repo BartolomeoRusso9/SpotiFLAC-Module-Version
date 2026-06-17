@@ -74,7 +74,7 @@ _api_cooldown_lock:     threading.Lock       = threading.Lock()
 _api_cooldown_until:    dict[str, float]     = {}
 
 def _is_deterministic_error(message: str) -> bool:
-    """Verifica se l'errore ritornato è causato dalla traccia e non da un timeout di rete"""
+    """Check if the returned error is caused by the track and not by a network timeout"""
     text = str(message or "")
     if not text:
         return False
@@ -952,7 +952,7 @@ class TidalProvider(BaseProvider):
             # Controllo Preview derivato dal Web JS
             actual_s = self._get_audio_duration_seconds(final_dest)
             if actual_s <= 35 and expected_s > 45:
-                # E' probabile che sia stato scaricato un preview limitato
+                # E' probabile che sia stato sloaded un preview limitato
                 if final_dest.exists():
                     final_dest.unlink()
                 raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Tidal returned a limited preview track ({actual_s}s).", self.name)

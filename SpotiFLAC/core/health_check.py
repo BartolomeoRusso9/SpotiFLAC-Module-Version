@@ -16,7 +16,7 @@ from ..core.endpoints import get_health_zarz_url
 # ---------------------------------------------------------------------------
 
 def _is_streaming_url(raw: str) -> bool:
-    """Verifica se una stringa è un URL HTTP/HTTPS valido."""
+    """Check if una stringa è un URL HTTP/HTTPS valido."""
     if not raw or not isinstance(raw, str):
         return False
     parsed = urlparse(raw.strip())
@@ -51,7 +51,7 @@ _TIDAL_MAX_MIRRORS = 8
 def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     """
     Carica dinamicamente gli endpoint interrogando il registro centralizzato.
-    Ritorna un dict {provider_name: [(method, url), ...]}
+    Returns un dict {provider_name: [(method, url), ...]}
     Esclude le API ufficiali, ma mantiene i check centralizzati Zarz.
     """
     from ..core.endpoints import (
@@ -405,7 +405,7 @@ async def _zarz_bulk_check(
 ) -> dict[str, HealthResult]:
     """
     Una sola richiesta a Zarz per ricavare lo stato di tutti i provider.
-    Ritorna {provider: HealthResult} solo per i provider presenti nella risposta.
+    Returns {provider: HealthResult} solo per i provider presenti nella risposta.
     """
     try:
         t0   = time.perf_counter()
@@ -626,5 +626,5 @@ def provider_ok(results: list[HealthResult], provider: str) -> bool:
 
 
 def get_working_providers(results: list[HealthResult]) -> list[str]:
-    """Ritorna la lista dei provider con almeno un endpoint funzionante."""
+    """Returns la lista dei provider con almeno un endpoint funzionante."""
     return list(dict.fromkeys(r.provider for r in results if r.ok))

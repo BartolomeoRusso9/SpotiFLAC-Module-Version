@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-# Utilizza il path relativo corretto in base a dove hai salvato spotfetch.py
+# Utilizza il path relativo corretto in base a dove hai saved spotfetch.py
 from ..core.spotify_totp import generate_spotify_totp
 
 logger = logging.getLogger(__name__)
@@ -28,8 +28,8 @@ class SpotifyWebClient:
         self.client_version = ""
 
     def _get_session_info(self) -> None:
-        """Recupera la clientVersion e i cookie iniziali (sp_t)."""
-        # Allineato a Go per recuperare i parametri di sessione
+        """Retrieves la clientVersion e i cookie iniziali (sp_t)."""
+        # Allineato a Go per retrievesre i parametri di sessione
         resp = self._session.get("https://open.spotify.com")
         resp.raise_for_status()
         
@@ -40,7 +40,7 @@ class SpotifyWebClient:
                 cfg = json.loads(decoded)
                 self.client_version = cfg.get("clientVersion", self.client_version)
             except Exception as e:
-                logger.debug(f"[spotfetch] Errore decodifica appServerConfig: {e}")
+                logger.debug(f"[spotfetch] Error decodifica appServerConfig: {e}")
 
         if not self.client_version:
             fallback = re.search(r'"clientVersion"\s*:\s*"([^"]+)"', resp.text)
@@ -232,7 +232,7 @@ class SpotifyWebClient:
         return ""
 
     def get_home_feed(self, time_zone: str = "Europe/Rome") -> dict:
-        """Recupera l'Home Feed di Spotify (Daily Mix, Nuove uscite, ecc.)"""
+        """Retrieves l'Home Feed di Spotify (Daily Mix, Nuove uscite, ecc.)"""
         payload = {
             "operationName": "home",
             "variables": {
@@ -248,7 +248,7 @@ class SpotifyWebClient:
         return self.query(payload)
 
     def get_browse_categories(self) -> dict:
-        """Recupera le categorie e i generi esplorabili"""
+        """Retrieves le categorie e i generi esplorabili"""
         payload = {
             "operationName": "browseAll",
             "variables": {},
@@ -288,11 +288,11 @@ class SpotifyWebClient:
                         composers.append(name)
             return ", ".join(composers)
         except Exception as exc:
-            logger.debug(f"[spotfetch] Errore recupero compositori per {track_id}: {exc}")
+            logger.debug(f"[spotfetch] Error recupero compositori per {track_id}: {exc}")
             return ""
         
     def get_preview_url(self, track_id: str) -> str:
-        """Recupera la preview URL dalla pagina embed (stessa logica di Go GetPreviewURL)."""
+        """Retrieves la preview URL dalla page embed (stessa logica di Go GetPreviewURL)."""
         try:
             embed_url = f"https://open.spotify.com/embed/track/{track_id}"
             resp = self._session.get(embed_url, timeout=10)
@@ -344,7 +344,7 @@ class SpotifyWebClient:
     
     def get_track_stats(self, track_id: str) -> dict:
         """
-        Recupera il playcount di una singola traccia tramite API GraphQL interna Spotify.
+        Retrieves il playcount di una singola traccia tramite API GraphQL interna Spotify.
         """
         payload = {
             "operationName": "getTrack",
@@ -375,12 +375,12 @@ class SpotifyWebClient:
             logger.debug(f"[spotfetch] get_track_stats({track_id}) result: {result}")
             return result
         except Exception as exc:
-            logger.debug(f"[spotfetch] Errore recupero stats traccia {track_id}: {exc}")
+            logger.debug(f"[spotfetch] Error retrieving track stats {track_id}: {exc}")
             return {"playcount": "", "rank": "", "status": ""}
 
     def get_playlist_stats(self, playlist_id: str, offset: int = 0, limit: int = 100) -> dict:
         """
-        Recupera playcount, rank e status per le tracce all'interno di una playlist.
+        Retrieves playcount, rank e status per le tracks all'interno di una playlist.
         Restituisce un dizionario con track_id come chiave.
         """
         payload = {
@@ -446,12 +446,12 @@ class SpotifyWebClient:
             return stats_map
             
         except Exception as exc:
-            logger.debug(f"[spotfetch] Errore recupero stats playlist {playlist_id}: {exc}")
+            logger.debug(f"[spotfetch] Error recupero stats playlist {playlist_id}: {exc}")
             return {}
         
     def get_album_stats(self, album_id: str, offset: int = 0, limit: int = 100) -> dict:
         """
-        Recupera il playcount di tutte le tracce di un album in un'unica richiesta GraphQL.
+        Retrieves il playcount di tutte le tracks di un album in un'unica richiesta GraphQL.
         Restituisce un dizionario con track_id come chiave.
         """
         payload = {
@@ -508,12 +508,12 @@ class SpotifyWebClient:
             return stats_map
             
         except Exception as exc:
-            logger.debug(f"[spotfetch] Errore recupero stats album {album_id}: {exc}")
+            logger.debug(f"[spotfetch] Error recupero stats album {album_id}: {exc}")
             return {}
 
     def get_artist_discography(self, artist_id: str, order: str = "DATE_DESC") -> list[dict[str, Any]]:
         """
-        Recupera la lista di release della discografia di un artista tramite GraphQL.
+        Retrieves la lista di release della discografia di un artista tramite GraphQL.
         Restituisce gli elementi di `data.artistUnion.discography.all.items`.
         """
         all_items: list[dict[str, Any]] = []
@@ -540,7 +540,7 @@ class SpotifyWebClient:
             try:
                 data = self.query(payload)
             except Exception as exc:
-                logger.debug(f"[spotfetch] Errore recupero discografia artista {artist_id}: {exc}")
+                logger.debug(f"[spotfetch] Error recupero discografia artista {artist_id}: {exc}")
                 break
 
             discography = data.get("data", {}).get("artistUnion", {}).get("discography", {})
@@ -583,7 +583,7 @@ class SpotifyWebClient:
         return "".join(f"{b:02x}" for b in reversed(bytes_))
 
     def get_isrc_from_metadata(self, track_id: str) -> str:
-        """Recupera l'ISRC dall'endpoint binario spclient (stesso approccio del JS)."""
+        """Retrieves l'ISRC dall'endpoint binario spclient (stesso approccio del JS)."""
         try:
             gid = self.spotify_id_to_hex_gid(track_id)
             resp = self._session.get(

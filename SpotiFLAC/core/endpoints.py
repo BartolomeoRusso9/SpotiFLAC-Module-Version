@@ -52,7 +52,7 @@ def _load_registry() -> dict:
         return registry
 
     except Exception as e:
-        logger.warning(f"Impossibile contattare i server Cloud ({e}). Provo il backup locale...")
+        logger.warning(f"Unable to contact Cloud servers ({e}). Falling back to local cache...")
         
         # 2. Se fallisce, prova a leggere l'ultima cache salvata
         try:
@@ -61,11 +61,11 @@ def _load_registry() -> dict:
                     cached_string = f.read()
                 return _decrypt_base64_payload(cached_string)
         except Exception as cache_e:
-            logger.error(f"Impossibile leggere la cache locale: {cache_e}")
+            logger.error(f"Unable to read local cache: {cache_e}")
             
         return {}
 
-# Questa riga viene eseguita solo la prima volta che il file viene importato
+# Questa riga viene executeta solo la prima volta che il file viene importato
 REGISTRY = _load_registry()
 
 
@@ -108,5 +108,5 @@ def get_health_zarz_url() -> str:
     return REGISTRY.get("health", {}).get("zarz", "")
 
 def get_community_url(provider: str) -> str:
-    """Ritorna l'URL Community se esiste nel registro, altrimenti stringa vuota."""
+    """Returns l'URL Community se esiste nel registro, altrimenti stringa vuota."""
     return REGISTRY.get(provider, {}).get("community", "")

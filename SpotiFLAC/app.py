@@ -207,7 +207,7 @@ class SpotiFLAC_API:
             pass
 
     def _fetch_track_playcounts(self, sp_client, track_ids: list[str]) -> dict[str, dict]:
-        """Recupera playcount per traccia in parallelo usando get_track_stats."""
+        """Retrieves playcount per track in parallel using get_track_stats."""
         stats_map: dict[str, dict] = {}
         unique_ids = [tid for tid in dict.fromkeys(track_ids) if tid]
         if not unique_ids:
@@ -273,7 +273,7 @@ class SpotiFLAC_API:
         return url
     
     def get_spotify_home_feed(self):
-        """Metodo chiamato da app.js per recuperare l'Home Feed."""
+        """Metodo chiamato da app.js per retrievesre l'Home Feed."""
         try:
             from .core.spotfetch import SpotifyWebClient
             from .providers.spotify_metadata import parse_home_feed
@@ -284,7 +284,7 @@ class SpotiFLAC_API:
             return formatted_data
         except Exception as e:
             import logging
-            logging.error(f"Errore durante il recupero dell'Home Feed: {e}")
+            logging.error(f"Error retrieving Home Feed: {e}")
             return {"success": False, "error": str(e)}
 
     def search_provider(self, query, limit=50):
@@ -472,7 +472,7 @@ class SpotiFLAC_API:
             if self._window:
                 self._window.evaluate_js(f"window.app_handle_provider_search_error({msg});")
 
-    def search_provider_async(self, query, limit=50): # Limite di default aggiornato a 50
+    def search_provider_async(self, query, limit=50): # Limite di default updated a 50
         if not query:
             return {"status": "empty"}
         threading.Thread(target=self._search_provider_thread, args=(query, limit), daemon=True).start()
@@ -833,7 +833,7 @@ class SpotiFLAC_API:
         except Exception as e:
             self.log(f"Album cover download error: {e}", "error")
 
-    # ── Bulk: cover di tutte le tracce ───────────────────────────────────────────
+    # ── Bulk: cover di tutte le tracks ───────────────────────────────────────────
 
     def _download_all_covers_task(self, tracks_data):
         total   = len(tracks_data)
@@ -874,7 +874,7 @@ class SpotiFLAC_API:
 
         self.log(f"All covers done — {success} saved, {skipped} skipped.", "ok")
 
-    # ── Bulk: cover di tutte le tracce (VERSIONE ASINCRONA ULTRA-VELOCE) ──
+    # ── Bulk: cover di tutte le tracks (VERSION ASINCRONA ULTRA-VELOCE) ──
     def download_all_covers(self, tracks_data):
         threading.Thread(target=self._run_async_covers, args=(tracks_data,), daemon=True).start()
 
@@ -923,7 +923,7 @@ class SpotiFLAC_API:
         self.log(f"All covers done — {success} saved, {skipped} skipped.", "ok")
 
 
-    # ── Bulk: lyrics di tutte le tracce (VERSIONE ASINCRONA) ──
+    # ── Bulk: lyrics di tutte le tracks (VERSION ASINCRONA) ──
     def download_all_lyrics(self, tracks_data):
         threading.Thread(target=self._run_async_lyrics, args=(tracks_data,), daemon=True).start()
 
@@ -983,7 +983,7 @@ class SpotiFLAC_API:
     # ── Lazy Loading - Anteprima traccia ──────────────────────────────────────
 
     def get_track_preview(self, track_id: str) -> str:
-        """Recupera l'URL di anteprima per una traccia (lazy loading).
+        """Retrieves l'URL di anteprima per una traccia (lazy loading).
         
         Questo metodo è invocato dalla GUI solo quando l'utente clicca su 'play' o 'preview'
         per evitare richieste di rete durante il caricamento iniziale della lista.
@@ -1047,7 +1047,7 @@ class SpotiFLAC_API:
                 return
     
             # ── Chiamata universale ────────────────────────────────────────────
-            # get_url ora restituisce (nome, tracce) OPPURE (nome, tracce, cover)
+            # get_url ora restituisce (nome, tracks) OPPURE (nome, tracks, cover)
             result          = client.get_url(stripped)
             collection_name = result[0]
             tracks          = result[1]
@@ -1117,7 +1117,7 @@ class SpotiFLAC_API:
             for i, t in enumerate(tracks):
                 track_id = getattr(t, 'id', '')
                 
-                # Cerca di recuperare i dati in modo dinamico
+                # Cerca di retrievesre i dati in modo dinamico
                 title   = getattr(t, 'title', getattr(t, 'name', f'Track {i+1}'))
                 # Gestisce sia se 'artists' è una stringa che una lista
                 raw_art = getattr(t, 'artists', getattr(t, 'artist', 'Unknown'))

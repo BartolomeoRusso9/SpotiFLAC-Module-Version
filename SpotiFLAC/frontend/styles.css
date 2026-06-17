@@ -1757,7 +1757,7 @@
   word-break: break-word;
 }
 
-/* ── ARTIST VIEW: sezioni Albums + Tracks ── */
+/* ── ARTIST VIEW: sections Albums + Tracks ── */
 .artist-section-hdr {
   max-width: min(100%, 950px); margin: 16px auto 8px;
   padding: 0 14px;
@@ -1865,7 +1865,7 @@
     display: none !important; 
   }
   
-  /* Layout aggiornato per le 4 colonne rimanenti (Checkbox, #, Titolo, Azioni) */
+  /* Layout updated per le 4 colonne rimanenti (Checkbox, #, Titolo, Azioni) */
   .track-table-header, .track-row { 
     grid-template-columns: 24px 30px 1fr 140px !important; 
   }

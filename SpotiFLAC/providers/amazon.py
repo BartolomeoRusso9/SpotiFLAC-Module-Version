@@ -150,7 +150,7 @@ class AmazonProvider(BaseProvider):
     ) -> httpx.Response:
         base_url = get_amazon_endpoint(provider_key)
         if not base_url:
-            raise ValueError(f"Endpoint non trovato per il provider: {provider_key}")
+            raise ValueError(f"Endpoint not found for provider: {provider_key}")
 
         url = f"{base_url}{endpoint}"
 
@@ -702,7 +702,7 @@ class AmazonProvider(BaseProvider):
         endpoint_url = get_amazon_endpoint(provider_key)
     
         if not endpoint_url:
-            raise SpotiflacError(ErrorKind.NETWORK, f"Endpoint non valido: {provider_key}")
+            raise SpotiflacError(ErrorKind.NETWORK, f"Invalid endpoint: {provider_key}")
             
         method = "GET"
 

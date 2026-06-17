@@ -451,7 +451,7 @@ def embed_metadata(
     if opts.extra_tags:
         merged_extra.update(opts.extra_tags)
 
-    # Per tracce singole l'GENRE dell'enrichment ha priorità
+    # Per tracks singole l'GENRE dell'enrichment ha priorità
     if not opts.is_album:
         enrich_genre = enriched_tags.get("GENRE")
         if enrich_genre:

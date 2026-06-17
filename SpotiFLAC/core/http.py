@@ -138,7 +138,7 @@ class HttpClient:
                 wait = getattr(exc, "retry_after", delay)
                 time.sleep(wait)
             except httpx.RequestError as exc:
-                last_err = NetworkError(self._provider, f"Errore di rete: {exc}")
+                last_err = NetworkError(self._provider, f"Error di rete: {exc}")
                 time.sleep(min(delay, self._retry.max_delay_s))
                 delay *= self._retry.backoff_factor
 

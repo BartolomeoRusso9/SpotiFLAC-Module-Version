@@ -122,7 +122,7 @@ def list_profiles() -> list[str]:
 def get_profile(name: str) -> dict | None:
     """
     Carica un profilo per nome.
-    Ritorna None se il profilo non esiste.
+    Returns None se il profilo non esiste.
     """
     return _load().get(name)
 
@@ -145,7 +145,7 @@ def save_profile(name: str, cfg: dict) -> None:
 def delete_profile(name: str) -> bool:
     """
     Elimina un profilo per nome.
-    Ritorna True se il profilo esisteva, False altrimenti.
+    Returns True se il profilo esisteva, False altrimenti.
     """
     profiles = _load()
     if name not in profiles:
@@ -156,7 +156,7 @@ def delete_profile(name: str) -> bool:
 
 
 def rename_profile(old_name: str, new_name: str) -> bool:
-    """Rinomina un profilo. Ritorna True se l'operazione riesce."""
+    """Rinomina un profilo. Returns True se l'operazione riesce."""
     profiles = _load()
     if old_name not in profiles or new_name in profiles:
         return False

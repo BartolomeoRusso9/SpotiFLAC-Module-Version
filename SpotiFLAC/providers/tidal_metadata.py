@@ -1,6 +1,6 @@
 """
-TidalMetadataClient — recupera metadati di tracce/album/playlist/artisti direttamente
-dall'API pubblica di Tidal quando l'URL di input è un link Tidal (non Spotify).
+TidalMetadataClient — retrieves metadata for tracks/albums/playlists/artists
+from the public Tidal API when the input URL is a Tidal link (not Spotify).
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ _TIDAL_FILTER_COMPILATIONS  = "COMPILATIONS"
 # ---------------------------------------------------------------------------
 
 def is_tidal_url(url: str) -> bool:
-    """Restituisce True se l'URL appartiene a Tidal, inclusi i deep link."""
+    """Returns True if the URL belongs to Tidal, including deep links."""
     url_lower = url.lower().strip()
     if url_lower.startswith("tidal:"):
         return True
@@ -58,8 +58,8 @@ def is_tidal_url(url: str) -> bool:
 
 def parse_tidal_url(url: str) -> dict[str, str]:
     """
-    Analizza un URL Tidal o deep link e restituisce {"type": ..., "id": ...}.
-    Sincronizzato con la logica parseURL di index.js.
+    Parse a Tidal URL or deep link and return {"type": ..., "id": ...}.
+    Synchronized with the parseURL logic from index.js.
     """
     text = url.strip()
     
@@ -140,7 +140,7 @@ def _artist_in_track(artist_name: str, track_artists: str) -> bool:
 
 class TidalMetadataClient:
     """
-    Recupera metadati dall'API pubblica di Tidal v1.
+    Retrieves metadati dall'API pubblica di Tidal v1.
     """
 
     def __init__(self, timeout_s: int = 15) -> None:
@@ -169,16 +169,16 @@ class TidalMetadataClient:
                 resp = self._session.get(url, params=params, timeout=self._timeout)
             except httpx.RequestError as exc:
                 if _attempt >= _MAX_RATE_LIMIT_RETRIES:
-                    raise NetworkError("tidal_metadata", f"Errore di rete su {path}: {exc}")
+                    raise NetworkError("tidal_metadata", f"Network error on {path}: {exc}")
                 time.sleep(2)
                 continue
 
             if resp.status_code == 401:
-                raise AuthError("tidal_metadata", "Token Tidal non valido o scaduto")
+                raise AuthError("tidal_metadata", "Tidal token invalid or expired")
             if resp.status_code == 404:
                 raise SpotiflacError(
                     ErrorKind.TRACK_NOT_FOUND,
-                    f"Risorsa non trovata: {path}",
+                    f"Resource not found: {path}",
                     "tidal_metadata",
                 )
             if resp.status_code == 429:
@@ -189,19 +189,19 @@ class TidalMetadataClient:
                     )
                 wait = int(resp.headers.get("Retry-After", 5)) + 1
                 logger.warning(
-                    "[tidal_metadata] Rate limited (tentativo %d/%d) — attendo %ds",
+                    "[tidal_metadata] Rate limited (attempt %d/%d) — waiting %ds",
                     _attempt + 1, _MAX_RATE_LIMIT_RETRIES, wait,
                 )
                 time.sleep(wait)
                 continue
             if resp.status_code != 200:
-                raise NetworkError("tidal_metadata", f"HTTP {resp.status_code} da {path}")
+                raise NetworkError("tidal_metadata", f"HTTP {resp.status_code} from {path}")
 
             return resp.json()
 
-        raise NetworkError("tidal_metadata", f"Impossibile completare la richiesta a {path}")
+        raise NetworkError("tidal_metadata", f"Unable to complete request to {path}")
 
-    def _paginate(self, path: str, extra_params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def _pagete(self, path: str, extra_params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         items:  list[dict[str, Any]] = []
         offset: int = 0
 
@@ -217,7 +217,7 @@ class TidalMetadataClient:
             items.extend(page)
             offset += len(page)
 
-            logger.debug("[tidal_metadata] paginazione %s: %d/%d", path, offset, total)
+            logger.debug("[tidal_metadata] pagination %s: %d/%d", path, offset, total)
 
             if offset >= total or not page:
                 break
@@ -236,7 +236,7 @@ class TidalMetadataClient:
             preloaded_album: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], list[TrackMetadata]]:
         album = preloaded_album if preloaded_album else self._get(f"/albums/{album_id}")
-        items = self._paginate(f"/albums/{album_id}/tracks")
+        items = self._pagete(f"/albums/{album_id}/tracks")
         tracks = [self._track_from_album_item(item, album) for item in items]
         
         formatted_album = {
@@ -248,7 +248,7 @@ class TidalMetadataClient:
 
     def get_playlist_tracks(self, playlist_uuid: str) -> tuple[dict[str, Any], list[TrackMetadata]]:
         playlist  = self._get(f"/playlists/{playlist_uuid}")
-        raw_items = self._paginate(f"/playlists/{playlist_uuid}/tracks")
+        raw_items = self._pagete(f"/playlists/{playlist_uuid}/tracks")
 
         tracks: list[TrackMetadata] = []
         for entry in raw_items:
@@ -258,7 +258,7 @@ class TidalMetadataClient:
 
             if track_data.get("streamReady") is False:
                 logger.debug(
-                    "[tidal_metadata] traccia non disponibile saltata: %s",
+                    "[tidal_metadata] track not available skipped: %s",
                     track_data.get("title", "?"),
                 )
                 continue
@@ -293,7 +293,7 @@ class TidalMetadataClient:
                 continue
 
             try:
-                albums = self._paginate(
+                albums = self._pagete(
                     f"/artists/{artist_id}/albums",
                     extra_params={"filter": group},
                 )
@@ -323,7 +323,7 @@ class TidalMetadataClient:
                     _, album_tracks = future.result()
                     results[album_id] = (album_tracks, is_compilation)
                 except Exception as exc:
-                    logger.warning("[tidal_metadata] album %s saltato: %s", album_id, exc)
+                    logger.warning("[tidal_metadata] album %s skipped: %s", album_id, exc)
 
         for album_id, _, is_compilation in albums_to_fetch:
             if album_id not in results:
@@ -382,7 +382,7 @@ class TidalMetadataClient:
 
         raise SpotiflacError(
             ErrorKind.INVALID_URL,
-            f"Tipo Tidal non supportato: {t} (supportati: track, album, playlist, artist)",
+            f"Tidal type not supported: {t} (supported: track, album, playlist, artist)",
         )
 
     @staticmethod
@@ -402,7 +402,7 @@ class TidalMetadataClient:
         try:
             return self._get(f"/albums/{album_id}")
         except Exception as exc:
-            logger.debug("[tidal_metadata] Impossibile recuperare album %s: %s", album_id, exc)
+            logger.debug("[tidal_metadata] Unable to fetch album %s: %s", album_id, exc)
             return {}
 
     def _track_from_raw(

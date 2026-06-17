@@ -19,7 +19,7 @@ _DISCOGRAPHY_SUBTYPES = frozenset({"all", "album", "single", "compilation"})
 
 @dataclass(frozen=True)
 class ArtistSimple:
-    """Artista con ID e URL esterno, per uso downstream."""
+    """Artist con ID e URL esterno, per uso downstream."""
     id: str
     name: str
     external_url: str
@@ -215,7 +215,7 @@ def parse_spotify_url(uri: str) -> dict[str, str]:
     if len(parts) == 3 and parts[1] in ("album", "track", "playlist", "artist"):
         return {"type": parts[1], "id": parts[2].split("?")[0]}
 
-    # Playlist annidata (/user/<uid>/playlist/<id>)
+    # Playlist nested (/user/<uid>/playlist/<id>)
     if len(parts) == 5 and parts[3] == "playlist":
         return {"type": "playlist", "id": parts[4].split("?")[0]}
 
@@ -299,7 +299,7 @@ class SpotifyMetadataClient:
         self.web_client.initialize()
 
     # ------------------------------------------------------------------
-    # Traccia singola
+    # Track singola
     # ------------------------------------------------------------------
 
     def _get_album_artists(self, album_id: str) -> str:
@@ -326,7 +326,7 @@ class SpotifyMetadataClient:
             return ""
 
     def get_track(self, track_id: str) -> TrackMetadata:
-        """Recupera metadati completi per una singola traccia, compositore incluso."""
+        """Retrieves metadati completi per una singola traccia, compositore incluso."""
         payload = {
             "operationName": "getTrack",
             "variables": {"uri": f"spotify:track:{track_id}"},
@@ -415,7 +415,7 @@ class SpotifyMetadataClient:
     # ------------------------------------------------------------------
 
     def get_track_preview(self, track_id: str) -> str:
-        """Recupera l'URL di anteprima di una traccia al momento della richiesta (lazy loading).
+        """Retrieves l'URL di anteprima di una traccia al momento della richiesta (lazy loading).
         
         Questo metodo è pensato per essere invocato solo quando l'utente clicca su 'play' o 'preview'
         nella GUI, evitando richieste di rete durante il caricamento iniziale della lista.
@@ -438,7 +438,7 @@ class SpotifyMetadataClient:
     # ------------------------------------------------------------------
 
     def get_album_tracks(self, album_id: str) -> tuple[dict, list[TrackMetadata]]:
-        """Recupera tutte le tracce di un album con paginazione completa."""
+        """Retrieves tutte le tracks di un album con pagezione completa."""
         limit = 1000
         all_items: list[Any] = []
         album_union: dict = {}
@@ -649,7 +649,7 @@ class SpotifyMetadataClient:
         }
 
     def search(self, query: str, limit: int = 20) -> dict[str, list]:
-        """Ricerca unificata: restituisce tracce, album, artisti e playlist."""
+        """Ricerca unificata: restituisce tracks, album, artisti e playlist."""
         try:
             data = self.web_client.query(self._search_payload(query, limit))
             search_v2 = data.get("data", {}).get("searchV2", {})
@@ -754,7 +754,7 @@ class SpotifyMetadataClient:
     ) -> list:
         """Ricerca filtrata per un singolo tipo: track | album | artist | playlist."""
         if kind not in ("track", "album", "artist", "playlist"):
-            raise ValueError(f"Tipo non valido: {kind!r}. Valori ammessi: track, album, artist, playlist")
+            raise ValueError(f"Invalid type: {kind!r}. Valori ammessi: track, album, artist, playlist")
         data = self.web_client.query(self._search_payload(query, limit, offset))
         search_v2 = data.get("data", {}).get("searchV2", {})
         results = self.search(query, limit=limit)
@@ -766,7 +766,7 @@ class SpotifyMetadataClient:
         return self.search(query, limit=limit)["tracks"]
 
     # ------------------------------------------------------------------
-    # Artista
+    # Artist
     # ------------------------------------------------------------------
 
     def get_artist_profile(self, artist_id: str) -> dict:
@@ -950,7 +950,7 @@ class SpotifyMetadataClient:
     ) -> tuple[str, list[TrackMetadata], str, dict]:
         info = parse_spotify_url(spotify_url)
         t = info["type"]
-        logger.info(f"[DEBUG] URL tipo: {t}, ID: {info['id']}")
+        logger.info(f"[DEBUG] URL type: {t}, ID: {info['id']}")
 
         routing_metadata = {
             "genre_source_preference": "musicbrainz" if t == "album" else "provider",
@@ -994,7 +994,7 @@ class SpotifyMetadataClient:
             artist_meta.update(routing_metadata)
             return artist_meta["name"], tracks, artist_meta.get("avatar", ""), artist_meta
 
-        raise SpotiflacError(ErrorKind.INVALID_URL, f"Tipo Spotify non supportato: {t}")
+        raise SpotiflacError(ErrorKind.INVALID_URL, f"Spotify type not supported: {t}")
     
 def _extract_explore_artists(content: dict[str, Any]) -> str:
     artist_items = []

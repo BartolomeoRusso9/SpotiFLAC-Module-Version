@@ -352,7 +352,7 @@ class DeezerProvider(BaseProvider):
             token = dati_prepare.get("t")
             
             if not token:
-                logger.warning("[flacdownloader] Errore: Il campo 't' non è presente nella risposta.")
+                logger.warning("[flacdownloader] Error: Il campo 't' non è presente nella risposta.")
                 return None
 
             logger.info("[flacdownloader] Esecuzione del passaggio 2: Richiesta del link di scaricamento...")
@@ -388,7 +388,7 @@ class DeezerProvider(BaseProvider):
             return {"file_path": str(file_path), "extension": file_extension}
 
         except Exception as exc:
-            logger.warning(f"[flacdownloader] Si è verificato un errore durante il fallback: {exc}")
+            logger.warning(f"[flacdownloader] An error occurred during fallback: {exc}")
             return None
 
 

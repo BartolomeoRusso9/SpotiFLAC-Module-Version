@@ -213,19 +213,19 @@ class AppleMusicProvider(BaseProvider):
                     return _proxy_queued, f"{_proxy_queued}/file/{job_id}"
 
                 if status == "failed":
-                    err = st_data.get('error', 'Errore API sconosciuto')
-                    logger.warning("[apple-music] Errore API proxy per codec %s: %s", codec, err)
+                    err = st_data.get('error', 'Error API sconosciuto')
+                    logger.warning("[apple-music] Error API proxy per codec %s: %s", codec, err)
                     record_failure(self.name, get_apple_music_endpoint("proxy_queued"))
                     return None, None
 
                 time.sleep(2.5)
 
-            logger.warning("[apple-music] Timeout durante l'attesa della traccia con codec %s.", codec)
+            logger.warning("[apple-music] Timeout while waiting for track with codec %s.", codec)
             record_failure(self.name, get_apple_music_endpoint("proxy_queued"))
             return None, None
 
         except Exception as e:
-            logger.debug("[apple-music] Impossibile recuperare lo stream in coda per %s: %s", codec, e)
+            logger.debug("[apple-music] Unable to retrievesre lo stream in coda per %s: %s", codec, e)
             record_failure(self.name, download_endpoint)
             return None, None
 
@@ -306,9 +306,9 @@ class AppleMusicProvider(BaseProvider):
                 if metadata.isrc:
                     track_url = self._resolve_track_url(metadata.isrc)
 
-                # FALLBACK: Se l'ISRC fallisce, cerca per Titolo, Artista, ISRC e durata
+                # FALLBACK: Se l'ISRC fallisce, cerca per Titolo, Artist, ISRC e durata
                 if not track_url:
-                    logger.debug("[apple-music] ISRC non trovato, tentativo tramite ricerca testuale...")
+                    logger.debug("[apple-music] ISRC not found, tentativo tramite ricerca testuale...")
                     track_url = self._resolve_track_url_by_search(
                         metadata.title,
                         metadata.artists,
@@ -317,9 +317,9 @@ class AppleMusicProvider(BaseProvider):
                     )
 
             if not track_url:
-                raise TrackNotFoundError(self.name, f"Traccia non trovata (ISRC: {metadata.isrc})")
+                raise TrackNotFoundError(self.name, f"Track not found (ISRC: {metadata.isrc})")
 
-            logger.info("[apple-music] URL della traccia risolto: %s", track_url)
+            logger.info("[apple-music] Resolved track URL: %s", track_url)
 
             stream_url = None
             used_codec = None
@@ -344,7 +344,7 @@ class AppleMusicProvider(BaseProvider):
 
             self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
 
-            # Validazione Traccia (Controllo File Corrotto/Tronco)
+            # Validazione Track (Controllo File Corrotto/Tronco)
             expected_s = metadata.duration_ms // 1000
             valid, err_msg = validate_downloaded_track(str(dest), expected_s)
             if not valid:
@@ -377,5 +377,5 @@ class AppleMusicProvider(BaseProvider):
             logger.error("[%s] %s", self.name, exc)
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
-            logger.exception("[%s] Errore inaspettato", self.name)
+            logger.exception("[%s] Error inaspettato", self.name)
             return DownloadResult.fail(self.name, f"Inaspettato: {exc}")

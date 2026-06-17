@@ -23,7 +23,7 @@ function detectAndApplyOSStyles() {
   console.log(`[OS Detection] Detected OS: ${detectedOS}`);
 }
 
-// Esegui il rilevamento al caricamento della pagina
+// Esegui il rilevamento al caricamento della page
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', detectAndApplyOSStyles);
 } else {
@@ -34,7 +34,7 @@ function showSkeletonTracks(count = 5) {
   const container = $('track-rows');
   if (!container) return;
   
-  // Svuota la tabella e inserisci gli skeleton con lo STESSO grid delle tracce reali
+  // Svuota la tabella e inserisci gli skeleton con lo STESSO grid delle tracks reali
   container.innerHTML = Array(count).fill(0).map(() => `
     <div class="track-row" style="pointer-events: none; border-bottom: 1px solid var(--border);">
       <div><div class="skeleton" style="width:14px; height:14px; border-radius:2px;"></div></div>
@@ -67,7 +67,7 @@ function showSkeletonTracks(count = 5) {
   if (header) header.style.display = 'none';
 }
 
-// Inizializza lo stato dopo aver caricato le impostazioni
+// Inizializza lo stato dopo aver loaded le impostazioni
 function initSettingsTracking() {
     initialSettings = buildConfig();
     isDirty = false;
@@ -589,7 +589,7 @@ function renderStatusIcon(status) {
 function copyLogs() {
     const logArea = $('logArea');
     if (!logArea) {
-        logMessage('Errore: Area log non trovata.', 'error');
+        logMessage('Error: Log area not found.', 'error');
         return;
     }
 
@@ -600,7 +600,7 @@ function copyLogs() {
         navigator.clipboard.writeText(logsText).then(() => {
             toastMgr.success('Logs copiati negli appunti!');
         }).catch(err => {
-            toastMgr.error('Errore durante la copia dei logs.');
+            toastMgr.error('Error copying logs.');
         });
     } else {
         // Fallback per browser vecchi
@@ -1165,7 +1165,7 @@ function updateAlbumMeta(trackCount) {
     }
   }
   
-  // Per gli album, mostra artista, data e numero di tracce nel subtitle
+  // Per gli album, mostra artista, data e numero di tracks nel subtitle
   if (badgeType === 'ALBUM') {
     const artistEl = $('album-artist');
     const artist = artistEl.textContent?.trim() || '';
@@ -1197,7 +1197,7 @@ function updateAlbumMeta(trackCount) {
     trackCountEl.textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
   }
   $('album-meta').style.display = '';
-  // Aggiorna anche l'etichetta dell'intestazione della tabella tracce
+  // Aggiorna anche l'etichetta dell'intestazione della tabella tracks
   setPlaycountHeaderLabel(badgeType === 'PLAYLIST' ? 'Album' : 'Playcount');
 }
 
@@ -1463,7 +1463,7 @@ function renderTracks(tracks, page = 1) {
   currentTracks = tracks;
   currentPage = page;
   
-  // Calcola la paginazione
+  // Calcola la pagezione
   const totalPages = Math.ceil(tracks.length / TRACKS_PER_PAGE);
   const startIdx = (currentPage - 1) * TRACKS_PER_PAGE;
   const endIdx = startIdx + TRACKS_PER_PAGE;
@@ -1577,7 +1577,7 @@ function renderTracks(tracks, page = 1) {
     } else {
       setTrackRenderStatus('', false);
       updateAlbumMeta(tracks.length);
-      // Se è una pagina artista, inietta la sezione album sopra le tracce
+      // Se è una page artista, inietta la section album sopra le tracks
       const urlLower = (currentUrl || '').toLowerCase();
       const isArtist = urlLower.includes('/artist/') || urlLower.includes('spotify:artist:') || urlLower.includes('/browse/artist');
       document.getElementById('artist-tabs-section')?.remove();
@@ -1593,7 +1593,7 @@ function renderTracks(tracks, page = 1) {
       }
       $('recent-wrap').style.display = 'none';
       
-      // Mostra/nascondi paginazione
+      // Mostra/nascondi pagezione
       updatePaginationControls(totalPages);
     }
   };
@@ -1604,10 +1604,10 @@ onCheckChange();
 }
 
 function updatePaginationControls(totalPages) {
-  const paginationDiv = $('pagination-controls');
+  const pagetionDiv = $('pagetion-controls');
   if (totalPages > 1) {
-    paginationDiv.classList.remove('hidden');
-    paginationDiv.style.display = 'flex';
+    pagetionDiv.classList.remove('hidden');
+    pagetionDiv.style.display = 'flex';
     
     const pageInfo = $('page-info');
     pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${TRACKS_PER_PAGE} per page)`;
@@ -1615,8 +1615,8 @@ function updatePaginationControls(totalPages) {
     $('page-prev').disabled = currentPage === 1;
     $('page-next').disabled = currentPage === totalPages;
   } else {
-    paginationDiv.classList.add('hidden');
-    paginationDiv.style.display = 'none';
+    pagetionDiv.classList.add('hidden');
+    pagetionDiv.style.display = 'none';
   }
 }
 
@@ -2346,7 +2346,7 @@ function sortTracks() {
   const val = $('sort-select').value;
   const sorted = [...currentTracks]; // Lavora sempre su una copia
   
-  // Ripristina l'array usando l'indice nascosto salvato in precedenza
+  // Ripristina l'array usando l'indice nascosto saved in precedenza
   if (val === 'default') { 
     sorted.sort((a, b) => a._originalIndex - b._originalIndex);
     renderTracks(sorted, 1); 
@@ -2863,7 +2863,7 @@ function setFetchingState(state, customMsg = null) {
   else if (state === 'error') {
     if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
     const errorTitle = customMsg || 'error occurred';
-    toastMgr.error('Impossibile recuperare i dati', { title: errorTitle, position: 'bottom-left', duration: 3500 });
+    toastMgr.error('Unable to retrieve data', { title: errorTitle, position: 'bottom-left', duration: 3500 });
     currentFetchToastId = null;
   }
   else if (state === 'hide') {
@@ -2922,7 +2922,7 @@ async function onFetch() {
           setStatus(`Searching "${url}"...`, true);
         })
         .catch((e) => {
-          setStatus('Errore nella ricerca provider.', false);
+          setStatus('Provider search error.', false);
           logMessage('Search error: ' + e, 'error');
           setFetchingState('error');
         });
@@ -3231,7 +3231,7 @@ async function loadExploreData() {
         sectionsContainer.innerHTML = '<div style="color:var(--red);">Unable to load feed. Check your connection.</div>';
       }
     } catch (e) {
-      logMessage('Errore caricamento explore feed: ' + e, 'error');
+      logMessage('Failed to load explore feed: ' + e, 'error');
       sectionsContainer.innerHTML = '<div style="color:var(--red);">Network error.</div>';
     }
   } else {

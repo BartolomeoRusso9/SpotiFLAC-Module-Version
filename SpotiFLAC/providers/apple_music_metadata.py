@@ -1,5 +1,5 @@
 """
-AppleMusicMetadataClient — recupera metadati di tracce/album/artisti/playlist
+AppleMusicMetadataClient — retrieves metadati di tracks/album/artisti/playlist
 tramite la AMP API pubblica di Apple Music.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ _APPLE_UA = (
 
 # Prefissi JWT noti per i token di Apple Music (kid = WebPlayKid).
 # Apple usa due ordinamenti diversi dei campi nell'header JWT.
-# Equivalente alle `prefixes` in extractJWTFromString() di index.js.
+# Equivalent alle `prefixes` in extractJWTFromString() di index.js.
 _JWT_KNOWN_PREFIXES = (
     "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IldlYlBsYXlLaWQifQ.",
     "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6IldlYlBsYXlLaWQifQ.",
@@ -80,7 +80,7 @@ def parse_apple_music_url(url: str) -> dict[str, str]:
         re.IGNORECASE,
     )
     if not m:
-        raise InvalidUrlError(f"URL Apple Music non riconosciuto: {url}")
+        raise InvalidUrlError(f"Apple Music URL not recognized: {url}")
 
     storefront = m.group(1).lower()
     kind       = m.group(2).lower()
@@ -178,7 +178,7 @@ class AppleMusicMetadataClient:
 
         1. devToken=JWT nel sorgente HTML (parametro URL in un iframe)
         2. Prefissi JWT noti direttamente nell'HTML
-        3. Bundle JS della pagina (saltando quelli legacy)
+        3. Bundle JS della page (saltando quelli legacy)
         """
         if self._auth_token and _time.time() < self._token_expiry:
             return self._auth_token
@@ -220,7 +220,7 @@ class AppleMusicMetadataClient:
                     js_res = self._session.get(js_url, timeout=self._timeout)
                     token = _extract_jwt_from_string(urllib.parse.unquote(js_res.text))
                     if token:
-                        logger.debug("[apple_metadata] Token trovato nel bundle JS: %s", src)
+                        logger.debug("[apple_metadata] Token found in JS bundle: %s", src)
                         self._auth_token = token
                         self._parse_token_expiry(token)
                         return token
@@ -229,23 +229,23 @@ class AppleMusicMetadataClient:
 
             raise SpotiflacError(
                 ErrorKind.NETWORK_ERROR,
-                "Token JWT non trovato né nell'HTML né nei bundle JS."
+                "JWT token not found in HTML or JS bundles."
             )
 
         except SpotiflacError:
             raise
         except Exception as e:
-            logger.error("[apple_metadata] Impossibile recuperare JWT token: %s", e)
+            logger.error("[apple_metadata] Unable to retrieve JWT token: %s", e)
             raise SpotiflacError(
                 ErrorKind.NETWORK_ERROR,
-                f"Impossibile recuperare il token di Apple Music: {e}"
+                f"Unable to retrieve Apple Music token: {e}"
             )
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         token = self._get_token()
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Se il path è già un URL assoluto (es. dalla paginazione), usalo direttamente
+        # If the path is already an absolute URL (es. dalla pagezione), use it directly
         if path.startswith("https://"):
             url = path
         else:
@@ -268,19 +268,19 @@ class AppleMusicMetadataClient:
         return resp.json()
 
     # ------------------------------------------------------------------
-    # Paginazione relazione tracce (album / playlist)
+    # Pagination relazione tracks (album / playlist)
     # ------------------------------------------------------------------
 
-    def _paginate_tracks(
+    def _pagete_tracks(
         self,
         initial_items: list[dict[str, Any]],
         first_next: str | None,
-        label: str = "risorsa",
+        label: str = "resource",
     ) -> list[dict[str, Any]]:
         """
-        Completa la lista delle tracce paginate partendo dagli item già
+        Completa la lista delle tracks pagete partendo dagli item già
         ottenuti dal primo fetch e seguendo i link `next` successivi.
-        Equivalente al pattern while(nextURL) in fetchAlbum/fetchPlaylist di index.js.
+        Equivalent al pattern while(nextURL) in fetchAlbum/fetchPlaylist di index.js.
         """
         items = list(initial_items)
         next_path = first_next
@@ -295,7 +295,7 @@ class AppleMusicMetadataClient:
                 next_path = page.get("next")
                 _time.sleep(0.3)
             except Exception as exc:
-                logger.warning("[apple_metadata] Paginazione tracce %s interrotta: %s", label, exc)
+                logger.warning("[apple_metadata] Track pagetion %s interrupted: %s", label, exc)
                 break
 
         return items
@@ -311,7 +311,7 @@ class AppleMusicMetadataClient:
         )
         results = data.get("data", [])
         if not results:
-            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Traccia {track_id} non trovata.")
+            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Track {track_id} not found.")
         return self._parse_item(results[0])
 
     def get_album_tracks(self, album_id: str, storefront: str = "us") -> tuple[dict[str, Any], list[TrackMetadata]]:
@@ -321,13 +321,13 @@ class AppleMusicMetadataClient:
         )
         results = data.get("data", [])
         if not results:
-            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Album {album_id} non trovato.")
+            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Album {album_id} not found.")
 
         album_data = results[0]
         tracks_rel = album_data.get("relationships", {}).get("tracks", {})
 
-        # Paginazione: Apple Music tronca le tracce incluse (di solito a 100)
-        tracks_items = self._paginate_tracks(
+        # Pagination: Apple Music tronca le tracks incluse (di solito a 100)
+        tracks_items = self._pagete_tracks(
             initial_items=tracks_rel.get("data", []),
             first_next=tracks_rel.get("next"),
             label=f"album {album_id}",
@@ -357,13 +357,13 @@ class AppleMusicMetadataClient:
         )
         results = data.get("data", [])
         if not results:
-            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Playlist {playlist_id} non trovata.")
+            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Playlist {playlist_id} not found.")
 
         playlist_data = results[0]
         tracks_rel    = playlist_data.get("relationships", {}).get("tracks", {})
 
-        # Paginazione: le playlist lunghe sono troncate nel primo fetch
-        tracks_items = self._paginate_tracks(
+        # Pagination: le playlist lunghe sono troncate nel primo fetch
+        tracks_items = self._pagete_tracks(
             initial_items=tracks_rel.get("data", []),
             first_next=tracks_rel.get("next"),
             label=f"playlist {playlist_id}",
@@ -372,7 +372,7 @@ class AppleMusicMetadataClient:
         tracks = [self._parse_item(item) for item in tracks_items if item.get("type") == "songs"]
         return playlist_data, tracks
 
-    def _paginate_relationship(self, initial_path: str) -> list[dict[str, Any]]:
+    def _pagete_relationship(self, initial_path: str) -> list[dict[str, Any]]:
         """Itera una relazione standalone (es. /artists/{id}/albums) seguendo i link `next`."""
         results: list[dict[str, Any]] = []
         next_url: str | None = initial_path
@@ -381,7 +381,7 @@ class AppleMusicMetadataClient:
             try:
                 data = self._get(next_url)
             except Exception as exc:
-                logger.warning("[apple_metadata] Paginazione interrotta: %s", exc)
+                logger.warning("[apple_metadata] Pagination interrupted: %s", exc)
                 break
 
             page = data.get("data", [])
@@ -406,7 +406,7 @@ class AppleMusicMetadataClient:
         artist_data = self._get(f"/{storefront}/artists/{artist_id}")
         artist_results = artist_data.get("data", [])
         if not artist_results:
-            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Artista {artist_id} non trovato.")
+            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"Artist {artist_id} not found.")
 
         artist_obj  = artist_results[0]
         artist_name = artist_obj.get("attributes", {}).get("name", "Unknown")
@@ -415,7 +415,7 @@ class AppleMusicMetadataClient:
         seen_ids:  set[str]  = set()
 
         # Album propri
-        for album_data in self._paginate_relationship(f"/{storefront}/artists/{artist_id}/albums"):
+        for album_data in self._pagete_relationship(f"/{storefront}/artists/{artist_id}/albums"):
             aid = str(album_data.get("id", ""))
             if aid and aid not in seen_ids:
                 seen_ids.add(aid)
@@ -425,7 +425,7 @@ class AppleMusicMetadataClient:
 
         # Featuring
         if include_featuring:
-            for album_data in self._paginate_relationship(f"/{storefront}/artists/{artist_id}/appears-on-albums"):
+            for album_data in self._pagete_relationship(f"/{storefront}/artists/{artist_id}/appears-on-albums"):
                 aid = str(album_data.get("id", ""))
                 if aid and aid not in seen_ids:
                     seen_ids.add(aid)
@@ -449,7 +449,7 @@ class AppleMusicMetadataClient:
                     _, album_tracks = future.result()
                     results_dict[aid] = album_tracks
                 except Exception as exc:
-                    logger.warning("[apple_metadata] Album %s saltato: %s", aid, exc)
+                    logger.warning("[apple_metadata] Album %s skipped: %s", aid, exc)
 
         # Merge deduplicato rispettando l'ordine originale
         for aid in album_ids:
@@ -506,7 +506,7 @@ class AppleMusicMetadataClient:
 
         raise SpotiflacError(
             ErrorKind.INVALID_URL,
-            f"Tipo Apple Music non supportato: {t} (supportati: track, album, playlist, artist)"
+            f"Apple Music type not supported: {t} (supportati: track, album, playlist, artist)"
         )
 
     # ------------------------------------------------------------------

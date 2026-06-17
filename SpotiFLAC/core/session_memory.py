@@ -61,7 +61,7 @@ def set_last_folder(folder: str) -> None:
 
 def get_url_history() -> list[dict]:
     """
-    Ritorna la cronologia URL in ordine dal più recente al meno recente.
+    Returns la cronologia URL in ordine dal più recente al meno recente.
     Ogni entry è: {"url": str, "label": str, "cover": str, "track_count": int,
                    "url_type": str, "artist": str, "at": int (unix timestamp)}
     """

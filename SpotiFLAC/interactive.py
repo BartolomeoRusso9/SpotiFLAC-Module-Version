@@ -302,7 +302,7 @@ def _profile_load_section(cfg: dict) -> dict:
                     if _ask_bool(f"Delete profile '{prof_to_delete}'?", False):
                         delete_profile(prof_to_delete)
                         print(f"\n  {GREEN('✓')} Profile {BOLD(prof_to_delete)} deleted.\n")
-                    continue # Ricarica il menu aggiornato
+                    continue # Reload the updated menu
 
         # Gestione caricamento profilo
         chosen_name: str | None = None

@@ -47,7 +47,7 @@ class MiguProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def _search(self, query: str, count: int = 10) -> list[dict]:
-        """Cerca tracce su Migu tramite l'API specificata."""
+        """Cerca tracks su Migu tramite l'API specificata."""
         try:
             resp = self._session.get(
                 get_asian_provider_endpoint("migu", "gdstudio"),
@@ -76,7 +76,7 @@ class MiguProvider(BaseProvider):
         Implementa il fallback gerarchico 24-bit -> 16-bit per formati FLAC/M4A.
         Rifiuta attivamente MP3 e URL lossy generici.
         
-        Ritorna una tupla: (url_stream, estensione_file, etichetta_qualità).
+        Returns una tupla: (url_stream, estensione_file, etichetta_qualità).
         """
         
         # Ordine di tentativi strettamente ad alta qualità
@@ -107,7 +107,7 @@ class MiguProvider(BaseProvider):
                 resp.raise_for_status()
                 
                 dl_url = ""
-                # Gestione della risposta: potrebbe essere JSON annidato o una stringa raw
+                # Response handling: potrebbe essere JSON nested o una stringa raw
                 try:
                     data = resp.json()
                     if isinstance(data, dict):
@@ -154,7 +154,7 @@ class MiguProvider(BaseProvider):
         return "", "", ""
 
     def _get_pic_url(self, pic_id: str, size: int = 500) -> str:
-        """Recupera l'URL della copertina dell'album."""
+        """Retrieves l'URL della copertina dell'album."""
         if not pic_id:
             return ""
         try:
@@ -175,7 +175,7 @@ class MiguProvider(BaseProvider):
         return ""
 
     def _get_lyric(self, lyric_id: str) -> str:
-        """Recupera il testo della canzone (LRC)."""
+        """Retrieves il testo della canzone (LRC)."""
         if not lyric_id:
             return ""
         try:
@@ -196,7 +196,7 @@ class MiguProvider(BaseProvider):
         return ""
 
     def _get_album_tracks(self, album_id: str) -> list[dict]:
-        """Recupera la lista tracce di un album."""
+        """Retrieves la lista tracks di un album."""
         try:
             resp = self._session.get(
                 get_asian_provider_endpoint("migu", "api_base"),
@@ -262,7 +262,7 @@ class MiguProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def get_url(self, url: str) -> tuple[str, list[TrackMetadata]]:
-        """Interpreta URL o query e restituisce la collezione trovata."""
+        """Interpreta URL o query e restituisce la collezione found."""
         match = re.search(r"(\d{5,})", url)
 
         if match and "_album" in url.lower():
@@ -285,7 +285,7 @@ class MiguProvider(BaseProvider):
         if not items:
             raise SpotiflacError(
                 ErrorKind.TRACK_NOT_FOUND,
-                f"Nessun risultato trovato su Migu per: {query}",
+                f"Nessun risultato found su Migu per: {query}",
                 self.name,
             )
         tracks = [self._item_to_metadata(it, i + 1) for i, it in enumerate(items)]
@@ -323,13 +323,13 @@ class MiguProvider(BaseProvider):
             # 1. Ricerca se non abbiamo l'ID di Migu
             if not raw_track_id:
                 query = f"{metadata.title} {metadata.first_artist}".strip()
-                logger.info("[migu] Cerco traccia: %s", query)
+                logger.info("[migu] Searching track: %s", query)
                 items = self._search(query, count=5)
                 if not items:
-                    raise TrackNotFoundError(self.name, f"Traccia non trovata su Migu: {query}")
+                    raise TrackNotFoundError(self.name, f"Track not found su Migu: {query}")
                 raw_track_id = str(items[0].get("id", ""))
                 if not raw_track_id:
-                    raise TrackNotFoundError(self.name, "ID traccia vuoto dai risultati di Migu")
+                    raise TrackNotFoundError(self.name, "Empty track ID from Migu results")
                 extra = {
                     "raw_track_id": raw_track_id,
                     "pic_id":       str(items[0].get("pic_id", "")),
@@ -428,7 +428,7 @@ class MiguProvider(BaseProvider):
                             audio.save()
                             logger.debug("[migu] Testo Migu aggiunto su M4A")
                 except Exception as exc:
-                    logger.warning("[migu] Impossibile aggiungere il testo nativo: %s", exc)
+                    logger.warning("[migu] Unable to aggiungere il testo nativo: %s", exc)
 
             fmt = extension.replace(".", "")
             return DownloadResult.ok(self.name, str(dest), fmt=fmt)
@@ -437,5 +437,5 @@ class MiguProvider(BaseProvider):
             logger.error("[%s] %s", self.name, exc)
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
-            logger.exception("[%s] Errore imprevisto", self.name)
+            logger.exception("[%s] Error imprevisto", self.name)
             return DownloadResult.fail(self.name, f"Unexpected: {exc}")

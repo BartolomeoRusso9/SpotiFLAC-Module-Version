@@ -78,7 +78,7 @@ class TrackMetadata(BaseModel):
 
     @property
     def first_artist(self) -> str:
-        """Ritorna solo il primo artista della lista."""
+        """Returns solo il primo artista della lista."""
         return self.artists.split(",")[0].strip()
 
     def as_flac_tags(self, *, first_artist_only: bool = False) -> dict[str, str]:

@@ -261,7 +261,7 @@ class _TidalMeta:
         return out
 
     def _try_api(self, api: str, query: str) -> dict | None:
-        """Prova un singolo API endpoint; ritorna la prima traccia trovata o None."""
+        """Try a single API endpoint; return the first track found or None."""
         base = api.rstrip("/")
         for endpoint in (
                 f"{base}/search/?s={query}&limit=3",
@@ -282,7 +282,7 @@ class _TidalMeta:
     def _search_parallel(self, title: str, artist: str) -> dict | None:
         """
         Interroga le API Tidal in parallelo invece di sequenzialmente.
-        Ritorna al primo risultato valido, cancellando i worker rimasti.
+        Returns al primo risultato valido, cancellando i worker rimasti.
         """
         from urllib.parse import quote
         clean  = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", title).strip() or title
@@ -476,7 +476,7 @@ def enrich_metadata(
 
     Args:
         track_name:  Nome della traccia.
-        artist_name: Artista principale.
+        artist_name: Artist principale.
         isrc:        ISRC (usato da Deezer e Qobuz).
         providers:   Lista ordinata di provider da usare.
         timeout_s:   Timeout massimo globale in secondi (default: 6.0).

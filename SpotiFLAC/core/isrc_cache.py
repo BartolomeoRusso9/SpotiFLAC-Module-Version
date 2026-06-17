@@ -43,7 +43,7 @@ def _save(cache: dict) -> None:
 
 
 def get_cached_isrc(track_id: str) -> str:
-    """Ritorna ISRC cached o stringa vuota."""
+    """Returns ISRC cached o stringa vuota."""
     track_id = track_id.strip()
     if not track_id:
         return ""

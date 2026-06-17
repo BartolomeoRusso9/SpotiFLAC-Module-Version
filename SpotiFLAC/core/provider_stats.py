@@ -93,7 +93,7 @@ class _ProviderStats:
 class ProviderScorer:
     """
     Singleton thread-safe che traccia successi/fallimenti per API URL.
-    Equivalente a recordProviderSuccess/recordProviderFailure del Go.
+    Equivalent a recordProviderSuccess/recordProviderFailure del Go.
     """
     _instance: "ProviderScorer | None" = None
     _lock = threading.Lock()

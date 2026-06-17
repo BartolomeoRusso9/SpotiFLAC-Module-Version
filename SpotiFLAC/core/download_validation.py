@@ -36,9 +36,9 @@ def validate_downloaded_track(
     expected_seconds: int,
 ) -> tuple[bool, str]:
     """
-    Controlla che il file scaricato non sia una preview da 30s.
-    Ritorna (valido, messaggio_errore).
-    Equivalente a ValidateDownloadedTrackDuration() del Go.
+    Controlla che il file sloaded non sia una preview da 30s.
+    Returns (valido, messaggio_errore).
+    Equivalent a ValidateDownloadedTrackDuration() del Go.
     """
     if not filepath or expected_seconds <= 0:
         return True, ""
@@ -72,7 +72,7 @@ def validate_downloaded_track(
             return False, msg
 
     if expected_seconds > 0 and expected_seconds < _PREVIEW_EXPECTED_MIN:
-        # Se il file scaricato dura meno del 60% della durata attesa, è chiaramente troncato
+        # Se il file sloaded dura meno del 60% della durata attesa, è chiaramente troncato
         if actual_s < (expected_seconds * 0.6):
             msg = (
                 f"Durata errata (brano corto troncato): file è {actual_s}s, "
@@ -86,6 +86,6 @@ def validate_downloaded_track(
 def _remove_file(filepath: str) -> None:
     try:
         os.remove(filepath)
-        logger.warning("[validation] File rimosso: %s", filepath)
+        logger.warning("[validation] File removed: %s", filepath)
     except OSError as exc:
-        logger.warning("[validation] Impossibile rimuovere %s: %s", filepath, exc)
+        logger.warning("[validation] Unable to remove %s: %s", filepath, exc)

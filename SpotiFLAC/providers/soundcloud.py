@@ -423,12 +423,12 @@ class SoundCloudProvider(BaseProvider):
         elif kind == "user":
             return data.get("username", "Unknown Artist"), self._get_user_tracks_list(data.get("id"))
             
-        raise ValueError(f"Tipo URL SoundCloud non supportato: {kind}")
+        raise ValueError(f"SoundCloud URL type not supported: {kind}")
 
     def get_metadata_from_url(self, url: str) -> TrackMetadata:
         _, tracks = self.get_url(url)
         if not tracks:
-            raise ValueError(f"Nessuna traccia trovata per: {url}")
+            raise ValueError(f"No tracks found for: {url}")
         return tracks[0]
 
     # ==========================================
@@ -612,7 +612,7 @@ class SoundCloudProvider(BaseProvider):
             )
             embed_metadata(str(dest), metadata, opts, session=self.session)
         except Exception as exc:
-            logger.warning("[SC] embed_metadata failed (file salvato senza tag): %s", exc)
+            logger.warning("[SC] embed_metadata failed (file saved senza tag): %s", exc)
 
         logger.info("[SC] Completed: %s", dest.name)
         return DownloadResult.ok(self.name, str(dest), fmt="mp3")

@@ -9,7 +9,7 @@ _DOWNLOAD_URL = "https://ffmpeg.org/download.html"
 
 def check_ffmpeg() -> dict:
     """
-    Ritorna dict con chiavi:
+    Returns dict con chiavi:
       available (bool), version (str), error (str)
     """
     result = {"available": False, "version": "", "error": ""}
@@ -39,7 +39,7 @@ def check_ffmpeg() -> dict:
 
 
 def print_ffmpeg_warning(result: dict | None = None) -> dict:
-    """Stampa avviso CLI se ffmpeg manca. Ritorna il dict del check."""
+    """Stampa avviso CLI se ffmpeg manca. Returns il dict del check."""
     if result is None:
         result = check_ffmpeg()
 
