@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.swp
+
+# Virtual environments
+.venv/
+venv/
+.env
+.env.*
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests and temporary files
+tests/
+*.log
+*.tmp
+*.bak
+
+# Downloads and local output
+Downloads/
+output/
+
+# Docker-related
+frontend/
+.dockerignore

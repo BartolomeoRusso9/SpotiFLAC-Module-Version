@@ -22,7 +22,6 @@ pip install SpotiFLAC
 ```
 
 ---
-
 ## Quick Start
 
 The easiest way to use SpotiFLAC is through the Graphical User Interface. Just run the command without any arguments:
@@ -32,8 +31,32 @@ spotiflac
 > (Or python launcher.py if running from source)
 
 ---
-## Interactive Mode
+## Docker Usage
 
+A CLI-focused Docker image is available for running SpotiFLAC without the desktop GUI.
+
+Build the image:
+```bash
+docker build -t spotiflac .
+```
+
+Run a download with a mounted local output directory:
+```bash
+docker run --rm -v "$(pwd)/downloads:/app/downloads" spotiflac \
+  https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT \
+  ./downloads -s tidal -q LOSSLESS
+```
+
+The Docker image is intended for CLI mode only; it does not launch the webview GUI.
+
+For interactive terminal mode, run with `-it`:
+```bash
+docker run --rm -it -v "$(pwd)/downloads:/app/downloads" spotiflac \
+  --interactive
+```
+
+---
+## Interactive Mode
 SpotiFLAC features a smart Interactive Wizard that guides you step-by-step. To launch the wizard, use the `--interactive` flag:
 ```bash
 spotiflac --interactive
@@ -44,7 +67,7 @@ On launch it automatically runs a **service health check** before asking any que
 
 **What the wizard does at startup:**
 
-1. **Service Health Check** — probes all provider endpoints and shows availability inline (✅ / ❌) before asking anything
+1. **Service Health Check** — probes provider endpoints and shows provider availability inline (✅ / ❌) before asking anything
 2. **URL History** — shows your last 8 downloads so you can re-run one with a single keypress
 3. **Folder Memory** — remembers your last output directory and offers it as the default
 4. **Profile Load** — optionally restores a full saved configuration
@@ -159,7 +182,7 @@ print("Available providers:", working)
 spotiflac https://open.spotify.com/track/... ./out --service tidal qobuz
 ```
 
-The health check runs **in parallel** with a configurable timeout (default: 5 s per endpoint) and never blocks your download if a check fails.
+The health check runs **in parallel** with a configurable timeout (default: 5 s per endpoint) and never blocks your download if a check fails. In the GUI, the check reports provider-level availability and endpoint counts, without exposing individual raw endpoint URLs.
 
 ---
 

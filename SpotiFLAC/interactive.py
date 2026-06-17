@@ -765,6 +765,7 @@ def run_interactive() -> dict:
 
     # ── 11. Optional Qobuz Local API ───────────────────────────────────────────────
     _section("12 · Optional Qobuz Local API")
+    print(f"  {DIM('For a self-hosted Qobuz API, visit: https://github.com/BartolomeoRusso9/qobuz-api')}")
     cfg["qobuz_local_api_url"] = _ask(
         "Qobuz local API URL (leave blank to skip)",
         cfg.get("qobuz_local_api_url", "") or "",
