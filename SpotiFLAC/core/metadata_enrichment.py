@@ -202,22 +202,8 @@ class _AppleMusicMeta:
 # Provider: Tidal — ottimizzato con ricerca parallela e API list cached
 # ---------------------------------------------------------------------------
 
-_TIDAL_APIS_BUILTIN = [
-    "https://eu-central.monochrome.tf",
-    "https://us-west.monochrome.tf",
-    "https://api.monochrome.tf",
-    "https://monochrome-api.samidy.com",
-    "https://tidal-api.binimum.org",
-    "https://tidal.kinoplus.online",
-    "https://triton.squid.wtf",
-    "https://vogel.qqdl.site",
-    "https://maus.qqdl.site",
-    "https://hund.qqdl.site",
-    "https://katze.qqdl.site",
-    "https://wolf.qqdl.site",
-    "https://hifi-one.spotisaver.net",
-    "https://hifi-two.spotisaver.net",
-]
+# Built-in Tidal API list removed for privacy. Use get_tidal_api_list() or populate registry.
+_TIDAL_APIS_BUILTIN = []
 
 
 class _TidalMeta:

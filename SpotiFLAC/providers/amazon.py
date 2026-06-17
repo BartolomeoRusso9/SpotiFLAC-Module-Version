@@ -405,8 +405,8 @@ class AmazonProvider(BaseProvider):
  
         _squid_ep = get_amazon_endpoint("squid")
         parsed = urlparse(_squid_ep) if _squid_ep else None
-        origin = f"{parsed.scheme}://{parsed.netloc}" if parsed and parsed.scheme and parsed.netloc else "https://amz.squid.wtf"
-        referer = f"{origin}/"
+        origin = f"{parsed.scheme}://{parsed.netloc}" if parsed and parsed.scheme and parsed.netloc else ""
+        referer = f"{origin}/" if origin else ""
         _h = {
             "accept":       "*/*",
             "content-type": "application/json",

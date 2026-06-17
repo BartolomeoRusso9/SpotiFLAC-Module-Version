@@ -220,11 +220,11 @@ async def _check_one(
         # Iniezione degli header richiesti da FlacDownloader per aggirare il blocco
         if "flacdownloader.com" in url or "/prepare" in url:
             parsed = urlparse(url)
-            origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else "https://flacdownloader.com"
+            origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
             req_kwargs["headers"].update({
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
                 "Accept": "application/json",
-                "Referer": f"{origin}/it/download"
+                "Referer": f"{origin}/it/download" if origin else ""
             })
 
         # Payload standard per l'API di Deezer
