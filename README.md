@@ -87,6 +87,28 @@ docker run --rm -it -v "$(pwd)/downloads:/app/downloads" spotiflac \
   --interactive
 ```
 
+Published image (GHCR)
+
+Official images are published to GitHub Container Registry (GHCR) via GitHub Actions. You can pull them with:
+
+```bash
+# Replace `<OWNER>` with the GitHub user or org that owns this repo
+docker pull ghcr.io/<OWNER>/SpotiFLAC-Module-Version:latest
+# example:
+docker pull ghcr.io/ShuShuzinhuu/SpotiFLAC-Module-Version:latest
+```
+
+Run a pulled image:
+
+```bash
+docker run --rm -v "$(pwd)/downloads:/app/downloads" ghcr.io/ShuShuzinhuu/SpotiFLAC-Module-Version:latest \
+    https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT ./downloads -s tidal -q LOSSLESS
+```
+
+Notes:
+- The GHCR workflow publishes multi-arch images and uses `GITHUB_TOKEN` for authentication, so no extra Docker credentials are required for the automated push.
+- Replace `<OWNER>` in the pull command with the repository owner (username or org).
+
 ---
 
 ```python
