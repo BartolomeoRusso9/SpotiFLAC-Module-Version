@@ -84,13 +84,30 @@ def print_summary(total: int, succeeded: int, failed: list[tuple[str, str, str]]
 
 def print_api_failure(provider: str, api: str, reason: str) -> None:
     with tqdm.get_lock():
-        tqdm.write(f"  ✗  {provider}  ·  {_shorten_api(api)}  ·  {_clean_error(reason)}", file=sys.stderr)
+        tqdm.write(
+            f"  ✗  {provider}  ·  {_shorten_api(provider, api)}  ·  {_clean_error(reason)}",
+            file=sys.stderr,
+        )
 
 def print_quality_fallback(provider: str, from_q: str, to_q: str) -> None:
     with tqdm.get_lock():
         tqdm.write(f"  ⬇  {provider}: quality {from_q} unavailable — falling back to {to_q}", file=sys.stderr)
 
-def _shorten_api(url: str) -> str:
+def _shorten_api(provider: str, url: str) -> str:
+    if provider.lower() == "qobuz":
+        return "stream API"
+    if provider.lower() == "tidal":
+        return "Tidal API"
+    if provider.lower() == "amazon":
+        return "Amazon API"
+    if provider.lower() == "deezer":
+        return "Deezer API"
+    if provider.lower() == "apple":
+        return "Apple Music API"
+    if provider.lower() == "soundcloud":
+        return "SoundCloud API"
+    if provider.lower() == "youtube":
+        return "YouTube API"
     return url.removeprefix("https://").removeprefix("http://").split("/")[0]
 
 def _fmt_seconds(s: float) -> str:

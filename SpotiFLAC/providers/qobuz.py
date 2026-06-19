@@ -72,7 +72,21 @@ _QOBUZ_DL_: list[str]           = get_qobuz_endpoints("dl")
 _POST_APIS: list[str]           = get_qobuz_endpoints("post")
 _GDSTUDIO_APIS: list[str]       = get_qobuz_endpoints("gdstudio")
 _WJHE_APIS: list[str]           = get_qobuz_endpoints("wjhe")
-_FLACDOWNLOADER_APIS: list[str] = get_qobuz_endpoints("flacdownloader")
+_flacdownloader_raw = get_qobuz_endpoints("flacdownloader")
+_FLACDOWNLOADER_APIS: list[str] = (
+    [_flacdownloader_raw] if isinstance(_flacdownloader_raw, str) and _flacdownloader_raw
+    else list(_flacdownloader_raw) if isinstance(_flacdownloader_raw, list)
+    else []
+)
+_COMMUNITY_APIS: list[str] = []
+try:
+    _community_raw = get_qobuz_endpoints("community")
+    if isinstance(_community_raw, str) and _community_raw:
+        _COMMUNITY_APIS = [_community_raw]
+    elif isinstance(_community_raw, list):
+        _COMMUNITY_APIS = _community_raw
+except Exception:
+    pass
 
 _QUALITY_FALLBACK: dict[str, list[str]] = {
     "27":              ["27", "7", "6"],
@@ -332,6 +346,40 @@ def _parse_retry_after(resp: httpx.Response) -> float | None:
 _gdstudio_ts9_cache: dict[str, tuple[str, float]] = {}
 _gdstudio_ts9_lock  = threading.Lock()
 
+_fd_token_cache: dict[str, tuple[str, float]] = {}
+_fd_token_lock  = threading.Lock()
+_bad_stream_urls:      set[str]       = set()
+_bad_stream_urls_lock: threading.Lock = threading.Lock()
+_dns_failed_hosts:      set[str]       = set()
+_dns_failed_hosts_lock: threading.Lock = threading.Lock()
+
+def _get_fd_token(
+        client:    httpx.Client,
+        origin:    str,
+        headers:   dict,
+        timeout_s: int,
+) -> str:
+    now = time.time()
+    with _fd_token_lock:
+        cached = _fd_token_cache.get(origin)
+        if cached and (now - cached[1]) < 55.0:   # token valido ~60s
+            return cached[0]
+
+    prep_resp = client.get(f"{origin}/prepare", headers=headers, timeout=timeout_s)
+    if prep_resp.status_code == 429:
+        raise RuntimeError("rate limited (HTTP 429) su /prepare")
+    if prep_resp.status_code != 200:
+        raise RuntimeError(f"HTTP {prep_resp.status_code} su /prepare (fd)")
+
+    t_token = prep_resp.json().get("t")
+    if not t_token:
+        raise RuntimeError("fd /prepare: nessun token 't'")
+
+    with _fd_token_lock:
+        _fd_token_cache[origin] = (t_token, now)
+
+    return t_token
+
 def _get_gdstudio_ts9(host: str) -> str:
     now = time.time()
     with _gdstudio_ts9_lock:
@@ -376,9 +424,9 @@ def _fetch_stream_url_once(
     is_gdstudio = "gdstudio" in api_cleaning
     is_wjhe = "wjhe.top" in api_cleaning
     is_squid = "squid.wtf" in api_cleaning
-    is_flacdownloader = "/prepare" in api_cleaning
+    is_fd = "flacdownloader.com" in api_cleaning
     
-    is_post = api_base in _POST_APIS or is_zarz or is_gdstudio or is_flacdownloader
+    is_post = api_base in _POST_APIS or api_base in _COMMUNITY_APIS or is_zarz or is_gdstudio or is_fd
     max_retries = _MAX_RETRIES_POST if is_post else _MAX_RETRIES_GET
 
     headers = {
@@ -437,33 +485,26 @@ def _fetch_stream_url_once(
                     if loc and loc.startswith("http"):
                         return loc
 
-            elif is_flacdownloader:
-                prep_url = f"{api_cleaning}/prepare"
-                prep_resp = client.get(prep_url, headers=headers, timeout=timeout_s)
-                
-                if prep_resp.status_code == 429:
-                    resp = prep_resp  # Lascia che il ciclo esterno gestisca il 429
-                elif prep_resp.status_code != 200:
-                    raise RuntimeError(f"HTTP {prep_resp.status_code} su /prepare (FlacDownloader)")
-                else:
-                    t_token = prep_resp.json().get("t")
-                    if not t_token:
-                        raise RuntimeError("FlacDownloader /prepare ha fallito: nessun token 't'")
+            elif is_fd:
+                _parsed_fd  = urlparse(api_cleaning)
+                base_origin = f"{_parsed_fd.scheme}://{_parsed_fd.netloc}"
 
-                    dl_url = f"{api_cleaning}/qobuz-asset"
-                    fd_headers = headers.copy()
-                    fd_headers["X-Dl-Token"] = t_token
-                    fd_headers["Referer"] = f"{api_cleaning}/it/download"
+                t_token = _get_fd_token(client, base_origin, headers, timeout_s)
 
-                    fmt_map = {"27": 27, "7": 7, "6": 6, "5": 5, "HI_RES_LOSSLESS": 27, "HI_RES": 7, "LOSSLESS": 6}
-                    fmt_id = fmt_map.get(quality, 7) # Di default tenta HI_RES
+                fd_headers = headers.copy()
+                fd_headers["X-Dl-Token"] = t_token
+                fd_headers["Referer"]    = f"{base_origin}/it/download"
 
-                    payload_fd = {
-                        "url": f"https://open.qobuz.com/track/{track_id}",
-                        "formatId": fmt_id
-                    }
+                fmt_map = {"27": 27, "7": 7, "6": 6, "5": 5,
+                        "HI_RES_LOSSLESS": 27, "HI_RES": 7, "LOSSLESS": 6}
+                fmt_id  = fmt_map.get(quality, 7)
 
-                    resp = client.post(dl_url, json=payload_fd, headers=fd_headers, timeout=timeout_s)
+                payload_fd = {
+                    "url":      f"https://open.qobuz.com/track/{track_id}",
+                    "formatId": fmt_id,
+                }
+
+                resp = client.post(api_cleaning, json=payload_fd, headers=fd_headers, timeout=timeout_s)
 
             elif is_squid:
                 import struct
@@ -622,6 +663,11 @@ def _fetch_stream_url_once(
 
         except (httpx.TimeoutException, httpx.ConnectError) as exc: 
             last_err = exc
+            if isinstance(exc, httpx.ConnectError) and "nodename nor servname" in str(exc):
+                host = urlparse(api_base).netloc
+                with _dns_failed_hosts_lock:
+                    _dns_failed_hosts.add(host)
+                break
             continue
         except RuntimeError:
             raise
@@ -647,7 +693,12 @@ def _fetch_stream_url_parallel(
     start  = time.time()
     errors: list[str] = []
 
-    pool = ThreadPoolExecutor(max_workers=min(len(apis), 4))
+    with _dns_failed_hosts_lock:
+        dead = frozenset(_dns_failed_hosts)
+    available_apis = [a for a in apis if urlparse(a).netloc not in dead]
+    if not available_apis:
+        available_apis = apis  # fallback se tutti morti
+    pool = ThreadPoolExecutor(max_workers=min(len(available_apis), 4))
     try:
         futures: dict[Future, str] = {
             pool.submit(_fetch_stream_url_once, client, api, track_id, quality, timeout_s, local_api_url): api
@@ -865,7 +916,7 @@ class QobuzProvider(BaseProvider):
             
         chain = _QUALITY_FALLBACK.get(quality, [quality])
         
-        all_apis = list(_STREAM_APIS) + list(_POST_APIS) + list(_GDSTUDIO_APIS) + list(_WJHE_APIS) + list(_FLACDOWNLOADER_APIS)
+        all_apis = list(_STREAM_APIS) + list(_QOBUZ_DL_) + list(_POST_APIS) + list(_COMMUNITY_APIS) + list(_GDSTUDIO_APIS) + list(_WJHE_APIS) + list(_FLACDOWNLOADER_APIS)
         ordered_apis = prioritize_providers("qobuz", all_apis)
 
         if self._local_api_url:
@@ -912,6 +963,37 @@ class QobuzProvider(BaseProvider):
             return int(float(subprocess.check_output(cmd, text=True).strip()))
         except Exception:
             return 0
+        
+    def _search_by_text_with_duration(self, title: str, artist: str, target_duration_s: int) -> dict | None:
+        query = f"{title} {artist}".strip()
+        try:
+            resp = self._do_signed_get("track/search", {"query": query, "limit": "20"})
+            if resp.status_code != 200:
+                return None
+            items = resp.json().get("tracks", {}).get("items", [])
+            if not items:
+                return None
+
+            best_match = None
+            best_score = float("inf")
+
+            for item in items:
+                qobuz_dur = item.get("duration", 0)
+                if qobuz_dur == 0:
+                    continue
+                diff = abs(qobuz_dur - target_duration_s)
+                if diff < best_score:
+                    best_score = diff
+                    best_match = item
+
+            # Accetta solo se entro 15s di differenza
+            if best_match and best_score <= 15:
+                return best_match
+            return None
+
+        except Exception as exc:
+            logger.debug("[qobuz] duration-aware search failed: %s", exc)
+            return None
 
     def download_track(
             self,
@@ -959,6 +1041,25 @@ class QobuzProvider(BaseProvider):
             track_id = track.get("id")
             if not track_id:
                 raise TrackNotFoundError(self.name, "Missing track ID in Qobuz response")
+            
+            if metadata.duration_ms > 0:
+                qobuz_duration_s = track.get("duration", 0)
+                expected_s = metadata.duration_ms // 1000
+                if qobuz_duration_s > 0 and abs(qobuz_duration_s - expected_s) > 15:
+                    logger.warning(
+                        "[qobuz] track_id=%s has duration %ds, expected %ds — attempting duration-aware search",
+                        track_id, qobuz_duration_s, expected_s,
+                    )
+                    # Forza ricerca testuale con durata target
+                    alt_track = self._search_by_text_with_duration(
+                        metadata.title, metadata.artists, expected_s
+                    )
+                    if alt_track:
+                        alt_duration = alt_track.get("duration", 0)
+                        if abs(alt_duration - expected_s) < abs(qobuz_duration_s - expected_s):
+                            logger.info("[qobuz] found alternative version: track_id=%s duration=%ds", alt_track.get("id"), alt_duration)
+                            track = alt_track
+                            track_id = track.get("id")
                 
             album_data = track.get("album", {})
             images = album_data.get("image", {})
@@ -1061,7 +1162,28 @@ class QobuzProvider(BaseProvider):
                         )
                     raise exc
 
-                self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
+                # Skip immediato se URL già noto invalido
+                with _bad_stream_urls_lock:
+                    is_bad_url = stream_url in _bad_stream_urls
+                if is_bad_url:
+                    logger.warning("[qobuz] stream URL already known-bad, blacklisting API and skipping download")
+                    record_failure("qobuz", winner_api)
+                    excluded_apis.add(winner_api)
+                    last_err = "stream URL already known-bad"
+                    continue
+
+                self._http.stream_to_file(
+                    stream_url,
+                    str(dest),
+                    self._progress_cb,
+                    extra_headers={
+                        "User-Agent":      _DEFAULT_UA,
+                        "Accept":          "audio/flac, audio/*, */*",
+                        "Accept-Encoding": "identity",
+                        "Referer":         "https://open.qobuz.com/",
+                        "Origin":          "https://open.qobuz.com",
+                    },
+                )
 
                 valid, err = validate_downloaded_track(str(dest), expected_s)
                 if not valid:
@@ -1069,8 +1191,10 @@ class QobuzProvider(BaseProvider):
                     if actual_duration > 0 and actual_duration <= 35 and expected_s > 45:
                         err = "Preview-length audio detected (30s limit)"
                         
-                    logger.warning("[qobuz] API %s returned invalid file: %s. Blacklisting endpoint and retrying...", _shorten_api_url(winner_api), err)
-                    record_failure("qobuz", winner_api)  
+                    logger.warning("[qobuz] stream API returned invalid file: %s. Blacklisting endpoint and retrying...", err)
+                    with _bad_stream_urls_lock:
+                        _bad_stream_urls.add(stream_url)
+                    record_failure("qobuz", winner_api)
                     excluded_apis.add(winner_api)
                     last_err = err
                     
@@ -1099,8 +1223,8 @@ class QobuzProvider(BaseProvider):
                     message = str(exc).lower()
                     if exc.kind == ErrorKind.FILE_IO and "not a valid flac file" in message:
                         logger.warning(
-                            "[qobuz] API %s returned invalid FLAC file: %s. Blacklisting endpoint and retrying...",
-                            winner_api, exc,
+                            "[qobuz] stream API returned invalid FLAC file: %s. Blacklisting endpoint and retrying...",
+                            exc,
                         )
                         record_failure("qobuz", winner_api)
                         excluded_apis.add(winner_api)
