@@ -1,15 +1,19 @@
 """
-MusicBrainz API Client (Ported from Go implementation)
-Gestisce rate-limiting globale, caching, deduplicazione in-flight e retry.
+MusicBrainz API Client — versione originale sync + nuova variante async (Phase 2).
+La variante async usa asyncio.Event per deduplicazione in-flight invece di threading.Event.
 """
 from __future__ import annotations
+
+import asyncio
 import logging
-import httpx
 import threading
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 import atexit as _atexit
+
+import httpx
+
 from .http import NetworkManager
 import threading as _threading
 
@@ -24,9 +28,6 @@ _MB_THROTTLE_COOLDOWN    = 5.0
 
 _USER_AGENT = "SpotiFLAC/2.0 ( support@spotbye.qzz.io )"
 
-# FIX: sentinel per distinguere "lookup fallito" da "lookup non ancora avvenuto".
-# Prima, quando il leader thread falliva, i follower ricevevano {} dal get() sulla
-# cache vuota, senza modo di sapere se fosse un fallimento o un risultato legittimo.
 _LOOKUP_FAILED = object()
 
 _mb_cache: dict[str, object] = {}
@@ -35,9 +36,21 @@ _mb_cache_order: list[str] = []
 _mb_inflight: dict[str, threading.Event] = {}
 _mb_inflight_mu = threading.Lock()
 
-_mb_throttle_mu = threading.Lock()
-_mb_next_request: float = 0.0
-_mb_blocked_till: float = 0.0
+# --- Async in-flight state (Phase 2) ---
+_mb_inflight_async: dict[str, asyncio.Event] = {}
+_mb_inflight_async_lock: asyncio.Lock | None = None  # lazy init
+
+
+def _get_async_inflight_lock() -> asyncio.Lock:
+    global _mb_inflight_async_lock
+    if _mb_inflight_async_lock is None:
+        _mb_inflight_async_lock = asyncio.Lock()
+    return _mb_inflight_async_lock
+
+
+_mb_throttle_mu    = threading.Lock()
+_mb_next_request:  float = 0.0
+_mb_blocked_till:  float = 0.0
 
 _mb_status_lock        = _threading.Lock()
 _mb_last_checked_at:   float = 0.0
@@ -73,11 +86,32 @@ def _wait_for_request_slot() -> None:
         if ready_at < now:
             ready_at = now
 
-        _mb_next_request = ready_at + _MB_MIN_REQ_INTERVAL
-        wait_duration = ready_at - now
+        _mb_next_request      = ready_at + _MB_MIN_REQ_INTERVAL
+        wait_duration         = ready_at - now
 
     if wait_duration > 0:
         time.sleep(wait_duration)
+
+
+async def _wait_for_request_slot_async() -> None:
+    """Async-safe throttle per MusicBrainz (Phase 2)."""
+    global _mb_next_request
+
+    with _mb_throttle_mu:
+        ready_at = _mb_next_request
+        if _mb_blocked_till > ready_at:
+            ready_at = _mb_blocked_till
+
+        now = time.time()
+        if ready_at < now:
+            ready_at = now
+
+        _mb_next_request  = ready_at + _MB_MIN_REQ_INTERVAL
+        wait_duration     = ready_at - now
+
+    if wait_duration > 0:
+        await asyncio.sleep(wait_duration)
+
 
 def _note_throttle() -> None:
     global _mb_blocked_till, _mb_next_request
@@ -88,53 +122,145 @@ def _note_throttle() -> None:
         if _mb_next_request < _mb_blocked_till:
             _mb_next_request = _mb_blocked_till
 
-def _query_recordings(query: str) -> dict:
-    url = f"{_MB_API_BASE}/recording?query={urllib.parse.quote(query)}&fmt=json&inc=releases+artist-credits+tags+media+release-groups+labels+label-info+isrcs"
-    headers = {
-        "User-Agent": _USER_AGENT,
-        "Accept": "application/json"
-    }
 
+def _query_recordings(query: str) -> dict:
+    url = (
+        f"{_MB_API_BASE}/recording"
+        f"?query={urllib.parse.quote(query)}"
+        f"&fmt=json&inc=releases+artist-credits+tags+media+release-groups+labels+label-info+isrcs"
+    )
+    headers  = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
     last_err = Exception("Empty response")
-    client = NetworkManager.get_sync_client() # <--- Inizializza il nuovo client
+    client   = NetworkManager.get_sync_client()
 
     for attempt in range(_MB_RETRIES):
         _wait_for_request_slot()
-
         try:
-            # Usa il client corretto
             resp = client.get(url, headers=headers, timeout=_MB_TIMEOUT)
-
             if resp.status_code == 200:
                 return resp.json()
-
             if resp.status_code == 503:
                 _note_throttle()
-
             last_err = Exception(f"HTTP {resp.status_code}")
-
             if 400 <= resp.status_code < 500 and resp.status_code != 429:
                 break
-
-        except httpx.RequestError as e: # <--- Eccezione nativa di httpx
+        except httpx.RequestError as e:
             last_err = e
-
         if attempt < _MB_RETRIES - 1:
             time.sleep(_MB_RETRY_WAIT)
 
     raise last_err
+
+
+def _parse_mb_response(data: dict) -> dict:
+    """Logica di parsing estratta per riutilizzo da sync e async."""
+    parsed: dict = {
+        "genre": "", "original_date": "", "bpm": "", "mbid_track": "",
+        "mbid_album": "", "mbid_artist": "", "mbid_relgroup": "",
+        "mbid_albumartist": "", "albumartist_sort": "", "catalognumber": "",
+        "label": "", "barcode": "", "organization": "",
+        "country": "", "script": "", "status": "",
+        "media": "", "type": "", "artist_sort": ""
+    }
+
+    recs = data.get("recordings", [])
+    if not recs:
+        return parsed
+
+    rec = recs[0]
+    parsed["mbid_track"]    = rec.get("id", "")
+    parsed["original_date"] = rec.get("first-release-date", "")
+    parsed["bpm"]           = str(rec.get("bpm", "")) if rec.get("bpm") else ""
+
+    credits = rec.get("artist-credit", [])
+    if credits:
+        artist_ids  = []
+        sort_names  = []
+        for c in credits:
+            artist_obj = c.get("artist", {})
+            a_id   = artist_obj.get("id")
+            a_sort = artist_obj.get("sort-name", "")
+            phrase = c.get("joinphrase", "")
+            if a_id:   artist_ids.append(a_id)
+            if a_sort: sort_names.append(a_sort + phrase)
+        parsed["mbid_artist"] = "; ".join(artist_ids)
+        parsed["artist_sort"] = "".join(sort_names)
+
+    all_tags = rec.get("tags", [])
+    for c in credits:
+        all_tags.extend(c.get("artist", {}).get("tags", []))
+    if all_tags:
+        sorted_tags = sorted(all_tags, key=lambda x: x.get("count", 0), reverse=True)
+        genres = []
+        for t in sorted_tags:
+            name = t.get("name", "").title()
+            if name and name not in genres:
+                genres.append(name)
+        parsed["genre"] = "; ".join(genres[:5])
+
+    releases = rec.get("releases", [])
+    if releases:
+        def _release_score(r: dict) -> int:
+            score = 0
+            if r.get("barcode"):     score += 2
+            if r.get("label-info"): score += 2
+            if r.get("country"):    score += 1
+            if r.get("status") == "Official": score += 1
+            return score
+
+        rel = max(releases, key=_release_score)
+        parsed["mbid_album"]    = rel.get("id", "")
+        parsed["mbid_relgroup"] = rel.get("release-group", {}).get("id", "")
+        parsed["status"]        = rel.get("status", "")
+        parsed["type"]          = rel.get("release-group", {}).get("primary-type", "")
+        parsed["country"]       = rel.get("country", "")
+        parsed["script"]        = rel.get("text-representation", {}).get("script", "")
+        media                   = rel.get("media", [])
+        if media:
+            parsed["media"] = media[0].get("format", "")
+
+        rel_credits = rel.get("artist-credit", [])
+        if rel_credits:
+            aa_ids        = []
+            aa_sort_names = []
+            for c in rel_credits:
+                artist_obj = c.get("artist", {})
+                a_id   = artist_obj.get("id")
+                a_sort = artist_obj.get("sort-name", "")
+                phrase = c.get("joinphrase", "")
+                if a_id:   aa_ids.append(a_id)
+                if a_sort: aa_sort_names.append(a_sort + phrase)
+            parsed["mbid_albumartist"] = "; ".join(aa_ids)
+            parsed["albumartist_sort"] = "".join(aa_sort_names)
+
+        for r in releases:
+            if not parsed.get("barcode") and r.get("barcode"):
+                parsed["barcode"] = r["barcode"]
+            for li in r.get("label-info", []):
+                lbl = li.get("label") or {}
+                if not parsed.get("label") and lbl.get("name"):
+                    parsed["label"]        = lbl["name"]
+                    parsed["organization"] = lbl["name"]
+                if not parsed.get("catalognumber") and li.get("catalog-number"):
+                    parsed["catalognumber"] = li["catalog-number"]
+            if parsed.get("barcode") and parsed.get("label") and parsed.get("catalognumber"):
+                break
+
+    return parsed
+
+
+# ---------------------------------------------------------------------------
+# Sync fetch_mb_metadata (invariato)
+# ---------------------------------------------------------------------------
 
 def fetch_mb_metadata(isrc: str) -> dict:
     if not isrc:
         return {}
 
     cache_key = isrc.strip().upper()
-
-    # FIX: controlla il cache con il sentinel.
-    cached = _mb_cache.get(cache_key)
+    cached    = _mb_cache.get(cache_key)
     if cached is not None:
-        # Se era un lookup fallito, restituiamo {} senza ritentare
-        return {} if cached is _LOOKUP_FAILED else cached  # type: ignore[return-value]
+        return {} if cached is _LOOKUP_FAILED else cached  # type: ignore
 
     if should_skip_mb():
         logger.debug("[musicbrainz] skipped (offline recently)")
@@ -142,125 +268,28 @@ def fetch_mb_metadata(isrc: str) -> dict:
 
     with _mb_inflight_mu:
         if cache_key in _mb_inflight:
-            event = _mb_inflight[cache_key]
-            is_leader = False
+            event      = _mb_inflight[cache_key]
+            is_leader  = False
         else:
-            event = threading.Event()
+            event      = threading.Event()
             _mb_inflight[cache_key] = event
-            is_leader = True
+            is_leader  = True
 
     if not is_leader:
         event.wait()
-        # FIX: controlla il sentinel anche per i follower
         result = _mb_cache.get(cache_key)
-        return {} if (result is None or result is _LOOKUP_FAILED) else result  # type: ignore[return-value]
+        return {} if (result is None or result is _LOOKUP_FAILED) else result  # type: ignore
 
-    res: dict | object = _LOOKUP_FAILED  # Default: lookup fallito
-
+    res: dict | object = _LOOKUP_FAILED
     try:
         data = _query_recordings(f"isrc:{isrc}")
         set_mb_status(True)
-
-        parsed: dict = {
-            "genre": "", "original_date": "", "bpm": "", "mbid_track": "",
-            "mbid_album": "", "mbid_artist": "", "mbid_relgroup": "",
-            "mbid_albumartist": "", "albumartist_sort": "", "catalognumber": "",
-            "label": "", "barcode": "", "organization": "",
-            "country": "", "script": "", "status": "",
-            "media": "", "type": "", "artist_sort": ""
-        }
-
-        recs = data.get("recordings", [])
-        if recs:
-            rec = recs[0]
-            parsed["mbid_track"] = rec.get("id", "")
-            parsed["original_date"] = rec.get("first-release-date", "")
-            parsed["bpm"] = str(rec.get("bpm", "")) if rec.get("bpm") else ""
-
-            credits = rec.get("artist-credit", [])
-            if credits:
-                artist_ids = []
-                sort_names = []
-                for c in credits:
-                    artist_obj = c.get("artist", {})
-                    a_id = artist_obj.get("id")
-                    a_sort = artist_obj.get("sort-name", "")
-                    phrase = c.get("joinphrase", "")
-                    if a_id: artist_ids.append(a_id)
-                    if a_sort: sort_names.append(a_sort + phrase)
-                parsed["mbid_artist"] = "; ".join(artist_ids)
-                parsed["artist_sort"] = "".join(sort_names)
-
-            all_tags = rec.get("tags", [])
-            for c in credits:
-                all_tags.extend(c.get("artist", {}).get("tags", []))
-            if all_tags:
-                sorted_tags = sorted(all_tags, key=lambda x: x.get("count", 0), reverse=True)
-                genres = []
-                for t in sorted_tags:
-                    name = t.get("name", "").title()
-                    if name and name not in genres: genres.append(name)
-                parsed["genre"] = "; ".join(genres[:5])
-
-            releases = rec.get("releases", [])
-            if releases:
-                def _release_score(r: dict) -> int:
-                    score = 0
-                    if r.get("barcode"): score += 2
-                    if r.get("label-info"): score += 2
-                    if r.get("country"): score += 1
-                    if r.get("status") == "Official": score += 1
-                    return score
-
-                rel = max(releases, key=_release_score)
-                parsed["mbid_album"]    = rel.get("id", "")
-                parsed["mbid_relgroup"] = rel.get("release-group", {}).get("id", "")
-                parsed["status"]        = rel.get("status", "")
-                parsed["type"]          = rel.get("release-group", {}).get("primary-type", "")
-                parsed["country"]       = rel.get("country", "")
-                parsed["script"]        = rel.get("text-representation", {}).get("script", "")
-                media = rel.get("media", [])
-                if media:
-                    parsed["media"] = media[0].get("format", "")
-
-                rel_credits = rel.get("artist-credit", [])
-                if rel_credits:
-                    aa_ids = []
-                    aa_sort_names = []
-                    for c in rel_credits:
-                        artist_obj = c.get("artist", {})
-                        a_id   = artist_obj.get("id")
-                        a_sort = artist_obj.get("sort-name", "")
-                        phrase = c.get("joinphrase", "")
-                        if a_id:   aa_ids.append(a_id)
-                        if a_sort: aa_sort_names.append(a_sort + phrase)
-                    parsed["mbid_albumartist"] = "; ".join(aa_ids)
-                    parsed["albumartist_sort"] = "".join(aa_sort_names)
-
-                for r in releases:
-                    if not parsed.get("barcode") and r.get("barcode"):
-                        parsed["barcode"] = r["barcode"]
-                    for li in r.get("label-info", []):
-                        lbl = li.get("label") or {}
-                        if not parsed.get("label") and lbl.get("name"):
-                            parsed["label"]        = lbl["name"]
-                            parsed["organization"] = lbl["name"]
-                        if not parsed.get("catalognumber") and li.get("catalog-number"):
-                            parsed["catalognumber"] = li["catalog-number"]
-                    if parsed.get("barcode") and parsed.get("label") and parsed.get("catalognumber"):
-                        break
-
-        res = parsed  # Lookup riuscito
-
+        res  = _parse_mb_response(data)
     except Exception as e:
         set_mb_status(False)
         logger.debug("[musicbrainz] lookup failed: %s", e)
         res = _LOOKUP_FAILED
-
     finally:
-        # FIX: salva sempre qualcosa in cache (anche il sentinel di fallimento)
-        # così i follower non devono aspettare e i retry inutili vengono evitati
-        # finché MB non torna online (gestito da should_skip_mb).
         _mb_cache[cache_key] = res
         try:
             _mb_cache_order.append(cache_key)
@@ -273,11 +302,95 @@ def fetch_mb_metadata(isrc: str) -> dict:
         with _mb_inflight_mu:
             _mb_inflight.pop(cache_key, None)
 
-    return {} if res is _LOOKUP_FAILED else res  # type: ignore[return-value]
+    return {} if res is _LOOKUP_FAILED else res  # type: ignore
+
+
+# ---------------------------------------------------------------------------
+# Async fetch_mb_metadata_async (Phase 2 — nuovo)
+# ---------------------------------------------------------------------------
+
+async def fetch_mb_metadata_async(isrc: str) -> dict:
+    """
+    Versione async di fetch_mb_metadata.
+    Usa asyncio.Event per deduplicazione in-flight invece di threading.Event.
+    Stessa logica di caching della versione sync.
+    """
+    if not isrc:
+        return {}
+
+    cache_key = isrc.strip().upper()
+    cached    = _mb_cache.get(cache_key)
+    if cached is not None:
+        return {} if cached is _LOOKUP_FAILED else cached  # type: ignore
+
+    if should_skip_mb():
+        logger.debug("[musicbrainz] async: skipped (offline recently)")
+        return {}
+
+    inflight_lock = _get_async_inflight_lock()
+
+    async with inflight_lock:
+        if cache_key in _mb_inflight_async:
+            event = _mb_inflight_async[cache_key]
+            await event.wait()
+            result = _mb_cache.get(cache_key)
+            return {} if (result is None or result is _LOOKUP_FAILED) else result  # type: ignore
+
+        event = asyncio.Event()
+        _mb_inflight_async[cache_key] = event
+
+    res: dict | object = _LOOKUP_FAILED
+    try:
+        await _wait_for_request_slot_async()
+
+        client = NetworkManager.get_async_client()
+        url    = (
+            f"{_MB_API_BASE}/recording"
+            f"?query={urllib.parse.quote(f'isrc:{isrc}')}"
+            f"&fmt=json&inc=releases+artist-credits+tags+media+release-groups+labels+label-info+isrcs"
+        )
+        headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+
+        for attempt in range(_MB_RETRIES):
+            try:
+                resp = await client.get(url, headers=headers, timeout=_MB_TIMEOUT)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    res  = _parse_mb_response(data)
+                    set_mb_status(True)
+                    break
+                if resp.status_code == 503:
+                    _note_throttle()
+                if 400 <= resp.status_code < 500 and resp.status_code != 429:
+                    break
+            except Exception as exc:
+                logger.debug("[musicbrainz] async attempt %d failed: %s", attempt + 1, exc)
+
+            if attempt < _MB_RETRIES - 1:
+                await asyncio.sleep(_MB_RETRY_WAIT)
+
+    except Exception as e:
+        set_mb_status(False)
+        logger.debug("[musicbrainz] async lookup failed: %s", e)
+        res = _LOOKUP_FAILED
+    finally:
+        _mb_cache[cache_key] = res
+        try:
+            _mb_cache_order.append(cache_key)
+            if len(_mb_cache_order) > _MB_CACHE_MAX:
+                old = _mb_cache_order.pop(0)
+                _mb_cache.pop(old, None)
+        except Exception:
+            pass
+        event.set()
+        async with inflight_lock:
+            _mb_inflight_async.pop(cache_key, None)
+
+    return {} if res is _LOOKUP_FAILED else res  # type: ignore
 
 
 def mb_result_to_tags(res: dict) -> dict[str, str]:
-    """Converte il dizionario di risposta di MusicBrainz nei tag standard supportati da SpotiFLAC."""
+    """Converte il dizionario di risposta di MusicBrainz nei tag standard."""
     if not res:
         return {}
 
@@ -299,7 +412,7 @@ def mb_result_to_tags(res: dict) -> dict[str, str]:
         "albumartist_sort": "ALBUMARTISTSORT",
         "catalognumber":    "CATALOGNUMBER",
         "bpm":              "BPM",
-        "genre":            "GENRE"
+        "genre":            "GENRE",
     }
 
     tags = {}
@@ -315,6 +428,12 @@ def mb_result_to_tags(res: dict) -> dict[str, str]:
         tags["CATALOGNUMBER"] = res["catalognumber"]
 
     return tags
+
+
+# ---------------------------------------------------------------------------
+# AsyncMBFetch — helper che wrappa ThreadPoolExecutor (backward compat)
+# Per i provider già migrati ad async, usare direttamente fetch_mb_metadata_async.
+# ---------------------------------------------------------------------------
 
 class AsyncMBFetch:
     _executor: ThreadPoolExecutor | None = ThreadPoolExecutor(max_workers=4)
@@ -339,14 +458,13 @@ class AsyncMBFetch:
         try:
             self.future = self._get_executor().submit(fetch_mb_metadata, isrc)
         except RuntimeError:
-            # executor spento e non ancora ricreato — retry
             self.future = self._get_executor().submit(fetch_mb_metadata, isrc)
 
     def result(self, timeout: float | None = None) -> dict:
-        """Blocca fino al completamento del fetch e ritorna il risultato."""
         try:
             return self.future.result(timeout=timeout)
         except Exception:
             return {}
+
 
 _atexit.register(AsyncMBFetch._shutdown)
