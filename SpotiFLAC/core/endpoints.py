@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 _SEED_PARTS = [b"spotif", b"lac:co", b"mmunity:url:v1"]
 _AAD = b"spotiflac|community|url|v1"
 
-_CLOUD_URL = "https://gist.githubusercontent.com/BartolomeoRusso9/0b857131a77131be2c7b2b0131c3f2cf/raw/28f149e3e90a6a3783e72e91be7f84b8c811be45/gistfile1.txt"
+_CLOUD_URL = "https://gist.githubusercontent.com/BartolomeoRusso9/0b857131a77131be2c7b2b0131c3f2cf/raw/gistfile1.txt"
 
 _CACHE_FILE = os.path.join(os.path.dirname(__file__), ".endpoints_cache.txt")
 
@@ -110,3 +110,56 @@ def get_health_zarz_url() -> str:
 def get_community_url(provider: str) -> str:
     """Returns l'URL Community se esiste nel registro, altrimenti stringa vuota."""
     return REGISTRY.get(provider, {}).get("community", "")
+
+def _jwt_payload(token: str) -> dict:
+    """
+    Decodifica (senza verificare la firma) il payload di un JWT
+    'Bearer <header>.<payload>.<signature>'. Usata solo per leggere
+    campi informativi come 'exp', non per validare l'autenticità.
+    """
+    try:
+        raw = token.removeprefix("Bearer ").strip()
+        parts = raw.split(".")
+        if len(parts) != 3:
+            return {}
+        payload_b64 = parts[1]
+        # JWT usa base64url senza padding: va ripristinato prima di decodificare.
+        padding = "=" * (-len(payload_b64) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64 + padding)
+        return json.loads(payload_bytes.decode("utf-8"))
+    except Exception:
+        return {}
+
+def get_monochrome_token() -> str:
+    """
+    Ritorna il token (con prefisso 'Bearer ') letto dal registro cifrato.
+    Se il token è un JWT con campo 'exp', verifica la scadenza e logga un
+    warning se è già scaduto o scade entro 24 ore — non viene effettuato
+    alcun refresh automatico: il rinnovo resta manuale (rigenerare e
+    pubblicare un nuovo Gist cifrato).
+    """
+    import time
+
+    token = REGISTRY.get("monochrome-token", {}).get("token", "")
+    if not token:
+        return token
+
+    payload = _jwt_payload(token)
+    exp = payload.get("exp")
+    if isinstance(exp, (int, float)):
+        now = time.time()
+        if exp <= now:
+            expired_since = now - exp
+            logger.debug(
+                "Token già scaduto da %.0f ore — "
+                "il proxy Tidal probabilmente risponderà 401. "
+                "Rigenerare il token e aggiornare il Gist.",
+                expired_since / 3600,
+            )
+        elif exp - now <= 86400:
+            logger.debug(
+                "Token in scadenza entro 24 ore (alle %s UTC).",
+                time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(exp)),
+            )
+
+    return token
