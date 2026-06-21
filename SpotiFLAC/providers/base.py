@@ -66,7 +66,6 @@ class BaseProvider(ABC):
     # Interface methods — subclasses must implement
     # ------------------------------------------------------------------
 
-    @abstractmethod
     def download_track(
             self,
             metadata:   TrackMetadata,
@@ -85,13 +84,48 @@ class BaseProvider(ABC):
             is_album:             bool = False,
             **kwargs,
     ) -> DownloadResult | Awaitable[DownloadResult]:
-        """
-        Scarica la track e ritorna un DownloadResult.
+        own_async_is_overridden = (
+            type(self).download_track_async is not BaseProvider.download_track_async
+        )
 
-        IMPORTANTE: le implementazioni NON devono propagare eccezioni al caller;
-        should catch them and return DownloadResult.fail(...) in caso di errore.
-        """
-        raise NotImplementedError
+        if not own_async_is_overridden:
+            raise NotImplementedError(
+                f"{type(self).__name__} non implementa né download_track (sync) "
+                f"né download_track_async: deve sovrascrivere almeno uno dei due."
+            )
+
+        coro = self.download_track_async(
+            metadata,
+            output_dir,
+            filename_format=filename_format,
+            position=position,
+            include_track_num=include_track_num,
+            use_album_track_num=use_album_track_num,
+            first_artist_only=first_artist_only,
+            allow_fallback=allow_fallback,
+            embed_lyrics=embed_lyrics,
+            lyrics_providers=lyrics_providers,
+            enrich_metadata=enrich_metadata,
+            enrich_providers=enrich_providers,
+            is_album=is_album,
+            **kwargs,
+        )
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # Nessun event loop attivo nel thread corrente: possiamo usare asyncio.run.
+            return asyncio.run(coro)
+        else:
+            # Già dentro un event loop: non possiamo bloccare con asyncio.run.
+            # Eseguiamo la coroutine in un nuovo loop su un thread separato.
+            import concurrent.futures
+
+            def _run_in_new_loop():
+                return asyncio.run(coro)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(_run_in_new_loop).result()
 
     async def download_track_async(
             self,
@@ -111,12 +145,13 @@ class BaseProvider(ABC):
             is_album:             bool = False,
             **kwargs,
     ) -> DownloadResult:
-        """
-        Async wrapper for provider download_track.
-        If the provider implements async download_track, await it. Otherwise run it in a thread.
-        """
-        if inspect.iscoroutinefunction(self.download_track) or self._is_async:
-            result = self.download_track(
+        own_sync_is_overridden = (
+            type(self).download_track is not BaseProvider.download_track
+        )
+
+        if own_sync_is_overridden:
+            return await asyncio.to_thread(
+                self.download_track,
                 metadata,
                 output_dir,
                 filename_format=filename_format,
@@ -132,26 +167,12 @@ class BaseProvider(ABC):
                 is_album=is_album,
                 **kwargs,
             )
-            if inspect.isawaitable(result):
-                return await result
-            return result
 
-        return await asyncio.to_thread(
-            self.download_track,
-            metadata,
-            output_dir,
-            filename_format=filename_format,
-            position=position,
-            include_track_num=include_track_num,
-            use_album_track_num=use_album_track_num,
-            first_artist_only=first_artist_only,
-            allow_fallback=allow_fallback,
-            embed_lyrics=embed_lyrics,
-            lyrics_providers=lyrics_providers,
-            enrich_metadata=enrich_metadata,
-            enrich_providers=enrich_providers,
-            is_album=is_album,
-            **kwargs,
+        # Né download_track né download_track_async sono stati sovrascritti
+        # dalla sottoclasse: configurazione non valida del provider.
+        raise NotImplementedError(
+            f"{type(self).__name__} non implementa download_track_async "
+            f"né download_track: deve sovrascrivere almeno uno dei due."
         )
 
     # ------------------------------------------------------------------
@@ -209,8 +230,3 @@ class BaseProvider(ABC):
         )
         stdout, stderr = await proc.communicate()
         return proc.returncode, stdout.decode(errors="ignore"), stderr.decode(errors="ignore")
-
-    # FIX: rimosso _safe_download — era codice morto.
-    # Nessun provider lo chiamava: tutti invocano download_track() direttamente.
-    # Il pattern corretto è che download_track() catchi le eccezioni internamente
-    # e ritorni DownloadResult.fail(), come da docstring qui sopra.
