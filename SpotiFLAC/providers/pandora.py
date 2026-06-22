@@ -21,16 +21,16 @@ from typing import Callable, Any
 from urllib.parse import urlparse, urlencode, quote, unquote
 
 import httpx
-from ..core.http import NetworkManager, RetryConfig, async_songlink_rate_limiter, songlink_rate_limiter
+from ..core.http import NetworkManager, RetryConfig, async_songlink_rate_limiter
 from .base import BaseProvider
 from ..core.console import print_source_banner
-from ..core.download_validation import validate_downloaded_track
 from ..core.errors import SpotiflacError, ErrorKind, TrackNotFoundError
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.tagger import embed_metadata, _print_mb_summary, EmbedOptions
 from ..core.endpoints import get_pandora_base_and_path
 from ..core.quality import normalize_quality
+from ..core.download_validation import validate_downloaded_track_async
 
 logger = logging.getLogger(__name__)
 
@@ -813,156 +813,7 @@ class PandoraProvider(BaseProvider):
 
         return _normalize_pandora_canonical_url(pandora_url, resolved_id)
 
-    # ------------------------------------------------------------------
-    # BaseProvider.download_track
-    # ------------------------------------------------------------------
-
-    def download_track(
-            self,
-            metadata:            TrackMetadata,
-            output_dir:          str,
-            *,
-            filename_format:     str              = "{title} - {artist}",
-            position:            int              = 1,
-            include_track_num:   bool             = False,
-            use_album_track_num: bool             = False,
-            first_artist_only:   bool             = False,
-            allow_fallback:      bool             = True,
-            quality:             str              = "mp3_192",
-            embed_lyrics:        bool             = False,
-            lyrics_providers:    list[str] | None = None,
-            enrich_metadata:     bool             = False,
-            enrich_providers:    list[str] | None = None,
-            qobuz_token:         str | None       = None,
-            is_album:            bool             = False,
-            **kwargs,
-    ) -> DownloadResult:
-        try:
-            pandora_track_id = str(metadata.id or "").strip()
-
-            if metadata.external_url and "pandora.com" in metadata.external_url:
-                download_url = _normalize_secure_url(metadata.external_url)
-            elif pandora_track_id:
-                resolve_input = (
-                    metadata.external_url
-                    if metadata.external_url and metadata.external_url.startswith("http")
-                    else pandora_track_id
-                )
-                download_url = _normalize_secure_url(
-                    self._normalize_pandora_track_url(resolve_input)
-                )
-            else:
-                return DownloadResult.fail(self.name, "No Pandora track ID or URL available")
-
-            # Assicuriamo che dest_mp3 sia un oggetto pathlib.Path
-            dest_mp3 = Path(self._build_output_path(
-                metadata, output_dir, filename_format,
-                position, include_track_num, use_album_track_num,
-                first_artist_only, extension=".mp3",
-            ))
-            dest_m4a = dest_mp3.with_suffix(".m4a")
-
-            for candidate in (dest_mp3, dest_m4a):
-                if self._file_exists(candidate):
-                    fmt = "mp3" if candidate.suffix == ".mp3" else "m4a"
-                    return DownloadResult.skipped_result(self.name, str(candidate), fmt=fmt)
-
-            mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
-
-            pan_base, pan_path = get_pandora_base_and_path()
-            pan_full_url = f"{pan_base}{pan_path}"
-
-            print_source_banner("pandora", "", quality)
-
-            zarz_id = _extract_pandora_track_id(download_url)
-            safe_api_url = _build_pandora_url(zarz_id) if zarz_id else download_url
-
-            payload = self._post_json(
-                pan_full_url,
-                {"url": safe_api_url},
-            )
-
-            if not payload or payload.get("success") is not True:
-                error_msg = "Pandora API request failed"
-                err_data = payload.get("error")
-                if isinstance(err_data, dict):
-                    error_msg = err_data.get("message", error_msg)
-                elif isinstance(err_data, str):
-                    error_msg = err_data
-                return DownloadResult.fail(self.name, error_msg)
-
-            cdn_links = payload.get("cdnLinks", {})
-            # Accept canonical quality values; Pandora expects mp3_192/aac_64/aac_32 tokens
-            q_norm = normalize_quality(quality) if isinstance(quality, str) else quality
-            pandora_token = None
-            if q_norm == "HIGH":
-                pandora_token = "mp3_192"
-            elif q_norm == "LOW":
-                pandora_token = "aac_32"
-            else:
-                # Default to mp3_192 for anything lossless/unknown
-                pandora_token = "mp3_192"
-
-            selected  = _select_quality_link(cdn_links, pandora_token)
-
-            if not selected or not selected.get("url"):
-                if allow_fallback:
-                    for fallback_q in ("mp3_192", "aac_64", "aac_32"):
-                        if fallback_q != quality:
-                            selected = _select_quality_link(cdn_links, fallback_q)
-                            if selected and selected.get("url"):
-                                logger.info("[pandora] Quality fallback: %s → %s", quality, fallback_q)
-                                break
-                                
-                if not selected or not selected.get("url"):
-                    return DownloadResult.fail(self.name, "No downloadable Pandora stream available")
-
-            stream_url = _normalize_secure_url(selected["url"])
-            ext        = _output_extension_for_link(selected)
-            fmt_str    = "mp3" if ext == ".mp3" else "m4a"
-
-            dest = dest_mp3.with_suffix(ext)
-
-            os.makedirs(output_dir, exist_ok=True)
-            self._http.stream_to_file(
-                stream_url,
-                str(dest),
-                self._progress_cb,
-                extra_headers={"User-Agent": _ua_for_url(stream_url)}
-            )
-
-            expected_s = metadata.duration_ms // 1000
-            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
-            if not valid:
-                raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
-
-            mb_tags: dict[str, str] = {}
-            if mb_fetcher:
-                mb_result = mb_fetcher.future.result()
-                mb_tags   = mb_result_to_tags(mb_result)
-                _print_mb_summary(mb_tags)
-
-            opts = EmbedOptions(
-                first_artist_only  = first_artist_only,
-                cover_url          = metadata.cover_url,
-                embed_lyrics       = embed_lyrics,
-                lyrics_providers   = lyrics_providers or [],
-                enrich             = enrich_metadata,
-                enrich_providers   = enrich_providers,
-                enrich_qobuz_token = qobuz_token or "",
-                is_album           = is_album,
-                extra_tags         = mb_tags,
-            )
-            embed_metadata(str(dest), metadata, opts, session=self._session)
-
-            return DownloadResult.ok(self.name, str(dest), fmt=fmt_str)
-
-        except SpotiflacError as exc:
-            logger.error("[pandora] %s", exc)
-            return DownloadResult.fail(self.name, str(exc))
-        except Exception as exc:
-            logger.exception("[pandora] Unexpected error")
-            return DownloadResult.fail(self.name, f"Unexpected: {exc}")
+    # ----------------------------------------
 
     async def download_track_async(
             self,
@@ -1072,7 +923,7 @@ class PandoraProvider(BaseProvider):
             )
 
             expected_s = metadata.duration_ms // 1000
-            valid, err_msg = await asyncio.to_thread(validate_downloaded_track, str(dest), expected_s)
+            valid, err_msg = await validate_downloaded_track_async(str(dest), expected_s)
             if not valid:
                 raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
 

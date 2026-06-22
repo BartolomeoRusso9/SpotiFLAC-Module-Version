@@ -1,11 +1,9 @@
 # backend/core/download_validation.py
-"""
-Port di download_validation.go — rileva preview da 30s e mismatch di durata.
-"""
 from __future__ import annotations
 import logging
 import os
-import subprocess
+import asyncio
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -16,22 +14,32 @@ _MIN_ALLOWED_DIFF         = 15
 _DURATION_DIFF_RATIO      = 0.25
 
 
-def _get_audio_duration(filepath: str) -> float:
+async def _get_audio_duration_async(filepath: str) -> float:
     try:
-        result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
-             "-show_format", filepath],
-            capture_output=True, text=True,
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", filepath,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
-        import json
-        data = json.loads(result.stdout)
+        stdout, _ = await proc.communicate()
+        
+        data = json.loads(stdout.decode('utf-8'))
         return float(data.get("format", {}).get("duration", 0))
     except Exception as exc:
-        logger.warning("[validation] No ffprobe found. Error: %s", exc)
+        logger.warning("[validation] No ffprobe found or error. Error: %s", exc)
         return 0.0
 
 
-def validate_downloaded_track(
+async def _remove_file_async(filepath: str) -> None:
+    try:
+        # La rimozione di file è I/O bloccante, lo deleghiamo a un thread
+        await asyncio.to_thread(os.remove, filepath)
+        logger.warning("[validation] File removed: %s", filepath)
+    except OSError as exc:
+        logger.warning("[validation] Unable to remove %s: %s", filepath, exc)
+
+
+async def validate_downloaded_track_async(
     filepath:         str,
     expected_seconds: int,
 ) -> tuple[bool, str]:
@@ -43,7 +51,7 @@ def validate_downloaded_track(
     if not filepath or expected_seconds <= 0:
         return True, ""
 
-    actual = _get_audio_duration(filepath)
+    actual = await _get_audio_duration_async(filepath)
     if actual <= 0:
         return True, ""
 
@@ -52,10 +60,10 @@ def validate_downloaded_track(
     # Caso 1: preview da 30s su brano lungo
     if expected_seconds >= _PREVIEW_EXPECTED_MIN and actual_s <= _PREVIEW_MAX_SECONDS:
         msg = (
-            f"Preview rilevata: file è {actual_s}s, "
-            f"attesi ~{expected_seconds}s — file rimosso"
+            f"Preview: file is {actual_s}s, "
+            f"expected ~{expected_seconds}s — file rimosso"
         )
-        _remove_file(filepath)
+        await _remove_file_async(filepath)
         return False, msg
 
     # Caso 2: mismatch grande su brani lunghi
@@ -65,27 +73,19 @@ def validate_downloaded_track(
         diff = abs(actual_s - expected_seconds)
         if diff > allowed:
             msg = (
-                f"Durata errata: file è {actual_s}s, "
-                f"attesi ~{expected_seconds}s — file rimosso"
+                f"Durata errata: file is {actual_s}s, "
+                f"expected ~{expected_seconds}s — file rimosso"
             )
-            _remove_file(filepath)
+            await _remove_file_async(filepath)
             return False, msg
 
     if expected_seconds > 0 and expected_seconds < _PREVIEW_EXPECTED_MIN:
-        # Se il file sloaded dura meno del 60% della durata attesa, è chiaramente troncato
         if actual_s < (expected_seconds * 0.6):
             msg = (
-                f"Durata errata (brano corto troncato): file è {actual_s}s, "
-                f"attesi ~{expected_seconds}s — file rimosso"
+                f"Durata errata (brano corto troncato): file is {actual_s}s, "
+                f"expected ~{expected_seconds}s — file rimosso"
             )
-            _remove_file(filepath)
+            await _remove_file_async(filepath)
             return False, msg
+            
     return True, ""
-
-
-def _remove_file(filepath: str) -> None:
-    try:
-        os.remove(filepath)
-        logger.warning("[validation] File removed: %s", filepath)
-    except OSError as exc:
-        logger.warning("[validation] Unable to remove %s: %s", filepath, exc)

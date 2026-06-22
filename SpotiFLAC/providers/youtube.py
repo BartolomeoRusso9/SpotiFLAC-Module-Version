@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import asyncio
 from pathlib import Path
 from typing import Any, Callable, Iterator
 from urllib.parse import quote, urlparse, parse_qs
@@ -15,11 +16,10 @@ from ..core.http import NetworkManager
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError
 from .base import BaseProvider
-from ..core.tagger import embed_metadata, EmbedOptions
+from ..core.tagger import embed_metadata_async, EmbedOptions
 from ..core.musicbrainz import mb_result_to_tags
-from ..core.download_validation import validate_downloaded_track
+from ..core.download_validation import validate_downloaded_track_async
 from ..core.musicbrainz import AsyncMBFetch
-# FIXED IMPORT:
 from ..core.endpoints import get_youtube_endpoints
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,6 @@ _DEFAULT_UA = (
     "Chrome/120.0.0.0 Safari/537.36"
 )
 
-# Parametri InnerTube allineati al JS
 YT_SEARCH_PARAMS_TRACKS = "EgWKAQIIAQ=="
 INNERTUBE_CLIENT_VERSION = "1.20240801.01.00"
 
@@ -44,20 +43,14 @@ class YouTubeProvider(BaseProvider):
 
     def __init__(self, timeout_s: int = 120) -> None:
         super().__init__(timeout_s=timeout_s)
-        self._session = NetworkManager.get_sync_client()
+        self._session = NetworkManager.get_async_client()
         self._session.headers.update({"User-Agent": _DEFAULT_UA})
         self._enrichment_cache: dict[str, dict] = {}
-
-    # YouTube receives canonical quality; backend chooses best available via yt-dlp.
 
     def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
         super().set_progress_callback(cb)
 
-    # ------------------------------------------------------------------
-    # URL Detection & Resolution (Playlist, Album, Artist, Track)
-    # ------------------------------------------------------------------
-
-    def get_url(self, url: str) -> tuple[str, list[TrackMetadata]]:
+    async def get_url_async(self, url: str) -> tuple[str, list[TrackMetadata]]:
         parsed = urlparse(url)
         qs = parse_qs(parsed.query)
 
@@ -67,56 +60,44 @@ class YouTubeProvider(BaseProvider):
 
         if "/browse/" in parsed.path:
             browse_id = parsed.path.split("/browse/")[1].split("?")[0]
-            return self._fetch_container(browse_id)
+            return await self._fetch_container_async(browse_id)
 
         if playlist_id:
             browse_id = playlist_id if playlist_id.startswith(("VL", "PL")) else f"VL{playlist_id}"
-            return self._fetch_container(browse_id)
+            return await self._fetch_container_async(browse_id)
 
         video_id = self._extract_video_id(url)
         if video_id:
-            meta = self._get_single_track_metadata(video_id)
+            meta = await self._get_single_track_metadata_async(video_id)
             return meta.title, [meta]
 
         raise ValueError(f"URL YouTube non supportato o non riconosciuto: {url}")
 
-    def _get_single_track_metadata(self, video_id: str) -> TrackMetadata:
+    async def _get_single_track_metadata_async(self, video_id: str) -> TrackMetadata:
         url = "https://music.youtube.com/youtubei/v1/player?alt=json"
         payload = {
             "context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}},
             "videoId": video_id
         }
         
-        resp = self._session.post(url, json=payload, timeout=10)
+        resp = await self._session.post(url, json=payload, timeout=10)
         resp.raise_for_status()
         data = resp.json()
 
         details = data.get("videoDetails", {})
         title = details.get("title", "Unknown")
         artist = details.get("author", "Unknown Artist")
-        # FIXED: Safe casting to integer in case API returns None or empty string
         duration = int(details.get("lengthSeconds") or 0) * 1000
 
         thumbs = details.get("thumbnail", {}).get("thumbnails", [])
         cover_url = thumbs[-1].get("url") if thumbs else ""
 
         return TrackMetadata(
-            id=video_id,
-            title=title,
-            artists=artist,
-            album_artist=artist,
-            album="YouTube",
-            duration_ms=duration,
-            cover_url=cover_url,
-            external_url=f"https://music.youtube.com/watch?v={video_id}",
-            extra_info={"provider": "youtube"}
+            id=video_id, title=title, artists=artist, album_artist=artist, album="YouTube",
+            duration_ms=duration, cover_url=cover_url, external_url=f"https://music.youtube.com/watch?v={video_id}", extra_info={"provider": "youtube"}
         )
 
-    # ------------------------------------------------------------------
-    # InnerTube API Fetchers per Container (Playlist/Album)
-    # ------------------------------------------------------------------
-
-    def _fetch_container(self, browse_id: str) -> tuple[str, list[TrackMetadata]]:
+    async def _fetch_container_async(self, browse_id: str) -> tuple[str, list[TrackMetadata]]:
         logger.info("[youtube] Fetching container: %s", browse_id)
 
         url = "https://music.youtube.com/youtubei/v1/browse?alt=json"
@@ -125,7 +106,7 @@ class YouTubeProvider(BaseProvider):
             "browseId": browse_id
         }
 
-        resp = self._session.post(url, json=payload, timeout=15)
+        resp = await self._session.post(url, json=payload, timeout=15)
         resp.raise_for_status()
         data = resp.json()
 
@@ -141,13 +122,11 @@ class YouTubeProvider(BaseProvider):
         continuation = self._get_continuation_token(data)
         while continuation:
             logger.debug("[youtube] Fetching continuation...")
-            cont_data = self._fetch_continuation(continuation)
-            if not cont_data: 
-                break
+            cont_data = await self._fetch_continuation_async(continuation)
+            if not cont_data: break
 
             added = self._parse_tracks_from_data(cont_data, tracks)
-            if added == 0: 
-                break
+            if added == 0: break
             
             continuation = self._get_continuation_token(cont_data)
 
@@ -161,48 +140,32 @@ class YouTubeProvider(BaseProvider):
         items = self._find_key_recursive(data, "musicResponsiveListItemRenderer")
 
         for item in items:
-            if not isinstance(item, dict):
-                continue
+            if not isinstance(item, dict): continue
                 
             v_id = item.get("playlistItemData", {}).get("videoId")
-            if not v_id: 
-                continue
+            if not v_id: continue
 
             columns = item.get("flexColumns", [])
             title = "Unknown"
             artist = "Unknown Artist"
             
             if columns and isinstance(columns, list):
-                # Estrazione Titolo
                 first_col = columns[0].get("musicResponsiveListItemFlexColumnRenderer", {})
                 runs = first_col.get("text", {}).get("runs", [])
-                if runs:
-                    title = runs[0].get("text", "Unknown")
+                if runs: title = runs[0].get("text", "Unknown")
 
-                # Estrazione Artist
                 if len(columns) > 1:
                     second_col = columns[1].get("musicResponsiveListItemFlexColumnRenderer", {})
                     artist_runs = second_col.get("text", {}).get("runs", [])
-                    artist_parts = [
-                        r["text"] for r in artist_runs 
-                        if "browseId" in r.get("navigationEndpoint", {}).get("browseEndpoint", {})
-                    ]
-                    if artist_parts:
-                        artist = ", ".join(artist_parts)
+                    artist_parts = [r["text"] for r in artist_runs if "browseId" in r.get("navigationEndpoint", {}).get("browseEndpoint", {})]
+                    if artist_parts: artist = ", ".join(artist_parts)
 
             thumbnails = item.get("thumbnail", {}).get("musicThumbnailRenderer", {}).get("thumbnail", {}).get("thumbnails", [])
             cover = thumbnails[-1].get("url") if thumbnails else ""
 
             track_list.append(TrackMetadata(
-                id=v_id,
-                title=title,
-                artists=artist,
-                album_artist=artist,
-                album="YouTube Music",
-                duration_ms=0,
-                cover_url=cover,
-                external_url=f"https://music.youtube.com/watch?v={v_id}",
-                extra_info={"provider": "youtube"}
+                id=v_id, title=title, artists=artist, album_artist=artist, album="YouTube Music",
+                duration_ms=0, cover_url=cover, external_url=f"https://music.youtube.com/watch?v={v_id}", extra_info={"provider": "youtube"}
             ))
 
         return len(track_list) - count_before
@@ -211,13 +174,11 @@ class YouTubeProvider(BaseProvider):
         tokens = self._find_key_recursive(data, "continuation")
         return next(tokens, None)
 
-    def _fetch_continuation(self, token: str) -> dict | None:
+    async def _fetch_continuation_async(self, token: str) -> dict | None:
         url = f"https://music.youtube.com/youtubei/v1/browse?alt=json&ctoken={quote(token)}&continuation={quote(token)}"
         try:
-            resp = self._session.post(
-                url, 
-                json={"context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}}}, 
-                timeout=10
+            resp = await self._session.post(
+                url, json={"context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}}}, timeout=10
             )
             return resp.json() if resp.is_success else None
         except httpx.RequestError as e: 
@@ -227,108 +188,77 @@ class YouTubeProvider(BaseProvider):
     def _find_key_recursive(self, data: Any, key: str) -> Iterator[Any]:
         if isinstance(data, dict):
             for k, v in data.items():
-                if k == key: 
-                    yield v
-                else: 
-                    yield from self._find_key_recursive(v, key)
+                if k == key: yield v
+                else: yield from self._find_key_recursive(v, key)
         elif isinstance(data, list):
-            for item in data:
-                yield from self._find_key_recursive(item, key)
+            for item in data: yield from self._find_key_recursive(item, key)
 
-    # ------------------------------------------------------------------
-    # Odesli & Deezer Metadata Enrichment (Portato da JS)
-    # ------------------------------------------------------------------
-
-    def _enrich_metadata_with_odesli(self, metadata: TrackMetadata, platform_url: str) -> str | None:
+    async def _enrich_metadata_with_odesli_async(self, metadata: TrackMetadata, platform_url: str) -> str | None:
         api_url = f"https://api.song.link/v1-alpha.1/links?url={quote(platform_url)}"
-        
         try:
-            resp = self._session.get(api_url, timeout=10)
+            resp = await self._session.get(api_url, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
                 links = data.get("linksByPlatform", {})
                 
-                # 1. Retrieves ISRC da Odesli se presente
                 entities = data.get("entitiesByUniqueId", {})
                 for entity_data in entities.values():
                     if not metadata.isrc and entity_data.get("isrc"):
                         metadata.isrc = entity_data.get("isrc")
                         logger.info(f"[youtube] ISRC found via Odesli: {metadata.isrc}")
 
-                # 2. Fallback su API Deezer per ISRC
                 if not metadata.isrc and "deezer" in links:
                     deezer_url = links["deezer"].get("url", "")
                     match = re.search(r'/track/(\d+)', deezer_url)
                     if match:
                         deezer_id = match.group(1)
-                        logger.debug(f"[youtube] ISRC mancante, tento fallback API Deezer (ID: {deezer_id})")
                         try:
-                            dz_resp = self._session.get(f"https://api.deezer.com/track/{deezer_id}", timeout=10)
+                            dz_resp = await self._session.get(f"https://api.deezer.com/track/{deezer_id}", timeout=10)
                             if dz_resp.status_code == 200:
                                 dz_data = dz_resp.json()
-                                if dz_data.get("isrc"):
-                                    metadata.isrc = dz_data["isrc"]
-                                    logger.info(f"[youtube] ISRC retrievesto via fallback Deezer API: {metadata.isrc}")
+                                if dz_data.get("isrc"): metadata.isrc = dz_data["isrc"]
                         except httpx.RequestError as e:
                             logger.warning(f"[youtube] Deezer API fallback network error: {e}")
 
-                # 3. Returns URL YouTube
                 yt_info = links.get("youtubeMusic") or links.get("youtube")
-                if yt_info and yt_info.get("url"):
-                    return yt_info["url"]
+                if yt_info and yt_info.get("url"): return yt_info["url"]
 
-        except httpx.RequestError as exc:
-            logger.warning(f"[youtube] Odesli API enrichTrack network error: {exc}")
         except Exception as exc:
             logger.warning(f"[youtube] Odesli API enrichTrack failed: {exc}")
-        
         return None
 
-    def _get_youtube_url(self, metadata: TrackMetadata) -> str:
-        if metadata.external_url:
-            platform_url = metadata.external_url
-        elif metadata.id.startswith("tidal_"):
-            platform_url = f"https://tidal.com/browse/track/{metadata.id.removeprefix('tidal_')}"
-        elif metadata.id.startswith("spotify:"):
-            platform_url = f"https://open.spotify.com/track/{metadata.id.split(':')[-1]}"
-        else:
-            platform_url = f"https://song.link/s/{metadata.id}"
+    async def _get_youtube_url_async(self, metadata: TrackMetadata) -> str:
+        if metadata.external_url: platform_url = metadata.external_url
+        elif metadata.id.startswith("tidal_"): platform_url = f"https://tidal.com/browse/track/{metadata.id.removeprefix('tidal_')}"
+        elif metadata.id.startswith("spotify:"): platform_url = f"https://open.spotify.com/track/{metadata.id.split(':')[-1]}"
+        else: platform_url = f"https://song.link/s/{metadata.id}"
 
-        yt_url = self._enrich_metadata_with_odesli(metadata, platform_url)
-        if yt_url:
-            logger.info(f"[youtube] URL risolto e metadati arricchiti con successo: {yt_url}")
-            return yt_url
+        yt_url = await self._enrich_metadata_with_odesli_async(metadata, platform_url)
+        if yt_url: return yt_url
 
         if metadata.title and metadata.artists:
-            yt_url = self._search_youtube_direct(metadata.title, metadata.artists)
-            if yt_url:
-                return yt_url
+            yt_url = await self._search_youtube_direct_async(metadata.title, metadata.artists)
+            if yt_url: return yt_url
 
-        raise RuntimeError("Failed to resolve YouTube URL via Odesli API and direct search")
+        raise RuntimeError("Failed to resolve YouTube URL")
 
-    def _search_youtube_direct(self, track_name: str, artist_name: str) -> str | None:
+    async def _search_youtube_direct_async(self, track_name: str, artist_name: str) -> str | None:
         query = f"{track_name} {artist_name}"
         url = "https://music.youtube.com/youtubei/v1/search?alt=json"
 
         payload = {
             "context": {"client": {"clientName": "WEB_REMIX", "clientVersion": INNERTUBE_CLIENT_VERSION}},
-            "query": query,
-            "params": YT_SEARCH_PARAMS_TRACKS
+            "query": query, "params": YT_SEARCH_PARAMS_TRACKS
         }
 
         try:
-            resp = self._session.post(url, json=payload, headers={"User-Agent": _DEFAULT_UA}, timeout=10)
+            resp = await self._session.post(url, json=payload, headers={"User-Agent": _DEFAULT_UA}, timeout=10)
             resp.raise_for_status()
 
             data = resp.json()
             first_vid = next(self._find_key_recursive(data, "videoId"), None)
 
-            if first_vid:
-                video_url = f"https://music.youtube.com/watch?v={first_vid}"
-                logger.info(f"[youtube] Direct search resolved: {video_url}")
-                return video_url
-        except httpx.RequestError as exc:
-            logger.warning(f"[youtube] Direct search network error: {exc}")
+            if first_vid: return f"https://music.youtube.com/watch?v={first_vid}"
         except Exception as exc:
             logger.warning(f"[youtube] Direct search failed: {exc}")
 
@@ -339,17 +269,14 @@ class YouTubeProvider(BaseProvider):
         match = re.search(r'(?:v=|/v/|youtu\.be/|/embed/)([a-zA-Z0-9_-]{11})', url)
         return match.group(1) if match else None
 
-    # ------------------------------------------------------------------
-    # Download URL APIs (Tiered Fallback Allineato al JS)
-    # ------------------------------------------------------------------
-
+    # L'unico metodo lasciato sync perché yt-dlp blocca il sub-process. 
+    # Verrà chiamato tramite asyncio.to_thread!
     def _download_direct_innertube(self, video_id: str, dest_path: str) -> bool:
         def _yt_dlp_progress(d: dict) -> None:
             if d.get('status') == 'downloading':
                 downloaded = d.get('downloaded_bytes', 0)
                 total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
-                if self._progress_cb and total > 0:
-                    self._progress_cb(downloaded, total)
+                if self._progress_cb and total > 0: self._progress_cb(downloaded, total)
 
         class MuteLogger:
             def debug(self, msg: str) -> None: pass
@@ -360,229 +287,131 @@ class YouTubeProvider(BaseProvider):
         out_tmpl = str(Path(dest_path).with_suffix('.%(ext)s'))
 
         ydl_opts = {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-            'noprogress': True,
-            'logger': MuteLogger(),
-            'outtmpl': out_tmpl,
-            'extractor_args': {
-                'youtube': [
-                    'player_client=android,mweb,ios',
-                    'player_skip=webpage,configs,js'
-                ]
-            },
+            'format': 'bestaudio/best', 'quiet': True, 'no_warnings': True, 'noprogress': True,
+            'logger': MuteLogger(), 'outtmpl': out_tmpl,
+            'extractor_args': {'youtube': ['player_client=android,mweb,ios', 'player_skip=webpage,configs,js']},
             'updatetime': False,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'm4a',
-                'preferredquality': '256',
-            }],
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'm4a', 'preferredquality': '256'}],
             'progress_hooks': [_yt_dlp_progress],
         }
 
         url = f"https://www.youtube.com/watch?v={video_id}"
 
         try:
-            logger.info(f"[youtube] Native yt-dlp download (ID: {video_id}) via Android/Mweb/iOS clients...")
-            if os.path.exists(dest_path):
-                os.remove(dest_path)
+            logger.info(f"[youtube] Native yt-dlp download (ID: {video_id})...")
+            if os.path.exists(dest_path): os.remove(dest_path)
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-
-            if os.path.exists(dest_path):
-                return True
-
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
+            if os.path.exists(dest_path): return True
         except Exception as e:
             logger.warning(f"[youtube] yt-dlp error: {e}")
 
         return False
 
-    def _request_cobalt(self, video_url: str) -> str | None:
-        # FIXED: Corrected the function call and normalized to list
+    async def _request_cobalt_async(self, video_url: str) -> str | None:
         cobalt_instances = get_youtube_endpoints("cobalt")
-        if not isinstance(cobalt_instances, list):
-            cobalt_instances = [cobalt_instances] if cobalt_instances else []
+        if not isinstance(cobalt_instances, list): cobalt_instances = [cobalt_instances] if cobalt_instances else []
 
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": _DEFAULT_UA,
-        }
+        headers = {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": _DEFAULT_UA}
 
         for base_url in cobalt_instances:
             try:
-                logger.debug(f"[youtube] Tentativo Cobalt via: {_shorten_api_url(base_url)}")
-                payload_v10 = {
-                    "url": video_url,
-                    "downloadMode": "audio",
-                    "audioFormat": "mp3"
-                }
-                
-                # FIXED: Extracted safely if returned as list; falls back to base_url
+                payload_v10 = {"url": video_url, "downloadMode": "audio", "audioFormat": "mp3"}
                 zarz_data = get_youtube_endpoints("zarz_clean")
-                if isinstance(zarz_data, list):
-                    api_url = zarz_data[0] if zarz_data else base_url
-                else:
-                    api_url = zarz_data or base_url
+                api_url = (zarz_data[0] if zarz_data else base_url) if isinstance(zarz_data, list) else (zarz_data or base_url)
                 
-                resp = self._session.post(api_url, json=payload_v10, headers=headers, timeout=10)
+                resp = await self._session.post(api_url, json=payload_v10, headers=headers, timeout=10)
 
-                # Fallback API v7 (legacy)
                 if resp.status_code == 404:
                     payload_v7 = {"url": video_url, "isAudioOnly": True, "aFormat": "mp3"}
                     api_url = f"{base_url.rstrip('/')}/api/json"
-                    resp = self._session.post(api_url, json=payload_v7, headers=headers, timeout=10)
+                    resp = await self._session.post(api_url, json=payload_v7, headers=headers, timeout=10)
 
                 if resp.status_code in (200, 202):
                     data = resp.json()
                     dl_url = data.get("url") or data.get("audio") or data.get("audioUrl")
-                    if dl_url:
-                        logger.info(f"[youtube] Cobalt URL generato con successo da {_shorten_api_url(api_url)}")
-                        return dl_url
-            except httpx.RequestError as exc:
-                logger.debug(f"[youtube] Error di rete Cobalt su {_shorten_api_url(base_url)}: {exc}")
+                    if dl_url: return dl_url
             except Exception as exc:
                 logger.debug(f"[youtube] Fallimento Cobalt su {_shorten_api_url(base_url)}: {exc}")
 
-        logger.warning("[youtube] Tutti i server Cobalt sono attualmente offline o irraggiungibili.")
         return None
 
-    def _request_yt1d(self, video_url: str) -> str | None:
+    async def _request_yt1d_async(self, video_url: str) -> str | None:
         try:
-            res_config = self._session.get("https://yt1d.io/results/", headers={"User-Agent": _DEFAULT_UA}, timeout=10)
+            res_config = await self._session.get("https://yt1d.io/results/", headers={"User-Agent": _DEFAULT_UA}, timeout=10)
             nonce_match = re.search(r'"nonce"\s*:\s*"([^"]+)"', res_config.text)
-            if not nonce_match: 
-                return None
-            nonce = nonce_match.group(1)
+            if not nonce_match: return None
 
-            payload = {
-                "action": "process_youtube_audio_download",
-                "video_url": video_url,
-                "quality": "m4a",
-                "nonce": nonce
-            }
-            headers = {
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "Origin": "https://yt1d.io",
-                "Referer": "https://yt1d.io/results/",
-                "User-Agent": _DEFAULT_UA
-            }
+            payload = {"action": "process_youtube_audio_download", "video_url": video_url, "quality": "m4a", "nonce": nonce_match.group(1)}
+            headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "Origin": "https://yt1d.io", "Referer": "https://yt1d.io/results/", "User-Agent": _DEFAULT_UA}
             
-            res_audio = self._session.post("https://yt1d.io/wp-admin/admin-ajax.php", data=payload, headers=headers, timeout=15)
+            res_audio = await self._session.post("https://yt1d.io/wp-admin/admin-ajax.php", data=payload, headers=headers, timeout=15)
             if res_audio.status_code == 200:
                 data = res_audio.json()
                 dl_url = data.get("downloadUrl") or data.get("downloadURL") or data.get("url")
-                
                 if not dl_url and data.get("data"):
                     nested = data["data"]
                     dl_url = nested.get("downloadUrl") or nested.get("downloadURL") or nested.get("url")
 
-                if dl_url and dl_url.startswith("http"):
-                    logger.info("[youtube] YT1D URL generated successfully")
-                    return dl_url
-                    
-        except httpx.RequestError as exc:
-            logger.warning(f"[youtube] yt1d fallback network error: {exc}")
+                if dl_url and dl_url.startswith("http"): return dl_url
         except Exception as exc:
             logger.warning(f"[youtube] yt1d fallback failed: {exc}")
-            
         return None
 
-    # ------------------------------------------------------------------
-    # BaseProvider interface
-    # ------------------------------------------------------------------
-
-    def download_track(self, metadata: TrackMetadata, output_dir: str, *, quality: str = "320", filename_format: str = "{title} - {artist}", position: int = 1, include_track_num: bool = False, use_album_track_num: bool = False, first_artist_only: bool = False, allow_fallback: bool = True, embed_lyrics: bool = False, lyrics_providers: list[str] | None = None,  enrich_metadata: bool = False, enrich_providers: list[str] | None = None, qobuz_token: str | None = None, is_album: bool = False, **kwargs) -> DownloadResult:
+    async def download_track_async(self, metadata: TrackMetadata, output_dir: str, *, quality: str = "320", filename_format: str = "{title} - {artist}", position: int = 1, include_track_num: bool = False, use_album_track_num: bool = False, first_artist_only: bool = False, allow_fallback: bool = True, embed_lyrics: bool = False, lyrics_providers: list[str] | None = None,  enrich_metadata: bool = False, enrich_providers: list[str] | None = None, qobuz_token: str | None = None, is_album: bool = False, **kwargs) -> DownloadResult:
         try:
-            dest = self._build_output_path(
-                metadata, output_dir,
-                filename_format=filename_format,
-                position=position,
-                include_track_num=include_track_num,
-                use_album_track_num=use_album_track_num,
-                first_artist_only=first_artist_only,
-                extension=".m4a",
-            )
-            
-            if self._file_exists(dest):
-                return DownloadResult.skipped_result(self.name, str(dest), fmt="m4a")
+            dest = self._build_output_path(metadata, output_dir, filename_format=filename_format, position=position, include_track_num=include_track_num, use_album_track_num=use_album_track_num, first_artist_only=first_artist_only, extension=".m4a")
+            if self._file_exists(dest): return DownloadResult.skipped_result(self.name, str(dest), fmt="m4a")
 
             is_native_yt = metadata.extra_info.get("provider") == "youtube"
             looks_like_yt_id = len(metadata.id) == 11 and not metadata.id.startswith("spotify:")
 
             if is_native_yt or looks_like_yt_id:
-                video_id = metadata.id
-                yt_url = f"https://www.youtube.com/watch?v={video_id}"
+                video_id, yt_url = metadata.id, f"https://www.youtube.com/watch?v={metadata.id}"
             else:
-                yt_url = self._get_youtube_url(metadata)
+                yt_url = await self._get_youtube_url_async(metadata)
                 video_id = self._extract_video_id(yt_url)
 
-            if not video_id:
-                return DownloadResult.fail(self.name, "Could not extract video ID")
+            if not video_id: return DownloadResult.fail(self.name, "Could not extract video ID")
 
             mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
 
             try:
                 from ..core.console import print_source_banner
-                real_quality = "M4A 256kbps"
-                print_source_banner("youtube", "music.youtube.com", real_quality)
-            except ImportError:
-                pass
+                print_source_banner("youtube", "music.youtube.com", "M4A 256kbps")
+            except ImportError: pass
 
             download_success = False
 
-            # 1. Download nativo yt-dlp configurato con i client JS per aggirare PO Tokens
-            if self._download_direct_innertube(video_id, str(dest)):
+            if await asyncio.to_thread(self._download_direct_innertube, video_id, str(dest)):
                 download_success = True
             else:
-                # 2. Fallback su API esterne
-                download_sources = [
-                    ("Cobalt", lambda: self._request_cobalt(yt_url)),
-                    ("YT1D", lambda: self._request_yt1d(yt_url))
-                ]
-
+                download_sources = [("Cobalt", self._request_cobalt_async), ("YT1D", self._request_yt1d_async)]
                 for source_name, get_url_func in download_sources:
-                    dl_url = get_url_func()
-                    if not dl_url:
-                        continue
+                    dl_url = await get_url_func(yt_url) # <-- CORRETTO
+                    if not dl_url: continue
 
                     logger.info(f"[youtube] Attempting download via {source_name}...")
                     try:
-                        headers = {"User-Agent": _DEFAULT_UA}
-                        self._http.stream_to_file(dl_url, str(dest), self._progress_cb, extra_headers=headers)
+                        await self._http.stream_to_file_async(dl_url, str(dest), self._progress_cb, extra_headers={"User-Agent": _DEFAULT_UA})
                         download_success = True
-                        logger.info(f"[youtube] Download successful via {source_name}")
                         break
-
                     except Exception as e:
                         logger.warning(f"[youtube] Download via {source_name} failed: {e}")
                         if os.path.exists(str(dest)):
-                            try:
-                                os.remove(str(dest))
-                            except OSError:
-                                pass
-                        continue
+                            try: os.remove(str(dest))
+                            except OSError: pass
 
             if not download_success:
-                if os.path.exists(str(dest)):
-                    try:
-                        os.remove(str(dest))
-                    except OSError:
-                        pass
-                return DownloadResult.fail(self.name, "All YouTube download sources failed (Direct, Cobalt, YT1D)")
+                return DownloadResult.fail(self.name, "All YouTube download sources failed")
 
-            # Validazione del file finale
             expected_s = metadata.duration_ms // 1000
-            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
-            if not valid:
-                return DownloadResult.fail(self.name, f"Validazione fallita: {err_msg}")
+            valid, err_msg = await validate_downloaded_track_async(str(dest), expected_s)
+            if not valid: return DownloadResult.fail(self.name, f"Validazione fallita: {err_msg}")
 
-            mb_tags: dict[str, str] = {}
+            mb_tags = {}
             if mb_fetcher:
-                res = mb_fetcher.future.result()
+                res = await asyncio.wrap_future(mb_fetcher.future) if hasattr(mb_fetcher.future, 'add_done_callback') else mb_fetcher.future.result()
                 mb_tags = mb_result_to_tags(res)
                 if res:
                     mapping = {
@@ -624,8 +453,7 @@ class YouTubeProvider(BaseProvider):
                 enrich_qobuz_token=qobuz_token or "",
                 is_album=is_album,
             )
-            
-            embed_metadata(str(dest), metadata, opts, session=self._session)
+            await embed_metadata_async(str(dest), metadata, opts, session=self._session)
 
             return DownloadResult.ok(self.name, str(dest), fmt="m4a")
 

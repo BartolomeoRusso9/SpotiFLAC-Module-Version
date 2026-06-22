@@ -1013,7 +1013,7 @@ class SpotiFLAC_API:
             daemon=True,
         ).start()
 
-    def _fetch_metadata_task(self, url):
+    async def _fetch_metadata_task(self, url):
         try:
             self.set_progress("Recupero metadati…")
             self.log(f"Analisi input: {url}", "info")
@@ -1191,7 +1191,7 @@ class SpotiFLAC_API:
             self.set_progress("Ready for download.")
 
             try:
-                from .core.session_memory import add_url_to_history
+                from .core.session_memory import add_url_to_history_async
                 _lower = url.lower()
                 if '/track/' in _lower or _lower.startswith('spotify:track:') or 'watch?v=' in _lower or 'youtu.be' in _lower:
                     _url_type = 'track'
@@ -1205,8 +1205,8 @@ class SpotiFLAC_API:
                     _url_type = ''
                 
                 _artist = getattr(tracks[0], 'artists', '') if tracks and _url_type == 'track' else ''
-                add_url_to_history(url, label=collection_name, cover=cover,
-                                   track_count=len(tracks), url_type=_url_type, artist=_artist)
+                await add_url_to_history_async(url, label=collection_name, cover=cover,
+                                              track_count=len(tracks), url_type=_url_type, artist=_artist)
             except Exception:
                 pass
 

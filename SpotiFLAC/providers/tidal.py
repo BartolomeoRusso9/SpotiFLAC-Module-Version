@@ -28,7 +28,7 @@ except ImportError:
 
 from .base import BaseProvider
 from ..core.console import print_api_failure, print_quality_fallback, print_source_banner
-from ..core.download_validation import validate_downloaded_track
+from ..core.download_validation import validate_downloaded_track_async
 from ..core.errors import ErrorKind, ParseError, SpotiflacError, TrackNotFoundError
 from ..core.http import NetworkManager, RetryConfig, async_zarz_rate_limiter
 from ..core.link_resolver import LinkResolver
@@ -946,14 +946,14 @@ class TidalProvider(BaseProvider):
         return await asyncio.to_thread(self._resolve_via_songlink, spotify_track_id)
 
     async def _get_download_url_async(self, track_id: int, quality: str) -> str:
-        from ..core.provider_stats import prioritize_providers, record_success
+        from ..core.provider_stats import prioritize_providers_async, record_success
 
         try:
             rotated = get_rotated_tidal_api_list()
         except Exception:
             rotated = self._apis
 
-        ordered = prioritize_providers("tidal", rotated)
+        ordered = await prioritize_providers_async("tidal", rotated)
         if self._apis and self._apis[0] not in ordered:
             ordered = [self._apis[0]] + ordered
         elif self._apis and ordered and self._apis[0] != ordered[0]:
@@ -1247,7 +1247,7 @@ class TidalProvider(BaseProvider):
 
             expected_s = metadata.duration_ms // 1000
 
-            valid, err_msg = await asyncio.to_thread(validate_downloaded_track, str(final_dest), expected_s)
+            valid, err_msg = await asyncio.to_thread(validate_downloaded_track_async, str(final_dest), expected_s)
             if not valid:
                 raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
 

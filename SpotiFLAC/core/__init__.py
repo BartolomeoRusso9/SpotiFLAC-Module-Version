@@ -17,4 +17,4 @@ __all__ = [
     "embed_metadata", "max_resolution_spotify_cover",
     "DownloadManager", "ProgressCallback", "RichProgressCallback",
 ]
-from .provider_stats import record_success, record_failure, prioritize as prioritize_providers
+from .provider_stats import record_success_async, record_failure_async, prioritize_async as prioritize_providers_async

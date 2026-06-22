@@ -1,6 +1,7 @@
 # amazon_provider.py
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -10,7 +11,6 @@ import re
 import json
 import httpx
 import threading
-import subprocess
 import time
 from typing import Callable
 from urllib.parse import urlparse
@@ -129,18 +129,18 @@ def _ffprobe_path() -> str:
 
 class AmazonProvider(BaseProvider):
     name = "amazon"
-    _prefetch_thread: threading.Thread | None = None
+    _prefetch_task: asyncio.Task | None = None
 
     def __init__(self, timeout_s: int = 120) -> None:
         super().__init__(timeout_s=timeout_s)
-        self._session = NetworkManager.get_sync_client()
+        self._session = NetworkManager.get_async_client()
         self._session.headers.update({"User-Agent": _DEFAULT_UA})
         self._squid_token: str | None = None
 
     def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
         super().set_progress_callback(cb)
 
-    def _make_api_request(
+    async def _make_api_request(
             self,
             provider_key: str,
             endpoint: str,
@@ -156,10 +156,10 @@ class AmazonProvider(BaseProvider):
         url = f"{base_url}{endpoint}"
 
         if method.upper() == "POST":
-            return self._session.post(url, json=payload, headers=headers, timeout=30)
-        return self._session.get(url, params=params, headers=headers, timeout=30)
+            return await self._session.post(url, json=payload, headers=headers, timeout=30)
+        return await self._session.get(url, params=params, headers=headers, timeout=30)
 
-    def _do_request_with_retry(
+    async def _do_request_with_retry(
             self,
             method: str,
             url: str,
@@ -171,7 +171,7 @@ class AmazonProvider(BaseProvider):
         retry_statuses = {429, 500, 502, 503, 504}
         for attempt in range(max_retries):
             try:
-                response = self._session.request(method, url, **kwargs)
+                response = await self._session.request(method, url, **kwargs)
             except httpx.RequestError as exc:
                 if attempt < max_retries - 1:
                     logger.warning(
@@ -180,7 +180,7 @@ class AmazonProvider(BaseProvider):
                         max_retries,
                         exc,
                     )
-                    time.sleep(base_delay_s * (attempt + 1))
+                    await asyncio.sleep(base_delay_s * (attempt + 1))
                     continue
                 raise
 
@@ -192,9 +192,6 @@ class AmazonProvider(BaseProvider):
                             delay = float(retry_after) if retry_after else base_delay_s * (attempt + 1)
                         except ValueError:
                             delay = base_delay_s * (attempt + 1)
-                        # Cap Retry-After to avoid blocking for server-specified
-                        # values that can be tens of minutes long. Fall through
-                        # to the next provider quickly instead.
                         delay = min(delay, 10.0)
                     else:
                         delay = base_delay_s * (attempt + 1)
@@ -207,8 +204,8 @@ class AmazonProvider(BaseProvider):
                         method.upper(),
                         url,
                     )
-                    response.close()
-                    time.sleep(delay)
+                    await response.aclose()
+                    await asyncio.sleep(delay)
                     continue
 
             return response
@@ -244,10 +241,10 @@ class AmazonProvider(BaseProvider):
                     if res: return res
         return None
 
-    def _resolve_via_songstats(self, isrc: str) -> str | None:
+    async def _resolve_via_songstats(self, isrc: str) -> str | None:
         url = f"https://songstats.com/{isrc.upper().strip()}?ref=ISRCFinder"
         try:
-            resp = self._session.get(url, headers={"User-Agent": _DEFAULT_UA, "Accept": "text/html"}, timeout=15)
+            resp = await self._session.get(url, headers={"User-Agent": _DEFAULT_UA, "Accept": "text/html"}, timeout=15)
             if resp.status_code == 200:
                 for match in re.finditer(r'<script type="application/ld\+json">([\s\S]*?)</script>', resp.text):
                     try:
@@ -262,7 +259,7 @@ class AmazonProvider(BaseProvider):
             logger.warning(f"[amazon] Songstats failed: {e}")
         return None
 
-    def _resolve_amazon_url(self, metadata: TrackMetadata) -> str:
+    async def _resolve_amazon_url(self, metadata: TrackMetadata) -> str:
         """Multilayer resolver ported from JS checkAvailability/resolveAmazonURL"""
         if metadata.id and re.match(r'^B[0-9A-Z]{9}$', metadata.id.upper()):
             logger.info(f"[amazon] ID {metadata.id} is already an ASIN.")
@@ -276,7 +273,7 @@ class AmazonProvider(BaseProvider):
             _zarz_base = get_amazon_endpoint("zarz")
             if _zarz_base:
                 _zarz_url = f"{_zarz_base.rstrip('/')}/resolve"
-                resp = self._session.post(
+                resp = await self._session.post(
                     _zarz_url,
                     json={"url": source_url},
                     headers={"User-Agent": "SpotiFLAC-Mobile/4.5.0"},
@@ -284,7 +281,7 @@ class AmazonProvider(BaseProvider):
                 )
             else:
                 resp = None
-            if resp.status_code == 200:
+            if resp and resp.status_code == 200:
                 data = resp.json()
                 if data.get("success") and "AmazonMusic" in data.get("songUrls", {}):
                     amz_val = data["songUrls"]["AmazonMusic"]
@@ -301,7 +298,7 @@ class AmazonProvider(BaseProvider):
             try:
                 dz_url = f"https://www.deezer.com/track/{deezer_id}"
                 sl_api_url = f"https://api.song.link/v1-alpha.1/links?url={dz_url}&userCountry=US"
-                resp = self._session.get(sl_api_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
+                resp = await self._session.get(sl_api_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
                 if resp.status_code == 200:
                     data = resp.json()
                     links = data.get("linksByPlatform", {})
@@ -314,7 +311,7 @@ class AmazonProvider(BaseProvider):
         # 3. SONGLINK HTML (Spotify ID Fallback)
         try:
             sl_url = f"https://song.link/s/{track_id}"
-            resp = self._session.get(sl_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
+            resp = await self._session.get(sl_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
             if resp.status_code == 200:
                 asin_match = re.search(r'trackAsin=([A-Z0-9]{10})', resp.text)
                 if not asin_match:
@@ -328,7 +325,7 @@ class AmazonProvider(BaseProvider):
         # 4. SONGLINK API (Spotify ID)
         try:
             sl_api_url = f"https://api.song.link/v1-alpha.1/links?url={source_url}&userCountry=US"
-            resp = self._session.get(sl_api_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
+            resp = await self._session.get(sl_api_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
                 links = data.get("linksByPlatform", {})
@@ -343,7 +340,7 @@ class AmazonProvider(BaseProvider):
             isrc = metadata.isrc
             try:
                 sl_api_url = f"https://api.song.link/v1-alpha.1/links?isrc={isrc}&userCountry=US"
-                resp = self._session.get(sl_api_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
+                resp = await self._session.get(sl_api_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
                 if resp.status_code == 200:
                     data = resp.json()
                     links = data.get("linksByPlatform", {})
@@ -353,7 +350,7 @@ class AmazonProvider(BaseProvider):
             except Exception as exc:
                 logger.warning(f"[amazon] SongLink API (ISRC) failed: {exc}")
 
-            amz_url = self._resolve_via_songstats(isrc)
+            amz_url = await self._resolve_via_songstats(isrc)
             if amz_url:
                 return self._format_amazon_url(amz_url)
 
@@ -363,7 +360,11 @@ class AmazonProvider(BaseProvider):
     # Squid PoW Captcha + Direct FLAC Download
     # ------------------------------------------------------------------
 
-    def _solve_pow(self, challenge: dict) -> dict:
+    async def _solve_pow(self, challenge: dict) -> dict:
+        """Esegue il calcolo intensivo di hash in un thread asincrono worker separato, liberando l'event loop."""
+        return await asyncio.to_thread(self._solve_pow_sync, challenge)
+
+    def _solve_pow_sync(self, challenge: dict) -> dict:
         p           = challenge["parameters"]
         nonce_bytes = bytes.fromhex(p["nonce"])
         salt        = bytes.fromhex(p["salt"])
@@ -403,7 +404,7 @@ class AmazonProvider(BaseProvider):
             "time":       round((time.time() - t0) * 1000, 1),
         }
 
-    def _get_squid_token(self, force_refresh: bool = False) -> str:
+    async def _get_squid_token(self, force_refresh: bool = False) -> str:
         if self._squid_token and not force_refresh:
             self._start_prefetch_if_needed()
             return self._squid_token
@@ -423,15 +424,15 @@ class AmazonProvider(BaseProvider):
             _squid_ep = get_amazon_endpoint("squid")
             if not _squid_ep:
                 raise RuntimeError("[amazon] Squid endpoint not configured")
-            challenge = self._session.get(
-                f"{_squid_ep}/captcha/challenge", headers=_h, timeout=15
-            ).json()
-            solution  = self._solve_pow(challenge)
+            
+            resp_challenge = await self._session.get(f"{_squid_ep}/captcha/challenge", headers=_h, timeout=15)
+            challenge = resp_challenge.json()
+            solution  = await self._solve_pow(challenge)
             encoded   = base64.b64encode(
                 json.dumps({"challenge": challenge, "solution": solution},
                            separators=(",", ":")).encode()
             ).decode()
-            resp = self._session.post(
+            resp = await self._session.post(
                 f"{_squid_ep}/captcha/verify",
                 json={"payload": encoded}, headers=_h, timeout=15,
             )
@@ -444,22 +445,19 @@ class AmazonProvider(BaseProvider):
         except Exception as exc:
             raise RuntimeError(f"[amazon] Squid captcha failed: {exc}") from exc
 
-    def _prefetch_squid_token(self) -> None:
+    async def _prefetch_squid_token(self) -> None:
         try:
             self._squid_token = None
-            self._get_squid_token()
+            await self._get_squid_token()
         except Exception as exc:
             logger.debug("[amazon] Squid pre-fetch failed (non-blocking): %s", exc)
 
     def _start_prefetch_if_needed(self) -> None:
-        t = self.__class__._prefetch_thread
-        if t is None or not t.is_alive():
-            self.__class__._prefetch_thread = threading.Thread(
-                target=self._prefetch_squid_token, daemon=True
-            )
-            self.__class__._prefetch_thread.start()
+        t = self.__class__._prefetch_task
+        if t is None or t.done():
+            self.__class__._prefetch_task = asyncio.create_task(self._prefetch_squid_token())
 
-    def _download_from_squid_api(self, asin: str, output_dir: str, requested_quality: str) -> tuple[str, dict] | None:
+    async def _download_from_squid_api(self, asin: str, output_dir: str, requested_quality: str) -> tuple[str, dict] | None:
         """
         Download a track directly from a Squid API via GET /api/stream.
         Handles both native FLAC responses and M4A containers with FLAC stream inside.
@@ -499,13 +497,13 @@ class AmazonProvider(BaseProvider):
 
         for attempt in range(max_attempts):
             try:
-                token = self._get_squid_token(force_refresh=(attempt > 0))
+                token = await self._get_squid_token(force_refresh=(attempt > 0))
                 if not token:
                     logger.warning("[amazon] No squid token obtained; skipping attempt.")
                     return None
                 _h["x-captcha-token"] = token
 
-                with self._session.stream(
+                async with self._session.stream(
                     "GET",
                     f"{_squid_ep}/stream",
                     params=params,
@@ -516,7 +514,7 @@ class AmazonProvider(BaseProvider):
                     if resp.status_code in (401, 403) and attempt < max_attempts - 1:
                         logger.info("[amazon] Squid token rejected, refreshing…")
                         self._squid_token = None
-                        time.sleep(base_delay_s)
+                        await asyncio.sleep(base_delay_s)
                         continue
 
                     if resp.status_code in (502, 503, 504) and attempt < max_attempts - 1:
@@ -524,7 +522,7 @@ class AmazonProvider(BaseProvider):
                             "[amazon] Squid API returned HTTP %d, retrying after backoff…",
                             resp.status_code,
                         )
-                        time.sleep(base_delay_s * (attempt + 1))
+                        await asyncio.sleep(base_delay_s * (attempt + 1))
                         continue
 
                     if resp.status_code != 200:
@@ -537,7 +535,7 @@ class AmazonProvider(BaseProvider):
                     format_error = False
 
                     with open(temp_file, "wb") as f:
-                        for chunk in resp.iter_bytes(65536):
+                        async for chunk in resp.aiter_bytes(65536):
                             if detected_ext is None:
                                 if len(chunk) >= 4 and chunk[:4] == b"fLaC":
                                     detected_ext = ".flac"
@@ -560,26 +558,21 @@ class AmazonProvider(BaseProvider):
                         _cleanup()
                         return None
 
-                # Rename to correct extension
                 final_file = os.path.join(output_dir, f"{asin}_squid{detected_ext}")
                 if os.path.exists(final_file):
                     os.remove(final_file)
                 os.rename(temp_file, final_file)
 
-                # If M4A, check inner codec — demux to FLAC if it's FLAC inside (like the JS client does)
                 if detected_ext == ".m4a":
-                    inner_codec = self._get_codec(final_file)
+                    inner_codec = await self._get_codec(final_file)
                     if inner_codec == "flac":
                         flac_out = os.path.join(output_dir, f"{asin}_squid.flac")
-                        si = None
-                        if os.name == "nt":
-                            si = subprocess.STARTUPINFO()
-                            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                        result = subprocess.run(
-                            [_ffmpeg_path(), "-y", "-i", final_file, "-c", "copy", flac_out],
-                            capture_output=True, startupinfo=si,
+                        proc = await asyncio.create_subprocess_exec(
+                            _ffmpeg_path(), "-y", "-i", final_file, "-c", "copy", flac_out,
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                         )
-                        if result.returncode == 0 and os.path.exists(flac_out):
+                        await proc.communicate()
+                        if proc.returncode == 0 and os.path.exists(flac_out):
                             os.remove(final_file)
                             final_file = flac_out
                             logger.info("[amazon] Squid: demuxed FLAC stream from M4A container")
@@ -589,9 +582,8 @@ class AmazonProvider(BaseProvider):
                 logger.info("[amazon] Squid download complete — %.1f MB (%s)",
                             written / 1024 / 1024, os.path.splitext(final_file)[1])
                 
-                # Validate and repair FLAC files if needed
                 if final_file.lower().endswith(".flac"):
-                    success, repair_msg = validate_and_repair_if_needed(final_file)
+                    success, repair_msg = await asyncio.to_thread(validate_and_repair_if_needed, final_file)
                     if not success:
                         logger.error("[amazon] FLAC file validation failed: %s", repair_msg)
                         _cleanup()
@@ -605,7 +597,7 @@ class AmazonProvider(BaseProvider):
                 logger.warning("[amazon] Squid error (attempt %d/%d): %s", attempt + 1, max_attempts, exc)
                 _cleanup()
                 if attempt < max_attempts - 1:
-                    time.sleep(base_delay_s * (attempt + 1))
+                    await asyncio.sleep(base_delay_s * (attempt + 1))
                     continue
 
         return None
@@ -614,7 +606,7 @@ class AmazonProvider(BaseProvider):
     # Download + Decrypt
     # ------------------------------------------------------------------
 
-    def _get_codec(self, filepath: str) -> str:
+    async def _get_codec(self, filepath: str) -> str:
         try:
             cmd = [
                 _ffprobe_path(), "-v", "quiet", "-select_streams", "a:0",
@@ -622,11 +614,13 @@ class AmazonProvider(BaseProvider):
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 filepath,
             ]
-            si = None
-            if os.name == "nt":
-                si = subprocess.STARTUPINFO()
-                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            return subprocess.check_output(cmd, text=True, startupinfo=si).strip()
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await proc.communicate()
+            return stdout.decode().strip()
         except Exception:
             return "m4a"
 
@@ -634,7 +628,7 @@ class AmazonProvider(BaseProvider):
         """Map quality string to Amazon/Zarz codec name (delegates to core.quality)."""
         return to_zarz_codec(quality)
 
-    def _download_from_zarz_api(self, asin: str, output_dir: str, quality: str) -> tuple[str, dict] | None:
+    async def _download_from_zarz_api(self, asin: str, output_dir: str, quality: str) -> tuple[str, dict] | None:
         codec = self._quality_to_zarz_codec(quality)
         logger.info("[amazon] Trying Zarz.moe API (ASIN: %s, codec: %s)", asin, codec)
 
@@ -643,23 +637,21 @@ class AmazonProvider(BaseProvider):
             "User-Agent": "SpotiFLAC-Mobile/4.5.0"
         }
 
-        def _fetch_zarz(target_codec: str):
+        async def _fetch_zarz(target_codec: str):
             try:
                 from ..core.http import zarz_rate_limiter
-                zarz_rate_limiter.wait_for_slot()
+                await asyncio.to_thread(zarz_rate_limiter.wait_for_slot)
             except ImportError:
                 pass
 
             url = f"{get_amazon_endpoint('zarz').rstrip('/')}/media"
             try:
-                return self._do_request_with_retry(
+                return await self._do_request_with_retry(
                     "GET",
                     url,
                     headers=headers,
                     params={"asin": asin, "codec": target_codec},
                     timeout=30,
-                    # Only one attempt on Zarz: if it 429s it's rate-limited and
-                    # a quick retry won't clear it. Fall through to Squid fast.
                     max_retries=1,
                     base_delay_s=2.0,
                 )
@@ -667,12 +659,12 @@ class AmazonProvider(BaseProvider):
                 logger.warning("[amazon] Zarz API connection error: %s", e)
                 return None
 
-        resp = _fetch_zarz(codec)
+        resp = await _fetch_zarz(codec)
 
         if (not resp or resp.status_code != 200) and codec != "flac":
             logger.info("[amazon] Codec %s unavailable for ASIN: %s — falling back to FLAC", codec, asin)
             codec = "flac"
-            resp = _fetch_zarz(codec)
+            resp = await _fetch_zarz(codec)
 
         if not resp or resp.status_code != 200:
             status = resp.status_code if resp else "Connection Error"
@@ -736,7 +728,17 @@ class AmazonProvider(BaseProvider):
         logger.info("[amazon] Downloading encrypted stream from Zarz…")
 
         try:
-            self._http.stream_to_file(stream_url, temp_file, self._progress_cb, extra_headers=headers)
+            async with self._session.stream("GET", stream_url, headers=headers, timeout=120) as s_resp:
+                if s_resp.status_code != 200:
+                    raise RuntimeError(f"Zarz stream returned HTTP {s_resp.status_code}")
+                total = int(s_resp.headers.get("content-length", 0))
+                written = 0
+                with open(temp_file, "wb") as f:
+                    async for chunk in s_resp.aiter_bytes(65536):
+                        f.write(chunk)
+                        written += len(chunk)
+                        if self._progress_cb and total:
+                            self._progress_cb(written, total)
         except Exception as exc:
             logger.warning("[amazon] Failed to download Zarz stream: %s", exc)
             if os.path.exists(temp_file):
@@ -752,28 +754,24 @@ class AmazonProvider(BaseProvider):
             logger.info("[amazon] Decrypting Zarz stream…")
             out = os.path.join(output_dir, f"{asin}{ext}")
 
-            si = None
-            if os.name == "nt":
-                si = subprocess.STARTUPINFO()
-                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            result = subprocess.run(
-                [_ffmpeg_path(), "-y", "-decryption_key", decryption_key,
-                 "-i", temp_file, "-c", "copy", out],
-                capture_output=True, startupinfo=si,
+            proc = await asyncio.create_subprocess_exec(
+                _ffmpeg_path(), "-y", "-decryption_key", decryption_key,
+                "-i", temp_file, "-c", "copy", out,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
+            await proc.communicate()
+
             if os.path.exists(temp_file):
                 os.remove(temp_file)
 
-            if result.returncode != 0:
-                logger.warning("[amazon] Zarz decryption failed: %s", result.stderr.decode()[:100])
+            if proc.returncode != 0:
+                logger.warning("[amazon] Zarz decryption failed: %s", proc.stderr.decode()[:100] if proc.stderr else "")
                 if os.path.exists(out):
                     os.remove(out)
                 return None
             
-            # Validate and repair FLAC files if needed
             if ext == ".flac":
-                success, repair_msg = validate_and_repair_if_needed(out)
+                success, repair_msg = await asyncio.to_thread(validate_and_repair_if_needed, out)
                 if not success:
                     logger.error("[amazon] FLAC file validation failed: %s", repair_msg)
                     if os.path.exists(out):
@@ -790,7 +788,7 @@ class AmazonProvider(BaseProvider):
         os.rename(temp_file, final)
         return final, api_meta
 
-    def _download_from_spotbye_api(self, asin: str, output_dir: str, provider_key: str) -> tuple[str, dict]:
+    async def _download_from_spotbye_api(self, asin: str, output_dir: str, provider_key: str) -> tuple[str, dict]:
         logger.info("[amazon] Fetching track from %s API (ASIN: %s)", provider_key, asin)
 
         endpoint_url = get_amazon_endpoint(provider_key)
@@ -822,7 +820,7 @@ class AmazonProvider(BaseProvider):
             elif params is not None:
                 request_kwargs["params"] = params
 
-            resp = self._do_request_with_retry(
+            resp = await self._do_request_with_retry(
                 method,
                 url,
                 **request_kwargs,
@@ -860,34 +858,45 @@ class AmazonProvider(BaseProvider):
         if captcha_token:
             download_headers["x-captcha-token"] = str(captcha_token)
 
-        self._http.stream_to_file(stream_url, temp_file, self._progress_cb, extra_headers=download_headers)
+        try:
+            async with self._session.stream("GET", stream_url, headers=download_headers, timeout=120) as s_resp:
+                if s_resp.status_code != 200:
+                    raise RuntimeError(f"Stream download failed with status {s_resp.status_code}")
+                total = int(s_resp.headers.get("content-length", 0))
+                written = 0
+                with open(temp_file, "wb") as f:
+                    async for chunk in s_resp.aiter_bytes(65536):
+                        f.write(chunk)
+                        written += len(chunk)
+                        if self._progress_cb and total:
+                            self._progress_cb(written, total)
+        except Exception as exc:
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Failed to download stream from {provider_key}: {exc}", self.name)
 
         if decryption_key:
-            codec = self._get_codec(temp_file)
+            codec = await self._get_codec(temp_file)
             ext   = ".flac" if codec == "flac" else ".m4a"
             out   = os.path.join(output_dir, f"{asin}{ext}")
 
-            si = None
-
-            result = subprocess.run(
-                [_ffmpeg_path(), "-y", "-decryption_key", decryption_key.strip(),
-                 "-i", temp_file, "-c", "copy", out],
-                capture_output=True, startupinfo=si,
+            proc = await asyncio.create_subprocess_exec(
+                _ffmpeg_path(), "-y", "-decryption_key", decryption_key.strip(),
+                "-i", temp_file, "-c", "copy", out,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
+            await proc.communicate()
 
             if os.path.exists(temp_file):
                 os.remove(temp_file)
 
-            if result.returncode != 0:
+            if proc.returncode != 0:
                 raise SpotiflacError(
                     ErrorKind.FILE_IO,
-                    f"Decryption failed: {result.stderr.decode()[:100]}",
+                    f"Decryption failed: {proc.stderr.decode()[:100] if proc.stderr else ''}",
                     self.name,
                 )
             
-            # Validate and repair FLAC files if needed
             if ext == ".flac":
-                success, repair_msg = validate_and_repair_if_needed(out)
+                success, repair_msg = await asyncio.to_thread(validate_and_repair_if_needed, out)
                 if not success:
                     logger.error("[amazon] FLAC file validation failed: %s", repair_msg)
                     if os.path.exists(out):
@@ -908,9 +917,9 @@ class AmazonProvider(BaseProvider):
         os.rename(temp_file, final)
         return final, api_meta
 
-    def _download_from_spotbye1_api(self, asin: str, output_dir: str) -> tuple[str, dict]:
+    async def _download_from_spotbye1_api(self, asin: str, output_dir: str) -> tuple[str, dict]:
         base_url = get_amazon_endpoint("spotbye1")
-        resp = self._do_request_with_retry(
+        resp = await self._do_request_with_retry(
             "POST",
             f"{base_url}/track",
             json={"asin": asin, "tier": "best"},
@@ -946,36 +955,45 @@ class AmazonProvider(BaseProvider):
         stream_headers = {"User-Agent": _DEFAULT_UA, "x-captcha-token": captcha_token}
         temp_file = os.path.join(output_dir, f"{asin}.enc")
 
-        self._http.stream_to_file(stream_url, temp_file, self._progress_cb, extra_headers=stream_headers)
+        try:
+            async with self._session.stream("GET", stream_url, headers=stream_headers, timeout=120) as s_resp:
+                if s_resp.status_code != 200:
+                    raise RuntimeError(f"Stream download failed with status {s_resp.status_code}")
+                total = int(s_resp.headers.get("content-length", 0))
+                written = 0
+                with open(temp_file, "wb") as f:
+                    async for chunk in s_resp.aiter_bytes(65536):
+                        f.write(chunk)
+                        written += len(chunk)
+                        if self._progress_cb and total:
+                            self._progress_cb(written, total)
+        except Exception as exc:
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Failed to download stream from spotbye1: {exc}", self.name)
 
         ext = ".flac" if returned_codec == "flac" else ".m4a"
 
         if decryption_key:
             out = os.path.join(output_dir, f"{asin}{ext}")
-            si = None
-            if os.name == "nt":
-                si = subprocess.STARTUPINFO()
-                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-            result = subprocess.run(
-                [_ffmpeg_path(), "-y", "-decryption_key", decryption_key.strip(),
-                 "-i", temp_file, "-c", "copy", out],
-                capture_output=True, startupinfo=si,
+            proc = await asyncio.create_subprocess_exec(
+                _ffmpeg_path(), "-y", "-decryption_key", decryption_key.strip(),
+                "-i", temp_file, "-c", "copy", out,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
+            await proc.communicate()
 
             if os.path.exists(temp_file):
                 os.remove(temp_file)
 
-            if result.returncode != 0:
+            if proc.returncode != 0:
                 raise SpotiflacError(
                     ErrorKind.FILE_IO,
-                    f"Decryption failed: {result.stderr.decode()[:100]}",
+                    f"Decryption failed: {proc.stderr.decode()[:100] if proc.stderr else ''}",
                     self.name,
                 )
             
-            # Validate and repair FLAC files if needed
             if ext == ".flac":
-                success, repair_msg = validate_and_repair_if_needed(out)
+                success, repair_msg = await asyncio.to_thread(validate_and_repair_if_needed, out)
                 if not success:
                     logger.error("[amazon] FLAC file validation failed: %s", repair_msg)
                     if os.path.exists(out):
@@ -995,9 +1013,8 @@ class AmazonProvider(BaseProvider):
             os.remove(final)
         os.rename(temp_file, final)
         
-        # Validate and repair FLAC files if needed
         if ext == ".flac":
-            success, repair_msg = validate_and_repair_if_needed(final)
+            success, repair_msg = await asyncio.to_thread(validate_and_repair_if_needed, final)
             if not success:
                 logger.error("[amazon] FLAC file validation failed: %s", repair_msg)
                 if os.path.exists(final):
@@ -1012,7 +1029,7 @@ class AmazonProvider(BaseProvider):
         
         return final, api_meta
     
-    def _download_from_musicdl_api(self, amazon_url: str, asin: str, output_dir: str) -> tuple[str, dict]:
+    async def _download_from_musicdl_api(self, amazon_url: str, asin: str, output_dir: str) -> tuple[str, dict]:
         """Scaricamento tramite Telegram Bot CDN (dl.musicdl.me)"""
         logger.info("[amazon] Trying MusicDL API (ASIN: %s)", asin)
 
@@ -1029,7 +1046,7 @@ class AmazonProvider(BaseProvider):
                     "MusicDL endpoint not configured",
                     self.name
                 )
-            resp = self._do_request_with_retry(
+            resp = await self._do_request_with_retry(
                 "POST",
                 _musicdl_url,
                 json=payload,
@@ -1063,9 +1080,22 @@ class AmazonProvider(BaseProvider):
         
         logger.info("[amazon] MusicDL returned stream URL, downloading...")
 
-        self._http.stream_to_file(stream_url, temp_file, self._progress_cb)
+        try:
+            async with self._session.stream("GET", stream_url, timeout=120) as s_resp:
+                if s_resp.status_code != 200:
+                    raise RuntimeError(f"Stream download failed with status {s_resp.status_code}")
+                total = int(s_resp.headers.get("content-length", 0))
+                written = 0
+                with open(temp_file, "wb") as f:
+                    async for chunk in s_resp.aiter_bytes(65536):
+                        f.write(chunk)
+                        written += len(chunk)
+                        if self._progress_cb and total:
+                            self._progress_cb(written, total)
+        except Exception as exc:
+            raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Failed to download stream from MusicDL: {exc}", self.name)
 
-        codec = self._get_codec(temp_file)
+        codec = await self._get_codec(temp_file)
         ext = ".flac" if codec == "flac" else ".m4a"
         
         final = os.path.join(output_dir, f"{asin}{ext}")
@@ -1073,7 +1103,6 @@ class AmazonProvider(BaseProvider):
             os.remove(final)
         os.rename(temp_file, final)
 
-        # Raccogliamo i metadati basilari che restituisce l'API
         api_meta = {}
         if data.get("title"):
             api_meta["title"] = data["title"]
@@ -1082,7 +1111,7 @@ class AmazonProvider(BaseProvider):
 
         return final, api_meta
 
-    def _download_from_api(self, amazon_url: str, output_dir: str, quality: str) -> tuple[str, dict]:
+    async def _download_from_api(self, amazon_url: str, output_dir: str, quality: str) -> tuple[str, dict]:
         asin_match = re.search(r"(B[0-9A-Z]{9})", amazon_url)
         if not asin_match:
             raise RuntimeError(f"Cannot extract ASIN from: {amazon_url}")
@@ -1090,7 +1119,6 @@ class AmazonProvider(BaseProvider):
  
         fallback_quality = str(quality).upper()
  
-        # Validate at least one Amazon endpoint is configured
         _zarz_ep = get_amazon_endpoint("zarz")
         _squid_ep = get_amazon_endpoint("squid")
         _spotbye1_ep = get_amazon_endpoint("spotbye1")
@@ -1105,22 +1133,19 @@ class AmazonProvider(BaseProvider):
  
         # 1. ZARZ API (Primary)
         codec = self._quality_to_zarz_codec(quality)
-        zarz_url = f"{_zarz_ep}/media?asin={asin}&codec={codec}"
         display_quality = "Best Available Quality (up to 24-bit/48kHz)" if codec == "flac" else quality
         print_source_banner("amazon", "", display_quality)
 
-        zarz_result = self._download_from_zarz_api(asin, output_dir, quality)
+        zarz_result = await self._download_from_zarz_api(asin, output_dir, quality)
         if zarz_result and os.path.exists(zarz_result[0]):
             return zarz_result
 
         logger.info("[amazon] Zarz failed. Trying Squid API…")
 
-        # 2. SQUID API (Fallback 1 — direct FLAC, no decryption)
-        q_str = str(quality)
-        squid_tier = get_squid_tier(q_str)
+        # 2. SQUID API (Fallback 1)
         print_source_banner("amazon", "", fallback_quality)
         try:
-            squid_result = self._download_from_squid_api(asin, output_dir, quality)
+            squid_result = await self._download_from_squid_api(asin, output_dir, quality)
             if squid_result and os.path.exists(squid_result[0]):
                 return squid_result
         except Exception as exc:
@@ -1131,7 +1156,7 @@ class AmazonProvider(BaseProvider):
         # 3. SPOTBYE 1 (Fallback 2)
         print_source_banner("amazon", "", fallback_quality)
         try:
-            return self._download_from_spotbye1_api(asin, output_dir)
+            return await self._download_from_spotbye1_api(asin, output_dir)
         except Exception as exc:
             logger.warning("[amazon] Spotbye1 failed: %s", exc)
 
@@ -1140,7 +1165,7 @@ class AmazonProvider(BaseProvider):
         # 4. SPOTBYE 2 (Fallback 3)
         print_source_banner("amazon", "", fallback_quality)
         try:
-            return self._download_from_spotbye_api(asin, output_dir, provider_key="spotbye2")
+            return await self._download_from_spotbye_api(asin, output_dir, provider_key="spotbye2")
         except Exception as exc:
             logger.warning("[amazon] Spotbye2 failed: %s", exc)
             
@@ -1149,7 +1174,7 @@ class AmazonProvider(BaseProvider):
         # 5. MUSICDL (Fallback 4 - Telegram CDN)
         print_source_banner("amazon", "", "BEST QUALITY AVAILABLE (MOSTLY 16 bit 44.1 Hz)")
         try:
-            return self._download_from_musicdl_api(amazon_url, asin, output_dir)
+            return await self._download_from_musicdl_api(amazon_url, asin, output_dir)
         except Exception as exc:
             logger.warning("[amazon] MusicDL failed: %s", exc)
             raise SpotiflacError(
@@ -1162,7 +1187,7 @@ class AmazonProvider(BaseProvider):
     # Metadata Embedding
     # ------------------------------------------------------------------
 
-    def _embed_metadata(
+    async def _embed_metadata(
             self,
             filepath:     str,
             title:        str,
@@ -1186,7 +1211,7 @@ class AmazonProvider(BaseProvider):
 
         if target_cover_url:
             try:
-                r = self._session.get(target_cover_url, timeout=15)
+                r = await self._session.get(target_cover_url, timeout=15)
                 if r.status_code == 200:
                     cover_data = r.content
             except Exception as exc:
@@ -1208,69 +1233,72 @@ class AmazonProvider(BaseProvider):
         t_copy  = api_meta.get("copyright") or copyright
         t_label = api_meta.get("label") or publisher
 
-        try:
-            if filepath.endswith(".flac"):
-                audio = FLAC(filepath)
-                audio.delete()
-                audio["TITLE"]       = t_title
-                audio["ARTIST"]      = t_artist
-                audio["ALBUM"]       = t_album
-                audio["ALBUMARTIST"] = t_album_artist
-                audio["DATE"]        = t_date
-                audio["TRACKNUMBER"] = str(t_num)
-                audio["TRACKTOTAL"]  = str(t_total)
-                audio["DISCNUMBER"]  = str(d_num)
-                audio["DISCTOTAL"]   = str(d_total)
+        def _sync_write_tags():
+            try:
+                if filepath.endswith(".flac"):
+                    audio = FLAC(filepath)
+                    audio.delete()
+                    audio["TITLE"]       = t_title
+                    audio["ARTIST"]      = t_artist
+                    audio["ALBUM"]       = t_album
+                    audio["ALBUMARTIST"] = t_album_artist
+                    audio["DATE"]        = t_date
+                    audio["TRACKNUMBER"] = str(t_num)
+                    audio["TRACKTOTAL"]  = str(t_total)
+                    audio["DISCNUMBER"]  = str(d_num)
+                    audio["DISCTOTAL"]   = str(d_total)
 
-                if t_copy:                    audio["COPYRIGHT"]    = t_copy
-                if t_label:                   audio["ORGANIZATION"] = t_label
-                if url:                       audio["URL"]          = url
-                if api_meta.get("genre"):     audio["GENRE"]        = api_meta["genre"]
-                if api_meta.get("composer"):  audio["COMPOSER"]     = api_meta["composer"]
-                if api_meta.get("isrc"):      audio["ISRC"]         = api_meta["isrc"]
-                if "is_explicit" in api_meta:
-                    audio["ITUNESADVISORY"] = "1" if api_meta["is_explicit"] else "2"
+                    if t_copy:                    audio["COPYRIGHT"]    = t_copy
+                    if t_label:                   audio["ORGANIZATION"] = t_label
+                    if url:                       audio["URL"]          = url
+                    if api_meta.get("genre"):     audio["GENRE"]        = api_meta["genre"]
+                    if api_meta.get("composer"):  audio["COMPOSER"]     = api_meta["composer"]
+                    if api_meta.get("isrc"):      audio["ISRC"]         = api_meta["isrc"]
+                    if "is_explicit" in api_meta:
+                        audio["ITUNESADVISORY"] = "1" if api_meta["is_explicit"] else "2"
 
-                if cover_data:
-                    pic      = Picture()
-                    pic.data = cover_data
-                    pic.type = PictureType.COVER_FRONT
-                    pic.mime = "image/jpeg"
-                    audio.add_picture(pic)
-                audio.save()
+                    if cover_data:
+                        pic = Picture()
+                        pic.data = cover_data
+                        pic.type = PictureType.COVER_FRONT
+                        pic.mime = "image/jpeg"
+                        audio.add_picture(pic)
+                    audio.save()
 
-            elif filepath.endswith((".m4a", ".mp4")):
-                audio = MP4(filepath)
-                audio.delete()
-                audio["\xa9nam"] = t_title
-                audio["\xa9ART"] = t_artist
-                audio["\xa9alb"] = t_album
-                audio["aART"]    = t_album_artist
-                audio["\xa9day"] = t_date
-                audio["trkn"]    = [(t_num, t_total)]
-                audio["disk"]    = [(d_num, d_total)]
+                elif filepath.endswith((".m4a", ".mp4")):
+                    audio = MP4(filepath)
+                    audio.delete()
+                    audio["\xa9nam"] = t_title
+                    audio["\xa9ART"] = t_artist
+                    audio["\xa9alb"] = t_album
+                    audio["aART"]    = t_album_artist
+                    audio["\xa9day"] = t_date
+                    audio["trkn"]    = [(t_num, t_total)]
+                    audio["disk"]    = [(d_num, d_total)]
 
-                if t_copy:                    audio["cprt"]                              = t_copy
-                if api_meta.get("genre"):     audio["\xa9gen"]                           = api_meta["genre"]
-                if api_meta.get("composer"):  audio["\xa9wrt"]                           = api_meta["composer"]
-                if api_meta.get("isrc"):      audio["----:com.apple.iTunes:ISRC"]        = api_meta["isrc"].encode()
-                if t_label:                   audio["----:com.apple.iTunes:LABEL"]       = t_label.encode()
-                if "is_explicit" in api_meta:
-                    audio["rtng"] = [2] if api_meta["is_explicit"] else [1]
+                    if t_copy:                    audio["cprt"]                              = t_copy
+                    if api_meta.get("genre"):     audio["\xa9gen"]                           = api_meta["genre"]
+                    if api_meta.get("composer"):  audio["\xa9wrt"]                           = api_meta["composer"]
+                    if api_meta.get("isrc"):      audio["----:com.apple.iTunes:ISRC"]        = api_meta["isrc"].encode()
+                    if t_label:                   audio["----:com.apple.iTunes:LABEL"]       = t_label.encode()
+                    if "is_explicit" in api_meta:
+                        audio["rtng"] = [2] if api_meta["is_explicit"] else [1]
 
-                if cover_data:
-                    audio["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
-                audio.save()
+                    if cover_data:
+                        audio["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
+                    audio.save()
 
-            logger.info("[amazon] Metadata embedded: %s", os.path.basename(filepath))
-        except Exception as exc:
-            logger.warning("[amazon] embed_metadata failed: %s", exc)
+                logger.info("[amazon] Metadata embedded: %s", os.path.basename(filepath))
+            except Exception as exc:
+                logger.warning("[amazon] embed_metadata failed: %s", exc)
+
+        await asyncio.to_thread(_sync_write_tags)
 
     # ------------------------------------------------------------------
     # BaseProvider interface
     # ------------------------------------------------------------------
 
-    def download_track(
+    async def download_track(
             self,
             metadata:            TrackMetadata,
             output_dir:          str,
@@ -1294,14 +1322,14 @@ class AmazonProvider(BaseProvider):
                 metadata, output_dir, filename_format,
                 position, include_track_num, use_album_track_num, first_artist_only,
             )
-            if self._file_exists(dest):
+            if await asyncio.to_thread(self._file_exists, dest):
                 return DownloadResult.skipped_result(self.name, str(dest))
 
             from ..core.musicbrainz import AsyncMBFetch
             mb_fetcher = AsyncMBFetch(metadata.isrc) if getattr(metadata, "isrc", None) else None
 
-            amazon_url = self._resolve_amazon_url(metadata)
-            downloaded, api_metadata = self._download_from_api(amazon_url, output_dir, quality)
+            amazon_url = await self._resolve_amazon_url(metadata)
+            downloaded, api_metadata = await self._download_from_api(amazon_url, output_dir, quality)
 
             ext      = os.path.splitext(downloaded)[1] or ".m4a"
             dest_ext = str(dest).rsplit(".", 1)[0] + ext
@@ -1315,7 +1343,7 @@ class AmazonProvider(BaseProvider):
             mb_tags: dict[str, str] = {}
             res: dict = {}
             if mb_fetcher:
-                res = mb_fetcher.future.result()
+                res = await asyncio.to_thread(mb_fetcher.future.result)
 
             mb_tags = mb_result_to_tags(res)
 
@@ -1340,7 +1368,7 @@ class AmazonProvider(BaseProvider):
                     is_album          = is_album,
                     extra_tags        = mb_tags,
                 )
-                embed_metadata(dest_ext, metadata, opts, session=self._session)
+                await asyncio.to_thread(embed_metadata, dest_ext, metadata, opts)
             else:
                 track_num    = position
                 if use_album_track_num and _safe_int(metadata.track_number) > 0:
@@ -1348,7 +1376,7 @@ class AmazonProvider(BaseProvider):
                 artist       = _first_artist(metadata.artists) if first_artist_only else metadata.artists
                 album_artist = _first_artist(metadata.album_artist) if first_artist_only else metadata.album_artist
 
-                self._embed_metadata(
+                await self._embed_metadata(
                     filepath     = dest_ext,
                     title        = metadata.title,
                     artist       = artist,

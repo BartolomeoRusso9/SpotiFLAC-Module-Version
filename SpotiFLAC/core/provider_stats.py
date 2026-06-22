@@ -1,15 +1,8 @@
-"""
-Sistema di scoring per le API dei provider.
-Porta il pattern Go prioritizeProviders/recordProviderSuccess/Failure.
-
-Le API che falliscono vengono messe in fondo alla lista automaticamente,
-quelle che funzionano vengono promosse in cima — senza shuffle casuale.
-"""
 from __future__ import annotations
 
 import json
 import os
-import threading
+import asyncio
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -38,7 +31,8 @@ def _ensure_cache_dir() -> None:
     _get_cache_file().parent.mkdir(parents=True, exist_ok=True)
 
 
-def _load_cache() -> dict[str, dict]:
+# Funzioni di supporto sincrone per i thread worker
+def _load_cache_sync() -> dict[str, dict]:
     try:
         cache_file = _get_cache_file()
         if cache_file.exists():
@@ -48,7 +42,7 @@ def _load_cache() -> dict[str, dict]:
     return {}
 
 
-def _save_cache(data: dict[str, dict]) -> None:
+def _save_cache_sync(data: dict[str, dict]) -> None:
     try:
         cache_file = _get_cache_file()
         _ensure_cache_dir()
@@ -64,7 +58,7 @@ class _ProviderStats:
     last_success: float = 0.0
     last_failure: float = 0.0
     last_attempt: float = 0.0
-    last_outcome: str  = ""
+    last_outcome: str   = ""
 
     def score(self) -> float:
         base = self.successes - (self.failures * 2)
@@ -92,39 +86,38 @@ class _ProviderStats:
 
 class ProviderScorer:
     """
-    Singleton thread-safe che track successi/fallimenti per API URL.
-    Equivalent a recordProviderSuccess/recordProviderFailure del Go.
+    Gestore thread-safe asincrono che traccia successi/fallimenti per API URL.
+    Usa l'inizializzazione lazy per supportare operazioni asyncio.
     """
-    _instance: "ProviderScorer | None" = None
-    _lock = threading.Lock()
-    _stats: dict[str, _ProviderStats]
+    def __init__(self) -> None:
+        self._stats: dict[str, _ProviderStats] = {}
+        self._stats_lock = asyncio.Lock()
+        self._initialized = False
+        self._init_lock = asyncio.Lock()
 
-    def __new__(cls) -> "ProviderScorer":
-        with cls._lock:
-            if cls._instance is None:
-                inst = super().__new__(cls)
-                inst._stats = {}
-                inst._stats_lock = threading.Lock()
-                inst._load_from_disk()
-                cls._instance = inst
-        return cls._instance
+    async def _ensure_initialized(self) -> None:
+        """Carica il database solo la prima volta che viene richiesto."""
+        if not self._initialized:
+            async with self._init_lock:
+                if not self._initialized:
+                    cache = await asyncio.to_thread(_load_cache_sync)
+                    for key, raw in cache.items():
+                        try:
+                            self._stats[key] = _ProviderStats.from_dict(raw)
+                        except Exception:
+                            continue
+                    self._initialized = True
 
-    def _load_from_disk(self) -> None:
-        cache = _load_cache()
-        for key, raw in cache.items():
-            try:
-                self._stats[key] = _ProviderStats.from_dict(raw)
-            except Exception:
-                continue
-
-    def _persist_to_disk(self) -> None:
+    async def _persist_to_disk_async(self) -> None:
         cache = {key: stat.to_dict() for key, stat in self._stats.items()}
-        _save_cache(cache)
+        await asyncio.to_thread(_save_cache_sync, cache)
 
-    def _record(self, provider_type: str, api_url: str, success: bool) -> None:
+    async def _record_async(self, provider_type: str, api_url: str, success: bool) -> None:
+        await self._ensure_initialized()
         key = f"{provider_type}:{api_url}"
         now = time.time()
-        with self._stats_lock:
+        
+        async with self._stats_lock:
             s = self._stats.setdefault(key, _ProviderStats())
             if success:
                 s.successes += 1
@@ -135,16 +128,20 @@ class ProviderScorer:
                 s.last_failure = now
                 s.last_outcome = "failure"
             s.last_attempt = now
-            self._persist_to_disk()
+            
+            # Scrittura su disco delegata a un worker
+            await self._persist_to_disk_async()
 
-    def record_success(self, provider_type: str, api_url: str) -> None:
-        self._record(provider_type, api_url, True)
+    async def record_success_async(self, provider_type: str, api_url: str) -> None:
+        await self._record_async(provider_type, api_url, True)
 
-    def record_failure(self, provider_type: str, api_url: str) -> None:
-        self._record(provider_type, api_url, False)
+    async def record_failure_async(self, provider_type: str, api_url: str) -> None:
+        await self._record_async(provider_type, api_url, False)
 
-    def prioritize(self, provider_type: str, api_urls: list[str]) -> list[str]:
-        with self._stats_lock:
+    async def prioritize_async(self, provider_type: str, api_urls: list[str]) -> list[str]:
+        await self._ensure_initialized()
+        
+        async with self._stats_lock:
             original_index = {url: idx for idx, url in enumerate(api_urls)}
 
             def _rank(url: str) -> tuple[int, float, float, int]:
@@ -164,27 +161,28 @@ class ProviderScorer:
 
             return sorted(api_urls, key=_rank, reverse=True)
 
-    def reset(self) -> None:
-        """Utile per i test."""
-        with self._stats_lock:
+    async def reset_async(self) -> None:
+        """Utile per i test o reset manuale."""
+        await self._ensure_initialized()
+        async with self._stats_lock:
             self._stats.clear()
-            _save_cache({})
+            await asyncio.to_thread(_save_cache_sync, {})
 
 
-# Singleton globale — usato dai provider
+# Istanza Singleton globale
 _scorer = ProviderScorer()
 
 
-def record_success(provider_type: str, api_url: str) -> None:
-    _scorer.record_success(provider_type, api_url)
+async def record_success_async(provider_type: str, api_url: str) -> None:
+    await _scorer.record_success_async(provider_type, api_url)
 
 
-def record_failure(provider_type: str, api_url: str) -> None:
-    _scorer.record_failure(provider_type, api_url)
+async def record_failure_async(provider_type: str, api_url: str) -> None:
+    await _scorer.record_failure_async(provider_type, api_url)
 
 
-def prioritize(provider_type: str, api_urls: list[str]) -> list[str]:
-    return _scorer.prioritize(provider_type, api_urls)
+async def prioritize_async(provider_type: str, api_urls: list[str]) -> list[str]:
+    return await _scorer.prioritize_async(provider_type, api_urls)
 
-# Alias per compatibilità con i provider
-prioritize_providers = prioritize
+# Alias per compatibilità asincrona globale
+prioritize_providers_async = prioritize_async

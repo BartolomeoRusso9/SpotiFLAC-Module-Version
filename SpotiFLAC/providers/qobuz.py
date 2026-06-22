@@ -29,7 +29,7 @@ from .base import BaseProvider
 from ..core.console import (
     print_source_banner, print_api_failure, print_quality_fallback,
 )
-from ..core.download_validation import validate_downloaded_track
+from ..core.download_validation import validate_downloaded_track_async
 from ..core.errors import (
     TrackNotFoundError, NetworkError,
     ParseError, SpotiflacError, ErrorKind,
@@ -37,7 +37,7 @@ from ..core.errors import (
 from ..core.http import AsyncHttpClient, RetryConfig, NetworkManager, async_zarz_rate_limiter
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags, fetch_mb_metadata_async
-from ..core.provider_stats import record_success, record_failure, prioritize_providers
+from ..core.provider_stats import record_success_async, record_failure_async, prioritize_providers_async
 from ..core.tagger import _print_mb_summary, EmbedOptions
 from ..core.tagger import embed_metadata, embed_metadata_async
 from ..core.endpoints import get_qobuz_endpoints
@@ -724,7 +724,7 @@ def _fetch_stream_url_once(
 
     raise last_err
 
-def _fetch_stream_url_parallel(
+async def _fetch_stream_url_parallel(
         client:        httpx.Client,
         apis:          list[str],
         track_id:      int,
@@ -756,14 +756,14 @@ def _fetch_stream_url_parallel(
                 short_api = _shorten_api_url(api)
                 logger.debug("[qobuz] parallel: got URL from %s in %.2fs", short_api, time.time() - start)
                 pool.shutdown(wait=False, cancel_futures=True)
-                record_success("qobuz", api)
+                await record_success_async("qobuz", api)
                 print_source_banner("qobuz", "", quality)
                 return api, stream_url
             except Exception as exc:
                 err_msg = str(exc)[:80]
                 short_api = _shorten_api_url(api)
                 errors.append(f"{short_api}: {err_msg}")
-                record_failure("qobuz", api)
+                await record_failure_async("qobuz", api)
                 print_api_failure("qobuz", api, err_msg)
     except FuturesTimeoutError:
         errors.append("global timeout exceeded")
@@ -1229,14 +1229,14 @@ class QobuzProvider(BaseProvider):
                         logger.debug("[qobuz] parallel: got URL from %s in %.2fs", short_api, time.time() - start)
                         for pending_task in pending:
                             pending_task.cancel()
-                        record_success("qobuz", api)
+                        await record_success_async("qobuz", api)
                         print_source_banner("qobuz", "", quality)
                         return api, stream_url, quality
                     except Exception as exc:
                         err_msg = str(exc)[:80]
                         short_api = _shorten_api_url(api)
                         errors.append(f"{short_api}: {err_msg}")
-                        record_failure("qobuz", api)
+                        await record_failure_async("qobuz", api)
                         print_api_failure("qobuz", api, err_msg)
                         continue
 
@@ -1354,7 +1354,7 @@ class QobuzProvider(BaseProvider):
             exclude_apis: set[str] | None = None,
     ) -> tuple[str, str, str]:
         all_apis = list(_STREAM_APIS) + list(_QOBUZ_DL_) + list(_POST_APIS) + list(_COMMUNITY_APIS) + list(_GDSTUDIO_APIS) + list(_WJHE_APIS) + list(_FLACDOWNLOADER_APIS)
-        ordered_apis = prioritize_providers("qobuz", all_apis)
+        ordered_apis = await prioritize_providers_async("qobuz", all_apis)
         if self._local_api_url:
             cleaned_local_api = self._local_api_url.rstrip('/')
             if cleaned_local_api in ordered_apis:
@@ -1520,7 +1520,7 @@ class QobuzProvider(BaseProvider):
                     is_bad_url = stream_url in _bad_stream_urls
                 if is_bad_url:
                     logger.warning("[qobuz] stream URL already known-bad, blacklisting API and skipping download")
-                    record_failure("qobuz", winner_api)
+                    await record_failure_async("qobuz", winner_api)
                     excluded_apis.add(winner_api)
                     last_err = "stream URL already known-bad"
                     continue
@@ -1538,7 +1538,7 @@ class QobuzProvider(BaseProvider):
                     },
                 )
 
-                valid, err = await asyncio.to_thread(validate_downloaded_track, str(dest), expected_s)
+                valid, err = await asyncio.to_thread(validate_downloaded_track_async, str(dest), expected_s)
                 if not valid:
                     actual_duration = await self._get_audio_duration_seconds_async(str(dest))
                     if actual_duration > 0 and actual_duration <= 35 and expected_s > 45:
@@ -1547,7 +1547,7 @@ class QobuzProvider(BaseProvider):
                     logger.warning("[qobuz] stream API returned invalid file: %s. Blacklisting endpoint and retrying...", err)
                     with _bad_stream_urls_lock:
                         _bad_stream_urls.add(stream_url)
-                    record_failure("qobuz", winner_api)
+                    await record_failure_async("qobuz", winner_api)
                     excluded_apis.add(winner_api)
                     last_err = err
 
@@ -1579,7 +1579,7 @@ class QobuzProvider(BaseProvider):
                             "[qobuz] stream API returned invalid FLAC file: %s. Blacklisting endpoint and retrying...",
                             exc,
                         )
-                        record_failure("qobuz", winner_api)
+                        await record_failure_async("qobuz", winner_api)
                         excluded_apis.add(winner_api)
                         last_err = exc
                         if os.path.exists(dest):
@@ -1728,7 +1728,7 @@ class QobuzProvider(BaseProvider):
         chain = _QUALITY_FALLBACK.get(quality, [quality])
         
         all_apis = list(_STREAM_APIS) + list(_QOBUZ_DL_) + list(_POST_APIS) + list(_COMMUNITY_APIS) + list(_GDSTUDIO_APIS) + list(_WJHE_APIS) + list(_FLACDOWNLOADER_APIS)
-        ordered_apis = prioritize_providers("qobuz", all_apis)
+        ordered_apis = prioritize_providers_async("qobuz", all_apis)
 
         if self._local_api_url:
             cleaned_local_api = self._local_api_url.rstrip('/')

@@ -15,13 +15,14 @@ from typing import Any, Dict, Optional, List
 import httpx
 
 from ..core.http import NetworkManager
-from ..core.tagger import embed_metadata, embed_metadata_async, EmbedOptions
+from ..core.tagger import embed_metadata_async, EmbedOptions
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError, ErrorKind
 from .base import BaseProvider
 from ..core.musicbrainz import mb_result_to_tags, fetch_mb_metadata_async
 from ..core.endpoints import get_deezer_endpoint, get_youtube_endpoints
 from ..core.quality import normalize_quality
+from ..core.download_validation import validate_downloaded_track_async
 
 try:
     from Crypto.Cipher import Blowfish
@@ -181,10 +182,6 @@ class DeezerProvider(BaseProvider):
         except Exception as exc:
             logger.error("[deezer] Decryption failed: %s", exc)
             return False
-
-    # ------------------------------------------------------------------
-    # Async HTTP helpers
-    # ------------------------------------------------------------------
 
     async def _request_json_async(self, method: str, url: str, payload: Optional[Dict] = None) -> Dict[str, Any]:
         """Async version of _request_json — uses the shared async httpx client."""
@@ -499,19 +496,24 @@ class DeezerProvider(BaseProvider):
     ) -> DownloadResult:
 
         quality = normalize_quality(quality) if isinstance(quality, str) else quality
-        isrc_to_use = metadata.isrc
+        track = None
+        if metadata.isrc:
+            track = await self._get_track_by_isrc_async(metadata.isrc)
 
-        if not isrc_to_use:
+        if not track:
             logger.warning(
-                "[deezer] ISRC missing. Attempting text search for: %s - %s",
-                metadata.title, metadata.artists,
+                "[deezer] ISRC lookup failed (isrc=%s). Trying text search for: %s - %s",
+                metadata.isrc, metadata.title, metadata.artists,
             )
-            fallback_track = await self._search_track_text_async(metadata.title, metadata.artists)
-            if fallback_track and fallback_track.get("isrc"):
-                isrc_to_use = fallback_track["isrc"]
-                logger.info("[deezer] Found alternative ISRC: %s", isrc_to_use)
-            else:
-                return DownloadResult.fail(self.name, "No ISRC available and text search failed.")
+            track = await self._search_track_text_async(metadata.title, metadata.artists)
+
+        if not track:
+            return DownloadResult.fail(self.name, "No matching track on Deezer (ISRC lookup and text search both failed).")
+
+        isrc_to_use = track.get("isrc") or metadata.isrc
+        if track.get("isrc") and track["isrc"] != metadata.isrc:
+            logger.info("[deezer] Syncing metadata ISRC: %s -> %s", metadata.isrc, track["isrc"])
+            metadata.isrc = track["isrc"]                                                                                       
 
         try:
             dest = self._build_output_path(
@@ -557,9 +559,9 @@ class DeezerProvider(BaseProvider):
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 await asyncio.to_thread(shutil.move, str(downloaded_path), str(dest))
 
-            from ..core.download_validation import validate_downloaded_track
+            from ..core.download_validation import validate_downloaded_track_async
             expected_s = metadata.duration_ms // 1000
-            valid, err_msg = await asyncio.to_thread(validate_downloaded_track, str(dest), expected_s)
+            valid, err_msg = await validate_downloaded_track_async(str(dest), expected_s)
             if not valid:
                 if mb_task and not mb_task.done():
                     mb_task.cancel()

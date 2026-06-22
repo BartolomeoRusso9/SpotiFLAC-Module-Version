@@ -14,9 +14,9 @@ class IsrcHelper:
         self.finder = IsrcFinder(http_client)
         self.soundplate = SoundplateProvider(http_client)
         self.songstats = SongstatsProvider(http_client)
-        self.resolver = LinkResolver(http_client)  # Inizializziamo il resolver
+        self.resolver = LinkResolver(http_client) 
 
-    def get_isrc(self, track_id: str) -> str:
+    async def get_isrc_async(self, track_id: str) -> str:
         # 1. Cache
         cached = get_cached_isrc(track_id)
         if cached: return cached
@@ -24,10 +24,10 @@ class IsrcHelper:
         isrc = None
         search_id = track_id
 
-        # 1.5. Traduzione ID (Se non è Spotify, cerchiamo il link Spotify tramite Odesli)
+        # 1.5. Traduzione ID
         if not track_id.startswith("spotify_") and "_" in track_id:
             try:
-                links = self.resolver.resolve_all(track_id)
+                links = await self.resolver.resolve_all_async(track_id)
                 spotify_url = links.get("spotify")
                 if spotify_url:
                     match = re.search(r"track/([a-zA-Z0-9]{22})", spotify_url)
@@ -36,12 +36,14 @@ class IsrcHelper:
             except Exception:
                 pass  # Fallimento silenzioso, proseguiamo col normale flusso
 
-        # 2. Sequenza di risoluzione (usando l'ID originale o quello tradotto)
-        isrc = self.finder.find_isrc(search_id)
+        # 2. Sequenza di risoluzione async
+        isrc = await self.finder.find_isrc_async(search_id)
+        
         if not isrc:
-            isrc = self.soundplate.get_isrc(search_id)
+            isrc = await self.soundplate.get_isrc_async(search_id)
+            
         if not isrc:
-            isrc = self.songstats.get_isrc(search_id)
+            isrc = await self.songstats.get_isrc_async(search_id)
 
         # 3. Salvataggio
         if isrc:

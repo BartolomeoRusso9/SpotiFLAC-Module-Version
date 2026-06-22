@@ -2,14 +2,14 @@ import importlib.metadata
 from packaging.version import Version
 from .core.http import NetworkManager
 
-def check_for_updates():
+async def check_for_updates_async():
     package_name = "spotiflac"
-    client = NetworkManager.get_sync_client()
+    client = NetworkManager.get_async_client()
 
     try:
         current_version = importlib.metadata.version(package_name)
 
-        resp = client.get(f"https://pypi.org/pypi/{package_name}/json", timeout=2)
+        resp = await client.get(f"https://pypi.org/pypi/{package_name}/json", timeout=2)
 
         if resp.status_code == 200:
             latest_version = resp.json()["info"]["version"]
@@ -37,10 +37,6 @@ def check_for_updates():
 
                 print(f" │{mod_line.ljust(width-2)}│")
                 print(f" │{app_line.ljust(width-2)}│")
-
                 print(f" ╰" + "─" * (width-2) + "╯\n")
-
-    except importlib.metadata.PackageNotFoundError:
-        pass
     except Exception:
         pass

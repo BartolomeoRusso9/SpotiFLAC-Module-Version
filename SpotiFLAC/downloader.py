@@ -1,11 +1,3 @@
-"""
-Downloader — main orchestrator.
-Changes compared to the original:
-  - DownloadOptions: +track_max_retries, +post_download_action, +post_download_command
-  - download_one(): per-track retry with exponential backoff
-  - DownloadWorker: post-download actions (open_folder / notify / command)
-  - SpotiflacDownloader.run(): accepts str | list[str] for batch mode
-"""
 from __future__ import annotations
 
 import asyncio
@@ -872,7 +864,7 @@ class SpotiflacDownloader:
         failed_ids = {f[0] for f in failed_tuples}
         return [t for t in updated_tracks if t.id in failed_ids]
 
-    def _run_once(self, url: str, target_tracks=None) -> list:
+    async def _run_once(self, url: str, target_tracks=None) -> list:
         if target_tracks is not None:
             print(f"\nRetrying download for {len(target_tracks)} track(s)...")
             tracks          = target_tracks
@@ -919,19 +911,19 @@ class SpotiflacDownloader:
 
         # Update URL history with collection name and cover art
         try:
-            from .core.session_memory import add_url_to_history
+            from .core.session_memory import add_url_to_history_async
             cover_url = tracks[0].cover_url if tracks and getattr(tracks[0], 'cover_url', '') else ''
             _url_type = info.get("type", "")
             if _url_type == "artist_discography":
                 _url_type = "artist"
             _artist = tracks[0].artists if tracks and _url_type == 'track' else ''
-            add_url_to_history(url, label=collection_name, cover=cover_url,
+            await add_url_to_history_async(url, label=collection_name, cover=cover_url,
                                track_count=len(tracks), url_type=_url_type, artist=_artist)
         except Exception as exc:
             logger.debug("[downloader] Failed operation: %s", exc)
         return self._run_worker(tracks, collection_name, info, is_album, is_playlist, opts=effective_opts)
 
-    def _run_once_async(self, url: str, target_tracks=None) -> list[TrackMetadata]:
+    async def _run_once_async(self, url: str, target_tracks=None) -> list[TrackMetadata]:
         if target_tracks is not None:
             print(f"\nRetrying download for {len(target_tracks)} track(s)...")
             tracks          = target_tracks
@@ -978,13 +970,13 @@ class SpotiflacDownloader:
 
         # Update URL history with collection name and cover art
         try:
-            from .core.session_memory import add_url_to_history
+            from .core.session_memory import add_url_to_history_async
             cover_url = tracks[0].cover_url if tracks and getattr(tracks[0], 'cover_url', '') else ''
             _url_type = info.get("type", "")
             if _url_type == "artist_discography":
                 _url_type = "artist"
             _artist = tracks[0].artists if tracks and _url_type == 'track' else ''
-            add_url_to_history(url, label=collection_name, cover=cover_url,
+            await add_url_to_history_async(url, label=collection_name, cover=cover_url,
                                track_count=len(tracks), url_type=_url_type, artist=_artist)
         except Exception as exc:
             logger.debug("[downloader] Failed operation: %s", exc)

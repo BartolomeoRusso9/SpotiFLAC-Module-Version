@@ -13,10 +13,10 @@ from ..core.http import NetworkManager
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError, ErrorKind, TrackNotFoundError
 from ..core.tagger import embed_metadata, EmbedOptions
-from ..core.download_validation import validate_downloaded_track
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.endpoints import get_asian_provider_endpoint
 from ..core.flac_validation import validate_and_repair_if_needed
+from ..core.download_validation import validate_downloaded_track_async
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +254,7 @@ class GDStudioProvider(BaseProvider):
         tracks = [self._item_to_metadata(it, i+1) for i, it in enumerate(items)]
         return f"Search: {query}", tracks
 
-    def download_track(self, metadata: TrackMetadata, output_dir: str, **kwargs: Any) -> DownloadResult:
+    async def download_track(self, metadata: TrackMetadata, output_dir: str, **kwargs: Any) -> DownloadResult:
         try:
             extra = metadata.extra_info or {}
             raw_track_id = extra.get("raw_track_id", "")
@@ -279,7 +279,7 @@ class GDStudioProvider(BaseProvider):
             self._http.stream_to_file(dl_url, str(dest), self._progress_cb)
 
             expected_s = metadata.duration_ms // 1000
-            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
+            valid, err_msg = await validate_downloaded_track_async(str(dest), expected_s)
             if not valid:
                 if dest.exists():
                     os.remove(str(dest))
@@ -345,7 +345,7 @@ class GDStudioProvider(BaseProvider):
             await self._async_http.stream_to_file(dl_url, str(dest), self._progress_cb, extra_headers={"User-Agent": _DEFAULT_UA})
 
             expected_s = metadata.duration_ms // 1000
-            valid, err_msg = await asyncio.to_thread(validate_downloaded_track, str(dest), expected_s)
+            valid, err_msg = await validate_downloaded_track_async(str(dest), expected_s)
             if not valid:
                 if dest.exists():
                     os.remove(str(dest))
