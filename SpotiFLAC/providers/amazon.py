@@ -402,9 +402,9 @@ class AmazonProvider(BaseProvider):
             return self._s_token
 
         # Recuperiamo gli endpoint esatti dal registro cifrato
-        s_home_url = get_amazon_endpoint("squid_home")
-        s_challenge_url = get_amazon_endpoint("squid_challenge")
-        s_verify_url = get_amazon_endpoint("squid_verify")
+        s_home_url = get_amazon_endpoint("s_home")
+        s_challenge_url = get_amazon_endpoint("s_challenge")
+        s_verify_url = get_amazon_endpoint("s_verify")
         
         if not all([s_home_url, s_challenge_url, s_verify_url]):
             raise RuntimeError("[amazon] s endpoints not fully configured in registry")
@@ -520,7 +520,7 @@ class AmazonProvider(BaseProvider):
     async def _download_from_s_api(self, asin: str, output_dir: str, requested_quality: str) -> tuple[str, dict] | None:
         logger.info("[amazon] Trying s API (ASIN: %s)", asin)
  
-        s_stream_url = get_amazon_endpoint("squid_stream")
+        s_stream_url = get_amazon_endpoint("s_stream")
         if not s_stream_url:
             logger.warning("[amazon] s stream endpoint not configured; skipping s fallback.")
             return None
