@@ -39,29 +39,6 @@ class GDStudioProvider(BaseProvider):
         self._async_http._headers.update({"User-Agent": _DEFAULT_UA})
 
     # Basic helpers shared across Netease/Kuwo/JOOX/Migu
-    def _search(self, query: str, count: int = 10) -> list[dict]:
-        try:
-            resp = self._session.get(
-                get_asian_provider_endpoint(self._source, "gdstudio"),
-                params={
-                    "types": "search",
-                    "source": self._source,
-                    "name": query,
-                    "count": count,
-                    "pages": 1,
-                },
-                timeout=10,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
-                return data.get("data", data.get("result", []))
-        except Exception as exc:
-            logger.debug("[%s] Search failed for '%s': %s", self._source, query, exc)
-        return []
-
     async def _search_async(self, query: str, count: int = 10) -> list[dict]:
         try:
             resp = await self._async_http.get(
@@ -82,66 +59,6 @@ class GDStudioProvider(BaseProvider):
                 return data.get("data", data.get("result", []))
         except Exception as exc:
             logger.debug("[%s] Async search failed for '%s': %s", self._source, query, exc)
-        return []
-
-    def _get_stream(self, track_id: str, requested_quality: int | None = None) -> tuple[str, int]:
-        try:
-            params = {"types": "url", "source": self._source, "id": track_id}
-            if requested_quality:
-                params["br"] = requested_quality
-            resp = self._session.get(get_asian_provider_endpoint(self._source, "gdstudio"), params=params, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            url = data.get("url", "")
-            actual_br = int(data.get("br", 0)) if isinstance(data.get("br", 0), (int, str)) else 0
-            return url, actual_br
-        except Exception as exc:
-            logger.debug("[%s] Stream fetch failed for id=%s: %s", self._source, track_id, exc)
-        return "", 0
-
-    def _get_pic_url(self, pic_id: str, size: int = 500) -> str:
-        if not pic_id:
-            return ""
-        try:
-            resp = self._session.get(
-                get_asian_provider_endpoint(self._source, "gdstudio"),
-                params={"types": "pic", "source": self._source, "id": pic_id, "size": size},
-                timeout=8,
-            )
-            resp.raise_for_status()
-            return resp.json().get("url", "")
-        except Exception as exc:
-            logger.debug("[%s] Pic fetch failed for pic_id=%s: %s", self._source, pic_id, exc)
-        return ""
-
-    def _get_lyric(self, lyric_id: str) -> str:
-        if not lyric_id:
-            return ""
-        try:
-            resp = self._session.get(
-                get_asian_provider_endpoint(self._source, "gdstudio"),
-                params={"types": "lyric", "source": self._source, "id": lyric_id},
-                timeout=8,
-            )
-            resp.raise_for_status()
-            return resp.json().get("lyric", "")
-        except Exception as exc:
-            logger.debug("[%s] Lyric fetch failed for id=%s: %s", self._source, lyric_id, exc)
-        return ""
-
-    def _get_album_tracks(self, album_id: str) -> list[dict]:
-        try:
-            resp = self._session.get(
-                get_asian_provider_endpoint(self._source, "gdstudio"),
-                params={"types": "search", "source": f"{self._source}_album", "name": album_id, "count": 100, "pages": 1},
-                timeout=12,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            if isinstance(data, list):
-                return data
-        except Exception as exc:
-            logger.debug("[%s] Album tracks fetch failed for id=%s: %s", self._source, album_id, exc)
         return []
 
     async def _get_stream_async(self, track_id: str, requested_quality: int | None = None) -> tuple[str, int]:
@@ -204,7 +121,7 @@ class GDStudioProvider(BaseProvider):
             logger.debug("[%s] Async album tracks fetch failed for id=%s: %s", self._source, album_id, exc)
         return []
 
-    def _item_to_metadata(self, item: dict, position: int = 1) -> TrackMetadata:
+    async def _item_to_metadata_async(self, item: dict, position: int = 1) -> TrackMetadata:
         track_id = str(item.get("id", ""))
         title = item.get("name", "Unknown")
         raw_artists = item.get("artist", [])
@@ -214,7 +131,7 @@ class GDStudioProvider(BaseProvider):
             artist_str = str(raw_artists) or "Unknown"
         album = item.get("album", "Unknown")
         pic_id = str(item.get("pic_id", ""))
-        cover_url = self._get_pic_url(pic_id) if pic_id else ""
+        cover_url = await self._get_pic_url_async(pic_id) if pic_id else ""
         return TrackMetadata(
             id = f"{self._source}_{track_id}",
             title = title,
@@ -228,27 +145,27 @@ class GDStudioProvider(BaseProvider):
         )
 
     # Generic get_url / download_track reuse the same logic used previously in individual modules
-    def get_url(self, url: str) -> tuple[str, list[TrackMetadata]]:
+    async def get_url_async(self, url: str) -> tuple[str, list[TrackMetadata]]:
         match = re.search(r"(\d{5,})", url)
         if match and "_album" in url.lower():
             album_id = match.group(1)
-            items = self._get_album_tracks(album_id)
+            items = await self._get_album_tracks_async(album_id)
             if items:
-                tracks = [self._item_to_metadata(it, i+1) for i, it in enumerate(items)]
+                tracks = [await self._item_to_metadata_async(it, i+1) for i, it in enumerate(items)]
                 return tracks[0].album if tracks else "Unknown Album", tracks
 
         if match:
             track_id = match.group(1)
-            items = self._search(track_id, count=1)
+            items = await self._search_async(track_id, count=1)
             if items:
-                meta = self._item_to_metadata(items[0])
+                meta = await self._item_to_metadata_async(items[0])
                 return meta.title, [meta]
 
         query = url.strip()
-        items = self._search(query, count=20)
+        items = await self._search_async(query, count=20)
         if not items:
             raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, f"No results for: {query}", self.name)
-        tracks = [self._item_to_metadata(it, i+1) for i, it in enumerate(items)]
+        tracks = [await self._item_to_metadata_async(it, i+1) for i, it in enumerate(items)]
         return f"Search: {query}", tracks
 
     async def download_track_async(self, metadata: TrackMetadata, output_dir: str, **kwargs: Any) -> DownloadResult:
@@ -288,7 +205,7 @@ class GDStudioProvider(BaseProvider):
 
             mb_tags = {}
             if mb_fetcher:
-                res = mb_fetcher.future.result()
+                res = await asyncio.to_thread(mb_fetcher.future.result)
                 mb_tags = mb_result_to_tags(res)
 
             if extra.get("pic_id") and not metadata.cover_url:
