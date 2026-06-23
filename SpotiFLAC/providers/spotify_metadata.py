@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import unicodedata
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse, parse_qs
 
 from ..core.spotfetch import SpotifyWebClient
+from ..core.http import AsyncHttpClient
 from ..core.errors import InvalidUrlError, SpotiflacError, ErrorKind
 from ..core.models import TrackMetadata
 
@@ -297,12 +298,13 @@ class SpotifyMetadataClient:
     def __init__(self, timeout_s: int = 10) -> None:
         self.web_client = SpotifyWebClient()
         self.web_client.initialize()
+        self._async_http = AsyncHttpClient(provider="spotify", timeout_s=timeout_s)
 
     # ------------------------------------------------------------------
     # Track singola
     # ------------------------------------------------------------------
 
-    def _get_album_artists(self, album_id: str) -> str:
+    async def _get_album_artists_async(self, album_id: str) -> str:
         """Query leggera: solo metadati album, nessuna track."""
         payload = {
             "operationName": "getAlbum",
@@ -318,14 +320,14 @@ class SpotifyMetadataClient:
             }},
         }
         try:
-            data = self.web_client.query(payload)
+            data = await asyncio.to_thread(self.web_client.query, payload)
             album_union = data.get("data", {}).get("albumUnion", {})
             return _join_artists(album_union.get("artists", {}))
         except Exception as e:
             logger.debug(f"[spotify] Failed to fetch album artists for {album_id}: {e}")
             return ""
 
-    def get_track(self, track_id: str) -> TrackMetadata:
+    async def get_track_async(self, track_id: str) -> TrackMetadata:
         """Retrieves metadati completi per una singola track, compositore incluso."""
         payload = {
             "operationName": "getTrack",
@@ -335,7 +337,7 @@ class SpotifyMetadataClient:
                 "sha256Hash": "612585ae06ba435ad26369870deaae23b5c8800a256cd8a57e08eddc25a37294",
             }},
         }
-        data = self.web_client.query(payload)
+        data = await asyncio.to_thread(self.web_client.query, payload)
         track_union = data.get("data", {}).get("trackUnion", {})
 
         album_data = track_union.get("albumOfTrack", {})
@@ -350,7 +352,7 @@ class SpotifyMetadataClient:
                 if isinstance(uri, str) and ":" in uri:
                     album_id = uri.split(":")[-1]
             if album_id:
-                album_artists_str = self._get_album_artists(album_id)
+                album_artists_str = await self._get_album_artists_async(album_id)
             if not album_artists_str:
                 album_artists_str = "Unknown Artist"
         
@@ -384,7 +386,7 @@ class SpotifyMetadataClient:
         artists_str = ", ".join(artists_list)
         # ------------------------------------------------------------------
         
-        composer_str = self.web_client.get_track_composer(track_id)
+        composer_str = await asyncio.to_thread(self.web_client.get_track_composer, track_id)
         
         c_items = album_data.get("copyright", {}).get("items", [])
         copyright_str = " \u00B7 ".join([c.get("text", "") for c in c_items if c.get("text")]) if c_items else ""
@@ -414,20 +416,14 @@ class SpotifyMetadataClient:
     # Lazy Loading - Anteprima track
     # ------------------------------------------------------------------
 
-    def get_track_preview(self, track_id: str) -> str:
+    async def get_track_preview_async(self, track_id: str) -> str:
         """Retrieves l'URL di anteprima di una track al momento della richiesta (lazy loading).
         
         Questo metodo è pensato per essere invocato solo quando l'utente clicca su 'play' o 'preview'
         nella GUI, evitando richieste di rete durante il caricamento iniziale della lista.
-        
-        Args:
-            track_id: ID della track Spotify
-            
-        Returns:
-            URL dell'anteprima MP3 (stringa vuota se non disponibile)
         """
         try:
-            preview_url = self.web_client.get_preview_url(track_id)
+            preview_url = await asyncio.to_thread(self.web_client.get_preview_url, track_id)
             return preview_url or ""
         except Exception as e:
             logger.debug(f"[spotify] Failed to fetch preview for track {track_id}: {e}")
@@ -437,7 +433,7 @@ class SpotifyMetadataClient:
     # Album
     # ------------------------------------------------------------------
 
-    def get_album_tracks(self, album_id: str) -> tuple[dict, list[TrackMetadata]]:
+    async def get_album_tracks_async(self, album_id: str) -> tuple[dict, list[TrackMetadata]]:
         """Retrieves tutte le tracks di un album con pagezione completa."""
         limit = 1000
         all_items: list[Any] = []
@@ -458,7 +454,7 @@ class SpotifyMetadataClient:
                     "sha256Hash": "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10",
                 }},
             }
-            data = self.web_client.query(payload)
+            data = await asyncio.to_thread(self.web_client.query, payload)
             au = data.get("data", {}).get("albumUnion", {})
 
             # Salva i metadati dell'album solo al primo giro
@@ -527,7 +523,7 @@ class SpotifyMetadataClient:
     # Playlist
     # ------------------------------------------------------------------
 
-    def get_playlist_tracks(self, playlist_id: str) -> tuple[dict, list[TrackMetadata], str]:
+    async def get_playlist_tracks_async(self, playlist_id: str) -> tuple[dict, list[TrackMetadata], str]:
         limit = 1000
         offset = 0
         all_items: list[Any] = []
@@ -549,7 +545,7 @@ class SpotifyMetadataClient:
                     "sha256Hash": "bb67e0af06e8d6f52b531f97468ee4acd44cd0f82b988e15c2ea47b1148efc77",
                 }},
             }
-            response = self.web_client.query(payload)
+            response = await asyncio.to_thread(self.web_client.query, payload)
             playlist_v2 = response.get("data", {}).get("playlistV2", {})
 
             if playlist_name == "Unknown Playlist" and playlist_v2:
@@ -648,10 +644,10 @@ class SpotifyMetadataClient:
             "extensions": {"persistedQuery": {"version": 1, "sha256Hash": self._SEARCH_HASH}},
         }
 
-    def search(self, query: str, limit: int = 20) -> dict[str, list]:
+    async def search_async(self, query: str, limit: int = 20) -> dict[str, list]:
         """Ricerca unificata: restituisce tracks, album, artisti e playlist."""
         try:
-            data = self.web_client.query(self._search_payload(query, limit))
+            data = await asyncio.to_thread(self.web_client.query, self._search_payload(query, limit))
             search_v2 = data.get("data", {}).get("searchV2", {})
         except Exception as e:
             logger.debug(f"[spotify] Search error: {e}")
@@ -745,7 +741,7 @@ class SpotifyMetadataClient:
             "playlists": _parse_simple(playlists_data.get("items", []), "playlist"),
         }
 
-    def search_by_type(
+    async def search_by_type_async(
         self,
         query: str,
         kind: str,
@@ -755,21 +751,21 @@ class SpotifyMetadataClient:
         """Ricerca filtrata per un singolo tipo: track | album | artist | playlist."""
         if kind not in ("track", "album", "artist", "playlist"):
             raise ValueError(f"Invalid type: {kind!r}. Valori ammessi: track, album, artist, playlist")
-        data = self.web_client.query(self._search_payload(query, limit, offset))
+        data = await asyncio.to_thread(self.web_client.query, self._search_payload(query, limit, offset))
         search_v2 = data.get("data", {}).get("searchV2", {})
-        results = self.search(query, limit=limit)
+        results = await self.search_async(query, limit=limit)
         key = "tracks" if kind == "track" else f"{kind}s"
         return results.get(key, [])[offset:]
 
-    # Mantenuto per retrocompatibilità
-    def search_tracks(self, query: str, limit: int = 20) -> list[TrackMetadata]:
-        return self.search(query, limit=limit)["tracks"]
+    async def search_tracks_async(self, query: str, limit: int = 20) -> list[TrackMetadata]:
+        res = await self.search_async(query, limit=limit)
+        return res["tracks"]
 
     # ------------------------------------------------------------------
     # Artist
     # ------------------------------------------------------------------
 
-    def get_artist_profile(self, artist_id: str) -> dict:
+    async def get_artist_profile_async(self, artist_id: str) -> dict:
         payload = {
             "operationName": "queryArtistOverview",
             "variables": {"uri": f"spotify:artist:{artist_id}", "locale": ""},
@@ -779,7 +775,7 @@ class SpotifyMetadataClient:
             }},
         }
         try:
-            response = self.web_client.query(payload)
+            response = await asyncio.to_thread(self.web_client.query, payload)
             artist_data = response.get("data", {}).get("artistUnion", {})
             if not artist_data:
                 return {}
@@ -817,14 +813,14 @@ class SpotifyMetadataClient:
             logger.warning(f"[spotify] Profile fetch failed: {e}")
             return {"profile": {"name": "Unknown"}, "stats": {}}
 
-    def get_artist_albums(
+    async def get_artist_albums_async(
         self,
         artist_id: str,
         include_groups: str = "album,single",
     ) -> tuple[dict, list[TrackMetadata]]:
-        artist_info = self.get_artist_profile(artist_id)
+        artist_info = await self.get_artist_profile_async(artist_id)
 
-        items = self.web_client.get_artist_discography(artist_id)
+        items = await asyncio.to_thread(self.web_client.get_artist_discography, artist_id)
         allowed_groups = (
             {"album", "single", "appears_on", "compilation"}
             if include_groups == "all"
@@ -845,23 +841,30 @@ class SpotifyMetadataClient:
             albums_to_fetch.append(aid)
 
         all_tracks: list[TrackMetadata] = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(self.get_album_tracks, aid): aid for aid in albums_to_fetch}
-            for future in as_completed(futures):
-                try:
-                    _, track_list = future.result()
-                    all_tracks.extend(track_list)
-                except Exception:
-                    continue
+        sem = asyncio.Semaphore(5)
+
+        async def fetch_album(aid: str):
+            async with sem:
+                return await self.get_album_tracks_async(aid)
+
+        tasks = [fetch_album(aid) for aid in albums_to_fetch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for res in results:
+            if isinstance(res, Exception):
+                logger.warning("[spotify] Album fetch failed in discography: %s", res)
+            else:
+                _, track_list = res
+                all_tracks.extend(track_list)
 
         return artist_info, all_tracks
     
-    def get_home_feed(self, time_zone: str = "Europe/Rome") -> dict:
-        raw = self.web_client.get_home_feed(time_zone)
+    async def get_home_feed_async(self, time_zone: str = "Europe/Rome") -> dict:
+        raw = await asyncio.to_thread(self.web_client.get_home_feed, time_zone)
         return parse_home_feed(raw)
 
-    def get_browse_categories(self) -> dict:
-        raw = self.web_client.get_browse_categories()
+    async def get_browse_categories_async(self) -> dict:
+        raw = await asyncio.to_thread(self.web_client.get_browse_categories)
         return self._parse_browse(raw)
 
     def _parse_browse(self, raw: dict) -> dict:
@@ -891,17 +894,17 @@ class SpotifyMetadataClient:
                 })
         return {"success": True, "categories": categories}
     
-    def enrich_track(self, track: TrackMetadata) -> TrackMetadata:
+    async def enrich_track_async(self, track: TrackMetadata) -> TrackMetadata:
         """Arricchisce ISRC, genre, label, copyright via Spotify metadata + Deezer."""
         if not track.id:
             return track
 
         # 1. ISRC da Spotify
-        isrc = track.isrc or self.web_client.get_isrc_from_metadata(track.id)
+        isrc = track.isrc or await asyncio.to_thread(self.web_client.get_isrc_from_metadata, track.id)
 
         # 2. Deezer per label/copyright/genre
         if isrc:
-            deezer = self._fetch_deezer_by_isrc(isrc)
+            deezer = await self._fetch_deezer_by_isrc_async(isrc)
             return TrackMetadata(
                 **{**track.__dict__,
                 "isrc": isrc,
@@ -912,10 +915,9 @@ class SpotifyMetadataClient:
             )
         return TrackMetadata(**{**track.__dict__, "isrc": isrc})
 
-    def _fetch_deezer_by_isrc(self, isrc: str) -> dict:
+    async def _fetch_deezer_by_isrc_async(self, isrc: str) -> dict:
         try:
-            import httpx
-            resp = httpx.get(f"https://api.deezer.com/track/isrc:{isrc}", timeout=8)
+            resp = await self._async_http.get(f"https://api.deezer.com/track/isrc:{isrc}", timeout=8)
             if resp.status_code != 200:
                 return {}
             data = resp.json()
@@ -924,7 +926,7 @@ class SpotifyMetadataClient:
             result = {"isrc": data.get("isrc", isrc)}
             album_id = (data.get("album") or {}).get("id")
             if album_id:
-                album_resp = httpx.get(f"https://api.deezer.com/album/{album_id}", timeout=8)
+                album_resp = await self._async_http.get(f"https://api.deezer.com/album/{album_id}", timeout=8)
                 if album_resp.status_code == 200:
                     album = album_resp.json()
                     if album.get("label"):
@@ -943,7 +945,7 @@ class SpotifyMetadataClient:
     # Dispatcher principale
     # ------------------------------------------------------------------
 
-    def get_url(
+    async def get_url_async(
         self,
         spotify_url: str,
         include_featuring: bool = False,
@@ -957,11 +959,11 @@ class SpotifyMetadataClient:
         }
 
         if t == "track":
-            meta = self.get_track(info["id"])
+            meta = await self.get_track_async(info["id"])
             return meta.title, [meta], "", routing_metadata
 
         if t == "album":
-            album, tracks = self.get_album_tracks(info["id"])
+            album, tracks = await self.get_album_tracks_async(info["id"])
             album_meta = {
                 "cover_url": album.get("cover_url", ""),
                 "release_date": album.get("release_date", ""),
@@ -971,14 +973,14 @@ class SpotifyMetadataClient:
             return album.get("name", "Unknown Album"), tracks, album.get("cover_url", ""), album_meta
 
         if t == "playlist":
-            playlist, tracks, cover = self.get_playlist_tracks(info["id"])
+            playlist, tracks, cover = await self.get_playlist_tracks_async(info["id"])
             playlist.update(routing_metadata)
             return playlist.get("name", "Unknown Playlist"), tracks, cover, playlist
 
         if t in ("artist", "artist_discography"):
             # Rispetta il sub-type della discografia se presente nell'URL
             group = info.get("group", "album,single")
-            artist, tracks = self.get_artist_albums(info["id"], include_groups=group)
+            artist, tracks = await self.get_artist_albums_async(info["id"], include_groups=group)
             artist_meta = {
                 "name":              artist.get("profile", {}).get("name", "Unknown Artist"),
                 "profile":           artist.get("profile", {}),
@@ -996,6 +998,12 @@ class SpotifyMetadataClient:
 
         raise SpotiflacError(ErrorKind.INVALID_URL, f"Spotify type not supported: {t}")
     
+    async def get_metadata_from_url_async(self, url: str) -> TrackMetadata:
+        _, tracks, _, _ = await self.get_url_async(url)
+        if not tracks:
+            raise ValueError(f"No tracks found for: {url}")
+        return tracks[0]
+
 def _extract_explore_artists(content: dict[str, Any]) -> str:
     artist_items = []
     raw_artists = content.get("artists")
