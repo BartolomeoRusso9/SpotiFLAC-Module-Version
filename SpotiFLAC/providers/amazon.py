@@ -12,9 +12,9 @@ import json
 import httpx
 import threading
 import time
+import aiofiles
 from typing import Callable
 from urllib.parse import urlparse
-from ..core.http import NetworkManager
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import PictureType
@@ -132,9 +132,8 @@ class AmazonProvider(BaseProvider):
     _prefetch_task: asyncio.Task | None = None
 
     def __init__(self, timeout_s: int = 120) -> None:
-        super().__init__(timeout_s=timeout_s)
-        self._session = NetworkManager.get_async_client()
-        self._session.headers.update({"User-Agent": _DEFAULT_UA})
+        # Passiamo l'User-Agent alla classe BaseProvider affinché l'AsyncHttpClient lo erediti!
+        super().__init__(timeout_s=timeout_s, headers={"User-Agent": _DEFAULT_UA})
         self._s_token: str | None = None
 
     def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
@@ -156,8 +155,8 @@ class AmazonProvider(BaseProvider):
         url = f"{base_url}{endpoint}"
 
         if method.upper() == "POST":
-            return await self._session.post(url, json=payload, headers=headers, timeout=30)
-        return await self._session.get(url, params=params, headers=headers, timeout=30)
+            return await self._async_http.post(url, json=payload, headers=headers, timeout=30)
+        return await self._async_http.get(url, params=params, headers=headers, timeout=30)
 
     async def _do_request_with_retry(
             self,
@@ -169,9 +168,11 @@ class AmazonProvider(BaseProvider):
             **kwargs,
     ) -> httpx.Response:
         retry_statuses = {429, 500, 502, 503, 504}
+        client = await self._async_http._client()
+
         for attempt in range(max_retries):
             try:
-                response = await self._session.request(method, url, **kwargs)
+                response = await client.request(method, url, **kwargs)
             except httpx.RequestError as exc:
                 if attempt < max_retries - 1:
                     logger.warning(
@@ -209,7 +210,6 @@ class AmazonProvider(BaseProvider):
                     continue
 
             return response
-
         return response
 
     # ------------------------------------------------------------------
@@ -244,17 +244,16 @@ class AmazonProvider(BaseProvider):
     async def _resolve_via_songstats(self, isrc: str) -> str | None:
         url = f"https://songstats.com/{isrc.upper().strip()}?ref=ISRCFinder"
         try:
-            resp = await self._session.get(url, headers={"User-Agent": _DEFAULT_UA, "Accept": "text/html"}, timeout=15)
-            if resp.status_code == 200:
-                for match in re.finditer(r'<script type="application/ld\+json">([\s\S]*?)</script>', resp.text):
-                    try:
-                        data = json.loads(match.group(1))
-                        amz_url = self._extract_amazon_from_json_ld(data)
-                        if amz_url:
-                            logger.info("[amazon] Resolved via Songstats ISRC")
-                            return amz_url
-                    except json.JSONDecodeError:
-                        continue
+            resp = await self._async_http.get(url, headers={"Accept": "text/html"}, timeout=15)
+            for match in re.finditer(r'<script type="application/ld\+json">([\s\S]*?)</script>', resp.text):
+                try:
+                    data = json.loads(match.group(1))
+                    amz_url = self._extract_amazon_from_json_ld(data)
+                    if amz_url:
+                        logger.info("[amazon] Resolved via Songstats ISRC")
+                        return amz_url
+                except json.JSONDecodeError:
+                    continue
         except Exception as e:
             logger.warning(f"[amazon] Songstats failed: {e}")
         return None
@@ -273,15 +272,12 @@ class AmazonProvider(BaseProvider):
             _zarz_base = get_amazon_endpoint("zarz")
             if _zarz_base:
                 _zarz_url = f"{_zarz_base.rstrip('/')}/resolve"
-                resp = await self._session.post(
+                resp = await self._async_http.post(
                     _zarz_url,
                     json={"url": source_url},
                     headers={"User-Agent": "SpotiFLAC-Mobile/4.5.0"},
                     timeout=15
                 )
-            else:
-                resp = None
-            if resp and resp.status_code == 200:
                 data = resp.json()
                 if data.get("success") and "AmazonMusic" in data.get("songUrls", {}):
                     amz_val = data["songUrls"]["AmazonMusic"]
@@ -298,40 +294,37 @@ class AmazonProvider(BaseProvider):
             try:
                 dz_url = f"https://www.deezer.com/track/{deezer_id}"
                 sl_api_url = f"https://api.song.link/v1-alpha.1/links?url={dz_url}&userCountry=US"
-                resp = await self._session.get(sl_api_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    links = data.get("linksByPlatform", {})
-                    if "amazonMusic" in links:
-                        logger.info("[amazon] Resolved via SongLink API (Deezer ID)")
-                        return self._format_amazon_url(links["amazonMusic"].get("url"))
+                resp = await self._async_http.get(sl_api_url, timeout=15)
+                data = resp.json()
+                links = data.get("linksByPlatform", {})
+                if "amazonMusic" in links:
+                    logger.info("[amazon] Resolved via SongLink API (Deezer ID)")
+                    return self._format_amazon_url(links["amazonMusic"].get("url"))
             except Exception as exc:
                 logger.warning(f"[amazon] SongLink API (Deezer ID) failed: {exc}")
 
         # 3. SONGLINK HTML (Spotify ID Fallback)
         try:
             sl_url = f"https://song.link/s/{track_id}"
-            resp = await self._session.get(sl_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
-            if resp.status_code == 200:
-                asin_match = re.search(r'trackAsin=([A-Z0-9]{10})', resp.text)
-                if not asin_match:
-                    asin_match = re.search(r'https://music\.amazon\.com/tracks/([A-Z0-9]{10})', resp.text)
-                if asin_match:
-                    logger.info("[amazon] Resolved via Songlink HTML Scraping")
-                    return self._format_amazon_url(asin_match.group(1))
+            resp = await self._async_http.get(sl_url, timeout=15)
+            asin_match = re.search(r'trackAsin=([A-Z0-9]{10})', resp.text)
+            if not asin_match:
+                asin_match = re.search(r'https://music\.amazon\.com/tracks/([A-Z0-9]{10})', resp.text)
+            if asin_match:
+                logger.info("[amazon] Resolved via Songlink HTML Scraping")
+                return self._format_amazon_url(asin_match.group(1))
         except Exception as exc:
             logger.warning(f"[amazon] Songlink HTML failed: {exc}")
 
         # 4. SONGLINK API (Spotify ID)
         try:
             sl_api_url = f"https://api.song.link/v1-alpha.1/links?url={source_url}&userCountry=US"
-            resp = await self._session.get(sl_api_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                links = data.get("linksByPlatform", {})
-                if "amazonMusic" in links:
-                    logger.info("[amazon] Resolved via SongLink API (Spotify ID)")
-                    return self._format_amazon_url(links["amazonMusic"].get("url"))
+            resp = await self._async_http.get(sl_api_url, timeout=15)
+            data = resp.json()
+            links = data.get("linksByPlatform", {})
+            if "amazonMusic" in links:
+                logger.info("[amazon] Resolved via SongLink API (Spotify ID)")
+                return self._format_amazon_url(links["amazonMusic"].get("url"))
         except Exception as exc:
             logger.warning(f"[amazon] SongLink API resolve failed: {exc}")
 
@@ -340,13 +333,12 @@ class AmazonProvider(BaseProvider):
             isrc = metadata.isrc
             try:
                 sl_api_url = f"https://api.song.link/v1-alpha.1/links?isrc={isrc}&userCountry=US"
-                resp = await self._session.get(sl_api_url, headers={"User-Agent": _DEFAULT_UA}, timeout=15)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    links = data.get("linksByPlatform", {})
-                    if "amazonMusic" in links:
-                        logger.info("[amazon] Resolved via SongLink API (ISRC)")
-                        return self._format_amazon_url(links["amazonMusic"].get("url"))
+                resp = await self._async_http.get(sl_api_url, timeout=15)
+                data = resp.json()
+                links = data.get("linksByPlatform", {})
+                if "amazonMusic" in links:
+                    logger.info("[amazon] Resolved via SongLink API (ISRC)")
+                    return self._format_amazon_url(links["amazonMusic"].get("url"))
             except Exception as exc:
                 logger.warning(f"[amazon] SongLink API (ISRC) failed: {exc}")
 
@@ -410,9 +402,9 @@ class AmazonProvider(BaseProvider):
             return self._s_token
 
         # Recuperiamo gli endpoint esatti dal registro cifrato
-        s_home_url = get_amazon_endpoint("s_home")
-        s_challenge_url = get_amazon_endpoint("s_challenge")
-        s_verify_url = get_amazon_endpoint("s_verify")
+        s_home_url = get_amazon_endpoint("squid_home")
+        s_challenge_url = get_amazon_endpoint("squid_challenge")
+        s_verify_url = get_amazon_endpoint("squid_verify")
         
         if not all([s_home_url, s_challenge_url, s_verify_url]):
             raise RuntimeError("[amazon] s endpoints not fully configured in registry")
@@ -453,9 +445,8 @@ class AmazonProvider(BaseProvider):
         
         try:
             # Step 1: Navighiamo sulla root per estrarre il token di sessione (webNonce) HTML
-            resp_home = await self._session.get(s_home_url, headers=headers_nav, timeout=15)
-            resp_home.raise_for_status()
-
+            resp_home = await self._async_http.get(s_home_url, headers=headers_nav, timeout=15)
+            
             web_nonce = None
             match = re.search(r'window\.__AMZ_WEB\s*=\s*(\{.*?\});', resp_home.text)
             if match:
@@ -477,8 +468,7 @@ class AmazonProvider(BaseProvider):
             h_challenge = headers_api.copy()
             h_challenge.pop("content-type", None)
             
-            resp_challenge = await self._session.get(s_challenge_url, headers=h_challenge, timeout=15)
-            resp_challenge.raise_for_status()
+            resp_challenge = await self._async_http.get(s_challenge_url, headers=h_challenge, timeout=15)
             challenge = resp_challenge.json()
             
             # Step 3: Calcolo PoW
@@ -496,13 +486,12 @@ class AmazonProvider(BaseProvider):
             
             payload_bytes = json.dumps(verify_payload, separators=(",", ":")).encode("utf-8")
             
-            resp = await self._session.post(
+            resp = await self._async_http.post(
                 s_verify_url,
                 content=payload_bytes, 
                 headers=headers_api, 
                 timeout=15,
             )
-            resp.raise_for_status()
             
             self._s_token = resp.json()["token"]
             logger.info(
@@ -511,10 +500,11 @@ class AmazonProvider(BaseProvider):
             )
             
             await asyncio.sleep(1.5)
-            
             return self._s_token
+            
         except Exception as exc:
             raise RuntimeError(f"[amazon] s captcha failed: {exc}") from exc
+
     async def _prefetch_s_token(self) -> None:
         try:
             self._s_token = None
@@ -530,13 +520,11 @@ class AmazonProvider(BaseProvider):
     async def _download_from_s_api(self, asin: str, output_dir: str, requested_quality: str) -> tuple[str, dict] | None:
         logger.info("[amazon] Trying s API (ASIN: %s)", asin)
  
-        # Recuperiamo l'endpoint per lo streaming dal registro
-        s_stream_url = get_amazon_endpoint("s_stream")
+        s_stream_url = get_amazon_endpoint("squid_stream")
         if not s_stream_url:
             logger.warning("[amazon] s stream endpoint not configured; skipping s fallback.")
             return None
 
-        # Deriviamo dinamicamente origin/referer
         parsed = urlparse(s_stream_url)
         origin = f"{parsed.scheme}://{parsed.netloc}" if parsed and parsed.scheme and parsed.netloc else ""
         referer = f"{origin}/" if origin else ""
@@ -571,6 +559,8 @@ class AmazonProvider(BaseProvider):
         max_attempts = 2
         base_delay_s = 1.0
 
+        client = await self._async_http._client()
+
         for attempt in range(max_attempts):
             try:
                 token = await self._get_s_token(force_refresh=(attempt > 0))
@@ -582,7 +572,7 @@ class AmazonProvider(BaseProvider):
                 h_stream["x-captcha-token"] = token
                 h_stream.pop("content-type", None)
 
-                async with self._session.stream(
+                async with client.stream(
                     "GET",
                     s_stream_url,
                     params=params,
@@ -613,7 +603,7 @@ class AmazonProvider(BaseProvider):
                     detected_ext: str | None = None
                     format_error = False
 
-                    with open(temp_file, "wb") as f:
+                    async with aiofiles.open(temp_file, "wb") as f:
                         async for chunk in resp.aiter_bytes(65536):
                             if detected_ext is None:
                                 if len(chunk) >= 4 and chunk[:4] == b"fLaC":
@@ -628,7 +618,7 @@ class AmazonProvider(BaseProvider):
                                     )
                                     format_error = True
                                     break
-                            f.write(chunk)
+                            await f.write(chunk)
                             written += len(chunk)
                             if self._progress_cb and total:
                                 self._progress_cb(written, total)
@@ -680,6 +670,7 @@ class AmazonProvider(BaseProvider):
                     continue
 
         return None
+
     # ------------------------------------------------------------------
     # Download + Decrypt
     # ------------------------------------------------------------------
@@ -806,21 +797,15 @@ class AmazonProvider(BaseProvider):
         logger.info("[amazon] Downloading encrypted stream from Zarz…")
 
         try:
-            async with self._session.stream("GET", stream_url, headers=headers, timeout=120) as s_resp:
-                if s_resp.status_code != 200:
-                    raise RuntimeError(f"Zarz stream returned HTTP {s_resp.status_code}")
-                total = int(s_resp.headers.get("content-length", 0))
-                written = 0
-                with open(temp_file, "wb") as f:
-                    async for chunk in s_resp.aiter_bytes(65536):
-                        f.write(chunk)
-                        written += len(chunk)
-                        if self._progress_cb and total:
-                            self._progress_cb(written, total)
+            await self._async_http.stream_to_file(
+                url=stream_url,
+                dest_path=temp_file,
+                progress_cb=self._progress_cb,
+                chunk_size=65536,
+                extra_headers=headers
+            )
         except Exception as exc:
             logger.warning("[amazon] Failed to download Zarz stream: %s", exc)
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
             return None
 
         if returned_codec in ["eac3", "mha1", "opus"]:
@@ -937,17 +922,13 @@ class AmazonProvider(BaseProvider):
             download_headers["x-captcha-token"] = str(captcha_token)
 
         try:
-            async with self._session.stream("GET", stream_url, headers=download_headers, timeout=120) as s_resp:
-                if s_resp.status_code != 200:
-                    raise RuntimeError(f"Stream download failed with status {s_resp.status_code}")
-                total = int(s_resp.headers.get("content-length", 0))
-                written = 0
-                with open(temp_file, "wb") as f:
-                    async for chunk in s_resp.aiter_bytes(65536):
-                        f.write(chunk)
-                        written += len(chunk)
-                        if self._progress_cb and total:
-                            self._progress_cb(written, total)
+            await self._async_http.stream_to_file(
+                url=stream_url,
+                dest_path=temp_file,
+                progress_cb=self._progress_cb,
+                chunk_size=65536,
+                extra_headers=download_headers
+            )
         except Exception as exc:
             raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Failed to download stream from {provider_key}: {exc}", self.name)
 
@@ -1034,17 +1015,13 @@ class AmazonProvider(BaseProvider):
         temp_file = os.path.join(output_dir, f"{asin}.enc")
 
         try:
-            async with self._session.stream("GET", stream_url, headers=stream_headers, timeout=120) as s_resp:
-                if s_resp.status_code != 200:
-                    raise RuntimeError(f"Stream download failed with status {s_resp.status_code}")
-                total = int(s_resp.headers.get("content-length", 0))
-                written = 0
-                with open(temp_file, "wb") as f:
-                    async for chunk in s_resp.aiter_bytes(65536):
-                        f.write(chunk)
-                        written += len(chunk)
-                        if self._progress_cb and total:
-                            self._progress_cb(written, total)
+            await self._async_http.stream_to_file(
+                url=stream_url,
+                dest_path=temp_file,
+                progress_cb=self._progress_cb,
+                chunk_size=65536,
+                extra_headers=stream_headers
+            )
         except Exception as exc:
             raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Failed to download stream from spotbye1: {exc}", self.name)
 
@@ -1159,17 +1136,12 @@ class AmazonProvider(BaseProvider):
         logger.info("[amazon] MusicDL returned stream URL, downloading...")
 
         try:
-            async with self._session.stream("GET", stream_url, timeout=120) as s_resp:
-                if s_resp.status_code != 200:
-                    raise RuntimeError(f"Stream download failed with status {s_resp.status_code}")
-                total = int(s_resp.headers.get("content-length", 0))
-                written = 0
-                with open(temp_file, "wb") as f:
-                    async for chunk in s_resp.aiter_bytes(65536):
-                        f.write(chunk)
-                        written += len(chunk)
-                        if self._progress_cb and total:
-                            self._progress_cb(written, total)
+            await self._async_http.stream_to_file(
+                url=stream_url,
+                dest_path=temp_file,
+                progress_cb=self._progress_cb,
+                chunk_size=65536
+            )
         except Exception as exc:
             raise SpotiflacError(ErrorKind.UNAVAILABLE, f"Failed to download stream from MusicDL: {exc}", self.name)
 
@@ -1198,7 +1170,7 @@ class AmazonProvider(BaseProvider):
         fallback_quality = str(quality).upper()
  
         _zarz_ep = get_amazon_endpoint("zarz")
-        _s_ep = get_amazon_endpoint("s")
+        _s_ep = get_amazon_endpoint("s_stream")
         _spotbye1_ep = get_amazon_endpoint("spotbye1")
         _spotbye2_ep = get_amazon_endpoint("spotbye2")
         _musicdl_ep = get_amazon_endpoint("musicdl")
@@ -1289,9 +1261,8 @@ class AmazonProvider(BaseProvider):
 
         if target_cover_url:
             try:
-                r = await self._session.get(target_cover_url, timeout=15)
-                if r.status_code == 200:
-                    cover_data = r.content
+                r = await self._async_http.get(target_cover_url, timeout=15)
+                cover_data = r.content
             except Exception as exc:
                 logger.warning("[amazon] Cover download failed: %s", exc)
 
@@ -1446,7 +1417,7 @@ class AmazonProvider(BaseProvider):
                     is_album          = is_album,
                     extra_tags        = mb_tags,
                 )
-                await asyncio.to_thread(embed_metadata_async, dest_ext, metadata, opts)
+                await embed_metadata_async(dest_ext, metadata, opts)
             else:
                 track_num    = position
                 if use_album_track_num and _safe_int(metadata.track_number) > 0:
