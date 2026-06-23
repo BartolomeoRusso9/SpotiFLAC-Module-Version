@@ -669,7 +669,6 @@ class SoundCloudProvider(BaseProvider):
                 lyrics_providers     = effective_providers,
                 enrich               = enrich_metadata,
                 enrich_providers     = enrich_providers,
-                enrich_qobuz_token   = qobuz_token or "",
                 is_album             = is_album,
             )
             await embed_metadata_async(str(dest), metadata, opts)
