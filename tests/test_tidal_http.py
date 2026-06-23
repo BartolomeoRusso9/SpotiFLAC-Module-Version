@@ -1,4 +1,4 @@
-import json
+import asyncio
 
 from SpotiFLAC.providers import tidal
 
@@ -14,7 +14,7 @@ def test_search_on_mirrors_finds_track(mock_network_client):
     mock_network_client([("/search", 200, fake)])
 
     provider = tidal.TidalProvider(apis=["https://api.test"])
-    res = provider._search_on_mirrors("Test Track", "Artist", "", 180)
+    res = asyncio.run(provider._search_on_mirrors_async("Test Track", "Artist", "", 180))
     assert res is not None
     assert "listen.tidal.com/track/" in res
 
@@ -26,5 +26,5 @@ def test_fetch_tidal_url_once_handles_rate_limit_and_success(mock_network_client
     mock_network_client(seq)
 
     api = "https://api.test"
-    url = tidal._fetch_tidal_url_once(api, track_id=1, quality="LOSSLESS", timeout_s=2)
+    url = asyncio.run(tidal._fetch_tidal_url_once_async(api, track_id=1, quality="LOSSLESS", timeout_s=2))
     assert url is not None

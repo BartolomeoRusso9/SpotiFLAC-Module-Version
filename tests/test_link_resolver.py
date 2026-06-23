@@ -1,6 +1,7 @@
 import unittest
 import asyncio
 from unittest.mock import Mock
+from unittest.mock import AsyncMock
 
 from SpotiFLAC.core.link_resolver import LinkResolver
 
@@ -8,6 +9,9 @@ from SpotiFLAC.core.link_resolver import LinkResolver
 class LinkResolverTests(unittest.TestCase):
     def setUp(self):
         self.http = Mock()
+        self.http.get_json_async = AsyncMock()
+        self.http.get_async = AsyncMock()
+        self.http.get = Mock()
         self.resolver = LinkResolver(self.http)
 
     def test_process_songlink_response_normalizes_platforms(self):
@@ -27,7 +31,7 @@ class LinkResolverTests(unittest.TestCase):
         self.assertEqual(links["spotify"], "https://open.spotify.com/track/abc")
 
     def test_resolve_all_uses_songlink_without_double_encoding(self):
-        self.http.get_json.side_effect = [
+        self.http.get_json_async.side_effect = [
             {"link": "https://www.deezer.com/track/123", "id": 123},
             {"linksByPlatform": {"amazonMusic": {"url": "https://music.amazon.com/tracks/B123456789?musicTerritory=US"}}},
         ]

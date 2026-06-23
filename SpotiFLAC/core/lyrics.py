@@ -1,10 +1,4 @@
-"""
-Multi-provider lyrics fetcher — Phase 2 asyncio migration.
-
-Aggiunge versioni async di tutti i `_fetch_*` e una nuova `fetch_lyrics`
-che lancia tutti i provider **in parallelo** con asyncio.as_completed.
-Le versioni sync originali restano per backward compatibility.
-"""
+"""Async multi-provider lyrics fetcher."""
 from __future__ import annotations
 
 import asyncio
@@ -153,7 +147,7 @@ async def _fetch_spotify_async(track_id: str, timeout: int = 7) -> str:
         access_token = await _get_spotify_anon_token_async(timeout)
         if not access_token:
             return ""
-        client = NetworkManager.get_async_client()
+        client = await NetworkManager.get_async_client_safe()
         r = await client.get(
             f"{_SPOTIFY_LYRICS}/{track_id}",
             params={"format": "json", "market": "from_token"},
@@ -216,7 +210,7 @@ async def _fetch_apple_async(track_name: str, artist_name: str, duration_s: int,
     query      = urllib.parse.quote(f"{track_name} {artist_name}")
     search_url = f"{_PAXSENIX_APPLE}/search?q={query}"
     try:
-        client = NetworkManager.get_async_client()
+        client = await NetworkManager.get_async_client_safe()
         r = await client.get(search_url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout)
         if not r.is_success:
             return ""
@@ -255,7 +249,7 @@ async def _fetch_apple_async(track_name: str, artist_name: str, duration_s: int,
 
 async def _fetch_musixmatch_async(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
     import json as _json
-    client = NetworkManager.get_async_client()
+    client = await NetworkManager.get_async_client_safe()
     for sync_type in ["word", "line"]:
         params = {"t": track_name, "a": artist_name, "type": sync_type, "format": "lrc"}
         if duration_s > 0:
@@ -286,7 +280,7 @@ async def _fetch_amazon_async(isrc: str, timeout: int = 7) -> str:
     if not isrc:
         return ""
     try:
-        client = NetworkManager.get_async_client()
+        client = await NetworkManager.get_async_client_safe()
         r = await client.get(
             f"{get_amazon_endpoint('spotbye1')}/lyrics/{isrc}",
             headers={"User-Agent": _UA},
@@ -317,7 +311,7 @@ async def _fetch_amazon_async(isrc: str, timeout: int = 7) -> str:
 async def _fetch_lrclib_async(
     track_name: str, artist_name: str, album_name: str = "", duration_s: int = 0, timeout: int = 7
 ) -> str:
-    client = NetworkManager.get_async_client()
+    client = await NetworkManager.get_async_client_safe()
 
     async def _exact(t: str, a: str, al: str, d: int) -> str:
         params = {"artist_name": a, "track_name": t}
@@ -417,254 +411,4 @@ async def fetch_lyrics_async(
                     t.cancel()
             return add_lrc_metadata(lyrics.strip(), track_name, artist_name), provider
 
-    return "", ""
-
-
-# ---------------------------------------------------------------------------
-# Sync fetch_lyrics (backward compat — invariata)
-# ---------------------------------------------------------------------------
-
-def _fetch_spotify(track_id: str, timeout: int = 7) -> str:
-    if not track_id:
-        return ""
-    try:
-        access_token = _get_spotify_anon_token(timeout)
-        if not access_token:
-            return ""
-        r = NetworkManager.get_sync_client().get(
-            f"{_SPOTIFY_LYRICS}/{track_id}",
-            params={"format": "json", "market": "from_token"},
-            headers={"Authorization": f"Bearer {access_token}", "App-Platform": "WebPlayer", "User-Agent": _UA},
-            timeout=timeout,
-        )
-        if r.status_code == 401:
-            _spotify_session_cache.pop("token", None)
-            _spotify_session_cache.pop("cached_at", None)
-            access_token = _get_spotify_anon_token(timeout)
-            if not access_token:
-                return ""
-            r = NetworkManager.get_sync_client().get(
-                f"{_SPOTIFY_LYRICS}/{track_id}",
-                params={"format": "json", "market": "from_token"},
-                headers={"Authorization": f"Bearer {access_token}", "App-Platform": "WebPlayer", "User-Agent": _UA},
-                timeout=timeout,
-            )
-        if r.status_code != 200:
-            return ""
-        data  = r.json()
-        lines = data.get("lyrics", {}).get("lines", [])
-        if not lines:
-            return ""
-        sync_type = data.get("lyrics", {}).get("syncType", "")
-        if sync_type == "LINE_SYNCED":
-            lrc_lines = []
-            for line in lines:
-                ms   = int(line.get("startTimeMs", 0))
-                m, s = divmod(ms // 1000, 60)
-                cs   = (ms % 1000) // 10
-                lrc_lines.append(f"[{m:02d}:{s:02d}.{cs:02d}]{line.get('words', '')}")
-            return "\n".join(lrc_lines)
-        return "\n".join(line.get("words", "") for line in lines)
-    except Exception as exc:
-        logger.debug("[lyrics/spotify] %s", exc)
-        return ""
-
-
-def _fetch_apple(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
-    query      = urllib.parse.quote(f"{track_name} {artist_name}")
-    search_url = f"{_PAXSENIX_APPLE}/search?q={query}"
-    try:
-        r = NetworkManager.get_sync_client().get(
-            search_url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout
-        )
-        if not r.is_success: return ""
-        results = r.json()
-        if not results: return ""
-        best    = max(results, key=lambda x: _score_apple_result(x, track_name, artist_name, duration_s))
-        song_id = best.get("id")
-        if not song_id: return ""
-        lyrics_url = f"{_PAXSENIX_APPLE}/lyrics?id={song_id}"
-        r_lyr      = NetworkManager.get_sync_client().get(
-            lyrics_url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout
-        )
-        if not r_lyr.is_success: return ""
-        data      = r_lyr.json()
-        content   = data.get("content", []) if isinstance(data, dict) else data
-        lrc_lines = []
-        for line in content:
-            ts         = int(line.get("timestamp", 0))
-            m, s       = divmod(ts // 1000, 60)
-            cs         = (ts % 1000) // 10
-            text_parts = line.get("text", [])
-            line_text  = ""
-            for part in text_parts:
-                line_text += part.get("text", "")
-                if not part.get("part", False):
-                    line_text += " "
-            line_text = line_text.strip()
-            if line_text:
-                lrc_lines.append(f"[{m:02d}:{s:02d}.{cs:02d}]{line_text}")
-        return "\n".join(lrc_lines)
-    except Exception as exc:
-        logger.debug("[lyrics/apple] %s", exc)
-        return ""
-
-
-def _fetch_musixmatch(track_name: str, artist_name: str, duration_s: int, timeout: int = 7) -> str:
-    import json as _json
-    for sync_type in ["word", "line"]:
-        params = {"t": track_name, "a": artist_name, "type": sync_type, "format": "lrc"}
-        if duration_s > 0:
-            params["d"] = str(duration_s)
-        url = f"{_PAXSENIX_MXM}/lyrics?" + urllib.parse.urlencode(params)
-        try:
-            r = NetworkManager.get_sync_client().get(
-                url, headers={"User-Agent": _UA, "Accept": "application/json"}, timeout=timeout
-            )
-            if r.is_success:
-                body = r.text.strip()
-                try:
-                    parsed = _json.loads(body)
-                    if isinstance(parsed, str) and parsed.strip():
-                        return parsed.strip()
-                    if isinstance(parsed, dict):
-                        for key in ("lrc", "lyrics", "syncedLyrics", "plainLyrics"):
-                            val = parsed.get(key)
-                            if isinstance(val, str) and val.strip():
-                                return val.strip()
-                except ValueError:
-                    if body and not body.startswith("{"):
-                        return body
-        except Exception as exc:
-            logger.debug("[lyrics/musixmatch] %s fallito: %s", sync_type, exc)
-    return ""
-
-
-def _fetch_amazon(isrc: str, timeout: int = 7) -> str:
-    if not isrc:
-        return ""
-    try:
-        r = NetworkManager.get_sync_client().get(
-            f"{get_amazon_endpoint('spotbye1')}/lyrics/{isrc}",
-            headers={"User-Agent": _UA},
-            timeout=timeout,
-        )
-        if not r.is_success: return ""
-        data  = r.json()
-        lines = data.get("lines") or data.get("lyrics", [])
-        if not lines: return ""
-        if isinstance(lines[0], dict):
-            lrc = []
-            for line in lines:
-                ts   = int(line.get("startTime", 0))
-                m    = ts // 60000
-                s    = (ts % 60000) // 1000
-                cs   = (ts % 1000) // 10
-                text = line.get("text", "")
-                lrc.append(f"[{m:02d}:{s:02d}.{cs:02d}]{text}")
-            return "\n".join(lrc)
-        return "\n".join(str(l) for l in lines)
-    except Exception as exc:
-        logger.debug("[lyrics/amazon] %s", exc)
-        return ""
-
-
-def _fetch_lrclib(
-    track_name: str, artist_name: str, album_name: str = "", duration_s: int = 0, timeout: int = 7
-) -> str:
-    def _lrclib_exact(t, a, al, d):
-        params = {"artist_name": a, "track_name": t}
-        if al: params["album_name"] = al
-        if d:  params["duration"]   = d
-        try:
-            r = NetworkManager.get_sync_client().get(f"{_LRCLIB}/get", params=params, timeout=timeout)
-            if r.status_code == 200:
-                data = r.json()
-                return data.get("syncedLyrics") or data.get("plainLyrics") or ""
-        except Exception:
-            pass
-        return ""
-
-    result = _lrclib_exact(track_name, artist_name, album_name, duration_s)
-    if result: return result
-    if album_name:
-        result = _lrclib_exact(track_name, artist_name, "", duration_s)
-        if result: return result
-
-    try:
-        r = NetworkManager.get_sync_client().get(
-            f"{_LRCLIB}/search",
-            params={"artist_name": artist_name, "track_name": track_name},
-            timeout=timeout,
-        )
-        if r.status_code == 200:
-            results = r.json()
-            if results:
-                best_synced = best_plain = None
-                for item in results:
-                    item_duration = item.get("duration", 0)
-                    if duration_s == 0 or abs(item_duration - duration_s) <= 10.0:
-                        if item.get("syncedLyrics") and not best_synced:
-                            best_synced = item["syncedLyrics"]
-                        elif item.get("plainLyrics") and not best_plain:
-                            best_plain  = item["plainLyrics"]
-                return best_synced or best_plain or ""
-    except Exception:
-        pass
-    return ""
-
-
-def fetch_lyrics(
-    track_name:  str,
-    artist_name: str,
-    album_name:  str  = "",
-    duration_s:  int  = 0,
-    track_id:    str  = "",
-    isrc:        str  = "",
-    providers:   list[str] | None = None,
-) -> tuple[str, str]:
-    """Versione sync originale (backward compat)."""
-    if providers is None:
-        providers = DEFAULT_LYRICS_PROVIDERS
-
-    clean_track  = simplify_track_name(track_name)
-    clean_artist = get_primary_artist(artist_name)
-
-    _short     = clean_track.split(" - ", 1)[-1].strip() if " - " in clean_track else None
-    short_track = _short if _short and _short != clean_track else None
-
-    for provider in providers:
-        titles_to_try = [clean_track]
-        if short_track and provider not in _ID_BASED_PROVIDERS:
-            titles_to_try.append(short_track)
-
-        for title in titles_to_try:
-            result = ""
-            try:
-                if provider == "spotify":
-                    spotify_id = track_id if (track_id and len(track_id) == 22 and "_" not in track_id) else ""
-                    result     = _fetch_spotify(spotify_id)
-                elif provider == "apple":
-                    result = _fetch_apple(title, clean_artist, duration_s)
-                elif provider == "musixmatch":
-                    result = _fetch_musixmatch(title, clean_artist, duration_s)
-                elif provider == "amazon":
-                    result = _fetch_amazon(isrc)
-                elif provider == "lrclib":
-                    result = _fetch_lrclib(title, clean_artist, album_name, duration_s)
-                else:
-                    logger.warning("[lyrics] unknown provider: %s", provider)
-                    break
-            except Exception as exc:
-                logger.debug("[lyrics/%s] unexpected error: %s", provider, exc)
-
-            if result and result.strip():
-                label = f"{provider}" + (f" [short title]" if title == short_track else "")
-                logger.debug("[lyrics] found via %s (%d chars)", label, len(result))
-                return add_lrc_metadata(result.strip(), track_name, artist_name), provider
-
-            if provider in _ID_BASED_PROVIDERS:
-                break
-
-    logger.debug("[lyrics] not found for '%s' by '%s'", track_name, artist_name)
     return "", ""

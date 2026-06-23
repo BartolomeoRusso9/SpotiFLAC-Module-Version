@@ -34,7 +34,7 @@ def _make_handler(sequence: Iterable[tuple[str, int, dict]]):
 
 @pytest.fixture
 def mock_network_client(monkeypatch: pytest.MonkeyPatch) -> Callable[[Iterable[tuple[str, int, dict]]], None]:
-    """Fixture that lets tests install a mock httpx.Client into NetworkManager.
+    """Fixture that lets tests install a mock httpx.AsyncClient into NetworkManager.
 
     Usage:
         mock_network_client([ ("/search", 200, { ... }), ("/track", 200, { ... }) ])
@@ -43,7 +43,11 @@ def mock_network_client(monkeypatch: pytest.MonkeyPatch) -> Callable[[Iterable[t
     def _installer(sequence: Iterable[tuple[str, int, dict]]):
         handler = _make_handler(sequence)
         transport = httpx.MockTransport(handler)
-        client = httpx.Client(transport=transport)
-        monkeypatch.setattr(NetworkManager, "_sync_client", client)
+        client = httpx.AsyncClient(transport=transport)
+
+        async def _fake_get_async_client_safe() -> httpx.AsyncClient:
+            return client
+
+        monkeypatch.setattr(NetworkManager, "get_async_client_safe", staticmethod(_fake_get_async_client_safe))
 
     return _installer

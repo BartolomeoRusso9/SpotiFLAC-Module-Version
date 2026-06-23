@@ -9,13 +9,12 @@ import difflib
 from urllib.parse import quote, urlsplit, urlunsplit
 from typing import Any
 
-import httpx  
-from ..core.http import NetworkManager  
+import httpx
 from .base import BaseProvider
-from ..core.http import HttpClient
+from ..core.http import AsyncHttpClient
 from ..core.link_resolver import LinkResolver
 from ..core.models import DownloadResult, TrackMetadata
-from ..core.tagger import embed_metadata, EmbedOptions
+from ..core.tagger import embed_metadata_async, EmbedOptions
 from ..core.endpoints import get_soundcloud_cobalt
 from ..core.quality import normalize_quality
 
@@ -47,14 +46,14 @@ class SoundCloudProvider(BaseProvider):
         self.client_id_expiry: float = 0
         self._sc_version = ""
         self.cobalt_api  = get_soundcloud_cobalt()
-        self.session     = NetworkManager.get_sync_client() 
-        self.session.headers.update({
+        self._headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/120.0.0.0 Safari/537.36"
             )
-        })
+        }
+        self._async_http._headers.update(self._headers)
 
     # ==========================================
     # CLIENT ID
@@ -136,7 +135,7 @@ class SoundCloudProvider(BaseProvider):
 
     async def _fetch_client_id_async(self) -> str:
         logger.info("[SC] Fetching SoundCloud client_id...")
-        headers = {"User-Agent": self.session.headers.get("User-Agent", "")}
+        headers = {"User-Agent": self._headers.get("User-Agent", "")}
 
         try:
             resp = await self._async_http.get(
@@ -198,7 +197,7 @@ class SoundCloudProvider(BaseProvider):
         params = dict(params or {})
         params["client_id"] = self.client_id
         url = f"{self.api_url}/{endpoint}"
-        headers = {"User-Agent": self.session.headers.get("User-Agent", "")}
+        headers = {"User-Agent": self._headers.get("User-Agent", "")}
 
         resp = await self._async_http.get(url, params=params, headers=headers, timeout=15.0)
         if resp.status_code == 401:
@@ -231,7 +230,7 @@ class SoundCloudProvider(BaseProvider):
                             resp = await self._async_http.get(
                                 best["url"],
                                 params={"client_id": self.client_id, "track_authorization": track_auth},
-                                headers={"User-Agent": self.session.headers.get("User-Agent", "")},
+                                headers={"User-Agent": self._headers.get("User-Agent", "")},
                                 timeout=15.0,
                             )
                             if resp.status_code == 200:
@@ -255,7 +254,7 @@ class SoundCloudProvider(BaseProvider):
                     json=payload,
                     headers={
                         "Accept": "application/json",
-                        "User-Agent": self.session.headers.get("User-Agent", "SpotiFLAC-Mobile/4.5.0"),
+                        "User-Agent": self._headers.get("User-Agent", "SpotiFLAC-Mobile/4.5.0"),
                     },
                     timeout=15.0,
                 )
@@ -379,6 +378,17 @@ class SoundCloudProvider(BaseProvider):
 
     def search(self, query: str, search_type: str = "tracks", limit: int = 20) -> list[dict[str, Any]]:
         data = self._api_get(
+            f"search/{search_type}", {"q": query, "limit": limit, "access": "playable"}
+        )
+        results = []
+        for item in data.get("collection", []):
+            if search_type == "tracks":
+                if formatted := self._format_track(item):
+                    results.append(formatted)
+        return results
+
+    async def search_async(self, query: str, search_type: str = "tracks", limit: int = 20) -> list[dict[str, Any]]:
+        data = await self._api_get_async(
             f"search/{search_type}", {"q": query, "limit": limit, "access": "playable"}
         )
         results = []
@@ -678,7 +688,7 @@ class SoundCloudProvider(BaseProvider):
         else:
             try:
                 async def resolve_links() -> dict[str, str]:
-                    resolver = LinkResolver(HttpClient("odesli"))
+                    resolver = LinkResolver(AsyncHttpClient("odesli"))
                     return await resolver.resolve_all_async(metadata.id)
 
                 links = await asyncio.to_thread(resolve_links)
@@ -695,7 +705,7 @@ class SoundCloudProvider(BaseProvider):
                 search_query = f"{metadata.title} {metadata.artists}".strip()
                 logger.info("[SC] Odesli failed. Native search for: '%s'", search_query)
                 try:
-                    search_results = await asyncio.to_thread(self.search, search_query, limit=5)
+                    search_results = await self.search_async(search_query, limit=5)
                     if best_track := self._find_best_match(search_results, metadata.title, metadata.artists, metadata.duration_ms):
                         logger.info("[SC] Found fallback via search: %s (ID: %s)", best_track.get("name"), best_track.get("id"))
                         dl_url = await self.get_download_url_async(
@@ -743,7 +753,7 @@ class SoundCloudProvider(BaseProvider):
                 enrich_qobuz_token   = qobuz_token or "",
                 is_album             = is_album,
             )
-            await asyncio.to_thread(embed_metadata, str(dest), metadata, opts, session=self.session)
+            await embed_metadata_async(str(dest), metadata, opts)
         except Exception as exc:
             logger.warning("[SC] embed_metadata failed (file saved senza tag): %s", exc)
 

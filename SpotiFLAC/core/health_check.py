@@ -536,16 +536,6 @@ async def run_health_check(
     return results
 
 
-def run_health_check_sync(
-    services: list[str],
-    **kwargs,
-) -> list[HealthResult]:
-    """
-    Wrapper sincrono — crea un event loop dedicato tramite asyncio.run().
-    """
-    return asyncio.run(run_health_check(services, **kwargs))
-
-
 # ---------------------------------------------------------------------------
 # Report rendering
 # ---------------------------------------------------------------------------

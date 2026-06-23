@@ -14,7 +14,6 @@ from typing import Any, Dict, Optional, List
 
 import httpx
 
-from ..core.http import NetworkManager
 from ..core.tagger import embed_metadata_async, EmbedOptions
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError, ErrorKind
@@ -73,8 +72,7 @@ class DeezerProvider(BaseProvider):
 
     def __init__(self, timeout_s: int = 30) -> None:
         super().__init__(timeout_s=timeout_s)
-        self._session = NetworkManager.get_sync_client()
-        self._session.headers.update({"User-Agent": _DEFAULT_UA})
+        self._async_http._headers.update({"User-Agent": _DEFAULT_UA})
 
         self._track_cache: Dict[str, _CacheEntry] = {}
         self._search_cache: Dict[str, _CacheEntry] = {}
@@ -593,7 +591,7 @@ class DeezerProvider(BaseProvider):
                 enrich_qobuz_token = qobuz_token or "",
                 is_album           = is_album,
             )
-            await embed_metadata_async(str(dest), metadata, opts, session=self._session)
+            await embed_metadata_async(str(dest), metadata, opts)
 
             return DownloadResult.ok(self.name, str(dest))
 

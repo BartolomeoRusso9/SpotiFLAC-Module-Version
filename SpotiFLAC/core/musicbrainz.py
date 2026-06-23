@@ -113,6 +113,17 @@ async def _wait_for_request_slot_async() -> None:
         await asyncio.sleep(wait_duration)
 
 
+def _run_async_sync(coro):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    if loop.is_running():
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(asyncio.run, coro).result()
+    return loop.run_until_complete(coro)
+
+
 def _note_throttle() -> None:
     global _mb_blocked_till, _mb_next_request
     with _mb_throttle_mu:
@@ -123,7 +134,7 @@ def _note_throttle() -> None:
             _mb_next_request = _mb_blocked_till
 
 
-def _query_recordings(query: str) -> dict:
+async def _query_recordings_async(query: str) -> dict:
     url = (
         f"{_MB_API_BASE}/recording"
         f"?query={urllib.parse.quote(query)}"
@@ -131,12 +142,12 @@ def _query_recordings(query: str) -> dict:
     )
     headers  = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
     last_err = Exception("Empty response")
-    client   = NetworkManager.get_sync_client()
+    client   = await NetworkManager.get_async_client_safe()
 
     for attempt in range(_MB_RETRIES):
-        _wait_for_request_slot()
+        await _wait_for_request_slot_async()
         try:
-            resp = client.get(url, headers=headers, timeout=_MB_TIMEOUT)
+            resp = await client.get(url, headers=headers, timeout=_MB_TIMEOUT)
             if resp.status_code == 200:
                 return resp.json()
             if resp.status_code == 503:
@@ -147,9 +158,13 @@ def _query_recordings(query: str) -> dict:
         except httpx.RequestError as e:
             last_err = e
         if attempt < _MB_RETRIES - 1:
-            time.sleep(_MB_RETRY_WAIT)
+            await asyncio.sleep(_MB_RETRY_WAIT)
 
     raise last_err
+
+
+def _query_recordings(query: str) -> dict:
+    return _run_async_sync(_query_recordings_async(query))
 
 
 def _parse_mb_response(data: dict) -> dict:
@@ -341,34 +356,9 @@ async def fetch_mb_metadata_async(isrc: str) -> dict:
 
     res: dict | object = _LOOKUP_FAILED
     try:
-        await _wait_for_request_slot_async()
-
-        client = NetworkManager.get_async_client()
-        url    = (
-            f"{_MB_API_BASE}/recording"
-            f"?query={urllib.parse.quote(f'isrc:{isrc}')}"
-            f"&fmt=json&inc=releases+artist-credits+tags+media+release-groups+labels+label-info+isrcs"
-        )
-        headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
-
-        for attempt in range(_MB_RETRIES):
-            try:
-                resp = await client.get(url, headers=headers, timeout=_MB_TIMEOUT)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    res  = _parse_mb_response(data)
-                    set_mb_status(True)
-                    break
-                if resp.status_code == 503:
-                    _note_throttle()
-                if 400 <= resp.status_code < 500 and resp.status_code != 429:
-                    break
-            except Exception as exc:
-                logger.debug("[musicbrainz] async attempt %d failed: %s", attempt + 1, exc)
-
-            if attempt < _MB_RETRIES - 1:
-                await asyncio.sleep(_MB_RETRY_WAIT)
-
+        data = await _query_recordings_async(f"isrc:{isrc}")
+        res = _parse_mb_response(data)
+        set_mb_status(True)
     except Exception as e:
         set_mb_status(False)
         logger.debug("[musicbrainz] async lookup failed: %s", e)

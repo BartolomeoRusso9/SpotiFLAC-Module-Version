@@ -35,6 +35,17 @@ _TIDAL_MAX_APIS     = 10
 _TIDAL_MAX_WORKERS  = 5
 
 
+def _run_async_sync(coro):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    if loop.is_running():
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(asyncio.run, coro).result()
+    return loop.run_until_complete(coro)
+
+
 # ---------------------------------------------------------------------------
 # EnrichedMetadata (invariato)
 # ---------------------------------------------------------------------------
@@ -113,14 +124,18 @@ class _DeezerMeta:
     BASE = "https://api.deezer.com/2.0"
 
     def __init__(self) -> None:
-        self._client = NetworkManager.get_sync_client()
+        self._client = None
 
     def fetch(self, isrc: str) -> EnrichedMetadata:
+        return _run_async_sync(self.fetch_async(isrc))
+
+    async def fetch_async(self, isrc: str) -> EnrichedMetadata:
         out = EnrichedMetadata()
         if not isrc:
             return out
         try:
-            r = self._client.get(f"{self.BASE}/track/isrc:{isrc}", timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA})
+            client = await NetworkManager.get_async_client_safe()
+            r = await client.get(f"{self.BASE}/track/isrc:{isrc}", timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA})
             if r.status_code != 200:
                 return out
             d = r.json()
@@ -128,7 +143,7 @@ class _DeezerMeta:
                 return out
             album_id = d.get("album", {}).get("id")
             if album_id:
-                ar = self._client.get(f"{self.BASE}/album/{album_id}", timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA})
+                ar = await client.get(f"{self.BASE}/album/{album_id}", timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA})
                 if ar.is_success:
                     ad = ar.json()
                     genres = ad.get("genres", {}).get("data", [])
@@ -141,7 +156,7 @@ class _DeezerMeta:
             out.explicit = bool(d.get("explicit_lyrics"))
             out.isrc     = d.get("isrc", "")
         except Exception as exc:
-            logger.debug("[meta/deezer] %s", exc)
+            logger.debug("[meta/deezer] async %s", exc)
         return out
 
 
@@ -149,35 +164,33 @@ class _AppleMusicMeta:
     SEARCH = "https://itunes.apple.com/search"
 
     def __init__(self) -> None:
-        self._client = NetworkManager.get_sync_client()
+        self._client = None
 
     def fetch(self, track_name: str, artist_name: str, isrc: str = "") -> EnrichedMetadata:
-        out  = EnrichedMetadata()
-        item = self._search(track_name, artist_name, isrc)
-        if not item:
-            return out
-        out.genre    = item.get("primaryGenreName", "")
-        out.explicit = item.get("trackExplicitness") == "explicit"
-        raw_art      = item.get("artworkUrl100", "")
-        out.cover_url_hd = raw_art.replace("100x100", "600x600")
-        return out
+        return _run_async_sync(self.fetch_async(track_name, artist_name, isrc))
 
     def _search(self, title: str, artist: str, isrc: str) -> dict[str, Any] | None:
+        return _run_async_sync(self._search_async(title, artist, isrc))
+
+    async def _search_async(self, title: str, artist: str, isrc: str) -> dict[str, Any] | None:
         try:
+            client = await NetworkManager.get_async_client_safe()
             if isrc:
-                r = self._client.get(
+                r = await client.get(
                     self.SEARCH,
                     params={"term": isrc, "media": "music", "entity": "song", "limit": 1, "country": "US"},
-                    headers={"User-Agent": _UA}, timeout=_HTTP_TIMEOUT,
+                    headers={"User-Agent": _UA},
+                    timeout=_HTTP_TIMEOUT,
                 )
                 if r.is_success:
                     results = r.json().get("results", [])
                     if results:
                         return results[0]
-            r = self._client.get(
+            r = await client.get(
                 self.SEARCH,
                 params={"term": f"{title} {artist}", "media": "music", "entity": "song", "limit": 5, "country": "US"},
-                headers={"User-Agent": _UA}, timeout=_HTTP_TIMEOUT,
+                headers={"User-Agent": _UA},
+                timeout=_HTTP_TIMEOUT,
             )
             if not r.is_success:
                 return None
@@ -190,8 +203,19 @@ class _AppleMusicMeta:
                     return item
             return results[0]
         except Exception as exc:
-            logger.debug("[meta/apple] %s", exc)
+            logger.debug("[meta/apple] async %s", exc)
             return None
+
+    async def fetch_async(self, track_name: str, artist_name: str, isrc: str = "") -> EnrichedMetadata:
+        out  = EnrichedMetadata()
+        item = await self._search_async(track_name, artist_name, isrc)
+        if not item:
+            return out
+        out.genre    = item.get("primaryGenreName", "")
+        out.explicit = item.get("trackExplicitness") == "explicit"
+        raw_art      = item.get("artworkUrl100", "")
+        out.cover_url_hd = raw_art.replace("100x100", "600x600")
+        return out
 
 
 _TIDAL_APIS_BUILTIN: list[str] = []
@@ -199,7 +223,7 @@ _TIDAL_APIS_BUILTIN: list[str] = []
 
 class _TidalMeta:
     def __init__(self) -> None:
-        self._client    = NetworkManager.get_sync_client()
+        self._client    = None
         self._apis: list[str] = []
         self._apis_ready = False
         self._apis_lock  = threading.Lock()
@@ -230,24 +254,23 @@ class _TidalMeta:
             logger.debug("[meta/tidal] refresh background failed: %s", exc)
 
     def fetch(self, track_name: str, artist_name: str) -> EnrichedMetadata:
-        out        = EnrichedMetadata()
-        track_data = self._search_parallel(track_name, artist_name)
-        if not track_data:
-            return out
-        album        = track_data.get("album", {})
-        out.cover_url_hd = album.get("cover", "")
-        out.explicit     = bool(track_data.get("explicit"))
-        out.isrc         = track_data.get("isrc", "")
-        return out
+        return _run_async_sync(self.fetch_async(track_name, artist_name))
 
     def _try_api(self, api: str, query: str) -> dict | None:
+        return _run_async_sync(self._try_api_async(api, query))
+
+    def _search_parallel(self, title: str, artist: str) -> dict | None:
+        return _run_async_sync(self._search_parallel_async(title, artist))
+
+    async def _try_api_async(self, api: str, query: str) -> dict | None:
         base = api.rstrip("/")
+        client = await NetworkManager.get_async_client_safe()
         for endpoint in (
             f"{base}/search/?s={query}&limit=3",
             f"{base}/search?s={query}&limit=3",
         ):
             try:
-                r = self._client.get(endpoint, timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA})
+                r = await client.get(endpoint, timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA})
                 if not r.is_success:
                     continue
                 data  = r.json()
@@ -258,7 +281,7 @@ class _TidalMeta:
                 pass
         return None
 
-    def _search_parallel(self, title: str, artist: str) -> dict | None:
+    async def _search_parallel_async(self, title: str, artist: str) -> dict | None:
         from urllib.parse import quote
         clean  = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", title).strip() or title
         first  = artist.split(",")[0].strip()
@@ -271,23 +294,34 @@ class _TidalMeta:
         if not apis_to_try:
             return None
 
-        pool   = ThreadPoolExecutor(max_workers=min(len(apis_to_try), _TIDAL_MAX_WORKERS))
-        futs   = {pool.submit(self._try_api, api, query): api for api in apis_to_try}
-        result: dict | None = None
+        async def _one(api: str) -> dict | None:
+            return await self._try_api_async(api, query)
+
+        tasks = [asyncio.create_task(_one(api)) for api in apis_to_try]
         try:
-            for fut in as_completed(futs, timeout=_HTTP_TIMEOUT + 1):
+            for coro in asyncio.as_completed(tasks):
                 try:
-                    data = fut.result()
+                    data = await coro
                     if data:
-                        result = data
-                        break
+                        return data
                 except Exception:
                     pass
-        except FuturesTimeoutError:
-            pass
         finally:
-            pool.shutdown(wait=False, cancel_futures=True)
-        return result
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+        return None
+
+    async def fetch_async(self, track_name: str, artist_name: str) -> EnrichedMetadata:
+        out        = EnrichedMetadata()
+        track_data = await self._search_parallel_async(track_name, artist_name)
+        if not track_data:
+            return out
+        album        = track_data.get("album", {})
+        out.cover_url_hd = album.get("cover", "")
+        out.explicit     = bool(track_data.get("explicit"))
+        out.isrc         = track_data.get("isrc", "")
+        return out
 
 
 class _QobuzMeta:
@@ -305,6 +339,9 @@ class _QobuzMeta:
         return self._provider
 
     def fetch(self, isrc: str) -> EnrichedMetadata:
+        return _run_async_sync(self.fetch_async(isrc))
+
+    async def fetch_async(self, isrc: str) -> EnrichedMetadata:
         out = EnrichedMetadata()
         if not isrc:
             return out
@@ -312,13 +349,12 @@ class _QobuzMeta:
             prov = self._get_provider()
             if prov is None:
                 return out
-            resp  = prov._do_signed_get("track/search", {"query": isrc, "limit": "1"})
-            if not resp.is_success:
+            if hasattr(prov, "_search_by_isrc_async"):
+                track = await prov._search_by_isrc_async(isrc)
+            else:
+                track = None
+            if not track:
                 return out
-            items = resp.json().get("tracks", {}).get("items", [])
-            if not items:
-                return out
-            track        = items[0]
             album        = track.get("album", {})
             out.genre    = (album.get("genre", {}) or {}).get("name", "")
             out.label    = album.get("label", {}).get("name", "") if isinstance(album.get("label"), dict) else ""
@@ -327,7 +363,7 @@ class _QobuzMeta:
             out.isrc     = track.get("isrc", "")
             out.upc      = album.get("upc", "")
         except Exception as exc:
-            logger.debug("[meta/qobuz] %s", exc)
+            logger.debug("[meta/qobuz] async %s", exc)
         return out
 
 
@@ -353,18 +389,27 @@ class _SoundCloudMeta:
         return self._provider
 
     def fetch(self, track_name: str, artist_name: str) -> EnrichedMetadata:
+        return _run_async_sync(self.fetch_async(track_name, artist_name))
+
+    async def fetch_async(self, track_name: str, artist_name: str) -> EnrichedMetadata:
         out = EnrichedMetadata()
         try:
             prov = self._get_provider()
             if prov is None:
                 return out
-            query   = f"{artist_name} {track_name}"
-            results = prov.search(query, search_type="tracks", limit=1)
-            if not results:
+            query = f"{artist_name} {track_name}".strip()
+            data = await prov._api_get_async(
+                "search/tracks",
+                {"q": query, "limit": 1, "access": "playable"},
+            )
+            items = data.get("collection", []) if isinstance(data, dict) else []
+            if not items:
                 return out
-            out.cover_url_hd = results[0].get("cover_url", "")
+            formatted = prov._format_track(items[0])
+            if formatted:
+                out.cover_url_hd = formatted.get("cover_url", "")
         except Exception as exc:
-            logger.debug("[meta/soundcloud] %s", exc)
+            logger.debug("[meta/soundcloud] async %s", exc)
         return out
 
 
@@ -420,23 +465,23 @@ def _get_sc() -> _SoundCloudMeta:
 # ---------------------------------------------------------------------------
 
 async def _deezer_fetch_async(isrc: str) -> EnrichedMetadata:
-    return await asyncio.to_thread(_get_deezer().fetch, isrc)
+    return await _get_deezer().fetch_async(isrc)
 
 
 async def _apple_fetch_async(track_name: str, artist_name: str, isrc: str) -> EnrichedMetadata:
-    return await asyncio.to_thread(_get_apple().fetch, track_name, artist_name, isrc)
+    return await _get_apple().fetch_async(track_name, artist_name, isrc)
 
 
 async def _tidal_fetch_async(track_name: str, artist_name: str) -> EnrichedMetadata:
-    return await asyncio.to_thread(_get_tidal().fetch, track_name, artist_name)
+    return await _get_tidal().fetch_async(track_name, artist_name)
 
 
 async def _qobuz_fetch_async(isrc: str, qobuz_token: str | None) -> EnrichedMetadata:
-    return await asyncio.to_thread(_get_qobuz_meta(qobuz_token).fetch, isrc)
+    return await _get_qobuz_meta(qobuz_token).fetch_async(isrc)
 
 
 async def _soundcloud_fetch_async(track_name: str, artist_name: str) -> EnrichedMetadata:
-    return await asyncio.to_thread(_get_sc().fetch, track_name, artist_name)
+    return await _get_sc().fetch_async(track_name, artist_name)
 
 
 # ---------------------------------------------------------------------------
@@ -509,76 +554,3 @@ async def enrich_metadata_async(
 
     return merged
 
-
-# ---------------------------------------------------------------------------
-# Sync enrich_metadata (backward compat — invariata)
-# ---------------------------------------------------------------------------
-
-def enrich_metadata(
-    track_name:  str,
-    artist_name: str,
-    isrc:        str = "",
-    providers:   list[str] | None = None,
-    timeout_s:   float = _GLOBAL_TIMEOUT,
-    qobuz_token: str | None = None,
-) -> EnrichedMetadata:
-    """Versione sync originale (mantiene ThreadPoolExecutor)."""
-    if providers is None:
-        providers = ["deezer", "apple", "qobuz", "tidal"]
-
-    if isrc:
-        cached = _get_cached(isrc)
-        if cached is not None:
-            return cached
-
-    merged = EnrichedMetadata()
-
-    def _run_provider(name: str) -> tuple[str, EnrichedMetadata]:
-        try:
-            if name == "deezer":
-                return name, _get_deezer().fetch(isrc)
-            elif name == "apple":
-                return name, _get_apple().fetch(track_name, artist_name, isrc)
-            elif name == "tidal":
-                return name, _get_tidal().fetch(track_name, artist_name)
-            elif name == "qobuz":
-                return name, _get_qobuz_meta(qobuz_token).fetch(isrc)
-            elif name == "soundcloud":
-                return name, _get_sc().fetch(track_name, artist_name)
-            else:
-                return name, EnrichedMetadata()
-        except Exception as exc:
-            logger.debug("[meta/enrich] %s failed: %s", name, exc)
-            return name, EnrichedMetadata()
-
-    results: dict[str, EnrichedMetadata] = {}
-    pool    = ThreadPoolExecutor(max_workers=len(providers))
-    futs    = {pool.submit(_run_provider, p): p for p in providers}
-    deadline = time.time() + timeout_s
-
-    try:
-        for fut in as_completed(futs, timeout=max(1.0, deadline - time.time())):
-            name, data = fut.result()
-            results[name] = data
-            merged_preview = EnrichedMetadata()
-            for n in providers:
-                if n in results:
-                    merged_preview.merge(results[n], n)
-            if merged_preview.is_complete():
-                break
-    except FuturesTimeoutError:
-        pass
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
-
-    for name in providers:
-        if name in results:
-            merged.merge(results[name], source=name)
-
-    if merged._sources:
-        logger.debug("[meta/enrich] sync enriched: %s", merged._sources)
-
-    if isrc and (merged.genre or merged.label or merged.cover_url_hd):
-        _put_cached(isrc, merged)
-
-    return merged

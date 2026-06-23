@@ -4,7 +4,7 @@ from .core.http import NetworkManager
 
 async def check_for_updates_async():
     package_name = "spotiflac"
-    client = NetworkManager.get_async_client()
+    client = await NetworkManager.get_async_client_safe()
 
     try:
         current_version = importlib.metadata.version(package_name)

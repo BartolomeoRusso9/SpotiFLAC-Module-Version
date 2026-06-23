@@ -53,7 +53,7 @@ class IsrcFinder:
         url = f"https://spclient.wg.spotify.com/metadata/4/track/{gid}"
         try:
             from .http import NetworkManager
-            async_client = NetworkManager.get_async_client()
+            async_client = await NetworkManager.get_async_client_safe()
             resp = await async_client.get(
                 url,
                 headers={

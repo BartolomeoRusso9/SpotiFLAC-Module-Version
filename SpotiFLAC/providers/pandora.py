@@ -21,13 +21,13 @@ from typing import Callable, Any
 from urllib.parse import urlparse, urlencode, quote, unquote
 
 import httpx
-from ..core.http import NetworkManager, RetryConfig, async_songlink_rate_limiter
+from ..core.http import RetryConfig, async_songlink_rate_limiter
 from .base import BaseProvider
 from ..core.console import print_source_banner
 from ..core.errors import SpotiflacError, ErrorKind, TrackNotFoundError
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
-from ..core.tagger import embed_metadata, _print_mb_summary, EmbedOptions
+from ..core.tagger import embed_metadata_async, _print_mb_summary, EmbedOptions
 from ..core.endpoints import get_pandora_base_and_path
 from ..core.quality import normalize_quality
 from ..core.download_validation import validate_downloaded_track_async
@@ -319,8 +319,7 @@ class PandoraProvider(BaseProvider):
 
     def __init__(self, timeout_s: int = 30) -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
-        self._session = NetworkManager.get_sync_client()
-        self._session.headers.update({
+        self._async_http._headers.update({
             "Accept":     "application/json",
             "User-Agent": _MOBILE_UA,
         })
@@ -377,9 +376,8 @@ class PandoraProvider(BaseProvider):
         if self._limiter is not None:
             await self._limiter.wait_for_slot()
 
-        client = await self._async_client()
         try:
-            resp = await client.post(url, json=body, headers=merged, timeout=30.0)
+            resp = await self._async_http.post(url, json=body, headers=merged, timeout=30.0)
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as e:
@@ -452,6 +450,30 @@ class PandoraProvider(BaseProvider):
                 follow_redirects=True,
             )
             resp.raise_for_status()
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Pandora app link request failed: {e}") from e
+
+        resp_url = str(resp.url)
+        if "pandora.com/" in resp_url and "pandora.app.link" not in resp_url:
+            return _normalize_secure_url(resp_url)
+
+        resolved = _extract_pandora_url_from_html(resp.text)
+        if not resolved:
+            raise RuntimeError("Could not resolve Pandora app link")
+
+        return resolved
+
+    async def _resolve_pandora_app_link_async(self, url: str) -> str:
+        try:
+            resp = await self._async_http.get(
+                _normalize_secure_url(url),
+                headers={
+                    "Accept":     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "User-Agent": _MOBILE_UA,
+                },
+                timeout=15.0,
+                follow_redirects=True,
+            )
         except httpx.RequestError as e:
             raise RuntimeError(f"Pandora app link request failed: {e}") from e
 
@@ -796,6 +818,30 @@ class PandoraProvider(BaseProvider):
 
         return _normalize_pandora_canonical_url(pandora_url, resolved_id)
 
+    async def _normalize_pandora_track_url_async(self, input_url: str) -> str:
+        input_url = (input_url or "").strip()
+        if _is_pandora_app_link(input_url):
+            input_url = await self._resolve_pandora_app_link_async(input_url)
+
+        track_id = _extract_pandora_track_id(input_url)
+        if track_id:
+            return _normalize_pandora_canonical_url(input_url, track_id)
+
+        url_for_songlink = input_url if input_url.startswith("http") else f"https://open.spotify.com/track/{input_url}"
+        params = {"url": url_for_songlink, "userCountry": _USER_COUNTRY}
+        songlink = await self._get_json_async(f"{_SONGLINK_URL}?{urlencode(params)}")
+        pandora_url = self._extract_pandora_url_from_songlink(songlink)
+        resolved_id = _extract_pandora_track_id(pandora_url)
+
+        if not resolved_id:
+            raise SpotiflacError(
+                ErrorKind.TRACK_NOT_FOUND,
+                "Could not resolve Pandora track URL",
+                self.name,
+            )
+
+        return _normalize_pandora_canonical_url(pandora_url, resolved_id)
+
     # ----------------------------------------
 
     async def download_track_async(
@@ -830,7 +876,7 @@ class PandoraProvider(BaseProvider):
                     else pandora_track_id
                 )
                 download_url = _normalize_secure_url(
-                    await asyncio.to_thread(self._normalize_pandora_track_url, resolve_input)
+                    await self._normalize_pandora_track_url_async(resolve_input)
                 )
             else:
                 return DownloadResult.fail(self.name, "No Pandora track ID or URL available")
@@ -927,7 +973,7 @@ class PandoraProvider(BaseProvider):
                 is_album           = is_album,
                 extra_tags         = mb_tags,
             )
-            await asyncio.to_thread(embed_metadata, str(dest), metadata, opts, session=self._session)
+            await embed_metadata_async(str(dest), metadata, opts)
 
             return DownloadResult.ok(self.name, str(dest), fmt=fmt_str)
 

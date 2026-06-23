@@ -27,7 +27,7 @@ from .core.progress import DownloadManager, ProgressManager, ProgressCallback, s
 from .providers.base import BaseProvider
 from .providers.spotify_metadata import SpotifyMetadataClient
 from .core.isrc_helper import IsrcHelper
-from .core.http import HttpClient
+from .core.http import AsyncHttpClient
 from .core.quality import normalize_quality
 
 logger = logging.getLogger(__name__)
@@ -566,7 +566,7 @@ class SpotiflacDownloader:
 
         print(f"Resolving ISRC for {len(missing)} track(s)…")
         try:
-            resolver = IsrcHelper(HttpClient("isrc"))
+            resolver = IsrcHelper(AsyncHttpClient("isrc"))
 
             async def _resolve_one(i: int, track: TrackMetadata):
                 if track.isrc:

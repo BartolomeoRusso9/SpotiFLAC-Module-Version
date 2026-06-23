@@ -39,7 +39,7 @@ from ..core.models import TrackMetadata, DownloadResult
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags, fetch_mb_metadata_async
 from ..core.provider_stats import record_success_async, record_failure_async, prioritize_providers_async
 from ..core.tagger import _print_mb_summary, EmbedOptions
-from ..core.tagger import embed_metadata, embed_metadata_async
+from ..core.tagger import embed_metadata_async
 from ..core.endpoints import get_qobuz_endpoints
 from ..core.quality import map_musicdl_quality
 
@@ -795,7 +795,6 @@ class QobuzProvider(BaseProvider):
             retry     = RetryConfig(max_attempts=2),
             headers   = {"User-Agent": _DEFAULT_UA, "Accept": "application/json"},
         )
-        self._session     = NetworkManager.get_sync_client()
         self._creds:      QobuzCredentials | None = None
         self._creds_lock = threading.Lock()
         self._qobuz_token = qobuz_token or os.environ.get("QOBUZ_AUTH_TOKEN")
@@ -1571,7 +1570,7 @@ class QobuzProvider(BaseProvider):
                         enrich_qobuz_token      = self._qobuz_token or "",
                         is_album                = is_album,
                     )
-                    await embed_metadata_async(str(dest), metadata, opts, session=self._session)
+                    await embed_metadata_async(str(dest), metadata, opts)
                 except SpotiflacError as exc:
                     message = str(exc).lower()
                     if exc.kind == ErrorKind.FILE_IO and "not a valid flac file" in message:

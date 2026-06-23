@@ -296,8 +296,7 @@ def _save_tidal_api_list_state_locked(state: dict[str, Any]) -> None:
         logger.warning("[tidal] failed to write API list cache: %s", exc)
 
 def _fetch_tidal_api_urls_from_gist() -> list[str]:
-    client = NetworkManager.get_sync_client()
-    resp = client.get(_TIDAL_API_GIST_URL, timeout=10, headers={"User-Agent": _TIDAL_USER_AGENT})
+    resp = httpx.get(_TIDAL_API_GIST_URL, timeout=10, headers={"User-Agent": _TIDAL_USER_AGENT})
     if resp.status_code != 200:
         raise RuntimeError(f"Tidal API gist returned status {resp.status_code}")
     
@@ -316,6 +315,33 @@ def _fetch_tidal_api_urls_from_gist() -> list[str]:
         else:
             raise RuntimeError("Tidal API gist did not return a JSON array")
             
+    urls = _normalize_tidal_api_urls(payload)
+    if not urls:
+        raise RuntimeError("Tidal API gist returned no valid URLs")
+    return urls
+
+
+async def _fetch_tidal_api_urls_from_gist_async() -> list[str]:
+    client = await NetworkManager.get_async_client_safe()
+    resp = await client.get(_TIDAL_API_GIST_URL, timeout=10, headers={"User-Agent": _TIDAL_USER_AGENT})
+    if resp.status_code != 200:
+        raise RuntimeError(f"Tidal API gist returned status {resp.status_code}")
+
+    try:
+        payload = resp.json()
+    except Exception:
+        raise RuntimeError(f"Tidal API gist returned non-JSON: {resp.text[:120]}")
+
+    if not isinstance(payload, list):
+        if isinstance(payload, dict):
+            urls = payload.get("apis") or payload.get("urls") or list(payload.values())
+            if urls and isinstance(urls, list):
+                payload = urls
+            else:
+                raise RuntimeError(f"Tidal API gist returned unexpected format: {type(payload)}")
+        else:
+            raise RuntimeError("Tidal API gist did not return a JSON array")
+
     urls = _normalize_tidal_api_urls(payload)
     if not urls:
         raise RuntimeError("Tidal API gist returned no valid URLs")
@@ -378,6 +404,38 @@ def get_tidal_api_list() -> list[str]:
         state = _load_tidal_api_list_state_locked()
         if not state["urls"]:
             raise RuntimeError("No cached Tidal API URLs")
+        return list(state["urls"])
+
+
+async def refresh_tidal_api_list_async(force: bool = False) -> list[str]:
+    with _tidal_api_list_mu:
+        state = _load_tidal_api_list_state_locked()
+        if not force and state["urls"]:
+            return list(state["urls"])
+
+    try:
+        gist_urls = await _fetch_tidal_api_urls_from_gist_async()
+    except Exception as exc:
+        logger.warning("[tidal] async gist fetch failed: %s", exc)
+        gist_urls = []
+
+    get_urls = _normalize_tidal_api_urls(_TIDAL_APIS_GET + gist_urls)
+    post_urls = _normalize_tidal_api_urls(_TIDAL_API_POST)
+    merged = get_urls + [u for u in post_urls if u not in set(get_urls)]
+
+    with _tidal_api_list_mu:
+        state = _load_tidal_api_list_state_locked()
+        if not merged:
+            if state["urls"]:
+                return list(state["urls"])
+            raise RuntimeError("No Tidal API URLs available from any source")
+
+        state["urls"] = merged
+        state["updated_at"] = int(time.time())
+        state["source"] = "builtin+gist"
+        if state["last_used_url"] not in state["urls"]:
+            state["last_used_url"] = ""
+        _save_tidal_api_list_state_locked(state)
         return list(state["urls"])
 
 def get_rotated_tidal_api_list() -> list[str]:
@@ -702,19 +760,11 @@ class TidalProvider(BaseProvider):
             qobuz_token:     str | None       = None,
             custom_api_url:  str | None       = None,
     ) -> None:
-        """
-        NOTA SU PERFORMANCE ASYNC: questo costruttore esegue prime_tidal_api_list(),
-        che può effettuare una richiesta HTTP sincrona bloccante (refresh della
-        lista API da gist) se la cache locale è vuota o va aggiornata. Se si sta
-        istanziando il provider da dentro un event loop già in esecuzione, usare
-        invece TidalProvider.create_async(...) per evitare di bloccare il loop.
-        """
+        """Create a Tidal provider without performing network I/O."""
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
-        self._session = NetworkManager.get_sync_client()
-        self._session.headers.update({"User-Agent": self._random_ua()})
+        self._async_http._headers.update({"User-Agent": self._random_ua()})
 
         try:
-            prime_tidal_api_list()
             base_apis = apis or get_tidal_api_list()
         except Exception as exc:
             logger.warning("[tidal] API list unavailable, using built-in fallback: %s", exc)
@@ -736,21 +786,21 @@ class TidalProvider(BaseProvider):
             qobuz_token:     str | None       = None,
             custom_api_url:  str | None       = None,
     ) -> "TidalProvider":
-        """
-        Factory asincrona equivalente a __init__, ma che esegue il refresh
-        della lista API (potenzialmente I/O-bound e bloccante) in un thread
-        separato tramite asyncio.to_thread, per non bloccare l'event loop
-        del chiamante. Preferire questa rispetto al costruttore diretto
-        quando si opera già dentro codice async.
-        """
-        def _build() -> "TidalProvider":
-            return cls(
-                apis=apis,
-                timeout_s=timeout_s,
-                qobuz_token=qobuz_token,
-                custom_api_url=custom_api_url,
-            )
-        return await asyncio.to_thread(_build)
+        """Create a Tidal provider and refresh the remote API list asynchronously."""
+        base_apis = apis
+        if base_apis is None:
+            try:
+                base_apis = await refresh_tidal_api_list_async(force=True)
+            except Exception as exc:
+                logger.warning("[tidal] async API refresh failed, using constructor fallback: %s", exc)
+                base_apis = None
+
+        return cls(
+            apis=base_apis,
+            timeout_s=timeout_s,
+            qobuz_token=qobuz_token,
+            custom_api_url=custom_api_url,
+        )
 
     async def resolve_spotify_to_tidal_async(
             self,
@@ -1319,7 +1369,7 @@ class TidalProvider(BaseProvider):
                 is_album                = is_album,
             )
 
-            await embed_metadata_async(str(final_dest), metadata, opts, session=self._session)
+            await embed_metadata_async(str(final_dest), metadata, opts)
             return DownloadResult.ok(self.name, str(final_dest))
         except SpotiflacError as exc:
             logger.error("[tidal] %s", exc)

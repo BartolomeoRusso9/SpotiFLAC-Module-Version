@@ -25,7 +25,7 @@ from ..core.console import print_source_banner
 from ..core.errors import SpotiflacError, ErrorKind
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.musicbrainz import mb_result_to_tags
-from ..core.tagger import embed_metadata, EmbedOptions
+from ..core.tagger import EmbedOptions
 from ..core.endpoints import get_amazon_endpoint
 from ..core.quality import get_squid_tier, to_zarz_codec
 from ..core.flac_validation import validate_and_repair_if_needed
@@ -639,8 +639,8 @@ class AmazonProvider(BaseProvider):
 
         async def _fetch_zarz(target_codec: str):
             try:
-                from ..core.http import zarz_rate_limiter
-                await asyncio.to_thread(zarz_rate_limiter.wait_for_slot)
+                from ..core.http import async_zarz_rate_limiter
+                await async_zarz_rate_limiter.wait_for_slot()
             except ImportError:
                 pass
 
