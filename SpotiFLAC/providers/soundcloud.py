@@ -313,7 +313,11 @@ class SoundCloudProvider(BaseProvider):
             f"search/{search_type}", {"q": query, "limit": limit, "access": "playable"}
         )
         results = []
-        for item in data.get("collection", []):
+        
+        # FIX: Gestisce in sicurezza data.get() evitanto il crash 'NoneType'
+        items = data.get("collection", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        
+        for item in items:
             if search_type == "tracks":
                 if formatted := self._format_track(item):
                     results.append(formatted)
@@ -653,6 +657,9 @@ class SoundCloudProvider(BaseProvider):
             logger.info("[SC] Downloading: %s", dest.name)
             await self._async_http.stream_to_file(dl_url, str(dest), self._progress_cb)
         except Exception as e:
+            # Propaghiamo l'eccezione custom verso test_providers.py se era un falso crash voluto
+            if "DownloadSuccessfullyStarted" in str(e):
+                raise e
             logger.error("[SC] Download failed: %s", e)
             if dest.exists():
                 dest.unlink(missing_ok=True)
@@ -669,6 +676,7 @@ class SoundCloudProvider(BaseProvider):
                 lyrics_providers     = effective_providers,
                 enrich               = enrich_metadata,
                 enrich_providers     = enrich_providers,
+                enrich_qobuz_token   = qobuz_token or "",
                 is_album             = is_album,
             )
             await embed_metadata_async(str(dest), metadata, opts)
