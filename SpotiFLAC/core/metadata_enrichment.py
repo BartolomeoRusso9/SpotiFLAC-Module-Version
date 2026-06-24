@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .http import NetworkManager
+from .isrc_utils import normalize_isrc, is_valid_isrc
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,10 @@ class EnrichedMetadata:
         if self.label:    tags["ORGANIZATION"]   = self.label
         if self.bpm:      tags["BPM"]            = str(self.bpm)
         if self.upc:      tags["UPC"]            = self.upc
-        if self.isrc:     tags["ISRC"]           = self.isrc
+        if self.isrc:
+            isrc_n = normalize_isrc(self.isrc)
+            if isrc_n:
+                tags["ISRC"] = isrc_n
         if self.explicit: tags["ITUNESADVISORY"] = "1"
         return tags
 

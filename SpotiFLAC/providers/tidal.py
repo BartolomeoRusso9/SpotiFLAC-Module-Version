@@ -1266,7 +1266,7 @@ class TidalProvider(BaseProvider):
 
             expected_s = metadata.duration_ms // 1000
 
-            valid, err_msg = await asyncio.to_thread(validate_downloaded_track_async, str(final_dest), expected_s)
+            valid, err_msg = await validate_downloaded_track_async(str(final_dest), expected_s)
             if not valid:
                 raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
 

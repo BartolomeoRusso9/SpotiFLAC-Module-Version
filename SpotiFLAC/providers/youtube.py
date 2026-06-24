@@ -199,8 +199,20 @@ class YouTubeProvider(BaseProvider):
                 
                 entities = data.get("entitiesByUniqueId", {})
                 for entity_data in entities.values():
-                    if not metadata.isrc and entity_data.get("isrc"):
-                        metadata.isrc = entity_data.get("isrc")
+                        if not metadata.isrc and entity_data.get("isrc"):
+                            try:
+                                from ..core.isrc_utils import normalize_isrc
+                                isrc_val = normalize_isrc(entity_data.get("isrc"))
+                                if isrc_val:
+                                    try:
+                                        from ..core.isrc_utils import confirm_isrc_with_qobuz_async
+                                        ok, _ = await confirm_isrc_with_qobuz_async(isrc_val, metadata.title or "", metadata.artists or "", metadata.duration_ms or 0)
+                                        if ok:
+                                            metadata.isrc = isrc_val
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
                         logger.info(f"[youtube] ISRC found via Odesli: {metadata.isrc}")
 
                 if not metadata.isrc and "deezer" in links:
@@ -212,7 +224,20 @@ class YouTubeProvider(BaseProvider):
                             dz_resp = await self._async_http.get(f"https://api.deezer.com/track/{deezer_id}", timeout=10)
                             if dz_resp.status_code == 200:
                                 dz_data = dz_resp.json()
-                                if dz_data.get("isrc"): metadata.isrc = dz_data["isrc"]
+                                if dz_data.get("isrc"):
+                                    try:
+                                        from ..core.isrc_utils import normalize_isrc
+                                        isrc_val = normalize_isrc(dz_data.get("isrc"))
+                                        if isrc_val:
+                                            try:
+                                                from ..core.isrc_utils import confirm_isrc_with_qobuz_async
+                                                ok, _ = await confirm_isrc_with_qobuz_async(isrc_val, metadata.title or "", metadata.artists or "", metadata.duration_ms or 0)
+                                                if ok:
+                                                    metadata.isrc = isrc_val
+                                            except Exception:
+                                                pass
+                                    except Exception:
+                                        pass
                         except httpx.RequestError as e:
                             logger.warning(f"[youtube] Deezer API fallback network error: {e}")
 

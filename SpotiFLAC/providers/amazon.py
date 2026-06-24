@@ -29,6 +29,7 @@ from ..core.tagger import EmbedOptions, embed_metadata_async
 from ..core.endpoints import get_amazon_endpoint
 from ..core.quality import to_zarz_codec
 from ..core.flac_validation import validate_and_repair_if_needed
+from ..core.isrc_utils import normalize_isrc
 
 
 logger = logging.getLogger(__name__)
@@ -1300,7 +1301,10 @@ class AmazonProvider(BaseProvider):
                     if url:                       audio["URL"]          = url
                     if api_meta.get("genre"):     audio["GENRE"]        = api_meta["genre"]
                     if api_meta.get("composer"):  audio["COMPOSER"]     = api_meta["composer"]
-                    if api_meta.get("isrc"):      audio["ISRC"]         = api_meta["isrc"]
+                    if api_meta.get("isrc"):
+                        isrc_v = normalize_isrc(api_meta.get("isrc"))
+                        if isrc_v:
+                            audio["ISRC"] = isrc_v
                     if "is_explicit" in api_meta:
                         audio["ITUNESADVISORY"] = "1" if api_meta["is_explicit"] else "2"
 
@@ -1326,7 +1330,10 @@ class AmazonProvider(BaseProvider):
                     if t_copy:                    audio["cprt"]                              = t_copy
                     if api_meta.get("genre"):     audio["\xa9gen"]                           = api_meta["genre"]
                     if api_meta.get("composer"):  audio["\xa9wrt"]                           = api_meta["composer"]
-                    if api_meta.get("isrc"):      audio["----:com.apple.iTunes:ISRC"]        = api_meta["isrc"].encode()
+                    if api_meta.get("isrc"):
+                        isrc_v = normalize_isrc(api_meta.get("isrc"))
+                        if isrc_v:
+                            audio["----:com.apple.iTunes:ISRC"] = isrc_v.encode()
                     if t_label:                   audio["----:com.apple.iTunes:LABEL"]       = t_label.encode()
                     if "is_explicit" in api_meta:
                         audio["rtng"] = [2] if api_meta["is_explicit"] else [1]
@@ -1371,12 +1378,30 @@ class AmazonProvider(BaseProvider):
             )
             if await asyncio.to_thread(self._file_exists, dest):
                 return DownloadResult.skipped_result(self.name, str(dest))
+            
+            amazon_url = await self._resolve_amazon_url(metadata)
+            downloaded, api_metadata = await self._download_from_api(amazon_url, output_dir, quality)
+
+            
+            if api_metadata and api_metadata.get("isrc") and api_metadata["isrc"] != metadata.isrc:
+                try:
+                    from ..core.isrc_utils import normalize_isrc, confirm_isrc_with_qobuz_async
+                    isrc_val = normalize_isrc(api_metadata["isrc"])
+                    if isrc_val:
+                        ok, _ = await confirm_isrc_with_qobuz_async(isrc_val, metadata.title or "", metadata.artists or "", 0)
+                        if ok:
+                            logger.info("[amazon] Syncing metadata ISRC: %s -> %s", metadata.isrc, isrc_val)
+                            metadata.isrc = isrc_val
+                            api_metadata["isrc"] = isrc_val
+                        else:
+                            api_metadata["isrc"] = metadata.isrc
+                except Exception:
+                    pass
 
             from ..core.musicbrainz import AsyncMBFetch
             mb_fetcher = AsyncMBFetch(metadata.isrc) if getattr(metadata, "isrc", None) else None
 
-            amazon_url = await self._resolve_amazon_url(metadata)
-            downloaded, api_metadata = await self._download_from_api(amazon_url, output_dir, quality)
+            
 
             ext      = os.path.splitext(downloaded)[1] or ".m4a"
             dest_ext = str(dest).rsplit(".", 1)[0] + ext
@@ -1397,7 +1422,10 @@ class AmazonProvider(BaseProvider):
             if api_metadata:
                 if api_metadata.get("genre"):      mb_tags["GENRE"]           = api_metadata["genre"]
                 if api_metadata.get("label"):      mb_tags["LABEL"]           = api_metadata["label"]
-                if api_metadata.get("isrc"):       mb_tags["ISRC"]            = api_metadata["isrc"]
+                if api_metadata.get("isrc"):
+                    isrc_v = normalize_isrc(api_metadata.get("isrc"))
+                    if isrc_v:
+                        mb_tags["ISRC"] = isrc_v
                 if api_metadata.get("composer"):   mb_tags["COMPOSER"]        = api_metadata["composer"]
                 if api_metadata.get("copyright"):  mb_tags["COPYRIGHT"]       = api_metadata["copyright"]
                 if "is_explicit" in api_metadata:

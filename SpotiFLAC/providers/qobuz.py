@@ -1178,7 +1178,19 @@ class QobuzProvider(BaseProvider):
             if album_data.get("url"):
                 qobuz_extra_tags["URL"] = album_data["url"]
             if track.get("isrc"):
-                metadata.isrc = track["isrc"]
+                try:
+                    from ..core.isrc_utils import normalize_isrc
+                    isrc_val = normalize_isrc(track["isrc"])
+                    if isrc_val:
+                        try:
+                            from ..core.isrc_utils import confirm_isrc_with_qobuz_async
+                            ok, _ = await confirm_isrc_with_qobuz_async(isrc_val, metadata.title or "", metadata.artists or "", metadata.duration_ms or 0)
+                            if ok:
+                                metadata.isrc = isrc_val
+                        except Exception:
+                            metadata.isrc = isrc_val
+                except Exception:
+                    metadata.isrc = ""
             if track.get("track_number"):
                 metadata.track_number = track["track_number"]
             if album_data.get("tracks_count"):

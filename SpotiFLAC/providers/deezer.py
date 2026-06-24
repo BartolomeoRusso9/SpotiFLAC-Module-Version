@@ -511,8 +511,16 @@ class DeezerProvider(BaseProvider):
 
         isrc_to_use = track.get("isrc") or metadata.isrc
         if track.get("isrc") and track["isrc"] != metadata.isrc:
-            logger.info("[deezer] Syncing metadata ISRC: %s -> %s", metadata.isrc, track["isrc"])
-            metadata.isrc = track["isrc"]                                                                                       
+            try:
+                from ..core.isrc_utils import normalize_isrc, confirm_isrc_with_qobuz_async
+                isrc_val = normalize_isrc(track["isrc"])
+                if isrc_val:
+                    ok, _ = await confirm_isrc_with_qobuz_async(isrc_val, metadata.title or "", metadata.artists or "", metadata.duration_ms or 0)
+                    if ok:
+                        logger.info("[deezer] Syncing metadata ISRC: %s -> %s", metadata.isrc, isrc_val)
+                        metadata.isrc = isrc_val
+            except Exception:
+                pass
 
         try:
             dest = self._build_output_path(
