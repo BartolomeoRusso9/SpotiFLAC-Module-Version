@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import asyncio.subprocess as _subproc
 import hashlib
 import json
 import logging
@@ -16,15 +15,10 @@ from typing import Any
 from urllib.parse import urlparse, quote
 
 import httpx
-try:
-    import aiofiles
-except ImportError:
-    aiofiles = None
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .base import BaseProvider
 from ..core.console import (
-    print_source_banner, print_api_failure, print_quality_fallback,
+    print_source_banner, print_api_failure
 )
 from ..core.download_validation import validate_downloaded_track_async
 from ..core.errors import (
@@ -33,7 +27,7 @@ from ..core.errors import (
 )
 from ..core.http import AsyncHttpClient, RetryConfig, NetworkManager, async_zarz_rate_limiter
 from ..core.models import TrackMetadata, DownloadResult
-from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags, fetch_mb_metadata_async
+from ..core.musicbrainz import mb_result_to_tags, fetch_mb_metadata_async
 from ..core.provider_stats import record_success_async, record_failure_async, prioritize_providers_async
 from ..core.tagger import _print_mb_summary, EmbedOptions
 from ..core.tagger import embed_metadata_async
@@ -1188,7 +1182,6 @@ class QobuzProvider(BaseProvider):
                         "Origin":          "https://open.qobuz.com",
                     },
                 )
-
                 valid, err = await validate_downloaded_track_async(str(dest), expected_s)
                 if not valid:
                     actual_duration = await self._get_audio_duration_seconds_async(str(dest))

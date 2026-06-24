@@ -1,6 +1,6 @@
 import re
 
-from .isrc_cache import get_cached_isrc, put_cached_isrc
+from .isrc_cache import get_cached_isrc_async, put_cached_isrc_async
 from .isrc_finder import IsrcFinder
 from .link_resolver import LinkResolver
 
@@ -18,7 +18,7 @@ class IsrcHelper:
 
     async def get_isrc_async(self, track_id: str) -> str:
         # 1. Cache
-        cached = get_cached_isrc(track_id)
+        cached = await get_cached_isrc_async(track_id)
         if cached: return cached
 
         isrc = None
@@ -47,7 +47,7 @@ class IsrcHelper:
 
         # 3. Salvataggio
         if isrc:
-            put_cached_isrc(track_id, isrc)
+            await put_cached_isrc_async(track_id, isrc)
             return isrc
 
         return ""

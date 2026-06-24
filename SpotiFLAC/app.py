@@ -1384,7 +1384,7 @@ class SpotiFLAC_API:
             from .core.progress import DownloadManager
             manager = DownloadManager()
             while not stop_event.wait(0.25):
-                self._push_download_stats(manager.get_stats())
+                self._push_download_stats(manager.get_stats_sync())
         except Exception:
             pass
         finally:
@@ -1394,7 +1394,7 @@ class SpotiFLAC_API:
         try:
             if stats is None:
                 from .core.progress import DownloadManager
-                stats = DownloadManager().get_stats()
+                stats = DownloadManager().get_stats_sync()
             safe = json.dumps(stats)
             if self._window:
                 self._window.evaluate_js(f"window.app_update_download_stats({safe});")

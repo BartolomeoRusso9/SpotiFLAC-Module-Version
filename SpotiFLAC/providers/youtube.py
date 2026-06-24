@@ -46,9 +46,6 @@ class YouTubeProvider(BaseProvider):
         super().__init__(timeout_s=timeout_s, headers={"User-Agent": _DEFAULT_UA})
         self._enrichment_cache: dict[str, dict] = {}
 
-    def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
-        super().set_progress_callback(cb)
-
     async def get_url_async(self, url: str) -> tuple[str, list[TrackMetadata]]:
         parsed = urlparse(url)
         qs = parse_qs(parsed.query)
@@ -273,7 +270,8 @@ class YouTubeProvider(BaseProvider):
             if d.get('status') == 'downloading':
                 downloaded = d.get('downloaded_bytes', 0)
                 total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
-                if self._progress_cb and total > 0: self._progress_cb(downloaded, total)
+                if self._progress_cb and total > 0:
+                    self._progress_cb(downloaded, total)
 
         class MuteLogger:
             def debug(self, msg: str) -> None: pass

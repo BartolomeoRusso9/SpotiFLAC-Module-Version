@@ -13,7 +13,7 @@ import httpx
 import threading
 import time
 import aiofiles
-from typing import Callable
+from typing import Callable, Awaitable
 from urllib.parse import urlparse
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from mutagen.flac import FLAC, Picture
@@ -29,6 +29,7 @@ from ..core.tagger import EmbedOptions, embed_metadata_async
 from ..core.endpoints import get_amazon_endpoint
 from ..core.quality import to_zarz_codec
 from ..core.flac_validation import validate_and_repair_if_needed
+
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +136,6 @@ class AmazonProvider(BaseProvider):
         # Passiamo l'User-Agent alla classe BaseProvider affinché l'AsyncHttpClient lo erediti!
         super().__init__(timeout_s=timeout_s, headers={"User-Agent": _DEFAULT_UA})
         self._s_token: str | None = None
-
-    def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
-        super().set_progress_callback(cb)
 
     async def _make_api_request(
             self,

@@ -325,9 +325,6 @@ class PandoraProvider(BaseProvider):
         })
         self._limiter = async_songlink_rate_limiter
 
-    def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
-        super().set_progress_callback(cb)
-
     # ------------------------------------------------------------------
     # HTTP helpers
     # ------------------------------------------------------------------

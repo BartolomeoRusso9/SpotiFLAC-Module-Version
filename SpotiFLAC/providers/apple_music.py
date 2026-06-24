@@ -5,7 +5,7 @@ import difflib
 import logging
 import time
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Callable, Awaitable
 
 from ..core.http import RetryConfig
 from .base import BaseProvider
@@ -42,6 +42,16 @@ class AppleMusicProvider(BaseProvider):
         # Cache per gli URL di ricerca
         self._url_cache: OrderedDict[str, str] = OrderedDict()
         self._cache_limit = 200
+
+    def set_progress_callback(self, cb: Callable[[int, int], Awaitable[None] | None]) -> None:
+        def safe_wrapper(written: int, total: int) -> None:
+            if cb:
+                res = cb(written, total)
+                if asyncio.iscoroutine(res):
+                    asyncio.create_task(res)
+        
+        super().set_progress_callback(safe_wrapper)
+        self._progress_cb = safe_wrapper
 
     def _normalize_codec(self, quality: str) -> str:
         q = quality.lower()
