@@ -266,7 +266,7 @@ class DownloadWorker:
 
     async def run_async(self) -> list[tuple[str, str, str]]:
         manager   = DownloadManager()
-        manager.reset()
+        await manager.reset()
         total     = len(self._tracks)
         start     = time.perf_counter()
         
@@ -278,7 +278,7 @@ class DownloadWorker:
         try:
             return await self._run_downloads_async(manager, total, base_out, start)
         finally:
-            ProgressManager.clear_all()
+            await ProgressManager.clear_all()
             uninstall_console_interception()
 
     async def _run_downloads_async(
@@ -294,7 +294,7 @@ class DownloadWorker:
         async def worker_task(i: int, track: TrackMetadata):
             position = i + 1
             print_track_header(position, total, track.title, track.artists, track.album)
-            manager.start_download(track.id)
+            await manager.start_download(track.id)
 
             out_dir = await self._track_output_dir_async(base_out, track)
             result = await download_one_async(
@@ -316,16 +316,16 @@ class DownloadWorker:
         for coro in asyncio.as_completed(tasks):
             track, result = await coro
             if result.success and result.skipped:
-                manager.skip_download(track.id)
+                await manager.skip_download(track.id)
             elif result.success:
                 size_mb = await _get_file_size_mb_async(result.file_path)
-                manager.complete_download(track.id, result.file_path or "", size_mb)
+                await manager.complete_download(track.id, result.file_path or "", size_mb)
             else:
                 err = result.error or "unknown"
                 self._failed.append((track.id, track.title, track.artists, err))
                 safe_tqdm_write(f"\n  ✗  Failed: {track.title} — {track.artists}: {err}", file=sys.stderr)
                 logger.debug("[worker] Failed: %s — %s: %s", track.title, track.artists, err)
-                manager.fail_download(track.id, err)
+                await manager.fail_download(track.id, err)
                 from .core.progress import ProgressCallback
                 ProgressCallback.clear_item(track.id)
 
@@ -606,7 +606,7 @@ class SpotiflacDownloader:
         for i, t in enumerate(tracks):
             track_item_id = t.id or t.external_url or f"queue-{i}-{uuid.uuid4().hex}"
             track_spotify_id = t.id or t.external_url or track_item_id
-            manager.add_to_queue(track_item_id, t.title, t.artists, t.album, track_spotify_id)
+            await manager.add_to_queue(track_item_id, t.title, t.artists, t.album, track_spotify_id)
             if not t.id:
                 t = t.model_copy(update={"id": track_item_id})
             updated_tracks.append(t)
