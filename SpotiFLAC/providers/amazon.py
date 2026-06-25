@@ -259,9 +259,7 @@ class AmazonProvider(BaseProvider):
             return await self._async_http.post(
                 url, json=payload, headers=hdrs, timeout=30
             )
-        return await self._async_http.get(
-            url, params=params, headers=hdrs, timeout=30
-        )
+        return await self._async_http.get(url, params=params, headers=hdrs, timeout=30)
 
     async def _do_request_with_retry(
         self,
@@ -1436,23 +1434,27 @@ class AmazonProvider(BaseProvider):
 
         antra_url = get_amazon_endpoint("antra")
         if antra_url:
-            logger.info("[amazon] Attempting direct download via Antra server (ASIN: %s)", asin)
+            logger.info(
+                "[amazon] Attempting direct download via Antra server (ASIN: %s)", asin
+            )
             try:
                 antra_headers = {
                     "User-Agent": _DEFAULT_UA,
                     "X-API-Key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f",
-                    "api-key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f"
+                    "api-key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f",
                 }
                 antra_api_url = f"{antra_url.rstrip('/')}/api/track/{asin}"
-                
+
                 client = await self._async_http._client()
-                resp = await client.get(antra_api_url, headers=antra_headers, timeout=20)
-                
+                resp = await client.get(
+                    antra_api_url, headers=antra_headers, timeout=20
+                )
+
                 if resp.status_code == 200:
                     data = resp.json()
                     stream_url = data.get("streamUrl")
                     decryption_key = data.get("decryptionKey")
-                    
+
                     if stream_url:
                         temp_file = os.path.join(output_dir, f"{asin}_antra.enc")
                         await self._async_http.stream_to_file(
@@ -1460,25 +1462,33 @@ class AmazonProvider(BaseProvider):
                             dest_path=temp_file,
                             progress_cb=self._progress_cb,
                             chunk_size=65536,
-                            extra_headers={"User-Agent": _DEFAULT_UA}
+                            extra_headers={"User-Agent": _DEFAULT_UA},
                         )
-                        
+
                         codec = await self._get_codec(temp_file)
                         ext = ".flac" if codec == "flac" else ".m4a"
                         out = os.path.join(output_dir, f"{asin}{ext}")
-                        
+
                         if decryption_key:
                             logger.info("[amazon] Decrypting Antra stream...")
                             proc = await asyncio.create_subprocess_exec(
-                                _ffmpeg_path(), "-y", "-decryption_key", decryption_key.strip(),
-                                "-i", temp_file, "-c", "copy", out,
-                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                _ffmpeg_path(),
+                                "-y",
+                                "-decryption_key",
+                                decryption_key.strip(),
+                                "-i",
+                                temp_file,
+                                "-c",
+                                "copy",
+                                out,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE,
                             )
                             await proc.communicate()
-                            
+
                             if os.path.exists(temp_file):
                                 os.remove(temp_file)
-                                
+
                             if proc.returncode == 0:
                                 if ext == ".flac":
                                     success, repair_msg = await asyncio.to_thread(
@@ -1487,7 +1497,10 @@ class AmazonProvider(BaseProvider):
                                     if success:
                                         return out, {}
                                     else:
-                                        logger.warning("[amazon] Antra FLAC repair failed: %s", repair_msg)
+                                        logger.warning(
+                                            "[amazon] Antra FLAC repair failed: %s",
+                                            repair_msg,
+                                        )
                                 else:
                                     return out, {}
                             else:
@@ -1496,7 +1509,10 @@ class AmazonProvider(BaseProvider):
                             os.rename(temp_file, out)
                             return out, {}
             except Exception as exc:
-                logger.warning("[amazon] Antra stream failed: %s. Falling back to resolvers...", exc)
+                logger.warning(
+                    "[amazon] Antra stream failed: %s. Falling back to resolvers...",
+                    exc,
+                )
 
         _zarz_ep = get_amazon_endpoint("zarz")
         _s_ep = get_amazon_endpoint("s_stream")

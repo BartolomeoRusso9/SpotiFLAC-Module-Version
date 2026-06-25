@@ -628,7 +628,11 @@ async def _fetch_tidal_url_once_async(
     headers = {"User-Agent": _POST_USER_AGENT[0] if is_post_api else _TIDAL_USER_AGENT}
     # Se questa API è la community mirror, usa gli header dedicati per le POST
     try:
-        if is_post_api and _TIDAL_COMMUNITY_URL and api_cleaning == _TIDAL_COMMUNITY_URL.rstrip("/"):
+        if (
+            is_post_api
+            and _TIDAL_COMMUNITY_URL
+            and api_cleaning == _TIDAL_COMMUNITY_URL.rstrip("/")
+        ):
             headers = _COMMUNITY_POST_HEADERS
     except Exception:
         pass
@@ -1178,13 +1182,13 @@ class TidalProvider(BaseProvider):
             if "anandserver.cfd" in url_or_manifest:
                 dl_headers = {
                     "X-API-Key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f",
-                    "api-key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f"
+                    "api-key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f",
                 }
-                
+
             await self._async_http.stream_to_file(
                 url_or_manifest, str(tmp), self._progress_cb, extra_headers=dl_headers
             )
-            
+
             final_dest = await self._mux_audio_async(tmp, dest, quality)
             if tmp.exists():
                 try:

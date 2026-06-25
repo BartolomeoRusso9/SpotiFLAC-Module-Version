@@ -715,7 +715,14 @@ class QobuzProvider(BaseProvider):
             try:
                 if is_antra:
                     url = f"{api_cleaning}/api/stream/{track_id}"
-                    if quality in ("27", "7", "HI_RES_LOSSLESS", "HI_RES", "hi96", "hi24"):
+                    if quality in (
+                        "27",
+                        "7",
+                        "HI_RES_LOSSLESS",
+                        "HI_RES",
+                        "hi96",
+                        "hi24",
+                    ):
                         url += "?strict_24=1"
                     return url
 
@@ -958,7 +965,14 @@ class QobuzProvider(BaseProvider):
 
                 elif is_antra:
                     url = f"{api_cleaning}/api/stream/{track_id}"
-                    if quality in ("27", "7", "HI_RES_LOSSLESS", "HI_RES", "hi96", "hi24"):
+                    if quality in (
+                        "27",
+                        "7",
+                        "HI_RES_LOSSLESS",
+                        "HI_RES",
+                        "hi96",
+                        "hi24",
+                    ):
                         url += "?strict_24=1"
                     return url
 
@@ -1485,10 +1499,14 @@ class QobuzProvider(BaseProvider):
                     "Referer": "https://open.qobuz.com/",
                     "Origin": "https://open.qobuz.com",
                 }
-                
+
                 if "anandserver.cfd" in stream_url:
-                    headers_dl["X-API-Key"] = "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f"
-                    headers_dl["api-key"] = "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f"
+                    headers_dl["X-API-Key"] = (
+                        "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f"
+                    )
+                    headers_dl["api-key"] = (
+                        "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f"
+                    )
 
                 await self._async_http.stream_to_file(
                     stream_url,
