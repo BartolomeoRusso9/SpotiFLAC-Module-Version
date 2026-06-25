@@ -219,7 +219,7 @@ class AmazonProvider(BaseProvider):
     _prefetch_task: asyncio.Task | None = None
 
     def __init__(self, timeout_s: int = 120) -> None:
-        # Passiamo l'User-Agent alla classe BaseProvider affinché l'AsyncHttpClient lo erediti!
+        # Pass the User-Agent to BaseProvider so the AsyncHttpClient inherits it!
         super().__init__(timeout_s=timeout_s, headers={"User-Agent": _DEFAULT_UA})
         self._s_token: str | None = None
 
@@ -517,7 +517,7 @@ class AmazonProvider(BaseProvider):
         if not all([s_home_url, s_challenge_url, s_verify_url]):
             raise RuntimeError("[amazon] s endpoints not fully configured in registry")
 
-        # Ricaviamo origin e referer dinamicamente dall'URL della home
+        # Derive origin and referer dynamically from the home URL
         parsed = urlparse(s_home_url)
         origin = (
             f"{parsed.scheme}://{parsed.netloc}"
@@ -1417,6 +1417,70 @@ class AmazonProvider(BaseProvider):
 
         fallback_quality = str(quality).upper()
 
+        antra_url = get_amazon_endpoint("antra")
+        if antra_url:
+            logger.info("[amazon] Attempting direct download via Antra server (ASIN: %s)", asin)
+            try:
+                antra_headers = {
+                    "User-Agent": _DEFAULT_UA,
+                    "X-API-Key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f",
+                    "api-key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f"
+                }
+                antra_api_url = f"{antra_url.rstrip('/')}/api/track/{asin}"
+                
+                client = await self._async_http._client()
+                resp = await client.get(antra_api_url, headers=antra_headers, timeout=20)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    stream_url = data.get("streamUrl")
+                    decryption_key = data.get("decryptionKey")
+                    
+                    if stream_url:
+                        temp_file = os.path.join(output_dir, f"{asin}_antra.enc")
+                        await self._async_http.stream_to_file(
+                            url=stream_url,
+                            dest_path=temp_file,
+                            progress_cb=self._progress_cb,
+                            chunk_size=65536,
+                            extra_headers={"User-Agent": _DEFAULT_UA}
+                        )
+                        
+                        codec = await self._get_codec(temp_file)
+                        ext = ".flac" if codec == "flac" else ".m4a"
+                        out = os.path.join(output_dir, f"{asin}{ext}")
+                        
+                        if decryption_key:
+                            logger.info("[amazon] Decrypting Antra stream...")
+                            proc = await asyncio.create_subprocess_exec(
+                                _ffmpeg_path(), "-y", "-decryption_key", decryption_key.strip(),
+                                "-i", temp_file, "-c", "copy", out,
+                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                            )
+                            await proc.communicate()
+                            
+                            if os.path.exists(temp_file):
+                                os.remove(temp_file)
+                                
+                            if proc.returncode == 0:
+                                if ext == ".flac":
+                                    success, repair_msg = await asyncio.to_thread(
+                                        validate_and_repair_if_needed, out
+                                    )
+                                    if success:
+                                        return out, {}
+                                    else:
+                                        logger.warning("[amazon] Antra FLAC repair failed: %s", repair_msg)
+                                else:
+                                    return out, {}
+                            else:
+                                logger.warning("[amazon] Antra decryption failed.")
+                        else:
+                            os.rename(temp_file, out)
+                            return out, {}
+            except Exception as exc:
+                logger.warning("[amazon] Antra stream failed: %s. Falling back to resolvers...", exc)
+
         _zarz_ep = get_amazon_endpoint("zarz")
         _s_ep = get_amazon_endpoint("s_stream")
         _spotbye1_ep = get_amazon_endpoint("spotbye1")
@@ -1656,7 +1720,7 @@ class AmazonProvider(BaseProvider):
             if await asyncio.to_thread(self._file_exists, dest):
                 return DownloadResult.skipped_result(self.name, str(dest))
 
-            # Avvia in parallelo la ricerca ISRC su Qobuz per ridurre la latenza
+            # Start ISRC search on Qobuz in parallel to reduce latency
             try:
                 duration_ms = int(
                     getattr(metadata, "duration_ms", 0)
@@ -1681,7 +1745,7 @@ class AmazonProvider(BaseProvider):
                 amazon_url, output_dir, quality
             )
 
-            # Normalizza risultato Qobuz (gather/task può sollevare eccezioni)
+            # Normalize the Qobuz result (gather/task may raise exceptions)
             qobuz_isrc = None
             if qobuz_task is not None:
                 try:
@@ -1693,9 +1757,9 @@ class AmazonProvider(BaseProvider):
                 except Exception as exc:
                     logger.debug("[amazon] Qobuz ISRC lookup failed: %s", exc)
 
-            # Qobuz ha priorità assoluta su Amazon API: sempre consultato,
+            # Qobuz has absolute priority over Amazon API: always consult it,
             # il suo ISRC sovrascrive quello originale se trovato.
-            # Se Qobuz NON trova un ISRC, allora valida quello dell'API Amazon.
+            # If Qobuz does NOT find an ISRC, then validate the one from the Amazon API.
             if qobuz_isrc:
                 try:
                     normalized = normalize_isrc(qobuz_isrc)
@@ -1721,7 +1785,7 @@ class AmazonProvider(BaseProvider):
 
                     isrc_val = normalize_isrc(api_metadata["isrc"])
                     if isrc_val:
-                        # Recupera la durata reale dai metadati anziché passare 0
+                        # Retrieve the real duration from metadata instead of passing 0
                         track_duration = (
                             getattr(metadata, "duration", 0)
                             or getattr(metadata, "duration_ms", 0) / 1000

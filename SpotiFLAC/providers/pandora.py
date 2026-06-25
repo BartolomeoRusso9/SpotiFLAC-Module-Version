@@ -1,14 +1,14 @@
 """
-PandoraProvider — porta completa di index.js in Python.
+PandoraProvider — full port of index.js to Python.
 
-Supporta:
-  - URL Pandora web (www.pandora.com/artist/...)
-  - App link Pandora (pandora.app.link/...)
-  - Pandora ID diretti (TR:..., AL:...)
-  - Risoluzione via Song.link + arricchimento Deezer
+Supports:
+  - Pandora web URLs (www.pandora.com/artist/...)
+  - App links Pandora (pandora.app.link/...)
+  - Direct Pandora IDs (TR:..., AL:...)
+  - Resolution via Song.link + Deezer enrichment
   - Download via api.zarz.moe/v1/dl/pan
-  - Qualità: mp3_192 (default), aac_64, aac_32
-  - Pipeline completa: MusicBrainz, lyrics, enrichment, tagging
+  - Quality: mp3_192 (default), aac_64, aac_32
+  - Full pipeline: MusicBrainz, lyrics, enrichment, tagging
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ def _strip_url_query(url: str | None) -> str:
 
 
 def _title_case_from_slug(value: str | None) -> str:
-    """Converte un slug URL in Title Case (es. 'rock-and-roll' → 'Rock And Roll')."""
+    """Convert a URL slug to Title Case (e.g. 'rock-and-roll' → 'Rock And Roll')."""
     value = (value or "").strip()
     if not value:
         return ""
@@ -112,7 +112,7 @@ def _title_case_from_slug(value: str | None) -> str:
 
 
 def _try_parse_url(url: str | None) -> dict[str, str] | None:
-    """Parsifica un URL e restituisce hostname e pathname."""
+    """Parse a URL and return hostname and pathname."""
     if not url:
         return None
     try:

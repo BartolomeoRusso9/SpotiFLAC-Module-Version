@@ -195,5 +195,5 @@ async def prioritize_async(provider_type: str, api_urls: list[str]) -> list[str]
     return await _scorer.prioritize_async(provider_type, api_urls)
 
 
-# Alias per compatibilità asincrona globale
+# Alias for global async compatibility
 prioritize_providers_async = prioritize_async

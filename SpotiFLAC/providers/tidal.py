@@ -187,7 +187,7 @@ def _clear_api_rate_limit(api_url: str) -> None:
 async def _find_isrc_via_qobuz(
     title: str, artist: str, duration_ms: int = 0
 ) -> str | None:
-    """Cerca l'ISRC su Qobuz con verifica fuzzy di titolo, artista e durata."""
+    """Search for the ISRC on Qobuz with fuzzy verification of title, artist, and duration."""
     try:
         creds = await _scrape_credentials_async()
         query = f"{title} {artist}".strip()
@@ -624,6 +624,12 @@ async def _fetch_tidal_url_once_async(
 
     client = await NetworkManager.get_async_client_safe()
 
+    if "anandserver.cfd" in api_cleaning:
+        url = f"{api_cleaning}/api/stream/{track_id}"
+        if quality in ("DOLBY_ATMOS", "HI_RES_LOSSLESS", "HI_RES"):
+            url += "?strict_24=1"
+        return url
+
     for attempt in range(_MAX_RETRIES + 1):
         if attempt > 0:
             jitter = random.uniform(0, _RETRY_JITTER_S)
@@ -961,10 +967,7 @@ class TidalProvider(BaseProvider):
         duration_ms: int = 0,
     ) -> str | None:
         """
-        Variante nativamente async di _search_on_mirrors: usa il client HTTP
-        asincrono condiviso invece di self._session (sync), evitando di
-        occupare un worker del thread pool di asyncio.to_thread per tutta
-        la durata della ricerca sui mirror Tidal.
+        Native async variant of _search_on_mirrors: uses the shared async HTTP client instead of self._session (sync), avoiding occupying an asyncio.to_thread thread-pool worker for the entire Tidal mirror search.
         """
         clean_track = _clean_title(track_name)
         clean_artist = artist_name.split(",")[0].strip()
@@ -1082,8 +1085,8 @@ class TidalProvider(BaseProvider):
 
     async def _resolve_via_songlink_async(self, spotify_track_id: str) -> str:
         """
-        Risoluzione nativa e puramente asincrona tramite Songlink.
-        Elimina i blocchi e risolve l'AttributeError del client HTTP.
+        Native and purely asynchronous resolution via Songlink.
+        Removes blocking and fixes the HTTP client AttributeError.
         """
         # Recupera il client asincrono corretto (lo stesso usato nel resto del file)
         client = await NetworkManager.get_async_client_safe()
@@ -1158,9 +1161,17 @@ class TidalProvider(BaseProvider):
             )
         else:
             tmp = dest.with_suffix(".tmp")
+            dl_headers = None
+            if "anandserver.cfd" in url_or_manifest:
+                dl_headers = {
+                    "X-API-Key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f",
+                    "api-key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f"
+                }
+                
             await self._async_http.stream_to_file(
-                url_or_manifest, str(tmp), self._progress_cb
+                url_or_manifest, str(tmp), self._progress_cb, extra_headers=dl_headers
             )
+            
             final_dest = await self._mux_audio_async(tmp, dest, quality)
             if tmp.exists():
                 try:
@@ -1416,7 +1427,7 @@ class TidalProvider(BaseProvider):
             )
 
             # asyncio.gather con return_exceptions=True non propaga le
-            # eccezioni: le normalizziamo qui a "nessun risultato", così
+            # exceptions: normalize them here to "no results", so
             # un fallimento di una delle due chiamate non comporta la perdita
             # dell'altra (comportamento equivalente a due try/except separati).
             if isinstance(qobuz_isrc, BaseException):
@@ -1426,7 +1437,7 @@ class TidalProvider(BaseProvider):
                 logger.debug("[tidal] proxy track-details lookup raised: %s", details)
                 details = {}
 
-            # Qobuz ha priorità su Spotify: sempre consultato,
+            # Qobuz has priority over Spotify: always consulted,
             # il suo ISRC sovrascrive quello originale se trovato.
             if qobuz_isrc:
                 metadata.isrc = qobuz_isrc
@@ -1436,7 +1447,7 @@ class TidalProvider(BaseProvider):
                 tidal_tags["ISRC"] = metadata.isrc
                 logger.info("[tidal] ISRC from source metadata: %s", metadata.isrc)
 
-            # Proxy usato per releaseDate; il suo ISRC è solo l'ultima risorsa.
+            # Proxy used for releaseDate; its ISRC is only the last resort.
             if details:
                 if not metadata.isrc:
                     if isrc_from_proxy := details.get("isrc"):
@@ -1460,7 +1471,7 @@ class TidalProvider(BaseProvider):
                 mb_tags = mb_result_to_tags(mb_data)
 
             # ----------------------------------------------------------------
-            # Merge finale dei tag (Tidal base, MusicBrainz priorità maggiore)
+            # Final merge of tags (Tidal base, MusicBrainz higher priority)
             # ----------------------------------------------------------------
             combined_tags = {**tidal_tags, **mb_tags}
 

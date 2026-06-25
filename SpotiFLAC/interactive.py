@@ -292,7 +292,7 @@ async def _pick_from_history() -> str | None:
         if val_lower in ("r", "recent", "clear recent"):
             if _ask_bool("Are you sure you want to clear recent fetches?", False):
                 try:
-                    # Deleghiamo eventuali IO sync bloccanti di core/history a to_thread per sicurezza
+                    # Delegate blocking sync core/history I/O to to_thread for safety
                     await asyncio.to_thread(clear_recent_fetches)
                     print(f"\n  {GREEN('✓')} Recent fetches cleared.\n")
                     continue

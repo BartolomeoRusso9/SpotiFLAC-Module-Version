@@ -99,7 +99,7 @@
       z-index: 200;
     }
     
-    /* Disabilita il drag SOLO sul contenitore dei bottoni colorati, così rimangono cliccabili */
+    /* Disable drag ONLY on the colored buttons container so they remain clickable */
     #titlebar .dots { 
       -webkit-app-region: no-drag; 
     }
@@ -941,12 +941,12 @@
       min-height: 0; 
     }
     
-    /* Nuovo contenitore per allinearlo alla Search Bar */
+    /* New container to align it with the Search Bar */
     .recent-container {
       width: 100%;
       max-width: 820px;
       margin: 0 auto;
-      padding: 0 18px; /* Padding aggiunto per uniformità */
+      padding: 0 18px; /* Added padding for consistency */
     }
     .list-container {
       width: 100%;
@@ -1343,10 +1343,10 @@
     .sort-list { display: flex; flex-direction: column; gap: 4px; }
     #services-list {
       display: flex;
-      flex-direction: column; /* Cambiato da row a column */
-      flex-wrap: nowrap;      /* Non va più a capo */
-      gap: 6px;               /* Leggermente più compatto */
-      width: 100%;            /* Occupa tutta la larghezza */
+      flex-direction: column; /* Changed from row to column */
+      flex-wrap: nowrap;      /* No longer wraps */
+      gap: 6px;               /* Slightly more compact */
+      width: 100%;            /* Takes full width */
     }
 
     #services-list .sort-item {
@@ -1444,7 +1444,7 @@
       display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;
       margin-bottom: 6px;
     }
-    /* Status card ridotto e reso più compatto */
+    /* Status card reduced and made more compact */
     .status-card {
       padding: 16px 18px; border-radius: 18px; background: var(--surface);
       border: 1px solid var(--border2); box-shadow: 0 12px 24px rgba(0,0,0,.04);
@@ -2002,7 +2002,7 @@
   color: var(--muted);
   display: -webkit-box;
   -webkit-line-clamp: 2;
-  line-clamp: 2; /* Proprietà standard */
+  line-clamp: 2; /* Standard property */
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -2030,11 +2030,11 @@
 .toast {
   display: flex;
   align-items: center;
-  background-color: var(--surface); /* Usa lo sfondo delle card del tuo tema */
-  color: var(--text);               /* Usa il colore del testo corretto */
+  background-color: var(--surface); /* Uses your theme card background */
+  color: var(--text);               /* Uses the correct text color */
   padding: 14px 16px;
-  border-radius: 12px;              /* Angoli più smussati in stile SpotiFLAC */
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15); /* Ombra più morbida e moderna */
+  border-radius: 12px;              /* More rounded corners in SpotiFLAC style */
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15); /* Softer, more modern shadow */
   border: 1px solid var(--border);  /* Usa il bordo nativo del tema */
   min-width: 280px;
   max-width: 400px;

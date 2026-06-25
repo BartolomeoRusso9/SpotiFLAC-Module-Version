@@ -151,8 +151,8 @@ class SoundCloudProvider(BaseProvider):
 
     async def _api_get_url_async(self, full_url: str) -> Any:
         """
-        GET su un URL completo (es. next_href della paginazione).
-        Inietta client_id se assente e gestisce il refresh su AuthError.
+        GET on a full URL (e.g. pagination next_href).
+        Injects client_id if missing and handles refresh on AuthError.
         """
         await self._ensure_client_id_async()
 
@@ -176,7 +176,7 @@ class SoundCloudProvider(BaseProvider):
         return resp.json()
 
     # ==========================================
-    # UTILITÀ DI FORMATO (Sincrone, No-I/O)
+    # FORMAT UTILITIES (Sync, No I/O)
     # ==========================================
 
     def _get_hires_artwork(self, url: str | None) -> str:
@@ -272,7 +272,7 @@ class SoundCloudProvider(BaseProvider):
         return best_track if best_score >= 40 else None
 
     # ==========================================
-    # UTILITÀ URL
+    # URL UTILITIES
     # ==========================================
 
     async def _resolve_short_link_async(self, url: str) -> str:
@@ -296,11 +296,11 @@ class SoundCloudProvider(BaseProvider):
         return url
 
     # ==========================================
-    # UTILITÀ FILE ASINCRONE
+    # ASYNC FILE UTILITIES
     # ==========================================
 
     async def _async_file_exists(self, path: Path) -> bool:
-        """Controllo non-bloccante: True se il file esiste ed è non vuoto."""
+        """Non-blocking check: True if the file exists and is not empty."""
         exists = await asyncio.to_thread(path.exists)
         if not exists:
             return False
@@ -711,7 +711,7 @@ class SoundCloudProvider(BaseProvider):
         if await self._async_file_exists(dest):
             return DownloadResult.skipped_result(self.name, str(dest), fmt="mp3")
 
-        # makedirs non-bloccante (dest.parent già creata sopra, questa copre output_dir)
+        # non-blocking makedirs (dest.parent already created above, this covers output_dir)
         await asyncio.to_thread(os.makedirs, output_dir, exist_ok=True)
 
         try:

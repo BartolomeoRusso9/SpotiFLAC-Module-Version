@@ -143,7 +143,7 @@ class AppleMusicMetadataClient:
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        pass  # Il ciclo di vita del client HTTP è gestito da NetworkManager
+        pass  # The HTTP client's lifecycle is managed by NetworkManager
 
     # ------------------------------------------------------------------
     # Token handling

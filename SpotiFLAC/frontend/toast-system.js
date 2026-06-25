@@ -21,11 +21,11 @@ class ToastManager {
 
   playSound(type) {
     if (!this.soundEnabled) return;
-    // Usa un try-catch perché i browser possono bloccare l'autoplay audio non iniziato dall'utente
+    // Use a try-catch because browsers may block autoplay audio not started by the user
     try {
       const audio = new Audio(`assets/sounds/${type}.mp3`);
       audio.volume = 0.5;
-      audio.play().catch(e => { /* Ignora auto-play policy errors */ });
+      audio.play().catch(e => { /* Ignore auto-play policy errors */ });
     } catch(e) {}
   }
 

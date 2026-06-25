@@ -1,9 +1,7 @@
 """
 Metadata Enrichment — Phase 2 asyncio migration.
 
-Aggiunge `enrich_metadata_async` che usa `asyncio.gather` con timeout globale
-in sostituzione del `ThreadPoolExecutor`. La versione sync originale è mantenuta
-per backward compatibility.
+Adds `enrich_metadata_async` that uses `asyncio.gather` with a global timeout instead of `ThreadPoolExecutor`. The original sync version is retained for backward compatibility.
 """
 
 from __future__ import annotations
@@ -556,8 +554,8 @@ async def enrich_metadata_async(
     qobuz_token: str | None = None,
 ) -> EnrichedMetadata:
     """
-    Interroga i provider in parallelo con asyncio.gather + timeout globale.
-    Sostituisce ThreadPoolExecutor della versione sync.
+    Queries providers in parallel with asyncio.gather + global timeout.
+    Replaces the sync version's ThreadPoolExecutor.
     """
     if providers is None:
         providers = ["deezer", "apple", "qobuz", "tidal"]

@@ -111,19 +111,25 @@ def get_qobuz_endpoints(category: str) -> list[str]:
     return _get_registry().get("qobuz", {}).get(category, [])
 
 
+def get_tidal_endpoints(category: str) -> list[str]:
+    """Ottiene gli endpoint per Tidal in base alla categoria ('stream', 'post', ecc.)"""
+    return _get_registry().get("tidal", {}).get(category, [])
+
+
 def get_tidal_post_endpoints() -> list[str]:
+    """Maintained for backward compatibility"""
     return _get_registry().get("tidal", {}).get("post", [])
 
 
 def get_deezer_endpoint(key: str) -> str:
-    """Valid keys: 'resolver', 'flacdownloader_prepare', 'flacdownloader_asset'"""
+    """Valid keys: 'antra', 'resolver', 'flacdownloader_prepare', 'flacdownloader_asset'"""
     return _get_registry().get("deezer", {}).get(key, "")
 
 
 def get_amazon_endpoint(key: str) -> str:
     """
     Valid keys:
-    - Download: 'musicdl', 'spotbye1', 'spotbye2', 'zarz', 'zarz_media', 'community'
+    - Download: 'musicdl', 'spotbye1', 'spotbye2', 'zarz', 'zarz_media', 'community', 'antra'
     - S: 's', 's_home', 's_challenge', 's_verify', 's_stream', 's_queue'
     - Resolver: 'resolver_songstats', 'resolver_songlink_api', 'resolver_songlink_html', 'resolver_spotify', 'resolver_deezer'
     - Base: 'amazon_music_base'

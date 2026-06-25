@@ -28,12 +28,12 @@ async def confirm_isrc_with_qobuz_async(
     qobuz_token: str | None = None,
 ) -> tuple[bool, dict | None]:
     """
-    Conferma un ISRC interrogando Qobuz: cerca la traccia per ISRC e confronta
-    la durata (se disponibile). Restituisce (True, track_dict) se la traccia
-    trovata corrisponde (durata entro tolleranza), altrimenti (False, None).
+    Confirm an ISRC by querying Qobuz: search the track by ISRC and compare
+    duration (if available). Returns (True, track_dict) if the found track
+    matches (duration within tolerance), otherwise (False, None).
 
-    Nota: effettua un'import dinamica di `QobuzProvider` per evitare cicli di
-    import tra `core` e `providers`.
+    Note: performs a dynamic import of `QobuzProvider` to avoid import cycles
+    between `core` and `providers`.
     """
     if not isrc:
         return False, None

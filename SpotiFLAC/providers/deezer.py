@@ -452,6 +452,48 @@ class DeezerProvider(BaseProvider):
             "[deezer] Found: %s - %s (ID: %s)", meta["artists"], meta["title"], track_id
         )
 
+        antra_url = get_deezer_endpoint("antra")
+        if antra_url:
+            logger.info("[deezer] Attempting direct download via Antra server...")
+            try:
+                dl_headers = {
+                    "User-Agent": _DEFAULT_UA,
+                    "X-API-Key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f",
+                    "api-key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f"
+                }
+                stream_url = f"{antra_url.rstrip('/')}/api/stream/{track_id}"
+                
+                out_dir_path = Path(output_dir)
+                out_dir_path.mkdir(parents=True, exist_ok=True)
+                file_extension = "flac"
+                filename = f"{self._safe(meta['artists'])} - {self._safe(meta['title'])}.{file_extension}"
+                file_path = out_dir_path / filename
+                temp_path = file_path.with_suffix(f".{file_extension}.encrypted")
+                
+                await self._async_http.stream_to_file(
+                    stream_url, str(temp_path), self._progress_cb, extra_headers=dl_headers
+                )
+                
+                logger.info("[deezer] Antra stream downloaded. Starting Blowfish decryption...")
+                success = await asyncio.to_thread(
+                    self._decrypt_file, temp_path, file_path, str(track_id)
+                )
+                
+                if temp_path.exists():
+                    temp_path.unlink()
+                    
+                if success:
+                    return {"file_path": str(file_path), "extension": file_extension}
+                else:
+                    if file_path.exists():
+                        file_path.unlink()
+                    logger.warning("[deezer] Decryption failed for Antra. Falling back...")
+                    
+            except Exception as exc:
+                logger.warning("[deezer] Antra stream failed: %s. Falling back to resolvers...", exc)
+                if 'temp_path' in locals() and temp_path.exists():
+                    temp_path.unlink()
+
         try:
             payload = {
                 "platform": "deezer",

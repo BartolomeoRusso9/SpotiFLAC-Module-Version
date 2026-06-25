@@ -140,7 +140,7 @@ class SpotiFLAC_API:
         except Exception as exc:
             self.log(f"ffmpeg check error: {exc}", "warn")
 
-    # ── Metodo pubblico opzionale (il JS può interrogarlo anche dopo) ─────────────
+    # ── Optional public method (JS can query it later as well) ─────────────
     def get_ffmpeg_status(self) -> dict:
         from .core.ffmpeg_check import check_ffmpeg
 
@@ -315,7 +315,7 @@ class SpotiFLAC_API:
             from .providers.spotify_metadata import SpotifyMetadataClient
 
             client = SpotifyMetadataClient()
-            # client.search() restituisce già un dizionario con i 4 array
+            # client.search() already returns a dictionary with the 4 arrays
             results = client.search(query, limit=limit)
 
             out = {"tracks": [], "albums": [], "artists": [], "playlists": []}
@@ -492,7 +492,7 @@ class SpotiFLAC_API:
 
             payload = json.dumps(out)
             if self._window:
-                # Il JS ora riceverà un oggetto completo come nella versione Go
+                # The JS will now receive a complete object as in the Go version
                 self._window.evaluate_js(
                     f"window.app_handle_provider_search_results({payload});"
                 )
@@ -995,7 +995,7 @@ class SpotiFLAC_API:
             except Exception as e:
                 self.log(f"[{idx}/{total}] Cover error for '{title}': {e}", "error")
 
-        # Crea un client asincrono e avvia i download tutti assieme!
+        # Create an async client and start all downloads together!
         async with httpx.AsyncClient(limits=httpx.Limits(max_connections=50)) as client:
             tasks = [
                 fetch_and_save(client, track, i)
@@ -1072,19 +1072,19 @@ class SpotiFLAC_API:
 
         self.log(f"All lyrics done — {success} saved, {skipped} skipped.", "ok")
 
-    # ── Lazy Loading - Anteprima track ──────────────────────────────────────
+    # ── Lazy Loading - Track preview ──────────────────────────────────────
 
     def get_track_preview(self, track_id: str) -> str:
-        """Retrieves l'URL di anteprima per una track (lazy loading).
+        """Retrieves the preview URL for a track (lazy loading).
 
-        Questo metodo è invocato dalla GUI solo quando l'utente clicca su 'play' o 'preview'
-        per evitare richieste di rete durante il caricamento iniziale della lista.
+        This method is only invoked by the GUI when the user clicks 'play' or 'preview'
+        to avoid network requests during initial list loading.
 
         Args:
-            track_id: ID della track Spotify
+            track_id: Spotify track ID
 
         Returns:
-            URL dell'anteprima MP3 (stringa vuota se non disponibile)
+            MP3 preview URL (empty string if unavailable)
         """
         try:
             from .providers.spotify_metadata import SpotifyMetadataClient
@@ -1110,7 +1110,7 @@ class SpotiFLAC_API:
             self.set_progress("Recupero metadati…")
             self.log(f"Analisi input: {url}", "info")
 
-            # ── Rilevamento: è un URL o una query di ricerca? ──────────────────
+            # ── Detection: is it a URL or a search query? ──────────────────
             stripped = url.strip()
             is_url = stripped.startswith("http") or stripped.startswith("spotify:")
 
@@ -1129,7 +1129,7 @@ class SpotiFLAC_API:
 
                     client = SpotifyMetadataClient()
             else:
-                # ── Ricerca testuale — sempre SpotifyMetadataClient ─────────────
+                # ── Text search — always SpotifyMetadataClient ─────────────
                 from .providers.spotify_metadata import SpotifyMetadataClient
 
                 client = SpotifyMetadataClient()
@@ -1220,15 +1220,15 @@ class SpotiFLAC_API:
             for i, t in enumerate(tracks):
                 track_id = getattr(t, "id", "")
 
-                # Cerca di retrievesre i dati in modo dinamico
+                # Try to retrieve data dynamically
                 title = getattr(t, "title", getattr(t, "name", f"Track {i+1}"))
-                # Gestisce sia se 'artists' è una stringa che una lista
+                # Handles both cases where 'artists' is a string or a list
                 raw_art = getattr(t, "artists", getattr(t, "artist", "Unknown"))
                 artist = (
                     ", ".join(raw_art) if isinstance(raw_art, list) else str(raw_art)
                 )
 
-                # Prendi l'album se esiste
+                # Take the album if it exists
                 album = getattr(t, "album", getattr(t, "album_name", "—"))
 
                 _pc_val = playcount_map.get(track_id, "") if playcount_map else ""

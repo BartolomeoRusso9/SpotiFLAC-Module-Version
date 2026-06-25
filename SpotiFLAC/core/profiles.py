@@ -109,7 +109,7 @@ async def _load_async() -> dict:
                             logger.debug("[profile] skipping invalid profile %s", name)
                             continue
                         try:
-                            # La validazione Pydantic è velocissima in RAM
+                            # Pydantic validation is extremely fast in RAM
                             validated[name] = ProfileConfig.model_validate(
                                 profile
                             ).model_dump(exclude_none=True)

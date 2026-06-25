@@ -3,12 +3,12 @@
 CLI entry point for SpotiFLAC.
 
 === Migrazione async ===
-L'intero entry point ora gira su un singolo event loop condiviso, invece di
-delegare a `SpotiFLAC(...)` (wrapper sincrono che apre un proprio
-asyncio.run() al suo interno). Si usa direttamente `SpotiflacDownloader`,
-che è già 100% async-native, ed è per questo che `check_for_updates_async`
-e `run_interactive()` possono ora essere "await"-ati nello stesso loop
-invece di aprirne uno nuovo ciascuno.
+The entire entry point now runs on a single shared event loop instead of
+delegating to `SpotiFLAC(...)` (a sync wrapper that opens its own
+asyncio.run() internally). It uses `SpotiflacDownloader` directly, which is
+already 100% async-native, and that is why `check_for_updates_async`
+and `run_interactive()` can now be awaited in the same loop instead of
+opening a new one each time.
 
 New flags vs previous version:
   --retries N               Extra download attempts per track (default: 0)
@@ -312,7 +312,7 @@ async def _run_download_async(
     """
     Bridge async verso SpotiflacDownloader, senza passare per il wrapper
     sincrono `SpotiFLAC()` (che farebbe un `asyncio.run()` annidato e
-    fallirebbe perché siamo già dentro un loop).
+    would fail because we are already inside a loop).
     """
     logger = logging.getLogger("SpotiFLAC")
     if not logger.handlers:

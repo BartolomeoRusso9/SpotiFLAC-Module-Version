@@ -38,7 +38,7 @@ async def _get_audio_duration_async(filepath: str) -> float:
 
 async def _remove_file_async(filepath: str) -> None:
     try:
-        # La rimozione di file è I/O bloccante, lo deleghiamo a un thread
+        # File removal is blocking I/O; delegate it to a thread
         await asyncio.to_thread(os.remove, filepath)
         logger.warning("[validation] File removed: %s", filepath)
     except OSError as exc:

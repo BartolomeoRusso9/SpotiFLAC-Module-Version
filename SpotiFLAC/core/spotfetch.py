@@ -156,7 +156,7 @@ class SpotifyWebClient:
             self._get_client_token()
 
     def extract_cover_image(self, cover_data: dict) -> dict:
-        """Algoritmo avanzato di risoluzione delle copertine, estrae la massima risoluzione tramite Hash."""
+        """Advanced cover resolution algorithm; extracts the highest resolution using hash."""
         if not cover_data:
             return {}
 
@@ -226,7 +226,7 @@ class SpotifyWebClient:
         return res
 
     def extract_cover_url(self, cover_data: dict) -> str:
-        """Estrae l'URL di copertina preferito senza costruire una mappa completa."""
+        """Extracts the preferred cover URL without building a complete map."""
         if not cover_data or not isinstance(cover_data, dict):
             return ""
 
@@ -335,7 +335,7 @@ class SpotifyWebClient:
             return ""
 
     def get_preview_url(self, track_id: str) -> str:
-        """Retrieves la preview URL dalla page embed (stessa logica di Go GetPreviewURL)."""
+        """Retrieves the preview URL from the embed page (same logic as Go GetPreviewURL)."""
         try:
             embed_url = f"https://open.spotify.com/embed/track/{track_id}"
             resp = self._session.get(embed_url, timeout=10)
@@ -458,7 +458,7 @@ class SpotifyWebClient:
         try:
             data = self.query(payload)
 
-            # Estrai items dalla playlist
+            # Extract items from the playlist
             items = (
                 data.get("data", {})
                 .get("playlistV2", {})
@@ -581,8 +581,8 @@ class SpotifyWebClient:
         self, artist_id: str, order: str = "DATE_DESC"
     ) -> list[dict[str, Any]]:
         """
-        Retrieves la lista di release della discografia di un artista tramite GraphQL.
-        Returns gli elementi di `data.artistUnion.discography.all.items`.
+        Retrieves the list of releases in an artist's discography via GraphQL.
+        Returns the elements of `data.artistUnion.discography.all.items`.
         """
         all_items: list[dict[str, Any]] = []
         offset = 0

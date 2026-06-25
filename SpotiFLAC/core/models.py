@@ -79,7 +79,7 @@ class TrackMetadata(BaseModel):
 
     @property
     def first_artist(self) -> str:
-        """Returns solo il primo artista della lista."""
+        """Returns only the first artist from the list."""
         return self.artists.split(",")[0].strip()
 
     def as_flac_tags(self, *, first_artist_only: bool = False) -> dict[str, str]:
@@ -114,9 +114,9 @@ class TrackMetadata(BaseModel):
         """
         Returns una nuova istanza aggiornata con i dati dell'enrichment.
 
-        FIX: in precedenza usava assegnazione diretta (self.field = value),
-        che è anti-pattern per Pydantic v2. Ora usa model_copy(update={})
-        che è l'approccio idiomatico e produce un nuovo oggetto immutabile.
+        FIX: previously used direct assignment (self.field = value),
+        which is an anti-pattern for Pydantic v2. Now uses model_copy(update={})
+        which is the idiomatic approach and produces a new immutable object.
         """
         updates: dict[str, Any] = {}
 
@@ -162,7 +162,7 @@ class DownloadResult(BaseModel):
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "DownloadResult":
-        """Valida che se il download ha successo, il path sia presente."""
+        """Validates that if the download succeeded, the path is present."""
         if self.success and not self.file_path:
             raise ValueError("success=True richiede un file_path")
         return self

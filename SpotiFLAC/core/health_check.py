@@ -16,7 +16,7 @@ from ..core.endpoints import get_health_zarz_url
 
 
 def _is_streaming_url(raw: str) -> bool:
-    """Check if una stringa è un URL HTTP/HTTPS valido."""
+    """Check if a string is a valid HTTP/HTTPS URL."""
     if not raw or not isinstance(raw, str):
         return False
     parsed = urlparse(raw.strip())
@@ -24,7 +24,7 @@ def _is_streaming_url(raw: str) -> bool:
 
 
 def _contains_streaming_url(body: str) -> bool:
-    """Cerca un URL di streaming valido nel testo o nel JSON della risposta."""
+    """Search for a valid streaming URL in the response text or JSON."""
     if not body.strip():
         return False
     if _is_streaming_url(body):
@@ -290,7 +290,7 @@ async def _check_one(
                         ok, detail = True, "HTTP 200 OK"
 
             elif resp.status_code >= 500:
-                ok = False  # detail già impostato sopra ("HTTP 5xx")
+                ok = False  # detail already set above ("HTTP 5xx")
 
             elif resp.status_code == 401:
                 ok, detail = False, "Auth required"
@@ -304,8 +304,8 @@ async def _check_one(
                     pass
 
             else:
-                # Qualsiasi altro status (4xx diverso da 401, 3xx già seguiti) →
-                # il server è raggiungibile
+                # Any other status (4xx other than 401, 3xx already followed) →
+                # the server is reachable
                 ok = True
 
             return HealthResult(provider, url, method, ok, ms, detail)
@@ -476,7 +476,7 @@ async def run_health_check(
     include_all_endpoints: bool = True,
 ) -> list[HealthResult]:
     """
-    Check in modo asincrono la raggiungibilità di tutti i provider indicati.
+    Check the reachability of all indicated providers asynchronously.
     """
     results: list[HealthResult] = []
     task_list: list[tuple[str, str, str]] = []
@@ -641,15 +641,15 @@ def print_health_report(
 
 
 def any_service_ok(results: list[HealthResult]) -> bool:
-    """True se almeno un endpoint di almeno un provider è raggiungibile."""
+    """True if at least one endpoint for at least one provider is reachable."""
     return any(r.ok for r in results)
 
 
 def provider_ok(results: list[HealthResult], provider: str) -> bool:
-    """True se almeno un endpoint del provider indicato è raggiungibile."""
+    """True if at least one endpoint for the indicated provider is reachable."""
     return any(r.ok for r in results if r.provider == provider)
 
 
 def get_working_providers(results: list[HealthResult]) -> list[str]:
-    """Returns la lista dei provider con almeno un endpoint funzionante."""
+    """Returns the list of providers with at least one working endpoint."""
     return list(dict.fromkeys(r.provider for r in results if r.ok))

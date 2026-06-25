@@ -48,7 +48,7 @@ def _safe_duration_ms(raw: Any) -> int:
 
 
 def _extract_artist_names(artists_data: Any) -> list[str]:
-    """Estrae i nomi degli artisti dalla struttura GraphQL o da liste alternative."""
+    """Extracts artist names from the GraphQL structure or alternative lists."""
     if isinstance(artists_data, dict):
         items = artists_data.get("items", [])
         if isinstance(items, list) and items:
@@ -198,7 +198,7 @@ def _track_url(track_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Parsing URL e Utilità
+# URL parsing and utilities
 # ---------------------------------------------------------------------------
 
 
@@ -393,11 +393,11 @@ class SpotifyMetadataClient:
         if not artists_list:
             artists_list.extend(_extract_artist_names(track_union.get("artists", {})))
 
-        # 4. Fallback all'album se necessario
+        # 4. Fallback to the album if necessary
         if not artists_list:
             artists_list = _extract_artist_names(album_data.get("artists", {}))
 
-        # 5. Fallback finale se tutto fallisce
+        # 5. Final fallback if everything fails
         if not artists_list:
             artists_list = ["Unknown Artist"]
 
@@ -443,10 +443,10 @@ class SpotifyMetadataClient:
     # ------------------------------------------------------------------
 
     async def get_track_preview_async(self, track_id: str) -> str:
-        """Retrieves l'URL di anteprima di una track al momento della richiesta (lazy loading).
+        """Retrieves the preview URL for a track at request time (lazy loading).
 
-        Questo metodo è pensato per essere invocato solo quando l'utente clicca su 'play' o 'preview'
-        nella GUI, evitando richieste di rete durante il caricamento iniziale della lista.
+        This method is designed to be invoked only when the user clicks 'play' or 'preview'
+        in the GUI, avoiding network requests during the initial list load.
         """
         try:
             preview_url = await asyncio.to_thread(
@@ -691,7 +691,7 @@ class SpotifyMetadataClient:
         return info, tracks, playlist_cover
 
     # ------------------------------------------------------------------
-    # Ricerca
+    # Search
     # ------------------------------------------------------------------
 
     _SEARCH_HASH = "fcad5a3e0d5af727fb76966f06971c19cfa2275e6ff7671196753e008611873c"
@@ -715,7 +715,7 @@ class SpotifyMetadataClient:
         }
 
     async def search_async(self, query: str, limit: int = 20) -> dict[str, list]:
-        """Ricerca unificata: restituisce tracks, album, artisti e playlist."""
+        """Unified search: returns tracks, albums, artists, and playlists."""
         try:
             data = await asyncio.to_thread(
                 self.web_client.query, self._search_payload(query, limit)
@@ -771,7 +771,7 @@ class SpotifyMetadataClient:
             for item in items:
                 node = item.get("data") or item.get("item", {}).get("data", {})
                 # La GraphQL di Spotify non espone sempre un campo `id` diretto su
-                # album/artist/playlist: l'ID è embedded nell'URI
+                # album/artist/playlist: the ID is embedded in the URI
                 # (es. "spotify:album:4aawyAB9vmqN3uQ7FjRGTy").
                 # Proviamo prima il campo diretto, poi estraiamo dall'URI.
                 node_id: str = node.get("id") or ""
@@ -837,7 +837,7 @@ class SpotifyMetadataClient:
         limit: int = 20,
         offset: int = 0,
     ) -> list:
-        """Ricerca filtrata per un singolo tipo: track | album | artist | playlist."""
+        """Filtered search for a single type: track | album | artist | playlist."""
         if kind not in ("track", "album", "artist", "playlist"):
             raise ValueError(
                 f"Invalid type: {kind!r}. Valori ammessi: track, album, artist, playlist"
@@ -1112,7 +1112,7 @@ class SpotifyMetadataClient:
             return playlist.get("name", "Unknown Playlist"), tracks, cover, playlist
 
         if t in ("artist", "artist_discography"):
-            # Rispetta il sub-type della discografia se presente nell'URL
+            # Respect the discography sub-type if present in the URL
             group = info.get("group", "album,single")
             artist, tracks = await self.get_artist_albums_async(
                 info["id"], include_groups=group

@@ -41,7 +41,7 @@ def check_ffmpeg() -> dict:
 
 
 def print_ffmpeg_warning(result: dict | None = None) -> dict:
-    """Stampa avviso CLI se ffmpeg manca. Returns il dict del check."""
+    """Prints a CLI warning if ffmpeg is missing. Returns the check dict."""
     if result is None:
         result = check_ffmpeg()
 

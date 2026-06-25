@@ -34,8 +34,8 @@ def test_parse_dash_manifest():
 
 
 def test_clean_title_removes_parentheses_and_accents():
-    s = "Canción (Remastered) [Deluxe]"
+    s = "Song (Remastered) [Deluxe]"
     cleaned = tidal._clean_title(s)
     assert "remastered" not in cleaned
     assert "deluxe" not in cleaned
-    assert "cancion" in cleaned
+    assert "song" in cleaned

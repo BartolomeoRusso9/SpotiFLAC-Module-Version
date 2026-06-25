@@ -111,12 +111,12 @@ def SpotiFLAC(
     Download tracks/album/playlist from Spotify, Tidal, Apple Music, Deezer, SoundCloud, Pandora and YouTube.
 
     Args:
-        url: single URL (str) o lista di URL (list[str]) per il batch.
-        output_dir: Cartella di destinazione.
-        services: Provider in ordine di priorità (default: ["tidal"]).
-        track_max_retries: Tentativi extra per track in caso di fallimento (default: 0).
-        post_download_action: Azione al termine — "none" | "open_folder" | "notify" | "command".
-        post_download_command: Comando shell da eseguire (con {folder}, {succeeded}, {failed}).
+        url: single URL (str) or list of URLs (list[str]) for batch.
+        output_dir: Destination folder.
+        services: Providers in priority order (default: ["tidal"]).
+        track_max_retries: Extra retry attempts per track on failure (default: 0).
+        post_download_action: Action after completion — "none" | "open_folder" | "notify" | "command".
+        post_download_command: Shell command to run with {folder}, {succeeded}, {failed}.
     """
     _setup_logger(log_level)
 
@@ -150,12 +150,12 @@ def SpotiFLAC(
     try:
         downloader = SpotiflacDownloader(opts)
 
-        # Gestiamo l'avvio del loop asincrono in modo "safe"
-        # (copre sia chiamate standard che chiamate da contesti già asincroni come Jupyter)
+        # Handle starting the async loop in a safe way
+        # (covers both standard calls and calls from already-async contexts such as Jupyter)
         try:
             asyncio.run(downloader.run_async(url, loop_minutes=loop))
         except RuntimeError:
-            # Fallback se un event loop è già in esecuzione nel thread attuale
+            # Fallback if an event loop is already running in the current thread
             loop_instance = asyncio.get_event_loop()
             loop_instance.run_until_complete(
                 downloader.run_async(url, loop_minutes=loop)

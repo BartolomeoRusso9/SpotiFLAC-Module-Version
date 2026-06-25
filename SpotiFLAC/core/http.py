@@ -61,13 +61,13 @@ class NetworkManager:
     @classmethod
     async def get_async_client_safe(cls) -> httpx.AsyncClient:
         """
-        Restituisce un AsyncClient legato al loop corrente.
-        Crea un nuovo client se il loop non ne ha ancora uno.
+        Returns an AsyncClient tied to the current loop.
+        Creates a new client if the loop does not already have one.
         """
         loop = asyncio.get_running_loop()
         loop_id = id(loop)
 
-        # Fast path senza lock per il caso comune (client già esistente)
+        # Fast path without a lock for the common case (client already exists)
         client = cls._async_clients.get(loop_id)
         if client is not None:
             return client
@@ -99,8 +99,8 @@ class NetworkManager:
     @classmethod
     def close(cls) -> None:
         """
-        Best-effort cleanup dei client async a fine processo (chiamato da atexit).
-        I loop potrebbero già essere chiusi: ci limitiamo a svuotare il registro.
+        Best-effort cleanup of async clients at process exit (called by atexit).
+        Loops may already be closed: we limit ourselves to clearing the registry.
         """
         try:
             with cls._async_clients_lock:
@@ -113,9 +113,9 @@ class NetworkManager:
 class AsyncRateLimiter:
     """
     Rate limiter asyncio-safe.
-    Usa asyncio.Lock e asyncio.sleep così non blocca l'event loop.
-    L'asyncio.Lock viene creato in modo lazy (alla prima wait_for_slot())
-    perché non può essere istanziato fuori da un event loop attivo.
+    Uses asyncio.Lock and asyncio.sleep so it does not block the event loop.
+    The asyncio.Lock is created lazily (on the first wait_for_slot())
+    because it cannot be instantiated outside of an active event loop.
     """
 
     def __init__(self, max_requests: int, window_seconds: float):

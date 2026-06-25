@@ -159,7 +159,7 @@ class DownloadBroadcaster:
     _instance = None
 
     def __new__(cls) -> "DownloadBroadcaster":
-        # Rimosso _creation_lock: ora è thread-safe in contesto single-thread asyncio
+        # Removed _creation_lock: now thread-safe in single-thread asyncio context
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._listeners = set()
@@ -312,7 +312,7 @@ class DownloadManager:
         await DownloadBroadcaster().broadcast_immediate(stats)
 
     async def get_item_speed(self, item_id: str) -> float:
-        """Metodo sicuro per ottenere la velocità evitando l'accesso diretto alla coda dal callback."""
+        """Safe method to get speed without direct queue access from the callback."""
         async with self._lock:
             for item in self._queue:
                 if item.id == item_id:
@@ -616,8 +616,8 @@ class ProgressCallback:
         is_final = bool(total_bytes and current_bytes >= total_bytes)
 
         # Miglioria prestazionale critica: Throttling a monte.
-        # Ignora l'aggiornamento se non sono passati almeno 100ms e non è il pezzo finale,
-        # prevenendo l'intasamento dell'event loop con decine di migliaia di task.
+        # Ignore the update if at least 100ms have not passed and it is not the final piece,
+        # preventing event loop congestion with tens of thousands of tasks.
         if (
             not is_final
             and self._last_refresh_time > 0

@@ -1,7 +1,7 @@
 # backend/core/isrc_cache.py
 """
-Cache persistente per ISRC — port di isrc_cache.go.
-Evita chiamate ridondanti a Songlink/Soundplate per ISRC già risolti.
+Persistent ISRC cache — port of isrc_cache.go.
+Avoids redundant Songlink/Soundplate calls for already-resolved ISRCs.
 Async version with aiofiles for non-blocking I/O.
 """
 

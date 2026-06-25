@@ -29,7 +29,7 @@ def _write_file_sync(data: dict) -> None:
 async def _load_async() -> dict:
     async with _io_lock:
         try:
-            # Deleghiamo lettura disco e parsing JSON a un thread lavoratore
+            # Delegate disk read and JSON parsing to a worker thread
             return await asyncio.to_thread(_read_file_sync)
         except Exception as exc:
             logger.debug("[session] Read error: %s", exc)
@@ -39,7 +39,7 @@ async def _load_async() -> dict:
 async def _save_async(data: dict) -> None:
     async with _io_lock:
         try:
-            # Deleghiamo scrittura disco e dump JSON a un thread lavoratore
+            # Delegate disk write and JSON dump to a worker thread
             await asyncio.to_thread(_write_file_sync, data)
         except Exception as exc:
             logger.debug("[session] Write error: %s", exc)
@@ -72,8 +72,8 @@ async def set_last_folder_async(folder: str) -> None:
 
 async def get_url_history_async() -> list[dict]:
     """
-    Returns la cronologia URL in ordine dal più recente al meno recente.
-    Ogni entry è: {"url": str, "label": str, "cover": str, "track_count": int,
+    Returns the URL history ordered from most recent to oldest.
+    Each entry is: {"url": str, "label": str, "cover": str, "track_count": int,
                    "url_type": str, "artist": str, "at": int (unix timestamp)}
     """
     data = await _load_async()
@@ -82,10 +82,10 @@ async def get_url_history_async() -> list[dict]:
 
 def _normalize_history_url(url: str) -> str:
     """
-    Normalizza le URL salvate nella history (operazione veloce string based, resta sync).
+    Normalizes URLs saved in history (fast string-based operation, remains sync).
     - spotify:track:ID -> https://open.spotify.com/track/ID
     - open.spotify.com/... -> https://open.spotify.com/...
-    - mantiene http(s) invariati
+    - leaves http(s) unchanged
     """
     if not url:
         return ""
@@ -115,14 +115,14 @@ async def add_url_to_history_async(
     artist: str = "",
 ) -> None:
     """
-    Aggiunge un URL alla cronologia (o lo sposta in cima se già presente).
+    Adds a URL to history (or moves it to the top if already present).
     """
     if not url:
         return
     nurl = _normalize_history_url(url)
     data = await _load_async()
 
-    # Rimuovi eventuali occorrenze della stessa URL normalizzata
+    # Remove any occurrences of the same normalized URL
     history = [h for h in data.get("url_history", []) if h.get("url") != nurl]
     history.insert(
         0,
@@ -142,14 +142,14 @@ async def add_url_to_history_async(
 
 
 async def clear_url_history_async() -> None:
-    """Svuota completamente la cronologia degli URL."""
+    """Clears the URL history completely."""
     data = await _load_async()
     data["url_history"] = []
     await _save_async(data)
 
 
 async def remove_url_from_history_async(url: str) -> None:
-    """Removes un singolo URL dalla cronologia."""
+    """Removes a single URL from history."""
     if not url:
         return
     nurl = _normalize_history_url(url)

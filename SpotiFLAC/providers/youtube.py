@@ -465,8 +465,8 @@ class YouTubeProvider(BaseProvider):
             if os.path.exists(dest_path):
                 return True
         except Exception as e:
-            # L'eccezione DownloadSuccessfullyStarted salirà fin qui dal thread
-            # Lasciamo che propaghi al blocco superiore se è la nostra!
+            # The DownloadSuccessfullyStarted exception will bubble up here from the thread
+            # Let it propagate to the upper block if it is ours!
             if "DownloadSuccessfullyStarted" in str(e):
                 raise e
             logger.warning(f"[youtube] yt-dlp error: {e}")
@@ -679,7 +679,7 @@ class YouTubeProvider(BaseProvider):
                         download_success = True
                         break
                     except Exception as e:
-                        # Se è la nostra eccezione la rilanciamo fuori
+                        # If it is our exception, re-raise it.
                         if "DownloadSuccessfullyStarted" in str(e):
                             raise e
                         logger.warning(

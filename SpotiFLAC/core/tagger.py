@@ -62,7 +62,7 @@ SOURCE_TAG = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
 # ---------------------------------------------------------------------------
 
 # Vorbis tag  →  (ID3FrameClass, kwargs_override | None)
-# Se il valore è None il tag viene scritto come TXXX con desc=chiave originale.
+# If the value is None the tag is written as TXXX with desc=original key.
 _FLAC_TO_ID3: dict[str, tuple | None] = {
     "TITLE": (TIT2, {}),
     "ARTIST": (TPE1, {}),
@@ -258,7 +258,7 @@ def _embed_id3(
     # ── commento / source tag ──────────────────────────────────────────────
     audio.add(COMM(encoding=3, lang="eng", desc="", text=[SOURCE_TAG]))
 
-    # ── URL se presente ────────────────────────────────────────────────────
+    # ── URL if present ────────────────────────────────────────────────────
     if tags.get("URL"):
         audio.add(WXXX(encoding=3, desc="", url=tags["URL"]))
 
@@ -269,7 +269,7 @@ def _embed_id3(
         print(f"  ✦ Lyrics: added via {prov_str}")
         logger.debug("[tagger/mp3] lyrics embedded (%d chars)", len(lyrics))
 
-    # ── copertina ──────────────────────────────────────────────────────────
+    # ── cover art ──────────────────────────────────────────────────────────
     if cover_data:
         audio.add(
             APIC(
@@ -532,7 +532,7 @@ async def embed_metadata_async(
     if opts.extra_tags:
         merged_extra.update(opts.extra_tags)
 
-    # Per tracks singole l'GENRE dell'enrichment ha priorità
+    # For single tracks, the enrichment GENRE takes priority
     if not opts.is_album:
         enrich_genre = enriched_tags.get("GENRE")
         if enrich_genre:
@@ -540,7 +540,7 @@ async def embed_metadata_async(
             for k in [k for k in merged_extra if k.upper() == "GENRE"]:
                 del merged_extra[k]
 
-    # Guard: non sovrascrivere campi già presenti nel metadata base
+    # Guard: do not overwrite fields already present in the base metadata
     if metadata.composer:
         merged_extra.pop("COMPOSER", None)
         merged_extra.pop("composer", None)
@@ -613,7 +613,7 @@ async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | No
 
 
 def max_resolution_spotify_cover(url: str) -> str:
-    """Converte URL immagine Spotify alla variante massima risoluzione."""
+    """Convert a Spotify image URL to the maximum resolution variant."""
     import re
 
     if "i.scdn.co/image/" in url:

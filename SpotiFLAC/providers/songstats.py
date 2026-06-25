@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class SongstatsProvider:
-    """Estrae ISRC e link alle piattaforme dalla page pubblica di Songstats tramite JSON-LD."""
+    """Extracts ISRC and platform links from the public Songstats page via JSON-LD."""
 
     def __init__(self, http_client: AsyncHttpClient):
         self.http = http_client

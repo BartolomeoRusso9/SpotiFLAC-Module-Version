@@ -6,7 +6,7 @@ from .link_resolver import LinkResolver
 
 
 class IsrcHelper:
-    """Gestore centralizzato per la risoluzione ISRC con fallback e traduzione cross-platform."""
+    """Centralized handler for ISRC resolution with fallback and cross-platform translation."""
 
     def __init__(self, http_client):
         from ..providers.songstats import SongstatsProvider

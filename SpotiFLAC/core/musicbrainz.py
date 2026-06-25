@@ -451,7 +451,7 @@ def mb_result_to_tags(res: dict) -> dict[str, str]:
 
 # ---------------------------------------------------------------------------
 # AsyncMBFetch — helper che wrappa ThreadPoolExecutor (backward compat)
-# Per i provider già migrati ad async, usare direttamente fetch_mb_metadata_async.
+# For providers already migrated to async, use fetch_mb_metadata_async directly.
 # ---------------------------------------------------------------------------
 
 

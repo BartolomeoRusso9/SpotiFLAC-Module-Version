@@ -64,7 +64,7 @@ class AppleMusicProvider(BaseProvider):
         return "aac"
 
     async def _resolve_track_url_async(self, isrc: str) -> str | None:
-        """Uses l'API pubblica di iTunes per trovare l'URL della track delegando l'encoding all'AsyncClient httpx."""
+        """Uses the public iTunes API to find the track URL, delegating encoding to the httpx AsyncClient."""
         try:
             resp = await self._async_http.get(
                 "https://itunes.apple.com/lookup", params={"isrc": isrc}, timeout=15
@@ -353,7 +353,7 @@ class AppleMusicProvider(BaseProvider):
             if self._file_exists(dest):
                 return DownloadResult.skipped_result(self.name, str(dest), fmt="m4a")
 
-            # Risoluzione URL Asincrona
+            # Asynchronous URL resolution
             track_url = None
             if is_native_apple:
                 track_url = metadata.external_url
@@ -419,7 +419,7 @@ class AppleMusicProvider(BaseProvider):
                 stream_url, str(dest), self._progress_cb
             )
 
-            # Validazione Track Async (Controllo File Corrotto/Tronco)
+            # Async Track Validation (Corruption/Truncation Check)
             expected_s = metadata.duration_ms // 1000
             valid, err_msg = await validate_downloaded_track_async(
                 str(dest), expected_s

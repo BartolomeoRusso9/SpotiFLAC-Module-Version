@@ -419,7 +419,7 @@ class DownloadWorker:
         return await asyncio.to_thread(_do_resolve)
 
     async def _track_output_dir_async(self, base: str, track: TrackMetadata) -> str:
-        """Crea asincronamente eventuali sottocartelle basate sull'artista o sull'album."""
+        """Asynchronously creates any subfolders based on artist or album."""
 
         def _do_track_dir():
             out = base

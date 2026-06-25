@@ -15,7 +15,7 @@ function detectAndApplyOSStyles() {
     detectedOS = 'linux';
   }
 
-  // Se è Windows, applica la classe CSS per i pulsanti Windows
+  // If this is Windows, apply the CSS class for Windows-style buttons
   if (detectedOS === 'windows') {
     document.body.classList.add('windows-style');
   }
@@ -34,7 +34,7 @@ function showSkeletonTracks(count = 5) {
   const container = $('track-rows');
   if (!container) return;
   
-  // Svuota la tabella e inserisci gli skeleton con lo STESSO grid delle tracks reali
+  // Clear the table and insert skeletons using the SAME grid as real tracks
   container.innerHTML = Array(count).fill(0).map(() => `
     <div class="track-row" style="pointer-events: none; border-bottom: 1px solid var(--border);">
       <div><div class="skeleton" style="width:14px; height:14px; border-radius:2px;"></div></div>
@@ -59,10 +59,10 @@ function showSkeletonTracks(count = 5) {
   
   $('track-table-wrap').classList.remove('hidden');
   
-  // Nascondi i recenti
+  // Hide the recents
   if ($('recent-wrap')) $('recent-wrap').style.display = 'none'; 
   
-  // Nascondi l'header della tabella finché non arrivano i dati veri
+  // Hide the table header until the real data arrives
   const header = document.querySelector('.track-table-header');
   if (header) header.style.display = 'none';
 }
@@ -805,11 +805,11 @@ function logMessage(msg, type = '') {
     area.scrollTop = area.scrollHeight;
   }
 
-  // Genera anche un Toast visuale basato sul tipo di evento!
+  // Also generate a visual Toast based on the event type!
   if (type === 'ok') toastMgr.success(msg);
   else if (type === 'error') toastMgr.error(msg);
   else if (type === 'warn') toastMgr.warning(msg);
-  // Se non c'è tipo o è un info di routine ("info"), mostriamo info solo se ha rilevanza
+  // If there is no type or it is routine info ("info"), show info only when relevant
   else if (type === 'info') toastMgr.info(msg, { duration: 2500 });
 }
 
@@ -1222,10 +1222,10 @@ function showSingleTrackCard(t) {
       ' <span class="track-explicit-title">E</span>';
   }
 
-  // Nascondi il subtitle (qualità) — già mostrata altrove
+  // Hide the subtitle (quality) — already shown elsewhere
   $('album-subtitle').style.display = 'none';
 
-  // Popola la griglia meta
+  // Populate the meta grid
   const section = $('track-meta-section');
   const playcountRaw = t.plays ?? t.playcount ?? t.playCount ?? t.plays_count;
   const playcountVal = playcountRaw != null
@@ -1491,7 +1491,7 @@ function renderTracks(tracks, page = 1) {
 
     for (; index < end; index += 1) {
       const t = pageTrackS[index];
-      const globalIndex = startIdx + index; // Per compatibilità con gli indici globali
+      const globalIndex = startIdx + index; // For compatibility with global indices
       const row = document.createElement('div');
       row.className = 'track-row';
       row.id = `track-row-${globalIndex}`;
@@ -1516,10 +1516,10 @@ function renderTracks(tracks, page = 1) {
       const playcountCell = isPlaylist ? escHtml(albumName || '—') : playcount;
       let previewUrl = t.preview_url || '';
       
-      // Se non c'è, controlliamo se è una proprietà dell'oggetto track
+      // If it is not present, check whether it is a property of the track object
       if (!previewUrl && t.previewUrl) previewUrl = t.previewUrl;
       
-      // Lazy Loading: il pulsante è sempre abilitato, ma recupererà il preview al click se necessario
+      // Lazy Loading: the button is always enabled, but it will fetch the preview on click if necessary
       const previewBtn = `<button class="ta-btn ta-preview" data-preview-index="${globalIndex}" data-track-id="${t.id || ''}" data-tip="Play Preview" onclick="playPreview(${globalIndex})">
              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
            </button>`;
@@ -1577,7 +1577,7 @@ function renderTracks(tracks, page = 1) {
     } else {
       setTrackRenderStatus('', false);
       updateAlbumMeta(tracks.length);
-      // Se è una page artista, inietta la section album sopra le tracks
+      // If this is an artist page, inject the album section above the tracks
       const urlLower = (currentUrl || '').toLowerCase();
       const isArtist = urlLower.includes('/artist/') || urlLower.includes('spotify:artist:') || urlLower.includes('/browse/artist');
       document.getElementById('artist-tabs-section')?.remove();

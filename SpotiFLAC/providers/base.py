@@ -58,7 +58,7 @@ class BaseProvider(ABC):
             res = cb(written, total)
             if asyncio.iscoroutine(res):
                 try:
-                    # Controlliamo se siamo nel thread asincrono principale
+                    # Check whether we are in the main async thread
                     asyncio.get_running_loop()
                     asyncio.create_task(res)
                 except RuntimeError:
