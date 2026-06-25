@@ -78,11 +78,15 @@ class IsrcFinder:
                 logger.debug("[isrc_finder] Could not init SpotifyWebClient: %s", e)
         return self._spotify_client
 
-    async def _fetch_spotify_track_metadata(self, url: str, headers: dict[str, str]) -> Optional[dict[str, Any]]:
+    async def _fetch_spotify_track_metadata(
+        self, url: str, headers: dict[str, str]
+    ) -> Optional[dict[str, Any]]:
         for attempt in range(1, _MAX_METADATA_ATTEMPTS + 1):
             client = self._get_spotify_client()
             if not client or not client.access_token:
-                logger.debug("[isrc_finder] SpotifyWebClient is not initialized or missing access token")
+                logger.debug(
+                    "[isrc_finder] SpotifyWebClient is not initialized or missing access token"
+                )
                 return None
 
             try:
@@ -103,7 +107,9 @@ class IsrcFinder:
                 continue
 
             if resp.status_code == 401:
-                logger.debug("[isrc_finder] Spotify metadata auth failure, refreshing Spotify client")
+                logger.debug(
+                    "[isrc_finder] Spotify metadata auth failure, refreshing Spotify client"
+                )
                 self._spotify_client = None
                 if attempt == _MAX_METADATA_ATTEMPTS:
                     return None
@@ -132,7 +138,9 @@ class IsrcFinder:
             try:
                 return resp.json()
             except Exception as exc:
-                logger.debug("[isrc_finder] Failed to decode Spotify metadata JSON: %s", exc)
+                logger.debug(
+                    "[isrc_finder] Failed to decode Spotify metadata JSON: %s", exc
+                )
                 return None
 
         return None
@@ -145,8 +153,6 @@ class IsrcFinder:
             return None
 
         try:
-            from .spotfetch import SpotifyWebClient
-
             client = self._get_spotify_client()
             if not client or not client.access_token or not client.client_token:
                 return None

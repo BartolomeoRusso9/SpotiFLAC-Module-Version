@@ -80,9 +80,7 @@ class LinkResolver:
                 await asyncio.sleep(delay)
             except Exception as exc:
                 last_error = exc
-                logger.debug(
-                    f"[link_resolver] Non-retryable request error: {exc}"
-                )
+                logger.debug(f"[link_resolver] Non-retryable request error: {exc}")
                 break
         if last_error is not None:
             raise last_error
