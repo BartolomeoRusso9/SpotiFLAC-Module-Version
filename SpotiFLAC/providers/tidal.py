@@ -512,8 +512,10 @@ def _parse_dash_manifest(text: str) -> ManifestResult:
     if not init_url or not media_template or segment_count == 0:
         m_init  = re.search(r'initialization="([^"]+)"', text)
         m_media = re.search(r'media="([^"]+)"', text)
-        if m_init:  init_url       = m_init.group(1)
-        if m_media: media_template = m_media.group(1)
+        if m_init:
+            init_url       = m_init.group(1)
+        if m_media:
+            media_template = m_media.group(1)
         for match in re.findall(r"<S\s+[^>]*>", text):
             r = re.search(r'r="(\d+)"', match)
             segment_count += int(r.group(1)) + 1 if r else 1
@@ -581,10 +583,13 @@ async def _fetch_tidal_url_once_async(
                         continue
                     if resp.status_code != 200:
                         err_text = resp.text[:100]
-                        try: err_text = resp.json().get("message") or err_text
-                        except Exception: pass
+                        try:
+                            err_text = resp.json().get("message") or err_text
+                        except Exception:
+                            pass
                         last_err = RuntimeError(f"HTTP {resp.status_code}: {err_text}")
-                        if _is_deterministic_error(str(last_err)): break
+                        if _is_deterministic_error(str(last_err)):
+                            break
                         continue
 
                     data = resp.json()
@@ -641,7 +646,8 @@ async def _fetch_tidal_url_once_async(
                 except Exception:
                     pass
                 last_err = RuntimeError(f"HTTP {resp.status_code} - {err_text}")
-                if _is_deterministic_error(str(last_err)): break
+                if _is_deterministic_error(str(last_err)):
+                    break
                 continue
 
             data = resp.json()
@@ -649,7 +655,8 @@ async def _fetch_tidal_url_once_async(
             if isinstance(data, dict):
                 if data.get("success") is False:
                     last_err = RuntimeError(data.get("message") or "API Error")
-                    if _is_deterministic_error(str(last_err)): break
+                    if _is_deterministic_error(str(last_err)):
+                        break
                     continue
 
                 inner_data = data.get("data", {})
@@ -673,14 +680,16 @@ async def _fetch_tidal_url_once_async(
                         return str(item["OriginalTrackUrl"])
 
             last_err = RuntimeError("no download URL or manifest in response")
-            if _is_deterministic_error(str(last_err)): break
+            if _is_deterministic_error(str(last_err)):
+                break
 
         except (httpx.TimeoutException, httpx.ConnectError) as exc:
             last_err = exc
             continue
         except Exception as exc:
             last_err = exc
-            if _is_deterministic_error(str(last_err)): break
+            if _is_deterministic_error(str(last_err)):
+                break
             continue
 
     raise last_err
@@ -888,7 +897,8 @@ class TidalProvider(BaseProvider):
     @staticmethod
     def _extract_best_track_id(data: Any, track_name: str, artist_name: str, isrc: str = "", duration_ms: int = 0) -> str | None:
         def _iter_items(d: Any) -> Any:
-            if isinstance(d, list): yield from d
+            if isinstance(d, list):
+                yield from d
             elif isinstance(d, dict):
                 for key in ("items", "tracks", "result", "results"):
                     inner = d.get(key)
@@ -902,16 +912,19 @@ class TidalProvider(BaseProvider):
                         if isinstance(inner, list):
                             yield from inner
                             return
-                if d.get("id") or d.get("trackId"): yield d
+                if d.get("id") or d.get("trackId"):
+                    yield d
 
         best_id = None
         best_score = 0.0
         clean_req_title = _clean_title(track_name)
 
         for item in _iter_items(data):
-            if not isinstance(item, dict): continue
+            if not isinstance(item, dict):
+                continue
             t_id = str(item.get("id") or item.get("track_id") or "")
-            if not t_id: continue
+            if not t_id:
+                continue
 
             if isrc and item.get("isrc", "").upper() == isrc.upper():
                 return t_id

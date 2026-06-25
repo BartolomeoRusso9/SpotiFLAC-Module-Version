@@ -15,7 +15,7 @@ import sys
 import asyncio
 
 from .core.health_check import run_health_check
-from .core.quality import normalize_quality, quality_fallback_chain
+from .core.quality import normalize_quality
 
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
 
@@ -24,14 +24,22 @@ def _c(code: str, text: str) -> str:
         return text
     return f"\033[{code}m{text}\033[0m"
 
-BOLD    = lambda t: _c("1", t)
-DIM     = lambda t: _c("2", t)
-CYAN    = lambda t: _c("96", t)
-GREEN   = lambda t: _c("92", t)
-YELLOW  = lambda t: _c("93", t)
-RED     = lambda t: _c("91", t)
-BLUE    = lambda t: _c("94", t)
-MAGENTA = lambda t: _c("95", t)
+def BOLD(t):
+    return _c("1", t)
+def DIM(t):
+    return _c("2", t)
+def CYAN(t):
+    return _c("96", t)
+def GREEN(t):
+    return _c("92", t)
+def YELLOW(t):
+    return _c("93", t)
+def RED(t):
+    return _c("91", t)
+def BLUE(t):
+    return _c("94", t)
+def MAGENTA(t):
+    return _c("95", t)
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -377,11 +385,16 @@ def _summary(cfg: dict) -> None:
     row("Filename format", cfg["filename_format"])
 
     flags = []
-    if cfg["use_track_numbers"]:        flags.append("track-numbers")
-    if cfg["use_album_track_numbers"]:  flags.append("album-track-numbers")
-    if cfg["use_artist_subfolders"]:    flags.append("artist-subfolders")
-    if cfg["use_album_subfolders"]:     flags.append("album-subfolders")
-    if cfg["first_artist_only"]:        flags.append("first-artist-only")
+    if cfg["use_track_numbers"]:
+        flags.append("track-numbers")
+    if cfg["use_album_track_numbers"]:
+        flags.append("album-track-numbers")
+    if cfg["use_artist_subfolders"]:
+        flags.append("artist-subfolders")
+    if cfg["use_album_subfolders"]:
+        flags.append("album-subfolders")
+    if cfg["first_artist_only"]:
+        flags.append("first-artist-only")
     row("Options", ", ".join(flags) if flags else "none")
 
     row("Lyrics", "enabled (" + ", ".join(cfg["lyrics_providers"]) + ")" if cfg["embed_lyrics"] else "disabled")
@@ -679,14 +692,22 @@ async def run_interactive() -> dict:
                 options = combined_options,
                 default = default_combined,
             )
-            if q_choice.startswith("LOSSLESS"):    cfg["quality"] = "LOSSLESS"
-            elif q_choice.startswith("HI_RES"):    cfg["quality"] = "HI_RES"
-            elif q_choice.startswith("DOLBY_ATMOS"): cfg["quality"] = "DOLBY_ATMOS"
-            elif q_choice.startswith("ATMOS"):     cfg["quality"] = "atmos"
-            elif q_choice.startswith("AC3"):       cfg["quality"] = "ac3"
-            elif q_choice.startswith("7"):         cfg["quality"] = "7"
-            elif q_choice.startswith("AAC-LEGACY"):cfg["quality"] = "aac-legacy"
-            else:                                   cfg["quality"] = "HIGH"
+            if q_choice.startswith("LOSSLESS"):
+                cfg["quality"] = "LOSSLESS"
+            elif q_choice.startswith("HI_RES"):
+                cfg["quality"] = "HI_RES"
+            elif q_choice.startswith("DOLBY_ATMOS"):
+                cfg["quality"] = "DOLBY_ATMOS"
+            elif q_choice.startswith("ATMOS"):
+                cfg["quality"] = "atmos"
+            elif q_choice.startswith("AC3"):
+                cfg["quality"] = "ac3"
+            elif q_choice.startswith("7"):
+                cfg["quality"] = "7"
+            elif q_choice.startswith("AAC-LEGACY"):
+                cfg["quality"] = "aac-legacy"
+            else:
+                cfg["quality"] = "HIGH"
             # normalize combined choice to canonical form
             cfg["quality"] = normalize_quality(cfg["quality"])
         else:
@@ -842,11 +863,16 @@ def _print_cli_command(cfg: dict) -> None:
         parts.append(f'-q {cfg["quality"]}')
     if cfg["filename_format"] != "{title} - {artist}":
         parts.append(f'--filename-format "{cfg["filename_format"]}"')
-    if cfg["use_track_numbers"]:        parts.append("--use-track-numbers")
-    if cfg["use_album_track_numbers"]:  parts.append("--use-album-track-numbers")
-    if cfg["use_artist_subfolders"]:    parts.append("--use-artist-subfolders")
-    if cfg["use_album_subfolders"]:     parts.append("--use-album-subfolders")
-    if cfg["first_artist_only"]:        parts.append("--first-artist-only")
+    if cfg["use_track_numbers"]:
+        parts.append("--use-track-numbers")
+    if cfg["use_album_track_numbers"]:
+        parts.append("--use-album-track-numbers")
+    if cfg["use_artist_subfolders"]:
+        parts.append("--use-artist-subfolders")
+    if cfg["use_album_subfolders"]:
+        parts.append("--use-album-subfolders")
+    if cfg["first_artist_only"]:
+        parts.append("--first-artist-only")
     if not cfg["embed_lyrics"]:
         parts.append("--no-lyrics")
     else:

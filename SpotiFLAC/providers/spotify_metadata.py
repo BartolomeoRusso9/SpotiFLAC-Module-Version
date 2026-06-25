@@ -752,7 +752,7 @@ class SpotifyMetadataClient:
         if kind not in ("track", "album", "artist", "playlist"):
             raise ValueError(f"Invalid type: {kind!r}. Valori ammessi: track, album, artist, playlist")
         data = await asyncio.to_thread(self.web_client.query, self._search_payload(query, limit, offset))
-        search_v2 = data.get("data", {}).get("searchV2", {})
+        data.get("data", {}).get("searchV2", {})
         results = await self.search_async(query, limit=limit)
         key = "tracks" if kind == "track" else f"{kind}s"
         return results.get(key, [])[offset:]
@@ -1088,23 +1088,27 @@ def parse_home_feed(raw_data: dict) -> dict:
             
             if item_type == "album":
                 sources = content.get("coverArt", {}).get("sources", [])
-                if sources: cover_url = sources[0].get("url", "")
+                if sources:
+                    cover_url = sources[0].get("url", "")
                 artist_items = content.get("artists", {}).get("items", [])
                 if artist_items:
                     artists = ", ".join(a.get("profile", {}).get("name", "") for a in artist_items if a.get("profile", {}).get("name"))
                     
             elif item_type == "playlist":
                 sources = content.get("images", {}).get("items", [{}])[0].get("sources", [])
-                if sources: cover_url = sources[0].get("url", "")
+                if sources:
+                    cover_url = sources[0].get("url", "")
                 artists = content.get("ownerV2", {}).get("data", {}).get("name", "")
                 
             elif item_type == "artist":
                 sources = content.get("visuals", {}).get("avatarImage", {}).get("sources", [])
-                if sources: cover_url = sources[0].get("url", "")
+                if sources:
+                    cover_url = sources[0].get("url", "")
                 
             elif item_type == "track":
                 sources = content.get("albumOfTrack", {}).get("coverArt", {}).get("sources", [])
-                if sources: cover_url = sources[0].get("url", "")
+                if sources:
+                    cover_url = sources[0].get("url", "")
                 artists = _extract_explore_artists(content)
 
                 album_uri = content.get("albumOfTrack", {}).get("uri", "")

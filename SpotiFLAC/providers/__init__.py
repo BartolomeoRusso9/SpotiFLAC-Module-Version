@@ -35,13 +35,10 @@ PROVIDER_REGISTRY: dict[str, type] = {
     "amazon":     AmazonProvider,
     "apple":      AppleMusicProvider,
     "deezer":     DeezerProvider,
-    "joox":       JooxProvider,
     "kuwo":       KuwoProvider,
     "migu":       MiguProvider,
-    "netease":    NeteaseProvider,
     "pandora":    PandoraProvider,
     "qobuz":      QobuzProvider,
     "soundcloud": SoundCloudProvider,
-    "tidal":      TidalProvider,
     "youtube":    YouTubeProvider,
 }

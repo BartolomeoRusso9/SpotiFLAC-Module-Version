@@ -10,7 +10,6 @@ Changes compared to the original:
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import os
 import re
@@ -23,7 +22,7 @@ from dataclasses import dataclass, field
 from .core.console import print_track_header, print_summary
 from .core.errors import SpotiflacError, ErrorKind
 from .core.models import TrackMetadata, DownloadResult
-from .core.progress import DownloadManager, ProgressManager, ProgressCallback, safe_print, safe_tqdm_write, install_console_interception, uninstall_console_interception
+from .core.progress import DownloadManager, ProgressManager, ProgressCallback, safe_tqdm_write, install_console_interception, uninstall_console_interception
 from .providers.base import BaseProvider
 from .providers.spotify_metadata import SpotifyMetadataClient
 from .core.isrc_helper import IsrcHelper
@@ -120,7 +119,7 @@ async def download_one_async(
     with per-track retry if track_max_retries > 0.
     """
     stop_event = asyncio.Event()
-    manager = DownloadManager()
+    DownloadManager()
     errors: dict[str, str] = {}
     started_at = time.monotonic()
 
@@ -141,8 +140,10 @@ async def download_one_async(
             
             # Cooperative shutdown propagation
             if hasattr(provider, "set_stop_event_async"):
-                try: provider.set_stop_event_async(stop_event)
-                except Exception: pass
+                try:
+                    provider.set_stop_event_async(stop_event)
+                except Exception:
+                    pass
 
             try:
                 # Wrap inside asyncio.wait_for to enforce track timeout strictly at the IO level

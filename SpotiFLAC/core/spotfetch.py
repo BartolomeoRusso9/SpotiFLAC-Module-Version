@@ -167,9 +167,12 @@ class SpotifyWebClient:
         small_url, medium_url, fallback_url, image_id = "", "", "", ""
         for s in filtered:
             w, url = s["width"], s["url"]
-            if w == 300: small_url = url
-            elif w == 640: medium_url = url
-            elif w == 0: fallback_url = url
+            if w == 300:
+                small_url = url
+            elif w == 640:
+                medium_url = url
+            elif w == 0:
+                fallback_url = url
 
             if not image_id and url:
                 for prefix in ["ab67616d0000b273", "ab67616d00001e02", "ab67616d00004851"]:
@@ -184,9 +187,12 @@ class SpotifyWebClient:
         large_url = f"https://i.scdn.co/image/ab67616d000082c1{image_id}" if image_id else ""
 
         res = {}
-        if small_url: res["small"] = small_url
-        if medium_url: res["medium"] = medium_url
-        if large_url: res["large"] = large_url
+        if small_url:
+            res["small"] = small_url
+        if medium_url:
+            res["medium"] = medium_url
+        if large_url:
+            res["large"] = large_url
         if not res and fallback_url:
             res = {"small": fallback_url, "medium": fallback_url, "large": fallback_url}
 

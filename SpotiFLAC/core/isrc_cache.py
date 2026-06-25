@@ -101,7 +101,7 @@ async def put_cached_isrc_async(track_id: str, isrc: str) -> None:
 def get_cached_isrc(track_id: str) -> str:
     """Sync wrapper (deprecated, use get_cached_isrc_async instead)."""
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         # No running loop, fallback to thread pool
         import concurrent.futures
@@ -121,7 +121,7 @@ def get_cached_isrc(track_id: str) -> str:
 def put_cached_isrc(track_id: str, isrc: str) -> None:
     """Sync wrapper (deprecated, use put_cached_isrc_async instead)."""
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         # No running loop, fallback to thread pool
         import concurrent.futures

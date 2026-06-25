@@ -4,14 +4,12 @@ import asyncio
 import logging
 import os
 import re
-from pathlib import Path
 from typing import Any
 
 from ..core.console import print_source_banner
 from ..core.download_validation import validate_downloaded_track_async
 from ..core.endpoints import get_asian_provider_endpoint
 from ..core.errors import ErrorKind, SpotiflacError, TrackNotFoundError
-from ..core.flac_validation import validate_and_repair_if_needed
 from ..core.models import DownloadResult, TrackMetadata
 from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.tagger import EmbedOptions, embed_metadata_async

@@ -15,9 +15,9 @@ if parent_dir not in sys.path:
 # --------------------------------
 
 # Import core components via "SpotiFLAC."
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.providers.spotify_metadata import SpotifyMetadataClient
-from SpotiFLAC.core.http import NetworkManager
+from SpotiFLAC.core.models import TrackMetadata  # noqa: E402
+from SpotiFLAC.providers.spotify_metadata import SpotifyMetadataClient  # noqa: E402
+from SpotiFLAC.core.http import NetworkManager  # noqa: E402
 
 # Base configuration
 TEST_TRACK_ID = "0VjIjW4GlUZAMYd2vXMi3b"  # The Weeknd - Blinding Lights
@@ -180,7 +180,7 @@ async def main():
         return
 
     for provider in providers_to_test:
-        await test_single_provider(provider, test_metadata)
+        await _test_single_provider(provider, test_metadata)
 
     print("\n🧹 Cleaning up temporary downloads folder...")
     try:

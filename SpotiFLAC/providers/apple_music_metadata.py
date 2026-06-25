@@ -13,7 +13,6 @@ import time as _time
 import unicodedata
 import urllib.parse
 from typing import Any
-from urllib.parse import urlparse
 
 from ..core.errors import AuthError, ErrorKind, InvalidUrlError, SpotiflacError
 from ..core.http import AsyncHttpClient

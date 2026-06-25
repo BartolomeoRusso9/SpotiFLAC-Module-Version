@@ -25,18 +25,18 @@ async def check_for_updates_async():
             if update_available:
                 width = 68
 
-                print(f"\n ╭" + "─" * (width-2) + "╮")
+                print("\n ╭" + "─" * (width-2) + "╮")
 
                 title_line = f"  NEW VERSION AVAILABLE! ({current_version} -> {latest_version})"
                 print(f" │{title_line.ljust(width-2)}│")
 
-                print(f" ├" + "─" * (width-2) + "┤")
+                print(" ├" + "─" * (width-2) + "┤")
 
                 mod_line = f"  Module: pip install -U {package_name}"
-                app_line = f"  App:    https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
+                app_line = "  App:    https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
 
                 print(f" │{mod_line.ljust(width-2)}│")
                 print(f" │{app_line.ljust(width-2)}│")
-                print(f" ╰" + "─" * (width-2) + "╯\n")
+                print(" ╰" + "─" * (width-2) + "╯\n")
     except Exception:
         pass

@@ -301,7 +301,6 @@ async def _run_download_async(
 
 async def amain() -> None:
     """Entry point async-nativo. Tutto il flusso CLI vive su un solo event loop."""
-    import importlib.util, importlib.resources
     from .core.ffmpeg_check import print_ffmpeg_warning
 
     # Controllo aggiornamenti non bloccante: non deve mai impedire l'avvio.

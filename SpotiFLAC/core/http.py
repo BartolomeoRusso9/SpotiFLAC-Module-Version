@@ -8,6 +8,7 @@ NetworkManager.get_async_client legacy) ora che tutti i provider usano AsyncHttp
 from __future__ import annotations
 
 import asyncio
+import atexit as _atexit
 import logging
 import os
 import threading
@@ -17,6 +18,11 @@ from typing import Any
 
 import httpx
 import re
+
+from .errors import (
+    AuthError, RateLimitedError, NetworkError,
+    ParseError, TrackNotFoundError,
+)
 
 try:
     import aiofiles
@@ -33,11 +39,6 @@ class _RedactUrlFilter(logging.Filter):
         return True
 
 logging.getLogger("httpx").addFilter(_RedactUrlFilter())
-
-from .errors import (
-    AuthError, RateLimitedError, NetworkError,
-    ParseError, TrackNotFoundError,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -275,5 +276,4 @@ class AsyncHttpClient:
             raise
 
 
-import atexit as _atexit
 _atexit.register(NetworkManager.close)

@@ -3,7 +3,6 @@ Centralized quality normalization and provider mappings.
 """
 from __future__ import annotations
 
-from typing import List
 
 # Canonical qualities
 _CANONICAL = {

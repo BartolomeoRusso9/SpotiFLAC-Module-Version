@@ -13,12 +13,12 @@ import re
 import threading
 import time
 import functools
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
 from .http import NetworkManager
-from .isrc_utils import normalize_isrc, is_valid_isrc
+from .isrc_utils import normalize_isrc
 
 logger = logging.getLogger(__name__)
 
@@ -64,15 +64,20 @@ class EnrichedMetadata:
 
     def as_tags(self) -> dict[str, str]:
         tags: dict[str, str] = {}
-        if self.genre:    tags["GENRE"]          = self.genre
-        if self.label:    tags["ORGANIZATION"]   = self.label
-        if self.bpm:      tags["BPM"]            = str(self.bpm)
-        if self.upc:      tags["UPC"]            = self.upc
+        if self.genre:
+            tags["GENRE"]          = self.genre
+        if self.label:
+            tags["ORGANIZATION"]   = self.label
+        if self.bpm:
+            tags["BPM"]            = str(self.bpm)
+        if self.upc:
+            tags["UPC"]            = self.upc
         if self.isrc:
             isrc_n = normalize_isrc(self.isrc)
             if isrc_n:
                 tags["ISRC"] = isrc_n
-        if self.explicit: tags["ITUNESADVISORY"] = "1"
+        if self.explicit:
+            tags["ITUNESADVISORY"] = "1"
         return tags
 
     def merge(self, other: "EnrichedMetadata", source: str) -> None:

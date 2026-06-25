@@ -10,9 +10,7 @@ import os
 import re
 import threading
 import time
-from pathlib import Path
 import concurrent.futures
-from typing import Awaitable, Callable
 from urllib.parse import urlparse
 
 import aiofiles
@@ -229,7 +227,8 @@ class AmazonProvider(BaseProvider):
         if isinstance(obj, list):
             for item in obj:
                 res = self._extract_amazon_from_json_ld(item)
-                if res: return res
+                if res:
+                    return res
         elif isinstance(obj, dict):
             same_as = obj.get("sameAs", [])
             if isinstance(same_as, list):
@@ -239,7 +238,8 @@ class AmazonProvider(BaseProvider):
             for v in obj.values():
                 if isinstance(v, (dict, list)):
                     res = self._extract_amazon_from_json_ld(v)
-                    if res: return res
+                    if res:
+                        return res
         return None
 
     async def _resolve_via_songstats(self, isrc: str) -> str | None:
@@ -1317,11 +1317,16 @@ class AmazonProvider(BaseProvider):
                     audio["DISCNUMBER"]  = str(d_num)
                     audio["DISCTOTAL"]   = str(d_total)
 
-                    if t_copy:                    audio["COPYRIGHT"]    = t_copy
-                    if t_label:                   audio["ORGANIZATION"] = t_label
-                    if url:                       audio["URL"]          = url
-                    if api_meta.get("genre"):     audio["GENRE"]        = api_meta["genre"]
-                    if api_meta.get("composer"):  audio["COMPOSER"]     = api_meta["composer"]
+                    if t_copy:
+                        audio["COPYRIGHT"]    = t_copy
+                    if t_label:
+                        audio["ORGANIZATION"] = t_label
+                    if url:
+                        audio["URL"]          = url
+                    if api_meta.get("genre"):
+                        audio["GENRE"]        = api_meta["genre"]
+                    if api_meta.get("composer"):
+                        audio["COMPOSER"]     = api_meta["composer"]
                     if api_meta.get("isrc"):
                         isrc_v = normalize_isrc(api_meta.get("isrc"))
                         if isrc_v:
@@ -1348,14 +1353,18 @@ class AmazonProvider(BaseProvider):
                     audio["trkn"]    = [(t_num, t_total)]
                     audio["disk"]    = [(d_num, d_total)]
 
-                    if t_copy:                    audio["cprt"]                              = t_copy
-                    if api_meta.get("genre"):     audio["\xa9gen"]                           = api_meta["genre"]
-                    if api_meta.get("composer"):  audio["\xa9wrt"]                           = api_meta["composer"]
+                    if t_copy:
+                        audio["cprt"]                              = t_copy
+                    if api_meta.get("genre"):
+                        audio["\xa9gen"]                           = api_meta["genre"]
+                    if api_meta.get("composer"):
+                        audio["\xa9wrt"]                           = api_meta["composer"]
                     if api_meta.get("isrc"):
                         isrc_v = normalize_isrc(api_meta.get("isrc"))
                         if isrc_v:
                             audio["----:com.apple.iTunes:ISRC"] = isrc_v.encode()
-                    if t_label:                   audio["----:com.apple.iTunes:LABEL"]       = t_label.encode()
+                    if t_label:
+                        audio["----:com.apple.iTunes:LABEL"]       = t_label.encode()
                     if "is_explicit" in api_meta:
                         audio["rtng"] = [2] if api_meta["is_explicit"] else [1]
 
@@ -1504,14 +1513,18 @@ class AmazonProvider(BaseProvider):
             mb_tags = mb_result_to_tags(res)
 
             if api_metadata:
-                if api_metadata.get("genre"):      mb_tags["GENRE"]           = api_metadata["genre"]
-                if api_metadata.get("label"):      mb_tags["LABEL"]           = api_metadata["label"]
+                if api_metadata.get("genre"):
+                    mb_tags["GENRE"]           = api_metadata["genre"]
+                if api_metadata.get("label"):
+                    mb_tags["LABEL"]           = api_metadata["label"]
                 if api_metadata.get("isrc"):
                     isrc_v = normalize_isrc(api_metadata.get("isrc"))
                     if isrc_v:
                         mb_tags["ISRC"] = isrc_v
-                if api_metadata.get("composer"):   mb_tags["COMPOSER"]        = api_metadata["composer"]
-                if api_metadata.get("copyright"):  mb_tags["COPYRIGHT"]       = api_metadata["copyright"]
+                if api_metadata.get("composer"):
+                    mb_tags["COMPOSER"]        = api_metadata["composer"]
+                if api_metadata.get("copyright"):
+                    mb_tags["COPYRIGHT"]       = api_metadata["copyright"]
                 if "is_explicit" in api_metadata:
                     mb_tags["ITUNESADVISORY"] = "1" if api_metadata["is_explicit"] else "2"
 

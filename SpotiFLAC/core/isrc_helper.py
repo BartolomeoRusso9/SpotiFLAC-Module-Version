@@ -19,7 +19,8 @@ class IsrcHelper:
     async def get_isrc_async(self, track_id: str) -> str:
         # 1. Cache
         cached = await get_cached_isrc_async(track_id)
-        if cached: return cached
+        if cached:
+            return cached
 
         isrc = None
         search_id = track_id

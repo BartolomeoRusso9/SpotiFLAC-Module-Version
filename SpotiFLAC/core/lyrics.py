@@ -246,10 +246,14 @@ def _score_apple_result(res: dict, t_name: str, a_name: str, duration_s: int) ->
     r_a = normalize_loose_string(res.get("artistName", ""))
     t_t = normalize_loose_string(t_name)
     t_a = normalize_loose_string(a_name)
-    if r_t == t_t:          score += 50
-    elif t_t in r_t or r_t in t_t: score += 25
-    if r_a == t_a:          score += 60
-    elif t_a in r_a or r_a in t_a: score += 30
+    if r_t == t_t:
+        score += 50
+    elif t_t in r_t or r_t in t_t:
+        score += 25
+    if r_a == t_a:
+        score += 60
+    elif t_a in r_a or r_a in t_a:
+        score += 30
     r_dur = res.get("duration", 0)
     if duration_s > 0 and r_dur > 0:
         diff = abs((r_dur / 1000.0) - duration_s)
@@ -354,7 +358,7 @@ async def _fetch_amazon_async(isrc: str, timeout: int = 7) -> str:
                 text = line.get("text", "")
                 lrc.append(f"[{m:02d}:{s:02d}.{cs:02d}]{text}")
             return "\n".join(lrc)
-        return "\n".join(str(l) for l in lines)
+        return "\n".join(str(ln) for ln in lines)
     except Exception as exc:
         logger.debug("[lyrics/amazon] async: %s", exc)
         return ""
@@ -367,8 +371,10 @@ async def _fetch_lrclib_async(
 
     async def _exact(t: str, a: str, al: str, d: int) -> str:
         params = {"artist_name": a, "track_name": t}
-        if al: params["album_name"] = al
-        if d:  params["duration"]   = d
+        if al:
+            params["album_name"] = al
+        if d:
+            params["duration"]   = d
         try:
             r = await client.get(f"{_LRCLIB}/get", params=params, timeout=timeout)
             if r.status_code == 200:

@@ -112,8 +112,8 @@ class SpotiFLAC_API:
                 self.log(f"ffmpeg: {short}", "ok")
             else:
                 self.log(
-                    f"⚠  ffmpeg not found — Tidal FLAC muxing and Amazon "
-                    f"decryption will fail. Install: https://ffmpeg.org/download.html",
+                    "⚠  ffmpeg not found — Tidal FLAC muxing and Amazon "
+                    "decryption will fail. Install: https://ffmpeg.org/download.html",
                     "error",
                 )
                 try:
@@ -604,7 +604,7 @@ class SpotiFLAC_API:
                     try:
                         self._window.maximize()
                         self._is_maximized = True
-                    except:
+                    except Exception:
                         pass
             else:
                 self._window.maximize()
@@ -764,7 +764,7 @@ class SpotiFLAC_API:
 
             safe_title  = re.sub(r'[\\/*?:"<>|]', "", title).strip()
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-            safe_owner  = re.sub(r'[\\/*?:"<>|]', "", owner).strip()
+            re.sub(r'[\\/*?:"<>|]', "", owner).strip()
             client = AsyncHttpClient("cover", timeout_s=15)
             resp = await client.get(cover_url, timeout=15)
             resp.raise_for_status()

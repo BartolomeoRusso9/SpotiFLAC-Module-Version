@@ -17,7 +17,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import quote, unquote, urlencode, urlparse
 
 import httpx
@@ -293,8 +293,10 @@ def _output_extension_for_link(link_info: dict[str, Any] | None) -> str:
         return ".m4a"
 
     url = str(link_info.get("url", ""))
-    if _EXT_MP3_RE.search(url): return ".mp3"
-    if _EXT_M4A_RE.search(url) or _EXT_MP4_RE.search(url): return ".m4a"
+    if _EXT_MP3_RE.search(url):
+        return ".mp3"
+    if _EXT_M4A_RE.search(url) or _EXT_MP4_RE.search(url):
+        return ".m4a"
 
     return ".bin"
 
@@ -621,7 +623,7 @@ class PandoraProvider(BaseProvider):
             if deezer_track and deezer_track.get("album", {}).get("id"):
                 deezer_album = self._fetch_deezer_album(deezer_track["album"]["id"])
 
-        except Exception as exc:
+        except Exception:
             if not pretty:
                 raise
             logger.debug("[pandora] Song.link resolution failed (using pretty URL fallback)", exc_info=True)
@@ -665,7 +667,7 @@ class PandoraProvider(BaseProvider):
             if entity and entity.get("type") not in ("album", ""):
                 raise RuntimeError("Resolved entity is not a Pandora album")
 
-        except Exception as exc:
+        except Exception:
             if not pretty:
                 raise
             logger.debug("[pandora] Song.link album resolution failed (pretty fallback)", exc_info=True)

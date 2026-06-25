@@ -196,8 +196,10 @@ def _parse_mb_response(data: dict) -> dict:
             a_id   = artist_obj.get("id")
             a_sort = artist_obj.get("sort-name", "")
             phrase = c.get("joinphrase", "")
-            if a_id:   artist_ids.append(a_id)
-            if a_sort: sort_names.append(a_sort + phrase)
+            if a_id:
+                artist_ids.append(a_id)
+            if a_sort:
+                sort_names.append(a_sort + phrase)
         parsed["mbid_artist"] = "; ".join(artist_ids)
         parsed["artist_sort"] = "".join(sort_names)
 
@@ -217,10 +219,14 @@ def _parse_mb_response(data: dict) -> dict:
     if releases:
         def _release_score(r: dict) -> int:
             score = 0
-            if r.get("barcode"):     score += 2
-            if r.get("label-info"): score += 2
-            if r.get("country"):    score += 1
-            if r.get("status") == "Official": score += 1
+            if r.get("barcode"):
+                score += 2
+            if r.get("label-info"):
+                score += 2
+            if r.get("country"):
+                score += 1
+            if r.get("status") == "Official":
+                score += 1
             return score
 
         rel = max(releases, key=_release_score)
@@ -243,8 +249,10 @@ def _parse_mb_response(data: dict) -> dict:
                 a_id   = artist_obj.get("id")
                 a_sort = artist_obj.get("sort-name", "")
                 phrase = c.get("joinphrase", "")
-                if a_id:   aa_ids.append(a_id)
-                if a_sort: aa_sort_names.append(a_sort + phrase)
+                if a_id:
+                    aa_ids.append(a_id)
+                if a_sort:
+                    aa_sort_names.append(a_sort + phrase)
             parsed["mbid_albumartist"] = "; ".join(aa_ids)
             parsed["albumartist_sort"] = "".join(aa_sort_names)
 

@@ -2,7 +2,6 @@ import json
 import logging
 import urllib.parse
 import re
-import asyncio
 from typing import Dict, Optional
 
 from .http import AsyncHttpClient, async_songlink_rate_limiter
@@ -62,37 +61,46 @@ class LinkResolver:
 
     def identify_provider(self, url: str) -> str:
         url = url.lower()
-        if "soundcloud.com" in url or "on.soundcloud.com" in url: return "soundcloud"
-        elif "spotify.com" in url: return "spotify"
+        if "soundcloud.com" in url or "on.soundcloud.com" in url:
+            return "soundcloud"
+        elif "spotify.com" in url:
+            return "spotify"
         return "unknown"
     
     def _normalize_amazon_url(self, raw_url: str) -> str:
         url = raw_url.strip()
-        if not url: return ""
+        if not url:
+            return ""
         if "trackAsin=" in url:
             parts = url.split("trackAsin=")
             if len(parts) > 1:
                 track_asin = parts[1].split("&")[0]
-                if track_asin: return f"https://music.amazon.com/tracks/{track_asin}?musicTerritory=US"
+                if track_asin:
+                    return f"https://music.amazon.com/tracks/{track_asin}?musicTerritory=US"
 
         amazon_album_track = re.search(r'/albums/[A-Z0-9]{10}/(B[0-9A-Z]{9})', url, re.IGNORECASE)
-        if amazon_album_track: return f"https://music.amazon.com/tracks/{amazon_album_track.group(1)}?musicTerritory=US"
+        if amazon_album_track:
+            return f"https://music.amazon.com/tracks/{amazon_album_track.group(1)}?musicTerritory=US"
 
         amazon_track = re.search(r'/tracks/(B[0-9A-Z]{9})', url, re.IGNORECASE)
-        if amazon_track: return f"https://music.amazon.com/tracks/{amazon_track.group(1)}?musicTerritory=US"
+        if amazon_track:
+            return f"https://music.amazon.com/tracks/{amazon_track.group(1)}?musicTerritory=US"
 
         return url
 
     def _extract_deezer_id(self, raw_url: str) -> str:
         clean_url = raw_url.strip()
-        if not clean_url: return ""
+        if not clean_url:
+            return ""
         parts = clean_url.split("/track/")
-        if len(parts) < 2: return ""
+        if len(parts) < 2:
+            return ""
         return parts[1].split("?")[0].strip("/ ")
 
     def _normalize_deezer_url(self, raw_url: str) -> str:
         track_id = self._extract_deezer_id(raw_url)
-        if track_id: return f"https://www.deezer.com/track/{track_id}"
+        if track_id:
+            return f"https://www.deezer.com/track/{track_id}"
         return raw_url.strip()
 
     def _process_songlink_response(self, data: dict) -> Dict[str, str]:
@@ -103,15 +111,19 @@ class LinkResolver:
             entry = entities.get(platform)
             if isinstance(entry, dict):
                 url = entry.get("url")
-                if url: links[platform] = self._normalize_platform_url(platform, url)
+                if url:
+                    links[platform] = self._normalize_platform_url(platform, url)
 
         return links
 
     def _normalize_platform_url(self, platform: str, url: str) -> str:
         url = url.strip()
-        if not url: return ""
-        if platform == "deezer": return self._normalize_deezer_url(url)
-        if platform == "amazonMusic": return self._normalize_amazon_url(url)
+        if not url:
+            return ""
+        if platform == "deezer":
+            return self._normalize_deezer_url(url)
+        if platform == "amazonMusic":
+            return self._normalize_amazon_url(url)
         return url
 
     def _merge_links(self, final_links: dict[str, str], new_links: dict[str, str]) -> None:
@@ -126,8 +138,10 @@ class LinkResolver:
             html, re.DOTALL | re.IGNORECASE,
         )
         for match in matches:
-            try: payload = json.loads(match.group(1).strip())
-            except json.JSONDecodeError: continue
+            try:
+                payload = json.loads(match.group(1).strip())
+            except json.JSONDecodeError:
+                continue
             self._collect_songstats_links(payload, links)
         return {k: v for k, v in links.items() if v}
 
@@ -136,26 +150,35 @@ class LinkResolver:
             same_as = data.get("sameAs")
             if isinstance(same_as, list):
                 for url in same_as:
-                    if isinstance(url, str): self._assign_songstats_link(url, results)
-            for val in data.values(): self._collect_songstats_links(val, results)
+                    if isinstance(url, str):
+                        self._assign_songstats_link(url, results)
+            for val in data.values():
+                self._collect_songstats_links(val, results)
         elif isinstance(data, list):
-            for item in data: self._collect_songstats_links(item, results)
+            for item in data:
+                self._collect_songstats_links(item, results)
 
     def _assign_songstats_link(self, link: str, results: dict[str, str]) -> None:
         link = link.strip()
-        if not link: return
-        if "listen.tidal.com/track" in link and not results.get("tidal"): results["tidal"] = link
-        elif "music.amazon.com" in link and not results.get("amazonMusic"): results["amazonMusic"] = self._normalize_amazon_url(link)
-        elif "deezer.com" in link and not results.get("deezer"): results["deezer"] = self._normalize_deezer_url(link)
+        if not link:
+            return
+        if "listen.tidal.com/track" in link and not results.get("tidal"):
+            results["tidal"] = link
+        elif "music.amazon.com" in link and not results.get("amazonMusic"):
+            results["amazonMusic"] = self._normalize_amazon_url(link)
+        elif "deezer.com" in link and not results.get("deezer"):
+            results["deezer"] = self._normalize_deezer_url(link)
 
     async def _get_isrc_from_deezer_async(self, deezer_url: str) -> str:
         track_id = self._extract_deezer_id(deezer_url)
-        if not track_id: return ""
+        if not track_id:
+            return ""
         try:
             url = self.DEEZER_TRACK_API.format(track_id)
             data = await self._safe_get_json(url)
             isrc = data.get("isrc", "")
-            if isrc: return isrc.upper().strip()
+            if isrc:
+                return isrc.upper().strip()
         except Exception as e:
             logger.debug(f"[link_resolver] Error during ISRC reverse lookup on Deezer async: {e}")
         return ""
@@ -170,8 +193,10 @@ class LinkResolver:
             data = await self._safe_get_json(url)
             
             res = ""
-            if "link" in data and data["link"]: res = self._normalize_deezer_url(data["link"])
-            elif "id" in data and data["id"] > 0: res = f"https://www.deezer.com/track/{data['id']}"
+            if "link" in data and data["link"]:
+                res = self._normalize_deezer_url(data["link"])
+            elif "id" in data and data["id"] > 0:
+                res = f"https://www.deezer.com/track/{data['id']}"
                 
             self._deezer_async_cache[isrc_clean] = res
             return res
@@ -201,13 +226,15 @@ class LinkResolver:
             html = resp.text
 
             deezer_match = re.search(r"https?://www\.deezer\.com/track/[0-9]+", html)
-            if deezer_match: links["deezer"] = self._normalize_deezer_url(deezer_match.group(0))
+            if deezer_match:
+                links["deezer"] = self._normalize_deezer_url(deezer_match.group(0))
 
             amazon_match = re.search(r"trackAsin=([A-Z0-9]{10})", html)
             if amazon_match:
                 links["amazonMusic"] = self._normalize_amazon_url(f"https://music.amazon.com/tracks/{amazon_match.group(1)}?musicTerritory=US")
             tidal_match = re.search(r"https?://listen\.tidal\.com/track/[0-9]+", html)
-            if tidal_match: links["tidal"] = tidal_match.group(0)
+            if tidal_match:
+                links["tidal"] = tidal_match.group(0)
         except Exception as e:
             logger.debug(f"[link_resolver] Song.link HTML fallback async failed: {e}")
         return links
@@ -271,7 +298,8 @@ class LinkResolver:
 
             if not links.get("deezer"):
                 deezer_url = await self._get_deezer_url_by_isrc_async(isrc)
-                if deezer_url: links["deezer"] = deezer_url
+                if deezer_url:
+                    links["deezer"] = deezer_url
 
             if not links.get("tidal") or not links.get("amazonMusic"):
                 self._merge_links(links, await self._get_songlink_isrc_links_async(isrc))
@@ -282,8 +310,10 @@ class LinkResolver:
         if (not links.get("tidal") or not links.get("amazonMusic")) and raw_id:
             html_links = await self._get_songlink_html_links_async(raw_id)
             for plat, url in html_links.items():
-                if plat not in links and url: links[plat] = url
+                if plat not in links and url:
+                    links[plat] = url
 
-        if isrc: links["isrc"] = isrc
+        if isrc:
+            links["isrc"] = isrc
 
         return links

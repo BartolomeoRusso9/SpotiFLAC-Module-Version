@@ -107,8 +107,10 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     dzr_flac = get_deezer_endpoint("flacdownloader_prepare")
     
     deezer_eps = []
-    if dzr_res: deezer_eps.append(("POST", dzr_res))
-    if dzr_flac: deezer_eps.append(("GET", dzr_flac))
+    if dzr_res:
+        deezer_eps.append(("POST", dzr_res))
+    if dzr_flac:
+        deezer_eps.append(("GET", dzr_flac))
     deezer_eps.append(("GET", zarz_health))
     endpoints["deezer"] = deezer_eps
 

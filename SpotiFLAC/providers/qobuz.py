@@ -154,13 +154,17 @@ def _score_track_candidate(query: str, track: dict) -> int:
     elif (title_norm and query_norm in title_norm) or (display_norm and query_norm in display_norm):
         score += 420
 
-    if artist_norm and artist_norm in query_norm: score += 180
-    if album_norm and album_norm in query_norm: score += 100
+    if artist_norm and artist_norm in query_norm:
+        score += 180
+    if album_norm and album_norm in query_norm:
+        score += 100
     isrc_value = track.get("isrc") or ""
     if isinstance(isrc_value, str) and isrc_value.strip():
         score += 15
-    if track.get("maximum_bit_depth", 0) >= 24: score += 10
-    if track.get("maximum_sampling_rate", 0) >= 88.2: score += 10
+    if track.get("maximum_bit_depth", 0) >= 24:
+        score += 10
+    if track.get("maximum_sampling_rate", 0) >= 88.2:
+        score += 10
 
     return score
 
@@ -725,7 +729,7 @@ class QobuzProvider(BaseProvider):
                     key_length = params.get("keyLength", 32)
                     if algorithm != "SHA-256":
                         raise ValueError(f"Algoritmo ALTCHA non supportato: {algorithm}")
-                    salt_bytes = bytes.fromhex(salt_hex) if salt_hex else b""
+                    bytes.fromhex(salt_hex) if salt_hex else b""
                     nonce_bytes = bytes.fromhex(nonce_hex)
                     start_time = time.time()
                     counter = 0
@@ -797,7 +801,7 @@ class QobuzProvider(BaseProvider):
                             payload = {"id": track_id, "quality": _map_musicdl_quality(quality), "upload_to_r2": False}
                         # set headers required by community
                         post_headers = {
-                            "User-Agent": f"SpotiFLAC/7.1.9",
+                            "User-Agent": "SpotiFLAC/7.1.9",
                             "Accept": "application/json",
                             "Content-Type": "application/json",
                             "x-api-key": "explore-obscure-chivalry-travesty-blinks",
