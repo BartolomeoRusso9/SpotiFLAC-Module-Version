@@ -145,8 +145,6 @@ class IsrcFinder:
             return None
 
         try:
-            from .spotfetch import SpotifyWebClient
-
             client = self._get_spotify_client()
             if not client or not client.access_token or not client.client_token:
                 return None
