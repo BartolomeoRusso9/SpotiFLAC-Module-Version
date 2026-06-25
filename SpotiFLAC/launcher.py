@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
 CLI entry point for SpotiFLAC.
+
+=== Migrazione async ===
+L'intero entry point ora gira su un singolo event loop condiviso, invece di
+delegare a `SpotiFLAC(...)` (wrapper sincrono che apre un proprio
+asyncio.run() al suo interno). Si usa direttamente `SpotiflacDownloader`,
+che è già 100% async-native, ed è per questo che `check_for_updates_async`
+e `run_interactive()` possono ora essere "await"-ati nello stesso loop
+invece di aprirne uno nuovo ciascuno.
+
 New flags vs previous version:
   --retries N               Extra download attempts per track (default: 0)
   --post-action ACTION      Action after all downloads finish (none|open_folder|notify|command)
@@ -14,9 +23,10 @@ import logging
 import sys
 import json
 import os
+import asyncio
 
-from .check_update import check_for_updates
-from . import SpotiFLAC
+from .check_update import check_for_updates_async
+from .downloader import SpotiflacDownloader, DownloadOptions
 from .interactive import run_interactive
 
 
@@ -64,14 +74,14 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--service", "-s",
         choices = [
-            "deezer", "tidal", "qobuz", "amazon", "joox", "netease", 
+            "deezer", "tidal", "qobuz", "amazon", "joox", "netease",
             "migu", "kuwo", "soundcloud", "youtube", "apple", "pandora"
         ],
         nargs   = "+",
         default = pd.get("services", ["tidal"]),
         metavar = "SERVICE",
         help    = "Audio providers in priority order (default: tidal). "
-                  "Choices: tidal, qobuz, deezer, amazon, joox, netease, migu, kuwo, soundcloud, youtube, apple, pandora", 
+                  "Choices: tidal, qobuz, deezer, amazon, joox, netease, migu, kuwo, soundcloud, youtube, apple, pandora",
     )
     parser.add_argument(
         "--filename-format", "-f",
@@ -217,11 +227,90 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+async def _run_download_async(
+    url: str | list[str],
+    *,
+    output_dir: str,
+    services: list[str],
+    filename_format: str,
+    use_track_numbers: bool,
+    use_album_track_numbers: bool,
+    use_artist_subfolders: bool,
+    use_album_subfolders: bool,
+    loop: int | None,
+    quality: str,
+    first_artist_only: bool,
+    log_level: int,
+    output_path: str | None,
+    allow_fallback: bool,
+    embed_lyrics: bool,
+    lyrics_providers: list[str],
+    enrich_metadata: bool,
+    enrich_providers: list[str],
+    qobuz_local_api_url: str | None,
+    tidal_custom_api: str | None,
+    track_max_retries: int,
+    post_download_action: str,
+    post_download_command: str,
+    timeout_s: int | None,
+) -> None:
+    """
+    Bridge async verso SpotiflacDownloader, senza passare per il wrapper
+    sincrono `SpotiFLAC()` (che farebbe un `asyncio.run()` annidato e
+    fallirebbe perché siamo già dentro un loop).
+    """
+    logger = logging.getLogger("SpotiFLAC")
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
+        logger.addHandler(handler)
+    logger.setLevel(log_level)
+
+    opts = DownloadOptions(
+        output_dir              = output_dir,
+        services                = services,
+        filename_format         = filename_format,
+        use_track_numbers       = use_track_numbers,
+        use_album_track_numbers = use_album_track_numbers,
+        use_artist_subfolders   = use_artist_subfolders,
+        allow_fallback          = allow_fallback,
+        use_album_subfolders    = use_album_subfolders,
+        quality                 = quality,
+        first_artist_only       = first_artist_only,
+        output_path             = output_path,
+        embed_lyrics            = embed_lyrics,
+        lyrics_providers        = lyrics_providers,
+        enrich_metadata         = enrich_metadata,
+        enrich_providers        = enrich_providers,
+        qobuz_local_api_url     = qobuz_local_api_url,
+        track_max_retries       = track_max_retries,
+        post_download_action    = post_download_action,
+        post_download_command   = post_download_command,
+        tidal_custom_api        = tidal_custom_api,
+        timeout_s               = timeout_s,
+    )
+
+    try:
+        downloader = SpotiflacDownloader(opts)
+        await downloader.run_async(url, loop_minutes=loop)
+    except KeyboardInterrupt:
+        print("\n\n[!] Operazione interrotta dall'utente.")
+    except Exception as e:
+        logging.getLogger("SpotiFLAC").error("Critical error durante l'esecuzione: %s", e)
+
+
+async def amain() -> None:
+    """Entry point async-nativo. Tutto il flusso CLI vive su un solo event loop."""
     import importlib.util, importlib.resources
     from .core.ffmpeg_check import print_ffmpeg_warning
 
-    # GUI mode (explicit --gui flag)
+    # Controllo aggiornamenti non bloccante: non deve mai impedire l'avvio.
+    try:
+        await check_for_updates_async()
+    except Exception:
+        pass
+
+    # GUI mode (explicit --gui flag) — resta sincrona: la GUI gestisce il proprio loop.
     if "--gui" in sys.argv:
         from .app import run_gui
         run_gui()
@@ -230,13 +319,13 @@ def main() -> None:
     # Interactive mode (explicit --interactive flag)
     if "--interactive" in sys.argv:
         print_ffmpeg_warning()
-        cfg = run_interactive()
+        cfg = await run_interactive()
 
         log_level = logging.WARNING
         logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-        SpotiFLAC(
-            url                      = cfg["url"],
+        await _run_download_async(
+            cfg["url"],
             output_dir               = cfg["output_dir"],
             services                 = cfg["services"],
             filename_format          = cfg["filename_format"],
@@ -286,7 +375,7 @@ def main() -> None:
     merged_defaults = {**file_cfg, **profile_defaults}
 
     args = parse_args(profile_defaults=merged_defaults)
-    
+
     # Check that URL and output_dir are provided for CLI mode
     if not args.url or not args.output_dir:
         parser = argparse.ArgumentParser(
@@ -309,8 +398,8 @@ def main() -> None:
     log_format = "%(levelname)s:%(name)s: %(message)s" if args.verbose else "%(levelname)s: %(message)s"
     logging.basicConfig(level=log_level, format=log_format)
 
-    SpotiFLAC(
-        url                      = args.url,
+    await _run_download_async(
+        args.url,
         output_dir               = args.output_dir,
         services                 = args.service,
         filename_format          = args.filename_format,
@@ -323,6 +412,7 @@ def main() -> None:
         first_artist_only        = args.first_artist_only,
         log_level                = log_level,
         output_path              = args.output_path,
+        allow_fallback           = True,
         embed_lyrics             = args.embed_lyrics,
         lyrics_providers         = args.lyrics_providers,
         enrich_metadata          = args.enrich,
@@ -364,6 +454,10 @@ def main() -> None:
             print(f"[profile] Saved as: {args.save_profile}")
         except Exception as exc:
             print(f"[profile] Save error: {exc}")
+
+
+def main() -> None:
+    asyncio.run(amain())
 
 
 if __name__ == "__main__":

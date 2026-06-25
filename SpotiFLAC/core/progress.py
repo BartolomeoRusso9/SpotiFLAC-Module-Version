@@ -1,14 +1,15 @@
 from __future__ import annotations
+
 import asyncio
 import io
 import logging
-import queue
 import sys
 import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
+
 from tqdm import tqdm
 
 # Sincronizzazione visiva centralizzata sul core di tqdm.
@@ -71,6 +72,7 @@ class _TqdmTextIOProxy(io.TextIOBase):
                 line, self._buf = self._buf.split("\n", 1)
                 tqdm.write(line, file=self._original)
         return len(s)
+
     def flush(self) -> None:
         with tqdm.get_lock():
             if self._buf:
@@ -132,6 +134,7 @@ class DownloadStatus(Enum):
     FAILED      = "failed"
     SKIPPED     = "skipped"
 
+
 @dataclass
 class DownloadItem:
     id:            str
@@ -148,49 +151,45 @@ class DownloadItem:
     error_message: str            = ""
     file_path:     str            = ""
 
+
 class DownloadBroadcaster:
     _instance = None
-    _lock = threading.Lock()
 
-    def __new__(cls) -> DownloadBroadcaster:
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super().__new__(cls)
-                cls._instance._listeners = set()
-                cls._instance._listener_lock = threading.Lock()
-                cls._instance._loop = None
-                cls._instance._last_broadcast_time = 0.0
+    def __new__(cls) -> "DownloadBroadcaster":
+        # Rimosso _creation_lock: ora è thread-safe in contesto single-thread asyncio
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._listeners = set()
+            cls._instance._lock = asyncio.Lock()
+            cls._instance._last_broadcast_time = 0.0
         return cls._instance
 
-    def subscribe(self, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
-        with self._listener_lock:
+    async def subscribe(self, queue: asyncio.Queue) -> None:
+        async with self._lock:
             self._listeners.add(queue)
-            self._loop = loop
 
-    def unsubscribe(self, queue: asyncio.Queue) -> None:
-        with self._listener_lock:
+    async def unsubscribe(self, queue: asyncio.Queue) -> None:
+        async with self._lock:
             self._listeners.discard(queue)
-            if not self._listeners:
-                self._loop = None
 
-    def broadcast_immediate(self, event_data: dict) -> None:
+    async def broadcast_immediate(self, event_data: dict) -> None:
         self._last_broadcast_time = time.time()
-        self._send_to_all(event_data)
+        await self._send_to_all(event_data)
 
-    def broadcast_progress(self, event_data: dict) -> None:
+    async def broadcast_progress(self, event_data: dict) -> None:
         now = time.time()
         if now - self._last_broadcast_time >= 0.25:
             self._last_broadcast_time = now
-            self._send_to_all(event_data)
+            await self._send_to_all(event_data)
 
-    def _send_to_all(self, event_data: dict) -> None:
-        with self._listener_lock:
-            if self._loop and self._listeners:
-                for q in list(self._listeners):
-                    try:
-                        self._loop.call_soon_threadsafe(q.put_nowait, event_data)
-                    except Exception:
-                        pass
+    async def _send_to_all(self, event_data: dict) -> None:
+        async with self._lock:
+            for q in list(self._listeners):
+                try:
+                    q.put_nowait(event_data)
+                except Exception:
+                    pass
+
 
 class DownloadManager:
     _instance: "DownloadManager | None" = None
@@ -205,39 +204,36 @@ class DownloadManager:
         return cls._instance
 
     def _init_state(self) -> None:
-        self._lock            = threading.RLock()
+        self._lock            = asyncio.Lock()
         self._queue:    list[DownloadItem] = []
         self.total_downloaded = 0.0
         self.current_item_id  = ""
         self.session_start    = 0.0
 
-    @property
-    def is_downloading(self) -> bool:
-        with self._lock:
-            return any(item.status == DownloadStatus.DOWNLOADING for item in self._queue)
+    # Rimosse le properties is_downloading e current_speed per evitare accessi fuori lock/deadlock.
 
-    @property
-    def current_speed(self) -> float:
-        with self._lock:
-            return sum(item.speed for item in self._queue if item.status == DownloadStatus.DOWNLOADING)
-
-    def add_to_queue(self, item_id: str, track_name: str, artist_name: str, album_name: str, spotify_id: str) -> None:
-        with self._lock:
+    async def add_to_queue(self, item_id: str, track_name: str, artist_name: str, album_name: str, spotify_id: str) -> None:
+        async with self._lock:
             self._queue.append(DownloadItem(id=item_id, track_name=track_name, artist_name=artist_name, album_name=album_name, spotify_id=spotify_id))
-            if self.session_start == 0.0: self.session_start = time.time()
-        DownloadBroadcaster().broadcast_immediate(self.get_stats())
+            if self.session_start == 0.0: 
+                self.session_start = time.time()
+        
+        stats = await self.get_stats()
+        await DownloadBroadcaster().broadcast_immediate(stats)
 
-    def start_download(self, item_id: str) -> None:
-        with self._lock:
+    async def start_download(self, item_id: str) -> None:
+        async with self._lock:
             for item in self._queue:
                 if item.id == item_id:
                     item.status, item.start_time, item.progress = DownloadStatus.DOWNLOADING, time.time(), 0.0
                     break
             self.current_item_id = item_id
-        DownloadBroadcaster().broadcast_immediate(self.get_stats())
+            
+        stats = await self.get_stats()
+        await DownloadBroadcaster().broadcast_immediate(stats)
 
-    def update_progress(self, item_id: str, progress_mb: float, total_mb: float, speed_mbps: float) -> None:
-        with self._lock:
+    async def update_progress(self, item_id: str, progress_mb: float, total_mb: float, speed_mbps: float) -> None:
+        async with self._lock:
             for item in self._queue:
                 if item.id == item_id:
                     item.progress = progress_mb
@@ -245,37 +241,61 @@ class DownloadManager:
                         item.total_size = total_mb
                     item.speed = speed_mbps
                     break
-        DownloadBroadcaster().broadcast_progress(self.get_stats())
+                    
+        stats = await self.get_stats()
+        await DownloadBroadcaster().broadcast_progress(stats)
 
-    def complete_download(self, item_id: str, filepath: str, final_size_mb: float) -> None:
-        with self._lock:
+    async def complete_download(self, item_id: str, filepath: str, final_size_mb: float) -> None:
+        async with self._lock:
             for item in self._queue:
                 if item.id == item_id:
-                    item.status, item.end_time, item.file_path, item.progress, item.total_size = DownloadStatus.COMPLETED, time.time(), filepath, final_size_mb, final_size_mb
+                    item.status, item.end_time, item.file_path = DownloadStatus.COMPLETED, time.time(), filepath
+                    item.progress, item.total_size = final_size_mb, final_size_mb
                     self.total_downloaded += final_size_mb
                     break
-        DownloadBroadcaster().broadcast_immediate(self.get_stats())
+                    
+        stats = await self.get_stats()
+        await DownloadBroadcaster().broadcast_immediate(stats)
 
-    def fail_download(self, item_id: str, error_msg: str) -> None:
-        with self._lock:
+    async def fail_download(self, item_id: str, error_msg: str) -> None:
+        async with self._lock:
             for item in self._queue:
                 if item.id == item_id:
                     item.status, item.end_time, item.error_message = DownloadStatus.FAILED, time.time(), error_msg
                     break
-        DownloadBroadcaster().broadcast_immediate(self.get_stats())
+                    
+        stats = await self.get_stats()
+        await DownloadBroadcaster().broadcast_immediate(stats)
 
-    def skip_download(self, item_id: str) -> None:
-        with self._lock:
+    async def skip_download(self, item_id: str) -> None:
+        async with self._lock:
             for item in self._queue:
                 if item.id == item_id:
                     item.status, item.end_time = DownloadStatus.SKIPPED, time.time()
                     break
-        DownloadBroadcaster().broadcast_immediate(self.get_stats())
+                    
+        stats = await self.get_stats()
+        await DownloadBroadcaster().broadcast_immediate(stats)
 
-    def get_stats(self) -> dict:
-        with self._lock:
+    async def get_item_speed(self, item_id: str) -> float:
+        """Metodo sicuro per ottenere la velocità evitando l'accesso diretto alla coda dal callback."""
+        async with self._lock:
+            for item in self._queue:
+                if item.id == item_id:
+                    return item.speed
+        return 0.0
+
+    async def get_stats(self) -> dict:
+        async with self._lock:
             queue_items = []
             completed_items = []
+            
+            is_downloading = False
+            current_speed = 0.0
+            active_progress = 0.0
+            queued = 0
+            failed = 0
+            skipped = 0
             
             for i in self._queue:
                 item_data = {
@@ -293,25 +313,30 @@ class DownloadManager:
                     "error_message": i.error_message
                 }
                 queue_items.append(item_data)
-                if i.status == DownloadStatus.COMPLETED:
+                
+                # Statistiche calcolate in-place per evitare deadlock o chiamate incoerenti
+                if i.status == DownloadStatus.DOWNLOADING:
+                    is_downloading = True
+                    current_speed += i.speed
+                    active_progress += i.progress
+                elif i.status == DownloadStatus.QUEUED:
+                    queued += 1
+                elif i.status == DownloadStatus.COMPLETED:
                     completed_items.append(item_data)
+                elif i.status == DownloadStatus.FAILED:
+                    failed += 1
+                elif i.status == DownloadStatus.SKIPPED:
+                    skipped += 1
             
             completed_items.sort(key=lambda x: x["end_time"], reverse=True)
             latest_completed = completed_items[:20]
             
-            active_progress = sum(item.progress for item in self._queue if item.status == DownloadStatus.DOWNLOADING)
-            
-            queued = sum(1 for item in self._queue if item.status == DownloadStatus.QUEUED)
-            completed = len(completed_items)
-            failed = sum(1 for item in self._queue if item.status == DownloadStatus.FAILED)
-            skipped = sum(1 for item in self._queue if item.status == DownloadStatus.SKIPPED)
-            
             return {
-                "is_downloading": self.is_downloading,
-                "current_speed": self.current_speed,
+                "is_downloading": is_downloading,
+                "current_speed": current_speed,
                 "total_downloaded": self.total_downloaded + active_progress,
                 "queued": queued,
-                "completed": completed,
+                "completed": len(completed_items),
                 "failed": failed,
                 "skipped": skipped,
                 "downloads": queue_items,
@@ -319,9 +344,15 @@ class DownloadManager:
                 "latest_completed": latest_completed
             }
 
-    def reset(self) -> None:
-        with self._lock: self._init_state()
-        DownloadBroadcaster().broadcast_immediate(self.get_stats())
+    async def reset(self) -> None:
+        async with self._lock: 
+            self._queue = []
+            self.total_downloaded = 0.0
+            self.current_item_id  = ""
+            self.session_start    = 0.0
+            
+        stats = await self.get_stats()
+        await DownloadBroadcaster().broadcast_immediate(stats)
 
 
 class ProgressManager:
@@ -329,46 +360,48 @@ class ProgressManager:
     _slot_map: dict[str, int] = {}
     _master_bar: tqdm | None = None
     _master_enabled: bool = False
-    _event_queue: queue.Queue[tuple[str, str, int, int | None]] = queue.Queue()
-    _ui_thread: threading.Thread | None = None
-    _ui_stop: threading.Event = threading.Event()
-    _lock = threading.RLock()
+    
+    _event_queue: asyncio.Queue[tuple[str, str, int, int | None]] | None = None
+    _worker_task: asyncio.Task | None = None
+    _start_lock: asyncio.Lock | None = None
 
     @classmethod
-    def _start_ui_thread(cls) -> None:
-        with cls._lock:
-            if cls._ui_thread and cls._ui_thread.is_alive():
+    async def start_worker(cls) -> None:
+        # Lock di sicurezza per evitare l'avvio multiplo di worker (Race Condition)
+        if cls._start_lock is None:
+            cls._start_lock = asyncio.Lock()
+            
+        async with cls._start_lock:
+            if cls._event_queue is None:
+                cls._event_queue = asyncio.Queue()
+                
+            if cls._worker_task and not cls._worker_task.done():
                 return
-            cls._ui_stop.clear()
-            cls._ui_thread = threading.Thread(
-                target=cls._process_events,
-                name="SpotiFLAC-ProgressUI",
-                daemon=True,
-            )
-            cls._ui_thread.start()
+
+            cls._worker_task = asyncio.create_task(cls._process_events())
 
     @classmethod
-    def _stop_ui_thread(cls) -> None:
-        with cls._lock:
-            cls._ui_stop.set()
-            thread = cls._ui_thread
-            cls._ui_thread = None
-        if thread and thread.is_alive():
-            thread.join(timeout=1.0)
-
-    @classmethod
-    def _process_events(cls) -> None:
-        while not cls._ui_stop.is_set() or not cls._event_queue.empty():
+    async def stop_worker(cls) -> None:
+        if cls._worker_task:
+            cls._worker_task.cancel()
             try:
-                item_id, track_name, current_bytes, total_bytes = cls._event_queue.get(timeout=0.1)
-            except queue.Empty:
-                continue
+                await cls._worker_task
+            except asyncio.CancelledError:
+                pass
+            cls._worker_task = None
 
-            with tqdm.get_lock():
-                with cls._lock:
+    @classmethod
+    async def _process_events(cls) -> None:
+        if cls._event_queue is None:
+            cls._event_queue = asyncio.Queue()
+
+        while True:
+            try:
+                item_id, track_name, current_bytes, total_bytes = await cls._event_queue.get()
+
+                with tqdm.get_lock():
                     bar = cls._bars.get(item_id)
                     if bar is None:
-                        # Create the bar lazily on the UI thread.
                         bar = cls.create_bar(item_id, track_name, total_bytes)
 
                     if total_bytes != bar.total:
@@ -385,72 +418,74 @@ class ProgressManager:
                     if total_bytes is not None and current_bytes >= total_bytes:
                         cls.release_bar(item_id)
 
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logging.getLogger(__name__).exception("ProgressManager consumer crashed")
+
     @classmethod
-    def enqueue_progress(cls, item_id: str, track_name: str, current_bytes: int, total_bytes: int | None) -> None:
-        cls._start_ui_thread()
-        cls._event_queue.put((item_id, track_name, current_bytes, total_bytes))
+    async def enqueue_progress(cls, item_id: str, track_name: str, current_bytes: int, total_bytes: int | None) -> None:
+        await cls.start_worker()
+        if cls._event_queue is not None:
+            await cls._event_queue.put((item_id, track_name, current_bytes, total_bytes))
 
     @classmethod
     def _allocate_slot(cls, item_id: str) -> int:
-        with cls._lock:
-            if item_id in cls._slot_map:
-                return cls._slot_map[item_id]
+        if item_id in cls._slot_map:
+            return cls._slot_map[item_id]
 
-            used_slots = set(cls._slot_map.values())
-            slot = 0
-            while slot in used_slots:
-                slot += 1
+        used_slots = set(cls._slot_map.values())
+        slot = 0
+        while slot in used_slots:
+            slot += 1
 
-            cls._slot_map[item_id] = slot
-            return slot
+        cls._slot_map[item_id] = slot
+        return slot
 
     @classmethod
     def get_effective_position(cls, slot: int) -> int:
-        with cls._lock:
-            return slot + (1 if cls._master_enabled else 0)
+        return slot + (1 if cls._master_enabled else 0)
 
     @classmethod
     def create_bar(cls, item_id: str, track_name: str, total_bytes: int | None) -> tqdm:
-        with cls._lock:
-            if item_id in cls._bars:
-                return cls._bars[item_id]
+        if item_id in cls._bars:
+            return cls._bars[item_id]
 
-            slot = cls._allocate_slot(item_id)
-            display_name = track_name.strip()
-            if len(display_name) > 18:
-                display_name = display_name[:15] + "..."
+        slot = cls._allocate_slot(item_id)
+        display_name = track_name.strip()
+        if len(display_name) > 18:
+            display_name = display_name[:15] + "..."
 
-            bar = tqdm(
-                total        = total_bytes if total_bytes and total_bytes > 0 else None,
-                unit         = "B",
-                unit_scale   = True,
-                unit_divisor = 1024,
-                desc         = f"Track: {display_name:<18}",
-                leave        = False,
-                position     = cls.get_effective_position(slot),
-                dynamic_ncols= True,
-                miniters     = 1,
-                smoothing    = 0.2,
-                file         = sys.__stderr__,
-            )
+        bar = tqdm(
+            total        = total_bytes if total_bytes and total_bytes > 0 else None,
+            unit         = "B",
+            unit_scale   = True,
+            unit_divisor = 1024,
+            desc         = f"Track: {display_name:<18}",
+            leave        = False,
+            position     = cls.get_effective_position(slot),
+            dynamic_ncols= True,
+            miniters     = 1,
+            smoothing    = 0.2,
+            file         = sys.__stderr__,
+        )
 
-            cls._bars[item_id] = bar
-            return bar
+        cls._bars[item_id] = bar
+        return bar
 
     @classmethod
     def release_bar(cls, item_id: str) -> None:
-        with cls._lock:
-            bar = cls._bars.pop(item_id, None)
-            if bar is None:
-                cls._slot_map.pop(item_id, None)
-                return
-
-            try:
-                bar.clear()
-                bar.close()
-            except Exception:
-                pass
+        bar = cls._bars.pop(item_id, None)
+        if bar is None:
             cls._slot_map.pop(item_id, None)
+            return
+
+        try:
+            bar.clear()
+            bar.close()
+        except Exception:
+            pass
+        cls._slot_map.pop(item_id, None)
 
     @classmethod
     def clear_item(cls, item_id: str) -> None:
@@ -458,13 +493,12 @@ class ProgressManager:
             cls.release_bar(item_id)
 
     @classmethod
-    def clear_all(cls) -> None:
-        cls._stop_ui_thread()
+    async def clear_all(cls) -> None:
+        await cls.stop_worker()
         with tqdm.get_lock():
-            with cls._lock:
-                for item_id in list(cls._bars):
-                    cls.release_bar(item_id)
-                cls._slot_map.clear()
+            for item_id in list(cls._bars):
+                cls.release_bar(item_id)
+            cls._slot_map.clear()
             cls.clear_master_bar()
 
     @classmethod
@@ -473,54 +507,50 @@ class ProgressManager:
             raise ValueError("Only top-aligned master bar is supported by ProgressManager at this time.")
 
         with tqdm.get_lock():
-            with cls._lock:
-                cls.clear_master_bar()
-                cls._master_enabled = True
-                cls._master_bar = tqdm(
-                    total        = total_items,
-                    desc         = description,
-                    leave        = True,
-                    position     = 0,
-                    dynamic_ncols= True,
-                    miniters     = 1,
-                    file         = sys.__stderr__,
-                )
+            cls.clear_master_bar()
+            cls._master_enabled = True
+            cls._master_bar = tqdm(
+                total        = total_items,
+                desc         = description,
+                leave        = True,
+                position     = 0,
+                dynamic_ncols= True,
+                miniters     = 1,
+                file         = sys.__stderr__,
+            )
 
     @classmethod
     def clear_master_bar(cls) -> None:
         with tqdm.get_lock():
-            with cls._lock:
-                if cls._master_bar is None:
-                    cls._master_enabled = False
-                    return
-
-                try:
-                    cls._master_bar.clear()
-                    cls._master_bar.close()
-                except Exception:
-                    pass
-                cls._master_bar = None
+            if cls._master_bar is None:
                 cls._master_enabled = False
+                return
+
+            try:
+                cls._master_bar.clear()
+                cls._master_bar.close()
+            except Exception:
+                pass
+            cls._master_bar = None
+            cls._master_enabled = False
 
     @classmethod
     def increment_master(cls, step: int = 1) -> None:
         with tqdm.get_lock():
-            with cls._lock:
-                if cls._master_bar is None:
-                    return
+            if cls._master_bar is None:
+                return
 
-                cls._master_bar.update(step)
-                cls._master_bar.refresh()
+            cls._master_bar.update(step)
+            cls._master_bar.refresh()
 
     @classmethod
     def reset_master_total(cls, total_items: int) -> None:
         with tqdm.get_lock():
-            with cls._lock:
-                if cls._master_bar is None:
-                    return
+            if cls._master_bar is None:
+                return
 
-                cls._master_bar.reset(total=total_items)
-                cls._master_bar.refresh()
+            cls._master_bar.reset(total=total_items)
+            cls._master_bar.refresh()
 
 
 class ProgressCallback:
@@ -535,36 +565,38 @@ class ProgressCallback:
         self._last_refresh_time = 0.0
         self._last_reported_bytes = 0
 
-    def __call__(self, current_bytes: int, total_bytes: int) -> None:
+    async def __call__(self, current_bytes: int, total_bytes: int) -> None:
+        now = time.time()
+        is_final = bool(total_bytes and current_bytes >= total_bytes)
+        
+        # Miglioria prestazionale critica: Throttling a monte.
+        # Ignora l'aggiornamento se non sono passati almeno 100ms e non è il pezzo finale,
+        # prevenendo l'intasamento dell'event loop con decine di migliaia di task.
+        if not is_final and self._last_refresh_time > 0 and (now - self._last_refresh_time) < 0.1:
+            return
+
         current_bytes = max(0, current_bytes)
         total_bytes = total_bytes if total_bytes > 0 else None
-        ProgressManager.enqueue_progress(self._item_id, self._track_name, current_bytes, total_bytes)
+        
+        # Fire-and-forget: evochiamo l'aggiornamento senza bloccare la lettura dello stream
+        asyncio.create_task(ProgressManager.enqueue_progress(self._item_id, self._track_name, current_bytes, total_bytes))
 
         current_mb = current_bytes / (1024 * 1024)
         total_mb = total_bytes / (1024 * 1024) if total_bytes else 0.0
 
-        now = time.time()
         if self._last_refresh_time == 0.0:
             self._last_refresh_time = now
             self._last_reported_bytes = current_bytes
             speed_mbps = 0.0
         else:
             time_diff = now - self._last_refresh_time
-            if time_diff >= 0.5:
-                bytes_diff = current_bytes - self._last_reported_bytes
-                speed_mbps = (bytes_diff / (1024 * 1024)) / time_diff
-                self._last_refresh_time = now
-                self._last_reported_bytes = current_bytes
-            else:
-                manager = DownloadManager()
-                speed_mbps = 0.0
-                with manager._lock:
-                    for item in manager._queue:
-                        if item.id == self._item_id:
-                            speed_mbps = item.speed
-                            break
+            bytes_diff = current_bytes - self._last_reported_bytes
+            speed_mbps = (bytes_diff / (1024 * 1024)) / time_diff
+            self._last_refresh_time = now
+            self._last_reported_bytes = current_bytes
 
-        DownloadManager().update_progress(self._item_id, current_mb, total_mb, speed_mbps)
+        # Fire-and-forget del manager per non ritardare il download
+        asyncio.create_task(DownloadManager().update_progress(self._item_id, current_mb, total_mb, speed_mbps))
 
     @classmethod
     def clear_item(cls, item_id: str) -> None:

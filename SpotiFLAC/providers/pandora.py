@@ -12,25 +12,26 @@ Supporta:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Callable, Any
-from urllib.parse import urlparse, urlencode, quote, unquote
+from typing import Any, Callable
+from urllib.parse import quote, unquote, urlencode, urlparse
 
 import httpx
-from ..core.http import NetworkManager
-from .base import BaseProvider
+
 from ..core.console import print_source_banner
-from ..core.download_validation import validate_downloaded_track
-from ..core.errors import SpotiflacError, ErrorKind, TrackNotFoundError
-from ..core.http import RetryConfig
-from ..core.models import TrackMetadata, DownloadResult
-from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
-from ..core.tagger import embed_metadata, _print_mb_summary, EmbedOptions
+from ..core.download_validation import validate_downloaded_track_async
 from ..core.endpoints import get_pandora_base_and_path
+from ..core.errors import ErrorKind, SpotiflacError, TrackNotFoundError
+from ..core.http import RetryConfig, async_songlink_rate_limiter
+from ..core.models import DownloadResult, TrackMetadata
+from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from ..core.quality import normalize_quality
+from ..core.tagger import EmbedOptions, _print_mb_summary, embed_metadata_async
+from .base import BaseProvider
 
 logger = logging.getLogger(__name__)
 
@@ -319,20 +320,17 @@ class PandoraProvider(BaseProvider):
 
     def __init__(self, timeout_s: int = 30) -> None:
         super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
-        self._session = NetworkManager.get_sync_client()
-        self._session.headers.update({
+        self._async_http._headers.update({
             "Accept":     "application/json",
             "User-Agent": _MOBILE_UA,
         })
-
-    def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
-        super().set_progress_callback(cb)
+        self._limiter = async_songlink_rate_limiter
 
     # ------------------------------------------------------------------
     # HTTP helpers
     # ------------------------------------------------------------------
 
-    def _get_json(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    async def _get_json_async(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
         merged = {
             "Accept":     "application/json",
             "User-Agent": _ua_for_url(url),
@@ -340,14 +338,11 @@ class PandoraProvider(BaseProvider):
         if headers:
             merged.update(headers)
             
-        try:
-            resp = self._session.get(url, headers=merged, timeout=15)
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as e:
-            raise RuntimeError(f"HTTP {e.response.status_code} for {url}") from e
-        except (httpx.RequestError, ValueError) as e:
-            raise RuntimeError(f"Request failed for {url}: {e}") from e
+        if self._limiter is not None:
+            await self._limiter.wait_for_slot()
+
+        resp = await self._async_http.get(url, headers=merged)
+        return resp.json()
 
     def _post_json(self, url: str, body: dict[str, Any], headers: dict[str, str] | None = None) -> dict[str, Any]:
         merged = {
@@ -360,6 +355,27 @@ class PandoraProvider(BaseProvider):
             
         try:
             resp = self._session.post(url, json=body, headers=merged, timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(f"HTTP {e.response.status_code} for {url}") from e
+        except (httpx.RequestError, ValueError) as e:
+            raise RuntimeError(f"Request failed for {url}: {e}") from e
+
+    async def _post_json_async(self, url: str, body: dict[str, Any], headers: dict[str, str] | None = None) -> dict[str, Any]:
+        merged = {
+            "Content-Type": "application/json",
+            "Accept":       "application/json",
+            "User-Agent":   _ua_for_url(url),
+        }
+        if headers:
+            merged.update(headers)
+
+        if self._limiter is not None:
+            await self._limiter.wait_for_slot()
+
+        try:
+            resp = await self._async_http.post(url, json=body, headers=merged, timeout=30.0)
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as e:
@@ -432,6 +448,30 @@ class PandoraProvider(BaseProvider):
                 follow_redirects=True,
             )
             resp.raise_for_status()
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Pandora app link request failed: {e}") from e
+
+        resp_url = str(resp.url)
+        if "pandora.com/" in resp_url and "pandora.app.link" not in resp_url:
+            return _normalize_secure_url(resp_url)
+
+        resolved = _extract_pandora_url_from_html(resp.text)
+        if not resolved:
+            raise RuntimeError("Could not resolve Pandora app link")
+
+        return resolved
+
+    async def _resolve_pandora_app_link_async(self, url: str) -> str:
+        try:
+            resp = await self._async_http.get(
+                _normalize_secure_url(url),
+                headers={
+                    "Accept":     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "User-Agent": _MOBILE_UA,
+                },
+                timeout=15.0,
+                follow_redirects=True,
+            )
         except httpx.RequestError as e:
             raise RuntimeError(f"Pandora app link request failed: {e}") from e
 
@@ -776,11 +816,33 @@ class PandoraProvider(BaseProvider):
 
         return _normalize_pandora_canonical_url(pandora_url, resolved_id)
 
-    # ------------------------------------------------------------------
-    # BaseProvider.download_track
-    # ------------------------------------------------------------------
+    async def _normalize_pandora_track_url_async(self, input_url: str) -> str:
+        input_url = (input_url or "").strip()
+        if _is_pandora_app_link(input_url):
+            input_url = await self._resolve_pandora_app_link_async(input_url)
 
-    def download_track(
+        track_id = _extract_pandora_track_id(input_url)
+        if track_id:
+            return _normalize_pandora_canonical_url(input_url, track_id)
+
+        url_for_songlink = input_url if input_url.startswith("http") else f"https://open.spotify.com/track/{input_url}"
+        params = {"url": url_for_songlink, "userCountry": _USER_COUNTRY}
+        songlink = await self._get_json_async(f"{_SONGLINK_URL}?{urlencode(params)}")
+        pandora_url = self._extract_pandora_url_from_songlink(songlink)
+        resolved_id = _extract_pandora_track_id(pandora_url)
+
+        if not resolved_id:
+            raise SpotiflacError(
+                ErrorKind.TRACK_NOT_FOUND,
+                "Could not resolve Pandora track URL",
+                self.name,
+            )
+
+        return _normalize_pandora_canonical_url(pandora_url, resolved_id)
+
+    # ----------------------------------------
+
+    async def download_track_async(
             self,
             metadata:            TrackMetadata,
             output_dir:          str,
@@ -812,12 +874,11 @@ class PandoraProvider(BaseProvider):
                     else pandora_track_id
                 )
                 download_url = _normalize_secure_url(
-                    self._normalize_pandora_track_url(resolve_input)
+                    await self._normalize_pandora_track_url_async(resolve_input)
                 )
             else:
                 return DownloadResult.fail(self.name, "No Pandora track ID or URL available")
 
-            # Assicuriamo che dest_mp3 sia un oggetto pathlib.Path
             dest_mp3 = Path(self._build_output_path(
                 metadata, output_dir, filename_format,
                 position, include_track_num, use_album_track_num,
@@ -830,7 +891,14 @@ class PandoraProvider(BaseProvider):
                     fmt = "mp3" if candidate.suffix == ".mp3" else "m4a"
                     return DownloadResult.skipped_result(self.name, str(candidate), fmt=fmt)
 
-            mb_fetcher = AsyncMBFetch(metadata.isrc) if metadata.isrc else None
+            import concurrent.futures
+            from ..core.isrc_utils import normalize_isrc
+            _isrc_for_mb = normalize_isrc(getattr(metadata, "isrc", None) or "")
+            logger.debug("[pandora] ISRC at MB lookup: %r", _isrc_for_mb)
+            mb_fetcher = AsyncMBFetch(_isrc_for_mb) if _isrc_for_mb else None
+            if not mb_fetcher:
+                logger.warning("[pandora] MusicBrainz skipped: no valid ISRC available")
+
 
             pan_base, pan_path = get_pandora_base_and_path()
             pan_full_url = f"{pan_base}{pan_path}"
@@ -840,7 +908,7 @@ class PandoraProvider(BaseProvider):
             zarz_id = _extract_pandora_track_id(download_url)
             safe_api_url = _build_pandora_url(zarz_id) if zarz_id else download_url
 
-            payload = self._post_json(
+            payload = await self._post_json_async(
                 pan_full_url,
                 {"url": safe_api_url},
             )
@@ -855,19 +923,15 @@ class PandoraProvider(BaseProvider):
                 return DownloadResult.fail(self.name, error_msg)
 
             cdn_links = payload.get("cdnLinks", {})
-            # Accept canonical quality values; Pandora expects mp3_192/aac_64/aac_32 tokens
             q_norm = normalize_quality(quality) if isinstance(quality, str) else quality
-            pandora_token = None
             if q_norm == "HIGH":
                 pandora_token = "mp3_192"
             elif q_norm == "LOW":
                 pandora_token = "aac_32"
             else:
-                # Default to mp3_192 for anything lossless/unknown
                 pandora_token = "mp3_192"
 
-            selected  = _select_quality_link(cdn_links, pandora_token)
-
+            selected = _select_quality_link(cdn_links, pandora_token)
             if not selected or not selected.get("url"):
                 if allow_fallback:
                     for fallback_q in ("mp3_192", "aac_64", "aac_32"):
@@ -876,18 +940,16 @@ class PandoraProvider(BaseProvider):
                             if selected and selected.get("url"):
                                 logger.info("[pandora] Quality fallback: %s → %s", quality, fallback_q)
                                 break
-                                
                 if not selected or not selected.get("url"):
                     return DownloadResult.fail(self.name, "No downloadable Pandora stream available")
 
             stream_url = _normalize_secure_url(selected["url"])
-            ext        = _output_extension_for_link(selected)
-            fmt_str    = "mp3" if ext == ".mp3" else "m4a"
-
+            ext = _output_extension_for_link(selected)
+            fmt_str = "mp3" if ext == ".mp3" else "m4a"
             dest = dest_mp3.with_suffix(ext)
 
             os.makedirs(output_dir, exist_ok=True)
-            self._http.stream_to_file(
+            await self._async_http.stream_to_file(
                 stream_url,
                 str(dest),
                 self._progress_cb,
@@ -895,15 +957,24 @@ class PandoraProvider(BaseProvider):
             )
 
             expected_s = metadata.duration_ms // 1000
-            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
+            valid, err_msg = await validate_downloaded_track_async(str(dest), expected_s)
             if not valid:
                 raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
 
             mb_tags: dict[str, str] = {}
             if mb_fetcher:
-                mb_result = mb_fetcher.future.result()
-                mb_tags   = mb_result_to_tags(mb_result)
-                _print_mb_summary(mb_tags)
+                try:
+                    mb_result = await asyncio.to_thread(lambda: mb_fetcher.future.result(timeout=12))
+                    mb_tags = mb_result_to_tags(mb_result)
+                    if mb_tags:
+                        logger.info("[pandora] MusicBrainz tags found: %s", list(mb_tags.keys()))
+                        _print_mb_summary(mb_tags)
+                    else:
+                        logger.warning("[pandora] MusicBrainz returned no tags (ISRC: %r)", _isrc_for_mb)
+                except concurrent.futures.TimeoutError:
+                    logger.warning("[pandora] MusicBrainz timed out after 12s, skipping MB tags")
+                except Exception as exc:
+                    logger.warning("[pandora] MusicBrainz error: %s", exc)
 
             opts = EmbedOptions(
                 first_artist_only  = first_artist_only,
@@ -916,7 +987,7 @@ class PandoraProvider(BaseProvider):
                 is_album           = is_album,
                 extra_tags         = mb_tags,
             )
-            embed_metadata(str(dest), metadata, opts, session=self._session)
+            await embed_metadata_async(str(dest), metadata, opts)
 
             return DownloadResult.ok(self.name, str(dest), fmt=fmt_str)
 

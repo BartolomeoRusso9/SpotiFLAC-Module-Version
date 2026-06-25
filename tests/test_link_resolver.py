@@ -1,5 +1,7 @@
 import unittest
+import asyncio
 from unittest.mock import Mock
+from unittest.mock import AsyncMock
 
 from SpotiFLAC.core.link_resolver import LinkResolver
 
@@ -7,6 +9,9 @@ from SpotiFLAC.core.link_resolver import LinkResolver
 class LinkResolverTests(unittest.TestCase):
     def setUp(self):
         self.http = Mock()
+        self.http.get_json_async = AsyncMock()
+        self.http.get_async = AsyncMock()
+        self.http.get = Mock()
         self.resolver = LinkResolver(self.http)
 
     def test_process_songlink_response_normalizes_platforms(self):
@@ -26,13 +31,13 @@ class LinkResolverTests(unittest.TestCase):
         self.assertEqual(links["spotify"], "https://open.spotify.com/track/abc")
 
     def test_resolve_all_uses_songlink_without_double_encoding(self):
-        self.http.get_json.side_effect = [
+        self.http.get_json_async.side_effect = [
             {"link": "https://www.deezer.com/track/123", "id": 123},
             {"linksByPlatform": {"amazonMusic": {"url": "https://music.amazon.com/tracks/B123456789?musicTerritory=US"}}},
         ]
         self.http.get.return_value = Mock(text="")
 
-        links = self.resolver.resolve_all("spotify_ABCDEFGHIJKLMN", isrc="USRC17607839")
+        links = asyncio.run(self.resolver.resolve_all_async("spotify_ABCDEFGHIJKLMN", isrc="USRC17607839"))
 
         self.assertEqual(links["amazonMusic"], "https://music.amazon.com/tracks/B123456789?musicTerritory=US")
 
@@ -44,9 +49,9 @@ class LinkResolverTests(unittest.TestCase):
             "<a href=\"https://listen.tidal.com/track/56789\"></a>"
             "</html>"
         )
-        self.http.get.return_value = Mock(text=html)
+        self.http.get_async.return_value = Mock(text=html)
 
-        links = self.resolver._get_songlink_html_links("ABCDEFG")
+        links = asyncio.run(self.resolver._get_songlink_html_links_async("ABCDEFG"))
 
         self.assertEqual(links["deezer"], "https://www.deezer.com/track/123")
         self.assertEqual(links["amazonMusic"], "https://music.amazon.com/tracks/B123456789?musicTerritory=US")

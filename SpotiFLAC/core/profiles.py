@@ -2,23 +2,25 @@
 Profile management — salva/carica preset di configurazione con nome.
 File: ~/.cache/spotiflac/profiles.json
 
-Uso:
-    save_profile("tidal-hires", cfg)
-    cfg = get_profile("tidal-hires")
-    names = list_profiles()
+Uso asincrono:
+    await save_profile_async("tidal-hires", cfg)
+    cfg = await get_profile_async("tidal-hires")
+    names = await list_profiles_async()
 """
 from __future__ import annotations
 
 import json
 import time
 from pathlib import Path
-import threading
+import asyncio
 import logging
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 logger = logging.getLogger(__name__)
-_io_lock = threading.Lock()
+
+# Sostituiamo threading.Lock con asyncio.Lock per non bloccare l'event loop
+_io_lock = asyncio.Lock()
 _PROFILES_FILE = Path.home() / ".cache" / "spotiflac" / "profiles.json"
 
 
@@ -81,11 +83,24 @@ class ProfileConfig(BaseModel):
         raise TypeError("log_level must be an integer or a named log level string")
 
 
-def _load() -> dict:
-    with _io_lock:
+# Helpers I/O sincroni da eseguire in un thread
+def _read_file_sync() -> str | None:
+    if _PROFILES_FILE.exists():
+        return _PROFILES_FILE.read_text(encoding="utf-8")
+    return None
+
+
+def _write_file_sync(data_str: str) -> None:
+    _PROFILES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PROFILES_FILE.write_text(data_str, encoding="utf-8")
+
+
+async def _load_async() -> dict:
+    async with _io_lock:
         try:
-            if _PROFILES_FILE.exists():
-                raw = json.loads(_PROFILES_FILE.read_text(encoding="utf-8"))
+            raw_data = await asyncio.to_thread(_read_file_sync)
+            if raw_data:
+                raw = json.loads(raw_data)
                 if isinstance(raw, dict):
                     validated: dict[str, dict] = {}
                     for name, profile in raw.items():
@@ -93,6 +108,7 @@ def _load() -> dict:
                             logger.debug("[profile] skipping invalid profile %s", name)
                             continue
                         try:
+                            # La validazione Pydantic è velocissima in RAM
                             validated[name] = ProfileConfig.model_validate(profile).model_dump(exclude_none=True)
                         except ValidationError as exc:
                             logger.warning("[profile] invalid profile %s: %s", name, exc)
@@ -104,62 +120,63 @@ def _load() -> dict:
     return {}
 
 
-def _write(profiles: dict) -> None:
-    with _io_lock:
+async def _write_async(profiles: dict) -> None:
+    async with _io_lock:
         try:
-             _PROFILES_FILE.parent.mkdir(parents=True, exist_ok=True)
-             _PROFILES_FILE.write_text(json.dumps(profiles, indent=2), encoding="utf-8")
+            data_str = json.dumps(profiles, indent=2)
+            await asyncio.to_thread(_write_file_sync, data_str)
         except Exception as exc:
             logger.debug("[profile] Write error: %s", exc)
 
 
-
-def list_profiles() -> list[str]:
+async def list_profiles_async() -> list[str]:
     """Returns i nomi di tutti i profili salvati, in ordine alfabetico."""
-    return sorted(_load().keys())
+    profiles = await _load_async()
+    return sorted(profiles.keys())
 
 
-def get_profile(name: str) -> dict | None:
+async def get_profile_async(name: str) -> dict | None:
     """
     Carica un profilo per nome.
     Returns None se il profilo non esiste.
     """
-    return _load().get(name)
+    profiles = await _load_async()
+    return profiles.get(name)
 
 
-def save_profile(name: str, cfg: dict) -> None:
+async def save_profile_async(name: str, cfg: dict) -> None:
     """
     Salva l'intera configurazione come profilo nominato, escludendo i dati di runtime.
     Sovrascrive eventuali profili preesistenti con lo stesso nome.
     """
-    profiles = _load()
+    profiles = await _load_async()
     validated = ProfileConfig.model_validate(cfg)
     profile_data = validated.model_dump(exclude_none=True)
     for runtime_key in ("url", "output_path", "qobuz_token"):
         profile_data.pop(runtime_key, None)
     profile_data["_saved_at"] = int(time.time())
     profiles[name] = profile_data
-    _write(profiles)
+    await _write_async(profiles)
 
 
-def delete_profile(name: str) -> bool:
+async def delete_profile_async(name: str) -> bool:
     """
     Elimina un profilo per nome.
     Returns True se il profilo esisteva, False altrimenti.
     """
-    profiles = _load()
+    profiles = await _load_async()
     if name not in profiles:
         return False
     del profiles[name]
-    _write(profiles)
+    await _write_async(profiles)
     return True
 
 
-def rename_profile(old_name: str, new_name: str) -> bool:
+async def rename_profile_async(old_name: str, new_name: str) -> bool:
     """Rinomina un profilo. Returns True se l'operazione riesce."""
-    profiles = _load()
+    profiles = await _load_async()
     if old_name not in profiles or new_name in profiles:
         return False
     profiles[new_name] = profiles.pop(old_name)
-    _write(profiles)
+    await _write_async(profiles)
     return True

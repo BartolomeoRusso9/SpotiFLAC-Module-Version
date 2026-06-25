@@ -52,7 +52,12 @@ def print_track_header(position: int, total: int, title: str, artists: str, albu
 
 def print_source_banner(provider: str, api: str, quality: str) -> None:
     provider_label = provider.upper()
-    line = f"[SOURCE] {provider_label} · {quality}"
+
+    if api:
+        line = f"[SOURCE] {provider_label} · {_shorten_api(provider, api)} · {quality}"
+    else:
+        line = f"[SOURCE] {provider_label} · {quality}"
+
     with tqdm.get_lock():
         tqdm.write(line, file=sys.stderr)
 
@@ -94,21 +99,10 @@ def print_quality_fallback(provider: str, from_q: str, to_q: str) -> None:
         tqdm.write(f"  ⬇  {provider}: quality {from_q} unavailable — falling back to {to_q}", file=sys.stderr)
 
 def _shorten_api(provider: str, url: str) -> str:
-    if provider.lower() == "qobuz":
-        return "stream API"
-    if provider.lower() == "tidal":
-        return "Tidal API"
-    if provider.lower() == "amazon":
-        return "Amazon API"
-    if provider.lower() == "deezer":
-        return "Deezer API"
-    if provider.lower() == "apple":
-        return "Apple Music API"
-    if provider.lower() == "soundcloud":
-        return "SoundCloud API"
-    if provider.lower() == "youtube":
-        return "YouTube API"
-    return url.removeprefix("https://").removeprefix("http://").split("/")[0]
+    return url.removeprefix("https://") \
+              .removeprefix("http://") \
+              .split("/")[0] \
+              .split(".")[0]
 
 def _fmt_seconds(s: float) -> str:
     s = int(round(s))

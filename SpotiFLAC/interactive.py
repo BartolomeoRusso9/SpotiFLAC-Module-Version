@@ -12,9 +12,10 @@ from __future__ import annotations
 from urllib.parse import urlparse
 import os
 import sys
+import asyncio
+
 from .core.health_check import run_health_check
 from .core.quality import normalize_quality, quality_fallback_chain
-import asyncio
 
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
 
@@ -136,19 +137,18 @@ _ALL_SERVICES = [
     "tidal", "qobuz", "deezer", "amazon", "soundcloud", "apple", 
     "youtube", "pandora", "joox", "netease", "migu", "kuwo"
 ]
-def _run_health_check():
-    try:
-        return asyncio.run(run_health_check(_ALL_SERVICES, include_all_endpoints=True))
-    except Exception as e:
-        print(f"  {RED(f'Health check error: {e}')}")
-        return []
 
 
-def _display_health_check() -> dict[str, bool]:
+async def _display_health_check() -> dict[str, bool]:
     _section("Service Availability Check")
     print(f"  {DIM('Probing endpoints...')} ", end="", flush=True)
 
-    results = _run_health_check()
+    try:
+        results = await run_health_check(_ALL_SERVICES, include_all_endpoints=True)
+    except Exception as e:
+        print(f"\r  {RED(f'Health check error: {e}')}" + " " * 20)
+        results = []
+
     print("\r" + " " * 40 + "\r", end="")
 
     if not results:
@@ -187,15 +187,15 @@ def _display_health_check() -> dict[str, bool]:
 # URL History
 # ---------------------------------------------------------------------------
 
-def _pick_from_history() -> str | None:
+async def _pick_from_history() -> str | None:
     try:
-        from .core.session_memory import get_url_history, remove_url_from_history, clear_url_history
+        from .core.session_memory import get_url_history_async, remove_url_from_history_async, clear_url_history_async
         from .core.history import clear_recent_fetches
     except Exception:
         return None
 
     while True:
-        history = get_url_history()
+        history = await get_url_history_async()
 
         if not history:
             return None
@@ -230,7 +230,7 @@ def _pick_from_history() -> str | None:
         if val_lower in ('c', 'clear'):
             if _ask_bool("Are you sure you want to clear URL history?", False):
                 try:
-                    clear_url_history()
+                    await clear_url_history_async()
                     print(f"\n  {GREEN('✓')} URL history cleared.\n")
                     continue
                 except Exception as e:
@@ -243,7 +243,8 @@ def _pick_from_history() -> str | None:
         if val_lower in ('r', 'recent', 'clear recent'):
             if _ask_bool("Are you sure you want to clear recent fetches?", False):
                 try:
-                    clear_recent_fetches()
+                    # Deleghiamo eventuali IO sync bloccanti di core/history a to_thread per sicurezza
+                    await asyncio.to_thread(clear_recent_fetches)
                     print(f"\n  {GREEN('✓')} Recent fetches cleared.\n")
                     continue
                 except Exception as e:
@@ -260,7 +261,7 @@ def _pick_from_history() -> str | None:
                 if 0 <= idx < len(history[:8]):
                     url_to_remove = history[idx].get("url")
                     try:
-                        remove_url_from_history(url_to_remove)
+                        await remove_url_from_history_async(url_to_remove)
                         print(f"\n  {GREEN('✓')} Entry deleted. Refreshing list...\n")
                         continue
                     except Exception as e:
@@ -277,14 +278,14 @@ def _pick_from_history() -> str | None:
 # Profile Management
 # ---------------------------------------------------------------------------
 
-def _profile_load_section(cfg: dict) -> dict:
+async def _profile_load_section(cfg: dict) -> dict:
     try:
-        from .core.profiles import list_profiles, get_profile, delete_profile
+        from .core.profiles import list_profiles_async, get_profile_async, delete_profile_async
     except Exception:
         return cfg
 
     while True:
-        profiles = list_profiles()
+        profiles = await list_profiles_async()
         if not profiles:
             return cfg
 
@@ -307,7 +308,6 @@ def _profile_load_section(cfg: dict) -> dict:
 
         val_lower = val.lower()
         
-        # Handling cancellazione profilo
         if val_lower.startswith('d') and len(val_lower) > 1:
             num_str = val_lower[1:].strip()
             if num_str.isdigit():
@@ -315,11 +315,10 @@ def _profile_load_section(cfg: dict) -> dict:
                 if 0 <= idx < len(profiles):
                     prof_to_delete = profiles[idx]
                     if _ask_bool(f"Delete profile '{prof_to_delete}'?", False):
-                        delete_profile(prof_to_delete)
+                        await delete_profile_async(prof_to_delete)
                         print(f"\n  {GREEN('✓')} Profile {BOLD(prof_to_delete)} deleted.\n")
-                    continue # Reload the updated menu
+                    continue 
 
-        # Handling caricamento profilo
         chosen_name: str | None = None
         if val.isdigit() and 1 <= int(val) <= len(profiles):
             chosen_name = profiles[int(val) - 1]
@@ -327,23 +326,23 @@ def _profile_load_section(cfg: dict) -> dict:
             chosen_name = val
 
         if chosen_name:
-            profile_data = get_profile(chosen_name)
+            profile_data = await get_profile_async(chosen_name)
             if profile_data:
                 cfg.update({k: v for k, v in profile_data.items() if not k.startswith("_")})
                 print(f"\n  {GREEN('✓')} Profile {BOLD(chosen_name)} loaded.")
             return cfg
 
 
-def _profile_save_section(cfg: dict) -> None:
+async def _profile_save_section(cfg: dict) -> None:
     if not _ask_bool("Save this configuration as a profile?", False):
         return
     try:
-        from .core.profiles import save_profile, list_profiles
+        from .core.profiles import save_profile_async, list_profiles_async
     except Exception:
         print(f"  {RED('✗  Profile save unavailable.')}")
         return
 
-    existing = list_profiles()
+    existing = await list_profiles_async()
     if existing:
         print(f"  {DIM('Existing profiles: ' + ', '.join(existing))}")
 
@@ -352,7 +351,7 @@ def _profile_save_section(cfg: dict) -> None:
         return
 
     try:
-        save_profile(name, cfg)
+        await save_profile_async(name, cfg)
         print(f"  {GREEN('✓')} Profile {BOLD(name)} saved.")
     except Exception as exc:
         print(f"  {RED(f'✗  Save failed: {exc}')}")
@@ -412,12 +411,12 @@ def _summary(cfg: dict) -> None:
 # Main wizard
 # ---------------------------------------------------------------------------
 
-def run_interactive() -> dict:
+async def run_interactive() -> dict:
     _header()
 
     # ── Health check ────────────────────────────────────────────────────────
     while True:
-        health_status = _display_health_check()
+        health_status = await _display_health_check()
 
         working_count = sum(health_status.values()) if health_status else 0
         total_services = len(_ALL_SERVICES)
@@ -432,14 +431,14 @@ def run_interactive() -> dict:
     cfg: dict = {}
 
     # ── Profile load ────────────────────────────────────────────────────────
-    cfg = _profile_load_section(cfg)
+    cfg = await _profile_load_section(cfg)
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
     print(f"  {DIM('Accepted: Spotify, Apple Music, Tidal, SoundCloud, YouTube, Pandora.')}")
     print(f"  {DIM('Modes: Track, Album, Playlist, Artist Discography.')}")
 
-    prefill = _pick_from_history()
+    prefill = await _pick_from_history()
 
     url = ""
     while True:
@@ -478,16 +477,16 @@ def run_interactive() -> dict:
     # ── 2. Output directory ─────────────────────────────────────────────────
     _section("2 · Output Directory")
     try:
-        from .core.session_memory import get_last_folder
-        last_folder = get_last_folder() or "./Downloads"
+        from .core.session_memory import get_last_folder_async
+        last_folder = await get_last_folder_async() or "./Downloads"
     except Exception:
         last_folder = "./Downloads"
 
     cfg["output_dir"] = _ask("Destination folder", cfg.get("output_dir", last_folder))
 
     try:
-        from .core.session_memory import set_last_folder
-        set_last_folder(cfg["output_dir"])
+        from .core.session_memory import set_last_folder_async
+        await set_last_folder_async(cfg["output_dir"])
     except Exception:
         pass
 
@@ -802,6 +801,7 @@ def run_interactive() -> dict:
 
     # ── 11. Optional Qobuz Local API ───────────────────────────────────────────────
     _section("11 · Optional Qobuz Local API")
+    print(f"  {DIM('Self-host your own qobuz-api instance for guaranteed availability.')}")
     print(f"  {DIM('For a self-hosted Qobuz API, visit: https://github.com/BartolomeoRusso9/qobuz-api')}")
     cfg["qobuz_local_api_url"] = _ask(
         "Qobuz local API URL (leave blank to skip)",
@@ -818,7 +818,7 @@ def run_interactive() -> dict:
     cfg["loop"] = int(loop_str) if loop_str.isdigit() else None
 
     # ── Profile save ────────────────────────────────────────────────────────
-    _profile_save_section(cfg)
+    await _profile_save_section(cfg)
 
     # ── Summary + confirmation ───────────────────────────────────────────────
     _summary(cfg)

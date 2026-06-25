@@ -1,17 +1,15 @@
-"""
-BaseProvider: classe astratta per tutti i provider audio.
-Implementa il pattern Protocol/Interface di Go.
-"""
 from __future__ import annotations
+
+import asyncio
+import asyncio.subprocess as _subproc
 import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Callable
+from typing import Awaitable, Callable
 
-from ..core.models import TrackMetadata, DownloadResult, build_filename
-from ..core.http import HttpClient, RetryConfig
-from ..core.errors import SpotiflacError
+from ..core.http import AsyncHttpClient, AsyncRateLimiter, RetryConfig
+from ..core.models import DownloadResult, TrackMetadata, build_filename
 
 logger = logging.getLogger(__name__)
 
@@ -23,31 +21,58 @@ class BaseProvider(ABC):
     la duplicazione presente nei file originali.
     """
     name: str = "base"
+    _is_async: bool = True
 
     def __init__(
             self,
             timeout_s:  int            = 30,
             retry:      RetryConfig | None = None,
             headers:    dict[str, str] | None = None,
+            rate_limiter: AsyncRateLimiter | None = None,
     ) -> None:
-        self._http = HttpClient(
-            provider  = self.name,
-            timeout_s = timeout_s,
-            retry     = retry,
-            headers   = headers,
+        self._async_http = AsyncHttpClient(
+            provider    = self.name,
+            timeout_s   = timeout_s,
+            rate_limiter= rate_limiter,
+            headers     = headers,
         )
-        self._progress_cb: Callable[[int, int], None] | None = None
+        # Type hint aggiornato per supportare sia callback sincroni (None) che asincroni (Awaitable)
+        self._progress_cb: Callable[[int, int], Awaitable[None] | None] | None = None
 
-    def set_progress_callback(self, cb: Callable[[int, int], None]) -> None:
-        self._progress_cb = cb
+    def set_progress_callback(self, cb: Callable[[int, int], Awaitable[None] | None]) -> None:
+        """Imposta il callback di progresso in modo sicuro (Thread-Safe e Async-Safe)."""
+        if cb is None:
+            self._progress_cb = None
+            return
 
+        # Catturiamo il riferimento all'event loop principale 
+        # nel momento in cui il provider viene inizializzato.
+        try:
+            main_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            main_loop = None
+
+        def safe_wrapper(written: int, total: int) -> None:
+            res = cb(written, total)
+            if asyncio.iscoroutine(res):
+                try:
+                    # Controlliamo se siamo nel thread asincrono principale
+                    asyncio.get_running_loop()
+                    asyncio.create_task(res)
+                except RuntimeError:
+                    # RuntimeError significa che siamo in un worker thread (es. yt-dlp).
+                    # "Teletrasportiamo" l'esecuzione nel loop principale in modo sicuro.
+                    if main_loop and main_loop.is_running():
+                        asyncio.run_coroutine_threadsafe(res, main_loop)
+                
+        self._progress_cb = safe_wrapper
+        
     def set_stop_event(self, ev) -> None:
         """Attach a threading.Event used to signal cancellation to the provider and its HttpClient."""
         try:
             self._stop_event = ev
-            # also propagate to the underlying HttpClient when present
-            if hasattr(self, "_http") and self._http is not None:
-                setattr(self._http, "_stop_event", ev)
+            if hasattr(self, "_async_http") and self._async_http is not None:
+                setattr(self._async_http, "_stop_event", ev)
         except Exception:
             pass
 
@@ -56,7 +81,7 @@ class BaseProvider(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def download_track(
+    async def download_track_async(
             self,
             metadata:   TrackMetadata,
             output_dir: str,
@@ -74,12 +99,6 @@ class BaseProvider(ABC):
             is_album:             bool = False,
             **kwargs,
     ) -> DownloadResult:
-        """
-        Scarica la track e ritorna un DownloadResult.
-
-        IMPORTANTE: le implementazioni NON devono propagare eccezioni al caller;
-        should catch them and return DownloadResult.fail(...) in caso di errore.
-        """
         raise NotImplementedError
 
     # ------------------------------------------------------------------
@@ -118,7 +137,37 @@ class BaseProvider(ABC):
             return True
         return False
 
-    # FIX: rimosso _safe_download — era codice morto.
-    # Nessun provider lo chiamava: tutti invocano download_track() direttamente.
-    # Il pattern corretto è che download_track() catchi le eccezioni internamente
-    # e ritorni DownloadResult.fail(), come da docstring qui sopra.
+    async def _run_ffmpeg(self, *args: str) -> tuple[int, str, str]:
+        """Executes ffmpeg asynchronously and returns (returncode, stdout, stderr)."""
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=_subproc.PIPE,
+            stderr=_subproc.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stdout.decode(errors="ignore"), stderr.decode(errors="ignore")
+
+    # ------------------------------------------------------------------
+    # Interface methods — subclasses must implement
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def download_track_async(
+            self,
+            metadata:   TrackMetadata,
+            output_dir: str,
+            *,
+            filename_format:      str  = "{title} - {artist}",
+            position:             int  = 1,
+            include_track_num:    bool = False,
+            use_album_track_num:  bool = False,
+            first_artist_only:    bool = False,
+            allow_fallback:       bool = True,
+            embed_lyrics:         bool = False,
+            lyrics_providers:     list[str] | None = None,
+            enrich_metadata:      bool = False,
+            enrich_providers:     list[str] | None = None,
+            is_album:             bool = False,
+            **kwargs,
+    ) -> DownloadResult:
+        raise NotImplementedError

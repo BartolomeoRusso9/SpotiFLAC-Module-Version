@@ -1,27 +1,30 @@
-from .base import BaseProvider
-from .qobuz import QobuzProvider
-from .tidal import TidalProvider
 from .amazon import AmazonProvider
-from .deezer import DeezerProvider
 from .apple_music import AppleMusicProvider
-from .soundcloud import SoundCloudProvider
-from .youtube import YouTubeProvider
+from .base import BaseProvider
+from .deezer import DeezerProvider
+from .gdstudio import JooxProvider, KuwoProvider, MiguProvider, NeteaseProvider
 from .pandora import PandoraProvider
+from .qobuz import QobuzProvider
+from .soundcloud import SoundCloudProvider
 from .spotify_metadata import SpotifyMetadataClient, parse_spotify_url
-from .gdstudio import JooxProvider, NeteaseProvider, MiguProvider, KuwoProvider
+from .tidal import TidalProvider
+from .youtube import YouTubeProvider
 
 __all__ = [
-    "BaseProvider",
-    "QobuzProvider",
-    "TidalProvider",
     "AmazonProvider",
-    "SpotiDownloaderProvider",
     "AppleMusicProvider",
-    "SoundCloudProvider",
-    "YouTubeProvider",
+    "BaseProvider",
     "DeezerProvider",
+    "JooxProvider",
+    "KuwoProvider",
+    "MiguProvider",
+    "NeteaseProvider",
     "PandoraProvider",
+    "QobuzProvider",
+    "SoundCloudProvider",
     "SpotifyMetadataClient",
+    "TidalProvider",
+    "YouTubeProvider",
     "parse_spotify_url",
 ]
 
@@ -29,13 +32,16 @@ PROVIDER_REGISTRY: dict[str, type] = {
         "tidal":      TidalProvider,
         "joox":       JooxProvider,
         "netease":    NeteaseProvider,
-        "migu":       MiguProvider,
-        "kuwo":       KuwoProvider,
-        "qobuz":      QobuzProvider,
-        "amazon":     AmazonProvider,
-        "deezer":     DeezerProvider,
-        "apple":      AppleMusicProvider,
-        "soundcloud": SoundCloudProvider,
-        "youtube":    YouTubeProvider,
-        "pandora":    PandoraProvider,
-    }
+    "amazon":     AmazonProvider,
+    "apple":      AppleMusicProvider,
+    "deezer":     DeezerProvider,
+    "joox":       JooxProvider,
+    "kuwo":       KuwoProvider,
+    "migu":       MiguProvider,
+    "netease":    NeteaseProvider,
+    "pandora":    PandoraProvider,
+    "qobuz":      QobuzProvider,
+    "soundcloud": SoundCloudProvider,
+    "tidal":      TidalProvider,
+    "youtube":    YouTubeProvider,
+}

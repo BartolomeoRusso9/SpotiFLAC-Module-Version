@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import importlib.metadata
 import sys
+import asyncio
 
 from .downloader import SpotiflacDownloader, DownloadOptions
 from .providers import (
@@ -80,7 +81,7 @@ def SpotiFLAC(
         url:                   str | list[str],
         output_dir:            str,
         services:              list[str] | None = None,
-        filename_format:        str              = "{title} - {artist}",
+        filename_format:       str              = "{title} - {artist}",
         use_track_numbers:     bool             = False,
         use_album_track_numbers: bool           = False,
         use_artist_subfolders: bool             = False,
@@ -88,7 +89,7 @@ def SpotiFLAC(
         loop:                  int | None       = None,
         allow_fallback:        bool             = True,
         quality:               str              = "LOSSLESS",
-        first_artist_only:      bool             = False,
+        first_artist_only:     bool             = False,
         log_level:             int              = logging.WARNING,
         output_path:           str | None       = None,
         embed_lyrics:          bool             = True,
@@ -101,7 +102,7 @@ def SpotiFLAC(
         post_download_action:  str              = "none",
         post_download_command: str              = "",
         tidal_custom_api:      str | None       = None,
-        timeout_s:             int | None       = None
+        timeout_s:             int | None       = None,
 ) -> None:
     """
     Download tracks/album/playlist from Spotify, Tidal, Apple Music, Deezer, SoundCloud, Pandora and YouTube.
@@ -112,21 +113,21 @@ def SpotiFLAC(
         services: Provider in ordine di priorità (default: ["tidal"]).
         track_max_retries: Tentativi extra per track in caso di fallimento (default: 0).
         post_download_action: Azione al termine — "none" | "open_folder" | "notify" | "command".
-        post_download_command: Comando shell da executere (con {folder}, {succeeded}, {failed}).
+        post_download_command: Comando shell da eseguire (con {folder}, {succeeded}, {failed}).
     """
     _setup_logger(log_level)
 
     opts = DownloadOptions(
         output_dir              = output_dir,
         services                = services or ["tidal"],
-        filename_format          = filename_format,
+        filename_format         = filename_format,
         use_track_numbers       = use_track_numbers,
         use_album_track_numbers = use_album_track_numbers,
         use_artist_subfolders   = use_artist_subfolders,
         allow_fallback          = allow_fallback,
         use_album_subfolders    = use_album_subfolders,
         quality                 = quality,
-        first_artist_only        = first_artist_only,
+        first_artist_only       = first_artist_only,
         output_path             = output_path,
         embed_lyrics            = embed_lyrics,
         lyrics_providers        = lyrics_providers or ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
@@ -143,7 +144,16 @@ def SpotiFLAC(
 
     try:
         downloader = SpotiflacDownloader(opts)
-        downloader.run(url, loop_minutes=loop)
+        
+        # Gestiamo l'avvio del loop asincrono in modo "safe" 
+        # (copre sia chiamate standard che chiamate da contesti già asincroni come Jupyter)
+        try:
+            asyncio.run(downloader.run_async(url, loop_minutes=loop))
+        except RuntimeError:
+            # Fallback se un event loop è già in esecuzione nel thread attuale
+            loop_instance = asyncio.get_event_loop()
+            loop_instance.run_until_complete(downloader.run_async(url, loop_minutes=loop))
+            
     except KeyboardInterrupt:
         print("\n\n[!] Operazione interrotta dall'utente.")
     except Exception as e:

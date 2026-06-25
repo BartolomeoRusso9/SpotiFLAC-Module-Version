@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+import asyncio
 from unittest.mock import patch
 
 from SpotiFLAC.core import provider_stats
@@ -26,23 +27,23 @@ class ProviderStatsTests(unittest.TestCase):
 
     def test_record_success_and_prioritize(self):
         scorer = ProviderScorer()
-        scorer.reset()
+        asyncio.run(scorer.reset_async())
 
-        scorer.record_failure("test", "http://api.example.com/bad")
-        scorer.record_success("test", "http://api.example.com/good")
+        asyncio.run(scorer.record_failure_async("test", "http://api.example.com/bad"))
+        asyncio.run(scorer.record_success_async("test", "http://api.example.com/good"))
 
-        ordering = scorer.prioritize("test", ["http://api.example.com/bad", "http://api.example.com/good", "http://api.example.com/new"])
+        ordering = asyncio.run(scorer.prioritize_async("test", ["http://api.example.com/bad", "http://api.example.com/good", "http://api.example.com/new"]))
         self.assertEqual(ordering[0], "http://api.example.com/good")
         self.assertIn("http://api.example.com/new", ordering)
 
     def test_persistence_survives_new_instance(self):
         scorer = ProviderScorer()
-        scorer.reset()
-        scorer.record_success("test", "http://api.example.com/good")
+        asyncio.run(scorer.reset_async())
+        asyncio.run(scorer.record_success_async("test", "http://api.example.com/good"))
 
         ProviderScorer._instance = None
         new_scorer = ProviderScorer()
-        ordering = new_scorer.prioritize("test", ["http://api.example.com/good", "http://api.example.com/bad"])
+        ordering = asyncio.run(new_scorer.prioritize_async("test", ["http://api.example.com/good", "http://api.example.com/bad"]))
         self.assertEqual(ordering[0], "http://api.example.com/good")
 
 

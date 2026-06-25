@@ -12,7 +12,7 @@ import re
 import importlib.metadata
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .core.http import NetworkManager
+from .core.http import AsyncHttpClient
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
 
@@ -83,10 +83,10 @@ class SpotiFLAC_API:
     def get_version(self):
         return self.app_version
 
-    def get_latest_version(self) -> dict:
-        client = NetworkManager.get_sync_client()
+    async def get_latest_version(self) -> dict:
         try:
-            resp = client.get(
+            client = AsyncHttpClient("github", timeout_s=10)
+            resp = await client.get(
                 "https://api.github.com/repos/ShuShuzinhuu/SpotiFLAC-Module-Version/releases/latest",
                 headers={
                     "Accept": "application/vnd.github.v3+json",
@@ -498,11 +498,10 @@ class SpotiFLAC_API:
         except Exception:
             pass
 
-    def get_network_status(self):
+    async def get_network_status(self):
         try:
-            from .core.http import NetworkManager
-            client = NetworkManager.get_sync_client()
-            resp = client.get("https://ipapi.co/json/", timeout=10)
+            client = AsyncHttpClient("network", timeout_s=10)
+            resp = await client.get("https://ipapi.co/json/", timeout=10)
             data = resp.json() if resp.status_code == 200 else {}
             return {
                 "ip": data.get("ip", "Unavailable"),
@@ -536,21 +535,21 @@ class SpotiFLAC_API:
             self.log(f"Failed to delete profile: {e}", "error")
             return False
 
-    def check_qobuz_api(self, url):
-        return self._check_api_endpoint(url)
+    async def check_qobuz_api(self, url):
+        return await self._check_api_endpoint(url)
 
-    def check_tidal_api(self, url):
-        return self._check_api_endpoint(url)
+    async def check_tidal_api(self, url):
+        return await self._check_api_endpoint(url)
 
-    def _check_api_endpoint(self, url):
+    async def _check_api_endpoint(self, url):
         try:
             if not url or not isinstance(url, str) or not url.strip():
                 raise ValueError('URL must be a non-empty string')
             normalized = url.strip()
             if not normalized.lower().startswith('http'):
                 raise ValueError('URL must start with http or https')
-            client = NetworkManager.get_sync_client()
-            resp = client.get(normalized, follow_redirects=True, timeout=10.0)
+            client = AsyncHttpClient("api-check", timeout_s=10)
+            resp = await client.get(normalized, follow_redirects=True, timeout=10.0)
             return {
                 'ok': 200 <= resp.status_code < 400,
                 'status_code': resp.status_code,
@@ -664,6 +663,9 @@ class SpotiFLAC_API:
         ).start()
 
     def _download_lyrics_task(self, track_data):
+        asyncio.run(self._download_lyrics_task_async(track_data))
+
+    async def _download_lyrics_task_async(self, track_data):
         try:
             title   = track_data.get("title", "Unknown")
             artist  = track_data.get("artist", "")
@@ -671,8 +673,8 @@ class SpotiFLAC_API:
             dur_ms  = track_data.get("duration_ms", 0)
             track_id = track_data.get("id", "")
 
-            from .core.lyrics import fetch_lyrics
-            lyrics_text, provider = fetch_lyrics(
+            from .core.lyrics import fetch_lyrics_async
+            lyrics_text, provider = await fetch_lyrics_async(
                 track_name  = title,
                 artist_name = artist,
                 duration_s  = dur_ms // 1000 if dur_ms else 0,
@@ -690,8 +692,8 @@ class SpotiFLAC_API:
             out_path    = os.path.join(self.download_dir, filename)
 
             os.makedirs(self.download_dir, exist_ok=True)
-            with open(out_path, "w", encoding="utf-8") as f:
-                f.write(lyrics_text)
+            async with aiofiles.open(out_path, "w", encoding="utf-8") as f:
+                await f.write(lyrics_text)
 
             self.log(f"Lyrics saved: {filename} (via {provider})", "ok")
 
@@ -710,6 +712,9 @@ class SpotiFLAC_API:
 
 
     def _download_cover_task(self, track_data):
+        asyncio.run(self._download_cover_task_async(track_data))
+
+    async def _download_cover_task_async(self, track_data):
         try:
             title     = track_data.get("title", "Unknown")
             artist    = track_data.get("artist", "")
@@ -720,10 +725,8 @@ class SpotiFLAC_API:
                 return
 
             self.log(f"Downloading cover for: {title}…", "info")
-
-            from .core.http import NetworkManager
-            client = NetworkManager.get_sync_client()
-            resp = client.get(cover_url, timeout=15)
+            client = AsyncHttpClient("cover", timeout_s=15)
+            resp = await client.get(cover_url, timeout=15)
             resp.raise_for_status()
 
             safe_title  = re.sub(r'[\\/*?:"<>|]', "", title).strip()
@@ -732,8 +735,8 @@ class SpotiFLAC_API:
             out_path    = os.path.join(self.download_dir, filename)
 
             os.makedirs(self.download_dir, exist_ok=True)
-            with open(out_path, "wb") as f:
-                f.write(resp.content)
+            async with aiofiles.open(out_path, "wb") as f:
+                await f.write(resp.content)
 
             self.log(f"Cover saved: {filename}", "ok")
 
@@ -749,6 +752,9 @@ class SpotiFLAC_API:
         ).start()
 
     def _download_cover_task_typed(self, cover_data):
+        asyncio.run(self._download_cover_task_typed_async(cover_data))
+
+    async def _download_cover_task_typed_async(self, cover_data):
         try:
             title     = cover_data.get("title", "Unknown")
             artist    = cover_data.get("artist", "")
@@ -764,8 +770,8 @@ class SpotiFLAC_API:
             safe_title  = re.sub(r'[\\/*?:"<>|]', "", title).strip()
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
             safe_owner  = re.sub(r'[\\/*?:"<>|]', "", owner).strip()
-            client = NetworkManager.get_sync_client()
-            resp = client.get(cover_url, timeout=15)
+            client = AsyncHttpClient("cover", timeout_s=15)
+            resp = await client.get(cover_url, timeout=15)
             resp.raise_for_status()
 
             # Determine folder structure based on type
@@ -785,8 +791,8 @@ class SpotiFLAC_API:
             os.makedirs(folder_path, exist_ok=True)
             out_path = os.path.join(folder_path, "cover.jpg")
 
-            with open(out_path, "wb") as f:
-                f.write(resp.content)
+            async with aiofiles.open(out_path, "wb") as f:
+                await f.write(resp.content)
 
             self.log(f"Cover saved: {folder_display}/cover.jpg", "ok")
 
@@ -802,6 +808,9 @@ class SpotiFLAC_API:
         ).start()
 
     def _download_album_cover_task(self, album_data):
+        asyncio.run(self._download_album_cover_task_async(album_data))
+
+    async def _download_album_cover_task_async(self, album_data):
         try:
             title     = album_data.get("title", "Unknown")
             artist    = album_data.get("artist", "Unknown Artist")
@@ -812,8 +821,8 @@ class SpotiFLAC_API:
                 return
 
             self.log(f"Downloading album cover: {artist} - {title}…", "info")
-            client = NetworkManager.get_sync_client()
-            resp = client.get(cover_url, timeout=15)
+            client = AsyncHttpClient("cover", timeout_s=15)
+            resp = await client.get(cover_url, timeout=15)
             resp.raise_for_status()
 
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
@@ -836,6 +845,9 @@ class SpotiFLAC_API:
     # ── Bulk: cover di tutte le tracks ───────────────────────────────────────────
 
     def _download_all_covers_task(self, tracks_data):
+        asyncio.run(self._async_download_all_covers(tracks_data))
+
+    async def _download_all_covers_task_async(self, tracks_data):
         total   = len(tracks_data)
         success = 0
         skipped = 0
@@ -854,8 +866,8 @@ class SpotiFLAC_API:
                 continue
 
             try:
-                client = NetworkManager.get_sync_client()
-                resp = client.get(cover_url, timeout=15)
+                client = AsyncHttpClient("cover", timeout_s=15)
+                resp = await client.get(cover_url, timeout=15)
                 resp.raise_for_status()
 
                 safe_title  = re.sub(r'[\\/*?:"<>|]', "", title).strip()
@@ -863,8 +875,8 @@ class SpotiFLAC_API:
                 filename    = f"{safe_artist} - {safe_title}.jpg" if safe_artist else f"{safe_title}.jpg"
                 out_path    = os.path.join(self.download_dir, filename)
 
-                with open(out_path, "wb") as f:
-                    f.write(resp.content)
+                async with aiofiles.open(out_path, "wb") as f:
+                    await f.write(resp.content)
 
                 self.log(f"[{i}/{total}] Cover saved: {filename}", "ok")
                 success += 1
@@ -932,7 +944,7 @@ class SpotiFLAC_API:
 
     async def _async_download_all_lyrics(self, tracks_data):
         import aiofiles
-        from .core.lyrics import fetch_lyrics
+        from .core.lyrics import fetch_lyrics_async
         
         total = len(tracks_data)
         success, skipped = 0, 0
@@ -949,12 +961,12 @@ class SpotiFLAC_API:
             track_id = track_data.get("id", "")
 
             try:
-                # Esegue la vecchia funzione sincrona senza bloccare l'Event Loop
-                lyrics_text, provider = await asyncio.to_thread(
-                    fetch_lyrics,
-                    track_name=title, artist_name=artist,
+                lyrics_text, provider = await fetch_lyrics_async(
+                    track_name=title,
+                    artist_name=artist,
                     duration_s=dur_ms // 1000 if dur_ms else 0,
-                    track_id=track_id, isrc=isrc
+                    track_id=track_id,
+                    isrc=isrc,
                 )
 
                 if not lyrics_text:
@@ -1013,7 +1025,7 @@ class SpotiFLAC_API:
             daemon=True,
         ).start()
 
-    def _fetch_metadata_task(self, url):
+    async def _fetch_metadata_task(self, url):
         try:
             self.set_progress("Recupero metadati…")
             self.log(f"Analisi input: {url}", "info")
@@ -1191,7 +1203,7 @@ class SpotiFLAC_API:
             self.set_progress("Ready for download.")
 
             try:
-                from .core.session_memory import add_url_to_history
+                from .core.session_memory import add_url_to_history_async
                 _lower = url.lower()
                 if '/track/' in _lower or _lower.startswith('spotify:track:') or 'watch?v=' in _lower or 'youtu.be' in _lower:
                     _url_type = 'track'
@@ -1205,8 +1217,8 @@ class SpotiFLAC_API:
                     _url_type = ''
                 
                 _artist = getattr(tracks[0], 'artists', '') if tracks and _url_type == 'track' else ''
-                add_url_to_history(url, label=collection_name, cover=cover,
-                                   track_count=len(tracks), url_type=_url_type, artist=_artist)
+                await add_url_to_history_async(url, label=collection_name, cover=cover,
+                                              track_count=len(tracks), url_type=_url_type, artist=_artist)
             except Exception:
                 pass
 
@@ -1372,7 +1384,7 @@ class SpotiFLAC_API:
             from .core.progress import DownloadManager
             manager = DownloadManager()
             while not stop_event.wait(0.25):
-                self._push_download_stats(manager.get_stats())
+                self._push_download_stats(manager.get_stats_sync())
         except Exception:
             pass
         finally:
@@ -1382,7 +1394,7 @@ class SpotiFLAC_API:
         try:
             if stats is None:
                 from .core.progress import DownloadManager
-                stats = DownloadManager().get_stats()
+                stats = DownloadManager().get_stats_sync()
             safe = json.dumps(stats)
             if self._window:
                 self._window.evaluate_js(f"window.app_update_download_stats({safe});")

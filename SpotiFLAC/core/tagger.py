@@ -13,8 +13,8 @@ Both formats share the same pipeline:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -274,6 +274,28 @@ def _embed_flac(
     audio.save()
     logger.debug("[tagger/flac] tags written: %s", path.name)
 
+
+async def _write_tags_async(
+        path:        Path,
+        tags:        dict[str, str],
+        cover_data:  bytes | None,
+        lyrics:      str | None,
+        lyrics_prov: str,
+        multi_artist: bool,
+        is_flac:     bool,
+        is_mp3:      bool,
+        is_m4a:      bool,
+) -> None:
+    if is_flac:
+        await asyncio.to_thread(_embed_flac, path, tags, cover_data, lyrics, lyrics_prov, multi_artist)
+    elif is_mp3:
+        await asyncio.to_thread(_embed_id3, path, tags, cover_data, lyrics, lyrics_prov)
+    elif is_m4a:
+        await asyncio.to_thread(_embed_m4a, path, tags, cover_data, lyrics, lyrics_prov)
+    else:
+        raise SpotiflacError(ErrorKind.FILE_IO, f"Unsupported file type: {path.suffix}")
+
+
 def _embed_m4a(
         path:        Path,
         tags:        dict[str, str],
@@ -365,7 +387,7 @@ class EmbedOptions:
 # Public API
 # ---------------------------------------------------------------------------
 
-def embed_metadata(
+async def embed_metadata_async(
         filepath:          str | Path,
         metadata:          TrackMetadata,
         opts:              EmbedOptions,
@@ -392,8 +414,8 @@ def embed_metadata(
 
     if opts.enrich:
         try:
-            from .metadata_enrichment import enrich_metadata as _enrich
-            enriched = _enrich(
+            from .metadata_enrichment import enrich_metadata_async as _enrich
+            enriched = await _enrich(
                 track_name  = metadata.title,
                 artist_name = metadata.first_artist,
                 isrc        = metadata.isrc,
@@ -417,7 +439,7 @@ def embed_metadata(
     if not cover_data:
         best_cover = enriched_cover_url or opts.cover_url or metadata.cover_url
         if best_cover:
-            cover_data = _fetch_cover(best_cover, session)
+            cover_data = await _fetch_cover_async(best_cover, session)
 
     # ── 3. Lyrics ──────────────────────────────────────────────────────────
     lyrics: str | None = None
@@ -425,8 +447,8 @@ def embed_metadata(
 
     if opts.embed_lyrics and metadata.title and metadata.first_artist:
         try:
-            from .lyrics import fetch_lyrics
-            res = fetch_lyrics(
+            from .lyrics import fetch_lyrics_async
+            res = await fetch_lyrics_async(
                 track_name       = metadata.title,
                 artist_name      = metadata.first_artist,
                 album_name       = metadata.album,
@@ -481,14 +503,18 @@ def embed_metadata(
         if key not in _date_keys and key.upper() not in _date_keys:
             tags[key.upper()] = str(val)
 
-    # ── 5. Scrittura sul file ──────────────────────────────────────────────
     try:
-        if is_flac:
-            _embed_flac(path, tags, cover_data, lyrics, lyrics_prov, multi_artist)
-        elif is_mp3:
-            _embed_id3(path, tags, cover_data, lyrics, lyrics_prov)
-        else:  # m4a / aac
-            _embed_m4a(path, tags, cover_data, lyrics, lyrics_prov)
+        await _write_tags_async(
+            path,
+            tags,
+            cover_data,
+            lyrics,
+            lyrics_prov,
+            multi_artist,
+            is_flac,
+            is_mp3,
+            is_m4a,
+        )
     except SpotiflacError:
         raise
     except Exception as exc:
@@ -499,27 +525,25 @@ def embed_metadata(
         )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
-def _fetch_cover(url: str, session: Any | None = None) -> bytes | None:
+async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | None:
     if not url:
         return None
-    
-    from .http import NetworkManager
-    s = NetworkManager.get_sync_client() # Usa il pool globale ultra-veloce
-    
+
+    from .http import AsyncHttpClient
+    client = AsyncHttpClient(provider="tagger", timeout_s=10)
+    headers = {}
+
     for attempt in range(3):
         try:
-            res = s.get(url, timeout=8.0)
-            if res.status_code == 200:
-                return res.content
-            logger.warning("[tagger] cover HTTP %s (attempt %d)", res.status_code, attempt + 1)
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                return resp.content
+            logger.warning("[tagger] cover HTTP %s (attempt %d)", resp.status_code, attempt + 1)
         except Exception as exc:
             logger.warning("[tagger] cover attempt %d failed: %s", attempt + 1, exc)
         if attempt < 2:
-            time.sleep(1.5 * (attempt + 1))
+            await asyncio.sleep(1.5 * (attempt + 1))
     return None
 
 

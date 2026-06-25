@@ -1,24 +1,23 @@
 from __future__ import annotations
 
+import asyncio
 import difflib
 import logging
 import time
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Awaitable, Callable
 
-import httpx
-
-from ..core.http import NetworkManager, RetryConfig
-from .base import BaseProvider
-from ..core.console import print_source_banner, print_quality_fallback
-from ..core.download_validation import validate_downloaded_track
-from ..core.errors import SpotiflacError, ErrorKind, TrackNotFoundError
-from ..core.models import TrackMetadata, DownloadResult
-from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
-from ..core.provider_stats import record_success, record_failure
-from ..core.tagger import embed_metadata, _print_mb_summary, EmbedOptions
+from ..core.console import print_quality_fallback, print_source_banner
+from ..core.download_validation import validate_downloaded_track_async
 from ..core.endpoints import get_apple_music_endpoint
+from ..core.errors import ErrorKind, SpotiflacError, TrackNotFoundError
+from ..core.http import RetryConfig
+from ..core.models import DownloadResult, TrackMetadata
+from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
+from ..core.provider_stats import record_failure_async, record_success_async
 from ..core.quality import normalize_quality
+from ..core.tagger import EmbedOptions, _print_mb_summary, embed_metadata_async
+from .base import BaseProvider
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +29,6 @@ class AppleMusicProvider(BaseProvider):
     MAX_POLLING_WAIT_S = 3600
 
     def __init__(self, timeout_s: int = 30, proxy_api_key: str = "") -> None:
-        super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2))
-        self._session = NetworkManager.get_sync_client()
-
-        # Cache per gli URL di ricerca
-        self._url_cache: OrderedDict[str, str] = OrderedDict()
-        self._cache_limit = 200
-
         headers = {
             "User-Agent": _DEFAULT_UA,
             "Accept": "application/json"
@@ -45,7 +37,21 @@ class AppleMusicProvider(BaseProvider):
             headers["Authorization"] = f"Bearer {proxy_api_key}"
             headers["X-API-Key"] = proxy_api_key
 
-        self._session.headers.update(headers)
+        super().__init__(timeout_s=timeout_s, retry=RetryConfig(max_attempts=2), headers=headers)
+
+        # Cache per gli URL di ricerca
+        self._url_cache: OrderedDict[str, str] = OrderedDict()
+        self._cache_limit = 200
+
+    def set_progress_callback(self, cb: Callable[[int, int], Awaitable[None] | None]) -> None:
+        def safe_wrapper(written: int, total: int) -> None:
+            if cb:
+                res = cb(written, total)
+                if asyncio.iscoroutine(res):
+                    asyncio.create_task(res)
+        
+        super().set_progress_callback(safe_wrapper)
+        self._progress_cb = safe_wrapper
 
     def _normalize_codec(self, quality: str) -> str:
         q = quality.lower()
@@ -55,15 +61,14 @@ class AppleMusicProvider(BaseProvider):
             return "alac"
         return "aac"
 
-    def _resolve_track_url(self, isrc: str) -> str | None:
-        """Uses l'API pubblica di iTunes per trovare l'URL della track delegando l'encoding a httpx."""
+    async def _resolve_track_url_async(self, isrc: str) -> str | None:
+        """Uses l'API pubblica di iTunes per trovare l'URL della track delegando l'encoding all'AsyncClient httpx."""
         try:
-            resp = self._session.get(
+            resp = await self._async_http.get(
                 "https://itunes.apple.com/lookup",
                 params={"isrc": isrc},
                 timeout=15
             )
-            resp.raise_for_status()
             data = resp.json()
             if data.get("resultCount", 0) > 0:
                 return data["results"][0].get("trackViewUrl")
@@ -71,19 +76,18 @@ class AppleMusicProvider(BaseProvider):
             logger.warning("[apple-music] Risoluzione URL iTunes fallita per l'ISRC %s: %s", isrc, e)
         return None
 
-    def _resolve_track_url_by_search(self, title: str, artists: str, isrc: str = "", duration_ms: int = 0) -> str | None:
+    async def _resolve_track_url_by_search_async(self, title: str, artists: str, isrc: str = "", duration_ms: int = 0) -> str | None:
         try:
             first_artist = artists.split(",")[0].strip()
             query = f"{title} {first_artist}"
             cache_key = f"search_{query}_{isrc}"
 
-            # Controllo cache LRU
+            # Controllo cache LRU (operazione in memoria, non bloccante)
             if cache_key in self._url_cache:
                 self._url_cache.move_to_end(cache_key)
                 return self._url_cache[cache_key]
 
-            # Delegato encoding dell'URL e parametri a httpx
-            resp = self._session.get(
+            resp = await self._async_http.get(
                 "https://itunes.apple.com/search",
                 params={"term": query, "entity": "song", "limit": 10},
                 timeout=15
@@ -130,7 +134,7 @@ class AppleMusicProvider(BaseProvider):
             logger.debug("[apple-music] Ricerca testuale fallita: %s", e)
         return None
 
-    def _get_stream_url(self, track_url: str, codec: str) -> tuple[str | None, str | None]:
+    async def _get_stream_url_async(self, track_url: str, codec: str) -> tuple[str | None, str | None]:
         """
         Tenta prima il download diretto (app2). Se fallisce, ripiega su app in coda.
         Returns una tupla (api_utilizzata, stream_url).
@@ -145,7 +149,7 @@ class AppleMusicProvider(BaseProvider):
         # 1. Tentativo Diretto (App2)
         proxy_direct = get_apple_music_endpoint("proxy_direct")
         try:
-            resp = self._session.post(
+            resp = await self._async_http.post(
                 proxy_direct,
                 json={"url": track_url, "codec": codec},
                 headers=req_headers,
@@ -155,25 +159,23 @@ class AppleMusicProvider(BaseProvider):
             if resp.headers.get("cf-mitigated", "").lower() == "challenge":
                 raise SpotiflacError(ErrorKind.NETWORK_ERROR, "Proxy bloccato da Cloudflare challenge", self.name)
 
-            resp.raise_for_status()
             data = resp.json()
             if data.get("success") and data.get("stream_url"):
-                record_success(self.name, proxy_direct)
+                await record_success_async(self.name, proxy_direct)
                 return proxy_direct, data["stream_url"]
 
-        except httpx.HTTPStatusError as e:
-            err_msg = e.response.json().get("error") if e.response.text else str(e)
-            logger.debug("[apple-music] app2 rifiutato per %s: %s", codec, err_msg)
-            record_failure(self.name, proxy_direct)
+        except SpotiflacError as e:
+            logger.debug("[apple-music] app2 rifiutato per %s: %s", codec, e)
+            await record_failure_async(self.name, proxy_direct)
         except Exception as e:
             logger.debug("[apple-music] Fallback ad app2 fallito: %s", e)
-            record_failure(self.name, proxy_direct)
+            await record_failure_async(self.name, proxy_direct)
 
         # 2. Tentativo in Coda (App)
         _proxy_queued = get_apple_music_endpoint("proxy_queued")
         download_endpoint = f"{_proxy_queued}/download"
         try:
-            resp = self._session.post(
+            resp = await self._async_http.post(
                 download_endpoint,
                 json={"url": track_url, "codec": codec},
                 headers=req_headers,
@@ -183,13 +185,12 @@ class AppleMusicProvider(BaseProvider):
             if resp.headers.get("cf-mitigated", "").lower() == "challenge":
                 return None, None
 
-            resp.raise_for_status()
             job_data = resp.json()
             job_id = job_data.get("job_id")
 
             if not job_id:
                 logger.warning("[apple-music] Nessun job_id restituito dal proxy in coda per %s.", codec)
-                record_failure(self.name, download_endpoint)
+                await record_failure_async(self.name, download_endpoint)
                 return None, None
 
             # Polling in attesa del completamento
@@ -203,34 +204,33 @@ class AppleMusicProvider(BaseProvider):
                     elapsed = int(time.time() - start_time)
                     print(f"  ⏳ Apple Music: in attesa del job {job_id[:8]}... ({elapsed}s trascorsi)")
 
-                st_resp = self._session.get(f"{_proxy_queued}/status/{job_id}", timeout=15)
-                st_resp.raise_for_status()
+                st_resp = await self._async_http.get(f"{_proxy_queued}/status/{job_id}", timeout=15)
                 st_data = st_resp.json()
                 status = st_data.get("status", "").lower()
 
                 if status == "completed":
-                    record_success(self.name, get_apple_music_endpoint("proxy_queued"))
+                    await record_success_async(self.name, get_apple_music_endpoint("proxy_queued"))
                     return _proxy_queued, f"{_proxy_queued}/file/{job_id}"
 
                 if status == "failed":
                     err = st_data.get('error', 'Error API sconosciuto')
                     logger.warning("[apple-music] Error API proxy per codec %s: %s", codec, err)
-                    record_failure(self.name, get_apple_music_endpoint("proxy_queued"))
+                    await record_failure_async(self.name, get_apple_music_endpoint("proxy_queued"))
                     return None, None
 
-                time.sleep(2.5)
+                # Cruciale: Usiamo asyncio.sleep, NON time.sleep, per non bloccare l'Event Loop
+                await asyncio.sleep(2.5)
 
             logger.warning("[apple-music] Timeout while waiting for track with codec %s.", codec)
-            record_failure(self.name, get_apple_music_endpoint("proxy_queued"))
+            await record_failure_async(self.name, get_apple_music_endpoint("proxy_queued"))
             return None, None
 
         except Exception as e:
             logger.debug("[apple-music] Unable to retrievesre lo stream in coda per %s: %s", codec, e)
-            record_failure(self.name, download_endpoint)
+            await record_failure_async(self.name, download_endpoint)
             return None, None
 
-
-    def download_track(
+    async def download_track_async(
             self,
             metadata:            TrackMetadata,
             output_dir:          str,
@@ -280,9 +280,13 @@ class AppleMusicProvider(BaseProvider):
                 codecs_to_try = list(dict.fromkeys(codecs_to_try))
 
             # Trigger Asincrono MusicBrainz
-            mb_fetcher = None
-            if metadata.isrc:
-                mb_fetcher = AsyncMBFetch(metadata.isrc)
+            import concurrent.futures
+            from ..core.isrc_utils import normalize_isrc
+            _isrc_for_mb = normalize_isrc(getattr(metadata, "isrc", None) or "")
+            logger.debug("[apple-music] ISRC at MB lookup: %r", _isrc_for_mb)
+            mb_fetcher = AsyncMBFetch(_isrc_for_mb) if _isrc_for_mb else None
+            if not mb_fetcher:
+                logger.warning("[apple-music] MusicBrainz skipped: no valid ISRC available")
 
             dest = self._build_output_path(
                 metadata,
@@ -298,18 +302,18 @@ class AppleMusicProvider(BaseProvider):
             if self._file_exists(dest):
                 return DownloadResult.skipped_result(self.name, str(dest), fmt="m4a")
 
-            # Risoluzione URL
+            # Risoluzione URL Asincrona
             track_url = None
             if is_native_apple:
                 track_url = metadata.external_url
             else:
                 if metadata.isrc:
-                    track_url = self._resolve_track_url(metadata.isrc)
+                    track_url = await self._resolve_track_url_async(metadata.isrc)
 
                 # FALLBACK: Se l'ISRC fallisce, cerca per Titolo, Artist, ISRC e durata
                 if not track_url:
                     logger.debug("[apple-music] ISRC not found, tentativo tramite ricerca testuale...")
-                    track_url = self._resolve_track_url_by_search(
+                    track_url = await self._resolve_track_url_by_search_async(
                         metadata.title,
                         metadata.artists,
                         metadata.isrc or "",
@@ -325,10 +329,10 @@ class AppleMusicProvider(BaseProvider):
             used_codec = None
             api_used = None
 
-            # Fallback Loop dei Codec
+            # Fallback Loop dei Codec Asincrono
             for current_codec in codecs_to_try:
                 logger.debug("[apple-music] Tentativo stream con codec: %s", current_codec)
-                api_used, stream_url = self._get_stream_url(track_url, current_codec)
+                api_used, stream_url = await self._get_stream_url_async(track_url, current_codec)
                 if stream_url:
                     used_codec = current_codec
                     break
@@ -342,21 +346,30 @@ class AppleMusicProvider(BaseProvider):
 
             print_source_banner("Apple Music", "", used_codec.upper())
 
-            self._http.stream_to_file(stream_url, str(dest), self._progress_cb)
+            # Download su disco via Async Client
+            await self._async_http.stream_to_file(stream_url, str(dest), self._progress_cb)
 
-            # Validazione Track (Controllo File Corrotto/Tronco)
+            # Validazione Track Async (Controllo File Corrotto/Tronco)
             expected_s = metadata.duration_ms // 1000
-            valid, err_msg = validate_downloaded_track(str(dest), expected_s)
+            valid, err_msg = await validate_downloaded_track_async(str(dest), expected_s)
             if not valid:
                 raise SpotiflacError(ErrorKind.FILE_IO, err_msg, self.name)
 
             mb_tags: dict[str, str] = {}
             res: dict[str, Any] = {}
             if mb_fetcher:
-                res = mb_fetcher.future.result()
-
-            mb_tags = mb_result_to_tags(res)
-            _print_mb_summary(mb_tags)
+                try:
+                    res = await asyncio.to_thread(lambda: mb_fetcher.future.result(timeout=12))
+                    mb_tags = mb_result_to_tags(res)
+                    if mb_tags:
+                        logger.info("[apple-music] MusicBrainz tags found: %s", list(mb_tags.keys()))
+                        _print_mb_summary(mb_tags)
+                    else:
+                        logger.warning("[apple-music] MusicBrainz returned no tags (ISRC: %r)", _isrc_for_mb)
+                except concurrent.futures.TimeoutError:
+                    logger.warning("[apple-music] MusicBrainz timed out after 12s, skipping MB tags")
+                except Exception as exc:
+                    logger.warning("[apple-music] MusicBrainz error: %s", exc)
 
             opts = EmbedOptions(
                 first_artist_only    = first_artist_only,
@@ -369,7 +382,9 @@ class AppleMusicProvider(BaseProvider):
                 is_album             = is_album,
                 extra_tags           = mb_tags,
             )
-            embed_metadata(str(dest), metadata, opts, session=self._session)
+            
+            # Embed Asyncrono
+            await embed_metadata_async(str(dest), metadata, opts, session=await self._async_http._client())
 
             return DownloadResult.ok(self.name, str(dest), fmt="m4a")
 

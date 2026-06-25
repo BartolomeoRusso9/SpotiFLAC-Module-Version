@@ -1,27 +1,28 @@
 import json
-import re
 import logging
-from typing import Optional, Dict
-from ..core.http import HttpClient
+import re
+from typing import Dict, Optional
+
+from ..core.http import AsyncHttpClient
 
 logger = logging.getLogger(__name__)
 
 class SongstatsProvider:
     """Estrae ISRC e link alle piattaforme dalla page pubblica di Songstats tramite JSON-LD."""
 
-    def __init__(self, http_client: HttpClient):
+    def __init__(self, http_client: AsyncHttpClient):
         self.http = http_client
 
-    def get_isrc(self, track_id: str) -> Optional[str]:
-        data = self.get_data(track_id)
+    async def get_isrc_async(self, track_id: str) -> Optional[str]:
+        data = await self.get_data_async(track_id)
         return data.get("isrc")
 
-    def get_data(self, track_id: str) -> Dict[str, Optional[str]]:
+    async def get_data_async(self, track_id: str) -> Dict[str, Optional[str]]:
         url = f"https://songstats.com/track/{track_id}"
         results = {"isrc": None, "tidal": None, "amazon": None, "deezer": None}
         
         try:
-            resp = self.http.get(url, follow_redirects=True)
+            resp = await self.http.get(url, follow_redirects=True)
             
             # 1. Fallback rapido per l'ISRC
             isrc_match = re.search(r'isrc\\":\\"(.*?)\\"', resp.text)
