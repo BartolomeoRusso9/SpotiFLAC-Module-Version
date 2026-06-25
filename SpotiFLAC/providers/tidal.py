@@ -79,6 +79,14 @@ _TIDAL_USER_AGENT = (
 
 _POST_USER_AGENT = ["SpotiFLAC-Mobile/4.5.0"]
 
+# Headers specifici per endpoint "community" (usati nelle POST verso mirror comunitari)
+_COMMUNITY_POST_HEADERS = {
+    "User-Agent": "SpotiFLAC/7.1.9",
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "x-api-key": "explore-obscure-chivalry-travesty-blinks",
+}
+
 _TIDAL_PROXY_BASE = "https://tidal-proxy.monochrome.tf/api/v1"
 _TIDAL_API_GIST_URL = (
     "https://gist.githubusercontent.com/afkarxyz/2ce772b943321b9448b454f39403ce25/raw"
@@ -618,7 +626,12 @@ async def _fetch_tidal_url_once_async(
     is_post_api = api_cleaning in _CLEAN_POST_APIS
     quality = _normalize_quality(quality)
     headers = {"User-Agent": _POST_USER_AGENT[0] if is_post_api else _TIDAL_USER_AGENT}
-
+    # Se questa API è la community mirror, usa gli header dedicati per le POST
+    try:
+        if is_post_api and _TIDAL_COMMUNITY_URL and api_cleaning == _TIDAL_COMMUNITY_URL.rstrip("/"):
+            headers = _COMMUNITY_POST_HEADERS
+    except Exception:
+        pass
     delay = _RETRY_DELAY_S
     last_err: Exception = RuntimeError("no attempts made")
 

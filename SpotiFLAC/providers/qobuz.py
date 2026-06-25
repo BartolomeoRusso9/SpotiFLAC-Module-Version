@@ -64,6 +64,14 @@ _DEFAULT_UA = (
     "Chrome/146.0.0.0 Safari/537.36"
 )
 _ZARZ_USER_AGENT = "SpotiFLAC-Mobile/4.5.0"
+
+# Headers da usare per le richieste "community" verso mirror Qobuz
+_COMMUNITY_POST_HEADERS = {
+    "User-Agent": "SpotiFLAC/7.1.9",
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "x-api-key": "explore-obscure-chivalry-travesty-blinks",
+}
 _CREDS_TTL = 24 * 3600
 _PROBE_ISRC = "USUM71703861"
 _OPEN_URL = "https://open.qobuz.com/track/"
@@ -920,13 +928,8 @@ class QobuzProvider(BaseProvider):
                                 "quality": _map_musicdl_quality(quality),
                                 "upload_to_r2": False,
                             }
-                        # set headers required by community
-                        post_headers = {
-                            "User-Agent": "SpotiFLAC/7.1.9",
-                            "Accept": "application/json",
-                            "Content-Type": "application/json",
-                            "x-api-key": "explore-obscure-chivalry-travesty-blinks",
-                        }
+                        # set headers required by community (use shared constant)
+                        post_headers = dict(_COMMUNITY_POST_HEADERS)
 
                     # Attempt request, refresh credentials and retry once on 400/401
                     resp = await client.post(

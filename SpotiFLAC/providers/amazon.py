@@ -45,6 +45,14 @@ _S_UA = (
     "Chrome/149.0.0.0 Safari/537.36"
 )
 
+# Headers da usare per le richieste "community" verso mirror Amazon
+_COMMUNITY_POST_HEADERS = {
+    "User-Agent": "SpotiFLAC/7.1.9",
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "x-api-key": "explore-obscure-chivalry-travesty-blinks",
+}
+
 # ---------------------------------------------------------------------------
 # Backward Compatibility for Tagger
 # ---------------------------------------------------------------------------
@@ -238,12 +246,21 @@ class AmazonProvider(BaseProvider):
 
         url = f"{base_url}{endpoint}"
 
+        # Se questa base corrisponde all'endpoint community registrato, applica gli header specifici
+        hdrs = headers or {}
+        try:
+            community_url = get_amazon_endpoint("community")
+            if community_url and base_url.rstrip("/") == community_url.rstrip("/"):
+                hdrs = {**hdrs, **_COMMUNITY_POST_HEADERS}
+        except Exception:
+            pass
+
         if method.upper() == "POST":
             return await self._async_http.post(
-                url, json=payload, headers=headers, timeout=30
+                url, json=payload, headers=hdrs, timeout=30
             )
         return await self._async_http.get(
-            url, params=params, headers=headers, timeout=30
+            url, params=params, headers=hdrs, timeout=30
         )
 
     async def _do_request_with_retry(
