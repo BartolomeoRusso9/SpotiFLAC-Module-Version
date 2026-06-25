@@ -1889,11 +1889,11 @@ function setPreviewButtonState(button, active) {
   if (!button) return;
   button.classList.toggle('active', active);
   
-  // Controlliamo se è il bottone della card singola (.act-btn) o della tabella
+  // Check whether this is the single-card button (.act-btn) or the table button
   const isCardBtn = button.classList.contains('act-btn');
   const svgSize = isCardBtn ? "13" : "11";
 
-  // Handling dinamica dei tooltip
+  // Dynamic tooltip handling
   if (isCardBtn) {
     button.title = active ? 'Pause preview' : 'Play Preview';
   } else {
@@ -1956,7 +1956,7 @@ function runTypewriter() {
   const mode = $('searchMode').value;
   const input = $('urlInput');
   
-  // Scegli l'array giusto in base alla modalità
+  // Choose the correct array based on the current mode
   const links = (mode === 'search') ? searchPlaceholderLinks : placeholderLinks;
   const currentText = links[phIndex];
 
@@ -2094,7 +2094,7 @@ function updateSearchMode() {
   const label = $('searchModeText');
   
   if (mode === 'search') {
-    // Modalità Testo: ferma l'animazione e metti il testo fisso
+    // Text mode: stop the animation and set the fixed text
     clearTimeout(phTimeout);
     input.placeholder = 'Search Spotify with keywords, artist or track name…';
     toggle.classList.add('active');
@@ -2105,7 +2105,7 @@ function updateSearchMode() {
     $('track-controls')?.classList.add('hidden');
     $('album-card')?.classList.add('hidden');
   } else {
-    // Modalità Link: resetta e fai ripartire l'animazione
+    // Link mode: reset and restart the animation
     toggle.classList.remove('active');
     icon.textContent = '🔗';
     label.textContent = 'Fetch';
@@ -2847,7 +2847,7 @@ function setFetchingState(state, customMsg = null) {
 
   if (state === 'start') {
     const title = customMsg || 'fetching metadata...';
-    // Se c'è già un toast aperto, lo chiudiamo prima di aprirne un altro
+    // If a toast is already open, close it before opening another
     if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
     
     currentFetchToastId = toastMgr.loading(
@@ -2878,7 +2878,7 @@ async function onFetch() {
 
   const mode = $('searchMode').value;
   const url = $('urlInput').value.trim();
-  // 1. Controllo base: l'input non deve essere vuoto in nessuna modalità
+  // 1. Basic check: input must not be empty in any mode
   if (!url) {
     setFetchingState('error', "Input empty. Please enter a URL or search term.");
     return;
@@ -3271,16 +3271,16 @@ function renderHomeSections(sections) {
       `;
 
       card.onclick = () => {
-        // Torna alla home page
+        // Return to the home page
         switchView('home');
         
-        // Passa in modalità Fetch (Link)
+        // Switch to Fetch (Link) mode
         const mode = $('searchMode');
         if (mode && mode.value === 'search') {
-          toggleSearchMode(); // Simula click per rimetterlo a "link"
+          toggleSearchMode(); // Simulate click to set it back to "link"
         }
         
-        // Inserisci l'URI
+        // Insert the URI
         const input = $('urlInput');
         if (input) {
           input.value = item.uri || `spotify:${item.type}:${item.id}`;
