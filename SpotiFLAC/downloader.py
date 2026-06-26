@@ -572,11 +572,17 @@ class SpotiflacDownloader:
                 client = AppleMusicMetadataClient()
                 if hasattr(client, "get_url_async"):
                     collection_name, tracks, *collection_cover = (
-                        await client.get_url_async(url)
+                        await client.get_url_async(
+                            url, include_featuring=self._opts.include_featuring
+                        )
                     )
                 else:
                     collection_name, tracks, *collection_cover = (
-                        await asyncio.to_thread(client.get_url, url)
+                        await asyncio.to_thread(
+                            client.get_url,
+                            url,
+                            include_featuring=self._opts.include_featuring,
+                        )
                     )
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
@@ -617,11 +623,17 @@ class SpotiflacDownloader:
             else:
                 if hasattr(self._client, "get_url_async"):
                     collection_name, tracks, *collection_cover = (
-                        await self._client.get_url_async(url)
+                        await self._client.get_url_async(
+                            url, include_featuring=self._opts.include_featuring
+                        )
                     )
                 else:
                     collection_name, tracks, *collection_cover = (
-                        await asyncio.to_thread(self._client.get_url, url)
+                        await asyncio.to_thread(
+                            self._client.get_url,
+                            url,
+                            include_featuring=self._opts.include_featuring,
+                        )
                     )
         except SpotiflacError:
             raise

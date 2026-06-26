@@ -132,6 +132,7 @@ def SpotiFLAC(
         use_album_subfolders=use_album_subfolders,
         quality=quality,
         first_artist_only=first_artist_only,
+        include_featuring=include_featuring,
         output_path=output_path,
         embed_lyrics=embed_lyrics,
         lyrics_providers=lyrics_providers
