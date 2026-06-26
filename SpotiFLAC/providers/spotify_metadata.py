@@ -15,6 +15,22 @@ from ..core.spotfetch import SpotifyWebClient
 
 logger = logging.getLogger(__name__)
 
+
+def _run_async_sync(func, *args, **kwargs):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(func(*args, **kwargs))
+    if loop.is_running():
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _worker():
+            return asyncio.run(func(*args, **kwargs))
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(_worker).result()
+    return loop.run_until_complete(func(*args, **kwargs))
+
 _FEATURING_GROUPS = frozenset({"appears_on", "compilation"})
 _DISCOGRAPHY_SUBTYPES = frozenset(
     {"all", "album", "single", "compilation", "appears_on"}
@@ -318,7 +334,11 @@ class SpotifyMetadataClient:
 
     def search(self, query: str, limit: int = 50) -> dict[str, list]:
         """Synchronous wrapper used by the GUI search backend."""
-        return asyncio.run(self.search_async(query, limit=limit))
+        return _run_async_sync(self.search_async, query, limit=limit)
+
+    def get_url(self, url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata], str, dict]:
+        """Synchronous wrapper used by GUI metadata fetch and downloader."""
+        return _run_async_sync(self.get_url_async, url, include_featuring=include_featuring)
 
     # ------------------------------------------------------------------
     # Track singola
