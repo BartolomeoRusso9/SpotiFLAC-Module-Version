@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Awaitable, Callable
 
+from ..core.flac_validation import validate_flac_file
 from ..core.http import AsyncHttpClient, AsyncRateLimiter, RetryConfig
 from ..core.models import DownloadResult, TrackMetadata, build_filename
 
@@ -132,12 +133,28 @@ class BaseProvider(ABC):
         return path
 
     def _file_exists(self, path: Path) -> bool:
-        if path.exists() and path.stat().st_size > 0:
-            print(f"Skip (already existing): {path.name}")
-            size_mb = path.stat().st_size / (1024 * 1024)
-            logger.debug("File already exists: %s (%.2f MB)", path.name, size_mb)
-            return True
-        return False
+        if not (path.exists() and path.stat().st_size > 0):
+            return False
+
+        if path.suffix.lower() == ".flac":
+            is_valid, error_msg = validate_flac_file(str(path))
+            if not is_valid:
+                logger.warning(
+                    "Existing file is corrupted, removing so it can be re-downloaded: "
+                    "%s (%s)",
+                    path.name,
+                    error_msg,
+                )
+                try:
+                    path.unlink()
+                except OSError as exc:
+                    logger.warning("Failed to remove corrupted file %s: %s", path.name, exc)
+                return False
+
+        print(f"Skip (already existing): {path.name}")
+        size_mb = path.stat().st_size / (1024 * 1024)
+        logger.debug("File already exists: %s (%.2f MB)", path.name, size_mb)
+        return True
 
     async def _run_ffmpeg(self, *args: str) -> tuple[int, str, str]:
         """Executes ffmpeg asynchronously and returns (returncode, stdout, stderr)."""

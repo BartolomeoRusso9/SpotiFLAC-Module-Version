@@ -1105,11 +1105,10 @@ class TidalProvider(BaseProvider):
         Native and purely asynchronous resolution via Songlink.
         Removes blocking and fixes the HTTP client AttributeError.
         """
-        # Recupera il client asincrono corretto (lo stesso usato nel resto del file)
-        client = await NetworkManager.get_async_client_safe()
-
-        # Inizializza il resolver passandogli il client ASINCRONO
-        resolver = LinkResolver(client)
+        # LinkResolver si aspetta un AsyncHttpClient (che espone get_json_async/get),
+        # non il raw httpx.AsyncClient restituito da NetworkManager: passare quest'ultimo
+        # causava AttributeError ("'AsyncClient' object has no attribute 'get_json_async'").
+        resolver = LinkResolver()
 
         # Esegui direttamente l'await senza creare thread o sotto-loop artificiali
         links = await resolver.resolve_all_async(spotify_track_id)

@@ -794,7 +794,6 @@ class QobuzProvider(BaseProvider):
                         "Referer": f"{base_origin}/download",
                         "X-Dl-Token": t_token,
                         "Cookie": "csrftoken=laFTROF6th29hXV3Q5KtVw1oelBIGBXS",
-                        "Content-Type": "application/json",
                     }
                     fmt_map = {
                         "27": 27,
@@ -806,19 +805,21 @@ class QobuzProvider(BaseProvider):
                         "LOSSLESS": 6,
                     }
                     fmt_id = fmt_map.get(quality, 7)
-                    payload_fd = {
+                    params_fd = {
                         "url": f"{_OPEN_URL}{track_id}",
                         "formatId": fmt_id,
                     }
                     # Some flacdownloader entries are a bare domain (https://flacdownloader.com).
-                    # In that case the correct POST path is /qobuz-asset — otherwise use the full api_cleaning as provided.
+                    # In that case the correct GET path is /qobuz-asset — otherwise use the full api_cleaning as provided.
                     parsed_fd_full = urlparse(api_cleaning)
                     if not parsed_fd_full.path or parsed_fd_full.path == "/":
-                        post_url = api_cleaning.rstrip("/") + "/qobuz-asset"
+                        fd_url = api_cleaning.rstrip("/") + "/qobuz-asset"
                     else:
-                        post_url = api_cleaning
-                    resp = await client.post(
-                        post_url, json=payload_fd, headers=fd_headers, timeout=timeout_s
+                        fd_url = api_cleaning
+                    # The endpoint only allows GET/OPTIONS/HEAD (HTTP 405 on POST):
+                    # send the payload as query params via GET, not a JSON body.
+                    resp = await client.get(
+                        fd_url, params=params_fd, headers=fd_headers, timeout=timeout_s
                     )
 
                 elif is_squid:

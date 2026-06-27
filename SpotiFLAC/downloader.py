@@ -332,7 +332,7 @@ class DownloadWorker:
         base_out: str,
         start: float,
     ) -> list[tuple[str, str, str]]:
-        MAX_CONCURRENT_DOWNLOADS = 4
+        MAX_CONCURRENT_DOWNLOADS = 2
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
         async def worker_task(i: int, track: TrackMetadata):

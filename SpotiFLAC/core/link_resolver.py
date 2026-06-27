@@ -62,7 +62,7 @@ class LinkResolver:
             "Referer": "https://song.link/",
         }
         return await self._request_with_retry(
-            lambda: self.http.get_async(url, headers=headers)
+            lambda: self.http.get(url, headers=headers)
         )
 
     async def _request_with_retry(self, request_callable):
