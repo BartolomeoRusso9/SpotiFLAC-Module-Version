@@ -959,22 +959,36 @@ class TidalProvider(BaseProvider):
     async def _fetch_track_details_from_proxy(
         self, track_id: int, country_code: str = "US"
     ) -> dict:
-        client = await NetworkManager.get_async_client_safe()
-        url = f"{_TIDAL_PROXY_BASE}/tracks/{track_id}?countryCode={country_code}"
-        headers = {
-            "User-Agent": _TIDAL_USER_AGENT,
-            "Accept": "application/json",
-            "Authorization": get_monochrome_token(),
-        }
         try:
+            client = await NetworkManager.get_async_client_safe()
+            url = f"{_TIDAL_PROXY_BASE}/tracks/{track_id}?countryCode={country_code}"
+            headers = {
+                "User-Agent": _TIDAL_USER_AGENT,
+                "Accept": "application/json",
+                "Authorization": get_monochrome_token(),
+            }
+
             resp = await client.get(url, headers=headers, timeout=8)
-            if resp.status_code == 200:
+
+            if resp.status_code != 200:
+                err_msg = f"proxy HTTP {resp.status_code}"
+                logger.debug("[tidal] %s, skipping (non-blocking)", err_msg)
+                print_api_failure("tidal", "proxy", err_msg)
+                return {}
+
+            try:
                 return resp.json()
-            else:
-                print("[tidal] proxy returned %s", resp.status_code)
+            except Exception as exc:
+                err_msg = f"proxy invalid JSON: {exc}"
+                logger.debug("[tidal] %s, skipping", err_msg)
+                print_api_failure("tidal", "proxy", err_msg)
+                return {}
+
         except Exception as exc:
-            print("[tidal] proxy request failed: %s", exc)
-        return {}
+            err_msg = f"proxy request failed: {exc}"
+            logger.debug("[tidal] %s, skipping (non-blocking)", err_msg)
+            print_api_failure("tidal", "proxy", err_msg)
+            return {}
 
     async def _search_on_mirrors_async(
         self,
