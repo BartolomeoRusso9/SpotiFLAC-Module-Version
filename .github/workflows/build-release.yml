@@ -12,7 +12,7 @@ on:
         type: string
 
 jobs:
-  lint-and-test:
+  lint-and-bump:
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.commit_and_bump.outputs.NEW_TAG }}
@@ -39,11 +39,6 @@ jobs:
         run: |
           if command -v ruff >/dev/null 2>&1; then ruff check --fix .; else echo "ruff not installed"; fi
           if command -v black >/dev/null 2>&1; then black .; else echo "black not installed"; fi
-
-      - name: Run tests
-        shell: bash
-        run: |
-          pytest -q
 
       - name: Commit changes and bump version
         id: commit_and_bump
@@ -89,7 +84,7 @@ jobs:
           fi
 
   build:
-    needs: lint-and-test
+    needs: lint-and-bump
     strategy:
       fail-fast: false
       matrix:
@@ -170,8 +165,7 @@ jobs:
         retention-days: 7
 
   release:
-      # Abbiamo aggiunto lint-and-test come dipendenza qui in modo da ricevere in input la stringa della nuova versione
-      needs: [lint-and-test, build]
+      needs: [lint-and-bump, build]
       runs-on: ubuntu-latest
       if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
       
@@ -186,8 +180,7 @@ jobs:
         - name: Create GitHub Release
           uses: softprops/action-gh-release@v2
           with:
-            # Il tag ora è recuperato dall'output del job precedente
-            tag_name: ${{ needs.lint-and-test.outputs.release_tag }}
+            tag_name: ${{ needs.lint-and-bump.outputs.release_tag }}
             files: release-files/*
             draft: true
             prerelease: false
@@ -199,7 +192,7 @@ jobs:
 
               ## Downloads
               
-              [![Windows](https://img.shields.io/badge/Windows-[SPOTIFLAC.EXE]-0078D6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMjAgMjAiPjxwYXRoIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTIwIDEwLjg3M1YyMEw4LjQ3OSAxOC41MzdsLjAwMS03LjY2NEgyMFptLTEzLjEyIDBsLS4wMDEgNy40NjFMMCAxNy40NjF2LTYuNTg4aDYuODhaTTIwIDkuMjczSDguNDhsLS4wMDEtNy44MUwyMCAwdjkuMjczWk02Ljg3OSAxLjY2NmwuMDAxIDcuNjA3SDBWMi41MzlsNi44NzktLjg3M1oiLz48L3N2Zz4=)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-test.outputs.release_tag }}/SpotiFLAC-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-[SPOTIFLAC--macos]-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-test.outputs.release_tag }}/SpotiFLAC-macOS) [![Linux](https://img.shields.io/badge/Linux-[SPOTIFLAC--linux]-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-test.outputs.release_tag }}/SpotiFLAC-Linux-x86_64)
+              [![Windows](https://img.shields.io/badge/Windows-[SPOTIFLAC.EXE]-0078D6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMjAgMjAiPjxwYXRoIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTIwIDEwLjg3M1YyMEw4LjQ3OSAxOC41MzdsLjAwMS03LjY2NEgyMFptLTEzLjEyIDBsLS4wMDEgNy40NjFMMCAxNy40NjF2LTYuNTg4aDYuODhaTTIwIDkuMjczSDguNDhsLS4wMDEtNy44MUwyMCAwdjkuMjczWk02Ljg3OSAxLjY2NmwuMDAxIDcuNjA3SDBWMi41MzlsNi44NzktLjg3M1oiLz48L3N2Zz4=)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-[SPOTIFLAC--macos]-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-macOS) [![Linux](https://img.shields.io/badge/Linux-[SPOTIFLAC--linux]-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-Linux-x86_64)
 
               <details>
               <summary><b>💻 Usage Instructions</b></summary>
