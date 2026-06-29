@@ -719,6 +719,11 @@ class DeezerProvider(BaseProvider):
             if not valid:
                 if mb_task and not mb_task.done():
                     mb_task.cancel()
+                if dest.exists():
+                    try:
+                        dest.unlink()
+                    except OSError:
+                        pass
                 return DownloadResult.fail(self.name, f"Validation failed: {err_msg}")
 
             # Collect MusicBrainz result (should be ready by now)
@@ -732,8 +737,6 @@ class DeezerProvider(BaseProvider):
 
             try:
                 from ..core.tagger import _print_mb_summary
-
-                _print_mb_summary(mb_tags)
             except ImportError:
                 pass
 
@@ -754,7 +757,17 @@ class DeezerProvider(BaseProvider):
 
         except SpotiflacError as exc:
             logger.error("[deezer] %s", exc)
+            if "dest" in locals() and dest.exists():
+                try:
+                    dest.unlink()
+                except OSError:
+                    pass
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
             logger.exception("[deezer] Unexpected error in async download")
+            if "dest" in locals() and dest.exists():
+                try:
+                    dest.unlink()
+                except OSError:
+                    pass
             return DownloadResult.fail(self.name, f"Unexpected: {exc}")
