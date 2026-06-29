@@ -9,15 +9,15 @@ Retry model:
   - timeout_s          : max seconds for a single track download
   - Exponential backoff: 2 s → 4 s → 8 s … capped at 30 s between retries
 """
-import time
+
 import pytest
 
 from tests.conftest import SPOTIFY_TRACK, SPOTIFY_ALBUM
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # track_max_retries
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestTrackMaxRetries:
 
@@ -54,12 +54,13 @@ class TestTrackMaxRetries:
 # Exponential back-off helper
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def _backoff_delay(attempt: int, cap: int = 30) -> int:
     """
     Mirrors SpotiFLAC's documented back-off:
     attempt 1 → 2 s, attempt 2 → 4 s, attempt 3 → 8 s, …, capped at cap.
     """
-    return min(2 ** attempt, cap)
+    return min(2**attempt, cap)
 
 
 class TestExponentialBackoff:
@@ -97,6 +98,7 @@ class TestExponentialBackoff:
 # timeout_s
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestTimeoutParameter:
 
     @pytest.mark.parametrize("timeout", [10, 30, 60, 120, 300])
@@ -131,6 +133,7 @@ class TestTimeoutParameter:
 # ──────────────────────────────────────────────────────────────────────────────
 # loop (re-queue permanently failed tracks)
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestLoopParameter:
 
@@ -180,6 +183,7 @@ class TestLoopParameter:
 # ──────────────────────────────────────────────────────────────────────────────
 # Provider cycling on retry
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestProviderCyclingOnRetry:
     """

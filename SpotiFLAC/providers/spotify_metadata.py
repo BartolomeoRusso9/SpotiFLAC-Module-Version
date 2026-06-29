@@ -31,6 +31,7 @@ def _run_async_sync(func, *args, **kwargs):
             return executor.submit(_worker).result()
     return loop.run_until_complete(func(*args, **kwargs))
 
+
 _FEATURING_GROUPS = frozenset({"appears_on", "compilation"})
 _DISCOGRAPHY_SUBTYPES = frozenset(
     {"all", "album", "single", "compilation", "appears_on"}
@@ -336,9 +337,13 @@ class SpotifyMetadataClient:
         """Synchronous wrapper used by the GUI search backend."""
         return _run_async_sync(self.search_async, query, limit=limit)
 
-    def get_url(self, url: str, include_featuring: bool = False) -> tuple[str, list[TrackMetadata], str, dict]:
+    def get_url(
+        self, url: str, include_featuring: bool = False
+    ) -> tuple[str, list[TrackMetadata], str, dict]:
         """Synchronous wrapper used by GUI metadata fetch and downloader."""
-        return _run_async_sync(self.get_url_async, url, include_featuring=include_featuring)
+        return _run_async_sync(
+            self.get_url_async, url, include_featuring=include_featuring
+        )
 
     # ------------------------------------------------------------------
     # Track singola

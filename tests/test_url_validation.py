@@ -3,6 +3,7 @@ test_url_validation.py
 Tests for URL format recognition across all supported sources:
 Spotify, Tidal, Apple Music, SoundCloud, YouTube, Pandora (v1.2.8).
 """
+
 import re
 import pytest
 
@@ -21,32 +22,39 @@ from tests.conftest import (
     GARBAGE_STRING,
 )
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers – lightweight regex mirrors of what SpotiFLAC is expected to use.
 # These are tested independently so we can validate our own fixture URLs.
 # ──────────────────────────────────────────────────────────────────────────────
 
-SPOTIFY_PATTERN     = re.compile(r"https://open\.spotify\.com/(track|album|playlist|artist)/\w+")
-TIDAL_PATTERN       = re.compile(r"https://listen\.tidal\.com/(album|track|playlist)/\d+")
-APPLE_PATTERN       = re.compile(r"https://music\.apple\.com/.+/album/.+/\d+")
-SOUNDCLOUD_PATTERN  = re.compile(r"https://soundcloud\.com/.+/.+")
-YOUTUBE_PATTERN     = re.compile(r"https://(www\.)?youtube\.com/watch\?v=.+|https://youtu\.be/.+")
-PANDORA_PATTERN     = re.compile(r"https://www\.pandora\.com/.+")
+SPOTIFY_PATTERN = re.compile(
+    r"https://open\.spotify\.com/(track|album|playlist|artist)/\w+"
+)
+TIDAL_PATTERN = re.compile(r"https://listen\.tidal\.com/(album|track|playlist)/\d+")
+APPLE_PATTERN = re.compile(r"https://music\.apple\.com/.+/album/.+/\d+")
+SOUNDCLOUD_PATTERN = re.compile(r"https://soundcloud\.com/.+/.+")
+YOUTUBE_PATTERN = re.compile(
+    r"https://(www\.)?youtube\.com/watch\?v=.+|https://youtu\.be/.+"
+)
+PANDORA_PATTERN = re.compile(r"https://www\.pandora\.com/.+")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Spotify URL tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestSpotifyUrls:
 
-    @pytest.mark.parametrize("url", [
-        SPOTIFY_TRACK,
-        SPOTIFY_ALBUM,
-        SPOTIFY_PLAYLIST,
-        SPOTIFY_ARTIST,
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            SPOTIFY_TRACK,
+            SPOTIFY_ALBUM,
+            SPOTIFY_PLAYLIST,
+            SPOTIFY_ARTIST,
+        ],
+    )
     def test_spotify_urls_match_pattern(self, url):
         assert SPOTIFY_PATTERN.match(url), f"Expected Spotify URL to match: {url}"
 
@@ -62,11 +70,14 @@ class TestSpotifyUrls:
     def test_spotify_artist_url_structure(self):
         assert "/artist/" in SPOTIFY_ARTIST
 
-    @pytest.mark.parametrize("bad", [
-        "https://open.spotify.com/",            # no content type
-        "https://spotify.com/track/abc",        # wrong subdomain
-        "http://open.spotify.com/track/abc",    # HTTP not HTTPS
-    ])
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "https://open.spotify.com/",  # no content type
+            "https://spotify.com/track/abc",  # wrong subdomain
+            "http://open.spotify.com/track/abc",  # HTTP not HTTPS
+        ],
+    )
     def test_malformed_spotify_urls_do_not_match(self, bad):
         assert not SPOTIFY_PATTERN.match(bad)
 
@@ -74,6 +85,7 @@ class TestSpotifyUrls:
 # ──────────────────────────────────────────────────────────────────────────────
 # Tidal URL tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestTidalUrls:
 
@@ -87,10 +99,13 @@ class TestTidalUrls:
     def test_tidal_track_url_structure(self):
         assert "/track/" in TIDAL_TRACK
 
-    @pytest.mark.parametrize("bad", [
-        "https://tidal.com/album/123",          # wrong subdomain
-        "https://listen.tidal.com/",            # no content path
-    ])
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "https://tidal.com/album/123",  # wrong subdomain
+            "https://listen.tidal.com/",  # no content path
+        ],
+    )
     def test_malformed_tidal_urls_do_not_match(self, bad):
         assert not TIDAL_PATTERN.match(bad)
 
@@ -98,6 +113,7 @@ class TestTidalUrls:
 # ──────────────────────────────────────────────────────────────────────────────
 # Apple Music URL tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestAppleMusicUrls:
 
@@ -118,6 +134,7 @@ class TestAppleMusicUrls:
 # SoundCloud URL tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestSoundCloudUrls:
 
     def test_soundcloud_url_matches_pattern(self):
@@ -136,15 +153,19 @@ class TestSoundCloudUrls:
 # YouTube URL tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestYouTubeUrls:
 
     def test_youtube_full_url_matches(self):
         assert YOUTUBE_PATTERN.match(YOUTUBE_VIDEO)
 
-    @pytest.mark.parametrize("url", [
-        "https://youtu.be/dQw4w9WgXcQ",
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://youtu.be/dQw4w9WgXcQ",
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        ],
+    )
     def test_youtube_short_and_long_urls(self, url):
         assert YOUTUBE_PATTERN.match(url)
 
@@ -156,6 +177,7 @@ class TestYouTubeUrls:
 # ──────────────────────────────────────────────────────────────────────────────
 # Pandora URL tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestPandoraUrls:
 
@@ -169,6 +191,7 @@ class TestPandoraUrls:
 # ──────────────────────────────────────────────────────────────────────────────
 # Invalid / unsupported URL tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestInvalidUrls:
 
@@ -196,6 +219,7 @@ class TestInvalidUrls:
 # ──────────────────────────────────────────────────────────────────────────────
 # Mixed URL list tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestMixedUrlLists:
 

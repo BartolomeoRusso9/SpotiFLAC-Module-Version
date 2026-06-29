@@ -3,8 +3,8 @@ test_instantiation.py
 Tests for correct SpotiFLAC class instantiation, required parameters,
 default values, and basic type validation (v1.2.8).
 """
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from tests.conftest import (
     SPOTIFY_TRACK,
@@ -19,9 +19,7 @@ class TestBasicInstantiation:
     def test_single_url_string(self, tmp_output_dir, mock_spotiflac):
         mock_cls, _ = mock_spotiflac
         mock_cls(url=SPOTIFY_TRACK, output_dir=tmp_output_dir)
-        mock_cls.assert_called_once_with(
-            url=SPOTIFY_TRACK, output_dir=tmp_output_dir
-        )
+        mock_cls.assert_called_once_with(url=SPOTIFY_TRACK, output_dir=tmp_output_dir)
 
     def test_url_as_list(self, tmp_output_dir, mock_spotiflac):
         mock_cls, _ = mock_spotiflac

@@ -148,7 +148,9 @@ class BaseProvider(ABC):
                 try:
                     path.unlink()
                 except OSError as exc:
-                    logger.warning("Failed to remove corrupted file %s: %s", path.name, exc)
+                    logger.warning(
+                        "Failed to remove corrupted file %s: %s", path.name, exc
+                    )
                 return False
 
         print(f"Skip (already existing): {path.name}")

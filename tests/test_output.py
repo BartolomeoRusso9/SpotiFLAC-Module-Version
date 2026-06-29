@@ -8,10 +8,8 @@ Covers:
   - specific file path for single-track downloads
   - filename format expectations
 """
+
 import os
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from tests.conftest import (
     SPOTIFY_TRACK,
@@ -19,10 +17,10 @@ from tests.conftest import (
     SPOTIFY_PLAYLIST,
 )
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # output_dir
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestOutputDirectory:
 
@@ -61,6 +59,7 @@ class TestOutputDirectory:
 # ──────────────────────────────────────────────────────────────────────────────
 # use_album_subfolders
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestAlbumSubfolders:
 
@@ -106,6 +105,7 @@ class TestAlbumSubfolders:
 # Single-track specific output path
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestSingleTrackOutputPath:
     """
     From the docs: if the input is a single track URL, you can optionally
@@ -140,6 +140,7 @@ class TestSingleTrackOutputPath:
 # Expected output file name patterns
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestFilenameConventions:
     """
     The module does not expose direct filename control in v1.2.8,
@@ -150,7 +151,7 @@ class TestFilenameConventions:
         flac_services = ["tidal", "qobuz", "deezer", "amazon"]
         for svc in flac_services:
             # Simulate an expected output filename
-            filename = f"Artist - Track Title.flac"
+            filename = "Artist - Track Title.flac"
             assert filename.endswith(".flac"), f"Expected .flac for {svc}"
 
     def test_mp3_extension_for_soundcloud(self):
@@ -165,14 +166,15 @@ class TestFilenameConventions:
         """Filenames should not contain characters illegal on Windows/Linux."""
         illegal_chars = set('<>:"/\\|?*')
         sample_name = "Artist - My Song (feat. Other Artist).flac"
-        assert not illegal_chars.intersection(set(sample_name)), (
-            f"Illegal chars found in: {sample_name}"
-        )
+        assert not illegal_chars.intersection(
+            set(sample_name)
+        ), f"Illegal chars found in: {sample_name}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Docker / container output path
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestDockerOutputPath:
     """

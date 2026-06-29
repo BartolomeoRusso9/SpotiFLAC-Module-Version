@@ -1,46 +1,45 @@
 """
 Shared fixtures and helpers for SpotiFLAC v1.2.8 tests.
 """
-import os
-import pytest
-import tempfile
-from unittest.mock import MagicMock, patch
 
+import pytest
+from unittest.mock import MagicMock, patch
 
 # ─── Sample URLs ─────────────────────────────────────────────────────────────
 
-SPOTIFY_TRACK    = "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
-SPOTIFY_ALBUM    = "https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ"
+SPOTIFY_TRACK = "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+SPOTIFY_ALBUM = "https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ"
 SPOTIFY_PLAYLIST = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
-SPOTIFY_ARTIST   = "https://open.spotify.com/artist/06HL4z0CvFAxyc27GXpf02"
+SPOTIFY_ARTIST = "https://open.spotify.com/artist/06HL4z0CvFAxyc27GXpf02"
 
-TIDAL_ALBUM  = "https://listen.tidal.com/album/364272512"
-TIDAL_TRACK  = "https://listen.tidal.com/track/12345678"
+TIDAL_ALBUM = "https://listen.tidal.com/album/364272512"
+TIDAL_TRACK = "https://listen.tidal.com/track/12345678"
 
-APPLE_MUSIC_ALBUM  = "https://music.apple.com/us/album/folklore/1528309825"
-SOUNDCLOUD_TRACK   = "https://soundcloud.com/artist/track-name"
-YOUTUBE_VIDEO      = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-PANDORA_TRACK      = "https://www.pandora.com/artist/name/album/track"
+APPLE_MUSIC_ALBUM = "https://music.apple.com/us/album/folklore/1528309825"
+SOUNDCLOUD_TRACK = "https://soundcloud.com/artist/track-name"
+YOUTUBE_VIDEO = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+PANDORA_TRACK = "https://www.pandora.com/artist/name/album/track"
 
-INVALID_URL        = "https://example.com/not-a-music-url"
-GARBAGE_STRING     = "not a url at all"
+INVALID_URL = "https://example.com/not-a-music-url"
+GARBAGE_STRING = "not a url at all"
 
 
 # ─── Valid services ───────────────────────────────────────────────────────────
 
-ALL_SERVICES     = ["tidal", "qobuz", "deezer", "amazon"]
-DOWNLOAD_ONLY    = ["joox", "netease", "migu", "kuwo"]   # cannot be input URLs
+ALL_SERVICES = ["tidal", "qobuz", "deezer", "amazon"]
+DOWNLOAD_ONLY = ["joox", "netease", "migu", "kuwo"]  # cannot be input URLs
 
 
 # ─── Quality constants ────────────────────────────────────────────────────────
 
-TIDAL_QUALITIES   = ["DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"]
-QOBUZ_QUALITIES   = ["6", "7", "27"]
-APPLE_QUALITIES   = ["alac", "atmos", "ac3", "aac", "aac-legacy"]
+TIDAL_QUALITIES = ["DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"]
+QOBUZ_QUALITIES = ["6", "7", "27"]
+APPLE_QUALITIES = ["alac", "atmos", "ac3", "aac", "aac-legacy"]
 PANDORA_QUALITIES = ["mp3_192", "aac_64", "aac_32"]
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def tmp_output_dir(tmp_path):

@@ -5,8 +5,6 @@ End-to-end scenario tests for common SpotiFLAC usage patterns (v1.2.8).
 All network calls are mocked — these tests exercise parameter composition
 and the shape of the call rather than actual downloads.
 """
-import pytest
-from unittest.mock import call, patch, MagicMock
 
 from tests.conftest import (
     SPOTIFY_TRACK,
