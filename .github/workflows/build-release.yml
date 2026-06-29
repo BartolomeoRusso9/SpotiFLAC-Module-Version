@@ -7,16 +7,20 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: 'Nome da versão per creare la Release (ex: v1.0.0)'
+        description: 'Name of the version tag (es: v1.0.0)'
         required: false
         type: string
 
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.commit_and_bump.outputs.NEW_TAG }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -30,20 +34,59 @@ jobs:
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install .
 
-      - name: Run ruff
+      - name: Auto-fix with ruff and black
         shell: bash
         run: |
-          if command -v ruff >/dev/null 2>&1; then ruff check .; else echo "ruff not installed"; fi
-
-      - name: Run black --check
-        shell: bash
-        run: |
-          if command -v black >/dev/null 2>&1; then black --check .; else echo "black not installed"; fi
+          if command -v ruff >/dev/null 2>&1; then ruff check --fix .; else echo "ruff not installed"; fi
+          if command -v black >/dev/null 2>&1; then black .; else echo "black not installed"; fi
 
       - name: Run tests
         shell: bash
         run: |
           pytest -q
+
+      - name: Commit changes and bump version
+        id: commit_and_bump
+        shell: bash
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "Format changes detected. Committing and bumping version..."
+            
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            
+            git add .
+            git commit -m "style: auto-fix ruff e black [skip ci]"
+            
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
+            
+            if [[ $LATEST_TAG =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              MAJOR="${BASH_REMATCH[1]}"
+              MINOR="${BASH_REMATCH[2]}"
+              PATCH="${BASH_REMATCH[3]}"
+              
+              NEW_PATCH=$((PATCH + 1))
+              NEW_TAG="v$MAJOR.$MINOR.$NEW_PATCH"
+            else
+              NEW_TAG="v1.0.1" 
+            fi
+            
+            echo "New tag calculated: $NEW_TAG"
+            
+            git tag $NEW_TAG
+            git push origin HEAD:${{ github.ref }}
+            git push origin $NEW_TAG
+            
+            echo "NEW_TAG=$NEW_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "No necessary changes. Holding the tag."
+            USER_INPUT="${{ github.event.inputs.version_tag }}"
+            if [[ -n "$USER_INPUT" ]]; then
+              echo "NEW_TAG=$USER_INPUT" >> $GITHUB_OUTPUT
+            else
+              echo "NEW_TAG=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            fi
+          fi
 
   build:
     needs: lint-and-test
@@ -119,7 +162,6 @@ jobs:
             pyinstaller --onefile --name '${{ matrix.build_name }}' --console ../launcher.py
           "
 
-    # Salva o arquivo gerado por cada máquina em um artefato temporário
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
@@ -128,7 +170,8 @@ jobs:
         retention-days: 7
 
   release:
-      needs: build
+      # Abbiamo aggiunto lint-and-test come dipendenza qui in modo da ricevere in input la stringa della nuova versione
+      needs: [lint-and-test, build]
       runs-on: ubuntu-latest
       if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
       
@@ -143,7 +186,8 @@ jobs:
         - name: Create GitHub Release
           uses: softprops/action-gh-release@v2
           with:
-            tag_name: ${{ github.event.inputs.version_tag || github.ref_name }}
+            # Il tag ora è recuperato dall'output del job precedente
+            tag_name: ${{ needs.lint-and-test.outputs.release_tag }}
             files: release-files/*
             draft: true
             prerelease: false
@@ -155,26 +199,26 @@ jobs:
 
               ## Downloads
               
-              [![Windows](https://img.shields.io/badge/Windows-[SPOTIFLAC.EXE]-0078D6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMjAgMjAiPjxwYXRoIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTIwIDEwLjg3M1YyMEw4LjQ3OSAxOC41MzdsLjAwMS03LjY2NEgyMFptLTEzLjEyIDBsLS4wMDEgNy40NjFMMCAxNy40NjF2LTYuNTg4aDYuODhaTTIwIDkuMjczSDguNDhsLS4wMDEtNy44MUwyMCAwdjkuMjczWk02Ljg3OSAxLjY2NmwuMDAxIDcuNjA3SDBWMi41MzlsNi44NzktLjg3M1oiLz48L3N2Zz4=)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-[SPOTIFLAC--macos]-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-macOS) [![Linux](https://img.shields.io/badge/Linux-[SPOTIFLAC--linux]-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version_tag || github.ref_name }}/SpotiFLAC-Linux-x86_64)
+              [![Windows](https://img.shields.io/badge/Windows-[SPOTIFLAC.EXE]-0078D6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMjAgMjAiPjxwYXRoIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTIwIDEwLjg3M1YyMEw4LjQ3OSAxOC41MzdsLjAwMS03LjY2NEgyMFptLTEzLjEyIDBsLS4wMDEgNy40NjFMMCAxNy40NjF2LTYuNTg4aDYuODhaTTIwIDkuMjczSDguNDhsLS4wMDEtNy44MUwyMCAwdjkuMjczWk02Ljg3OSAxLjY2NmwuMDAxIDcuNjA3SDBWMi41MzlsNi44NzktLjg3M1oiLz48L3N2Zz4=)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-test.outputs.release_tag }}/SpotiFLAC-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-[SPOTIFLAC--macos]-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-test.outputs.release_tag }}/SpotiFLAC-macOS) [![Linux](https://img.shields.io/badge/Linux-[SPOTIFLAC--linux]-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-test.outputs.release_tag }}/SpotiFLAC-Linux-x86_64)
 
               <details>
               <summary><b>💻 Usage Instructions</b></summary>
               
               ### Windows (PowerShell ou CMD)
               ```cmd
-              SpotiFLAC-Windows.exe https://open.spotify.com/track/ ./out --service tidal
+              SpotiFLAC-Windows.exe [https://open.spotify.com/track/](https://open.spotify.com/track/) ./out --service tidal
               ```
 
               ### 🍏 macOS
               ```bash
               chmod +x SpotiFLAC-macOS
-              ./SpotiFLAC-macOS https://open.spotify.com/track/ ./out --service tidal
+              ./SpotiFLAC-macOS [https://open.spotify.com/track/](https://open.spotify.com/track/) ./out --service tidal
               ```
 
               ### 🐧 Linux
               ```bash
               chmod +x SpotiFLAC-Linux-x86_64
-              ./SpotiFLAC-Linux-x86_64 https://open.spotify.com/track/ ./out --service tidal
+              ./SpotiFLAC-Linux-x86_64 [https://open.spotify.com/track/](https://open.spotify.com/track/) ./out --service tidal
               ```
               *(For ARM devices like Raspberry Pi, replace `x86_64` with `arm64`)*
               </details>
