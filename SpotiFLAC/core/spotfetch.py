@@ -145,8 +145,21 @@ class SpotifyWebClient:
                 "Spotify client token request did not return a granted token"
             )
 
-    def initialize(self) -> None:
-        if not self.client_version or not self.device_id:
+    def initialize(self, force: bool = False) -> None:
+        if force:
+            self.access_token = ""
+            self.client_token = ""
+            self.device_id = ""
+            # Recreate session to clear cookies
+            limits = httpx.Limits(max_keepalive_connections=15, max_connections=30)
+            self._session = httpx.Client(limits=limits, timeout=15.0)
+            self._session.headers.update(
+                {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+                }
+            )
+
+        if force or not self.client_version or not self.device_id:
             self._get_session_info()
 
         if not self.access_token:
@@ -373,7 +386,7 @@ class SpotifyWebClient:
 
         if resp.status_code == 401 and retry:
             logger.debug("[spotfetch] Token scaduto. Auto-rinnovo in corso...")
-            self.initialize()
+            self.initialize(force=True)
             return self.query(payload, retry=False)
 
         if resp.status_code != 200:

@@ -253,7 +253,7 @@ class LinkResolver:
         self, raw_id: str, platform: str
     ) -> dict[str, str]:
         return await self._get_songlink_links_async(
-            {"id": raw_id, "platform": platform, "userCountry": "US"}
+            {"id": raw_id, "platform": platform, "userCountry": "US", "type": "song"}
         )
 
     async def _get_songlink_html_links_async(self, raw_id: str) -> Dict[str, str]:

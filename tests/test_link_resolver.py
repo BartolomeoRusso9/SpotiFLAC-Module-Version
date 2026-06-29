@@ -78,6 +78,14 @@ class LinkResolverTests(unittest.TestCase):
         )
         self.assertEqual(links["tidal"], "https://listen.tidal.com/track/56789")
 
+    def test_get_songlink_links_by_id_passes_type_song(self):
+        self.http.get_json_async.return_value = {}
+
+        asyncio.run(self.resolver._get_songlink_links_by_id_async("abc", "spotify"))
+
+        _, kwargs = self.http.get_json_async.call_args
+        self.assertEqual(kwargs["params"]["type"], "song")
+
 
 if __name__ == "__main__":
     unittest.main()
