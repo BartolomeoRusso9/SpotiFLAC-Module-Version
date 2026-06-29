@@ -152,3 +152,17 @@ class BaseProvider(ABC):
             stdout.decode(errors="ignore"),
             stderr.decode(errors="ignore"),
         )
+
+    async def _run_ffprobe(self, *args: str) -> tuple[int, str, str]:
+        """Executes ffprobe asynchronously and returns (returncode, stdout, stderr)."""
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=_subproc.PIPE,
+            stderr=_subproc.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        return (
+            proc.returncode,
+            stdout.decode(errors="ignore"),
+            stderr.decode(errors="ignore"),
+        )
