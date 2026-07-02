@@ -790,21 +790,7 @@ class AmazonProvider(BaseProvider):
                     inner_codec = await self._get_codec(final_file)
                     if inner_codec == "flac":
                         flac_out = os.path.join(output_dir, f"{asin}_s.flac")
-                        proc = await asyncio.create_subprocess_exec(
-                            _ffmpeg_path(),
-                            "-y",
-                            "-i",
-                            final_file,
-                            "-map",
-                            "0:a:0",
-                            "-c:a",
-                            "flac",
-                            flac_out,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
-                        )
-                        await proc.communicate()
-                        if proc.returncode == 0 and os.path.exists(flac_out):
+                        if await self._remux_to_flac(final_file, flac_out):
                             os.remove(final_file)
                             final_file = flac_out
                             logger.info(
@@ -873,6 +859,33 @@ class AmazonProvider(BaseProvider):
             return stdout.decode().strip()
         except Exception:
             return "m4a"
+
+    async def _remux_to_flac(self, input_path: str, output_path: str) -> bool:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                _ffmpeg_path(),
+                "-y",
+                "-i",
+                input_path,
+                "-map",
+                "0:a:0",
+                "-c:a",
+                "flac",
+                output_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                logger.warning(
+                    "[amazon] FLAC remux failed: %s",
+                    stderr.decode(errors="ignore")[:200],
+                )
+                return False
+            return os.path.exists(output_path)
+        except Exception as exc:
+            logger.warning("[amazon] FLAC remux error: %s", exc)
+            return False
 
     def _quality_to_zarz_codec(self, quality: str) -> str:
         """Map quality string to Amazon/Zarz codec name (delegates to core.quality)."""
@@ -1021,32 +1034,42 @@ class AmazonProvider(BaseProvider):
             logger.info("[amazon] Decrypting Zarz stream…")
             out = os.path.join(output_dir, f"{asin}{ext}")
 
-            proc = await asyncio.create_subprocess_exec(
-                _ffmpeg_path(),
-                "-y",
-                "-decryption_key",
-                decryption_key,
-                "-i",
-                temp_file,
-                "-c",
-                "copy",
-                out,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.communicate()
+            if ext == ".flac":
+                if not await self._remux_to_flac(temp_file, out):
+                    logger.warning("[amazon] Zarz FLAC remux failed")
+                    if os.path.exists(out):
+                        os.remove(out)
+                    return None
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    _ffmpeg_path(),
+                    "-y",
+                    "-decryption_key",
+                    decryption_key,
+                    "-i",
+                    temp_file,
+                    "-c",
+                    "copy",
+                    out,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.communicate()
+
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+
+                if proc.returncode != 0:
+                    logger.warning(
+                        "[amazon] Zarz decryption failed: %s",
+                        proc.stderr.decode()[:100] if proc.stderr else "",
+                    )
+                    if os.path.exists(out):
+                        os.remove(out)
+                    return None
 
             if os.path.exists(temp_file):
                 os.remove(temp_file)
-
-            if proc.returncode != 0:
-                logger.warning(
-                    "[amazon] Zarz decryption failed: %s",
-                    proc.stderr.decode()[:100] if proc.stderr else "",
-                )
-                if os.path.exists(out):
-                    os.remove(out)
-                return None
 
             if ext == ".flac":
                 success, repair_msg = await asyncio.to_thread(
@@ -1169,30 +1192,41 @@ class AmazonProvider(BaseProvider):
             ext = ".flac" if codec == "flac" else ".m4a"
             out = os.path.join(output_dir, f"{asin}{ext}")
 
-            proc = await asyncio.create_subprocess_exec(
-                _ffmpeg_path(),
-                "-y",
-                "-decryption_key",
-                decryption_key.strip(),
-                "-i",
-                temp_file,
-                "-c",
-                "copy",
-                out,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.communicate()
+            if ext == ".flac":
+                if not await self._remux_to_flac(temp_file, out):
+                    raise SpotiflacError(
+                        ErrorKind.FILE_IO,
+                        f"Decryption failed: FLAC remux failed",
+                        self.name,
+                    )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    _ffmpeg_path(),
+                    "-y",
+                    "-decryption_key",
+                    decryption_key.strip(),
+                    "-i",
+                    temp_file,
+                    "-c",
+                    "copy",
+                    out,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.communicate()
+
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+
+                if proc.returncode != 0:
+                    raise SpotiflacError(
+                        ErrorKind.FILE_IO,
+                        f"Decryption failed: {proc.stderr.decode()[:100] if proc.stderr else ''}",
+                        self.name,
+                    )
 
             if os.path.exists(temp_file):
                 os.remove(temp_file)
-
-            if proc.returncode != 0:
-                raise SpotiflacError(
-                    ErrorKind.FILE_IO,
-                    f"Decryption failed: {proc.stderr.decode()[:100] if proc.stderr else ''}",
-                    self.name,
-                )
 
             if ext == ".flac":
                 success, repair_msg = await asyncio.to_thread(
@@ -1282,30 +1316,41 @@ class AmazonProvider(BaseProvider):
         if decryption_key:
             out = os.path.join(output_dir, f"{asin}{ext}")
 
-            proc = await asyncio.create_subprocess_exec(
-                _ffmpeg_path(),
-                "-y",
-                "-decryption_key",
-                decryption_key.strip(),
-                "-i",
-                temp_file,
-                "-c",
-                "copy",
-                out,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.communicate()
+            if ext == ".flac":
+                if not await self._remux_to_flac(temp_file, out):
+                    raise SpotiflacError(
+                        ErrorKind.FILE_IO,
+                        f"Decryption failed: FLAC remux failed",
+                        self.name,
+                    )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    _ffmpeg_path(),
+                    "-y",
+                    "-decryption_key",
+                    decryption_key.strip(),
+                    "-i",
+                    temp_file,
+                    "-c",
+                    "copy",
+                    out,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.communicate()
+
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+
+                if proc.returncode != 0:
+                    raise SpotiflacError(
+                        ErrorKind.FILE_IO,
+                        f"Decryption failed: {proc.stderr.decode()[:100] if proc.stderr else ''}",
+                        self.name,
+                    )
 
             if os.path.exists(temp_file):
                 os.remove(temp_file)
-
-            if proc.returncode != 0:
-                raise SpotiflacError(
-                    ErrorKind.FILE_IO,
-                    f"Decryption failed: {proc.stderr.decode()[:100] if proc.stderr else ''}",
-                    self.name,
-                )
 
             if ext == ".flac":
                 success, repair_msg = await asyncio.to_thread(
@@ -1473,39 +1518,42 @@ class AmazonProvider(BaseProvider):
 
                         if decryption_key:
                             logger.info("[amazon] Decrypting Antra stream...")
-                            proc = await asyncio.create_subprocess_exec(
-                                _ffmpeg_path(),
-                                "-y",
-                                "-decryption_key",
-                                decryption_key.strip(),
-                                "-i",
-                                temp_file,
-                                "-c",
-                                "copy",
-                                out,
-                                stdout=asyncio.subprocess.PIPE,
-                                stderr=asyncio.subprocess.PIPE,
-                            )
-                            await proc.communicate()
-
-                            if os.path.exists(temp_file):
-                                os.remove(temp_file)
-
-                            if proc.returncode == 0:
-                                if ext == ".flac":
+                            if ext == ".flac":
+                                if await self._remux_to_flac(temp_file, out):
+                                    if os.path.exists(temp_file):
+                                        os.remove(temp_file)
                                     success, repair_msg = await asyncio.to_thread(
                                         validate_and_repair_if_needed, out
                                     )
                                     if success:
                                         return out, {}
-                                    else:
-                                        logger.warning(
-                                            "[amazon] Antra FLAC repair failed: %s",
-                                            repair_msg,
-                                        )
+                                    logger.warning(
+                                        "[amazon] Antra FLAC repair failed: %s",
+                                        repair_msg,
+                                    )
                                 else:
-                                    return out, {}
+                                    logger.warning("[amazon] Antra FLAC remux failed.")
                             else:
+                                proc = await asyncio.create_subprocess_exec(
+                                    _ffmpeg_path(),
+                                    "-y",
+                                    "-decryption_key",
+                                    decryption_key.strip(),
+                                    "-i",
+                                    temp_file,
+                                    "-c",
+                                    "copy",
+                                    out,
+                                    stdout=asyncio.subprocess.PIPE,
+                                    stderr=asyncio.subprocess.PIPE,
+                                )
+                                await proc.communicate()
+
+                                if os.path.exists(temp_file):
+                                    os.remove(temp_file)
+
+                                if proc.returncode == 0:
+                                    return out, {}
                                 logger.warning("[amazon] Antra decryption failed.")
                         else:
                             os.rename(temp_file, out)
