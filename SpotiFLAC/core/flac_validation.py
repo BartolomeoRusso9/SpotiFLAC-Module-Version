@@ -62,7 +62,9 @@ def validate_flac_file(filepath: str) -> tuple[bool, str]:
             timeout=30,
         )
         if integrity_result.returncode != 0:
-            error_msg = integrity_result.stderr.strip() or integrity_result.stdout.strip()
+            error_msg = (
+                integrity_result.stderr.strip() or integrity_result.stdout.strip()
+            )
             return False, f"FLAC integrity test failed: {error_msg[:120]}"
 
         return True, ""

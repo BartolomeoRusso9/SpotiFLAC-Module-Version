@@ -39,8 +39,15 @@ class AmazonFlacRegressionTests(unittest.TestCase):
 
         try:
             mock_run.side_effect = [
-                subprocess.CompletedProcess(args=["ffmpeg"], returncode=0, stdout="", stderr=""),
-                subprocess.CompletedProcess(args=["flac"], returncode=1, stdout="", stderr="integrity check failed"),
+                subprocess.CompletedProcess(
+                    args=["ffmpeg"], returncode=0, stdout="", stderr=""
+                ),
+                subprocess.CompletedProcess(
+                    args=["flac"],
+                    returncode=1,
+                    stdout="",
+                    stderr="integrity check failed",
+                ),
             ]
 
             is_valid, error_msg = flac_validation.validate_flac_file(tmp_path)
@@ -73,10 +80,20 @@ class AmazonFlacRegressionTests(unittest.TestCase):
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
-    @patch("SpotiFLAC.providers.amazon.validate_and_repair_if_needed", return_value=(True, ""))
-    @patch.object(AmazonProvider, "_remux_to_flac", new_callable=AsyncMock, return_value=True)
-    @patch.object(AmazonProvider, "_get_codec", new_callable=AsyncMock, return_value="flac")
-    @patch("SpotiFLAC.providers.amazon.AmazonProvider._do_request_with_retry", new_callable=AsyncMock)
+    @patch(
+        "SpotiFLAC.providers.amazon.validate_and_repair_if_needed",
+        return_value=(True, ""),
+    )
+    @patch.object(
+        AmazonProvider, "_remux_to_flac", new_callable=AsyncMock, return_value=True
+    )
+    @patch.object(
+        AmazonProvider, "_get_codec", new_callable=AsyncMock, return_value="flac"
+    )
+    @patch(
+        "SpotiFLAC.providers.amazon.AmazonProvider._do_request_with_retry",
+        new_callable=AsyncMock,
+    )
     def test_spotbye_api_uses_flac_remux_helper(
         self, mock_do_request, mock_get_codec, mock_remux, mock_validate
     ):
@@ -84,7 +101,10 @@ class AmazonFlacRegressionTests(unittest.TestCase):
         provider._async_http = MagicMock()
         provider._async_http.stream_to_file = AsyncMock()
 
-        with patch("SpotiFLAC.providers.amazon.get_amazon_endpoint", return_value="https://example.com"):
+        with patch(
+            "SpotiFLAC.providers.amazon.get_amazon_endpoint",
+            return_value="https://example.com",
+        ):
             response = MagicMock()
             response.status_code = 200
             response.headers = {"Content-Type": "application/json"}
@@ -97,7 +117,9 @@ class AmazonFlacRegressionTests(unittest.TestCase):
 
             with tempfile.TemporaryDirectory() as out_dir:
                 result = asyncio.run(
-                    provider._download_from_spotbye_api("B123456789", out_dir, "spotbye")
+                    provider._download_from_spotbye_api(
+                        "B123456789", out_dir, "spotbye"
+                    )
                 )
 
         self.assertIsNotNone(result)
