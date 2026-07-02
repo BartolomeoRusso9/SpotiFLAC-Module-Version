@@ -1196,7 +1196,7 @@ class AmazonProvider(BaseProvider):
                 if not await self._remux_to_flac(temp_file, out):
                     raise SpotiflacError(
                         ErrorKind.FILE_IO,
-                        f"Decryption failed: FLAC remux failed",
+                        "Decryption failed: FLAC remux failed",
                         self.name,
                     )
             else:
@@ -1320,7 +1320,7 @@ class AmazonProvider(BaseProvider):
                 if not await self._remux_to_flac(temp_file, out):
                     raise SpotiflacError(
                         ErrorKind.FILE_IO,
-                        f"Decryption failed: FLAC remux failed",
+                        "Decryption failed: FLAC remux failed",
                         self.name,
                     )
             else:
