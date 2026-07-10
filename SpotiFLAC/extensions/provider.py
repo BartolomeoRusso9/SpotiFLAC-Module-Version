@@ -96,6 +96,7 @@ class JSExtensionProvider(BaseProvider):
                     settings        = self._settings,
                     node_executable = self._node_executable,
                     startup_timeout = 30.0,
+                    signed_session_config = self._ext.manifest.get("signedSession"),
                 )
                 rt.start()
                 self._runtime = rt

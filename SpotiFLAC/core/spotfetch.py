@@ -687,8 +687,24 @@ class SpotifyWebClient:
                 return ""
             import re
 
-            match = re.search(rb"isrc[\x00-\x1f]+([A-Za-z0-9]{12})", resp.content)
-            return match.group(1).decode().upper() if match else ""
+            from .isrc_utils import is_valid_isrc
+
+            # NOTE: questo endpoint restituisce un blob protobuf binario
+            # (content-type: vnd.spotify/metadata-track), non JSON. Non
+            # esiste qui un vero parser protobuf: si cerca euristicamente
+            # la stringa "isrc" seguita da byte di controllo di campo e si
+            # prende il successivo blocco alfanumerico di 12 caratteri.
+            # Questo può agganciare per errore un campo vicino non
+            # correlato (es. un testo di restrizione/territorio), quindi
+            # il candidato va sempre validato contro il vero formato ISRC
+            # (2 lettere + 3 alfanumerici + 7 cifre) prima di essere
+            # accettato: un match come "INTERNATIONA" (12 lettere, zero
+            # cifre) non è mai un ISRC valido.
+            for match in re.finditer(rb"isrc[\x00-\x1f]+([A-Za-z0-9]{12})", resp.content):
+                candidate = match.group(1).decode(errors="ignore").upper()
+                if is_valid_isrc(candidate):
+                    return candidate
+            return ""
         except Exception as e:
             logger.debug(f"[spotfetch] ISRC lookup failed for {track_id}: {e}")
             return ""

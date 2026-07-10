@@ -10,10 +10,6 @@ logger = logging.getLogger(__name__)
 _SPOTIFY_TRACK_ID_RE = re.compile(
     r"^(?:spotify:track:|https?://(?:open\.spotify\.com|play\.spotify\.com)/track/)?([A-Za-z0-9]{22})(?:[/?].*)?$"
 )
-_SPOTIFY_METADATA_URL = "https://spclient.wg.spotify.com/metadata/4/track/{}"
-_SPOTIFY_RETRY_STATUS = {429, 500, 502, 503, 504}
-_MAX_METADATA_ATTEMPTS = 3
-_ISRC_RE = re.compile(r"^[A-Z0-9]{12}$")
 
 
 def spotify_id_to_gid(track_id: str) -> str:
@@ -31,35 +27,9 @@ def _normalize_isrc(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None
     isrc = value.strip().upper()
-    if _ISRC_RE.match(isrc):
-        return isrc
-    return None
+    from .isrc_utils import is_valid_isrc
 
-
-def _extract_isrc_from_payload(data: Any) -> Optional[str]:
-    if not isinstance(data, dict):
-        return None
-
-    external_ids = data.get("external_ids")
-    if isinstance(external_ids, dict):
-        isrc = _normalize_isrc(external_ids.get("isrc"))
-        if isrc:
-            return isrc
-
-    ids_list = data.get("external_id")
-    if isinstance(ids_list, list):
-        for ext in ids_list:
-            if not isinstance(ext, dict):
-                continue
-            if ext.get("type", "").strip().lower() == "isrc":
-                isrc = _normalize_isrc(ext.get("id") or ext.get("value"))
-                if isrc:
-                    return isrc
-
-        if ids_list and isinstance(ids_list[0], dict):
-            return _normalize_isrc(ids_list[0].get("id") or ids_list[0].get("value"))
-
-    return None
+    return isrc if is_valid_isrc(isrc) else None
 
 
 class IsrcFinder:
@@ -78,99 +48,32 @@ class IsrcFinder:
                 logger.debug("[isrc_finder] Could not init SpotifyWebClient: %s", e)
         return self._spotify_client
 
-    async def _fetch_spotify_track_metadata(
-        self, url: str, headers: dict[str, str]
-    ) -> Optional[dict[str, Any]]:
-        for attempt in range(1, _MAX_METADATA_ATTEMPTS + 1):
-            client = self._get_spotify_client()
-            if not client or not client.access_token:
-                logger.debug(
-                    "[isrc_finder] SpotifyWebClient is not initialized or missing access token"
-                )
-                return None
-
-            try:
-                from .http import NetworkManager
-
-                async_client = await NetworkManager.get_async_client_safe()
-                resp = await async_client.get(url, headers=headers, timeout=8.0)
-            except Exception as exc:
-                logger.debug(
-                    "[isrc_finder] Spotify metadata request failed (attempt %s/%s): %s",
-                    attempt,
-                    _MAX_METADATA_ATTEMPTS,
-                    exc,
-                )
-                if attempt == _MAX_METADATA_ATTEMPTS:
-                    return None
-                await asyncio.sleep(0.25 * attempt)
-                continue
-
-            if resp.status_code == 401:
-                logger.debug(
-                    "[isrc_finder] Spotify metadata auth failure, refreshing Spotify client"
-                )
-                self._spotify_client = None
-                if attempt == _MAX_METADATA_ATTEMPTS:
-                    return None
-                await asyncio.sleep(0.25 * attempt)
-                continue
-
-            if resp.status_code in _SPOTIFY_RETRY_STATUS:
-                logger.debug(
-                    "[isrc_finder] Spotify metadata transient failure %s, attempt %s/%s",
-                    resp.status_code,
-                    attempt,
-                    _MAX_METADATA_ATTEMPTS,
-                )
-                if attempt == _MAX_METADATA_ATTEMPTS:
-                    return None
-                await asyncio.sleep(0.25 * attempt)
-                continue
-
-            if resp.status_code != 200:
-                logger.debug(
-                    "[isrc_finder] Spotify metadata request failed with status %s",
-                    resp.status_code,
-                )
-                return None
-
-            try:
-                return resp.json()
-            except Exception as exc:
-                logger.debug(
-                    "[isrc_finder] Failed to decode Spotify metadata JSON: %s", exc
-                )
-                return None
-
-        return None
-
     async def find_isrc_async(self, track_id: str) -> Optional[str]:
+        # NOTE: l'endpoint spclient.wg.spotify.com/metadata/4/track/{gid}
+        # restituisce un blob protobuf binario (content-type
+        # "vnd.spotify/metadata-track"), mai JSON. Un precedente tentativo
+        # qui chiamava resp.json() su quel blob, fallendo sistematicamente
+        # con errori di decodifica UTF-8 per ogni traccia. L'estrazione
+        # (con validazione del formato ISRC reale) è centralizzata in
+        # SpotifyWebClient.get_isrc_from_metadata, che va invocata invece
+        # di duplicare qui un parsing JSON strutturalmente impossibile.
         try:
-            gid = spotify_id_to_gid(track_id)
+            spotify_id_to_gid(track_id)
         except ValueError as exc:
             logger.debug("[isrc_finder] %s", exc)
             return None
 
+        client = self._get_spotify_client()
+        if not client or not client.access_token or not client.client_token:
+            logger.debug(
+                "[isrc_finder] SpotifyWebClient is not initialized or missing access token"
+            )
+            return None
+
         try:
-            client = self._get_spotify_client()
-            if not client or not client.access_token or not client.client_token:
-                return None
-
-            gid = client.spotify_id_to_hex_gid(track_id)
+            isrc = await asyncio.to_thread(client.get_isrc_from_metadata, track_id)
         except Exception as exc:
-            logger.debug("[isrc_finder] Invalid Spotify ID for hex conversion: %s", exc)
+            logger.debug("[isrc_finder] Spotify metadata lookup failed: %s", exc)
             return None
 
-        payload = await self._fetch_spotify_track_metadata(
-            _SPOTIFY_METADATA_URL.format(gid),
-            {
-                "Authorization": f"Bearer {client.access_token}",
-                "Client-Token": client.client_token,
-            },
-        )
-
-        if not payload:
-            return None
-
-        return _extract_isrc_from_payload(payload)
+        return _normalize_isrc(isrc) if isrc else None

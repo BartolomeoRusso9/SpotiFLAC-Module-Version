@@ -103,6 +103,17 @@ if (!isMainThread) {
     appUserAgent: () => 'SpotiFLAC-Python/1.2',
   };
 
+  // Signed-session bridge: the session secret lives in Python (see
+  // core/signed_session.py), never in this worker. signedFetch() blocks
+  // synchronously (same Atomics.wait mechanism as http/file) while the
+  // main thread relays the request to Python and waits for its reply.
+  global.session = {
+    signedFetch: (method, path, body, headers) =>
+      bridgeCall('session.signedFetch', {
+        method, path, body: body || null, headers: headers || {},
+      }),
+  };
+
   let _ext = null;
   global.registerExtension = (obj) => { _ext = obj; };
 
@@ -155,6 +166,8 @@ const DOFF       = 8;
 let _pendingPy   = new Map();   // id → {resolve, reject}
 let _progressCbs = new Map();   // callId → progressCallback (unused server-side, forwarded to stdout)
 let _cmdSeq      = 0;
+let _pendingSession = new Map(); // id → {resolve, reject}  (session.signedFetch relayed to Python)
+let _sessionSeq  = 0;
 
 /** Esegue una bridge-request generata dal Worker. */
 async function handleBridgeRequest() {
@@ -174,6 +187,8 @@ async function handleBridgeRequest() {
       result = await nodeHttpRequest('POST', args.url, args.body, args.headers);
     } else if (method === 'file.download') {
       result = await nodeFileDownload(args.url, args.outputPath, args.opts);
+    } else if (method === 'session.signedFetch') {
+      result = await relaySignedFetchToPython(args);
     } else {
       error = `Unknown bridge method: ${method}`;
     }
@@ -187,6 +202,25 @@ async function handleBridgeRequest() {
 
   Atomics.store(STATE, 0, 2);
   Atomics.notify(STATE, 0, 1);
+}
+
+/**
+ * Inoltra una session.signedFetch a Python (che possiede il segreto di
+ * sessione) scrivendo un messaggio {type:'session_request'} su stdout e
+ * attendendo il corrispondente {type:'session_response'} su stdin.
+ */
+function relaySignedFetchToPython(args) {
+  return new Promise((resolve, reject) => {
+    const id = ++_sessionSeq;
+    _pendingSession.set(id, { resolve, reject });
+    process.stdout.write(JSON.stringify({ type: 'session_request', id, args }) + '\n');
+    setTimeout(() => {
+      if (_pendingSession.has(id)) {
+        _pendingSession.delete(id);
+        resolve({ error: 'signed session request timed out' });
+      }
+    }, 95_000);
+  });
 }
 
 /** HTTP request asincrona con redirect e cookie base. */
@@ -348,6 +382,15 @@ stdinRL.on('line', async (line) => {
   if (!line) return;
   let req;
   try { req = JSON.parse(line); } catch (_) { return; }
+
+  if (req.type === 'session_response') {
+    const pending = _pendingSession.get(req.id);
+    if (pending) {
+      _pendingSession.delete(req.id);
+      pending.resolve(req.error ? { error: req.error } : req.result);
+    }
+    return;
+  }
 
   const { id, call, args } = req;
   try {

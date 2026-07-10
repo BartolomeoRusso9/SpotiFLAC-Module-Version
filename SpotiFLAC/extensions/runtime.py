@@ -9,6 +9,7 @@ Lo stato `storage` dell'estensione è persistente per tutta la vita del runtime.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -19,6 +20,8 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable
+
+from ..core.signed_session import SignedSessionClient, client_from_manifest, perform_signed_fetch
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +53,32 @@ class JSRuntime:
         settings: dict | None = None,
         node_executable: str = "node",
         startup_timeout: float = 20.0,
+        signed_session_config: dict | None = None,
     ) -> None:
         self.ext_path        = Path(ext_path)
         self.settings        = settings or {}
         self.node_executable = node_executable
         self.startup_timeout = startup_timeout
+        # manifest["signedSession"] block, if the extension declares one
+        # (requiredRuntimeFeatures: ["signedSession@1", ...]). Lazily turned
+        # into a SignedSessionClient the first time the JS side calls
+        # session.signedFetch(...).
+        self._signed_session_config = signed_session_config
+        self._signed_session_client: SignedSessionClient | None = None
+        self._signed_session_lock = threading.Lock()
+        # A single dedicated event loop for the lifetime of this runtime:
+        # SignedSessionClient holds a persistent httpx.AsyncClient, which
+        # must not be reused across different event loops (as a fresh
+        # asyncio.run() per call would do under concurrent requests).
+        self._session_loop: asyncio.AbstractEventLoop | None = None
+        self._session_loop_thread: threading.Thread | None = None
 
         self._proc:        subprocess.Popen | None = None
         self._seq          = 0
         self._pending:     dict[int, queue.Queue] = {}
         self._progress_cbs: dict[int, Callable[[float], None]] = {}
         self._lock         = threading.Lock()
+        self._stdin_lock   = threading.Lock()
         self._reader:      threading.Thread | None = None
         self._ready_event  = threading.Event()
 
@@ -229,6 +247,20 @@ class JSRuntime:
                 self._proc.kill()
         self._proc = None
 
+        if self._session_loop is not None:
+            try:
+                if self._signed_session_client is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        self._signed_session_client.aclose(), self._session_loop
+                    ).result(timeout=5)
+            except Exception:
+                pass
+            self._session_loop.call_soon_threadsafe(self._session_loop.stop)
+            if self._session_loop_thread is not None:
+                self._session_loop_thread.join(timeout=5)
+            self._session_loop = None
+            self._session_loop_thread = None
+
     def __enter__(self) -> "JSRuntime":
         self.start()
         return self
@@ -269,8 +301,7 @@ class JSRuntime:
 
         msg = json.dumps({"id": seq, "call": method, "args": final_args}) + "\n"
         try:
-            self._proc.stdin.write(msg.encode())
-            self._proc.stdin.flush()
+            self._write_stdin(msg)
         except OSError as e:
             self._pending.pop(seq, None)
             raise ExtensionRuntimeError(f"Errore scrittura stdin Node: {e}") from e
@@ -338,12 +369,84 @@ class JSRuntime:
             level = msg.get("level", "info")
             getattr(logger, level, logger.info)("[EXT] %s", msg.get("msg", ""))
             return
+        if msg.get("type") == "session_request":
+            # Handled off the reader thread so a slow/blocking signed HTTP
+            # call (or a Turnstile solve) never stalls stdout draining.
+            threading.Thread(
+                target=self._handle_session_request, args=(msg,), daemon=True
+            ).start()
+            return
         seq = msg.get("id")
         if seq is None:
             return
         q = self._pending.pop(seq, None)
         if q:
             q.put(msg)
+
+    def _write_stdin(self, text: str) -> None:
+        with self._stdin_lock:
+            self._proc.stdin.write(text.encode())
+            self._proc.stdin.flush()
+
+    def _get_session_loop(self) -> asyncio.AbstractEventLoop:
+        if self._session_loop is None:
+            ready = threading.Event()
+
+            def _run():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                self._session_loop = loop
+                ready.set()
+                loop.run_forever()
+
+            self._session_loop_thread = threading.Thread(target=_run, daemon=True)
+            self._session_loop_thread.start()
+            ready.wait(timeout=5)
+        return self._session_loop
+
+    def _get_signed_session_client(self) -> SignedSessionClient:
+        with self._signed_session_lock:
+            if self._signed_session_client is None:
+                if not self._signed_session_config:
+                    raise ExtensionRuntimeError(
+                        "Extension calls session.signedFetch() but its manifest "
+                        "has no 'signedSession' block."
+                    )
+                self._signed_session_client = client_from_manifest(self._signed_session_config)
+            return self._signed_session_client
+
+    def _handle_session_request(self, msg: dict) -> None:
+        """
+        Services a `session.signedFetch(method, path, body, headers)` call
+        forwarded by _bridge.js's Node main thread. Runs the async
+        SignedSessionClient flow in a private event loop and writes the
+        JSON result back to Node's stdin as a `session_response` message.
+        """
+        req_id = msg.get("id")
+        args = msg.get("args") or {}
+        try:
+            client = self._get_signed_session_client()
+            loop = self._get_session_loop()
+            future = asyncio.run_coroutine_threadsafe(
+                perform_signed_fetch(
+                    client,
+                    method=args.get("method", "GET"),
+                    path=args.get("path", "/"),
+                    body=args.get("body"),
+                    headers=args.get("headers") or {},
+                ),
+                loop,
+            )
+            result = future.result(timeout=90)
+            reply = {"type": "session_response", "id": req_id, "result": result}
+        except Exception as exc:
+            logger.debug("[JSRuntime] session_request failed: %s", exc)
+            reply = {"type": "session_response", "id": req_id, "error": str(exc)}
+
+        try:
+            self._write_stdin(json.dumps(reply) + "\n")
+        except OSError:
+            pass  # Node process likely already gone; nothing more to do.
 
     def _drain_stderr(self) -> None:
         try:
