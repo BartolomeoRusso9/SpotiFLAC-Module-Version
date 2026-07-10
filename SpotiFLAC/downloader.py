@@ -74,10 +74,19 @@ class DownloadOptions:
     post_download_command: str = ""
     tidal_custom_api: str | None = None
     timeout_s: int | None = None
+    auto_pair_extensions:    bool             = True
+    ext_dir:                 str | None       = None
 
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
-    from .providers import PROVIDER_REGISTRY
+    from .providers import PROVIDER_REGISTRY, _build_ext_provider
+
+    if name.startswith("ext:"):
+        try:
+            return _build_ext_provider(name, ext_dir=opts.ext_dir, timeout_s=opts.timeout_s or 120)
+        except Exception as e:
+            logger.warning("Failed to create provider %s: %s", name, e)
+            return None
 
     cls = PROVIDER_REGISTRY.get(name)
     if cls is None:
@@ -96,8 +105,39 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
     return cls(**kwargs)
 
 
+def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProvider]:
+    providers: list[BaseProvider] = []
+
+    if name.startswith("ext:"):
+        p = _build_provider(name, opts)
+        if p:
+            providers.append(p)
+        return providers
+
+    native = _build_provider(name, opts)
+    if native:
+        providers.append(native)
+
+    if getattr(opts, "auto_pair_extensions", True):
+        from .providers import NATIVE_TO_EXTENSION_ID
+        ext_id = NATIVE_TO_EXTENSION_ID.get(name)
+        if ext_id:
+            try:
+                from .extensions.manager import ExtensionManager
+                mgr = ExtensionManager(ext_dir=opts.ext_dir)
+                if mgr.get_installed(ext_id) is not None:
+                    ext_provider = _build_provider(f"ext:{ext_id}", opts)
+                    if ext_provider:
+                        providers.append(ext_provider)
+                        logger.debug("[auto-pair] '%s' + extension '%s' added as fallback", name, ext_id)
+            except Exception as e:
+                logger.debug("[auto-pair] Extension for '%s' skipped: %s", name, e)
+
+    return providers
+
+
 async def _move_file_async(src: str, dst: str) -> None:
-    """Helper asincrono thread-safe per rinominare/spostare file."""
+    """Async thread-safe helper to rename/move files."""
 
     def _do_move():
         os.makedirs(os.path.dirname(os.path.abspath(dst)) or ".", exist_ok=True)
@@ -110,7 +150,7 @@ async def _move_file_async(src: str, dst: str) -> None:
 
 
 async def _get_file_size_mb_async(path: str) -> float:
-    """Helper asincrono thread-safe per calcolare il peso in MB."""
+    """Async thread-safe helper to calculate file size in MB."""
 
     def _do_get():
         if path and os.path.exists(path):
@@ -301,9 +341,7 @@ class DownloadWorker:
     def _build_providers(self) -> list[BaseProvider]:
         result = []
         for name in self._opts.services:
-            p = _build_provider(name, self._opts)
-            if p:
-                result.append(p)
+            result.extend(_build_providers_for_name(name, self._opts))
         if not result:
             raise ValueError(f"No valid providers found in: {self._opts.services}")
         return result
@@ -314,7 +352,7 @@ class DownloadWorker:
         total = len(self._tracks)
         start = time.perf_counter()
 
-        # Delegazione I/O cartelle nativa asincrona
+        # Native async folder I/O delegation
         base_out = await self._resolve_output_dir_async()
 
         install_console_interception()
@@ -392,7 +430,7 @@ class DownloadWorker:
         return self._failed
 
     async def _resolve_output_dir_async(self) -> str:
-        """Risolve asincronamente la directory di output assicurandosi che esista."""
+        """Asynchronously resolves the output directory ensuring it exists."""
 
         def _do_resolve():
             if self._opts.output_path:

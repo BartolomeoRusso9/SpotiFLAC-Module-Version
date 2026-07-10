@@ -26,6 +26,8 @@ __all__ = [
     "TidalProvider",
     "YouTubeProvider",
     "parse_spotify_url",
+    "PROVIDER_REGISTRY",
+    "NATIVE_TO_EXTENSION_ID",
 ]
 
 PROVIDER_REGISTRY: dict[str, type] = {
@@ -42,3 +44,45 @@ PROVIDER_REGISTRY: dict[str, type] = {
     "soundcloud": SoundCloudProvider,
     "youtube": YouTubeProvider,
 }
+
+# Maps native provider names to their corresponding extension IDs
+# for auto-pairing extensions as fallback providers
+NATIVE_TO_EXTENSION_ID: dict[str, str] = {
+    "tidal": "tidal",
+    "qobuz": "qobuz",
+    "amazon": "amazon",
+    "apple": "apple",
+    "deezer": "deezer",
+    "soundcloud": "soundcloud",
+    "youtube": "youtube",
+    "pandora": "pandora",
+}
+
+def _build_ext_provider(name: str, **kwargs) -> "BaseProvider | None":
+    """
+    Factory for providers with 'ext:' prefix.
+    Example: name='ext:soundcloud' creates JSExtensionProvider('soundcloud').
+
+    Optional parameters passable via kwargs:
+        ext_settings    – dict of settings for the extension
+        ext_dir         – extensions directory (default ~/.spotiflac/extensions)
+        node_executable – path to Node.js (default 'node')
+        timeout_s       – timeout for JS calls (default 120)
+    """
+    try:
+        from ..extensions.provider import JSExtensionProvider
+    except ImportError as e:
+        import logging
+        logging.getLogger(__name__).error(
+            "Failed to import extensions module: %s", e
+        )
+        return None
+
+    ext_id = name.removeprefix("ext:")
+    return JSExtensionProvider(
+        ext_id          = ext_id,
+        settings        = kwargs.pop("ext_settings", None),
+        ext_dir         = kwargs.pop("ext_dir", None),
+        node_executable = kwargs.pop("node_executable", "node"),
+        timeout_s       = kwargs.pop("timeout_s", 120),
+    )

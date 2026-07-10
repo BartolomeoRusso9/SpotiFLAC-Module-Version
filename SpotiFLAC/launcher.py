@@ -31,6 +31,34 @@ from .downloader import SpotiflacDownloader, DownloadOptions
 from .interactive import run_interactive
 
 
+VALID_PROVIDERS = {
+    "deezer", "tidal", "qobuz", "amazon", "joox", "netease",
+    "migu", "kuwo", "soundcloud", "youtube", "apple", "pandora"
+}
+
+
+def _validate_services(services: list[str]) -> list[str]:
+    """Validate service names — allow native providers and ext:* extensions."""
+    validated = []
+    for svc in services:
+        if svc.startswith("ext:"):
+            # Extension provider — just ensure non-empty name after prefix
+            ext_id = svc[4:]  # Remove "ext:" prefix
+            if ext_id:
+                validated.append(svc)
+            else:
+                raise ValueError(f"Invalid extension: '{svc}' (empty extension name)")
+        elif svc in VALID_PROVIDERS:
+            validated.append(svc)
+        else:
+            raise ValueError(
+                f"Invalid service: '{svc}'. "
+                f"Valid native providers: {', '.join(sorted(VALID_PROVIDERS))}. "
+                f"Extensions: ext:soundcloud, ext:pandora, ext:amazon, etc."
+            )
+    return validated
+
+
 def load_config() -> dict:
     config_path = "config.json"
     if os.path.exists(config_path):
@@ -81,25 +109,12 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--service",
         "-s",
-        choices=[
-            "deezer",
-            "tidal",
-            "qobuz",
-            "amazon",
-            "joox",
-            "netease",
-            "migu",
-            "kuwo",
-            "soundcloud",
-            "youtube",
-            "apple",
-            "pandora",
-        ],
         nargs="+",
         default=pd.get("services", ["tidal"]),
         metavar="SERVICE",
         help="Audio providers in priority order (default: tidal). "
-        "Choices: tidal, qobuz, deezer, amazon, joox, netease, migu, kuwo, soundcloud, youtube, apple, pandora",
+        "Native: tidal, qobuz, deezer, amazon, joox, netease, migu, kuwo, soundcloud, youtube, apple, pandora. "
+        "Extensions: ext:soundcloud, ext:pandora, ext:amazon, etc.",
     )
     parser.add_argument(
         "--filename-format",
@@ -360,7 +375,7 @@ async def _run_download_async(
         print("\n\n[!] Operazione interrotta dall'utente.")
     except Exception as e:
         logging.getLogger("SpotiFLAC").error(
-            "Critical error durante l'esecuzione: %s", e
+            "Critical error during execution: %s", e
         )
 
 
@@ -450,6 +465,13 @@ async def amain() -> None:
     merged_defaults = {**file_cfg, **profile_defaults}
 
     args = parse_args(profile_defaults=merged_defaults)
+
+    # Validate services (allow native providers and ext:* extensions)
+    try:
+        args.service = _validate_services(args.service)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Check that URL and output_dir are provided for CLI mode
     if not args.url or not args.output_dir:

@@ -44,6 +44,10 @@ from .providers import (
     SpotifyMetadataClient,
 )
 from .core import TrackMetadata, DownloadResult
+# NOTE: no "from .extensions import ExtensionManager" at module level.
+# _sync_extensions() already does the local import — importing it here would force loading
+# the entire extensions package (and its dependencies, e.g. httpx) every time
+# SpotiFLAC is imported, even when sync_extensions=False or extensions are never used.
 
 try:
     __version__ = importlib.metadata.version("SpotiFLAC")
@@ -80,6 +84,25 @@ def _setup_logger(level: int):
     return logger
 
 
+def _sync_extensions(logger: "logging.Logger") -> None:
+    """
+    Syncs download-category JS extensions from official registry.
+    Never blocks execution: any error becomes just a warning.
+    """
+    try:
+        from .extensions import ExtensionManager
+        em = ExtensionManager()
+        status = em.sync_download_extensions()
+        for ext_id, result in status.items():
+            if result.startswith("error"):
+                logger.warning("[Extensions] %s: %s", ext_id, result)
+            elif result.startswith(("installed", "updated")):
+                logger.info("[Extensions] %s: %s", ext_id, result)
+            # "up_to_date" is not logged to avoid noise on every run
+    except Exception as e:
+        logger.warning("[Extensions] Startup sync failed (non-blocking): %s", e)
+
+
 def SpotiFLAC(
     url: str | list[str],
     output_dir: str,
@@ -107,6 +130,7 @@ def SpotiFLAC(
     post_download_command: str = "",
     tidal_custom_api: str | None = None,
     timeout_s: int | None = None,
+    sync_extensions: bool = True,
 ) -> None:
     """
     Download tracks/album/playlist from Spotify, Tidal, Apple Music, Deezer, SoundCloud, Pandora and YouTube.
@@ -118,8 +142,13 @@ def SpotiFLAC(
         track_max_retries: Extra retry attempts per track on failure (default: 0).
         post_download_action: Action after completion — "none" | "open_folder" | "notify" | "command".
         post_download_command: Shell command to run with {folder}, {succeeded}, {failed}.
+        sync_extensions: If True (default), syncs JS extensions of "download" category on startup
+            from official registry (installs missing ones, updates those with newer versions available).
     """
-    _setup_logger(log_level)
+    logger = _setup_logger(log_level)
+
+    if sync_extensions:
+        _sync_extensions(logger)
 
     opts = DownloadOptions(
         output_dir=output_dir,
@@ -164,8 +193,8 @@ def SpotiFLAC(
             )
 
     except KeyboardInterrupt:
-        print("\n\n[!] Operazione interrotta dall'utente.")
+        print("\n\n[!] Operation interrupted by user.")
     except Exception as e:
         logging.getLogger("SpotiFLAC").error(
-            "Critical error durante l'esecuzione: %s", e
+            "Critical error during execution: %s", e
         )
