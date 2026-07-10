@@ -367,7 +367,25 @@ class JSRuntime:
             return
         if msg.get("type") == "log":
             level = msg.get("level", "info")
-            getattr(logger, level, logger.info)("[EXT] %s", msg.get("msg", ""))
+            text = msg.get("msg", "") or ""
+            # Sanitize potential ISRC-like tokens in logs (mirror _drain_stderr)
+            try:
+                import re
+                from ..core.isrc_utils import normalize_isrc
+
+                def _clean_token(tok: str) -> str:
+                    norm = normalize_isrc(tok)
+                    return norm if norm else "<INVALID_ISRC>"
+
+                def _replace(match: re.Match) -> str:
+                    tok = match.group(0)
+                    return _clean_token(tok)
+
+                text = re.sub(r"[A-Za-z0-9-]{12,}", _replace, text)
+            except Exception:
+                pass
+
+            getattr(logger, level, logger.info)("[EXT] %s", text)
             return
         if msg.get("type") == "session_request":
             # Handled off the reader thread so a slow/blocking signed HTTP
@@ -450,9 +468,31 @@ class JSRuntime:
 
     def _drain_stderr(self) -> None:
         try:
+            import re
+
             for raw in self._proc.stderr:
                 line = raw.rstrip(b"\n").decode("utf-8", errors="replace")
-                if line:
-                    logger.debug("[EXT stderr] %s", line)
+                if not line:
+                    continue
+
+                # Filter potential 12-char alphanumeric ISRC-like candidates
+                try:
+                    from ..core.isrc_utils import normalize_isrc
+
+                    def _clean_token(tok: str) -> str:
+                        norm = normalize_isrc(tok)
+                        return norm if norm else "<INVALID_ISRC>"
+
+                    # Replace all long alnum/hyphen tokens (heuristic) with
+                    # their normalized ISRC or a placeholder if invalid.
+                    def _replace(match: re.Match) -> str:
+                        tok = match.group(0)
+                        return _clean_token(tok)
+
+                    cleaned = re.sub(r"[A-Za-z0-9-]{12,}", _replace, line)
+                except Exception:
+                    cleaned = line
+
+                logger.debug("[EXT stderr] %s", cleaned)
         except Exception:
             pass

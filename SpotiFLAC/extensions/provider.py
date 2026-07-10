@@ -273,8 +273,17 @@ class JSExtensionProvider(BaseProvider):
         quality:             str,
     ) -> DownloadResult:
         # 1. Find track_id via checkAvailability (ISRC-based)
+        # Normalize/validate ISRC before querying the JS extension to avoid
+        # passing heuristic 12-char matches (e.g. "INTERNATIONA").
+        try:
+            from ..core.isrc_utils import normalize_isrc
+
+            isrc_to_pass = normalize_isrc(metadata.isrc or "") or ""
+        except Exception:
+            isrc_to_pass = metadata.isrc or ""
+
         avail = self.check_availability(
-            isrc        = metadata.isrc,
+            isrc        = isrc_to_pass,
             track_name  = metadata.title,
             artist_name = metadata.artists,
             options     = {
@@ -282,6 +291,20 @@ class JSExtensionProvider(BaseProvider):
                 "spotify_id":  metadata.id,
             },
         )
+
+        # If the extension returns an ISRC, validate it before using it downstream.
+        try:
+            from ..core.isrc_utils import normalize_isrc
+
+            if isinstance(avail, dict) and avail.get("isrc"):
+                norm = normalize_isrc(avail.get("isrc") or "")
+                if norm:
+                    avail["isrc"] = norm
+                else:
+                    # drop invalid candidate
+                    avail.pop("isrc", None)
+        except Exception:
+            pass
 
         if not avail.get("available"):
             reason = avail.get("reason", "not found")

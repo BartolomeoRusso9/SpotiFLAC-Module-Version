@@ -129,21 +129,40 @@ class SpotifyWebClient:
         }
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
-        resp = self._session.post(
-            "https://clienttoken.spotify.com/v1/clienttoken",
-            json=payload,
-            headers=headers,
-        )
-        resp.raise_for_status()
+        try:
+            resp = self._session.post(
+                "https://clienttoken.spotify.com/v1/clienttoken",
+                json=payload,
+                headers=headers,
+                timeout=10,
+            )
+        except Exception as e:
+            # Could be httpx.ConnectError / gaierror / OSError etc. Don't fail hard;
+            # allow callers to continue with other resolver fallbacks.
+            logger.warning(
+                f"[spotfetch] Could not reach clienttoken.spotify.com: {e}; continuing without client token"
+            )
+            return
 
-        data = resp.json()
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            logger.warning(
+                f"[spotfetch] clienttoken request returned non-2xx: {e}; skipping client token"
+            )
+            return
+
+        try:
+            data = resp.json()
+        except Exception as e:
+            logger.warning(f"[spotfetch] Failed to parse clienttoken JSON: {e}")
+            return
+
         if data.get("response_type") == "RESPONSE_GRANTED_TOKEN_RESPONSE":
             self.client_token = data.get("granted_token", {}).get("token", "")
         else:
-            logger.error(f"[spotfetch] Unexpected clienttoken response: {data}")
-            raise RuntimeError(
-                "Spotify client token request did not return a granted token"
-            )
+            logger.warning(f"[spotfetch] Unexpected clienttoken response: {data}")
+            return
 
     def initialize(self, force: bool = False) -> None:
         if force:

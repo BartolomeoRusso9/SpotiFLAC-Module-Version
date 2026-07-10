@@ -8,7 +8,7 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 _SPOTIFY_TRACK_ID_RE = re.compile(
-    r"^(?:spotify:track:|https?://(?:open\.spotify\.com|play\.spotify\.com)/track/)?([A-Za-z0-9]{22})(?:[/?].*)?$"
+    r"^(?:spotify:track:|https?://(?:open\.spotify\.com|play\.spotify\.com)(?:/intl-[^/]+)?/track/)?([A-Za-z0-9]{22})(?:[/?].*)?$"
 )
 
 
