@@ -449,35 +449,23 @@ class AmazonProvider(BaseProvider):
 
         # 5. ISRC FALLBACKS (SongLink API -> SongStats)
         if getattr(metadata, "isrc", None):
-            # Ensure ISRC is normalized and valid before using it. Some
-            # upstream heuristics may accidentally populate a 12-char
-            # alphanumeric string (e.g. "INTERNATIONA") from binary blobs;
-            # normalize_isrc returns None for invalid ISRCs.
-            from ..core.isrc_utils import normalize_isrc
-
-            isrc = normalize_isrc(getattr(metadata, "isrc", "") or "")
-            if not isrc:
-                logger.warning(
-                    "[amazon] Ignoring invalid metadata ISRC: %r",
-                    getattr(metadata, "isrc", None),
+            isrc = metadata.isrc
+            try:
+                sl_api_url = (
+                    f"https://api.song.link/v1-alpha.1/links?isrc={isrc}&userCountry=US"
                 )
-            else:
-                try:
-                    sl_api_url = (
-                        f"https://api.song.link/v1-alpha.1/links?isrc={isrc}&userCountry=US"
-                    )
-                    resp = await self._async_http.get(sl_api_url, timeout=15)
-                    data = resp.json()
-                    links = data.get("linksByPlatform", {})
-                    if "amazonMusic" in links:
-                        logger.info("[amazon] Resolved via SongLink API (ISRC)")
-                        return self._format_amazon_url(links["amazonMusic"].get("url"))
-                except Exception as exc:
-                    logger.warning(f"[amazon] SongLink API (ISRC) failed: {exc}")
+                resp = await self._async_http.get(sl_api_url, timeout=15)
+                data = resp.json()
+                links = data.get("linksByPlatform", {})
+                if "amazonMusic" in links:
+                    logger.info("[amazon] Resolved via SongLink API (ISRC)")
+                    return self._format_amazon_url(links["amazonMusic"].get("url"))
+            except Exception as exc:
+                logger.warning(f"[amazon] SongLink API (ISRC) failed: {exc}")
 
-                amz_url = await self._resolve_via_songstats(isrc)
-                if amz_url:
-                    return self._format_amazon_url(amz_url)
+            amz_url = await self._resolve_via_songstats(isrc)
+            if amz_url:
+                return self._format_amazon_url(amz_url)
 
         raise RuntimeError(
             f"Could not resolve Amazon URL for {track_id} via any method."
