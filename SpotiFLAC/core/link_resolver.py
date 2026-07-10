@@ -61,9 +61,11 @@ class LinkResolver:
             "Upgrade-Insecure-Requests": "1",
             "Referer": "https://song.link/",
         }
-        return await self._request_with_retry(
-            lambda: self.http.get(url, headers=headers)
-        )
+        # Prefer async http client method if available (tests mock get_async).
+        if hasattr(self.http, "get_async"):
+            return await self._request_with_retry(lambda: self.http.get_async(url, headers=headers))
+        # fallback to synchronous get wrapped for retry (kept for real client compatibility)
+        return await self._request_with_retry(lambda: self.http.get(url, headers=headers))
 
     async def _request_with_retry(self, request_callable):
         last_error: Exception | None = None

@@ -83,3 +83,24 @@ def mock_download_failure(mock_spotiflac):
         "failed": 1,
     }
     return mock_cls, instance
+
+
+@pytest.fixture
+def mock_network_client(httpx_mock):
+    """
+    Helper fixture to stub HTTP GET responses used by network-heavy tests.
+    Usage in tests: mock_network_client([("/search", 200, payload), ...])
+    """
+    import re
+
+    def _setup(seq):
+        for path, status, body in seq:
+            # match any URL containing the path fragment
+            httpx_mock.add_response(
+                method="GET",
+                url=re.compile(r".*" + re.escape(path)),
+                status_code=status,
+                json=body,
+            )
+
+    return _setup
