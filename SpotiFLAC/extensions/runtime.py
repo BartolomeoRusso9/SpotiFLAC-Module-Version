@@ -15,6 +15,7 @@ import os
 import queue
 import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable
@@ -67,9 +68,14 @@ class JSRuntime:
 
     def start(self) -> None:
         if not shutil.which(self.node_executable):
+            print("[SpotiFLAC] Node.js not found, attempting automatic installation...")
+            self._auto_install_node()
+            if shutil.which(self.node_executable):
+                print("[SpotiFLAC] Node.js installed automatically.")
+        if not shutil.which(self.node_executable):
             raise ExtensionRuntimeError(
-                f"Node.js non trovato ('{self.node_executable}'). "
-                "Installa Node.js ≥ 16 per usare le estensioni JS."
+                f"Node.js not found ('{self.node_executable}'). "
+                "Install Node.js ≥ 16 to use JS extensions."
             )
         if not _BRIDGE_JS.exists():
             raise ExtensionRuntimeError(f"Bridge JS non trovato: {_BRIDGE_JS}")
@@ -107,6 +113,112 @@ class JSRuntime:
                 "Verifica che il file JS sia valido."
             )
         logger.debug("[JSRuntime] extension ready: %s", self.ext_path.name)
+
+    def _auto_install_node(self) -> None:
+        if sys.platform.startswith("linux"):
+            self._install_node_linux()
+        elif sys.platform == "darwin":
+            self._install_node_macos()
+        elif sys.platform == "win32":
+            self._install_node_windows()
+        else:
+            raise ExtensionRuntimeError(
+                "Node.js non trovato e il sistema operativo non è supportato per "
+                "l'installazione automatica. Installa Node.js ≥ 16 manualmente."
+            )
+
+        if not shutil.which(self.node_executable):
+            raise ExtensionRuntimeError(
+                "Installazione automatica di Node.js fallita. "
+                "Installa Node.js ≥ 16 manualmente."
+            )
+
+        version = self._get_node_version()
+        if version is None or version < 16:
+            raise ExtensionRuntimeError(
+                f"La versione di Node.js installata è insufficiente: {version}. "
+                "Installa Node.js >= 16 manualmente."
+            )
+
+    def _run_install_command(self, cmd: list[str], description: str) -> None:
+        if os.name != "nt":
+            try:
+                is_root = os.geteuid() == 0
+            except AttributeError:
+                is_root = False
+            if not is_root:
+                if shutil.which("sudo"):
+                    cmd = ["sudo"] + cmd
+                else:
+                    raise ExtensionRuntimeError(
+                        "L'installazione automatica di Node.js richiede privilegi di root. "
+                        "Esegui il comando come root o installa Node.js manualmente."
+                    )
+
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise ExtensionRuntimeError(
+                f"Installazione automatica di Node.js fallita ({description}): {result.stderr.strip()}"
+            )
+
+    def _install_node_linux(self) -> None:
+        if shutil.which("apt-get"):
+            self._run_install_command(["apt-get", "update"], "apt-get update")
+            self._run_install_command(["apt-get", "install", "-y", "nodejs"], "apt-get install nodejs")
+        elif shutil.which("dnf"):
+            self._run_install_command(["dnf", "install", "-y", "nodejs"], "dnf install nodejs")
+        elif shutil.which("yum"):
+            self._run_install_command(["yum", "install", "-y", "nodejs"], "yum install nodejs")
+        elif shutil.which("pacman"):
+            self._run_install_command(["pacman", "-Sy", "--noconfirm", "nodejs"], "pacman install nodejs")
+        else:
+            raise ExtensionRuntimeError(
+                "Nessun gestore pacchetti supportato trovato per installare Node.js automaticamente. "
+                "Installa Node.js ≥ 16 manualmente."
+            )
+
+    def _install_node_macos(self) -> None:
+        if shutil.which("brew"):
+            self._run_install_command(["brew", "install", "node"], "brew install node")
+        else:
+            raise ExtensionRuntimeError(
+                "Homebrew non è installato. Installa Homebrew o Node.js manualmente."
+            )
+
+    def _install_node_windows(self) -> None:
+        if shutil.which("winget"):
+            self._run_install_command(["winget", "install", "OpenJS.NodeJS", "/quiet"], "winget install Node.js")
+        elif shutil.which("choco"):
+            self._run_install_command(["choco", "install", "nodejs.install", "-y"], "choco install nodejs")
+        else:
+            raise ExtensionRuntimeError(
+                "Nessun gestore pacchetti Windows supportato trovato per installare Node.js automaticamente. "
+                "Installa Node.js ≥ 16 manualmente."
+            )
+
+    def _get_node_version(self) -> int | None:
+        try:
+            result = subprocess.run(
+                [self.node_executable, "--version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+        except Exception:
+            return None
+        version = result.stdout.strip()
+        if version.startswith("v"):
+            version = version[1:]
+        try:
+            return int(version.split(".")[0])
+        except (ValueError, IndexError):
+            return None
 
     def stop(self) -> None:
         if self._proc and self._proc.poll() is None:

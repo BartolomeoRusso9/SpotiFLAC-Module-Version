@@ -19,11 +19,9 @@ e.g. "ext:soundcloud", "ext:pandora".
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-import os
-import tempfile
 from pathlib import Path
-from typing import Callable
 
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError, ErrorKind
@@ -220,6 +218,46 @@ class JSExtensionProvider(BaseProvider):
         except Exception as e:
             logger.exception("[%s] Unexpected error", self.name)
             return DownloadResult.fail(self.name, f"Unexpected error: {e}")
+
+    async def download_track_async(
+        self,
+        metadata:             TrackMetadata,
+        output_dir:           str,
+        *,
+        filename_format:      str          = "{title} - {artist}",
+        position:             int          = 1,
+        include_track_num:    bool         = False,
+        use_album_track_num:  bool         = False,
+        first_artist_only:    bool         = False,
+        allow_fallback:       bool         = True,
+        embed_lyrics:         bool         = False,
+        lyrics_providers:     list | None  = None,
+        enrich_metadata:      bool         = False,
+        enrich_providers:     list | None  = None,
+        is_album:             bool         = False,
+        quality:              str          = "best",
+        **kwargs,
+    ) -> DownloadResult:
+        """Async wrapper for the sync extension download implementation."""
+        loop = asyncio.get_running_loop()
+        func = lambda: self.download_track(
+            metadata,
+            output_dir,
+            filename_format=filename_format,
+            position=position,
+            include_track_num=include_track_num,
+            use_album_track_num=use_album_track_num,
+            first_artist_only=first_artist_only,
+            allow_fallback=allow_fallback,
+            embed_lyrics=embed_lyrics,
+            lyrics_providers=lyrics_providers,
+            enrich_metadata=enrich_metadata,
+            enrich_providers=enrich_providers,
+            is_album=is_album,
+            quality=quality,
+            **kwargs,
+        )
+        return await loop.run_in_executor(None, func)
 
     def _do_download(
         self,
