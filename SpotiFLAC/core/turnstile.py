@@ -201,12 +201,28 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
         # Check if already auto-solved (invisible widget)
         token = await get_token()
         if token:
-            if capture_callback:
+            if not capture_callback:
+                return token
+            try:
+                await capture_callback_grant()
+            except Exception:
+                pass
+            if callback_grant:
+                return (token, callback_grant)
+            # We have a token but the challenge page hasn't redirected to
+            # our cb URL with the grant yet - that redirect happens after
+            # the page verifies the token server-side, which can take a
+            # moment. Poll for it instead of giving up on the first check.
+            deadline = asyncio.get_event_loop().time() + timeout
+            while asyncio.get_event_loop().time() < deadline:
                 try:
                     await capture_callback_grant()
                 except Exception:
                     pass
-            return (token, callback_grant) if capture_callback else token
+                if callback_grant:
+                    return (token, callback_grant)
+                await asyncio.sleep(0.3)
+            return (token, callback_grant)
 
         # Wait up to 10s for the visible checkbox iframe to appear
         rect = None

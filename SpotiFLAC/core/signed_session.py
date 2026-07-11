@@ -32,12 +32,14 @@ hardcoded the refresh path as "/refresh" while some deployments declare
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -57,7 +59,11 @@ _DEFAULT_ENDPOINTS = {
     "bootstrap": "/bootstrap",
     "challenge": "/challenge",
     "exchange": "/session/exchange",
-    "refresh": "/refresh",
+    # NOTE: nessun default per "refresh": il backend Go di riferimento
+    # (extension_signed_session.go) non ne mette uno e tenta il refresh
+    # solo se il manifest lo dichiara esplicitamente in endpoints.refresh.
+    # Un default indovinato qui rischierebbe di colpire un path
+    # inesistente quando il manifest non lo dichiara.
 }
 
 _pending_signed_session_grants: dict[str, str] = {}
@@ -190,6 +196,7 @@ class SignedSessionClient:
         )
         resp.raise_for_status()
         data = resp.json()
+        logger.debug("[signed_session:%s] bootstrap response: %s", self.namespace, data)
         if data.get("session_id") and data.get("session_secret") and data.get("expires_at"):
             self.session_id = data["session_id"]
             self.session_secret = data["session_secret"]
@@ -197,10 +204,16 @@ class SignedSessionClient:
             self._save()
             return True
 
-        self.pending_sitekey = data.get("sitekey") or data.get("turnstile_sitekey")
+        self.pending_sitekey = (
+            data.get("sitekey")
+            or data.get("turnstile_sitekey")
+            or data.get("turnstile_site_key")
+        )
         auth_url = data.get("auth_url") or data.get("challenge_url")
         if not auth_url and data.get("challenge_id"):
             auth_url = self._build_challenge_url(data["challenge_id"])
+        if auth_url and not self.pending_sitekey:
+            self.pending_sitekey = await self._scrape_sitekey_from_page(auth_url)
         if auth_url:
             self.pending_auth_url = self._rewrite_auth_url_callback(auth_url)
             self.pending_auth_callback_url = self.callback_url
@@ -208,6 +221,25 @@ class SignedSessionClient:
             self.pending_auth_url = None
             self.pending_auth_callback_url = None
         return self.pending_auth_url
+
+    async def _scrape_sitekey_from_page(self, page_url: str) -> str | None:
+        try:
+            resp = await self._client.get(page_url, timeout=10, follow_redirects=True)
+        except Exception as exc:
+            logger.debug("[signed_session:%s] sitekey scrape fetch failed: %s", self.namespace, exc)
+            return None
+        if not resp.is_success:
+            return None
+        html = resp.text
+        for pattern in (
+            r'data-sitekey=["\']([0-9A-Za-z_-]{10,})["\']',
+            r'[\'"]sitekey[\'"]\s*:\s*[\'"]([0-9A-Za-z_-]{10,})[\'"]',
+            r'sitekey=([0-9A-Za-z_-]{10,})',
+        ):
+            match = re.search(pattern, html)
+            if match:
+                return match.group(1)
+        return None
 
     def _start_callback_listener(self) -> str:
         if self._callback_server is not None and self._callback_thread is not None:
@@ -310,11 +342,10 @@ class SignedSessionClient:
         self._save()
 
     async def _refresh(self) -> None:
+        refresh_path = self.endpoints.get("refresh")
+        if not refresh_path:
+            return  # nessun endpoint di refresh dichiarato: comportamento identico a Go
         body = {"install_id": self.install_id}
-        # Uses the manifest-declared refresh path (may be "/refresh" or
-        # "/session/refresh" depending on the provider) instead of a
-        # hardcoded route, so signing input and URL always agree.
-        refresh_path = self.endpoints["refresh"]
         headers = self._sign_headers("POST", refresh_path, json.dumps(body).encode())
         resp = await self._client.post(
             f"{self.base_url}{refresh_path}",
@@ -432,7 +463,14 @@ async def perform_signed_fetch(
                     try:
                         from .turnstile import solve_with_callback
 
-                        _, grant = solve_with_callback(
+                        # solve_with_callback() chiama internamente
+                        # asyncio.run(): va eseguito in un thread a parte,
+                        # perché qui siamo già dentro una coroutine in corsa
+                        # sul nostro event loop dedicato (vedi
+                        # JSRuntime._get_session_loop) e asyncio.run() non
+                        # può essere invocato da un loop già attivo.
+                        _, grant = await asyncio.to_thread(
+                            solve_with_callback,
                             sitekey=client.pending_sitekey,
                             siteurl=auth_url,
                             timeout=int(turnstile_timeout),
@@ -452,7 +490,28 @@ async def perform_signed_fetch(
                 return {"error": "bootstrap did not return a session or a challenge"}
 
         resp = await client.request(method, path, json_body=body, extra_headers=headers)
-        return {"statusCode": resp.status_code, "body": resp.text}
+
+        if resp.status_code in (401, 428):
+            # Stesso comportamento del backend Go: una 401/428 invalida la
+            # sessione locale e riparte la verifica invece di restituire
+            # l'errore grezzo al chiamante.
+            retry_auth_url = await client.bootstrap()
+            if isinstance(retry_auth_url, str) and retry_auth_url:
+                return {"needsVerification": True, "auth_url": retry_auth_url}
+
+        retry_after = 0
+        raw_retry_after = resp.headers.get("Retry-After", "").strip()
+        if raw_retry_after.isdigit():
+            retry_after = max(0, int(raw_retry_after))
+        return {
+            "statusCode": resp.status_code,
+            "status": resp.status_code,
+            "ok": 200 <= resp.status_code < 300,
+            "url": str(resp.url),
+            "body": resp.text,
+            "headers": dict(resp.headers),
+            "retryAfterSeconds": retry_after,
+        }
     except Exception as exc:
         logger.debug("[signed_session:%s] signedFetch failed: %s", client.namespace, exc)
         return {"error": str(exc)}
