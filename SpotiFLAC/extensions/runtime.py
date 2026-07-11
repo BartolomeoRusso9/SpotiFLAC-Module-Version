@@ -437,7 +437,7 @@ class JSRuntime:
                 ),
                 loop,
             )
-            result = future.result(timeout=90)
+            result = future.result(timeout=115)
             reply = {"type": "session_response", "id": req_id, "result": result}
         except Exception as exc:
             logger.debug("[JSRuntime] session_request failed: %s", exc)

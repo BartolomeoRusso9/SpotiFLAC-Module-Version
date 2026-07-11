@@ -61,7 +61,7 @@ if (!isMainThread) {
     while (Atomics.load(STATE, 0) !== 2) {
       const r = Atomics.wait(STATE, 0, 1, 200);
       waited += 200;
-      if (waited > 180_000) throw new Error(`Bridge timeout for ${method}`);
+      if (waited > 120_000) throw new Error(`Bridge timeout for ${method}`);
     }
 
     const len  = LEN[0];
@@ -219,7 +219,7 @@ function relaySignedFetchToPython(args) {
         _pendingSession.delete(id);
         resolve({ error: 'signed session request timed out' });
       }
-    }, 95_000);
+    }, 110_000);
   });
 }
 

@@ -180,6 +180,27 @@ class SignedSessionClient:
             grant = _pending_signed_session_grants.pop(self.namespace, "").strip()
             return grant or None
 
+    async def wait_for_grant(self, timeout: float, poll_interval: float = 0.25) -> str | None:
+        """
+        Polls the *real* local callback HTTP server (started in bootstrap()
+        via _start_callback_listener) for a grant delivered by the
+        challenge page's own background verify+callback flow.
+
+        This is the correct source of truth: the challenge page does not
+        navigate the browser to our cb URL, it calls it as a background
+        request (visible in DevTools as a separate network entry) after its
+        own /verify call succeeds. Watching the browser's address bar for a
+        redirect (as turnstile.py's solve_with_callback does) never sees
+        this, since the page never navigates away.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
+            grant = self._consume_pending_grant()
+            if grant:
+                return grant
+            await asyncio.sleep(poll_interval)
+        return None
+
     # ─────────────────────── bootstrap / challenge ────────────
 
     async def bootstrap(self):
@@ -248,10 +269,41 @@ class SignedSessionClient:
         class _GrantHandler(BaseHTTPRequestHandler):
             def do_GET(self):
                 url = f"http://127.0.0.1{self.path}"
+                logger.info(
+                    "[signed_session] callback listener hit: %s %s from %s",
+                    self.command, self.path, self.client_address,
+                )
                 parsed = urlparse(url)
                 grant = _extract_grant_from_callback_url(url)
                 if not grant:
                     grant = parsed.query or parsed.fragment
+                if grant:
+                    self.server.session_client._set_pending_grant(grant)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def do_POST(self):
+                # NOTE: se la pagina di sfida consegna il grant via POST
+                # (es. tramite fetch() invece di una navigazione GET) senza
+                # questo handler la richiesta fallirebbe con 501 e il grant
+                # andrebbe perso silenziosamente. Leggo sia i query param
+                # sull'URL sia un eventuale body JSON con {"grant": "..."}.
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                raw_body = self.rfile.read(length) if length else b""
+                logger.info(
+                    "[signed_session] callback listener hit: %s %s from %s body=%r",
+                    self.command, self.path, self.client_address, raw_body[:500],
+                )
+                url = f"http://127.0.0.1{self.path}"
+                grant = _extract_grant_from_callback_url(url)
+                if not grant and raw_body:
+                    try:
+                        body_json = json.loads(raw_body)
+                        grant = body_json.get("grant") or body_json.get("token") or body_json.get("code")
+                    except Exception:
+                        pass
                 if grant:
                     self.server.session_client._set_pending_grant(grant)
                 self.send_response(200)
@@ -461,20 +513,54 @@ async def perform_signed_fetch(
                 grant = None
                 if client.pending_sitekey:
                     try:
-                        from .turnstile import solve_with_callback
+                        from .turnstile import solve
 
-                        # solve_with_callback() chiama internamente
-                        # asyncio.run(): va eseguito in un thread a parte,
-                        # perché qui siamo già dentro una coroutine in corsa
-                        # sul nostro event loop dedicato (vedi
-                        # JSRuntime._get_session_loop) e asyncio.run() non
-                        # può essere invocato da un loop già attivo.
-                        _, grant = await asyncio.to_thread(
-                            solve_with_callback,
-                            sitekey=client.pending_sitekey,
-                            siteurl=auth_url,
-                            timeout=int(turnstile_timeout),
+                        # Il solve del browser e l'attesa del grant girano in
+                        # parallelo:
+                        # - il browser (thread separato, perché solve()
+                        #   chiama asyncio.run() internamente e non può
+                        #   essere invocato da un loop già attivo) serve solo
+                        #   a tenere la scheda aperta abbastanza a lungo da
+                        #   lasciare che la pagina di sfida completi da sola
+                        #   il suo /verify e la notifica al nostro cb;
+                        # - il grant vero arriva dal server HTTP locale
+                        #   (wait_for_grant), che riceve la chiamata reale
+                        #   della pagina in background. La pagina non
+                        #   naviga mai via (resta su api.zarz.moe/challenge),
+                        #   quindi controllare l'URL del browser per un
+                        #   redirect - come si faceva prima - non vede mai
+                        #   nulla.
+                        solve_future = asyncio.ensure_future(
+                            asyncio.to_thread(
+                                solve,
+                                sitekey=client.pending_sitekey,
+                                siteurl=auth_url,
+                                timeout=int(turnstile_timeout),
+                                hold_open_seconds=min(turnstile_timeout, 10.0),
+                            )
                         )
+                        grant = await client.wait_for_grant(turnstile_timeout)
+
+                        # Non cancelliamo solve_future anche se il grant è
+                        # già arrivato: i thread Python non sono
+                        # interrompibili, quindi cancellare il future
+                        # esterno non fermerebbe comunque il browser, e
+                        # rischia solo di interferire con la sequenza di
+                        # cleanup interna di nodriver (chiusura del
+                        # processo Chrome), lasciandola a metà. Lo
+                        # lasciamo terminare da solo in background,
+                        # loggando solo eventuali eccezioni inattese.
+                        def _log_solve_future_errors(fut: "asyncio.Future") -> None:
+                            if fut.cancelled():
+                                return
+                            exc = fut.exception()
+                            if exc is not None:
+                                logger.debug(
+                                    "[signed_session:%s] background Turnstile solve raised: %s",
+                                    client.namespace, exc,
+                                )
+
+                        solve_future.add_done_callback(_log_solve_future_errors)
                     except Exception as exc:
                         logger.warning(
                             "[signed_session:%s] Turnstile auto-solve failed: %s",

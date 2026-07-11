@@ -98,7 +98,7 @@ def _start_xvfb_if_needed() -> Optional[subprocess.Popen]:
     return proc
 
 
-async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback: bool = False) -> str | tuple[str, Optional[str]]:
+async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback: bool = False, hold_open_seconds: float = 0.0) -> str | tuple[str, Optional[str]]:
     browser = await uc.start(
         browser_executable_path=_find_chrome(),
         headless=False,
@@ -201,27 +201,18 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
         # Check if already auto-solved (invisible widget)
         token = await get_token()
         if token:
+            if hold_open_seconds > 0:
+                # Keep the tab open a bit longer: the challenge page still
+                # needs to call its own /verify endpoint and notify our
+                # callback URL in the background after the token appears.
+                # Closing the browser right away would cut that off.
+                await asyncio.sleep(hold_open_seconds)
             if not capture_callback:
                 return token
             try:
                 await capture_callback_grant()
             except Exception:
                 pass
-            if callback_grant:
-                return (token, callback_grant)
-            # We have a token but the challenge page hasn't redirected to
-            # our cb URL with the grant yet - that redirect happens after
-            # the page verifies the token server-side, which can take a
-            # moment. Poll for it instead of giving up on the first check.
-            deadline = asyncio.get_event_loop().time() + timeout
-            while asyncio.get_event_loop().time() < deadline:
-                try:
-                    await capture_callback_grant()
-                except Exception:
-                    pass
-                if callback_grant:
-                    return (token, callback_grant)
-                await asyncio.sleep(0.3)
             return (token, callback_grant)
 
         # Wait up to 10s for the visible checkbox iframe to appear
@@ -328,35 +319,44 @@ def clear_solver_cache() -> None:
     _TURNSTILE_CACHE.clear()
 
 
-def solve(sitekey: str, siteurl: str, timeout: int = 45) -> str:
+def solve(sitekey: str, siteurl: str, timeout: int = 45, hold_open_seconds: float = 0.0) -> str:
     import warnings
 
     _ensure_xvfb()
 
     cache_key = (sitekey.strip(), siteurl.strip())
     now = time.time()
-    cached = _TURNSTILE_CACHE.get(cache_key)
-    if cached is not None:
-        cached_at, token = cached
-        if now - cached_at <= DEFAULT_TURNSTILE_CACHE_TTL_SECONDS:
-            return token
-        _TURNSTILE_CACHE.pop(cache_key, None)
+    # hold_open_seconds keeps the browser tab open past the point of
+    # getting a token, for callers whose target page does background work
+    # after solving (e.g. calling its own /verify endpoint). That result
+    # shouldn't be served from cache on a later call with hold_open_seconds
+    # unset, so only use the cache for plain (hold_open_seconds == 0) calls.
+    if hold_open_seconds <= 0:
+        cached = _TURNSTILE_CACHE.get(cache_key)
+        if cached is not None:
+            cached_at, token = cached
+            if now - cached_at <= DEFAULT_TURNSTILE_CACHE_TTL_SECONDS:
+                return token
+            _TURNSTILE_CACHE.pop(cache_key, None)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        token = asyncio.run(_solve_impl(sitekey, siteurl, timeout))
-    _TURNSTILE_CACHE[cache_key] = (now, token)
+        token = asyncio.run(_solve_impl(sitekey, siteurl, timeout, hold_open_seconds=hold_open_seconds))
+    if hold_open_seconds <= 0:
+        _TURNSTILE_CACHE[cache_key] = (now, token)
     return token
 
 
-def solve_with_callback(sitekey: str, siteurl: str, timeout: int = 45) -> tuple[str, Optional[str]]:
+def solve_with_callback(sitekey: str, siteurl: str, timeout: int = 45, hold_open_seconds: float = 0.0) -> tuple[str, Optional[str]]:
     import warnings
 
     _ensure_xvfb()
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        result = asyncio.run(_solve_impl(sitekey, siteurl, timeout, capture_callback=True))
+        result = asyncio.run(
+            _solve_impl(sitekey, siteurl, timeout, capture_callback=True, hold_open_seconds=hold_open_seconds)
+        )
 
     if isinstance(result, tuple):
         return result
