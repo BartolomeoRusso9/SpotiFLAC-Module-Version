@@ -8,7 +8,7 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 _SPOTIFY_TRACK_ID_RE = re.compile(
-    r"^(?:spotify:track:|https?://(?:open\.spotify\.com|play\.spotify\.com)(?:/intl-[^/]+)?/track/)?([A-Za-z0-9]{22})(?:[/?].*)?$"
+    r"^(?:spotify:track:|https?://(?:open\.spotify\.com|play\.spotify\.com)/track/)?([A-Za-z0-9]{22})(?:[/?].*)?$"
 )
 
 
@@ -26,9 +26,9 @@ def spotify_id_to_gid(track_id: str) -> str:
 def _normalize_isrc(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None
-    from .isrc_utils import is_valid_isrc, normalize_isrc
+    isrc = value.strip().upper()
+    from .isrc_utils import is_valid_isrc
 
-    isrc = normalize_isrc(value)
     return isrc if is_valid_isrc(isrc) else None
 
 
