@@ -26,10 +26,10 @@ def spotify_id_to_gid(track_id: str) -> str:
 def _normalize_isrc(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None
-    isrc = value.strip().upper()
-    from .isrc_utils import is_valid_isrc
+    from .isrc_utils import normalize_isrc
 
-    return isrc if is_valid_isrc(isrc) else None
+    normalized = normalize_isrc(value)
+    return normalized or None
 
 
 class IsrcFinder:
