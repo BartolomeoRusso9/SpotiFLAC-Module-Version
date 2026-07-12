@@ -62,28 +62,38 @@ _DEFAULT_ENDPOINTS = {
     # inesistente quando il manifest non lo dichiara.
 }
 
-# Header "da browser reale" osservati via DevTools su una chiamata
-# riuscita a POST {base_url}/challenge/verify (Brave su macOS, Chromium 149).
-# Cloudflare/l'API applicano un controllo di fingerprint su questi header:
-# senza di essi la richiesta torna "Invalid request" anche con un token
-# Turnstile valido. Origin va calcolato per istanza (dipende da base_url)
-# e viene aggiunto in __init__, non qui.
-_BROWSER_FINGERPRINT_HEADERS = {
-    "Accept": "*/*",
-    "Accept-Language": "it-IT,it;q=0.7",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Ch-Ua": '"Brave";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"macOS"',
-    "Sec-Gpc": "1",
-    "Priority": "u=1, i",
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
-    ),
-}
+
+def _parse_retry_after(raw: str) -> int:
+    """Replica signedSessionRetryAfterSeconds() del backend Go: accetta sia
+    un numero di secondi sia una data HTTP (RFC 7231), clampando i negativi
+    a zero."""
+    raw = (raw or "").strip()
+    if not raw:
+        return 0
+    if raw.lstrip("-").isdigit():
+        return max(0, int(raw))
+    try:
+        from email.utils import parsedate_to_datetime
+
+        when = parsedate_to_datetime(raw)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        delta = (when - datetime.now(timezone.utc)).total_seconds()
+        return max(0, int(delta))
+    except Exception:
+        return 0
+
+
+def _sanitize_namespace(value: str) -> str:
+    """
+    Replica sanitizeSignedSessionNamespace() del backend Go: minuscolo,
+    trim degli spazi esterni, rimozione di spazi e slash interni (mantenendo
+    i punti), poi rimozione di punteggiatura (- _ .) residua ai bordi.
+    """
+    s = (value or "").strip().lower()
+    s = re.sub(r"[\s/\\]+", "", s)
+    s = s.strip("-_. ")
+    return s
 
 
 class SignedSessionClient:
@@ -96,61 +106,30 @@ class SignedSessionClient:
         scheme_label: str = "SPOTIFLAC-HMAC-V1",
         header_prefix: str = "X-Sig-",
         window_seconds: int = 300,
+        callback_url: str = "spotiflac://session-grant",
         endpoints: dict[str, str] | None = None,
         data_dir: str = "~/.spotiflac/signed_sessions",
         refresh_skew_seconds: int = 3600,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.namespace = namespace
+        self.namespace = _sanitize_namespace(namespace)
         self.app_version = app_version
         self.platform = platform
         self.scheme_label = scheme_label
         self.header_prefix = header_prefix
         self.window_seconds = window_seconds
+        self.callback_url = callback_url
         self.endpoints = {**_DEFAULT_ENDPOINTS, **(endpoints or {})}
         self.refresh_skew_seconds = refresh_skew_seconds
         self.data_dir = Path(os.path.expanduser(data_dir))
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._path = self._session_path()
-        # Origin è SOLO scheme://host (niente path): come confermato dallo
-        # screenshot DevTools, per base_url "https://api.zarz.moe/v2" il
-        # browser manda "Origin: https://api.zarz.moe", non ".../v2".
-        _parsed_base = urlparse(self.base_url)
-        _origin = f"{_parsed_base.scheme}://{_parsed_base.netloc}"
-        self._client = httpx.AsyncClient(
-            headers={
-                **_BROWSER_FINGERPRINT_HEADERS,
-                "Origin": _origin,
-            }
-        )
+        self._client = httpx.AsyncClient()
         self.pending_auth_url: str | None = None
         self.pending_sitekey: str | None = None
         self.pending_challenge_id: str | None = None
+        self.pending_server_nonce: str | None = None
         self._load()
-
-    def set_cf_clearance(self, cf_clearance: str) -> None:
-        """
-        Inietta il cookie `cf_clearance` di Cloudflare nel client httpx.
-
-        Questo cookie è quello che nello screenshot DevTools compare nella
-        richiesta riuscita del browser a /challenge/verify — è legato alla
-        sessione/fingerprint TLS con cui è stato ottenuto (tipicamente la
-        stessa sessione browser/CDP che ha risolto il Turnstile), quindi
-        NON va hardcodato: va passato qui non appena disponibile, subito
-        prima di chiamare verify_challenge().
-
-        Se il modulo core.turnstile.solve() è in grado di restituire anche
-        i cookie della pagina (oltre al solo token), passali qui, es.:
-
-            token, cookies = await asyncio.to_thread(solve, ...)
-            if cookies.get("cf_clearance"):
-                client.set_cf_clearance(cookies["cf_clearance"])
-        """
-        if not cf_clearance:
-            return
-        self._client.cookies.set(
-            "cf_clearance", cf_clearance, domain=urlparse(self.base_url).hostname
-        )
 
     # ─────────────────────── persistence ──────────────────────
 
@@ -170,19 +149,47 @@ class SignedSessionClient:
                 record = {}
 
         self.install_id = record.get("install_id") or secrets.token_hex(16)
-        self.session_id = record.get("session_id")
-        self.session_secret = record.get("session_secret")
-        self.expires_at = record.get("expires_at")
+
+        # Come normalizeSignedSessionRecordScope() in Go: una sessione
+        # salvata è valida solo se lo scope (namespace/base_url/app_version/
+        # platform) corrisponde esattamente a quello corrente. Se il file
+        # è stato scritto con una config diversa (es. un base_url cambiato,
+        # o lo stesso namespace riusato per un endpoint diverso), la
+        # sessione va invalidata invece di essere riusata alla cieca.
+        same_scope = (
+            record.get("namespace") == self.namespace
+            and record.get("base_url") == self.base_url
+            and record.get("app_version") == self.app_version
+            and record.get("platform") == self.platform
+        )
+        if same_scope:
+            self.session_id = record.get("session_id")
+            self.session_secret = record.get("session_secret")
+            self.expires_at = record.get("expires_at")
+        else:
+            self.session_id = None
+            self.session_secret = None
+            self.expires_at = None
         self._save()
 
     def _save(self) -> None:
         record = {
             "install_id": self.install_id,
+            "namespace": self.namespace,
+            "base_url": self.base_url,
+            "app_version": self.app_version,
+            "platform": self.platform,
             "session_id": self.session_id,
             "session_secret": self.session_secret,
             "expires_at": self.expires_at,
         }
         self._path.write_text(json.dumps(record, indent=2))
+        try:
+            # Il file contiene session_secret: come il backend Go (0600),
+            # non deve essere leggibile da altri utenti/processi.
+            os.chmod(self._path, 0o600)
+        except OSError:
+            pass  # best-effort (es. filesystem che non supporta chmod)
 
     def clear(self) -> None:
         self.session_id = None
@@ -240,6 +247,7 @@ class SignedSessionClient:
             or data.get("turnstile_sitekey")
             or data.get("turnstile_site_key")
         )
+        self.pending_server_nonce = data.get("server_nonce")
         self.pending_challenge_id = data.get("challenge_id")
         auth_url = data.get("auth_url") or data.get("challenge_url")
         if not auth_url and data.get("challenge_id"):
@@ -269,12 +277,18 @@ class SignedSessionClient:
         return None
 
     def _build_challenge_url(self, challenge_id: str) -> str:
-        # Nessun parametro "cb" necessario: il grant si ottiene chiamando
-        # {endpoints.challenge}/verify direttamente (confermato via
-        # DevTools), non tramite notifica in background alla pagina.
+        # Il vero backend (buildSignedSessionChallengeURL in
+        # extension_signed_session.go) include sempre "cb" con il valore
+        # letterale di callback_url (default "spotiflac://session-grant"),
+        # senza riscriverlo: la consegna del grant avviene tramite deep-link
+        # OS-level o bridge JS nativo di una WebView, meccanismi che un
+        # client CLI/browser esterno su desktop non può intercettare. Lo
+        # includiamo comunque per fedeltà al comportamento reale, anche se
+        # da qui non completiamo l'autenticazione tramite quel canale.
         parts = list(urlparse(f"{self.base_url}{self.endpoints['challenge']}"))
         query = dict(parse_qsl(parts[4]))
         query["id"] = challenge_id
+        query["cb"] = self.callback_url
         parts[4] = urlencode(query)
         return urlunparse(parts)
 
@@ -291,19 +305,6 @@ class SignedSessionClient:
         challenge page never notifies anyone, it just calls this endpoint
         itself and uses the grant locally. We can call it ourselves right
         after obtaining the token, with no callback/redirect needed at all.
-
-        NOTE (fix): confrontando con DevTools la richiesta del browser vera
-        e propria, l'API richiede anche un set di header "da browser"
-        (Origin, User-Agent, Sec-Fetch-*, Sec-Ch-Ua, ecc.) — senza di essi
-        risponde con un errore generico ("Invalid request"), anche con un
-        token Turnstile valido. Questi header sono ora impostati come
-        default su self._client in __init__ (_BROWSER_FINGERPRINT_HEADERS +
-        Origin), quindi questa POST li eredita automaticamente. Se hai
-        anche il cookie cf_clearance della sessione che ha risolto il
-        Turnstile, chiama client.set_cf_clearance(...) PRIMA di questa
-        funzione: è l'unico elemento visto nello screenshot che non può
-        essere impostato staticamente (è legato alla sessione/fingerprint
-        con cui è stato ottenuto).
         """
         resp = await self._client.post(
             f"{self.base_url}{self.endpoints['challenge']}/verify",
@@ -505,10 +506,7 @@ async def perform_signed_fetch(
             if isinstance(retry_auth_url, str) and retry_auth_url:
                 return {"needsVerification": True, "auth_url": retry_auth_url}
 
-        retry_after = 0
-        raw_retry_after = resp.headers.get("Retry-After", "").strip()
-        if raw_retry_after.isdigit():
-            retry_after = max(0, int(raw_retry_after))
+        retry_after = _parse_retry_after(resp.headers.get("Retry-After", ""))
         return {
             "statusCode": resp.status_code,
             "status": resp.status_code,
@@ -533,6 +531,7 @@ def client_from_manifest(manifest_block: dict, data_dir: str = "~/.spotiflac/sig
         scheme_label=manifest_block.get("schemeLabel", "SPOTIFLAC-HMAC-V1"),
         header_prefix=manifest_block.get("headerPrefix", "X-Sig-"),
         window_seconds=int(manifest_block.get("timeWindowSeconds", 300)),
+        callback_url=manifest_block.get("callbackUrl", "spotiflac://session-grant"),
         endpoints=manifest_block.get("endpoints"),
         data_dir=data_dir,
     )
