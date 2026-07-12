@@ -41,17 +41,13 @@ import logging
 import os
 import re
 import secrets
-import threading
 import time
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
-
-from .turnstile import _extract_grant_from_callback_url
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +62,6 @@ _DEFAULT_ENDPOINTS = {
     # inesistente quando il manifest non lo dichiara.
 }
 
-_pending_signed_session_grants: dict[str, str] = {}
-_pending_signed_session_grants_lock = threading.Lock()
-
 
 class SignedSessionClient:
     def __init__(
@@ -80,7 +73,6 @@ class SignedSessionClient:
         scheme_label: str = "SPOTIFLAC-HMAC-V1",
         header_prefix: str = "X-Sig-",
         window_seconds: int = 300,
-        callback_url: str = "spotiflac://session-grant",
         endpoints: dict[str, str] | None = None,
         data_dir: str = "~/.spotiflac/signed_sessions",
         refresh_skew_seconds: int = 3600,
@@ -92,8 +84,6 @@ class SignedSessionClient:
         self.scheme_label = scheme_label
         self.header_prefix = header_prefix
         self.window_seconds = window_seconds
-        self.callback_url = callback_url
-        self._default_callback_url = callback_url
         self.endpoints = {**_DEFAULT_ENDPOINTS, **(endpoints or {})}
         self.refresh_skew_seconds = refresh_skew_seconds
         self.data_dir = Path(os.path.expanduser(data_dir))
@@ -101,11 +91,8 @@ class SignedSessionClient:
         self._path = self._session_path()
         self._client = httpx.AsyncClient()
         self.pending_auth_url: str | None = None
-        self.pending_auth_callback_url: str | None = None
         self.pending_sitekey: str | None = None
-        self._callback_server: ThreadingHTTPServer | None = None
-        self._callback_thread: threading.Thread | None = None
-        self._callback_url: str | None = None
+        self.pending_challenge_id: str | None = None
         self._load()
 
     # ─────────────────────── persistence ──────────────────────
@@ -145,9 +132,8 @@ class SignedSessionClient:
         self.session_secret = None
         self.expires_at = None
         self.pending_auth_url = None
-        self.pending_auth_callback_url = None
         self.pending_sitekey = None
-        self._stop_callback_listener()
+        self.pending_challenge_id = None
         self._save()
 
     @property
@@ -167,39 +153,6 @@ class SignedSessionClient:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
-
-    def _set_pending_grant(self, grant: str) -> None:
-        grant = (grant or "").strip()
-        if not grant:
-            return
-        with _pending_signed_session_grants_lock:
-            _pending_signed_session_grants[self.namespace] = grant
-
-    def _consume_pending_grant(self) -> str | None:
-        with _pending_signed_session_grants_lock:
-            grant = _pending_signed_session_grants.pop(self.namespace, "").strip()
-            return grant or None
-
-    async def wait_for_grant(self, timeout: float, poll_interval: float = 0.25) -> str | None:
-        """
-        Polls the *real* local callback HTTP server (started in bootstrap()
-        via _start_callback_listener) for a grant delivered by the
-        challenge page's own background verify+callback flow.
-
-        This is the correct source of truth: the challenge page does not
-        navigate the browser to our cb URL, it calls it as a background
-        request (visible in DevTools as a separate network entry) after its
-        own /verify call succeeds. Watching the browser's address bar for a
-        redirect (as turnstile.py's solve_with_callback does) never sees
-        this, since the page never navigates away.
-        """
-        deadline = asyncio.get_event_loop().time() + timeout
-        while asyncio.get_event_loop().time() < deadline:
-            grant = self._consume_pending_grant()
-            if grant:
-                return grant
-            await asyncio.sleep(poll_interval)
-        return None
 
     # ─────────────────────── bootstrap / challenge ────────────
 
@@ -230,17 +183,13 @@ class SignedSessionClient:
             or data.get("turnstile_sitekey")
             or data.get("turnstile_site_key")
         )
+        self.pending_challenge_id = data.get("challenge_id")
         auth_url = data.get("auth_url") or data.get("challenge_url")
         if not auth_url and data.get("challenge_id"):
             auth_url = self._build_challenge_url(data["challenge_id"])
         if auth_url and not self.pending_sitekey:
             self.pending_sitekey = await self._scrape_sitekey_from_page(auth_url)
-        if auth_url:
-            self.pending_auth_url = self._rewrite_auth_url_callback(auth_url)
-            self.pending_auth_callback_url = self.callback_url
-        else:
-            self.pending_auth_url = None
-            self.pending_auth_callback_url = None
+        self.pending_auth_url = auth_url
         return self.pending_auth_url
 
     async def _scrape_sitekey_from_page(self, page_url: str) -> str | None:
@@ -262,115 +211,46 @@ class SignedSessionClient:
                 return match.group(1)
         return None
 
-    def _start_callback_listener(self) -> str:
-        if self._callback_server is not None and self._callback_thread is not None:
-            return self._callback_url or self.callback_url
-
-        class _GrantHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                url = f"http://127.0.0.1{self.path}"
-                logger.info(
-                    "[signed_session] callback listener hit: %s %s from %s",
-                    self.command, self.path, self.client_address,
-                )
-                parsed = urlparse(url)
-                grant = _extract_grant_from_callback_url(url)
-                if not grant:
-                    grant = parsed.query or parsed.fragment
-                if grant:
-                    self.server.session_client._set_pending_grant(grant)
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(b"ok")
-
-            def do_POST(self):
-                # NOTE: se la pagina di sfida consegna il grant via POST
-                # (es. tramite fetch() invece di una navigazione GET) senza
-                # questo handler la richiesta fallirebbe con 501 e il grant
-                # andrebbe perso silenziosamente. Leggo sia i query param
-                # sull'URL sia un eventuale body JSON con {"grant": "..."}.
-                length = int(self.headers.get("Content-Length", 0) or 0)
-                raw_body = self.rfile.read(length) if length else b""
-                logger.info(
-                    "[signed_session] callback listener hit: %s %s from %s body=%r",
-                    self.command, self.path, self.client_address, raw_body[:500],
-                )
-                url = f"http://127.0.0.1{self.path}"
-                grant = _extract_grant_from_callback_url(url)
-                if not grant and raw_body:
-                    try:
-                        body_json = json.loads(raw_body)
-                        grant = body_json.get("grant") or body_json.get("token") or body_json.get("code")
-                    except Exception:
-                        pass
-                if grant:
-                    self.server.session_client._set_pending_grant(grant)
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(b"ok")
-
-            def log_message(self, format, *args):
-                return
-
-        server = ThreadingHTTPServer(("127.0.0.1", 0), _GrantHandler)
-        server.session_client = self
-        self._callback_server = server
-        self._callback_url = (
-            f"http://127.0.0.1:{server.server_port}/grant"
-            f"?cb_version=v2grant&state={quote(self.namespace)}"
-        )
-        self.callback_url = self._callback_url
-        self._callback_thread = threading.Thread(target=server.serve_forever, daemon=True)
-        self._callback_thread.start()
-        return self._callback_url
-
-    def _stop_callback_listener(self) -> None:
-        if self._callback_server is not None:
-            self._callback_server.shutdown()
-            self._callback_server.server_close()
-            self._callback_server = None
-        if self._callback_thread is not None:
-            self._callback_thread.join(timeout=2)
-            self._callback_thread = None
-        self._callback_url = None
-        self.callback_url = self._default_callback_url
-
-    def _rewrite_auth_url_callback(self, auth_url: str) -> str:
-        if not auth_url:
-            return auth_url
-        self._start_callback_listener()
-        parsed = urlparse(auth_url)
-        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-        query["cb"] = self.callback_url
-        query.setdefault("cb_version", "v2grant")
-        query.setdefault("state", self.namespace)
-        parts = list(parsed)
-        parts[4] = urlencode(query)
-        return urlunparse(parts)
-
     def _build_challenge_url(self, challenge_id: str) -> str:
-        self._start_callback_listener()
-
-        cb_parts = list(urlparse(self.callback_url))
-        cb_query = dict(parse_qsl(cb_parts[4]))
-        cb_query.update({"cb_version": "v2grant", "state": self.namespace})
-        cb_parts[4] = urlencode(cb_query)
-        callback = urlunparse(cb_parts)
-
+        # Nessun parametro "cb" necessario: il grant si ottiene chiamando
+        # {endpoints.challenge}/verify direttamente (confermato via
+        # DevTools), non tramite notifica in background alla pagina.
         parts = list(urlparse(f"{self.base_url}{self.endpoints['challenge']}"))
         query = dict(parse_qsl(parts[4]))
-        query.update({"id": challenge_id, "cb": callback})
+        query["id"] = challenge_id
         parts[4] = urlencode(query)
         return urlunparse(parts)
 
-    async def exchange_grant(self, grant: str | None = None) -> None:
+    async def verify_challenge(self, challenge_id: str, turnstile_token: str) -> str:
+        """
+        Exchanges a solved Turnstile token for a grant by calling the
+        challenge's own /verify endpoint directly - confirmed via DevTools
+        to be POST {base_url}{endpoints.challenge}/verify with
+        {"challenge_id": ..., "turnstile_token": ...}, returning
+        {"grant": "...", "expires_in": ...}.
+
+        This replaces the earlier (incorrect) assumption that the grant
+        arrives via a background notification to a callback URL - the
+        challenge page never notifies anyone, it just calls this endpoint
+        itself and uses the grant locally. We can call it ourselves right
+        after obtaining the token, with no callback/redirect needed at all.
+        """
+        resp = await self._client.post(
+            f"{self.base_url}{self.endpoints['challenge']}/verify",
+            json={"challenge_id": challenge_id, "turnstile_token": turnstile_token},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        grant = data.get("grant")
+        if not grant:
+            raise RuntimeError(f"challenge verify did not return a grant: {data}")
+        return grant
+
+    async def exchange_grant(self, grant: str) -> None:
         resolved_grant = (grant or "").strip()
         if not resolved_grant:
-            resolved_grant = self._consume_pending_grant() or ""
-        if not resolved_grant:
-            raise RuntimeError("no pending grant")
+            raise RuntimeError("exchange_grant called without a grant")
 
         payload = {
             "grant": resolved_grant,
@@ -389,8 +269,8 @@ class SignedSessionClient:
         self.session_secret = data["session_secret"]
         self.expires_at = data["expires_at"]
         self.pending_auth_url = None
-        self.pending_auth_callback_url = None
         self.pending_sitekey = None
+        self.pending_challenge_id = None
         self._save()
 
     async def _refresh(self) -> None:
@@ -481,7 +361,6 @@ class SignedSessionClient:
         return resp
 
     async def aclose(self) -> None:
-        self._stop_callback_listener()
         await self._client.aclose()
 
 
@@ -511,56 +390,27 @@ async def perform_signed_fetch(
                 pass  # session obtained directly, no challenge needed
             elif auth_url:
                 grant = None
-                if client.pending_sitekey:
+                if client.pending_sitekey and client.pending_challenge_id:
                     try:
                         from .turnstile import solve
 
-                        # Il solve del browser e l'attesa del grant girano in
-                        # parallelo:
-                        # - il browser (thread separato, perché solve()
-                        #   chiama asyncio.run() internamente e non può
-                        #   essere invocato da un loop già attivo) serve solo
-                        #   a tenere la scheda aperta abbastanza a lungo da
-                        #   lasciare che la pagina di sfida completi da sola
-                        #   il suo /verify e la notifica al nostro cb;
-                        # - il grant vero arriva dal server HTTP locale
-                        #   (wait_for_grant), che riceve la chiamata reale
-                        #   della pagina in background. La pagina non
-                        #   naviga mai via (resta su api.zarz.moe/challenge),
-                        #   quindi controllare l'URL del browser per un
-                        #   redirect - come si faceva prima - non vede mai
-                        #   nulla.
-                        solve_future = asyncio.ensure_future(
-                            asyncio.to_thread(
-                                solve,
-                                sitekey=client.pending_sitekey,
-                                siteurl=auth_url,
-                                timeout=int(turnstile_timeout),
-                                hold_open_seconds=min(turnstile_timeout, 10.0),
-                            )
+                        # Il browser serve solo a ottenere il token
+                        # Turnstile. Il grant si ottiene chiamando
+                        # direttamente /challenge/verify (confermato via
+                        # DevTools) - non c'è nessun canale di notifica in
+                        # background da intercettare, quindi niente
+                        # server locale, niente cb URL, niente attesa: si
+                        # chiama verify() noi stessi subito dopo il token.
+                        token = await asyncio.to_thread(
+                            solve,
+                            sitekey=client.pending_sitekey,
+                            siteurl=client.pending_auth_url,
+                            timeout=int(turnstile_timeout),
                         )
-                        grant = await client.wait_for_grant(turnstile_timeout)
-
-                        # Non cancelliamo solve_future anche se il grant è
-                        # già arrivato: i thread Python non sono
-                        # interrompibili, quindi cancellare il future
-                        # esterno non fermerebbe comunque il browser, e
-                        # rischia solo di interferire con la sequenza di
-                        # cleanup interna di nodriver (chiusura del
-                        # processo Chrome), lasciandola a metà. Lo
-                        # lasciamo terminare da solo in background,
-                        # loggando solo eventuali eccezioni inattese.
-                        def _log_solve_future_errors(fut: "asyncio.Future") -> None:
-                            if fut.cancelled():
-                                return
-                            exc = fut.exception()
-                            if exc is not None:
-                                logger.debug(
-                                    "[signed_session:%s] background Turnstile solve raised: %s",
-                                    client.namespace, exc,
-                                )
-
-                        solve_future.add_done_callback(_log_solve_future_errors)
+                        if token:
+                            grant = await client.verify_challenge(
+                                client.pending_challenge_id, token
+                            )
                     except Exception as exc:
                         logger.warning(
                             "[signed_session:%s] Turnstile auto-solve failed: %s",
@@ -613,7 +463,6 @@ def client_from_manifest(manifest_block: dict, data_dir: str = "~/.spotiflac/sig
         scheme_label=manifest_block.get("schemeLabel", "SPOTIFLAC-HMAC-V1"),
         header_prefix=manifest_block.get("headerPrefix", "X-Sig-"),
         window_seconds=int(manifest_block.get("timeWindowSeconds", 300)),
-        callback_url=manifest_block.get("callbackUrl", "spotiflac://session-grant"),
         endpoints=manifest_block.get("endpoints"),
         data_dir=data_dir,
     )
