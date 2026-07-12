@@ -62,6 +62,29 @@ _DEFAULT_ENDPOINTS = {
     # inesistente quando il manifest non lo dichiara.
 }
 
+# Header "da browser reale" osservati via DevTools su una chiamata
+# riuscita a POST {base_url}/challenge/verify (Brave su macOS, Chromium 149).
+# Cloudflare/l'API applicano un controllo di fingerprint su questi header:
+# senza di essi la richiesta torna "Invalid request" anche con un token
+# Turnstile valido. Origin va calcolato per istanza (dipende da base_url)
+# e viene aggiunto in __init__, non qui.
+_BROWSER_FINGERPRINT_HEADERS = {
+    "Accept": "*/*",
+    "Accept-Language": "it-IT,it;q=0.7",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Ch-Ua": '"Brave";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"macOS"',
+    "Sec-Gpc": "1",
+    "Priority": "u=1, i",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+    ),
+}
+
 
 class SignedSessionClient:
     def __init__(
@@ -89,11 +112,45 @@ class SignedSessionClient:
         self.data_dir = Path(os.path.expanduser(data_dir))
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._path = self._session_path()
-        self._client = httpx.AsyncClient()
+        # Origin è SOLO scheme://host (niente path): come confermato dallo
+        # screenshot DevTools, per base_url "https://api.zarz.moe/v2" il
+        # browser manda "Origin: https://api.zarz.moe", non ".../v2".
+        _parsed_base = urlparse(self.base_url)
+        _origin = f"{_parsed_base.scheme}://{_parsed_base.netloc}"
+        self._client = httpx.AsyncClient(
+            headers={
+                **_BROWSER_FINGERPRINT_HEADERS,
+                "Origin": _origin,
+            }
+        )
         self.pending_auth_url: str | None = None
         self.pending_sitekey: str | None = None
         self.pending_challenge_id: str | None = None
         self._load()
+
+    def set_cf_clearance(self, cf_clearance: str) -> None:
+        """
+        Inietta il cookie `cf_clearance` di Cloudflare nel client httpx.
+
+        Questo cookie è quello che nello screenshot DevTools compare nella
+        richiesta riuscita del browser a /challenge/verify — è legato alla
+        sessione/fingerprint TLS con cui è stato ottenuto (tipicamente la
+        stessa sessione browser/CDP che ha risolto il Turnstile), quindi
+        NON va hardcodato: va passato qui non appena disponibile, subito
+        prima di chiamare verify_challenge().
+
+        Se il modulo core.turnstile.solve() è in grado di restituire anche
+        i cookie della pagina (oltre al solo token), passali qui, es.:
+
+            token, cookies = await asyncio.to_thread(solve, ...)
+            if cookies.get("cf_clearance"):
+                client.set_cf_clearance(cookies["cf_clearance"])
+        """
+        if not cf_clearance:
+            return
+        self._client.cookies.set(
+            "cf_clearance", cf_clearance, domain=urlparse(self.base_url).hostname
+        )
 
     # ─────────────────────── persistence ──────────────────────
 
@@ -234,6 +291,19 @@ class SignedSessionClient:
         challenge page never notifies anyone, it just calls this endpoint
         itself and uses the grant locally. We can call it ourselves right
         after obtaining the token, with no callback/redirect needed at all.
+
+        NOTE (fix): confrontando con DevTools la richiesta del browser vera
+        e propria, l'API richiede anche un set di header "da browser"
+        (Origin, User-Agent, Sec-Fetch-*, Sec-Ch-Ua, ecc.) — senza di essi
+        risponde con un errore generico ("Invalid request"), anche con un
+        token Turnstile valido. Questi header sono ora impostati come
+        default su self._client in __init__ (_BROWSER_FINGERPRINT_HEADERS +
+        Origin), quindi questa POST li eredita automaticamente. Se hai
+        anche il cookie cf_clearance della sessione che ha risolto il
+        Turnstile, chiama client.set_cf_clearance(...) PRIMA di questa
+        funzione: è l'unico elemento visto nello screenshot che non può
+        essere impostato staticamente (è legato alla sessione/fingerprint
+        con cui è stato ottenuto).
         """
         resp = await self._client.post(
             f"{self.base_url}{self.endpoints['challenge']}/verify",
