@@ -29,7 +29,7 @@ from ..core.errors import SpotiflacError, ErrorKind
 from ..providers.base import BaseProvider
 from .manager import ExtensionManager, InstalledExtension
 from .runtime import JSRuntime, ExtensionRuntimeError
-from ..core.signed_session import SignedSessionClient, perform_signed_fetch
+from ..core.signed_session import SignedSessionClient, perform_signed_fetch, client_from_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -124,8 +124,23 @@ class JSExtensionProvider(BaseProvider):
         ritorno che il JS si aspetta ({statusCode, body, ok, headers,
         error, needsVerification, auth_url}).
         """
-        assert self._signed_session is not None
-        return await perform_signed_fetch(self._signed_session, method, path, body, headers)
+        # Evitiamo che un'istanza di SignedSessionClient creata su un event
+        # loop isolato (via asyncio.run() in JSRuntime) venga riutilizzata
+        # su un loop diverso e generi "Event loop is closed". Creiamo una
+        # client temporanea per ogni invocazione e la chiudiamo prima di
+        # ritornare.
+        ss_manifest = self._ext.manifest.get("signedSession")
+        if not ss_manifest:
+            return {"error": "signedSession manifest missing"}
+
+        client = client_from_manifest(ss_manifest)
+        try:
+            return await perform_signed_fetch(client, method, path, body, headers)
+        finally:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
 
     def _get_runtime(self) -> JSRuntime:
         """Ritorna il runtime attivo, avviandolo se necessario (lazy start)."""
