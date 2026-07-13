@@ -96,20 +96,10 @@ _DEFAULT_ENDPOINTS = {
 # Turnstile valido. Origin va calcolato per istanza (dipende da base_url)
 # e viene aggiunto in __init__, non qui.
 _BROWSER_FINGERPRINT_HEADERS = {
-    "Accept": "*/*",
-    "Accept-Language": "it-IT,it;q=0.7",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Ch-Ua": '"Brave";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"macOS"',
-    "Sec-Gpc": "1",
-    "Priority": "u=1, i",
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
-    ),
+    # Use a minimal, mobile-extension-friendly fingerprint observed in the
+    # Qobuz extension captures: prefer JSON responses and gzip encoding.
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip",
 }
 
 _LOCAL_CALLBACK_HOST = "127.0.0.1"
@@ -277,12 +267,19 @@ class SignedSessionClient:
         # browser manda "Origin: https://api.zarz.moe", non ".../v2".
         _parsed_base = urlparse(self.base_url)
         _origin = f"{_parsed_base.scheme}://{_parsed_base.netloc}"
-        self._client = httpx.AsyncClient(
-            headers={
-                **_BROWSER_FINGERPRINT_HEADERS,
-                "Origin": _origin,
-            }
-        )
+        # Build headers per-instance so we can include the exact User-Agent
+        # that identifies this runtime + extension (observed in captures).
+        # Do NOT create the AsyncClient here: creating it inside __init__ may
+        # bind internal resources to the currently-running event loop, which
+        # can later be closed (asyncio.run) and cause "Event loop is closed"
+        # errors. Create the client lazily on first use instead.
+        self._client: httpx.AsyncClient | None = None
+        self._client_headers = {
+            **_BROWSER_FINGERPRINT_HEADERS,
+            # Do not include Origin by default; observed captures omit it for
+            # these signed requests coming from the extension runtime.
+            "User-Agent": f"SpotiFLAC-Mobile/{self.app_version}",
+        }
         self.pending_auth_url: str | None = None
         self.pending_sitekey: str | None = None
         self.pending_challenge_id: str | None = None
@@ -308,6 +305,8 @@ class SignedSessionClient:
         """
         if not cf_clearance:
             return
+        if self._client is None:
+            self._ensure_client()
         self._client.cookies.set(
             "cf_clearance", cf_clearance, domain=urlparse(self.base_url).hostname
         )
@@ -342,6 +341,23 @@ class SignedSessionClient:
         self.refresh_after = record.get("refresh_after")
         self.capabilities = record.get("capabilities", [])
         self._save()
+
+    def _ensure_client(self) -> None:
+        """Crea il client httpx in modo lazy e rimuove qualsiasi header "Connection".
+
+        Alcune catture di rete mostravano `Connection: keep-alive` inviato
+        automaticamente; rimuoviamo esplicitamente qualunque header con
+        quel nome per evitare che venga mandato.
+        """
+        if self._client is None:
+            # Assicuriamoci che non ci sia un header Connection sia mai impostato
+            # nelle headers globali del client (case-insensitive)
+            self._client_headers.pop("Connection", None)
+            self._client_headers.pop("connection", None)
+            # Abilitiamo HTTP/2: evita che httpcore aggiunga l'header
+            # "Connection: keep-alive" tipico di HTTP/1.1. La dipendenza
+            # httpx[http2] è indicata in requirements.txt.
+            self._client = httpx.AsyncClient(headers=self._client_headers, http2=True)
 
     def _save(self) -> None:
         record = {
@@ -392,6 +408,7 @@ class SignedSessionClient:
         if self.pending_auth_url:
             return self.pending_auth_url
 
+        self._ensure_client()
         resp = await self._client.get(
             f"{self.base_url}{self.endpoints['bootstrap']}",
             params={"install_id": self.install_id, "app_version": self.app_version},
@@ -425,6 +442,7 @@ class SignedSessionClient:
 
     async def _scrape_sitekey_from_page(self, page_url: str) -> str | None:
         try:
+            self._ensure_client()
             resp = await self._client.get(page_url, timeout=10, follow_redirects=True)
         except Exception as exc:
             logger.debug("[signed_session:%s] sitekey scrape fetch failed: %s", self.namespace, exc)
@@ -615,6 +633,7 @@ class SignedSessionClient:
         con i suoi cookie), e ne leggi/incolli tu il risultato dalla tab
         Network di DevTools.
         """
+        self._ensure_client()
         resp = await self._client.post(
             f"{self.base_url}{self.endpoints['challenge']}/verify",
             json={"challenge_id": challenge_id, "turnstile_token": turnstile_token},
@@ -638,6 +657,7 @@ class SignedSessionClient:
             "app_version": self.app_version,
             "platform": self.platform,
         }
+        self._ensure_client()
         resp = await self._client.post(
             f"{self.base_url}{self.endpoints['exchange']}",
             json=payload,
@@ -661,6 +681,7 @@ class SignedSessionClient:
             return  # nessun endpoint di refresh dichiarato: comportamento identico a Go
         body = {"install_id": self.install_id}
         headers = self._sign_headers("POST", refresh_path, json.dumps(body).encode())
+        self._ensure_client()
         resp = await self._client.post(
             f"{self.base_url}{refresh_path}",
             json=body,
@@ -720,12 +741,23 @@ class SignedSessionClient:
         sig = base64.urlsafe_b64encode(
             hmac.new(rolling_key, signing_input.encode(), hashlib.sha256).digest()
         ).rstrip(b"=").decode()
+        # DEBUG: log della stringa usata per la firma e della firma risultante
+        try:
+            logger.debug(
+                "[signed_session:%s] signing_input=%s signature=%s",
+                self.namespace,
+                signing_input,
+                sig,
+            )
+        except Exception:
+            pass
         p = self.header_prefix
         return {
             f"{p}Session": self.session_id,
             f"{p}Timestamp": ts,
             f"{p}Nonce": nonce,
-            f"{p}Body-SHA256": body_hash,
+            # Match observed header casing used by Qobuz extension runtime
+            f"{p}Body-Sha256": body_hash,
             f"{p}Signature": sig,
             f"{p}App-Version": self.app_version,
             f"{p}Platform": self.platform,
@@ -746,9 +778,42 @@ class SignedSessionClient:
         if extra_headers:
             headers.update(extra_headers)
 
+        # Evitiamo che venga inviato "Connection: keep-alive".
+        # Alcune librerie aggiungono automaticamente l'header su HTTP/1.1;
+        # impostiamo esplicitamente "close" per evitare keep-alive.
+        headers.pop("Connection", None)
+        headers.pop("connection", None)
+        headers["Connection"] = "close"
+
+        self._ensure_client()
+        # DEBUG: logghiamo header e body che stiamo per inviare al server
+        try:
+            b_preview = body[:1024]
+            try:
+                b_text = b_preview.decode('utf-8')
+            except Exception:
+                b_text = repr(b_preview)
+            logger.debug(
+                "[signed_session:%s] OUT %s %s headers=%s body=%s",
+                self.namespace, method, path, headers, b_text,
+            )
+        except Exception:
+            pass
         resp = await self._client.request(
             method, f"{self.base_url}{path}", content=body, headers=headers, timeout=30,
         )
+        # INFO: logghiamo URL completo e status per avere la stessa linea
+        # informativa di httpx ma con il link completo della richiesta.
+        try:
+            logger.info(
+                "HTTP Request: %s %s \"HTTP/1.1 %s %s\"",
+                method,
+                str(resp.url),
+                resp.status_code,
+                getattr(resp, "reason_phrase", ""),
+            )
+        except Exception:
+            pass
         if resp.status_code in (401, 428):
             self.clear()
         return resp
@@ -848,7 +913,11 @@ class SignedSessionClient:
         )
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        if self._client is not None:
+            try:
+                await self._client.aclose()
+            finally:
+                self._client = None
 
 
 async def perform_signed_fetch(
