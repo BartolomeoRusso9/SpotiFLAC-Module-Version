@@ -61,7 +61,7 @@ if (!isMainThread) {
     while (Atomics.load(STATE, 0) !== 2) {
       const r = Atomics.wait(STATE, 0, 1, 200);
       waited += 200;
-      if (waited > 120_000) throw new Error(`Bridge timeout for ${method}`);
+      if (waited > 60_000) throw new Error(`Bridge timeout for ${method}`);
     }
 
     const len  = LEN[0];
@@ -101,16 +101,29 @@ if (!isMainThread) {
     randomUserAgent: () =>
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     appUserAgent: () => 'SpotiFLAC-Python/1.2',
+    // Usata da alcune estensioni ufficiali (es. tidal-web/index.js,
+    // signedTicket()) per calcolare resource_hash prima di POST /tickets.
+    // Calcolata qui in locale (nessun giro di bridge: è pura, offline).
+    sha256: (input) =>
+      require('crypto').createHash('sha256').update(String(input), 'utf8').digest('hex'),
   };
 
-  // Signed-session bridge: the session secret lives in Python (see
-  // core/signed_session.py), never in this worker. signedFetch() blocks
-  // synchronously (same Atomics.wait mechanism as http/file) while the
-  // main thread relays the request to Python and waits for its reply.
+  // Esposto SOLO se l'estensione dichiara "requiredRuntimeFeatures" con
+  // "signedSession@1"/"sessionGrant@1" nel manifest (vedi provider.py):
+  // il bridge Python inietta la config del manifest e gestisce lato Python
+  // l'intero ciclo bootstrap/challenge/verify/exchange/refresh (incluso
+  // l'eventuale apertura del browser per il Turnstile) tramite
+  // SignedSessionClient/perform_signed_fetch — qui ci limitiamo a inoltrare
+  // la richiesta firmata, esattamente come fa "session.signedFetch" nel
+  // runtime reale dell'app (stessa forma di ritorno: {statusCode, body,
+  // ok, headers, error, needsVerification, auth_url}).
   global.session = {
     signedFetch: (method, path, body, headers) =>
       bridgeCall('session.signedFetch', {
-        method, path, body: body || null, headers: headers || {},
+        method: method || 'GET',
+        path: path || '',
+        body: body === undefined ? null : body,
+        headers: headers || {},
       }),
   };
 
@@ -166,8 +179,23 @@ const DOFF       = 8;
 let _pendingPy   = new Map();   // id → {resolve, reject}
 let _progressCbs = new Map();   // callId → progressCallback (unused server-side, forwarded to stdout)
 let _cmdSeq      = 0;
-let _pendingSession = new Map(); // id → {resolve, reject}  (session.signedFetch relayed to Python)
-let _sessionSeq  = 0;
+
+// Mappa dedicata per forwardToPython() (session.signedFetch): diversa da
+// _pendingPy sopra, che è per le risposte ai comandi call/args inviati DA
+// Python VERSO il Worker — qui invece è il main thread di Node che chiede
+// qualcosa a Python e aspetta una risposta, quindi serve un proprio spazio
+// di ID per non entrare in collisione.
+let _pySessionPending = new Map();  // requestId → resolve
+let _pySessionSeq     = 0;
+
+/** Inoltra una richiesta a Python (via stdout) e aspetta la sua risposta (via stdin). */
+function forwardToPython(type, payload) {
+  return new Promise((resolve) => {
+    const requestId = ++_pySessionSeq;
+    _pySessionPending.set(requestId, resolve);
+    process.stdout.write(JSON.stringify({ type, requestId, ...payload }) + '\n');
+  });
+}
 
 /** Esegue una bridge-request generata dal Worker. */
 async function handleBridgeRequest() {
@@ -188,7 +216,14 @@ async function handleBridgeRequest() {
     } else if (method === 'file.download') {
       result = await nodeFileDownload(args.url, args.outputPath, args.opts);
     } else if (method === 'session.signedFetch') {
-      result = await relaySignedFetchToPython(args);
+      // Non gestibile qui in Node puro: serve il vero SignedSessionClient
+      // Python (HMAC signing, ciclo bootstrap/challenge/verify/exchange,
+      // eventuale apertura browser per il Turnstile). Inoltriamo la
+      // richiesta a Python via stdout e aspettiamo la sua risposta via
+      // stdin (vedi forwardToPython più sotto).
+      result = await forwardToPython('session_signed_fetch', {
+        method: args.method, path: args.path, body: args.body, headers: args.headers,
+      });
     } else {
       error = `Unknown bridge method: ${method}`;
     }
@@ -202,25 +237,6 @@ async function handleBridgeRequest() {
 
   Atomics.store(STATE, 0, 2);
   Atomics.notify(STATE, 0, 1);
-}
-
-/**
- * Inoltra una session.signedFetch a Python (che possiede il segreto di
- * sessione) scrivendo un messaggio {type:'session_request'} su stdout e
- * attendendo il corrispondente {type:'session_response'} su stdin.
- */
-function relaySignedFetchToPython(args) {
-  return new Promise((resolve, reject) => {
-    const id = ++_sessionSeq;
-    _pendingSession.set(id, { resolve, reject });
-    process.stdout.write(JSON.stringify({ type: 'session_request', id, args }) + '\n');
-    setTimeout(() => {
-      if (_pendingSession.has(id)) {
-        _pendingSession.delete(id);
-        resolve({ error: 'signed session request timed out' });
-      }
-    }, 110_000);
-  });
 }
 
 /** HTTP request asincrona con redirect e cookie base. */
@@ -383,11 +399,13 @@ stdinRL.on('line', async (line) => {
   let req;
   try { req = JSON.parse(line); } catch (_) { return; }
 
-  if (req.type === 'session_response') {
-    const pending = _pendingSession.get(req.id);
-    if (pending) {
-      _pendingSession.delete(req.id);
-      pending.resolve(req.error ? { error: req.error } : req.result);
+  // Risposta di Python a un forwardToPython('session_signed_fetch', ...):
+  // risolve la Promise in attesa nel Worker, non è un comando da eseguire.
+  if (req.type === 'session_signed_fetch_response') {
+    const resolve = _pySessionPending.get(req.requestId);
+    if (resolve) {
+      _pySessionPending.delete(req.requestId);
+      resolve(req.result);
     }
     return;
   }

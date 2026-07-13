@@ -1,47 +1,56 @@
 """
 extensions/provider.py — JSExtensionProvider
 
-Adapts a JS extension to SpotiFLAC's BaseProvider contract.
+Adatta un'estensione JS al contratto BaseProvider di SpotiFLAC.
 
-Download flow via extension:
+Flusso download via estensione:
   1. checkAvailability(isrc, title, artist, options)
-       → { available, track_id } or { available: False }
+       → { available, track_id } oppure { available: False }
   2. download(track_id, quality, output_path, onProgress)
        → { success, file_path, title, artist, ... }
-  3. Convert result to DownloadResult and apply tags if missing.
+  3. Converti il risultato in DownloadResult e applica i tag se assenti.
 
-Direct URL flow (e.g. user pastes a SoundCloud link):
+Flusso URL diretto (es. utente incolla un link SoundCloud):
   1. handleURL(url) → { type: "track"|"album", ... }
   2. download(...)
 
-The provider is registered in PROVIDER_REGISTRY with key "ext:{name}",
-e.g. "ext:soundcloud", "ext:pandora".
+Il provider viene registrato in PROVIDER_REGISTRY con chiave "ext:{name}",
+es. "ext:soundcloud", "ext:pandora".
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
 from ..core.models import TrackMetadata, DownloadResult
 from ..core.errors import SpotiflacError, ErrorKind
 from ..providers.base import BaseProvider
 from .manager import ExtensionManager, InstalledExtension
 from .runtime import JSRuntime, ExtensionRuntimeError
+from ..core.signed_session import SignedSessionClient, perform_signed_fetch
 
 logger = logging.getLogger(__name__)
 
 
 class JSExtensionProvider(BaseProvider):
     """
-    Provider that delegates download and metadata to a JS extension.
+    Provider che delega download e metadati a un'estensione JS.
 
-    Parameters:
-        ext_id          – extension name (e.g. "soundcloud")
-        settings        – configuration dict (overrides manifest defaults)
-        ext_dir         – extensions folder (default: ~/.spotiflac/extensions)
-        node_executable – path to Node.js (default: "node")
-        timeout_s       – timeout for each JS operation (default: 120)
+    Parametri:
+        ext_id          – nome dell'estensione (es. "soundcloud")
+        settings        – dict di configurazione (sovrascrive i default del manifest)
+        ext_dir         – cartella estensioni (default: ~/.spotiflac/extensions)
+        node_executable – path di Node.js (default: "node")
+        timeout_s       – timeout per ogni operazione JS (default: 120)
+
+    Se il manifest dell'estensione dichiara "requiredRuntimeFeatures" con
+    "signedSession@1" (es. tidal-web, amazon, ecc.), viene automaticamente
+    istanziato un SignedSessionClient dalla sezione "signedSession" del
+    manifest e collegato a `session.signedFetch(...)` lato JS — l'estensione
+    può quindi usare la sua logica originale (manifest parsing, fallback
+    qualità, ecc.) invariata, senza bisogno di riscriverla in Python.
     """
 
     def __init__(
@@ -52,26 +61,45 @@ class JSExtensionProvider(BaseProvider):
         node_executable: str         = "node",
         timeout_s:       int         = 120,
     ) -> None:
-        # We don't call super().__init__() with HttpClient because Node.js handles HTTP,
-        # but we still need to initialize the attributes that BaseProvider expects.
+        # Non chiamiamo super().__init__() con HttpClient perché l'HTTP lo gestisce Node,
+        # ma dobbiamo comunque inizializzare gli attributi che BaseProvider si aspetta.
         self._timeout_s       = timeout_s
         self._node_executable = node_executable
-        self._progress_cb     = None   # set by set_progress_callback()
-        self._stop_event      = None   # set by set_stop_event()
+        self._progress_cb     = None   # impostato da set_progress_callback()
+        self._stop_event      = None   # impostato da set_stop_event()
 
         self._mgr = ExtensionManager(ext_dir=ext_dir)
         self._ext: InstalledExtension = self._load_extension(ext_id)
         self.name = f"ext:{self._ext.name}"
 
-        # Merge settings: manifest defaults + user settings
+        # Merge settings: defaults manifest + settings utente
         self._settings = self._ext.default_settings()
         if settings:
             self._settings.update(settings)
-        # Load settings saved to disk (higher priority than defaults)
+        # Carica settings salvati su disco (priorità più alta dei default)
         disk_settings = self._mgr.load_settings(ext_id)
         self._settings.update(disk_settings)
         if settings:
-            self._settings.update(settings)  # explicit settings have highest priority
+            self._settings.update(settings)  # settings espliciti hanno massima priorità
+
+        # signedSession: solo se il manifest lo dichiara (es. tidal-web,
+        # amazon). Confermato via manifest reale (tidal-web/manifest.json):
+        # {"namespace","baseUrl","appVersion","platform","schemeLabel",
+        #  "headerPrefix","timeWindowSeconds","endpoints"}.
+        self._signed_session: SignedSessionClient | None = None
+        required = self._ext.manifest.get("requiredRuntimeFeatures", [])
+        ss_config = self._ext.manifest.get("signedSession")
+        if ss_config and any(f.startswith("signedSession") for f in required):
+            self._signed_session = SignedSessionClient(
+                base_url       = ss_config["baseUrl"],
+                namespace      = ss_config["namespace"],
+                app_version    = ss_config.get("appVersion", "1.0"),
+                platform       = ss_config.get("platform", "extension"),
+                scheme_label   = ss_config.get("schemeLabel", "SPOTIFLAC-HMAC-V1"),
+                header_prefix  = ss_config.get("headerPrefix", "X-Sig-"),
+                window_seconds = ss_config.get("timeWindowSeconds", 300),
+                endpoints      = ss_config.get("endpoints"),
+            )
 
         self._runtime: JSRuntime | None = None
         self._runtime_lock = __import__("threading").Lock()
@@ -82,13 +110,25 @@ class JSExtensionProvider(BaseProvider):
         ext = self._mgr.get_installed(ext_id)
         if ext is None:
             raise ValueError(
-                f"Extension '{ext_id}' not installed. "
-                f"Use ExtensionManager().install('{ext_id}') first."
+                f"Estensione '{ext_id}' non installata. "
+                f"Usa ExtensionManager().install('{ext_id}') prima."
             )
         return ext
 
+    async def _session_signed_fetch_handler(
+        self, method: str, path: str, body: Any, headers: dict
+    ) -> dict:
+        """
+        Collega session.signedFetch(...) lato JS a perform_signed_fetch()
+        (già scritta e testata in signed_session.py): stessa forma di
+        ritorno che il JS si aspetta ({statusCode, body, ok, headers,
+        error, needsVerification, auth_url}).
+        """
+        assert self._signed_session is not None
+        return await perform_signed_fetch(self._signed_session, method, path, body, headers)
+
     def _get_runtime(self) -> JSRuntime:
-        """Returns the active runtime, starting it if necessary (lazy start)."""
+        """Ritorna il runtime attivo, avviandolo se necessario (lazy start)."""
         with self._runtime_lock:
             if self._runtime is None:
                 rt = JSRuntime(
@@ -96,7 +136,10 @@ class JSExtensionProvider(BaseProvider):
                     settings        = self._settings,
                     node_executable = self._node_executable,
                     startup_timeout = 30.0,
-                    signed_session_config = self._ext.manifest.get("signedSession"),
+                    session_handler = (
+                        self._session_signed_fetch_handler
+                        if self._signed_session is not None else None
+                    ),
                 )
                 rt.start()
                 self._runtime = rt
@@ -113,11 +156,17 @@ class JSExtensionProvider(BaseProvider):
             ) from e
 
     def close(self) -> None:
-        """Stops the Node.js process. Call explicitly or use as context manager."""
+        """Ferma il processo Node.js e l'eventuale SignedSessionClient. Chiamare esplicitamente o usare come context manager."""
         with self._runtime_lock:
             if self._runtime:
                 self._runtime.stop()
                 self._runtime = None
+        if self._signed_session is not None:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._signed_session.aclose())
+            except RuntimeError:
+                asyncio.run(self._signed_session.aclose())
 
     def __enter__(self) -> "JSExtensionProvider":
         return self
@@ -135,8 +184,8 @@ class JSExtensionProvider(BaseProvider):
         options:     dict | None = None,
     ) -> dict:
         """
-        Calls checkAvailability on the JS extension.
-        Returns the raw dict: { available: bool, track_id?: str, ... }
+        Chiama checkAvailability sull'estensione JS.
+        Ritorna il dict grezzo: { available: bool, track_id?: str, ... }
         """
         return self._call(
             "checkAvailability",
@@ -146,9 +195,9 @@ class JSExtensionProvider(BaseProvider):
 
     def handle_url(self, url: str) -> dict:
         """
-        Calls handleUrl on the JS extension (the name exposed by registerExtension
-        is always 'handleUrl', lowercase, in all official extensions).
-        Returns the raw dict with type, tracks, metadata, etc.
+        Chiama handleUrl sull'estensione JS (il nome esposto da registerExtension
+        è sempre 'handleUrl', minuscolo, in tutte le estensioni ufficiali).
+        Ritorna il dict grezzo con type, tracks, metadata, ecc.
         """
         return self._call("handleUrl", url) or {}
 
@@ -165,14 +214,14 @@ class JSExtensionProvider(BaseProvider):
         return self._call("getPlaylist", playlist_id) or {}
 
     def search_tracks(self, query: str, options: dict | None = None) -> dict:
-        """Full-text search for tracks (if the extension supports it)."""
+        """Ricerca full-text tracce (se l'estensione lo supporta)."""
         return self._call("searchTracks", query, options or {}) or {}
 
     def custom_search(self, query: str, options: dict | None = None) -> dict:
         return self._call("customSearch", query, options or {}) or {}
 
     def enrich_track(self, track: dict, options: dict | None = None) -> dict:
-        """Enriches metadata of an already-known track (ISRC, label, etc.)."""
+        """Arricchisce metadati di una traccia già nota (ISRC, label, ecc.)."""
         return self._call("enrichTrack", track, options or {}) or {}
 
     # ─────────────────────── BaseProvider ─────────────────────
@@ -197,12 +246,12 @@ class JSExtensionProvider(BaseProvider):
         **kwargs,
     ) -> DownloadResult:
         """
-        BaseProvider.download_track() implementation.
+        Implementazione BaseProvider.download_track().
 
-        Strategy:
-          1. If the manifest has checkAvailability, search by ISRC.
-          2. If found, download with download().
-          3. Apply tags to the resulting file if not already present.
+        Strategia:
+          1. Se il manifest ha checkAvailability, cercalo per ISRC.
+          2. Se trovato, scarica con download().
+          3. Applica tag al file risultante se non già presenti.
         """
         try:
             return self._do_download(
@@ -220,46 +269,6 @@ class JSExtensionProvider(BaseProvider):
             logger.exception("[%s] Unexpected error", self.name)
             return DownloadResult.fail(self.name, f"Unexpected error: {e}")
 
-    async def download_track_async(
-        self,
-        metadata:             TrackMetadata,
-        output_dir:           str,
-        *,
-        filename_format:      str          = "{title} - {artist}",
-        position:             int          = 1,
-        include_track_num:    bool         = False,
-        use_album_track_num:  bool         = False,
-        first_artist_only:    bool         = False,
-        allow_fallback:       bool         = True,
-        embed_lyrics:         bool         = False,
-        lyrics_providers:     list | None  = None,
-        enrich_metadata:      bool         = False,
-        enrich_providers:     list | None  = None,
-        is_album:             bool         = False,
-        quality:              str          = "best",
-        **kwargs,
-    ) -> DownloadResult:
-        """Async wrapper for the sync extension download implementation."""
-        loop = asyncio.get_running_loop()
-        func = lambda: self.download_track(
-            metadata,
-            output_dir,
-            filename_format=filename_format,
-            position=position,
-            include_track_num=include_track_num,
-            use_album_track_num=use_album_track_num,
-            first_artist_only=first_artist_only,
-            allow_fallback=allow_fallback,
-            embed_lyrics=embed_lyrics,
-            lyrics_providers=lyrics_providers,
-            enrich_metadata=enrich_metadata,
-            enrich_providers=enrich_providers,
-            is_album=is_album,
-            quality=quality,
-            **kwargs,
-        )
-        return await loop.run_in_executor(None, func)
-
     def _do_download(
         self,
         metadata:            TrackMetadata,
@@ -272,7 +281,7 @@ class JSExtensionProvider(BaseProvider):
         first_artist_only:   bool,
         quality:             str,
     ) -> DownloadResult:
-        # 1. Find track_id via checkAvailability (ISRC-based)
+        # 1. Trova il track_id via checkAvailability (ISRC-based)
         avail = self.check_availability(
             isrc        = metadata.isrc,
             track_name  = metadata.title,
@@ -291,8 +300,8 @@ class JSExtensionProvider(BaseProvider):
         if not track_id:
             return DownloadResult.fail(self.name, "checkAvailability returned no track_id")
 
-        # 2. Build output path
-        #    Use temporary .tmp extension — the JS extension will overwrite it
+        # 2. Costruisce il path di output
+        #    Usiamo un'estensione temporanea .tmp — l'estensione JS la sovrascriverà
         ext_hint = _quality_to_ext(quality)
         output_path = self._build_output_path(
             metadata            = metadata,
@@ -305,17 +314,17 @@ class JSExtensionProvider(BaseProvider):
             extension           = ext_hint,
         )
 
-        # Skip if already exists
+        # Salta se già esistente
         if self._file_exists(output_path):
             return DownloadResult.skipped_result(
                 self.name, str(output_path),
                 fmt = _ext_to_fmt(output_path.suffix),
             )
 
-        # 3. Call download() on the JS extension.
-        #    JS extensions report progress as float 0..1 (percentage),
-        #    while BaseProvider._progress_cb expects (current_bytes, total_bytes).
-        #    Use fixed scale 0..10000 as proxy to avoid losing precision.
+        # 3. Chiama download() sull'estensione JS.
+        #    Le estensioni JS riportano il progresso come float 0..1 (percentuale),
+        #    mentre BaseProvider._progress_cb si aspetta (current_bytes, total_bytes).
+        #    Usiamo una scala fissa 0..10000 come proxy per non perdere precisione.
         def _progress_adapter(fraction: float) -> None:
             if self._progress_cb is None:
                 return
@@ -323,7 +332,7 @@ class JSExtensionProvider(BaseProvider):
                 current = int(max(0.0, min(1.0, fraction)) * 10_000)
                 self._progress_cb(current, 10_000)
             except Exception:
-                pass  # progress reporting must never fail the download
+                pass  # il progress reporting non deve mai far fallire il download
 
         logger.info("[%s] Downloading '%s'", self.name, metadata.title)
         dl_result = self._call(
@@ -386,8 +395,8 @@ def make_extension_provider(
     timeout_s:       int         = 120,
 ) -> JSExtensionProvider:
     """
-    Creates a JSExtensionProvider for the specified extension.
-    Convenient for programmatic use.
+    Crea un JSExtensionProvider per l'estensione specificata.
+    Conveniente per uso programmatico.
     """
     return JSExtensionProvider(
         ext_id          = ext_id,

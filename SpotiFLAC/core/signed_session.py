@@ -28,6 +28,33 @@ NOTE: every network path (bootstrap/challenge/exchange/refresh) reads its
 route from `endpoints`, with the historical hardcoded paths kept only as
 fallback defaults. This matters because a previous ad-hoc port of this class
 hardcoded the refresh path as "/refresh" while some deployments declare
+
+NOTE (2026-07-12, cattura di rete reale via HTTP Toolkit su SpotiFLAC-Mobile):
+oltre a bootstrap/challenge/verify/exchange, esiste un flusso di DOWNLOAD a
+"ticket" a valle della sessione firmata, non ancora implementato qui:
+
+    POST {base_url}/tickets   (signed, come ogni altra signedFetch)
+      body: {"capability": "download_ticket", "provider": "<short_id>",
+             "resource_hash": "<sha256 esadecimale>"}
+      → {"ticket_id": "tkt_...", "expires_in": 60, "max_uses": 1}
+
+    POST {base_url}/dl/{short_id}   (signed, PIÙ un header extra)
+      header extra: X-Zarz-Ticket: <ticket_id ottenuto sopra>
+      body: {"id": "<track id del provider>", "quality": "<stringa qualità>"}
+      → presumibilmente URL/stream del file (non catturato: la richiesta
+        osservata ha ricevuto 502 dal server, quindi la risposta reale non è
+        nota)
+
+Il "resource_hash" è calcolato lato JS dall'estensione (probabilmente hash di
+provider+id+qualità o simile) e non è replicabile qui senza il codice
+JS dell'estensione specifica (es. tidal-web/index.js) che lo genera. Il
+ticket è a singolo uso (max_uses=1) e vive solo 60s: va richiesto appena
+prima di ogni singola chiamata /dl/{short_id}, non riutilizzato.
+Se in futuro serve implementare anche questo, il metodo generico `request()`
+già presente qui sotto (usato per signedFetch) può essere riusato invariato
+per la POST /tickets — serve solo aggiungere il supporto per l'header extra
+X-Zarz-Ticket sulla POST /dl/{short_id} (extra_headers è già supportato da
+request()).
 "/session/refresh" in the manifest, silently breaking session renewal.
 """
 from __future__ import annotations
@@ -44,8 +71,8 @@ import secrets
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from typing import Any, Callable
+from urllib.parse import parse_qsl, parse_qs, urlencode, urlparse, urlunparse
 
 import httpx
 
@@ -62,38 +89,160 @@ _DEFAULT_ENDPOINTS = {
     # inesistente quando il manifest non lo dichiara.
 }
 
+# Header "da browser reale" osservati via DevTools su una chiamata
+# riuscita a POST {base_url}/challenge/verify (Brave su macOS, Chromium 149).
+# Cloudflare/l'API applicano un controllo di fingerprint su questi header:
+# senza di essi la richiesta torna "Invalid request" anche con un token
+# Turnstile valido. Origin va calcolato per istanza (dipende da base_url)
+# e viene aggiunto in __init__, non qui.
+_BROWSER_FINGERPRINT_HEADERS = {
+    "Accept": "*/*",
+    "Accept-Language": "it-IT,it;q=0.7",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Ch-Ua": '"Brave";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"macOS"',
+    "Sec-Gpc": "1",
+    "Priority": "u=1, i",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+    ),
+}
 
-def _parse_retry_after(raw: str) -> int:
-    """Replica signedSessionRetryAfterSeconds() del backend Go: accetta sia
-    un numero di secondi sia una data HTTP (RFC 7231), clampando i negativi
-    a zero."""
-    raw = (raw or "").strip()
-    if not raw:
-        return 0
-    if raw.lstrip("-").isdigit():
-        return max(0, int(raw))
-    try:
-        from email.utils import parsedate_to_datetime
-
-        when = parsedate_to_datetime(raw)
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
-        delta = (when - datetime.now(timezone.utc)).total_seconds()
-        return max(0, int(delta))
-    except Exception:
-        return 0
+_LOCAL_CALLBACK_HOST = "127.0.0.1"
+_LOCAL_CALLBACK_PATH = "/callback"
+_LOCAL_CALLBACK_TIMEOUT_S = 300  # 5 minuti per completare la verifica nel browser
 
 
-def _sanitize_namespace(value: str) -> str:
+class _LocalGrantListener:
     """
-    Replica sanitizeSignedSessionNamespace() del backend Go: minuscolo,
-    trim degli spazi esterni, rimozione di spazi e slash interni (mantenendo
-    i punti), poi rimozione di punteggiatura (- _ .) residua ai bordi.
+    STORICO / NON PIÙ USATA dal flusso principale (authenticate_with_browser).
+
+    Ipotesi originaria: la pagina di sfida, dopo aver risolto il Turnstile,
+    avrebbe fatto un redirect al "cb" fornito (come fa l'app Flutter con lo
+    scheme "spotiflac://..."), catturabile da un piccolo server HTTP locale
+    che sostituisse quello scheme mobile con http://127.0.0.1:{porta}.
+
+    Verificato via DevTools che questo NON accade in un browser esterno: la
+    pagina ottiene il grant chiamando internamente {endpoints.challenge}/verify,
+    ma poi non naviga da nessuna parte (il meccanismo "cb" sembra pensato per
+    una WebView nativa con bridge JS, non per un browser esterno). Il flusso
+    reale ora intercetta direttamente quella risposta di rete via Playwright
+    (vedi SignedSessionClient._capture_grant_via_browser). Questa classe resta
+    solo per riferimento storico.
     """
-    s = (value or "").strip().lower()
-    s = re.sub(r"[\s/\\]+", "", s)
-    s = s.strip("-_. ")
-    return s
+
+    def __init__(self, host: str = _LOCAL_CALLBACK_HOST, path: str = _LOCAL_CALLBACK_PATH) -> None:
+        self.host = host
+        self.path = path
+        self.port: int | None = None
+        self._server: asyncio.AbstractServer | None = None
+        self._grant_future: asyncio.Future[str] | None = None
+
+    async def start(self) -> str:
+        """Avvia il listener su una porta libera e ritorna l'URL di callback completo."""
+        loop = asyncio.get_running_loop()
+        self._grant_future = loop.create_future()
+        self._server = await asyncio.start_server(
+            self._handle_connection, host=self.host, port=0
+        )
+        self.port = self._server.sockets[0].getsockname()[1]
+        return f"http://{self.host}:{self.port}{self.path}"
+
+    async def _handle_connection(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            request_line = await asyncio.wait_for(reader.readline(), timeout=10)
+            # Consuma il resto degli header della richiesta (non ci servono)
+            while True:
+                line = await asyncio.wait_for(reader.readline(), timeout=10)
+                if not line or line in (b"\r\n", b"\n"):
+                    break
+
+            try:
+                method, raw_target, _ = request_line.decode("latin-1").split(" ", 2)
+            except ValueError:
+                method, raw_target = "GET", "/"
+
+            parsed = urlparse(raw_target)
+
+            # Ignora qualsiasi richiesta che non sia il nostro path di callback
+            # (es. GET /favicon.ico che alcuni browser sparano automaticamente):
+            # non deve MAI toccare il future del grant.
+            if parsed.path != self.path:
+                await self._respond(writer, 404, "<h3>Not Found</h3>")
+                return
+
+            params = parse_qs(parsed.query)
+            grant = (params.get("grant") or [None])[0]
+            error = (params.get("error") or [None])[0]
+
+            if grant:
+                await self._respond(
+                    writer, 200,
+                    "<h2>Verifica completata ✅</h2>"
+                    "<p>Puoi chiudere questa finestra e tornare all'app.</p>",
+                )
+            else:
+                await self._respond(
+                    writer, 200,
+                    "<h2>Verifica non riuscita</h2>"
+                    f"<p>{error or 'Nessun grant ricevuto.'}</p>",
+                )
+
+            if self._grant_future is not None and not self._grant_future.done():
+                if grant:
+                    self._grant_future.set_result(grant)
+                else:
+                    self._grant_future.set_exception(
+                        RuntimeError(f"callback senza grant: {error or 'sconosciuto'}")
+                    )
+        except Exception as exc:
+            if self._grant_future is not None and not self._grant_future.done():
+                self._grant_future.set_exception(exc)
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    @staticmethod
+    async def _respond(writer: asyncio.StreamWriter, status: int, html_body: str) -> None:
+        reason = {200: "OK", 404: "Not Found"}.get(status, "OK")
+        body = (
+            f"<html><body style='font-family:sans-serif;text-align:center;"
+            f"padding-top:4em'>{html_body}</body></html>"
+        ).encode("utf-8")
+        response = (
+            f"HTTP/1.1 {status} {reason}\r\n"
+            f"Content-Type: text/html; charset=utf-8\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            f"Connection: close\r\n\r\n"
+        ).encode("utf-8") + body
+        writer.write(response)
+        await writer.drain()
+
+    async def wait_for_grant(self, timeout: float) -> str:
+        """Blocca finché il browser non chiama il callback con ?grant=..., poi ferma il listener."""
+        assert self._grant_future is not None, "start() non è stato chiamato"
+        try:
+            return await asyncio.wait_for(self._grant_future, timeout=timeout)
+        finally:
+            await self.stop()
+
+    async def stop(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            try:
+                await self._server.wait_closed()
+            except Exception:
+                pass
+            self._server = None
 
 
 class SignedSessionClient:
@@ -106,30 +255,61 @@ class SignedSessionClient:
         scheme_label: str = "SPOTIFLAC-HMAC-V1",
         header_prefix: str = "X-Sig-",
         window_seconds: int = 300,
-        callback_url: str = "spotiflac://session-grant",
         endpoints: dict[str, str] | None = None,
         data_dir: str = "~/.spotiflac/signed_sessions",
         refresh_skew_seconds: int = 3600,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.namespace = _sanitize_namespace(namespace)
+        self.namespace = namespace
         self.app_version = app_version
         self.platform = platform
         self.scheme_label = scheme_label
         self.header_prefix = header_prefix
         self.window_seconds = window_seconds
-        self.callback_url = callback_url
         self.endpoints = {**_DEFAULT_ENDPOINTS, **(endpoints or {})}
         self.refresh_skew_seconds = refresh_skew_seconds
         self.data_dir = Path(os.path.expanduser(data_dir))
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._path = self._session_path()
-        self._client = httpx.AsyncClient()
+        # Origin è SOLO scheme://host (niente path): come confermato dallo
+        # screenshot DevTools, per base_url "https://api.zarz.moe/v2" il
+        # browser manda "Origin: https://api.zarz.moe", non ".../v2".
+        _parsed_base = urlparse(self.base_url)
+        _origin = f"{_parsed_base.scheme}://{_parsed_base.netloc}"
+        self._client = httpx.AsyncClient(
+            headers={
+                **_BROWSER_FINGERPRINT_HEADERS,
+                "Origin": _origin,
+            }
+        )
         self.pending_auth_url: str | None = None
         self.pending_sitekey: str | None = None
         self.pending_challenge_id: str | None = None
-        self.pending_server_nonce: str | None = None
         self._load()
+
+    def set_cf_clearance(self, cf_clearance: str) -> None:
+        """
+        Inietta il cookie `cf_clearance` di Cloudflare nel client httpx.
+
+        Questo cookie è quello che nello screenshot DevTools compare nella
+        richiesta riuscita del browser a /challenge/verify — è legato alla
+        sessione/fingerprint TLS con cui è stato ottenuto (tipicamente la
+        stessa sessione browser/CDP che ha risolto il Turnstile), quindi
+        NON va hardcodato: va passato qui non appena disponibile, subito
+        prima di chiamare verify_challenge().
+
+        Se il modulo core.turnstile.solve() è in grado di restituire anche
+        i cookie della pagina (oltre al solo token), passali qui, es.:
+
+            token, cookies = await asyncio.to_thread(solve, ...)
+            if cookies.get("cf_clearance"):
+                client.set_cf_clearance(cookies["cf_clearance"])
+        """
+        if not cf_clearance:
+            return
+        self._client.cookies.set(
+            "cf_clearance", cf_clearance, domain=urlparse(self.base_url).hostname
+        )
 
     # ─────────────────────── persistence ──────────────────────
 
@@ -149,52 +329,36 @@ class SignedSessionClient:
                 record = {}
 
         self.install_id = record.get("install_id") or secrets.token_hex(16)
-
-        # Come normalizeSignedSessionRecordScope() in Go: una sessione
-        # salvata è valida solo se lo scope (namespace/base_url/app_version/
-        # platform) corrisponde esattamente a quello corrente. Se il file
-        # è stato scritto con una config diversa (es. un base_url cambiato,
-        # o lo stesso namespace riusato per un endpoint diverso), la
-        # sessione va invalidata invece di essere riusata alla cieca.
-        same_scope = (
-            record.get("namespace") == self.namespace
-            and record.get("base_url") == self.base_url
-            and record.get("app_version") == self.app_version
-            and record.get("platform") == self.platform
-        )
-        if same_scope:
-            self.session_id = record.get("session_id")
-            self.session_secret = record.get("session_secret")
-            self.expires_at = record.get("expires_at")
-        else:
-            self.session_id = None
-            self.session_secret = None
-            self.expires_at = None
+        self.session_id = record.get("session_id")
+        self.session_secret = record.get("session_secret")
+        self.expires_at = record.get("expires_at")
+        # Campi opzionali restituiti da bootstrap/exchange/refresh — confermati
+        # via cattura di rete reale (2026-07-12): la risposta di
+        # POST .../session/exchange include anche "refresh_after" (timestamp
+        # assoluto, preferito rispetto al nostro skew calcolato) e
+        # "capabilities" (lista di permessi della sessione, es.
+        # ["resolve", "metadata", "download_ticket"]).
+        self.refresh_after = record.get("refresh_after")
+        self.capabilities = record.get("capabilities", [])
         self._save()
 
     def _save(self) -> None:
         record = {
             "install_id": self.install_id,
-            "namespace": self.namespace,
-            "base_url": self.base_url,
-            "app_version": self.app_version,
-            "platform": self.platform,
             "session_id": self.session_id,
             "session_secret": self.session_secret,
             "expires_at": self.expires_at,
+            "refresh_after": self.refresh_after,
+            "capabilities": self.capabilities,
         }
         self._path.write_text(json.dumps(record, indent=2))
-        try:
-            # Il file contiene session_secret: come il backend Go (0600),
-            # non deve essere leggibile da altri utenti/processi.
-            os.chmod(self._path, 0o600)
-        except OSError:
-            pass  # best-effort (es. filesystem che non supporta chmod)
 
     def clear(self) -> None:
         self.session_id = None
         self.session_secret = None
         self.expires_at = None
+        self.refresh_after = None
+        self.capabilities = []
         self.pending_auth_url = None
         self.pending_sitekey = None
         self.pending_challenge_id = None
@@ -239,6 +403,8 @@ class SignedSessionClient:
             self.session_id = data["session_id"]
             self.session_secret = data["session_secret"]
             self.expires_at = data["expires_at"]
+            self.refresh_after = data.get("refresh_after")
+            self.capabilities = data.get("capabilities", [])
             self._save()
             return True
 
@@ -247,7 +413,6 @@ class SignedSessionClient:
             or data.get("turnstile_sitekey")
             or data.get("turnstile_site_key")
         )
-        self.pending_server_nonce = data.get("server_nonce")
         self.pending_challenge_id = data.get("challenge_id")
         auth_url = data.get("auth_url") or data.get("challenge_url")
         if not auth_url and data.get("challenge_id"):
@@ -277,34 +442,278 @@ class SignedSessionClient:
         return None
 
     def _build_challenge_url(self, challenge_id: str) -> str:
-        # Il vero backend (buildSignedSessionChallengeURL in
-        # extension_signed_session.go) include sempre "cb" con il valore
-        # letterale di callback_url (default "spotiflac://session-grant"),
-        # senza riscriverlo: la consegna del grant avviene tramite deep-link
-        # OS-level o bridge JS nativo di una WebView, meccanismi che un
-        # client CLI/browser esterno su desktop non può intercettare. Lo
-        # includiamo comunque per fedeltà al comportamento reale, anche se
-        # da qui non completiamo l'autenticazione tramite quel canale.
+        # STORICO/DEPRECATO: questo helper NON aggiunge nessun "cb" — era
+        # basato sull'assunzione (rivelatasi sbagliata, vedi verify_challenge
+        # sotto) che il grant si ottenesse chiamando {endpoints.challenge}/verify
+        # direttamente. Il vero backend (extension_signed_session.go,
+        # buildSignedSessionChallengeURL) aggiunge SEMPRE un parametro "cb"
+        # con l'URL di callback. Per il flusso corretto vedi
+        # _build_challenge_url_with_callback() + authenticate_with_browser().
+        # Questo metodo resta solo per lo scraping best-effort del sitekey
+        # dentro bootstrap() (vedi _scrape_sitekey_from_page), che oggi non
+        # serve più (non automatizziamo più la risoluzione del Turnstile),
+        # ma è innocuo lasciarlo.
         parts = list(urlparse(f"{self.base_url}{self.endpoints['challenge']}"))
         query = dict(parse_qsl(parts[4]))
         query["id"] = challenge_id
-        query["cb"] = self.callback_url
         parts[4] = urlencode(query)
         return urlunparse(parts)
 
+    def _build_challenge_url_with_callback(self, challenge_id: str, callback_url: str) -> str:
+        """
+        Replica ESATTAMENTE buildSignedSessionChallengeURL() del backend Go
+        (extension_signed_session.go):
+
+          1. il callback riceve, nella propria query string, cb_version=v2grant
+             e state=<namespace> (nel Go è state=<extensionID>: qui usiamo il
+             namespace del client, dato che un'istanza Python serve un solo
+             "extension logico" alla volta);
+          2. l'URL della pagina di sfida ({base}/challenge) riceve
+             id=<challenge_id> e cb=<callback_url completo, urlencoded>.
+
+        `callback_url` qui è tipicamente quello restituito da
+        _LocalGrantListener.start(), cioè http://127.0.0.1:{porta}/callback
+        al posto dello scheme mobile "spotiflac://session-grant" — la pagina
+        di sfida non fa alcuna distinzione, fa comunque un redirect al "cb"
+        fornito con ?grant=... aggiunto.
+        """
+        cb_parts = list(urlparse(callback_url))
+        cb_query = dict(parse_qsl(cb_parts[4]))
+        cb_query["cb_version"] = "v2grant"
+        cb_query["state"] = self.namespace
+        cb_parts[4] = urlencode(cb_query)
+        full_callback = urlunparse(cb_parts)
+
+        parts = list(urlparse(f"{self.base_url}{self.endpoints['challenge']}"))
+        query = dict(parse_qsl(parts[4]))
+        query["id"] = challenge_id
+        query["cb"] = full_callback
+        parts[4] = urlencode(query)
+        return urlunparse(parts)
+
+    async def authenticate_with_browser(
+        self,
+        timeout: float = _LOCAL_CALLBACK_TIMEOUT_S,
+        on_verification_url: "Callable[[str], None] | None" = None,
+    ) -> None:
+        """
+        Flusso di autenticazione basato su intercettazione di rete via Playwright.
+
+        STORIA (perché non un semplice redirect): il primo tentativo apriva la
+        pagina di sfida con webbrowser.open() e un "cb" locale, aspettandosi
+        che dopo il Turnstile la pagina facesse un redirect a quel cb (come fa
+        l'app Flutter con lo scheme "spotiflac://..."). Verificato via DevTools
+        che questo NON accade in un browser esterno: la pagina, dopo aver
+        risolto il Turnstile, chiama internamente POST {endpoints.challenge}/verify
+        (payload {"challenge_id", "turnstile_token"}) e ottiene
+        {"grant": "...", "expires_in": 60} — ma poi non naviga da nessuna parte
+        (il "ritorno automatico" è pensato per una WebView nativa Flutter con
+        un bridge JS, non per un browser esterno).
+
+        Quella chiamata /verify NON è replicabile direttamente da Python: il
+        200 OK che riceve la pagina dipende da cookie di sessione (incluso
+        cf_clearance di Cloudflare) legati a quella specifica tab/browser,
+        che un client HTTP headless non possiede.
+
+        SOLUZIONE: invece di rifare quella chiamata noi, ci limitiamo a
+        OSSERVARLA. Usiamo Playwright per aprire un vero Chromium (visibile:
+        l'utente deve vedere e risolvere il Turnstile), navigare alla pagina
+        di sfida, e intercettare la risposta di rete della chiamata /verify
+        che la pagina fa da sola - da cui estraiamo il "grant" così ottenuto.
+        Il grant ha vita breve (~60s): lo scambiamo subito con exchange_grant().
+
+        Richiede il pacchetto playwright (`pip install playwright && playwright
+        install chromium`).
+        """
+        boot_result = await self.bootstrap()
+        if boot_result is True:
+            return  # sessione ottenuta direttamente, nessuna verifica necessaria
+
+        if not self.pending_challenge_id:
+            if boot_result:
+                self._emit_verification_url(boot_result, on_verification_url)
+            raise RuntimeError(
+                "Il server ha fornito un auth_url senza challenge_id: "
+                "impossibile costruire l'URL della sfida da intercettare."
+            )
+
+        # Il valore del cb non viene più usato per un vero redirect (non
+        # avviene mai in un browser esterno), ma lo includiamo comunque nella
+        # stessa forma già confermata via DevTools innescare correttamente la
+        # chiamata /verify lato pagina.
+        dummy_callback = f"http://{_LOCAL_CALLBACK_HOST}:1{_LOCAL_CALLBACK_PATH}"
+        challenge_url = self._build_challenge_url_with_callback(
+            self.pending_challenge_id, dummy_callback
+        )
+
+        self._emit_verification_url(challenge_url, on_verification_url)
+
+        grant = await self._capture_grant_via_browser(challenge_url, timeout=timeout)
+        await self.exchange_grant(grant)
+
+    async def _capture_grant_via_browser(self, challenge_url: str, timeout: float) -> str:
+        """
+        Apre un Chromium reale e VISIBILE (headless=False: l'utente deve poter
+        vedere e risolvere il Turnstile) via Playwright, naviga alla pagina di
+        sfida, e intercetta la risposta di rete della chiamata
+        POST {endpoints.challenge}/verify che la pagina fa da sola non appena
+        il Turnstile è risolto - confermato via DevTools:
+        risposta = {"grant": "...", "expires_in": 60}.
+
+        Non replichiamo quella POST noi stessi (fallirebbe: mancano i cookie
+        di sessione, incluso cf_clearance, legati a quella tab specifica):
+        ci limitiamo a osservare la risposta che il browser stesso riceve.
+        """
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError as exc:
+            raise RuntimeError(
+                "Playwright non è installato. Esegui:\n"
+                "  pip install playwright\n"
+                "  playwright install chromium\n"
+                "per abilitare la verifica automatica via browser."
+            ) from exc
+
+        verify_path = f"{self.endpoints['challenge']}/verify"
+
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=False)
+            try:
+                page = await browser.new_page()
+                grant_future: asyncio.Future[str] = asyncio.get_event_loop().create_future()
+
+                async def _on_response(response) -> None:
+                    if verify_path not in response.url:
+                        return
+                    try:
+                        data = await response.json()
+                    except Exception:
+                        return
+                    grant = data.get("grant") if isinstance(data, dict) else None
+                    if grant and not grant_future.done():
+                        grant_future.set_result(grant)
+
+                page.on(
+                    "response",
+                    lambda r: asyncio.ensure_future(_on_response(r)),
+                )
+
+                await page.goto(challenge_url, timeout=int(timeout * 1000))
+
+                try:
+                    return await asyncio.wait_for(grant_future, timeout=timeout)
+                except asyncio.TimeoutError as exc:
+                    raise RuntimeError(
+                        f"Timeout ({timeout}s) in attesa che l'utente completi "
+                        f"la verifica nel browser"
+                    ) from exc
+            finally:
+                await browser.close()
+
+    async def authenticate_with_manual_grant(
+        self,
+        on_verification_url: "Callable[[str], None] | None" = None,
+        grant_input: "Callable[[], str] | None" = None,
+    ) -> None:
+        """
+        Fallback completamente manuale, senza Playwright: nessun browser viene
+        aperto o automatizzato da qui.
+
+        Uso:
+          1. bootstrap() ottiene un challenge_id.
+          2. L'URL della pagina di sfida viene mostrato (via
+             on_verification_url, o stampato/loggato di default).
+          3. TU apri quell'URL in un browser qualsiasi e risolvi il Turnstile.
+          4. Apri DevTools → tab Network → cerca la richiesta "verify" (POST
+             a .../challenge/verify) → tab Preview: lì trovi
+             {"grant": "gr_...", "expires_in": 60}.
+          5. Copi quel valore di "grant" (senza virgolette) e lo incolli
+             quando richiesto (o lo passi tramite `grant_input`).
+          6. exchange_grant(grant) scambia il grant per una sessione vera.
+
+        Il grant ha vita breve (~60s dalla risposta di verify): copialo e
+        incollalo il più velocemente possibile.
+
+        Parametri:
+          on_verification_url – callback per mostrare l'URL (altrimenti
+              stampato su stdout e loggato a WARNING).
+          grant_input – funzione senza argomenti che ritorna il grant come
+              stringa (utile per integrazioni non interattive/GUI). Se non
+              fornita, chiede il grant via input() da terminale.
+        """
+        boot_result = await self.bootstrap()
+        if boot_result is True:
+            return  # sessione ottenuta direttamente, nessuna verifica necessaria
+
+        if not self.pending_challenge_id:
+            if boot_result:
+                self._emit_verification_url(boot_result, on_verification_url)
+            raise RuntimeError(
+                "Il server ha fornito un auth_url senza challenge_id: "
+                "impossibile costruire l'URL della sfida."
+            )
+
+        dummy_callback = f"http://{_LOCAL_CALLBACK_HOST}:1{_LOCAL_CALLBACK_PATH}"
+        challenge_url = self._build_challenge_url_with_callback(
+            self.pending_challenge_id, dummy_callback
+        )
+        self._emit_verification_url(challenge_url, on_verification_url)
+
+        if grant_input is not None:
+            grant = grant_input()
+        else:
+            grant = await asyncio.to_thread(
+                input,
+                "\nIncolla qui il grant (da DevTools → Network → verify → "
+                "Preview → campo 'grant'): ",
+            )
+        grant = grant.strip()
+
+        if not grant:
+            raise RuntimeError("Nessun grant fornito.")
+
+        await self.exchange_grant(grant)
+
+    @staticmethod
+    def _emit_verification_url(
+        url: str, callback: "Callable[[str], None] | None"
+    ) -> None:
+        """
+        Rende disponibile l'URL di verifica al chiamante, senza mai aprirlo
+        automaticamente in un browser.
+
+        - Se `callback` è fornito, gli viene passato l'URL (il chiamante
+          decide cosa farne: webbrowser.open(), UI, notifica, ecc.).
+        - Altrimenti viene stampato su stdout e loggato a livello WARNING,
+          così resta visibile anche con la configurazione di logging di
+          default (WARNING) usata da SpotiFLAC(...).
+        """
+        if callback is not None:
+            callback(url)
+            return
+        logger.warning("[signed_session] Verifica richiesta: %s", url)
+        print(f"\n[SpotiFLAC] Verifica richiesta — apri questo link nel browser:\n  {url}\n")
+
     async def verify_challenge(self, challenge_id: str, turnstile_token: str) -> str:
         """
-        Exchanges a solved Turnstile token for a grant by calling the
-        challenge's own /verify endpoint directly - confirmed via DevTools
-        to be POST {base_url}{endpoints.challenge}/verify with
-        {"challenge_id": ..., "turnstile_token": ...}, returning
-        {"grant": "...", "expires_in": ...}.
+        NON CHIAMARLO DIRETTAMENTE da Python — lasciato solo per riferimento.
 
-        This replaces the earlier (incorrect) assumption that the grant
-        arrives via a background notification to a callback URL - the
-        challenge page never notifies anyone, it just calls this endpoint
-        itself and uses the grant locally. We can call it ourselves right
-        after obtaining the token, with no callback/redirect needed at all.
+        Questo endpoint ESISTE davvero ed è esattamente questo: POST
+        {base_url}{endpoints.challenge}/verify con
+        {"challenge_id": ..., "turnstile_token": ...}, risposta
+        {"grant": "...", "expires_in": 60} — confermato via DevTools su una
+        chiamata reale della pagina di sfida (200 OK).
+
+        Il motivo per cui chiamarlo noi stessi da Python fallisce (400): quella
+        richiesta, quando la fa la pagina, include un cookie `cf_clearance`
+        di Cloudflare legato a quella specifica tab/sessione browser (oltre
+        agli header di fingerprint già impostati su self._client). Un client
+        HTTP headless come questo non può ottenere quel cookie: richiede di
+        aver risolto realmente la sfida Cloudflare in un browser vero.
+
+        Il flusso corretto (vedi authenticate_with_browser) non replica questa
+        chiamata: intercetta via Playwright la risposta che la PAGINA STESSA
+        riceve quando la fa lei, con i suoi cookie.
         """
         resp = await self._client.post(
             f"{self.base_url}{self.endpoints['challenge']}/verify",
@@ -339,6 +748,8 @@ class SignedSessionClient:
         self.session_id = data["session_id"]
         self.session_secret = data["session_secret"]
         self.expires_at = data["expires_at"]
+        self.refresh_after = data.get("refresh_after")
+        self.capabilities = data.get("capabilities", [])
         self.pending_auth_url = None
         self.pending_sitekey = None
         self.pending_challenge_id = None
@@ -361,6 +772,8 @@ class SignedSessionClient:
             self.session_id = data.get("session_id", self.session_id)
             self.session_secret = data.get("session_secret", self.session_secret)
             self.expires_at = data.get("expires_at", self.expires_at)
+            self.refresh_after = data.get("refresh_after", self.refresh_after)
+            self.capabilities = data.get("capabilities", self.capabilities)
             self._save()
 
     async def ensure_session(self) -> None:
@@ -373,7 +786,16 @@ class SignedSessionClient:
             if now > exp:
                 self.clear()
                 raise RuntimeError("session expired")
-            if (exp - now).total_seconds() <= self.refresh_skew_seconds:
+
+            # Preferisci "refresh_after" (timestamp assoluto dato dal server,
+            # confermato via cattura di rete reale: es. 2h prima di expires_at,
+            # non 1h come il nostro skew di default) — più preciso dello skew
+            # calcolato, che resta solo un fallback se il server non lo manda.
+            refresh_at = self._parse_time(self.refresh_after)
+            if refresh_at:
+                if now >= refresh_at:
+                    await self._refresh()
+            elif (exp - now).total_seconds() <= self.refresh_skew_seconds:
                 await self._refresh()
 
     # ─────────────────────── signing ──────────────────────────
@@ -431,6 +853,100 @@ class SignedSessionClient:
             self.clear()
         return resp
 
+    # ─────────────────────── ticket / download layer ──────────────────────
+    #
+    # Formula e struttura confermate leggendo il codice sorgente reale
+    # dell'estensione tidal-web (index.js, funzione signedTicket) e
+    # verificate contro una cattura di rete reale (2026-07-12):
+    #   sha256("tid:track:530979474") == "a5f4aee7d242692d616b4210cd61c48933b..."
+    # che è esattamente il resource_hash osservato nella richiesta reale.
+    # Questa parte è generica: vale per qualsiasi provider (non solo Tidal),
+    # dato che è il runtime signedSession a gestirla, non il singolo
+    # provider — cambia solo cosa il provider mette come body della POST
+    # /dl/{provider} (quello sì è specifico per provider).
+
+    @staticmethod
+    def compute_resource_hash(provider: str, resource_id: str, resource_type: str = "track") -> str:
+        """
+        Calcola il resource_hash richiesto da POST /tickets, ESATTAMENTE come
+        fa il JS delle estensioni ufficiali (es. tidal-web/index.js,
+        signedTicket()):
+
+            sha256(f"{provider}:{resource_type}:{str(resource_id).lower()}")
+
+        Es. compute_resource_hash("tid", "530979474") per una traccia Tidal
+        (il "type" di default è "track", come nel JS: `type || "track"`).
+        """
+        raw = f"{provider}:{resource_type}:{str(resource_id).lower()}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    async def get_download_ticket(
+        self,
+        provider: str,
+        resource_id: str,
+        resource_type: str = "track",
+        tickets_path: str = "/tickets",
+    ) -> str:
+        """
+        Ottiene un ticket di download monouso (max_uses=1, vita breve ~60s,
+        confermato via cattura di rete reale) per la risorsa indicata,
+        chiamando POST {tickets_path} con body:
+            {"capability": "download_ticket", "provider": provider,
+             "resource_hash": compute_resource_hash(provider, resource_id, resource_type)}
+
+        Il ticket va usato IMMEDIATAMENTE con ticketed_request() — non va
+        richiesto in anticipo/cacheato, dato che è a singolo uso e scade in
+        pochi secondi.
+        """
+        resource_hash = self.compute_resource_hash(provider, resource_id, resource_type)
+        resp = await self.request(
+            "POST",
+            tickets_path,
+            json_body={
+                "capability": "download_ticket",
+                "provider": provider,
+                "resource_hash": resource_hash,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        ticket_id = str(data.get("ticket_id") or data.get("ticket") or "").strip()
+        if not ticket_id:
+            raise RuntimeError(f"ticket response missing ticket_id: {data}")
+        return ticket_id
+
+    async def ticketed_request(
+        self,
+        provider: str,
+        resource_id: str,
+        dl_path: str,
+        json_body: dict,
+        resource_type: str = "track",
+        tickets_path: str = "/tickets",
+    ) -> httpx.Response:
+        """
+        Ottiene un ticket per (provider, resource_id) e lo usa immediatamente
+        per una POST firmata a `dl_path`, aggiungendo l'header
+        "X-Zarz-Ticket: <ticket_id>" come fa il JS (postDownloadAPI()):
+
+            ticket_id = await get_download_ticket(provider, resource_id, resource_type)
+            POST {dl_path} con json_body, header extra X-Zarz-Ticket=ticket_id
+
+        La risposta e il body di `json_body` restano specifici del singolo
+        provider (es. per Tidal: {"id": track_id, "quality": "LOSSLESS"},
+        risposta {"data": {"manifest": ..., "audioQuality": ..., ...}} — un
+        manifest DASH/XML da parsare ulteriormente in modo specifico per
+        Tidal, non generico) — questo metodo si occupa solo del livello
+        "ticket + header", non del parsing del risultato.
+        """
+        ticket_id = await self.get_download_ticket(
+            provider, resource_id, resource_type, tickets_path=tickets_path
+        )
+        return await self.request(
+            "POST", dl_path, json_body=json_body,
+            extra_headers={"X-Zarz-Ticket": ticket_id},
+        )
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
@@ -441,72 +957,57 @@ async def perform_signed_fetch(
     path: str,
     body: Any,
     headers: dict | None,
-    turnstile_timeout: float = 60.0,
+    turnstile_timeout: float = _LOCAL_CALLBACK_TIMEOUT_S,
+    on_verification_url: "Callable[[str], None] | None" = None,
 ) -> dict:
     """
     High-level handler for a `session.signedFetch(method, path, body, headers)`
     call coming from the JS extension worker. Transparently bootstraps the
-    session and solves the Turnstile challenge (via core.turnstile) the first
-    time it's needed, then performs the signed request.
+    session the first time it's needed, then performs the signed request.
+
+    L'autenticazione (quando serve) NON apre più un browser in automatico:
+    l'URL di verifica viene passato a `on_verification_url(url)` se fornito,
+    altrimenti stampato/loggato — vedi
+    SignedSessionClient.authenticate_with_browser() per i dettagli
+    architetturali (nessuna chiamata a /challenge/verify, che l'API rifiuta:
+    quell'endpoint non fa parte del flusso reale, confermato confrontando
+    con il backend Go di riferimento).
 
     Returns a JSON-serializable dict matching what index.js's signedJSON()
-    expects: {"statusCode": int, "body": str} on success,
-    {"needsVerification": True, "auth_url": str} if it could not be solved
-    automatically, or {"error": str} on failure.
+    expects: {"statusCode": int, "body": str} on success, or {"error": str}
+    on failure (inclusa una verifica non completata entro il timeout).
     """
     try:
         if not client.authenticated:
-            auth_url = await client.bootstrap()
-            if auth_url is True:
-                pass  # session obtained directly, no challenge needed
-            elif auth_url:
-                grant = None
-                if client.pending_sitekey and client.pending_challenge_id:
-                    try:
-                        from .turnstile import solve
-
-                        # Il browser serve solo a ottenere il token
-                        # Turnstile. Il grant si ottiene chiamando
-                        # direttamente /challenge/verify (confermato via
-                        # DevTools) - non c'è nessun canale di notifica in
-                        # background da intercettare, quindi niente
-                        # server locale, niente cb URL, niente attesa: si
-                        # chiama verify() noi stessi subito dopo il token.
-                        token = await asyncio.to_thread(
-                            solve,
-                            sitekey=client.pending_sitekey,
-                            siteurl=client.pending_auth_url,
-                            timeout=int(turnstile_timeout),
-                        )
-                        if token:
-                            grant = await client.verify_challenge(
-                                client.pending_challenge_id, token
-                            )
-                    except Exception as exc:
-                        logger.warning(
-                            "[signed_session:%s] Turnstile auto-solve failed: %s",
-                            client.namespace, exc,
-                        )
-                if grant:
-                    await client.exchange_grant(grant)
-                else:
-                    # Could not solve automatically: surface the challenge to
-                    # the caller instead of failing silently.
-                    return {"needsVerification": True, "auth_url": auth_url}
-            else:
-                return {"error": "bootstrap did not return a session or a challenge"}
+            try:
+                await client.authenticate_with_browser(
+                    timeout=turnstile_timeout,
+                    on_verification_url=on_verification_url,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[signed_session:%s] Autenticazione via browser fallita: %s",
+                    client.namespace, exc,
+                )
+                return {"error": str(exc)}
 
         resp = await client.request(method, path, json_body=body, extra_headers=headers)
 
         if resp.status_code in (401, 428):
             # Stesso comportamento del backend Go: una 401/428 invalida la
             # sessione locale e riparte la verifica invece di restituire
-            # l'errore grezzo al chiamante.
+            # l'errore grezzo al chiamante. Qui NON riapriamo subito un
+            # browser durante una richiesta "di passaggio": segnaliamo solo
+            # che serve una nuova verifica, lasciando al chiamante decidere
+            # quando invocare di nuovo authenticate_with_browser().
             retry_auth_url = await client.bootstrap()
             if isinstance(retry_auth_url, str) and retry_auth_url:
                 return {"needsVerification": True, "auth_url": retry_auth_url}
 
-        retry_after = _parse_retry_after(resp.headers.get("Retry-After", ""))
+        retry_after = 0
+        raw_retry_after = resp.headers.get("Retry-After", "").strip()
+        if raw_retry_after.isdigit():
+            retry_after = max(0, int(raw_retry_after))
         return {
             "statusCode": resp.status_code,
             "status": resp.status_code,
@@ -531,7 +1032,6 @@ def client_from_manifest(manifest_block: dict, data_dir: str = "~/.spotiflac/sig
         scheme_label=manifest_block.get("schemeLabel", "SPOTIFLAC-HMAC-V1"),
         header_prefix=manifest_block.get("headerPrefix", "X-Sig-"),
         window_seconds=int(manifest_block.get("timeWindowSeconds", 300)),
-        callback_url=manifest_block.get("callbackUrl", "spotiflac://session-grant"),
         endpoints=manifest_block.get("endpoints"),
         data_dir=data_dir,
     )

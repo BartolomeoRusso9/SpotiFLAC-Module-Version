@@ -16,12 +16,9 @@ import os
 import queue
 import shutil
 import subprocess
-import sys
 import threading
 from pathlib import Path
-from typing import Any, Callable
-
-from ..core.signed_session import SignedSessionClient, client_from_manifest, perform_signed_fetch
+from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +42,14 @@ class JSRuntime:
     Come context manager:
         with JSRuntime(ext_path) as rt:
             result = rt.call("download", track_id, "mp3_128", "/tmp/out.mp3", None)
+
+    Estensioni con "requiredRuntimeFeatures": ["signedSession@1", ...] nel
+    manifest chiamano `session.signedFetch(method, path, body, headers)` dal
+    JS. Questo bridge NON implementa quella logica in Node (richiederebbe
+    duplicare tutta la firma HMAC/gestione Turnstile già scritta in Python):
+    inoltra invece la richiesta a `session_handler`, una funzione async
+    Python fornita dal chiamante (tipicamente JSExtensionProvider, che la
+    collega a SignedSessionClient/perform_signed_fetch).
     """
 
     def __init__(
@@ -53,47 +58,30 @@ class JSRuntime:
         settings: dict | None = None,
         node_executable: str = "node",
         startup_timeout: float = 20.0,
-        signed_session_config: dict | None = None,
+        session_handler: "Callable[[str, str, Any, dict], Awaitable[dict]] | None" = None,
     ) -> None:
         self.ext_path        = Path(ext_path)
         self.settings        = settings or {}
         self.node_executable = node_executable
         self.startup_timeout = startup_timeout
-        # manifest["signedSession"] block, if the extension declares one
-        # (requiredRuntimeFeatures: ["signedSession@1", ...]). Lazily turned
-        # into a SignedSessionClient the first time the JS side calls
-        # session.signedFetch(...).
-        self._signed_session_config = signed_session_config
-        self._signed_session_client: SignedSessionClient | None = None
-        self._signed_session_lock = threading.Lock()
-        # A single dedicated event loop for the lifetime of this runtime:
-        # SignedSessionClient holds a persistent httpx.AsyncClient, which
-        # must not be reused across different event loops (as a fresh
-        # asyncio.run() per call would do under concurrent requests).
-        self._session_loop: asyncio.AbstractEventLoop | None = None
-        self._session_loop_thread: threading.Thread | None = None
+        self.session_handler = session_handler
 
         self._proc:        subprocess.Popen | None = None
         self._seq          = 0
         self._pending:     dict[int, queue.Queue] = {}
         self._progress_cbs: dict[int, Callable[[float], None]] = {}
         self._lock         = threading.Lock()
-        self._stdin_lock   = threading.Lock()
         self._reader:      threading.Thread | None = None
         self._ready_event  = threading.Event()
+        self._loop:        "asyncio.AbstractEventLoop | None" = None
 
     # ─────────────────────── lifecycle ────────────────────────
 
     def start(self) -> None:
         if not shutil.which(self.node_executable):
-            print("[SpotiFLAC] Node.js not found, attempting automatic installation...")
-            self._auto_install_node()
-            if shutil.which(self.node_executable):
-                print("[SpotiFLAC] Node.js installed automatically.")
-        if not shutil.which(self.node_executable):
             raise ExtensionRuntimeError(
-                f"Node.js not found ('{self.node_executable}'). "
-                "Install Node.js ≥ 16 to use JS extensions."
+                f"Node.js non trovato ('{self.node_executable}'). "
+                "Installa Node.js ≥ 16 per usare le estensioni JS."
             )
         if not _BRIDGE_JS.exists():
             raise ExtensionRuntimeError(f"Bridge JS non trovato: {_BRIDGE_JS}")
@@ -132,112 +120,6 @@ class JSRuntime:
             )
         logger.debug("[JSRuntime] extension ready: %s", self.ext_path.name)
 
-    def _auto_install_node(self) -> None:
-        if sys.platform.startswith("linux"):
-            self._install_node_linux()
-        elif sys.platform == "darwin":
-            self._install_node_macos()
-        elif sys.platform == "win32":
-            self._install_node_windows()
-        else:
-            raise ExtensionRuntimeError(
-                "Node.js non trovato e il sistema operativo non è supportato per "
-                "l'installazione automatica. Installa Node.js ≥ 16 manualmente."
-            )
-
-        if not shutil.which(self.node_executable):
-            raise ExtensionRuntimeError(
-                "Installazione automatica di Node.js fallita. "
-                "Installa Node.js ≥ 16 manualmente."
-            )
-
-        version = self._get_node_version()
-        if version is None or version < 16:
-            raise ExtensionRuntimeError(
-                f"La versione di Node.js installata è insufficiente: {version}. "
-                "Installa Node.js >= 16 manualmente."
-            )
-
-    def _run_install_command(self, cmd: list[str], description: str) -> None:
-        if os.name != "nt":
-            try:
-                is_root = os.geteuid() == 0
-            except AttributeError:
-                is_root = False
-            if not is_root:
-                if shutil.which("sudo"):
-                    cmd = ["sudo"] + cmd
-                else:
-                    raise ExtensionRuntimeError(
-                        "L'installazione automatica di Node.js richiede privilegi di root. "
-                        "Esegui il comando come root o installa Node.js manualmente."
-                    )
-
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise ExtensionRuntimeError(
-                f"Installazione automatica di Node.js fallita ({description}): {result.stderr.strip()}"
-            )
-
-    def _install_node_linux(self) -> None:
-        if shutil.which("apt-get"):
-            self._run_install_command(["apt-get", "update"], "apt-get update")
-            self._run_install_command(["apt-get", "install", "-y", "nodejs"], "apt-get install nodejs")
-        elif shutil.which("dnf"):
-            self._run_install_command(["dnf", "install", "-y", "nodejs"], "dnf install nodejs")
-        elif shutil.which("yum"):
-            self._run_install_command(["yum", "install", "-y", "nodejs"], "yum install nodejs")
-        elif shutil.which("pacman"):
-            self._run_install_command(["pacman", "-Sy", "--noconfirm", "nodejs"], "pacman install nodejs")
-        else:
-            raise ExtensionRuntimeError(
-                "Nessun gestore pacchetti supportato trovato per installare Node.js automaticamente. "
-                "Installa Node.js ≥ 16 manualmente."
-            )
-
-    def _install_node_macos(self) -> None:
-        if shutil.which("brew"):
-            self._run_install_command(["brew", "install", "node"], "brew install node")
-        else:
-            raise ExtensionRuntimeError(
-                "Homebrew non è installato. Installa Homebrew o Node.js manualmente."
-            )
-
-    def _install_node_windows(self) -> None:
-        if shutil.which("winget"):
-            self._run_install_command(["winget", "install", "OpenJS.NodeJS", "/quiet"], "winget install Node.js")
-        elif shutil.which("choco"):
-            self._run_install_command(["choco", "install", "nodejs.install", "-y"], "choco install nodejs")
-        else:
-            raise ExtensionRuntimeError(
-                "Nessun gestore pacchetti Windows supportato trovato per installare Node.js automaticamente. "
-                "Installa Node.js ≥ 16 manualmente."
-            )
-
-    def _get_node_version(self) -> int | None:
-        try:
-            result = subprocess.run(
-                [self.node_executable, "--version"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=True,
-            )
-        except Exception:
-            return None
-        version = result.stdout.strip()
-        if version.startswith("v"):
-            version = version[1:]
-        try:
-            return int(version.split(".")[0])
-        except (ValueError, IndexError):
-            return None
-
     def stop(self) -> None:
         if self._proc and self._proc.poll() is None:
             try:
@@ -246,20 +128,6 @@ class JSRuntime:
             except Exception:
                 self._proc.kill()
         self._proc = None
-
-        if self._session_loop is not None:
-            try:
-                if self._signed_session_client is not None:
-                    asyncio.run_coroutine_threadsafe(
-                        self._signed_session_client.aclose(), self._session_loop
-                    ).result(timeout=5)
-            except Exception:
-                pass
-            self._session_loop.call_soon_threadsafe(self._session_loop.stop)
-            if self._session_loop_thread is not None:
-                self._session_loop_thread.join(timeout=5)
-            self._session_loop = None
-            self._session_loop_thread = None
 
     def __enter__(self) -> "JSRuntime":
         self.start()
@@ -301,7 +169,8 @@ class JSRuntime:
 
         msg = json.dumps({"id": seq, "call": method, "args": final_args}) + "\n"
         try:
-            self._write_stdin(msg)
+            self._proc.stdin.write(msg.encode())
+            self._proc.stdin.flush()
         except OSError as e:
             self._pending.pop(seq, None)
             raise ExtensionRuntimeError(f"Errore scrittura stdin Node: {e}") from e
@@ -369,12 +238,8 @@ class JSRuntime:
             level = msg.get("level", "info")
             getattr(logger, level, logger.info)("[EXT] %s", msg.get("msg", ""))
             return
-        if msg.get("type") == "session_request":
-            # Handled off the reader thread so a slow/blocking signed HTTP
-            # call (or a Turnstile solve) never stalls stdout draining.
-            threading.Thread(
-                target=self._handle_session_request, args=(msg,), daemon=True
-            ).start()
+        if msg.get("type") == "session_signed_fetch":
+            self._handle_session_signed_fetch(msg)
             return
         seq = msg.get("id")
         if seq is None:
@@ -383,70 +248,55 @@ class JSRuntime:
         if q:
             q.put(msg)
 
-    def _write_stdin(self, text: str) -> None:
-        with self._stdin_lock:
-            self._proc.stdin.write(text.encode())
-            self._proc.stdin.flush()
-
-    def _get_session_loop(self) -> asyncio.AbstractEventLoop:
-        if self._session_loop is None:
-            ready = threading.Event()
-
-            def _run():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                self._session_loop = loop
-                ready.set()
-                loop.run_forever()
-
-            self._session_loop_thread = threading.Thread(target=_run, daemon=True)
-            self._session_loop_thread.start()
-            ready.wait(timeout=5)
-        return self._session_loop
-
-    def _get_signed_session_client(self) -> SignedSessionClient:
-        with self._signed_session_lock:
-            if self._signed_session_client is None:
-                if not self._signed_session_config:
-                    raise ExtensionRuntimeError(
-                        "Extension calls session.signedFetch() but its manifest "
-                        "has no 'signedSession' block."
-                    )
-                self._signed_session_client = client_from_manifest(self._signed_session_config)
-            return self._signed_session_client
-
-    def _handle_session_request(self, msg: dict) -> None:
+    def _handle_session_signed_fetch(self, msg: dict) -> None:
         """
-        Services a `session.signedFetch(method, path, body, headers)` call
-        forwarded by _bridge.js's Node main thread. Runs the async
-        SignedSessionClient flow in a private event loop and writes the
-        JSON result back to Node's stdin as a `session_response` message.
+        Gestisce una richiesta `session.signedFetch(...)` fatta dal JS
+        dell'estensione. Chiamato da _read_loop (un thread separato).
+
+        IMPORTANTE: esegue session_handler in un event loop asyncio NUOVO E
+        ISOLATO (asyncio.run), invece di provare a schedularlo sul loop del
+        chiamante (es. via run_coroutine_threadsafe). Il motivo: JSRuntime.call()
+        è sincrono e blocca il thread/loop chiamante con una queue.get() —
+        se quel loop fosse condiviso e bloccato lì dentro, una coroutine
+        schedulata su di esso (run_coroutine_threadsafe) non potrebbe MAI
+        girare finché call() non ritorna, che a sua volta aspetta proprio
+        questa risposta: deadlock. Un loop isolato qui evita il problema
+        per costruzione, del tutto indipendente da come viene usato
+        JSExtensionProvider (sync o async) nel resto del programma.
         """
-        req_id = msg.get("id")
-        args = msg.get("args") or {}
-        try:
-            client = self._get_signed_session_client()
-            loop = self._get_session_loop()
-            future = asyncio.run_coroutine_threadsafe(
-                perform_signed_fetch(
-                    client,
-                    method=args.get("method", "GET"),
-                    path=args.get("path", "/"),
-                    body=args.get("body"),
-                    headers=args.get("headers") or {},
-                ),
-                loop,
-            )
-            result = future.result(timeout=115)
-            reply = {"type": "session_response", "id": req_id, "result": result}
-        except Exception as exc:
-            logger.debug("[JSRuntime] session_request failed: %s", exc)
-            reply = {"type": "session_response", "id": req_id, "error": str(exc)}
+        request_id = msg.get("requestId")
+        method  = msg.get("method", "GET")
+        path    = msg.get("path", "")
+        body    = msg.get("body")
+        headers = msg.get("headers") or {}
+
+        def _respond(result: dict) -> None:
+            try:
+                line = json.dumps({
+                    "type": "session_signed_fetch_response",
+                    "requestId": request_id,
+                    "result": result,
+                }) + "\n"
+                self._proc.stdin.write(line.encode())
+                self._proc.stdin.flush()
+            except Exception as e:
+                logger.debug("[JSRuntime] impossibile rispondere a session.signedFetch: %s", e)
+
+        if self.session_handler is None:
+            _respond({"error": "session.signedFetch: nessun session_handler configurato"})
+            return
+
+        async def _run() -> dict:
+            try:
+                return await self.session_handler(method, path, body, headers)
+            except Exception as e:
+                return {"error": str(e)}
 
         try:
-            self._write_stdin(json.dumps(reply) + "\n")
-        except OSError:
-            pass  # Node process likely already gone; nothing more to do.
+            result = asyncio.run(_run())
+        except Exception as e:
+            result = {"error": str(e)}
+        _respond(result)
 
     def _drain_stderr(self) -> None:
         try:
