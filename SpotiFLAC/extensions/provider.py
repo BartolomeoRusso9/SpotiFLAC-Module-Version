@@ -224,9 +224,9 @@ class JSExtensionProvider(BaseProvider):
         """Arricchisce metadati di una traccia già nota (ISRC, label, ecc.)."""
         return self._call("enrichTrack", track, options or {}) or {}
 
-    # ─────────────────────── BaseProvider ─────────────────────
+    # ─────────────────────── BaseProvider (async, richiesto da 1.3.x) ─────
 
-    def download_track(
+    async def download_track_async(
         self,
         metadata:             TrackMetadata,
         output_dir:           str,
@@ -246,7 +246,15 @@ class JSExtensionProvider(BaseProvider):
         **kwargs,
     ) -> DownloadResult:
         """
-        Implementazione BaseProvider.download_track().
+        Implementazione di BaseProvider.download_track_async() (il nome e la
+        natura async sono richiesti dalla libreria dalla v1.3.x in poi — la
+        vecchia BaseProvider sincrona con download_track() non esiste più).
+
+        Il lavoro vero resta sincrono (chiamate JSON-RPC bloccanti al
+        processo Node via _call()): qui lo si esegue con
+        asyncio.to_thread(...) per non bloccare il loop asyncio dell'app
+        (che ora è async end-to-end), non perché _call() stesso sia
+        diventato async.
 
         Strategia:
           1. Se il manifest ha checkAvailability, cercalo per ISRC.
@@ -254,7 +262,7 @@ class JSExtensionProvider(BaseProvider):
           3. Applica tag al file risultante se non già presenti.
         """
         try:
-            return self._do_download(
+            return await self._do_download_async(
                 metadata, output_dir,
                 filename_format   = filename_format,
                 position          = position,
@@ -269,7 +277,7 @@ class JSExtensionProvider(BaseProvider):
             logger.exception("[%s] Unexpected error", self.name)
             return DownloadResult.fail(self.name, f"Unexpected error: {e}")
 
-    def _do_download(
+    async def _do_download_async(
         self,
         metadata:            TrackMetadata,
         output_dir:          str,
@@ -281,8 +289,11 @@ class JSExtensionProvider(BaseProvider):
         first_artist_only:   bool,
         quality:             str,
     ) -> DownloadResult:
-        # 1. Trova il track_id via checkAvailability (ISRC-based)
-        avail = self.check_availability(
+        # 1. Trova il track_id via checkAvailability (ISRC-based).
+        #    check_availability() è sincrona (blocca su _call) — la giriamo
+        #    su un thread per non bloccare il loop asyncio dell'app.
+        avail = await asyncio.to_thread(
+            self.check_availability,
             isrc        = metadata.isrc,
             track_name  = metadata.title,
             artist_name = metadata.artists,
@@ -321,7 +332,7 @@ class JSExtensionProvider(BaseProvider):
                 fmt = _ext_to_fmt(output_path.suffix),
             )
 
-        # 3. Chiama download() sull'estensione JS.
+        # 3. Chiama download() sull'estensione JS (bloccante: su thread).
         #    Le estensioni JS riportano il progresso come float 0..1 (percentuale),
         #    mentre BaseProvider._progress_cb si aspetta (current_bytes, total_bytes).
         #    Usiamo una scala fissa 0..10000 come proxy per non perdere precisione.
@@ -335,7 +346,8 @@ class JSExtensionProvider(BaseProvider):
                 pass  # il progress reporting non deve mai far fallire il download
 
         logger.info("[%s] Downloading '%s'", self.name, metadata.title)
-        dl_result = self._call(
+        dl_result = await asyncio.to_thread(
+            self._call,
             "download",
             track_id, quality, str(output_path), None,
             progress_cb = _progress_adapter,
@@ -349,14 +361,19 @@ class JSExtensionProvider(BaseProvider):
         fmt         = _ext_to_fmt(Path(actual_path).suffix)
 
         # 4. Applica tag se l'estensione non li ha già applicati
-        #    (usiamo i metadati Spotify che abbiamo già — più completi)
+        #    (usiamo i metadati Spotify che abbiamo già — più completi).
+        #    embed_metadata_async è nativamente async dalla v1.3.x (prima
+        #    era embed_metadata, sincrona) — si awaita direttamente, nessun
+        #    to_thread necessario. EmbedOptions non ha più "embed_cover"
+        #    (bool): ora è "cover_url" (str) — passare "" per non incorporare
+        #    copertina.
         try:
-            from ..core.tagger import embed_metadata, EmbedOptions
-            embed_metadata(
+            from ..core.tagger import embed_metadata_async, EmbedOptions
+            await embed_metadata_async(
                 Path(actual_path),
                 metadata,
                 EmbedOptions(
-                    embed_cover        = bool(metadata.cover_url),
+                    cover_url          = metadata.cover_url or "",
                     first_artist_only  = first_artist_only,
                 ),
             )

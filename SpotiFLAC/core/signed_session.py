@@ -114,12 +114,12 @@ _BROWSER_FINGERPRINT_HEADERS = {
 
 _LOCAL_CALLBACK_HOST = "127.0.0.1"
 _LOCAL_CALLBACK_PATH = "/callback"
-_LOCAL_CALLBACK_TIMEOUT_S = 300  # 5 minuti per completare la verifica nel browser
+_MANUAL_GRANT_TIMEOUT_S = 300  # 5 minuti per incollare il grant
 
 
 class _LocalGrantListener:
     """
-    STORICO / NON PIÙ USATA dal flusso principale (authenticate_with_browser).
+    STORICO / NON PIÙ USATA dal flusso principale (authenticate_with_manual_grant).
 
     Ipotesi originaria: la pagina di sfida, dopo aver risolto il Turnstile,
     avrebbe fatto un redirect al "cb" fornito (come fa l'app Flutter con lo
@@ -130,9 +130,10 @@ class _LocalGrantListener:
     pagina ottiene il grant chiamando internamente {endpoints.challenge}/verify,
     ma poi non naviga da nessuna parte (il meccanismo "cb" sembra pensato per
     una WebView nativa con bridge JS, non per un browser esterno). Il flusso
-    reale ora intercetta direttamente quella risposta di rete via Playwright
-    (vedi SignedSessionClient._capture_grant_via_browser). Questa classe resta
-    solo per riferimento storico.
+    attuale (authenticate_with_manual_grant) evita del tutto il problema:
+    l'utente apre la pagina a mano, risolve il Turnstile, e legge/incolla
+    lui stesso il grant dalla risposta di quella chiamata in DevTools. Questa
+    classe resta solo per riferimento storico.
     """
 
     def __init__(self, host: str = _LOCAL_CALLBACK_HOST, path: str = _LOCAL_CALLBACK_PATH) -> None:
@@ -491,129 +492,11 @@ class SignedSessionClient:
         parts[4] = urlencode(query)
         return urlunparse(parts)
 
-    async def authenticate_with_browser(
-        self,
-        timeout: float = _LOCAL_CALLBACK_TIMEOUT_S,
-        on_verification_url: "Callable[[str], None] | None" = None,
-    ) -> None:
-        """
-        Flusso di autenticazione basato su intercettazione di rete via Playwright.
-
-        STORIA (perché non un semplice redirect): il primo tentativo apriva la
-        pagina di sfida con webbrowser.open() e un "cb" locale, aspettandosi
-        che dopo il Turnstile la pagina facesse un redirect a quel cb (come fa
-        l'app Flutter con lo scheme "spotiflac://..."). Verificato via DevTools
-        che questo NON accade in un browser esterno: la pagina, dopo aver
-        risolto il Turnstile, chiama internamente POST {endpoints.challenge}/verify
-        (payload {"challenge_id", "turnstile_token"}) e ottiene
-        {"grant": "...", "expires_in": 60} — ma poi non naviga da nessuna parte
-        (il "ritorno automatico" è pensato per una WebView nativa Flutter con
-        un bridge JS, non per un browser esterno).
-
-        Quella chiamata /verify NON è replicabile direttamente da Python: il
-        200 OK che riceve la pagina dipende da cookie di sessione (incluso
-        cf_clearance di Cloudflare) legati a quella specifica tab/browser,
-        che un client HTTP headless non possiede.
-
-        SOLUZIONE: invece di rifare quella chiamata noi, ci limitiamo a
-        OSSERVARLA. Usiamo Playwright per aprire un vero Chromium (visibile:
-        l'utente deve vedere e risolvere il Turnstile), navigare alla pagina
-        di sfida, e intercettare la risposta di rete della chiamata /verify
-        che la pagina fa da sola - da cui estraiamo il "grant" così ottenuto.
-        Il grant ha vita breve (~60s): lo scambiamo subito con exchange_grant().
-
-        Richiede il pacchetto playwright (`pip install playwright && playwright
-        install chromium`).
-        """
-        boot_result = await self.bootstrap()
-        if boot_result is True:
-            return  # sessione ottenuta direttamente, nessuna verifica necessaria
-
-        if not self.pending_challenge_id:
-            if boot_result:
-                self._emit_verification_url(boot_result, on_verification_url)
-            raise RuntimeError(
-                "Il server ha fornito un auth_url senza challenge_id: "
-                "impossibile costruire l'URL della sfida da intercettare."
-            )
-
-        # Il valore del cb non viene più usato per un vero redirect (non
-        # avviene mai in un browser esterno), ma lo includiamo comunque nella
-        # stessa forma già confermata via DevTools innescare correttamente la
-        # chiamata /verify lato pagina.
-        dummy_callback = f"http://{_LOCAL_CALLBACK_HOST}:1{_LOCAL_CALLBACK_PATH}"
-        challenge_url = self._build_challenge_url_with_callback(
-            self.pending_challenge_id, dummy_callback
-        )
-
-        self._emit_verification_url(challenge_url, on_verification_url)
-
-        grant = await self._capture_grant_via_browser(challenge_url, timeout=timeout)
-        await self.exchange_grant(grant)
-
-    async def _capture_grant_via_browser(self, challenge_url: str, timeout: float) -> str:
-        """
-        Apre un Chromium reale e VISIBILE (headless=False: l'utente deve poter
-        vedere e risolvere il Turnstile) via Playwright, naviga alla pagina di
-        sfida, e intercetta la risposta di rete della chiamata
-        POST {endpoints.challenge}/verify che la pagina fa da sola non appena
-        il Turnstile è risolto - confermato via DevTools:
-        risposta = {"grant": "...", "expires_in": 60}.
-
-        Non replichiamo quella POST noi stessi (fallirebbe: mancano i cookie
-        di sessione, incluso cf_clearance, legati a quella tab specifica):
-        ci limitiamo a osservare la risposta che il browser stesso riceve.
-        """
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError as exc:
-            raise RuntimeError(
-                "Playwright non è installato. Esegui:\n"
-                "  pip install playwright\n"
-                "  playwright install chromium\n"
-                "per abilitare la verifica automatica via browser."
-            ) from exc
-
-        verify_path = f"{self.endpoints['challenge']}/verify"
-
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=False)
-            try:
-                page = await browser.new_page()
-                grant_future: asyncio.Future[str] = asyncio.get_event_loop().create_future()
-
-                async def _on_response(response) -> None:
-                    if verify_path not in response.url:
-                        return
-                    try:
-                        data = await response.json()
-                    except Exception:
-                        return
-                    grant = data.get("grant") if isinstance(data, dict) else None
-                    if grant and not grant_future.done():
-                        grant_future.set_result(grant)
-
-                page.on(
-                    "response",
-                    lambda r: asyncio.ensure_future(_on_response(r)),
-                )
-
-                await page.goto(challenge_url, timeout=int(timeout * 1000))
-
-                try:
-                    return await asyncio.wait_for(grant_future, timeout=timeout)
-                except asyncio.TimeoutError as exc:
-                    raise RuntimeError(
-                        f"Timeout ({timeout}s) in attesa che l'utente completi "
-                        f"la verifica nel browser"
-                    ) from exc
-            finally:
-                await browser.close()
-
     async def authenticate_with_manual_grant(
         self,
         on_verification_url: "Callable[[str], None] | None" = None,
         grant_input: "Callable[[], str] | None" = None,
+        timeout: float = _MANUAL_GRANT_TIMEOUT_S,
     ) -> None:
         """
         Fallback completamente manuale, senza Playwright: nessun browser viene
@@ -640,6 +523,15 @@ class SignedSessionClient:
           grant_input – funzione senza argomenti che ritorna il grant come
               stringa (utile per integrazioni non interattive/GUI). Se non
               fornita, chiede il grant via input() da terminale.
+          timeout – secondi massimi di attesa per l'inserimento del grant
+              (default 5 minuti). Solleva RuntimeError se scade prima che
+              tu (o grant_input) fornisca un valore. NOTA: se l'attesa è su
+              input() da terminale, il thread bloccato su quella chiamata
+              non viene interrotto allo scadere del timeout (limite di
+              Python: non si può cancellare un input() bloccante) — resta
+              in attesa in background finché non premi Invio, ma la
+              funzione ritorna comunque con l'errore di timeout appena
+              scattato, senza aspettarlo.
         """
         boot_result = await self.bootstrap()
         if boot_result is True:
@@ -660,15 +552,22 @@ class SignedSessionClient:
         self._emit_verification_url(challenge_url, on_verification_url)
 
         if grant_input is not None:
-            grant = grant_input()
+            grant_awaitable = asyncio.to_thread(grant_input)
         else:
-            grant = await asyncio.to_thread(
+            grant_awaitable = asyncio.to_thread(
                 input,
                 "\nIncolla qui il grant (da DevTools → Network → verify → "
                 "Preview → campo 'grant'): ",
             )
-        grant = grant.strip()
 
+        try:
+            grant = await asyncio.wait_for(grant_awaitable, timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            raise RuntimeError(
+                f"Timeout ({timeout}s) in attesa dell'inserimento del grant"
+            ) from exc
+
+        grant = grant.strip()
         if not grant:
             raise RuntimeError("Nessun grant fornito.")
 
@@ -711,9 +610,10 @@ class SignedSessionClient:
         HTTP headless come questo non può ottenere quel cookie: richiede di
         aver risolto realmente la sfida Cloudflare in un browser vero.
 
-        Il flusso corretto (vedi authenticate_with_browser) non replica questa
-        chiamata: intercetta via Playwright la risposta che la PAGINA STESSA
-        riceve quando la fa lei, con i suoi cookie.
+        Il flusso corretto (vedi authenticate_with_manual_grant) non replica
+        questa chiamata: lasci che sia la PAGINA STESSA a farla (nel browser,
+        con i suoi cookie), e ne leggi/incolli tu il risultato dalla tab
+        Network di DevTools.
         """
         resp = await self._client.post(
             f"{self.base_url}{self.endpoints['challenge']}/verify",
@@ -957,36 +857,39 @@ async def perform_signed_fetch(
     path: str,
     body: Any,
     headers: dict | None,
-    turnstile_timeout: float = _LOCAL_CALLBACK_TIMEOUT_S,
     on_verification_url: "Callable[[str], None] | None" = None,
+    grant_input: "Callable[[], str] | None" = None,
+    timeout: float = _MANUAL_GRANT_TIMEOUT_S,
 ) -> dict:
     """
     High-level handler for a `session.signedFetch(method, path, body, headers)`
     call coming from the JS extension worker. Transparently bootstraps the
     session the first time it's needed, then performs the signed request.
 
-    L'autenticazione (quando serve) NON apre più un browser in automatico:
-    l'URL di verifica viene passato a `on_verification_url(url)` se fornito,
-    altrimenti stampato/loggato — vedi
-    SignedSessionClient.authenticate_with_browser() per i dettagli
-    architetturali (nessuna chiamata a /challenge/verify, che l'API rifiuta:
-    quell'endpoint non fa parte del flusso reale, confermato confrontando
-    con il backend Go di riferimento).
+    L'autenticazione (quando serve) è completamente MANUALE, senza nessun
+    browser automatizzato: l'URL di verifica viene passato a
+    `on_verification_url(url)` se fornito (altrimenti stampato/loggato), tu
+    lo apri in un browser qualsiasi, risolvi il Turnstile, e incolli il
+    grant che vedi in DevTools → Network → verify → Preview
+    ({"grant": "gr_...", "expires_in": 60}) — vedi
+    SignedSessionClient.authenticate_with_manual_grant() per i dettagli.
+    `timeout` limita quanto aspettare l'inserimento del grant (default 5 min).
 
     Returns a JSON-serializable dict matching what index.js's signedJSON()
     expects: {"statusCode": int, "body": str} on success, or {"error": str}
-    on failure (inclusa una verifica non completata entro il timeout).
+    on failure (inclusa una verifica non completata/annullata/scaduta).
     """
     try:
         if not client.authenticated:
             try:
-                await client.authenticate_with_browser(
-                    timeout=turnstile_timeout,
+                await client.authenticate_with_manual_grant(
                     on_verification_url=on_verification_url,
+                    grant_input=grant_input,
+                    timeout=timeout,
                 )
             except Exception as exc:
                 logger.warning(
-                    "[signed_session:%s] Autenticazione via browser fallita: %s",
+                    "[signed_session:%s] Autenticazione manuale fallita: %s",
                     client.namespace, exc,
                 )
                 return {"error": str(exc)}
