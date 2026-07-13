@@ -88,6 +88,60 @@ if (!isMainThread) {
   global.file = {
     download: (url, outputPath, opts) =>
       bridgeCall('file.download', { url, outputPath, opts: opts || {} }),
+    
+    // Novità: Metodi sincroni per operare sui file usando fs nativo
+    getSize: (filePath) => {
+      try {
+        const stats = require('fs').statSync(filePath);
+        return { success: true, size: stats.size };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    },
+    
+    readBytes: (filePath, opts) => {
+      try {
+        const offset = opts.offset || 0;
+        const length = opts.length || 0;
+        const encoding = opts.encoding || 'base64';
+        
+        const fd = require('fs').openSync(filePath, 'r');
+        const buffer = Buffer.alloc(length);
+        const bytesRead = require('fs').readSync(fd, buffer, 0, length, offset);
+        require('fs').closeSync(fd);
+        
+        // Se non abbiamo letto nulla, siamo a fine file (eof)
+        if (bytesRead === 0) {
+            return { success: true, bytes_read: 0, data: '', eof: true };
+        }
+        
+        // Taglia il buffer ai byte effettivamente letti e codifica
+        const data = buffer.subarray(0, bytesRead).toString(encoding);
+        return { success: true, bytes_read: bytesRead, data: data, eof: bytesRead < length };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    },
+    
+    writeBytes: (filePath, dataB64, opts) => {
+      try {
+        const flag = opts.append ? 'a' : 'w';
+        const buffer = Buffer.from(dataB64, opts.encoding || 'base64');
+        require('fs').writeFileSync(filePath, buffer, { flag: flag });
+        return { success: true, path: filePath };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    },
+    
+    delete: (filePath) => {
+      try {
+        require('fs').unlinkSync(filePath);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
   };
 
   global.log = {
@@ -101,13 +155,33 @@ if (!isMainThread) {
     randomUserAgent: () =>
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     appUserAgent: () => 'SpotiFLAC-Python/1.2',
-    // Usata da alcune estensioni ufficiali (es. tidal-web/index.js,
-    // signedTicket()) per calcolare resource_hash prima di POST /tickets.
-    // Calcolata qui in locale (nessun giro di bridge: è pura, offline).
+    
     sha256: (input) =>
       require('crypto').createHash('sha256').update(String(input), 'utf8').digest('hex'),
+      
+    md5: (input) =>
+      require('crypto').createHash('md5').update(String(input), 'utf8').digest('hex'),
+
+    decryptBlockCipher: (dataB64, opts) => {
+      try {
+        const crypto = require('crypto');
+        const key = Buffer.from(opts.key, opts.keyEncoding || 'hex');
+        const iv = Buffer.from(opts.iv, opts.ivEncoding || 'hex');
+        const input = Buffer.from(dataB64, opts.inputEncoding || 'base64');
+        
+        // Disattiva il padding se richiesto (Blowfish su Deezer usa padding personalizzato)
+        const decipher = crypto.createDecipheriv('bf-cbc', key, iv);
+        if (opts.padding === 'none') decipher.setAutoPadding(false);
+        
+        const output = Buffer.concat([decipher.update(input), decipher.final()]);
+        return { success: true, data: output.toString(opts.outputEncoding || 'base64') };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    },
   };
 
+  global.gobackend = global.utils;
   // Esposto SOLO se l'estensione dichiara "requiredRuntimeFeatures" con
   // "signedSession@1"/"sessionGrant@1" nel manifest (vedi provider.py):
   // il bridge Python inietta la config del manifest e gestisce lato Python

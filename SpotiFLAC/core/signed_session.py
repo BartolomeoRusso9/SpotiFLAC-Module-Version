@@ -343,21 +343,24 @@ class SignedSessionClient:
         self._save()
 
     def _ensure_client(self) -> None:
-        """Crea il client httpx in modo lazy e rimuove qualsiasi header "Connection".
+        """Crea il client httpx in modo lazy e rimuove l'header "Connection".
 
-        Alcune catture di rete mostravano `Connection: keep-alive` inviato
-        automaticamente; rimuoviamo esplicitamente qualunque header con
-        quel nome per evitare che venga mandato.
+        NOTA: non basta omettere "Connection" dal dict passato a
+        `httpx.AsyncClient(headers=...)`. Il setter interno di
+        `httpx.Client.headers` costruisce sempre un set di default
+        (Accept, Accept-Encoding, Connection: keep-alive, User-Agent) e poi
+        ci fonde sopra quelli forniti da noi: se noi non specifichiamo
+        "Connection", resta comunque il default "keep-alive" di httpx,
+        indipendentemente da eventuali .pop() fatti sul nostro dict PRIMA
+        della creazione del client. Va quindi rimosso DOPO, agendo
+        direttamente sull'oggetto Headers già costruito dal client.
         """
         if self._client is None:
-            # Assicuriamoci che non ci sia un header Connection sia mai impostato
-            # nelle headers globali del client (case-insensitive)
-            self._client_headers.pop("Connection", None)
-            self._client_headers.pop("connection", None)
-            # Abilitiamo HTTP/2: evita che httpcore aggiunga l'header
-            # "Connection: keep-alive" tipico di HTTP/1.1. La dipendenza
-            # httpx[http2] è indicata in requirements.txt.
             self._client = httpx.AsyncClient(headers=self._client_headers, http2=True)
+            # Rimuoviamo l'header dall'oggetto Headers effettivo del client,
+            # non dal dict di input (che a questo punto è già stato fuso
+            # con i default interni di httpx).
+            self._client.headers.pop("Connection", None)
 
     def _save(self) -> None:
         record = {
@@ -727,36 +730,37 @@ class SignedSessionClient:
         nonce = secrets.token_hex(12)
         body_hash = hashlib.sha256(body).hexdigest()
         window = int(time.time() // self.window_seconds)
-        rolling_key = hmac.new(
+        
+        rk_bytes = hmac.new(
             self.session_secret.encode(),
             f"{window}:{self.session_id}".encode(),
             hashlib.sha256,
         ).digest()
+        
+        rk_string = base64.urlsafe_b64encode(rk_bytes).rstrip(b"=").decode("utf-8")
+        
+        # --- FIX CRITICO: IL PERCORSO (PATH) ---
+        # Uniamo il base_url (che contiene /v2) e il path (che contiene /tickets)
+        # ed estraiamo il percorso finale corretto che il server si aspetta di firmare.
+        full_url = f"{self.base_url}{path}"
+        parsed_path = urlparse(full_url).path
+        
         signing_input = "\n".join(
             [
-                self.scheme_label, method, path, "", body_hash, ts, nonce,
+                self.scheme_label, method, parsed_path, "", body_hash, ts, nonce,
                 self.session_id, self.app_version, self.platform,
             ]
         )
+        
         sig = base64.urlsafe_b64encode(
-            hmac.new(rolling_key, signing_input.encode(), hashlib.sha256).digest()
-        ).rstrip(b"=").decode()
-        # DEBUG: log della stringa usata per la firma e della firma risultante
-        try:
-            logger.debug(
-                "[signed_session:%s] signing_input=%s signature=%s",
-                self.namespace,
-                signing_input,
-                sig,
-            )
-        except Exception:
-            pass
+            hmac.new(rk_string.encode("utf-8"), signing_input.encode("utf-8"), hashlib.sha256).digest()
+        ).rstrip(b"=").decode("utf-8")
+        
         p = self.header_prefix
         return {
             f"{p}Session": self.session_id,
             f"{p}Timestamp": ts,
             f"{p}Nonce": nonce,
-            # Match observed header casing used by Qobuz extension runtime
             f"{p}Body-Sha256": body_hash,
             f"{p}Signature": sig,
             f"{p}App-Version": self.app_version,
@@ -771,19 +775,12 @@ class SignedSessionClient:
         extra_headers: dict | None = None,
     ) -> httpx.Response:
         await self.ensure_session()
-        body = json.dumps(json_body).encode() if json_body is not None else b""
+        body = json.dumps(json_body, separators=(',', ':')).encode() if json_body is not None else b""
         headers = self._sign_headers(method.upper(), path, body)
         if body:
             headers["Content-Type"] = "application/json"
         if extra_headers:
             headers.update(extra_headers)
-
-        # Evitiamo che venga inviato "Connection: keep-alive".
-        # Alcune librerie aggiungono automaticamente l'header su HTTP/1.1;
-        # impostiamo esplicitamente "close" per evitare keep-alive.
-        headers.pop("Connection", None)
-        headers.pop("connection", None)
-        headers["Connection"] = "close"
 
         self._ensure_client()
         # DEBUG: logghiamo header e body che stiamo per inviare al server
@@ -802,6 +799,9 @@ class SignedSessionClient:
         resp = await self._client.request(
             method, f"{self.base_url}{path}", content=body, headers=headers, timeout=30,
         )
+        if resp.status_code >= 400:
+            print(f"\n[!!!] ERRORE ZARZ API ({resp.status_code}):")
+            print(f"[!!!] DETTAGLIO: {resp.text}\n")
         # INFO: logghiamo URL completo e status per avere la stessa linea
         # informativa di httpx ma con il link completo della richiesta.
         try:
@@ -853,17 +853,18 @@ class SignedSessionClient:
         tickets_path: str = "/tickets",
     ) -> str:
         """
-        Ottiene un ticket di download monouso (max_uses=1, vita breve ~60s,
-        confermato via cattura di rete reale) per la risorsa indicata,
-        chiamando POST {tickets_path} con body:
-            {"capability": "download_ticket", "provider": provider,
-             "resource_hash": compute_resource_hash(provider, resource_id, resource_type)}
-
-        Il ticket va usato IMMEDIATAMENTE con ticketed_request() — non va
-        richiesto in anticipo/cacheato, dato che è a singolo uso e scade in
-        pochi secondi.
+        Ottiene un ticket di download monouso (max_uses=1, vita breve ~60s).
         """
+        # --- FIX TRAPPOLA DEEZER ---
+        # Se il provider è Deezer (dzr) e l'ID fornito è solo un numero 
+        # (cioè non inizia già con "http"), lo convertiamo automaticamente 
+        # nell'URL completo che il server di Zarz si aspetta per l'hash.
+        if provider == "dzr" or provider == "deezer" and not str(resource_id).startswith("http"):
+            resource_id = f"https://www.deezer.com/{resource_type}/{resource_id}"
+        # ---------------------------
+        print(f"[*] Sto chiedendo il ticket per: {resource_id}")
         resource_hash = self.compute_resource_hash(provider, resource_id, resource_type)
+        
         resp = await self.request(
             "POST",
             tickets_path,
@@ -875,9 +876,11 @@ class SignedSessionClient:
         )
         resp.raise_for_status()
         data = resp.json()
+        
         ticket_id = str(data.get("ticket_id") or data.get("ticket") or "").strip()
         if not ticket_id:
             raise RuntimeError(f"ticket response missing ticket_id: {data}")
+            
         return ticket_id
 
     async def ticketed_request(

@@ -95,13 +95,26 @@ class JSRuntime:
             json.dumps(self.settings),
         ]
 
+        # --- FIX OPENSSL 3.0 (NODE 17+) ---
+        # Controlla la versione di Node e attiva i vecchi algoritmi (Blowfish) se necessario
+        env = os.environ.copy()
+        try:
+            v_out = subprocess.check_output([self.node_executable, "-v"], text=True)
+            v_major = int(v_out.strip().lstrip('v').split('.')[0])
+            if v_major >= 17:
+                env["NODE_OPTIONS"] = (env.get("NODE_OPTIONS", "") + " --openssl-legacy-provider").strip()
+        except Exception:
+            pass
+        # ----------------------------------
+
         self._proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=False,                    # byte mode per robustezza
+            text=False,
             bufsize=0,
+            env=env,  # <-- Inietta le variabili d'ambiente modificate
         )
 
         # Thread che legge stdout di Node e smista le risposte
