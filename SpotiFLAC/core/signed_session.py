@@ -657,7 +657,7 @@ class SignedSessionClient:
             self.pending_challenge_id, dummy_callback
         )
 
-        from .turnstile import solve_with_callback
+        from .solver import solve_with_callback
 
         token, grant = await asyncio.to_thread(
             solve_with_callback,
