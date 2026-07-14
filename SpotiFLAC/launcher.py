@@ -365,7 +365,7 @@ async def _run_download_async(
         downloader = SpotiflacDownloader(opts)
         await downloader.run_async(url, loop_minutes=loop)
     except KeyboardInterrupt:
-        print("\n\n[!] Operazione interrotta dall'utente.")
+        print("\n\n[!] Operation interrupted by user.")
     except Exception as e:
         logging.getLogger("SpotiFLAC").error(
             "Critical error during execution: %s", e

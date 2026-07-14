@@ -1,21 +1,21 @@
 """
 extensions/provider.py — JSExtensionProvider
 
-Adatta un'estensione JS al contratto BaseProvider di SpotiFLAC.
+Adapts a JavaScript extension to the SpotiFLAC BaseProvider contract.
 
-Flusso download via estensione:
+Download flow via extension:
   1. checkAvailability(isrc, title, artist, options)
-       → { available, track_id } oppure { available: False }
+       → { available, track_id } or { available: False }
   2. download(track_id, quality, output_path, onProgress)
        → { success, file_path, title, artist, ... }
-  3. Converti il risultato in DownloadResult e applica i tag se assenti.
+  3. Convert the result to DownloadResult and apply tags if absent.
 
-Flusso URL diretto (es. utente incolla un link SoundCloud):
+Direct URL flow (e.g. user pastes a SoundCloud link):
   1. handleURL(url) → { type: "track"|"album", ... }
   2. download(...)
 
-Il provider viene registrato in PROVIDER_REGISTRY con chiave "ext:{name}",
-es. "ext:soundcloud", "ext:pandora".
+The provider is registered in PROVIDER_REGISTRY with key "ext:{name}",
+e.g. "ext:soundcloud", "ext:pandora".
 """
 from __future__ import annotations
 
@@ -39,11 +39,11 @@ logger = logging.getLogger(__name__)
 
 class JSExtensionProvider(BaseProvider):
     """
-    Provider che delega download e metadati a un'estensione JS.
+    Provider that delegates downloads and metadata to a JavaScript extension.
 
-    Supporta i DOWNLOAD IN PARALLELO grazie a un Process Pool di JSRuntime.
-    Invece di un singolo processo Node.js bloccante, crea fino a `max_runtimes`
-    processi simultanei per scaricare le tracce alla stessa velocità dei provider nativi.
+    Supports PARALLEL DOWNLOADS thanks to a Process Pool of JSRuntime.
+    Instead of a single blocking Node.js process, creates up to `max_runtimes`
+    simultaneous processes to download tracks at the same speed as native providers.
     """
 
     def __init__(
@@ -72,7 +72,7 @@ class JSExtensionProvider(BaseProvider):
         if settings:
             self._settings.update(settings)
 
-        # Configurazione signedSession
+        # signedSession configuration
         self._signed_session: SignedSessionClient | None = None
         required = self._ext.manifest.get("requiredRuntimeFeatures", [])
         ss_config = self._ext.manifest.get("signedSession")
@@ -101,8 +101,8 @@ class JSExtensionProvider(BaseProvider):
         ext = self._mgr.get_installed(ext_id)
         if ext is None:
             raise ValueError(
-                f"Estensione '{ext_id}' non installata. "
-                f"Usa ExtensionManager().install('{ext_id}') prima."
+                f"Extension '{ext_id}' not installed. "
+                f"Use ExtensionManager().install('{ext_id}') first."
             )
         return ext
 
@@ -123,7 +123,7 @@ class JSExtensionProvider(BaseProvider):
                 pass
 
     def _create_runtime(self) -> JSRuntime:
-        """Crea una nuova istanza isolata del processo Node.js."""
+        """Creates a new isolated instance of the Node.js process."""
         rt = JSRuntime(
             ext_path        = self._ext.index_js,
             settings        = self._settings,
@@ -139,39 +139,39 @@ class JSExtensionProvider(BaseProvider):
 
     @contextlib.contextmanager
     def _acquire_runtime(self):
-        """Pool manager: fornisce un runtime Node.js disponibile, creandolo se necessario."""
+        """Pool manager: provides an available Node.js runtime, creating it if necessary."""
         rt = None
         try:
-            # Prova a prendere un processo Node già avviato e libero
+            # Try to get an already-started and free Node process
             rt = self._idle_runtimes.get_nowait()
         except queue.Empty:
-            # Se sono tutti occupati, possiamo crearne uno nuovo?
+            # If all are busy, can we create a new one?
             with self._runtime_lock:
                 if self._runtimes_created < self._max_runtimes:
                     rt = self._create_runtime()
                     self._runtimes_created += 1
                     self._all_runtimes.append(rt)
         
-        # Se siamo al limite massimo di processi, dobbiamo aspettare che se ne liberi uno
+        # If we're at the max process limit, we need to wait for one to free up
         if rt is None:
             try:
                 rt = self._idle_runtimes.get(timeout=self._timeout_s)
             except queue.Empty:
                 raise SpotiflacError(
                     kind=ErrorKind.NETWORK_ERROR,
-                    message="Timeout: tutti i processi dell'estensione sono occupati.",
+                    message="Timeout: all extension processes are busy.",
                     provider=self.name,
                 )
 
         try:
             yield rt
         finally:
-            # A fine lavoro (es. a download finito), rimetti il processo nel pool
+            # After work is done (e.g. download finished), put the process back in the pool
             self._idle_runtimes.put(rt)
 
     def _call(self, method: str, *args, **kw) -> object:
         try:
-            # Acquisiamo un "operaio" dal Pool e gli affidiamo il compito
+            # Acquire a "worker" from the Pool and assign it the task
             with self._acquire_runtime() as rt:
                 return rt.call(method, *args, timeout=self._timeout_s, **kw)
         except ExtensionRuntimeError as e:
@@ -182,7 +182,7 @@ class JSExtensionProvider(BaseProvider):
             ) from e
 
     def close(self) -> None:
-        """Chiude brutalmente tutti i processi Node.js nel Pool."""
+        """Forcefully closes all Node.js processes in the Pool."""
         with self._runtime_lock:
             for rt in self._all_runtimes:
                 try:
@@ -192,7 +192,7 @@ class JSExtensionProvider(BaseProvider):
             self._all_runtimes.clear()
             self._runtimes_created = 0
             
-            # Svuota la sala d'attesa
+            # Empty the waiting room
             while not self._idle_runtimes.empty():
                 try:
                     self._idle_runtimes.get_nowait()

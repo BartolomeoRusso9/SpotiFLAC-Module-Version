@@ -98,7 +98,7 @@ def parse_apple_music_url(url: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Helper normalizzazione
+# Helper normalization
 # ---------------------------------------------------------------------------
 
 
@@ -262,7 +262,7 @@ class AppleMusicMetadataClient:
             return resp.json()
 
     # ------------------------------------------------------------------
-    # Paginazione
+    # Pagination
     # ------------------------------------------------------------------
 
     async def _pagete_tracks(

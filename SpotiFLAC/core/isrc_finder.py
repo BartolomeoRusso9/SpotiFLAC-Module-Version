@@ -49,14 +49,14 @@ class IsrcFinder:
         return self._spotify_client
 
     async def find_isrc_async(self, track_id: str) -> Optional[str]:
-        # NOTE: l'endpoint spclient.wg.spotify.com/metadata/4/track/{gid}
-        # restituisce un blob protobuf binario (content-type
-        # "vnd.spotify/metadata-track"), mai JSON. Un precedente tentativo
-        # qui chiamava resp.json() su quel blob, fallendo sistematicamente
-        # con errori di decodifica UTF-8 per ogni traccia. L'estrazione
-        # (con validazione del formato ISRC reale) è centralizzata in
-        # SpotifyWebClient.get_isrc_from_metadata, che va invocata invece
-        # di duplicare qui un parsing JSON strutturalmente impossibile.
+        # NOTE: the endpoint spclient.wg.spotify.com/metadata/4/track/{gid}
+        # returns a binary protobuf blob (content-type
+        # "vnd.spotify/metadata-track"), never JSON. A previous attempt
+        # here called resp.json() on that blob, failing systematically
+        # with UTF-8 decoding errors for every track. The extraction
+        # (with validation of the real ISRC format) is centralized in
+        # SpotifyWebClient.get_isrc_from_metadata, which should be called instead
+        # of duplicating a structurally impossible JSON parsing here.
         try:
             spotify_id_to_gid(track_id)
         except ValueError as exc:

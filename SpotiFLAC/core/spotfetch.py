@@ -689,17 +689,17 @@ class SpotifyWebClient:
 
             from .isrc_utils import is_valid_isrc
 
-            # NOTE: questo endpoint restituisce un blob protobuf binario
-            # (content-type: vnd.spotify/metadata-track), non JSON. Non
-            # esiste qui un vero parser protobuf: si cerca euristicamente
-            # la stringa "isrc" seguita da byte di controllo di campo e si
-            # prende il successivo blocco alfanumerico di 12 caratteri.
-            # Questo può agganciare per errore un campo vicino non
-            # correlato (es. un testo di restrizione/territorio), quindi
-            # il candidato va sempre validato contro il vero formato ISRC
-            # (2 lettere + 3 alfanumerici + 7 cifre) prima di essere
-            # accettato: un match come "INTERNATIONA" (12 lettere, zero
-            # cifre) non è mai un ISRC valido.
+            # NOTE: this endpoint returns a binary protobuf blob
+            # (content-type: vnd.spotify/metadata-track), not JSON. There
+            # is no true protobuf parser here: we search heuristically for
+            # the string "isrc" followed by field control bytes and take
+            # the next 12-character alphanumeric block.
+            # This may erroneously match a nearby unrelated field (e.g. a
+            # restriction/territory text), so the candidate must always be
+            # validated against the true ISRC format
+            # (2 letters + 3 alphanumeric + 7 digits) before accepting:
+            # a match like "INTERNATIONA" (12 letters, zero
+            # digits) is never a valid ISRC.
             for match in re.finditer(rb"isrc[\x00-\x1f]+([A-Za-z0-9]{12})", resp.content):
                 candidate = match.group(1).decode(errors="ignore").upper()
                 if is_valid_isrc(candidate):

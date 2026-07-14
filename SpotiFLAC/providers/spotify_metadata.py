@@ -495,7 +495,7 @@ class SpotifyMetadataClient:
     async def get_album_tracks_async(
         self, album_id: str
     ) -> tuple[dict, list[TrackMetadata]]:
-        """Retrieves tutte le tracks di un album con pagezione completa."""
+        """Retrieves all tracks of an album with complete pagination."""
         limit = 1000
         all_items: list[Any] = []
         album_union: dict = {}

@@ -39,7 +39,7 @@ class IsrcHelper:
             except Exception:
                 pass  # Fallimento silenzioso, proseguiamo col normale flusso
 
-        # 2. Sequenza di risoluzione async
+        # 2. Async resolution sequence
         isrc = await self.finder.find_isrc_async(search_id)
 
         if not isrc:

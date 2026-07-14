@@ -37,7 +37,7 @@ DEFAULT_ENRICH_PROVIDERS = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
 
 
 # ---------------------------------------------------------------------------
-# Helpers (invariati)
+# Helpers (unchanged)
 # ---------------------------------------------------------------------------
 
 
@@ -104,7 +104,7 @@ _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " "Chrome/145.0.0.0 Safari/537.
 
 
 # ---------------------------------------------------------------------------
-# Spotify anon token (sync helper, riusato da async)
+# Spotify anon token (sync helper, reused by async)
 # ---------------------------------------------------------------------------
 
 _spotify_session_cache: dict[str, object] = {}

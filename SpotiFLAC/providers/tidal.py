@@ -1,5 +1,5 @@
 """
-TidalProvider — implementazione migliorata, robusta e tipizzata.
+TidalProvider — improved, robust, and type-hinted implementation.
 """
 
 from __future__ import annotations
@@ -626,7 +626,7 @@ async def _fetch_tidal_url_once_async(
     is_post_api = api_cleaning in _CLEAN_POST_APIS
     quality = _normalize_quality(quality)
     headers = {"User-Agent": _POST_USER_AGENT[0] if is_post_api else _TIDAL_USER_AGENT}
-    # Se questa API è la community mirror, usa gli header dedicati per le POST
+    # If this API is the community mirror, use dedicated headers for POST requests
     try:
         if (
             is_post_api

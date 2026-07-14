@@ -68,8 +68,8 @@ def _find_chrome() -> str:
             return path
 
     raise FileNotFoundError(
-        "Nessun browser basato su Chromium (Chrome, Edge, Brave, Arc) trovato nel sistema. "
-        "Installa uno di questi browser oppure imposta la variabile CHROME_PATH."
+        "No Chromium-based browser (Chrome, Edge, Brave, Arc) found on system. "
+        "Install one of these browsers or set the CHROME_PATH environment variable."
     )
 
 def _get_profile_dir() -> str:

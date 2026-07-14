@@ -1,11 +1,11 @@
 """
 extensions/runtime.py — JSRuntime
 
-Avvia il processo Node.js _bridge.js e fornisce un'API Python
-per chiamare i metodi dell'estensione JS in modo sincrono.
+Starts the Node.js _bridge.js process and provides a Python API
+to call JavaScript extension methods synchronously.
 
-Ogni istanza di JSRuntime rappresenta una sessione con una singola estensione.
-Lo stato `storage` dell'estensione è persistente per tutta la vita del runtime.
+Each JSRuntime instance represents a session with a single extension.
+The extension's `storage` state persists for the entire runtime lifetime.
 """
 from __future__ import annotations
 
@@ -31,25 +31,25 @@ class ExtensionRuntimeError(RuntimeError):
 
 class JSRuntime:
     """
-    Gestisce un processo Node.js che esegue il _bridge.js con un'estensione caricata.
+    Manages a Node.js process that runs _bridge.js with a loaded extension.
 
-    Uso:
+    Usage:
         rt = JSRuntime(ext_path, settings={"token": "..."})
-        rt.start()          # avvia Node.js, aspetta "ready"
+        rt.start()          # starts Node.js, waits for "ready"
         result = rt.call("handleURL", "https://soundcloud.com/...")
         rt.stop()
 
-    Come context manager:
+    As context manager:
         with JSRuntime(ext_path) as rt:
             result = rt.call("download", track_id, "mp3_128", "/tmp/out.mp3", None)
 
-    Estensioni con "requiredRuntimeFeatures": ["signedSession@1", ...] nel
-    manifest chiamano `session.signedFetch(method, path, body, headers)` dal
-    JS. Questo bridge NON implementa quella logica in Node (richiederebbe
-    duplicare tutta la firma HMAC/gestione Turnstile già scritta in Python):
-    inoltra invece la richiesta a `session_handler`, una funzione async
-    Python fornita dal chiamante (tipicamente JSExtensionProvider, che la
-    collega a SignedSessionClient/perform_signed_fetch).
+    Extensions with "requiredRuntimeFeatures": ["signedSession@1", ...] in the
+    manifest call `session.signedFetch(method, path, body, headers)` from JS.
+    This bridge does NOT implement that logic in Node (it would require
+    duplicating all the HMAC signature/Turnstile handling already written in Python):
+    it instead forwards the request to `session_handler`, an async Python function
+    provided by the caller (typically JSExtensionProvider, which links it to
+    SignedSessionClient/perform_signed_fetch).
     """
 
     def __init__(
@@ -80,13 +80,13 @@ class JSRuntime:
     def start(self) -> None:
         if not shutil.which(self.node_executable):
             raise ExtensionRuntimeError(
-                f"Node.js non trovato ('{self.node_executable}'). "
-                "Installa Node.js ≥ 16 per usare le estensioni JS."
+                f"Node.js not found ('{self.node_executable}'). "
+                "Install Node.js ≥ 16 to use JS extensions."
             )
         if not _BRIDGE_JS.exists():
-            raise ExtensionRuntimeError(f"Bridge JS non trovato: {_BRIDGE_JS}")
+            raise ExtensionRuntimeError(f"Bridge JS not found: {_BRIDGE_JS}")
         if not self.ext_path.exists():
-            raise ExtensionRuntimeError(f"Estensione non trovata: {self.ext_path}")
+            raise ExtensionRuntimeError(f"Extension not found: {self.ext_path}")
 
         cmd = [
             self.node_executable,
@@ -96,7 +96,7 @@ class JSRuntime:
         ]
 
         # --- FIX OPENSSL 3.0 (NODE 17+) ---
-        # Controlla la versione di Node e attiva i vecchi algoritmi (Blowfish) se necessario
+        # Checks Node version and enables legacy algorithms (Blowfish) if needed
         env = os.environ.copy()
         try:
             v_out = subprocess.check_output([self.node_executable, "-v"], text=True)
@@ -114,22 +114,22 @@ class JSRuntime:
             stderr=subprocess.PIPE,
             text=False,
             bufsize=0,
-            env=env,  # <-- Inietta le variabili d'ambiente modificate
+            env=env,  # <-- Injects modified environment variables
         )
 
-        # Thread che legge stdout di Node e smista le risposte
+        # Thread that reads Node stdout and routes responses
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
 
-        # Thread che draina stderr (log estensione)
+        # Thread that drains stderr (extension logs)
         threading.Thread(target=self._drain_stderr, daemon=True).start()
 
-        # Aspetta il segnale "ready" dall'estensione
+        # Waits for "ready" signal from the extension
         if not self._ready_event.wait(timeout=self.startup_timeout):
             self.stop()
             raise ExtensionRuntimeError(
-                f"L'estensione non ha risposto entro {self.startup_timeout}s. "
-                "Verifica che il file JS sia valido."
+                f"Extension did not respond within {self.startup_timeout}s. "
+                "Verify that the JS file is valid."
             )
         logger.debug("[JSRuntime] extension ready: %s", self.ext_path.name)
 
@@ -159,13 +159,13 @@ class JSRuntime:
         timeout: float = 120.0,
     ) -> Any:
         """
-        Chiama un metodo dell'estensione JS e ritorna il risultato.
+        Calls a JavaScript extension method and returns the result.
 
-        Per i metodi con onProgress (es. download), passa progress_cb;
-        il placeholder '__progress__' verrà sostituito dalla funzione JS.
+        For methods with onProgress (e.g. download), pass progress_cb;
+        the placeholder '__progress__' will be replaced by the JS function.
         """
         if not self._proc or self._proc.poll() is not None:
-            raise ExtensionRuntimeError("JSRuntime non avviato o già terminato.")
+            raise ExtensionRuntimeError("JSRuntime not started or already terminated.")
 
         with self._lock:
             self._seq += 1
@@ -174,7 +174,7 @@ class JSRuntime:
         result_q: queue.Queue = queue.Queue()
         self._pending[seq] = result_q
 
-        # Sostituisce None con '__progress__' se il metodo ha onProgress
+        # Replaces None with '__progress__' if the method has onProgress
         final_args = list(args)
         if progress_cb is not None and final_args and final_args[-1] is None:
             final_args[-1] = "__progress__"
@@ -186,14 +186,14 @@ class JSRuntime:
             self._proc.stdin.flush()
         except OSError as e:
             self._pending.pop(seq, None)
-            raise ExtensionRuntimeError(f"Errore scrittura stdin Node: {e}") from e
+            raise ExtensionRuntimeError(f"Error writing to Node stdin: {e}") from e
 
         try:
             resp = result_q.get(timeout=timeout)
         except queue.Empty:
             self._pending.pop(seq, None)
             self._progress_cbs.pop(seq, None)
-            raise ExtensionRuntimeError(f"Timeout ({timeout}s) chiamando {method}")
+            raise ExtensionRuntimeError(f"Timeout ({timeout}s) calling {method}")
         finally:
             self._progress_cbs.pop(seq, None)
 
@@ -204,7 +204,7 @@ class JSRuntime:
     # ─────────────────────── internals ────────────────────────
 
     def _read_loop(self) -> None:
-        """Legge stdout di Node.js riga per riga e smista le risposte."""
+        """Reads Node.js stdout line by line and routes responses."""
         buf = b""
         while self._proc and self._proc.poll() is None:
             try:
@@ -228,7 +228,7 @@ class JSRuntime:
                     continue
                 self._dispatch(msg)
 
-        # Svuota pending con errore
+        # Empties pending with error
         err = {"error": "Node.js process terminated unexpectedly"}
         for q in list(self._pending.values()):
             q.put(err)
@@ -263,19 +263,19 @@ class JSRuntime:
 
     def _handle_session_signed_fetch(self, msg: dict) -> None:
         """
-        Gestisce una richiesta `session.signedFetch(...)` fatta dal JS
-        dell'estensione. Chiamato da _read_loop (un thread separato).
+        Handles a `session.signedFetch(...)` request made from the JS
+        extension. Called from _read_loop (a separate thread).
 
-        IMPORTANTE: esegue session_handler in un event loop asyncio NUOVO E
-        ISOLATO (asyncio.run), invece di provare a schedularlo sul loop del
-        chiamante (es. via run_coroutine_threadsafe). Il motivo: JSRuntime.call()
-        è sincrono e blocca il thread/loop chiamante con una queue.get() —
-        se quel loop fosse condiviso e bloccato lì dentro, una coroutine
-        schedulata su di esso (run_coroutine_threadsafe) non potrebbe MAI
-        girare finché call() non ritorna, che a sua volta aspetta proprio
-        questa risposta: deadlock. Un loop isolato qui evita il problema
-        per costruzione, del tutto indipendente da come viene usato
-        JSExtensionProvider (sync o async) nel resto del programma.
+        IMPORTANT: runs session_handler in a NEW AND ISOLATED asyncio event loop
+        (asyncio.run), instead of trying to schedule it on the caller's loop
+        (e.g. via run_coroutine_threadsafe). The reason: JSRuntime.call()
+        is synchronous and blocks the calling thread/loop with a queue.get() —
+        if that loop were shared and blocked there, a coroutine
+        scheduled on it (run_coroutine_threadsafe) could NEVER
+        run until call() returns, which itself waits for exactly
+        this response: deadlock. An isolated loop here avoids the problem
+        by construction, completely independent of how
+        JSExtensionProvider is used (sync or async) in the rest of the program.
         """
         request_id = msg.get("requestId")
         method  = msg.get("method", "GET")
@@ -293,10 +293,10 @@ class JSRuntime:
                 self._proc.stdin.write(line.encode())
                 self._proc.stdin.flush()
             except Exception as e:
-                logger.debug("[JSRuntime] impossibile rispondere a session.signedFetch: %s", e)
+                logger.debug("[JSRuntime] unable to respond to session.signedFetch: %s", e)
 
         if self.session_handler is None:
-            _respond({"error": "session.signedFetch: nessun session_handler configurato"})
+            _respond({"error": "session.signedFetch: no session_handler configured"})
             return
 
         async def _run() -> dict:

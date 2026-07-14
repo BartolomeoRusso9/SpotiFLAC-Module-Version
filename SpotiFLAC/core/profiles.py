@@ -84,7 +84,7 @@ class ProfileConfig(BaseModel):
         raise TypeError("log_level must be an integer or a named log level string")
 
 
-# Helpers I/O sincroni da eseguire in un thread
+# Synchronous I/O helpers to be executed in a thread
 def _read_file_sync() -> str | None:
     if _PROFILES_FILE.exists():
         return _PROFILES_FILE.read_text(encoding="utf-8")

@@ -105,14 +105,14 @@ class ExtensionManager:
 
     Quick example:
         em = ExtensionManager(auto_install_downloads=True)
-        # Automaticamente scarica o aggiorna i provider di download all'avvio
+        # Automatically downloads or updates download providers on startup
     """
 
     def __init__(
         self,
         ext_dir: str | Path | None = None,
         timeout: float = 20.0,
-        auto_install_downloads: bool = True,  # Attivato di default
+        auto_install_downloads: bool = True,  # Enabled by default
     ) -> None:
         self.ext_dir = Path(ext_dir) if ext_dir else DEFAULT_EXT_DIR
         self.timeout = timeout
@@ -125,18 +125,18 @@ class ExtensionManager:
 
     def ensure_download_providers(self, registry_url: str = REGISTRY_URL) -> None:
         """
-        Verifica il registry remoto e installa (o aggiorna) automaticamente
-        tutte le estensioni classificate come download provider.
+        Checks the remote registry and automatically installs (or updates)
+        all extensions classified as download providers.
         """
-        logger.info("[ExtMgr] Controllo automatico estensioni di download all'avvio...")
+        logger.info("[ExtMgr] Automatic check for download extensions on startup...")
         try:
             entries = self.fetch_registry(registry_url)
         except Exception as e:
-            logger.warning("[ExtMgr] Impossibile recuperare il registry per l'auto-setup: %s", e)
+            logger.warning("[ExtMgr] Unable to retrieve registry for auto-setup: %s", e)
             return
 
         for entry in entries:
-            # Identifica se l'estensione è un download provider tramite categoria o tag
+            # Identifies if the extension is a download provider via category or tag
             is_download = (
                 entry.category == "download_provider" 
                 or "download" in entry.tags 
@@ -148,13 +148,13 @@ class ExtensionManager:
 
             existing = self.get_installed(entry.id)
             
-            # Se è già installata e la versione corrisponde, salta senza fare download
+            # If already installed and version matches, skip without downloading
             if existing and existing.version == entry.version:
-                logger.debug("[ExtMgr] '%s' è già installata e aggiornata (v%s)", entry.id, entry.version)
+                logger.debug("[ExtMgr] '%s' is already installed and updated (v%s)", entry.id, entry.version)
                 continue
 
-            # Altrimenti, installa o aggiorna
-            action = "Aggiornamento" if existing else "Installazione"
+            # Otherwise, installs or updates
+            action = "Update" if existing else "Installation"
             logger.info("[ExtMgr] %s di '%s' alla versione %s...", action, entry.id, entry.version)
             try:
                 self.install_from_url(entry.download_url)

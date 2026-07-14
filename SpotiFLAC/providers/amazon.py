@@ -1169,7 +1169,7 @@ class AmazonProvider(BaseProvider):
     async def _download_from_musicdl_api(
         self, amazon_url: str, asin: str, output_dir: str
     ) -> tuple[str, dict]:
-        """Scaricamento tramite Telegram Bot CDN (dl.musicdl.me)"""
+        """Download via Telegram Bot CDN (dl.musicdl.me)"""
         logger.info("[amazon] Trying MusicDL API (ASIN: %s)", asin)
 
         payload = {"url": amazon_url, "platform": "amazon"}
