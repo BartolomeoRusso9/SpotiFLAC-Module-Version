@@ -370,8 +370,8 @@ class JSExtensionProvider(BaseProvider):
             if self._progress_cb is None:
                 return
             try:
-                current = int(max(0.0, min(1.0, fraction)) * 10_000)
-                result = self._progress_cb(current, 10_000)
+                current = int(max(0.0, min(1.0, fraction)) * 100)
+                result = self._progress_cb(current, 100)
                 # If the callback is async and returns a coroutine, we can't await it here
                 # (we're in a sync context via to_thread), so we need to close it to prevent warnings
                 if asyncio.iscoroutine(result):
@@ -619,8 +619,8 @@ class JSExtensionProvider(BaseProvider):
                 if size != last_size:
                     last_size = size
                     try:
-                        current = int(fraction * 10_000)
-                        result = self._progress_cb(current, 10_000)
+                        current = int(fraction * 100)
+                        result = self._progress_cb(current, 100)
                         # If the callback is async, await it
                         if asyncio.iscoroutine(result):
                             await result

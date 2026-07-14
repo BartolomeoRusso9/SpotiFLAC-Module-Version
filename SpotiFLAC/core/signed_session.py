@@ -966,6 +966,18 @@ class SignedSessionClient:
             finally:
                 self._client = None
 
+_AUTH_LOCKS: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
+
+def _get_auth_lock(namespace: str) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    if namespace in _AUTH_LOCKS:
+        cached_loop, lock = _AUTH_LOCKS[namespace]
+        if cached_loop is loop:
+            return lock
+    # Crea un nuovo lock se non esiste o se il loop è cambiato
+    lock = asyncio.Lock()
+    _AUTH_LOCKS[namespace] = (loop, lock)
+    return lock
 
 async def perform_signed_fetch(
     client: SignedSessionClient,
@@ -979,39 +991,43 @@ async def perform_signed_fetch(
     use_turnstile_browser: bool = True,
 ) -> dict:
     try:
+        # Se non siamo autenticati, richiediamo il Lock asincrono
         if not client.authenticated:
-            try:
-                if use_turnstile_browser:
-                    await client.authenticate_with_turnstile(timeout=min(timeout, 90))
-                else:
-                    raise RuntimeError("turnstile automation disabled")
-            except Exception as exc:
-                logger.info(
-                    "[signed_session:%s] Turnstile automatico fallito (%s), "
-                    "fallback al flusso manuale.", client.namespace, exc,
-                )
-                try:
-                    await client.authenticate_with_manual_grant(
-                        on_verification_url=on_verification_url,
-                        grant_input=grant_input,
-                        timeout=timeout,
-                    )
-                except Exception as exc2:
-                    logger.warning(
-                        "[signed_session:%s] Autenticazione manuale fallita: %s",
-                        client.namespace, exc2,
-                    )
-                    return {"error": str(exc2)}
+            lock = _get_auth_lock(client.namespace)
+            async with lock:
+                # DOUBLE-CHECK: Una volta dentro al blocco, ricarichiamo i dati dal disco.
+                # Se un altro brano in parallelo ha appena fatto l'accesso al posto nostro,
+                # troveremo la sessione aggiornata e salteremo l'autenticazione!
+                client._load()
+                
+                if not client.authenticated:
+                    try:
+                        if use_turnstile_browser:
+                            await client.authenticate_with_turnstile(timeout=min(timeout, 90))
+                        else:
+                            raise RuntimeError("turnstile automation disabled")
+                    except Exception as exc:
+                        logger.info(
+                            "[signed_session:%s] Turnstile automatico fallito (%s), "
+                            "fallback al flusso manuale.", client.namespace, exc,
+                        )
+                        try:
+                            await client.authenticate_with_manual_grant(
+                                on_verification_url=on_verification_url,
+                                grant_input=grant_input,
+                                timeout=timeout,
+                            )
+                        except Exception as exc2:
+                            logger.warning(
+                                "[signed_session:%s] Autenticazione manuale fallita: %s",
+                                client.namespace, exc2,
+                            )
+                            return {"error": str(exc2)}
 
+        # A questo punto la sessione è garantita per tutte le tracce parallele
         resp = await client.request(method, path, json_body=body, extra_headers=headers)
 
         if resp.status_code in (401, 428):
-            # Same behavior as the Go backend: a 401/428 invalidates the
-            # local session and restarts verification instead of returning
-            # the raw error to the caller. Here we do NOT immediately reopen a
-            # browser during a "pass-through" request: we only signal
-            # that a new verification is needed, letting the caller decide
-            # when to invoke authenticate_with_browser() again.
             retry_auth_url = await client.bootstrap()
             if isinstance(retry_auth_url, str) and retry_auth_url:
                 return {"needsVerification": True, "auth_url": retry_auth_url}
@@ -1020,6 +1036,7 @@ async def perform_signed_fetch(
         raw_retry_after = resp.headers.get("Retry-After", "").strip()
         if raw_retry_after.isdigit():
             retry_after = max(0, int(raw_retry_after))
+            
         return {
             "statusCode": resp.status_code,
             "status": resp.status_code,
