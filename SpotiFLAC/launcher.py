@@ -78,10 +78,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     )
     parser.add_argument("output_dir", nargs="?", help="Destination directory")
 
-    parser.add_argument(
-        "--service",
-        "-s",
-        choices=[
+    def _service_type(value: str) -> str:
+        native_services = {
             "deezer",
             "tidal",
             "qobuz",
@@ -94,12 +92,22 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
             "youtube",
             "apple",
             "pandora",
-        ],
+        }
+        if value in native_services or value.startswith("ext:"):
+            return value
+        raise argparse.ArgumentTypeError(
+            f"invalid service: '{value}'. ``--service`` accepts native providers or ext:<name> extensions."
+        )
+
+    parser.add_argument(
+        "--service",
+        "-s",
+        type=_service_type,
         nargs="+",
         default=pd.get("services", ["tidal"]),
         metavar="SERVICE",
         help="Audio providers in priority order (default: tidal). "
-        "Choices: tidal, qobuz, deezer, amazon, joox, netease, migu, kuwo, soundcloud, youtube, apple, pandora",
+        "Choices: tidal, qobuz, deezer, amazon, joox, netease, migu, kuwo, soundcloud, youtube, apple, pandora, or ext:<name>",
     )
     parser.add_argument(
         "--filename-format",
@@ -357,11 +365,9 @@ async def _run_download_async(
         downloader = SpotiflacDownloader(opts)
         await downloader.run_async(url, loop_minutes=loop)
     except KeyboardInterrupt:
-        print("\n\n[!] Operazione interrotta dall'utente.")
+        print("\n\n[!] Operation interrupted by user.")
     except Exception as e:
-        logging.getLogger("SpotiFLAC").error(
-            "Critical error durante l'esecuzione: %s", e
-        )
+        logging.getLogger("SpotiFLAC").error("Critical error during execution: %s", e)
 
 
 async def amain() -> None:

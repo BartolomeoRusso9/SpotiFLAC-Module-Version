@@ -694,7 +694,7 @@ class SoundCloudProvider(BaseProvider):
                     logger.warning("[SC] Fallback search failed: %s", e)
 
         if not dl_url:
-            return DownloadResult.fail(self.name, "Stream non disponibile")
+            return DownloadResult.fail(self.name, "Stream not available")
 
         # Costruzione del path output — mkdir asincrona
         dest = await self._async_build_output_path(

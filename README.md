@@ -21,6 +21,14 @@ SpotiFLAC for Android & iOS — maintained by [@zarzet](https://github.com/zarze
 pip install SpotiFLAC
 ```
 
+On local installs, if you use JS extension providers like `ext:soundcloud`, SpotiFLAC will attempt to install Node.js automatically when needed. Supported package managers:
+
+- Linux: `apt-get`, `dnf`, `yum`, `pacman`
+- macOS: `brew`
+- Windows: `winget`, `choco`
+
+If automatic install is not possible, the CLI will prompt you to install Node.js ≥ 16 manually.
+
 ---
 ## Quick Start
 

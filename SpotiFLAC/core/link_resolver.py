@@ -39,7 +39,7 @@ class LinkResolver:
         self._deezer_async_cache = {}
 
     async def _safe_get_json(self, url: str, params: Optional[dict] = None) -> dict:
-        """Helper robusto che aggiunge User-Agent e Accept per evitare il blocco 406 di Varnish/WAF."""
+        """Robust helper that adds User-Agent and Accept to avoid Varnish/WAF 406 blocking."""
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
@@ -53,7 +53,7 @@ class LinkResolver:
         )
 
     async def _safe_get_html(self, url: str):
-        """Helper robusto che emula un browser desktop per le richieste di scraping HTML."""
+        """Robust helper that emulates a desktop browser for HTML scraping requests."""
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -61,6 +61,12 @@ class LinkResolver:
             "Upgrade-Insecure-Requests": "1",
             "Referer": "https://song.link/",
         }
+        # Prefer async http client method if available (tests mock get_async).
+        if hasattr(self.http, "get_async"):
+            return await self._request_with_retry(
+                lambda: self.http.get_async(url, headers=headers)
+            )
+        # fallback to synchronous get wrapped for retry (kept for real client compatibility)
         return await self._request_with_retry(
             lambda: self.http.get(url, headers=headers)
         )

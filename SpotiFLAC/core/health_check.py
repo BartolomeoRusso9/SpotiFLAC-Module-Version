@@ -11,7 +11,7 @@ import httpx
 from ..core.endpoints import get_health_zarz_url
 
 # ---------------------------------------------------------------------------
-# Helper per la validazione del payload
+# Helper for payload validation
 # ---------------------------------------------------------------------------
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,22 @@ def validate_flac_file(filepath: str) -> tuple[bool, str]:
             if "FLAC__STREAM_DECODER_ERROR" in error_msg or "sync" in error_msg.lower():
                 return False, f"FLAC sync error: {error_msg[:100]}"
             return False, f"FLAC validation failed: {error_msg[:100]}"
+
+        flac_binary = shutil.which("flac")
+        if flac_binary is None:
+            return False, "FLAC integrity test unavailable: flac binary not found"
+
+        integrity_result = subprocess.run(
+            [flac_binary, "-t", filepath],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if integrity_result.returncode != 0:
+            error_msg = (
+                integrity_result.stderr.strip() or integrity_result.stdout.strip()
+            )
+            return False, f"FLAC integrity test failed: {error_msg[:120]}"
 
         return True, ""
 

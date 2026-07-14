@@ -1,6 +1,6 @@
 """
-Modelli Pydantic per SpotiFLAC.
-Sostituiscono i dict raw per garantire validazione, coercizione e zero KeyError.
+Pydantic models for SpotiFLAC.
+Replace raw dicts to guarantee validation, coercion, and zero KeyError.
 """
 
 from __future__ import annotations
@@ -151,7 +151,7 @@ class TrackMetadata(BaseModel):
 
 
 class DownloadResult(BaseModel):
-    """Rappresenta l'esito di un'operazione di download."""
+    """Represents the outcome of a download operation."""
 
     success: bool
     provider: str

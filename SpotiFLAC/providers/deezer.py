@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from ..core.endpoints import get_deezer_endpoint, get_youtube_endpoints
+from ..core.endpoints import get_deezer_endpoint
 from ..core.errors import ErrorKind, SpotiflacError
 from ..core.http import NetworkManager
 from ..core.models import DownloadResult, TrackMetadata
@@ -200,10 +200,8 @@ class DeezerProvider(BaseProvider):
     async def _request_json_async(
         self, method: str, url: str, payload: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """Async version of _request_json — uses the shared async httpx client."""
-        is_zarz = get_youtube_endpoints("zarz_clean")
         headers: Dict[str, str] = {
-            "User-Agent": "SpotiFLAC-Mobile/4.3.0" if is_zarz else _DEFAULT_UA,
+            _DEFAULT_UA,
         }
         if method.upper() == "POST":
             headers["Content-Type"] = "application/json"
@@ -220,10 +218,6 @@ class DeezerProvider(BaseProvider):
                 delay *= 2
 
             try:
-                if is_zarz and method.upper() == "POST":
-                    from ..core.http import async_zarz_rate_limiter
-
-                    await async_zarz_rate_limiter.wait_for_slot()
 
                 req_kwargs: Dict[str, Any] = {
                     "headers": headers,
@@ -514,11 +508,7 @@ class DeezerProvider(BaseProvider):
             )
 
             if not api_data.get("success"):
-                logger.warning(
-                    "[deezer] Zarz resolve failed: %s",
-                    api_data.get("message", "Unknown error"),
-                )
-                logger.info("[deezer] Fallback: Trying FlacDownloader...")
+                logger.info("[deezer] Trying FlacDownloader...")
                 return await self._download_via_flacdownloader_async(
                     str(track_id), meta["title"], meta["artist"], output_dir
                 )
@@ -528,7 +518,7 @@ class DeezerProvider(BaseProvider):
             )
             if not download_url:
                 logger.warning("[deezer] No download URL returned by resolver.")
-                logger.info("[deezer] Fallback: Trying FlacDownloader...")
+                logger.info("[deezer] Trying FlacDownloader...")
                 return await self._download_via_flacdownloader_async(
                     str(track_id), meta["title"], meta["artist"], output_dir
                 )

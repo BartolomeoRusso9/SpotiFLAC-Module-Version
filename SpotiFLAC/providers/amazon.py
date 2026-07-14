@@ -21,13 +21,12 @@ from mutagen.id3 import PictureType
 from mutagen.mp4 import MP4, MP4Cover
 
 from ..core.console import print_source_banner
-from ..core.endpoints import get_amazon_endpoint, get_pandora_base_and_path
+from ..core.endpoints import get_amazon_endpoint
 from ..core.errors import ErrorKind, SpotiflacError
 from ..core.flac_validation import validate_and_repair_if_needed
 from ..core.isrc_utils import normalize_isrc
 from ..core.models import DownloadResult, TrackMetadata
 from ..core.musicbrainz import mb_result_to_tags, AsyncMBFetch
-from ..core.quality import to_zarz_codec
 from ..core.tagger import EmbedOptions, embed_metadata_async
 from .base import BaseProvider
 from .tidal import _find_isrc_via_qobuz
@@ -52,6 +51,8 @@ _COMMUNITY_POST_HEADERS = {
     "Content-Type": "application/json",
     "x-api-key": "explore-obscure-chivalry-travesty-blinks",
 }
+
+source_url = "https://open.spotify.com/track/{track_id}"
 
 # ---------------------------------------------------------------------------
 # Backward Compatibility for Tagger
@@ -380,30 +381,6 @@ class AmazonProvider(BaseProvider):
             )
 
         track_id = metadata.id
-
-        # 1. ZARZ.MOE API (Spotify ID)
-        source_url = f"https://open.spotify.com/track/{track_id}"
-        try:
-            _zarz_base, _zarz_path = get_pandora_base_and_path()
-            if _zarz_base:
-                _zarz_url = f"{_zarz_base.rstrip('/')}/v1/resolve"
-                resp = await self._async_http.post(
-                    _zarz_url,
-                    json={"url": source_url},
-                    headers={"User-Agent": "SpotiFLAC-Mobile/4.3.0"},
-                    timeout=15,
-                )
-                data = resp.json()
-                if data.get("success") and "AmazonMusic" in data.get("songUrls", {}):
-                    amz_val = data["songUrls"]["AmazonMusic"]
-                    amazon_url = (
-                        amz_val[0] if isinstance(amz_val, list) and amz_val else amz_val
-                    )
-                    if amazon_url:
-                        logger.info("[amazon] Resolved via Zarz.moe API")
-                        return self._format_amazon_url(amazon_url)
-        except Exception as exc:
-            logger.warning(f"[amazon] Zarz.moe resolve failed: {exc}")
 
         # 2. SONGLINK API (Deezer ID)
         deezer_id = getattr(metadata, "deezer_id", None)
@@ -790,21 +767,7 @@ class AmazonProvider(BaseProvider):
                     inner_codec = await self._get_codec(final_file)
                     if inner_codec == "flac":
                         flac_out = os.path.join(output_dir, f"{asin}_s.flac")
-                        proc = await asyncio.create_subprocess_exec(
-                            _ffmpeg_path(),
-                            "-y",
-                            "-i",
-                            final_file,
-                            "-map",
-                            "0:a:0",
-                            "-c:a",
-                            "flac",
-                            flac_out,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
-                        )
-                        await proc.communicate()
-                        if proc.returncode == 0 and os.path.exists(flac_out):
+                        if await self._remux_to_flac(final_file, flac_out):
                             os.remove(final_file)
                             final_file = flac_out
                             logger.info(
@@ -874,199 +837,31 @@ class AmazonProvider(BaseProvider):
         except Exception:
             return "m4a"
 
-    def _quality_to_zarz_codec(self, quality: str) -> str:
-        """Map quality string to Amazon/Zarz codec name (delegates to core.quality)."""
-        return to_zarz_codec(quality)
-
-    def _build_zarz_url(self, base_url: str) -> str:
-        if not base_url:
-            raise ValueError("Zarz endpoint not configured")
-
-        url = base_url.rstrip("/")
-        if url.endswith("/media") or "/v1/media" in url:
-            return url
-        if "/v1/dl/" in url:
-            return url
-        return f"{url}/media"
-
-    async def _download_from_zarz_api(
-        self, asin: str, output_dir: str, quality: str
-    ) -> tuple[str, dict] | None:
-        codec = self._quality_to_zarz_codec(quality)
-        logger.info("[amazon] Trying Zarz.moe API (ASIN: %s, codec: %s)", asin, codec)
-
-        headers = {"Accept": "application/json", "User-Agent": "SpotiFLAC-Mobile/4.5.0"}
-
-        async def _fetch_zarz(target_codec: str):
-            try:
-                from ..core.http import async_zarz_rate_limiter
-
-                await async_zarz_rate_limiter.wait_for_slot()
-            except ImportError:
-                pass
-
-            zarz_endpoint = get_amazon_endpoint("zarz_media") or get_amazon_endpoint(
-                "zarz"
-            )
-            if not zarz_endpoint:
-                logger.warning(
-                    "[amazon] Zarz media endpoint not configured; skipping Zarz API."
-                )
-                return None
-
-            url = self._build_zarz_url(zarz_endpoint)
-            try:
-                return await self._do_request_with_retry(
-                    "GET",
-                    url,
-                    headers=headers,
-                    params={"asin": asin, "codec": target_codec},
-                    timeout=30,
-                    max_retries=1,
-                    base_delay_s=2.0,
-                )
-            except (httpx.RequestError, httpx.ConnectError) as e:
-                logger.warning("[amazon] Zarz API connection error: %s", e)
-                return None
-
-        resp = await _fetch_zarz(codec)
-
-        if (not resp or resp.status_code != 200) and codec != "flac":
-            logger.info(
-                "[amazon] Codec %s unavailable for ASIN: %s — falling back to FLAC",
-                codec,
-                asin,
-            )
-            codec = "flac"
-            resp = await _fetch_zarz(codec)
-
-        if not resp or resp.status_code != 200:
-            status = resp.status_code if resp else "Connection Error"
-            if status == 429:
-                logger.warning(
-                    "[amazon] Zarz API rate-limited (HTTP 429) for ASIN %s — skipping to next provider",
-                    asin,
-                )
-            else:
-                logger.warning("[amazon] Zarz API failed with status: %s", status)
-            return None
-
+    async def _remux_to_flac(
+        self, input_path: str, output_path: str, decryption_key: str | None = None
+    ) -> bool:
         try:
-            data = resp.json()
-        except ValueError:
-            return None
+            cmd = [_ffmpeg_path(), "-y"]
+            # Iniettiamo la chiave DRM se è presente!
+            if decryption_key:
+                cmd.extend(["-decryption_key", str(decryption_key).strip()])
 
-        if isinstance(data, list):
-            if not data:
-                return None
-            data = data[0]
-
-        audio = data.get("audio", {})
-        stream_url = audio.get("url")
-        decryption_key = audio.get("key", "").strip()
-        returned_codec = audio.get("codec", codec)
-
-        api_meta = {}
-        m = data.get("meta", {})
-        if m:
-            api_meta = {
-                "title": m.get("title"),
-                "artist": m.get("artist"),
-                "album": m.get("album"),
-                "album_artist": m.get("albumArtist"),
-                "track_number": m.get("track"),
-                "total_tracks": m.get("trackTotal"),
-                "disc_number": m.get("disc"),
-                "total_discs": m.get("discTotal"),
-                "isrc": m.get("isrc"),
-                "genre": m.get("genre"),
-                "label": m.get("label"),
-                "copyright": m.get("copyright"),
-                "release_date": m.get("date"),
-            }
-
-        cover_url = data.get("cover", "")
-        if cover_url:
-            api_meta["cover_url"] = (
-                cover_url.replace("{size}", "1200")
-                .replace("{jpegQuality}", "94")
-                .replace("{format}", "jpg")
-            )
-
-        if not stream_url:
-            logger.warning("[amazon] No streamUrl in Zarz API response")
-            return None
-
-        temp_file = os.path.join(output_dir, f"{asin}_zarz.enc")
-        logger.info("[amazon] Downloading encrypted stream from Zarz…")
-
-        try:
-            await self._async_http.stream_to_file(
-                url=stream_url,
-                dest_path=temp_file,
-                progress_cb=self._progress_cb,
-                chunk_size=65536,
-                extra_headers=headers,
-            )
-        except Exception as exc:
-            logger.warning("[amazon] Failed to download Zarz stream: %s", exc)
-            return None
-
-        if returned_codec in ["eac3", "mha1", "opus"]:
-            ext = ".mp4"
-        else:
-            ext = ".flac" if returned_codec == "flac" else ".m4a"
-
-        if decryption_key:
-            logger.info("[amazon] Decrypting Zarz stream…")
-            out = os.path.join(output_dir, f"{asin}{ext}")
+            cmd.extend(["-i", input_path, "-map", "0:a:0", "-c:a", "flac", output_path])
 
             proc = await asyncio.create_subprocess_exec(
-                _ffmpeg_path(),
-                "-y",
-                "-decryption_key",
-                decryption_key,
-                "-i",
-                temp_file,
-                "-c",
-                "copy",
-                out,
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await proc.communicate()
-
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-
+            _, stderr = await proc.communicate()
             if proc.returncode != 0:
-                logger.warning(
-                    "[amazon] Zarz decryption failed: %s",
-                    proc.stderr.decode()[:100] if proc.stderr else "",
-                )
-                if os.path.exists(out):
-                    os.remove(out)
-                return None
-
-            if ext == ".flac":
-                success, repair_msg = await asyncio.to_thread(
-                    validate_and_repair_if_needed, out
-                )
-                if not success:
-                    logger.error("[amazon] FLAC file validation failed: %s", repair_msg)
-                    if os.path.exists(out):
-                        os.remove(out)
-                    return None
-                if repair_msg:
-                    logger.info("[amazon] FLAC file repair status: %s", repair_msg)
-
-            return out, api_meta
-
-        final = os.path.join(output_dir, f"{asin}{ext}")
-        if os.path.exists(final):
-            os.remove(final)
-        os.rename(temp_file, final)
-        return final, api_meta
+                err_msg = stderr.decode(errors="ignore")[-150:].replace("\n", " ")
+                logger.warning("[amazon] FLAC remux failed: %s", err_msg)
+                return False
+            return os.path.exists(output_path)
+        except Exception as exc:
+            logger.warning("[amazon] FLAC remux error: %s", exc)
+            return False
 
     async def _download_from_spotbye_api(
         self, asin: str, output_dir: str, provider_key: str
@@ -1169,30 +964,41 @@ class AmazonProvider(BaseProvider):
             ext = ".flac" if codec == "flac" else ".m4a"
             out = os.path.join(output_dir, f"{asin}{ext}")
 
-            proc = await asyncio.create_subprocess_exec(
-                _ffmpeg_path(),
-                "-y",
-                "-decryption_key",
-                decryption_key.strip(),
-                "-i",
-                temp_file,
-                "-c",
-                "copy",
-                out,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.communicate()
+            if ext == ".flac":
+                if not await self._remux_to_flac(temp_file, out, decryption_key):
+                    raise SpotiflacError(
+                        ErrorKind.FILE_IO,
+                        "Decryption failed: FLAC remux failed",
+                        self.name,
+                    )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    _ffmpeg_path(),
+                    "-y",
+                    "-decryption_key",
+                    decryption_key.strip(),
+                    "-i",
+                    temp_file,
+                    "-c",
+                    "copy",
+                    out,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.communicate()
+
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+
+                if proc.returncode != 0:
+                    raise SpotiflacError(
+                        ErrorKind.FILE_IO,
+                        f"Decryption failed: {proc.stderr.decode()[:100] if proc.stderr else ''}",
+                        self.name,
+                    )
 
             if os.path.exists(temp_file):
                 os.remove(temp_file)
-
-            if proc.returncode != 0:
-                raise SpotiflacError(
-                    ErrorKind.FILE_IO,
-                    f"Decryption failed: {proc.stderr.decode()[:100] if proc.stderr else ''}",
-                    self.name,
-                )
 
             if ext == ".flac":
                 success, repair_msg = await asyncio.to_thread(
@@ -1282,30 +1088,41 @@ class AmazonProvider(BaseProvider):
         if decryption_key:
             out = os.path.join(output_dir, f"{asin}{ext}")
 
-            proc = await asyncio.create_subprocess_exec(
-                _ffmpeg_path(),
-                "-y",
-                "-decryption_key",
-                decryption_key.strip(),
-                "-i",
-                temp_file,
-                "-c",
-                "copy",
-                out,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.communicate()
+            if ext == ".flac":
+                if not await self._remux_to_flac(temp_file, out, decryption_key):
+                    raise SpotiflacError(
+                        ErrorKind.FILE_IO,
+                        "Decryption failed: FLAC remux failed",
+                        self.name,
+                    )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    _ffmpeg_path(),
+                    "-y",
+                    "-decryption_key",
+                    decryption_key.strip(),
+                    "-i",
+                    temp_file,
+                    "-c",
+                    "copy",
+                    out,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.communicate()
+
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+
+                if proc.returncode != 0:
+                    raise SpotiflacError(
+                        ErrorKind.FILE_IO,
+                        f"Decryption failed: {proc.stderr.decode()[:100] if proc.stderr else ''}",
+                        self.name,
+                    )
 
             if os.path.exists(temp_file):
                 os.remove(temp_file)
-
-            if proc.returncode != 0:
-                raise SpotiflacError(
-                    ErrorKind.FILE_IO,
-                    f"Decryption failed: {proc.stderr.decode()[:100] if proc.stderr else ''}",
-                    self.name,
-                )
 
             if ext == ".flac":
                 success, repair_msg = await asyncio.to_thread(
@@ -1351,7 +1168,7 @@ class AmazonProvider(BaseProvider):
     async def _download_from_musicdl_api(
         self, amazon_url: str, asin: str, output_dir: str
     ) -> tuple[str, dict]:
-        """Scaricamento tramite Telegram Bot CDN (dl.musicdl.me)"""
+        """Download via Telegram Bot CDN (dl.musicdl.me)"""
         logger.info("[amazon] Trying MusicDL API (ASIN: %s)", asin)
 
         payload = {"url": amazon_url, "platform": "amazon"}
@@ -1414,7 +1231,18 @@ class AmazonProvider(BaseProvider):
         final = os.path.join(output_dir, f"{asin}{ext}")
         if os.path.exists(final):
             os.remove(final)
-        os.rename(temp_file, final)
+
+        if codec == "flac":
+            logger.info("[amazon] FLAC in M4A from MusicDL. Remuxing...")
+            if await self._remux_to_flac(temp_file, final):
+                os.remove(temp_file)
+            else:
+                logger.warning("[amazon] Remux failed, keeping original as .m4a")
+                ext = ".m4a"
+                final = os.path.join(output_dir, f"{asin}{ext}")
+                os.rename(temp_file, final)
+        else:
+            os.rename(temp_file, final)
 
         api_meta = {}
         if data.get("title"):
@@ -1473,39 +1301,44 @@ class AmazonProvider(BaseProvider):
 
                         if decryption_key:
                             logger.info("[amazon] Decrypting Antra stream...")
-                            proc = await asyncio.create_subprocess_exec(
-                                _ffmpeg_path(),
-                                "-y",
-                                "-decryption_key",
-                                decryption_key.strip(),
-                                "-i",
-                                temp_file,
-                                "-c",
-                                "copy",
-                                out,
-                                stdout=asyncio.subprocess.PIPE,
-                                stderr=asyncio.subprocess.PIPE,
-                            )
-                            await proc.communicate()
-
-                            if os.path.exists(temp_file):
-                                os.remove(temp_file)
-
-                            if proc.returncode == 0:
-                                if ext == ".flac":
+                            if ext == ".flac":
+                                if await self._remux_to_flac(
+                                    temp_file, out, decryption_key
+                                ):
+                                    if os.path.exists(temp_file):
+                                        os.remove(temp_file)
                                     success, repair_msg = await asyncio.to_thread(
                                         validate_and_repair_if_needed, out
                                     )
                                     if success:
                                         return out, {}
-                                    else:
-                                        logger.warning(
-                                            "[amazon] Antra FLAC repair failed: %s",
-                                            repair_msg,
-                                        )
+                                    logger.warning(
+                                        "[amazon] Antra FLAC repair failed: %s",
+                                        repair_msg,
+                                    )
                                 else:
-                                    return out, {}
+                                    logger.warning("[amazon] Antra FLAC remux failed.")
                             else:
+                                proc = await asyncio.create_subprocess_exec(
+                                    _ffmpeg_path(),
+                                    "-y",
+                                    "-decryption_key",
+                                    decryption_key.strip(),
+                                    "-i",
+                                    temp_file,
+                                    "-c",
+                                    "copy",
+                                    out,
+                                    stdout=asyncio.subprocess.PIPE,
+                                    stderr=asyncio.subprocess.PIPE,
+                                )
+                                await proc.communicate()
+
+                                if os.path.exists(temp_file):
+                                    os.remove(temp_file)
+
+                                if proc.returncode == 0:
+                                    return out, {}
                                 logger.warning("[amazon] Antra decryption failed.")
                         else:
                             os.rename(temp_file, out)
@@ -1516,32 +1349,16 @@ class AmazonProvider(BaseProvider):
                     exc,
                 )
 
-        _zarz_ep = get_amazon_endpoint("zarz")
         _s_ep = get_amazon_endpoint("s_stream")
         _spotbye1_ep = get_amazon_endpoint("spotbye1")
         _spotbye2_ep = get_amazon_endpoint("spotbye2")
         _musicdl_ep = get_amazon_endpoint("musicdl")
-        if not any([_zarz_ep, _s_ep, _spotbye1_ep, _spotbye2_ep, _musicdl_ep]):
+        if not any([_s_ep, _spotbye1_ep, _spotbye2_ep, _musicdl_ep]):
             raise SpotiflacError(
                 ErrorKind.UNAVAILABLE,
                 "No Amazon endpoints configured in registry",
                 self.name,
             )
-
-        # 1. ZARZ API (Primary)
-        codec = self._quality_to_zarz_codec(quality)
-        display_quality = (
-            "Best Available Quality (up to 24-bit/48kHz)"
-            if codec == "flac"
-            else quality
-        )
-        print_source_banner("amazon", "", display_quality)
-
-        zarz_result = await self._download_from_zarz_api(asin, output_dir, quality)
-        if zarz_result and os.path.exists(zarz_result[0]):
-            return zarz_result
-
-        logger.info("[amazon] Zarz failed. Trying s API…")
 
         # 2. s API (Fallback 1)
         print_source_banner("amazon", "", fallback_quality)

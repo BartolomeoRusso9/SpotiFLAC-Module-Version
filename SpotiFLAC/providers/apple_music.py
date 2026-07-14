@@ -74,7 +74,7 @@ class AppleMusicProvider(BaseProvider):
                 return data["results"][0].get("trackViewUrl")
         except Exception as e:
             logger.warning(
-                "[apple-music] Risoluzione URL iTunes fallita per l'ISRC %s: %s",
+                "[apple-music] iTunes URL resolution failed for ISRC %s: %s",
                 isrc,
                 e,
             )
@@ -88,7 +88,7 @@ class AppleMusicProvider(BaseProvider):
             query = f"{title} {first_artist}"
             cache_key = f"search_{query}_{isrc}"
 
-            # Controllo cache LRU (operazione in memoria, non bloccante)
+            # LRU cache check (in-memory operation, non-blocking)
             if cache_key in self._url_cache:
                 self._url_cache.move_to_end(cache_key)
                 return self._url_cache[cache_key]
