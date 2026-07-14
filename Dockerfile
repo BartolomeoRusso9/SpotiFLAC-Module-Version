@@ -7,6 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TS_PROFILE_DIR=/tmp/ts_profile \
     DISPLAY=:99
 
+ARG TARGETARCH
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -19,11 +21,23 @@ RUN apt-get update \
         fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
-       > /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
-    && rm -rf /var/lib/apt/lists/*
+# Google Chrome has no official arm64 .deb build, so on arm64 we install
+# Chromium from the Debian repos instead and symlink it to the same command
+# name, so the rest of the app can keep calling "google-chrome-stable"
+# regardless of architecture.
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+        && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+           > /etc/apt/sources.list.d/google-chrome.list \
+        && apt-get update \
+        && apt-get install -y --no-install-recommends google-chrome-stable \
+        && rm -rf /var/lib/apt/lists/*; \
+    else \
+        apt-get update \
+        && apt-get install -y --no-install-recommends chromium \
+        && rm -rf /var/lib/apt/lists/* \
+        && ln -sf /usr/bin/chromium /usr/bin/google-chrome-stable; \
+    fi
 
 COPY pyproject.toml requirements.txt ./
 
