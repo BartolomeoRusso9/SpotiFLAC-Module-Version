@@ -108,6 +108,7 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
 def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProvider]:
     providers: list[BaseProvider] = []
 
+    # 0. Se l'utente chiede esplicitamente SOLO l'estensione (es. -s ext:qobuz-web)
     if name.startswith("ext:"):
         p = _build_provider(name, opts)
         if p:
@@ -119,19 +120,35 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
         providers.append(native)
 
     if getattr(opts, "auto_pair_extensions", True):
-        from .providers import NATIVE_TO_EXTENSION_ID
-        ext_id = NATIVE_TO_EXTENSION_ID.get(name)
-        if ext_id:
+        try:
+            from .extensions.manager import ExtensionManager
+            mgr = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=False)
+            
+            possible_ext_ids = []
+            
             try:
-                from .extensions.manager import ExtensionManager
-                mgr = ExtensionManager(ext_dir=opts.ext_dir)
+                from .providers import NATIVE_TO_EXTENSION_ID
+                if ext_id := NATIVE_TO_EXTENSION_ID.get(name):
+                    possible_ext_ids.append(ext_id)
+            except ImportError:
+                pass
+            
+            # B. Aggiunge in automatico il nome base e la variante "-web" (es. qobuz, qobuz-web, tidal-web)
+            if name not in possible_ext_ids:
+                possible_ext_ids.append(name)
+            if f"{name}-web" not in possible_ext_ids:
+                possible_ext_ids.append(f"{name}-web")
+
+            for ext_id in possible_ext_ids:
                 if mgr.get_installed(ext_id) is not None:
                     ext_provider = _build_provider(f"ext:{ext_id}", opts)
                     if ext_provider:
                         providers.append(ext_provider)
                         logger.debug("[auto-pair] '%s' + extension '%s' added as fallback", name, ext_id)
-            except Exception as e:
-                logger.debug("[auto-pair] Extension for '%s' skipped: %s", name, e)
+                    break
+                    
+        except Exception as e:
+            logger.debug("[auto-pair] Extension for '%s' skipped: %s", name, e)
 
     return providers
 
