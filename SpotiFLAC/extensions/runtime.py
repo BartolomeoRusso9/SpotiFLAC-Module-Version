@@ -243,7 +243,23 @@ class JSRuntime:
             cb = self._progress_cbs.get(call_id)
             if cb is not None:
                 try:
-                    cb(float(msg.get("value", 0.0)))
+                    # NEW: se il callback accetta bytes_received/bytes_total
+                    # (firma "(fraction)" vs "(current, total)"), prova prima
+                    # la forma estesa così JSExtensionProvider._progress_adapter
+                    # può ricevere byte reali invece della sola frazione 0..1
+                    # quando disponibili (file.download li fornisce sempre ora).
+                    bytes_received = msg.get("bytesReceived")
+                    bytes_total = msg.get("bytesTotal")
+                    if bytes_received is not None and bytes_total:
+                        cb(float(msg.get("value", 0.0)), int(bytes_received), int(bytes_total))
+                    else:
+                        cb(float(msg.get("value", 0.0)))
+                except TypeError:
+                    # Il callback registrato accetta solo (fraction,)
+                    try:
+                        cb(float(msg.get("value", 0.0)))
+                    except Exception:
+                        logger.debug("[JSRuntime] progress callback raised, ignored")
                 except Exception:
                     logger.debug("[JSRuntime] progress callback raised, ignored")
             return

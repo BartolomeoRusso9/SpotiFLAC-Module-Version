@@ -43,9 +43,18 @@ if (!isMainThread) {
   const LEN    = new Uint32Array(sharedBuf, 4, 1);  // [0] lunghezza payload
   const DOFF   = 8;                                  // offset dati nel buffer
 
+  // NEW: traccia il callId della chiamata Python->Worker attualmente in
+  // esecuzione, così le bridge_request generate al suo interno (es.
+  // file.download) possono essere associate allo stesso callId per il
+  // routing dei messaggi "progress" verso il _progress_cbs[seq] giusto.
+  let _currentCallId = null;
+
   /** Chiama il main thread in modo *sincrono* via SharedArrayBuffer. */
   function bridgeCall(method, args) {
-    const payload = Buffer.from(JSON.stringify({ method, args }), 'utf8');
+    const payload = Buffer.from(
+      JSON.stringify({ method, args, callId: _currentCallId }), // NEW: callId incluso
+      'utf8'
+    );
     if (DOFF + payload.length > sharedBuf.byteLength) {
       throw new Error(`Bridge payload too large: ${payload.length} bytes`);
     }
@@ -215,6 +224,7 @@ if (!isMainThread) {
 
   // Riceve comandi dal main e li esegue *sincrono* (siamo già in un Worker)
   parentPort.on('message', ({ id, call, args }) => {
+    _currentCallId = id; // NEW: rende id disponibile a bridgeCall() durante fn(...)
     try {
       const fn = _ext[call];
       if (typeof fn !== 'function') {
@@ -231,6 +241,8 @@ if (!isMainThread) {
       parentPort.postMessage({ id, result });
     } catch (e) {
       parentPort.postMessage({ id, error: (e && e.message) || String(e) });
+    } finally {
+      _currentCallId = null; // NEW
     }
   });
 
@@ -282,13 +294,13 @@ async function handleBridgeRequest() {
   let error  = null;
 
   try {
-    const { method, args } = req;
+    const { method, args, callId } = req; // NEW: callId destrutturato
     if (method === 'http.get') {
       result = await nodeHttpRequest('GET', args.url, null, args.headers);
     } else if (method === 'http.post') {
       result = await nodeHttpRequest('POST', args.url, args.body, args.headers);
     } else if (method === 'file.download') {
-      result = await nodeFileDownload(args.url, args.outputPath, args.opts);
+      result = await nodeFileDownload(args.url, args.outputPath, args.opts, callId); // NEW: passa callId
     } else if (method === 'session.signedFetch') {
       // Non gestibile qui in Node puro: serve il vero SignedSessionClient
       // Python (HMAC signing, ciclo bootstrap/challenge/verify/exchange,
@@ -362,8 +374,14 @@ function nodeHttpRequest(method, rawUrl, body, headers, _depth = 0) {
   });
 }
 
-/** Scarica un URL su disco (streaming). */
-function nodeFileDownload(rawUrl, outputPath, opts) {
+/**
+ * Scarica un URL su disco (streaming), emettendo eventi "progress" verso
+ * Python ogni volta che vengono ricevuti almeno PROGRESS_THRESHOLD byte,
+ * con velocità calcolata sull'intervallo (non sulla media totale) — stesso
+ * schema di ItemProgressWriter nel backend Go (progressUpdateThreshold =
+ * 128 * 1024).
+ */
+function nodeFileDownload(rawUrl, outputPath, opts, callId) {
   return new Promise((resolve) => {
     let u;
     try { u = new URL(rawUrl); } catch (e) {
@@ -384,6 +402,37 @@ function nodeFileDownload(rawUrl, outputPath, opts) {
       headers:  Object.assign({}, extraHeaders),
     };
 
+    // ── Progress tracking (NEW) ──────────────────────────────────────
+    const PROGRESS_THRESHOLD = 128 * 1024;
+    let received = 0;
+    let total = 0;
+    let lastReportedBytes = 0;
+    let lastReportedTime = Date.now();
+
+    const emitProgress = (finalValue) => {
+      if (!callId) return;
+      const now = Date.now();
+      const elapsedS = (now - lastReportedTime) / 1000;
+      const bytesInInterval = received - lastReportedBytes;
+      const speedMBps = elapsedS > 0 ? (bytesInInterval / (1024 * 1024)) / elapsedS : 0;
+      const value = finalValue !== undefined
+        ? finalValue
+        : (total > 0 ? Math.min(0.999, received / total) : 0);
+
+      process.stdout.write(JSON.stringify({
+        type: 'progress',
+        callId,
+        value,
+        bytesReceived: received,
+        bytesTotal: total,
+        speedMBps,
+      }) + '\n');
+
+      lastReportedBytes = received;
+      lastReportedTime = now;
+    };
+    // ──────────────────────────────────────────────────────────────────
+
     const stream = fs.createWriteStream(outputPath);
     const req = lib.request(reqOpts, (res) => {
       if (res.statusCode >= 400) {
@@ -393,8 +442,19 @@ function nodeFileDownload(rawUrl, outputPath, opts) {
         resolve({ success: false, error: `HTTP ${res.statusCode}` });
         return;
       }
+
+      total = parseInt(res.headers['content-length'] || '0', 10) || 0; // NEW
+
+      res.on('data', (chunk) => { // NEW
+        received += chunk.length;
+        if (received - lastReportedBytes >= PROGRESS_THRESHOLD) {
+          emitProgress();
+        }
+      });
+
       res.pipe(stream);
       stream.on('finish', () => {
+        emitProgress(1); // NEW: segnale finale al 100%
         stream.close(() => {
           try {
             const sz = fs.statSync(outputPath).size;

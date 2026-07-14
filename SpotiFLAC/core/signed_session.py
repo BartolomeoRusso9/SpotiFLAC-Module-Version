@@ -592,6 +592,63 @@ class SignedSessionClient:
 
         await self.exchange_grant(grant)
 
+    async def authenticate_with_turnstile(
+        self,
+        timeout: float = 60,
+        hold_open_seconds: float = 3.0,
+    ) -> None:
+        """
+        Autenticazione automatica tramite browser reale (core.turnstile),
+        alternativa non-interattiva a authenticate_with_manual_grant().
+
+        Perché funziona dove verify_challenge() fallisce: qui è la PAGINA
+        stessa (dentro un vero Chrome pilotato da nodriver) a risolvere il
+        Turnstile e a chiamare il proprio /challenge/verify coi suoi cookie
+        di sessione (cf_clearance incluso) — non serve replicare quella
+        richiesta da Python. Dobbiamo solo:
+        1. bootstrap() per ottenere challenge_id + sitekey;
+        2. costruire l'URL di sfida con lo stesso "cb" del flusso manuale;
+        3. far risolvere il widget al browser reale e catturare il grant
+            dal redirect finale (?grant=...) tramite solve_with_callback();
+        4. scambiare il grant con exchange_grant(), come nel flusso manuale.
+        """
+        boot_result = await self.bootstrap()
+        if boot_result is True:
+            return  # sessione già ottenuta, nessuna verifica necessaria
+
+        if not self.pending_challenge_id or not self.pending_sitekey:
+            raise RuntimeError(
+                "bootstrap() non ha restituito challenge_id/sitekey: "
+                "impossibile guidare Turnstile automaticamente."
+            )
+
+        dummy_callback = f"http://{_LOCAL_CALLBACK_HOST}:1{_LOCAL_CALLBACK_PATH}"
+        challenge_url = self._build_challenge_url_with_callback(
+            self.pending_challenge_id, dummy_callback
+        )
+
+        from .turnstile import solve_with_callback
+
+        # solve_with_callback è sincrona e fa asyncio.run() al suo interno:
+        # va eseguita in un thread separato per non entrare in conflitto
+        # con il loop asyncio già in esecuzione qui.
+        token, grant = await asyncio.to_thread(
+            solve_with_callback,
+            self.pending_sitekey,
+            challenge_url,
+            int(timeout),
+            hold_open_seconds,
+        )
+
+        if not grant:
+            raise RuntimeError(
+                "Turnstile risolto (token ottenuto) ma nessun 'grant' catturato "
+                "dal redirect di callback. Prova ad aumentare hold_open_seconds "
+                "per dare tempo alla pagina di completare la verify() interna."
+            )
+
+        await self.exchange_grant(grant)
+    
     @staticmethod
     def _emit_verification_url(
         url: str, callback: "Callable[[str], None] | None"
@@ -919,39 +976,32 @@ async def perform_signed_fetch(
     on_verification_url: "Callable[[str], None] | None" = None,
     grant_input: "Callable[[], str] | None" = None,
     timeout: float = _MANUAL_GRANT_TIMEOUT_S,
+    use_turnstile_browser: bool = True,
 ) -> dict:
-    """
-    High-level handler for a `session.signedFetch(method, path, body, headers)`
-    call coming from the JS extension worker. Transparently bootstraps the
-    session the first time it's needed, then performs the signed request.
-
-    Authentication (when needed) is completely MANUAL, without any
-    automated browser: the verification URL is passed to
-    `on_verification_url(url)` if provided (otherwise printed/logged), you
-    open it in any browser, solve the Turnstile, and paste the
-    grant you see in DevTools → Network → verify → Preview
-    ({"grant": "gr_...", "expires_in": 60}) — see
-    SignedSessionClient.authenticate_with_manual_grant() for details.
-    `timeout` limits how long to wait for grant entry (default 5 min).
-
-    Returns a JSON-serializable dict matching what index.js's signedJSON()
-    expects: {"statusCode": int, "body": str} on success, or {"error": str}
-    on failure (including incomplete/cancelled/expired verification).
-    """
     try:
         if not client.authenticated:
             try:
-                await client.authenticate_with_manual_grant(
-                    on_verification_url=on_verification_url,
-                    grant_input=grant_input,
-                    timeout=timeout,
-                )
+                if use_turnstile_browser:
+                    await client.authenticate_with_turnstile(timeout=min(timeout, 90))
+                else:
+                    raise RuntimeError("turnstile automation disabled")
             except Exception as exc:
-                logger.warning(
-                    "[signed_session:%s] Autenticazione manuale fallita: %s",
-                    client.namespace, exc,
+                logger.info(
+                    "[signed_session:%s] Turnstile automatico fallito (%s), "
+                    "fallback al flusso manuale.", client.namespace, exc,
                 )
-                return {"error": str(exc)}
+                try:
+                    await client.authenticate_with_manual_grant(
+                        on_verification_url=on_verification_url,
+                        grant_input=grant_input,
+                        timeout=timeout,
+                    )
+                except Exception as exc2:
+                    logger.warning(
+                        "[signed_session:%s] Autenticazione manuale fallita: %s",
+                        client.namespace, exc2,
+                    )
+                    return {"error": str(exc2)}
 
         resp = await client.request(method, path, json_body=body, extra_headers=headers)
 

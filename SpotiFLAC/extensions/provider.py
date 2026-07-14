@@ -20,8 +20,8 @@ e.g. "ext:soundcloud", "ext:pandora".
 from __future__ import annotations
 
 import asyncio
-import logging
 import contextlib
+import logging
 import queue
 import threading
 from pathlib import Path
@@ -108,7 +108,7 @@ class JSExtensionProvider(BaseProvider):
     def set_stop_event(self, event) -> None:
         """Retrocompatibilità sincrona."""
         self._stop_event = event
-    
+
     # ─────────────────────── helpers ──────────────────────────
 
     def _load_extension(self, ext_id: str) -> InstalledExtension:
@@ -165,7 +165,7 @@ class JSExtensionProvider(BaseProvider):
                     rt = self._create_runtime()
                     self._runtimes_created += 1
                     self._all_runtimes.append(rt)
-        
+
         # If we're at the max process limit, we need to wait for one to free up
         if rt is None:
             try:
@@ -205,14 +205,14 @@ class JSExtensionProvider(BaseProvider):
                     pass
             self._all_runtimes.clear()
             self._runtimes_created = 0
-            
+
             # Empty the waiting room
             while not self._idle_runtimes.empty():
                 try:
                     self._idle_runtimes.get_nowait()
                 except queue.Empty:
                     break
-                    
+
         if self._signed_session is not None:
             try:
                 loop = asyncio.get_running_loop()
@@ -273,7 +273,7 @@ class JSExtensionProvider(BaseProvider):
         output_dir:           str,
         *,
         filename_format:      str          = "{title} - {artist}",
-        position:             int          = 1,
+        position:              int          = 1,
         include_track_num:    bool         = False,
         use_album_track_num:  bool         = False,
         first_artist_only:    bool         = False,
@@ -282,6 +282,7 @@ class JSExtensionProvider(BaseProvider):
         lyrics_providers:     list | None  = None,
         enrich_metadata:      bool         = False,
         enrich_providers:     list | None  = None,
+        qobuz_token:          str | None   = None,
         is_album:             bool         = False,
         quality:              str          = "best",
         **kwargs,
@@ -289,12 +290,19 @@ class JSExtensionProvider(BaseProvider):
         try:
             return await self._do_download_async(
                 metadata, output_dir,
-                filename_format   = filename_format,
-                position          = position,
-                include_track_num = include_track_num,
-                use_album_track_num = use_album_track_num,
-                first_artist_only = first_artist_only,
-                quality           = quality,
+                filename_format      = filename_format,
+                position             = position,
+                include_track_num    = include_track_num,
+                use_album_track_num  = use_album_track_num,
+                first_artist_only    = first_artist_only,
+                quality              = quality,
+                allow_fallback       = allow_fallback,
+                embed_lyrics         = embed_lyrics,
+                lyrics_providers     = lyrics_providers,
+                enrich_metadata      = enrich_metadata,
+                enrich_providers     = enrich_providers,
+                qobuz_token          = qobuz_token,
+                is_album             = is_album,
             )
         except SpotiflacError as e:
             return DownloadResult.fail(self.name, str(e))
@@ -313,6 +321,13 @@ class JSExtensionProvider(BaseProvider):
         use_album_track_num: bool,
         first_artist_only:   bool,
         quality:             str,
+        allow_fallback:      bool         = True,
+        embed_lyrics:        bool         = False,
+        lyrics_providers:    list | None  = None,
+        enrich_metadata:     bool         = False,
+        enrich_providers:    list | None  = None,
+        qobuz_token:         str | None   = None,
+        is_album:            bool         = False,
     ) -> DownloadResult:
         avail = await asyncio.to_thread(
             self.check_availability,
@@ -356,39 +371,264 @@ class JSExtensionProvider(BaseProvider):
                 return
             try:
                 current = int(max(0.0, min(1.0, fraction)) * 10_000)
-                self._progress_cb(current, 10_000)
+                result = self._progress_cb(current, 10_000)
+                # If the callback is async and returns a coroutine, we can't await it here
+                # (we're in a sync context via to_thread), so we need to close it to prevent warnings
+                if asyncio.iscoroutine(result):
+                    result.close()
             except Exception:
                 pass
 
         logger.info("[%s] Downloading '%s'", self.name, metadata.title)
-        dl_result = await asyncio.to_thread(
-            self._call,
-            "download",
-            track_id, quality, str(output_path), None,
-            progress_cb = _progress_adapter,
+
+        # ── Progress fallback via disk polling ──────────────────────────
+        # Copre il caso in cui l'estensione bypassi global.file.download
+        # (es. scrivendo segmenti manualmente via file.writeBytes) e quindi
+        # non generi mai eventi "progress" reali dal bridge. Se invece gli
+        # eventi reali arrivano (ora emessi da nodeFileDownload in
+        # _bridge.js), questo fallback è semplicemente ridondante e innocuo.
+        poll_stop = asyncio.Event()
+        poll_task = asyncio.create_task(
+            self._poll_file_progress_async(output_path, poll_stop)
         )
+
+        try:
+            dl_result = await asyncio.to_thread(
+                self._call,
+                "download",
+                track_id, quality, str(output_path), None,
+                progress_cb = _progress_adapter,
+            )
+        finally:
+            poll_stop.set()
+            poll_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await poll_task
 
         if not dl_result or not dl_result.get("success"):
             err = (dl_result or {}).get("error_message", "download failed")
             return DownloadResult.fail(self.name, err)
 
-        actual_path = dl_result.get("file_path") or str(output_path)
-        fmt         = _ext_to_fmt(Path(actual_path).suffix)
+        # ── Riassembla eventuali segmenti (es. Tidal DASH via estensione) ──
+        actual_path = await self._finalize_segments_async(dl_result, output_path)
+        if actual_path is None:
+            return DownloadResult.fail(
+                self.name, "Download returned no usable audio (segments unmergeable)"
+            )
+
+        fmt = _ext_to_fmt(Path(actual_path).suffix)
+
+        # ── MusicBrainz, come nei provider nativi (tidal.py, qobuz.py, ecc.) ──
+        mb_tags: dict[str, str] = {}
+        if enrich_metadata and metadata.isrc:
+            try:
+                from ..core.musicbrainz import fetch_mb_metadata_async, mb_result_to_tags
+                from ..core.isrc_utils import normalize_isrc
+
+                isrc_clean = normalize_isrc(metadata.isrc)
+                if isrc_clean:
+                    mb_data = await fetch_mb_metadata_async(isrc_clean)
+                    mb_tags = mb_result_to_tags(mb_data)
+            except Exception as e:
+                logger.debug("[%s] MusicBrainz lookup failed (non-fatal): %s", self.name, e)
 
         try:
             from ..core.tagger import embed_metadata_async, EmbedOptions
+            from ..core.download_validation import validate_downloaded_track_async
+
+            expected_s = metadata.duration_ms // 1000
+            valid, err_msg = await validate_downloaded_track_async(actual_path, expected_s)
+            if not valid:
+                logger.warning("[%s] Validation failed: %s", self.name, err_msg)
+                return DownloadResult.fail(self.name, f"Validation failed: {err_msg}")
+
             await embed_metadata_async(
                 Path(actual_path),
                 metadata,
                 EmbedOptions(
                     cover_url          = metadata.cover_url or "",
                     first_artist_only  = first_artist_only,
+                    embed_lyrics       = embed_lyrics,
+                    lyrics_providers   = lyrics_providers or [],
+                    enrich             = enrich_metadata,
+                    enrich_providers   = enrich_providers,
+                    enrich_qobuz_token = qobuz_token or "",
+                    is_album           = is_album,
+                    extra_tags         = mb_tags,
                 ),
             )
         except Exception as e:
             logger.warning("[%s] Tagging failed (non-fatal): %s", self.name, e)
 
         return DownloadResult.ok(self.name, actual_path, fmt)
+
+    # ─────────────────────── Segment reassembly ────────────────────────
+
+    async def _finalize_segments_async(
+        self, dl_result: dict, output_path: Path
+    ) -> str | None:
+        """
+        Alcune estensioni (es. tidal-web, che scarica via DASH/fMP4) possono
+        restituire i segmenti scaricati invece di un unico file audio pronto.
+        Contratto atteso, in ordine di priorità:
+
+          1. dl_result["file_path"] esiste ed è un file valido e non vuoto
+             → nessun lavoro extra, comportamento originale.
+          2. dl_result["segments"] è una lista ordinata di path assoluti
+             (init segment incluso, se presente) → li concateniamo come
+             byte grezzi in un file temporaneo e poi rimuxiamo con ffmpeg
+             (stesso schema di TidalProvider._download_from_manifest_async
+             + _mux_audio_async, generalizzato per qualsiasi estensione).
+          3. Fallback difensivo: se né 1 né 2 valgono, ma esistono file
+             residui accanto a output_path che matchano il pattern
+             "<stem>.partNN" o "<stem>.segNN" lasciati dall'estensione,
+             li ordiniamo e li trattiamo come (2).
+
+        Returns il path finale (str) del file audio pronto per il tagging,
+        o None se non è stato possibile ricostruire un file valido.
+        """
+        file_path = dl_result.get("file_path")
+        if file_path and Path(file_path).exists() and Path(file_path).stat().st_size > 0:
+            return file_path
+
+        segments: list[str] = dl_result.get("segments") or []
+
+        if not segments:
+            parent = output_path.parent
+            stem = output_path.stem
+            candidates = sorted(
+                parent.glob(f"{stem}.part*"),
+                key=lambda p: p.name,
+            ) or sorted(
+                parent.glob(f"{stem}.seg*"),
+                key=lambda p: p.name,
+            )
+            segments = [str(p) for p in candidates if p.exists() and p.stat().st_size > 0]
+
+        if not segments:
+            return None
+
+        logger.info(
+            "[%s] Reassembling %d segment(s) into a single stream…",
+            self.name, len(segments),
+        )
+
+        raw_concat = output_path.with_suffix(".raw.tmp")
+        try:
+            with open(raw_concat, "wb") as out_f:
+                for seg_path in segments:
+                    with open(seg_path, "rb") as seg_f:
+                        out_f.write(seg_f.read())
+        except Exception as e:
+            logger.error("[%s] Segment concatenation failed: %s", self.name, e)
+            if raw_concat.exists():
+                raw_concat.unlink(missing_ok=True)
+            return None
+
+        codec = "flac"
+        try:
+            rc, stdout, stderr = await self._run_ffprobe(
+                "ffprobe", "-v", "quiet",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(raw_concat),
+            )
+            if rc == 0 and stdout.strip():
+                codec = stdout.strip().lower()
+            else:
+                logger.warning(
+                    "[%s] ffprobe failed on reassembled stream, guessing codec: %s",
+                    self.name, stderr.strip()[:150],
+                )
+        except Exception:
+            logger.warning("[%s] ffprobe failed to detect codec after reassembly", self.name)
+
+        is_lossy = codec not in ("flac", "alac")
+        final_dest = (
+            output_path.with_suffix(".m4a") if is_lossy else output_path.with_suffix(".flac")
+        )
+
+        cmd = ["ffmpeg", "-y", "-i", str(raw_concat), "-vn"]
+        cmd.extend(["-c:a", "copy"] if is_lossy else ["-c:a", "flac"])
+        cmd.append(str(final_dest))
+
+        try:
+            rc, stdout, stderr = await self._run_ffmpeg(*cmd)
+        finally:
+            if raw_concat.exists():
+                raw_concat.unlink(missing_ok=True)
+            for seg_path in segments:
+                try:
+                    Path(seg_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        if rc != 0:
+            logger.error("[%s] ffmpeg mux failed: %s", self.name, stderr[:300])
+            if final_dest.exists():
+                final_dest.unlink(missing_ok=True)
+            return None
+
+        logger.info("[%s] Segments merged into: %s", self.name, final_dest.name)
+        return str(final_dest)
+
+    # ─────────────────────── Progress polling fallback ─────────────────
+
+    async def _poll_file_progress_async(
+        self, output_path: Path, stop_event: asyncio.Event
+    ) -> None:
+        """
+        Osserva la crescita di output_path (o dei suoi varianti temporanei
+        più comuni: .part, .tmp, .download) e alimenta self._progress_cb
+        con una stima percentuale quando nessun evento "progress" reale
+        arriva dal bridge JS (es. estensioni che scrivono i propri file
+        senza passare da global.file.download).
+        """
+        if self._progress_cb is None:
+            return
+
+        candidates = [
+            output_path,
+            output_path.with_suffix(output_path.suffix + ".part"),
+            output_path.with_suffix(output_path.suffix + ".tmp"),
+            output_path.with_suffix(output_path.suffix + ".download"),
+        ]
+
+        last_size = 0
+        elapsed_polls = 0
+
+        try:
+            while not stop_event.is_set():
+                await asyncio.sleep(0.3)
+                elapsed_polls += 1
+
+                size = 0
+                for cand in candidates:
+                    try:
+                        if cand.exists():
+                            size = max(size, cand.stat().st_size)
+                    except OSError:
+                        continue
+
+                if size <= 0:
+                    continue
+
+                fraction = min(0.97, 1 - (1 / (1 + elapsed_polls * 0.15)))
+
+                if size != last_size:
+                    last_size = size
+                    try:
+                        current = int(fraction * 10_000)
+                        result = self._progress_cb(current, 10_000)
+                        # If the callback is async, await it
+                        if asyncio.iscoroutine(result):
+                            await result
+                    except Exception:
+                        pass
+        except asyncio.CancelledError:
+            pass
+
 
 # ─────────────────────────────────────────────────────────────
 #  Helpers & Factory
