@@ -6,9 +6,11 @@ import logging
 import sys
 import threading
 import time
+import queue as _queue
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
+
 
 from tqdm import tqdm
 
@@ -154,6 +156,37 @@ class DownloadItem:
     error_message: str = ""
     file_path: str = ""
 
+class _CrossLoopLock:
+    """
+    Adatta un threading.Lock (funziona correttamente attraverso PIÙ event
+    loop/thread, a differenza di asyncio.Lock che si lega permanentemente
+    al loop del thread che lo usa per primo) a un context manager
+    awaitable, senza mai bloccare l'event loop chiamante: prova ad
+    acquisire in modo non bloccante e, se occupato, cede il controllo con
+    asyncio.sleep() finché non si libera.
+
+    Necessario perché DownloadManager/DownloadBroadcaster sono singleton
+    globali usati da tracce scaricate in thread paralleli, ognuno col
+    proprio event loop (ogni thread fa il proprio asyncio.run()): un
+    asyncio.Lock creato la prima volta si legherebbe per sempre al loop
+    di quel primo thread, e ogni altro thread/loop che lo acquisisce
+    andrebbe in crash con "RuntimeError: ... is bound to a different
+    event loop" — lo stesso bug già visto e risolto per ProgressManager.
+    """
+
+    def __init__(self, poll_interval: float = 0.01):
+        self._lock = threading.Lock()
+        self._poll_interval = poll_interval
+
+    async def __aenter__(self):
+        while not self._lock.acquire(blocking=False):
+            await asyncio.sleep(self._poll_interval)
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self._lock.release()
+        return False
+
 
 class DownloadBroadcaster:
     _instance = None
@@ -163,7 +196,7 @@ class DownloadBroadcaster:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._listeners = set()
-            cls._instance._lock = asyncio.Lock()
+            cls._instance._lock = _CrossLoopLock()
             cls._instance._last_broadcast_time = 0.0
         return cls._instance
 
@@ -395,46 +428,72 @@ class ProgressManager:
     _master_bar: tqdm | None = None
     _master_enabled: bool = False
 
-    _event_queue: asyncio.Queue[tuple[str, str, int, int | None]] | None = None
-    _worker_task: asyncio.Task | None = None
-    _start_lock: asyncio.Lock | None = None
+    # queue.Queue (thread-safe nativa) invece di asyncio.Queue: non ha
+    # alcun concetto di "event loop di appartenenza", quindi funziona
+    # correttamente anche con più thread paralleli che girano ognuno il
+    # proprio event loop (ogni thread di download fa il proprio
+    # asyncio.run()). Un asyncio.Queue creato durante il primo
+    # enqueue_progress() si legherebbe per sempre a quel loop specifico:
+    # ogni altro thread/loop che tenta un .put()/.get() va in crash con
+    # "RuntimeError: <Queue ...> is bound to a different event loop"
+    # (esattamente il traceback osservato).
+    _event_queue: "_queue.Queue | None" = None
+    _worker_thread: threading.Thread | None = None
+    _worker_lock = threading.Lock()
+    _stop_event: threading.Event | None = None
 
     @classmethod
-    async def start_worker(cls) -> None:
-        # Lock di sicurezza per evitare l'avvio multiplo di worker (Race Condition)
-        if cls._start_lock is None:
-            cls._start_lock = asyncio.Lock()
-
-        async with cls._start_lock:
+    def start_worker(cls) -> None:
+        """
+        Avvia il thread consumer in modo idempotente e thread-safe.
+        Non è più una coroutine: un vero threading.Thread di sistema non
+        è legato a nessun event loop, quindi consuma eventi inseriti da
+        QUALUNQUE thread/loop senza mai incappare nel problema sopra.
+        """
+        with cls._worker_lock:
             if cls._event_queue is None:
-                cls._event_queue = asyncio.Queue()
+                cls._event_queue = _queue.Queue()
+            if cls._stop_event is None:
+                cls._stop_event = threading.Event()
 
-            if cls._worker_task and not cls._worker_task.done():
+            if cls._worker_thread is not None and cls._worker_thread.is_alive():
                 return
 
-            cls._worker_task = asyncio.create_task(cls._process_events())
+            cls._stop_event.clear()
+            cls._worker_thread = threading.Thread(
+                target=cls._process_events_sync, daemon=True
+            )
+            cls._worker_thread.start()
 
     @classmethod
     async def stop_worker(cls) -> None:
-        if cls._worker_task:
-            cls._worker_task.cancel()
-            try:
-                await cls._worker_task
-            except asyncio.CancelledError:
-                pass
-            cls._worker_task = None
+        if cls._worker_thread is not None:
+            if cls._stop_event is not None:
+                cls._stop_event.set()
+            if cls._event_queue is not None:
+                # sblocca il .get() bloccante nel thread consumer
+                try:
+                    cls._event_queue.put_nowait(None)
+                except Exception:
+                    pass
+            cls._worker_thread.join(timeout=5)
+            cls._worker_thread = None
 
     @classmethod
-    async def _process_events(cls) -> None:
-        if cls._event_queue is None:
-            cls._event_queue = asyncio.Queue()
-
-        while True:
+    def _process_events_sync(cls) -> None:
+        assert cls._event_queue is not None
+        while not (cls._stop_event and cls._stop_event.is_set()):
             try:
-                item_id, track_name, current_bytes, total_bytes = (
-                    await cls._event_queue.get()
-                )
+                event = cls._event_queue.get()
+            except Exception:
+                break
 
+            if event is None:
+                break
+
+            item_id, track_name, current_bytes, total_bytes = event
+
+            try:
                 with tqdm.get_lock():
                     bar = cls._bars.get(item_id)
                     if bar is None:
@@ -453,23 +512,27 @@ class ProgressManager:
 
                     if total_bytes is not None and current_bytes >= total_bytes:
                         cls.release_bar(item_id)
-
-            except asyncio.CancelledError:
-                break
             except Exception:
                 logging.getLogger(__name__).exception(
                     "ProgressManager consumer crashed"
                 )
 
     @classmethod
-    async def enqueue_progress(
+    def enqueue_progress(
         cls, item_id: str, track_name: str, current_bytes: int, total_bytes: int | None
     ) -> None:
-        await cls.start_worker()
+        """
+        Ora sincrona: un put su queue.Queue è già non bloccante e
+        thread-safe, non serve alcun event loop né `await`.
+        """
+        cls.start_worker()
         if cls._event_queue is not None:
-            await cls._event_queue.put(
-                (item_id, track_name, current_bytes, total_bytes)
-            )
+            try:
+                cls._event_queue.put_nowait(
+                    (item_id, track_name, current_bytes, total_bytes)
+                )
+            except Exception:
+                pass
 
     @classmethod
     def _allocate_slot(cls, item_id: str) -> int:
@@ -628,13 +691,11 @@ class ProgressCallback:
         current_bytes = max(0, current_bytes)
         total_bytes = total_bytes if total_bytes > 0 else None
 
-        # Fire-and-forget: evochiamo l'aggiornamento senza bloccare la lettura dello stream
-        asyncio.create_task(
-            ProgressManager.enqueue_progress(
-                self._item_id, self._track_name, current_bytes, total_bytes
-            )
+        # enqueue_progress ora è sincrona (queue.Queue thread-safe):
+        # l'inserimento è istantaneo, non serve più asyncio.create_task.
+        ProgressManager.enqueue_progress(
+            self._item_id, self._track_name, current_bytes, total_bytes
         )
-
         current_mb = current_bytes / (1024 * 1024)
         total_mb = total_bytes / (1024 * 1024) if total_bytes else 0.0
 
