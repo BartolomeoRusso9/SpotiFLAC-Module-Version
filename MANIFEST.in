@@ -1,1 +1,2 @@
 recursive-include SpotiFLAC/frontend *
+recursive-include SpotiFLAC/extensions *

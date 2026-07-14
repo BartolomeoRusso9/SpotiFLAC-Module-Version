@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "1.3.2"
+version = "1.3.3"
 description = "Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -58,6 +58,9 @@ spotiflac = "SpotiFLAC.launcher:main"
 [tool.setuptools]
 packages = { find = { include = ["SpotiFLAC*"] } }
 include-package-data = true
+
+[tool.setuptools.package-data]
+"SpotiFLAC" = ["extensions/*.js", "extensions/**/*.js"]
 
 [tool.setuptools.data-files]
 "frontend" = [
