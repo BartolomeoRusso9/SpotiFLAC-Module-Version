@@ -6,6 +6,7 @@ Manages the lifecycle of locally installed extensions:
   - Installation / update from URL
   - Removal
   - Listing
+  - Auto-setup of download providers on startup
 
 Default directory: ~/.spotiflac/extensions/{name}/
   ├── index.js
@@ -103,28 +104,68 @@ class ExtensionManager:
     Central point for managing SpotiFLAC JS extensions.
 
     Quick example:
-        em = ExtensionManager()
-        em.install("soundcloud")          # from official registry
-        em.install_from_url("https://...my-ext.spotiflac-ext")
-        for ext in em.list_installed():
-            print(ext.name, ext.version)
-        em.uninstall("soundcloud")
+        em = ExtensionManager(auto_install_downloads=True)
+        # Automaticamente scarica o aggiorna i provider di download all'avvio
     """
 
     def __init__(
         self,
         ext_dir: str | Path | None = None,
         timeout: float = 20.0,
+        auto_install_downloads: bool = True,  # Attivato di default
     ) -> None:
         self.ext_dir = Path(ext_dir) if ext_dir else DEFAULT_EXT_DIR
         self.timeout = timeout
         self.ext_dir.mkdir(parents=True, exist_ok=True)
 
+        if auto_install_downloads:
+            self.ensure_download_providers()
+
+    # ── Auto Setup ───────────────────────────────────────────
+
+    def ensure_download_providers(self, registry_url: str = REGISTRY_URL) -> None:
+        """
+        Verifica il registry remoto e installa (o aggiorna) automaticamente
+        tutte le estensioni classificate come download provider.
+        """
+        logger.info("[ExtMgr] Controllo automatico estensioni di download all'avvio...")
+        try:
+            entries = self.fetch_registry(registry_url)
+        except Exception as e:
+            logger.warning("[ExtMgr] Impossibile recuperare il registry per l'auto-setup: %s", e)
+            return
+
+        for entry in entries:
+            # Identifica se l'estensione è un download provider tramite categoria o tag
+            is_download = (
+                entry.category == "download_provider" 
+                or "download" in entry.tags 
+                or "download_provider" in entry.tags
+            )
+            
+            if not is_download:
+                continue
+
+            existing = self.get_installed(entry.id)
+            
+            # Se è già installata e la versione corrisponde, salta senza fare download
+            if existing and existing.version == entry.version:
+                logger.debug("[ExtMgr] '%s' è già installata e aggiornata (v%s)", entry.id, entry.version)
+                continue
+
+            # Altrimenti, installa o aggiorna
+            action = "Aggiornamento" if existing else "Installazione"
+            logger.info("[ExtMgr] %s di '%s' alla versione %s...", action, entry.id, entry.version)
+            try:
+                self.install_from_url(entry.download_url)
+            except Exception as e:
+                logger.error("[ExtMgr] Errore durante l'%s di '%s': %s", action.lower(), entry.id, e)
+
     # ── Remote Registry ──────────────────────────────────────
 
     def fetch_registry(self, url: str = REGISTRY_URL) -> list[RegistryEntry]:
         """Downloads and parses the remote registry.json."""
-        logger.info("[ExtMgr] Fetching registry from %s", url)
+        logger.debug("[ExtMgr] Fetching registry from %s", url)
         try:
             r = httpx.get(url, timeout=self.timeout, follow_redirects=True)
             r.raise_for_status()
@@ -146,7 +187,6 @@ class ExtensionManager:
                 icon_url        = item.get("icon_url"),
                 updated_at      = item.get("updated_at", ""),
             ))
-        logger.info("[ExtMgr] Registry: %d extensions found", len(entries))
         return entries
 
     # ── Installation ────────────────────────────────────────
@@ -184,7 +224,7 @@ class ExtensionManager:
         Downloads a .spotiflac-ext file (ZIP) from `url` and installs it.
         The extension name is read from `manifest.json` inside the ZIP.
         """
-        logger.info("[ExtMgr] Downloading extension from %s", url)
+        logger.debug("[ExtMgr] Downloading extension from %s", url)
         try:
             r = httpx.get(url, timeout=self.timeout * 3, follow_redirects=True)
             r.raise_for_status()
@@ -239,7 +279,7 @@ class ExtensionManager:
                 json.dumps(settings, indent=2), encoding="utf-8"
             )
 
-        logger.info("[ExtMgr] Installed '%s' v%s → %s", ext_name, manifest.get("version"), target)
+        logger.info("[ExtMgr] Success: '%s' v%s installed.", ext_name, manifest.get("version"))
         return self._load_installed(target)
 
     # ── Removal ────────────────────────────────────────────
