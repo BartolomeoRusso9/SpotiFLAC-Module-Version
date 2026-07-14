@@ -240,7 +240,7 @@ class DownloadManager:
         return cls._instance
 
     def _init_state(self) -> None:
-        self._lock = asyncio.Lock()
+        self._lock = _CrossLoopLock()
         self._queue: list[DownloadItem] = []
         self.total_downloaded = 0.0
         self.current_item_id = ""
