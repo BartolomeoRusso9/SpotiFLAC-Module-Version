@@ -21,7 +21,7 @@ from mutagen.id3 import PictureType
 from mutagen.mp4 import MP4, MP4Cover
 
 from ..core.console import print_source_banner
-from ..core.endpoints import get_amazon_endpoint, get_pandora_base_and_path
+from ..core.endpoints import get_amazon_endpoint
 from ..core.errors import ErrorKind, SpotiflacError
 from ..core.flac_validation import validate_and_repair_if_needed
 from ..core.isrc_utils import normalize_isrc
