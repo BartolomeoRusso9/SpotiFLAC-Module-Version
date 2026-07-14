@@ -14,3 +14,4 @@ SpotiFLAC/core/builder_decrypt_endpoints.py
 SpotiFLAC/spotiflac_provider_results.txt
 SpotiFLAC/provider_test_report.txt
 /build
+/.vscode

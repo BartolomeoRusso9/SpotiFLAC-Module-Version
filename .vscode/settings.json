@@ -4,5 +4,6 @@
             "approve": true,
             "matchCommandLine": true
         }
-    }
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }
