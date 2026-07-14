@@ -7,11 +7,17 @@ from SpotiFLAC.core.isrc_finder import IsrcFinder, _normalize_isrc, spotify_id_t
 
 
 def test_spotify_id_to_gid_accepts_spotify_url():
-    assert spotify_id_to_gid("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT") == "4cOdK2wGLETKBW3PvgPWqT"
+    assert (
+        spotify_id_to_gid("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT")
+        == "4cOdK2wGLETKBW3PvgPWqT"
+    )
 
 
 def test_spotify_id_to_gid_accepts_spotify_uri():
-    assert spotify_id_to_gid("spotify:track:4cOdK2wGLETKBW3PvgPWqT") == "4cOdK2wGLETKBW3PvgPWqT"
+    assert (
+        spotify_id_to_gid("spotify:track:4cOdK2wGLETKBW3PvgPWqT")
+        == "4cOdK2wGLETKBW3PvgPWqT"
+    )
 
 
 def test_spotify_id_to_gid_rejects_invalid_id():
@@ -37,7 +43,11 @@ def test_find_isrc_async_returns_none_when_access_tokens_missing():
     )
 
     with patch("SpotiFLAC.core.spotfetch.SpotifyWebClient", return_value=mock_client):
-        result = asyncio.run(finder.find_isrc_async("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"))
+        result = asyncio.run(
+            finder.find_isrc_async(
+                "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+            )
+        )
 
     assert result is None
 
@@ -52,5 +62,9 @@ def test_find_isrc_async_normalizes_isrc_from_spotify_metadata():
     )
 
     with patch("SpotiFLAC.core.spotfetch.SpotifyWebClient", return_value=mock_client):
-        result = asyncio.run(finder.find_isrc_async("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"))
+        result = asyncio.run(
+            finder.find_isrc_async(
+                "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+            )
+        )
     assert result == "USRC12312345"

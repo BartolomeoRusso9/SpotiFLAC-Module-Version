@@ -13,6 +13,7 @@ Default directory: ~/.spotiflac/extensions/{name}/
   ├── manifest.json
   └── icon.jpg          (optional)
 """
+
 from __future__ import annotations
 
 import io
@@ -21,13 +22,14 @@ import logging
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-REGISTRY_URL = "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/registry.json"
+REGISTRY_URL = (
+    "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/registry.json"
+)
 
 DEFAULT_EXT_DIR = Path.home() / ".spotiflac" / "extensions"
 
@@ -36,28 +38,29 @@ DEFAULT_EXT_DIR = Path.home() / ".spotiflac" / "extensions"
 #  Models
 # ─────────────────────────────────────────────────────────────
 
+
 @dataclass
 class RegistryEntry:
-    id:              str
-    display_name:    str
-    version:         str
-    description:     str
-    download_url:    str
-    category:        str             = "unknown"
-    tags:            list[str]       = field(default_factory=list)
-    min_app_version: str             = "0.0.0"
-    icon_url:        str | None      = None
-    updated_at:      str             = ""
+    id: str
+    display_name: str
+    version: str
+    description: str
+    download_url: str
+    category: str = "unknown"
+    tags: list[str] = field(default_factory=list)
+    min_app_version: str = "0.0.0"
+    icon_url: str | None = None
+    updated_at: str = ""
 
 
 @dataclass
 class InstalledExtension:
-    name:          str
-    display_name:  str
-    version:       str
-    description:   str
-    ext_dir:       Path
-    manifest:      dict             = field(default_factory=dict)
+    name: str
+    display_name: str
+    version: str
+    description: str
+    ext_dir: Path
+    manifest: dict = field(default_factory=dict)
 
     @property
     def index_js(self) -> Path:
@@ -77,11 +80,7 @@ class InstalledExtension:
 
     @property
     def url_patterns(self) -> list[str]:
-        return (
-            self.manifest
-            .get("urlHandler", {})
-            .get("patterns", [])
-        )
+        return self.manifest.get("urlHandler", {}).get("patterns", [])
 
     @property
     def settings_schema(self) -> list[dict]:
@@ -89,15 +88,14 @@ class InstalledExtension:
 
     def default_settings(self) -> dict:
         return {
-            s["key"]: s.get("default", "")
-            for s in self.settings_schema
-            if "key" in s
+            s["key"]: s.get("default", "") for s in self.settings_schema if "key" in s
         }
 
 
 # ─────────────────────────────────────────────────────────────
 #  ExtensionManager
 # ─────────────────────────────────────────────────────────────
+
 
 class ExtensionManager:
     """
@@ -138,28 +136,36 @@ class ExtensionManager:
         for entry in entries:
             # Identifies if the extension is a download provider via category or tag
             is_download = (
-                entry.category == "download_provider" 
-                or "download" in entry.tags 
+                entry.category == "download_provider"
+                or "download" in entry.tags
                 or "download_provider" in entry.tags
             )
-            
+
             if not is_download:
                 continue
 
             existing = self.get_installed(entry.id)
-            
+
             # If already installed and version matches, skip without downloading
             if existing and existing.version == entry.version:
-                logger.debug("[ExtMgr] '%s' is already installed and updated (v%s)", entry.id, entry.version)
+                logger.debug(
+                    "[ExtMgr] '%s' is already installed and updated (v%s)",
+                    entry.id,
+                    entry.version,
+                )
                 continue
 
             # Otherwise, installs or updates
             action = "Update" if existing else "Installation"
-            logger.info("[ExtMgr] %s of '%s' to version %s...", action, entry.id, entry.version)
+            logger.info(
+                "[ExtMgr] %s of '%s' to version %s...", action, entry.id, entry.version
+            )
             try:
                 self.install_from_url(entry.download_url)
             except Exception as e:
-                logger.error("[ExtMgr] Error during %s of '%s': %s", action.lower(), entry.id, e)
+                logger.error(
+                    "[ExtMgr] Error during %s of '%s': %s", action.lower(), entry.id, e
+                )
 
     # ── Remote Registry ──────────────────────────────────────
 
@@ -175,18 +181,20 @@ class ExtensionManager:
 
         entries = []
         for item in data.get("extensions", []):
-            entries.append(RegistryEntry(
-                id              = item["id"],
-                display_name    = item.get("display_name", item["id"]),
-                version         = item.get("version", "0.0.0"),
-                description     = item.get("description", ""),
-                download_url    = item["download_url"],
-                category        = item.get("category", "unknown"),
-                tags            = item.get("tags", []),
-                min_app_version = item.get("min_app_version", "0.0.0"),
-                icon_url        = item.get("icon_url"),
-                updated_at      = item.get("updated_at", ""),
-            ))
+            entries.append(
+                RegistryEntry(
+                    id=item["id"],
+                    display_name=item.get("display_name", item["id"]),
+                    version=item.get("version", "0.0.0"),
+                    description=item.get("description", ""),
+                    download_url=item["download_url"],
+                    category=item.get("category", "unknown"),
+                    tags=item.get("tags", []),
+                    min_app_version=item.get("min_app_version", "0.0.0"),
+                    icon_url=item.get("icon_url"),
+                    updated_at=item.get("updated_at", ""),
+                )
+            )
         return entries
 
     # ── Installation ────────────────────────────────────────
@@ -202,10 +210,12 @@ class ExtensionManager:
         If already installed, updates only if the remote version is newer.
         """
         entries = self.fetch_registry(registry_url)
-        entry   = next((e for e in entries if e.id == ext_id), None)
+        entry = next((e for e in entries if e.id == ext_id), None)
         if entry is None:
             available = ", ".join(e.id for e in entries)
-            raise ValueError(f"Extension '{ext_id}' not found in registry. Available: {available}")
+            raise ValueError(
+                f"Extension '{ext_id}' not found in registry. Available: {available}"
+            )
 
         # Check if already installed and up-to-date
         existing = self.get_installed(ext_id)
@@ -279,7 +289,9 @@ class ExtensionManager:
                 json.dumps(settings, indent=2), encoding="utf-8"
             )
 
-        logger.info("[ExtMgr] Success: '%s' v%s installed.", ext_name, manifest.get("version"))
+        logger.info(
+            "[ExtMgr] Success: '%s' v%s installed.", ext_name, manifest.get("version")
+        )
         return self._load_installed(target)
 
     # ── Removal ────────────────────────────────────────────
@@ -287,6 +299,7 @@ class ExtensionManager:
     def uninstall(self, ext_id: str) -> bool:
         """Removes an installed extension. Returns True if found and removed."""
         import shutil
+
         target = self.ext_dir / ext_id
         if target.exists():
             shutil.rmtree(target)
@@ -361,12 +374,12 @@ class ExtensionManager:
     def _load_installed(self, ext_dir: Path) -> InstalledExtension:
         manifest = json.loads((ext_dir / "manifest.json").read_text(encoding="utf-8"))
         return InstalledExtension(
-            name         = manifest.get("name", ext_dir.name),
-            display_name = manifest.get("displayName", ext_dir.name),
-            version      = manifest.get("version", "0.0.0"),
-            description  = manifest.get("description", ""),
-            ext_dir      = ext_dir,
-            manifest     = manifest,
+            name=manifest.get("name", ext_dir.name),
+            display_name=manifest.get("displayName", ext_dir.name),
+            version=manifest.get("version", "0.0.0"),
+            description=manifest.get("description", ""),
+            ext_dir=ext_dir,
+            manifest=manifest,
         )
 
     # ── Batch update ──────────────────────────────────────

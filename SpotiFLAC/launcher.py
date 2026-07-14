@@ -367,9 +367,7 @@ async def _run_download_async(
     except KeyboardInterrupt:
         print("\n\n[!] Operation interrupted by user.")
     except Exception as e:
-        logging.getLogger("SpotiFLAC").error(
-            "Critical error during execution: %s", e
-        )
+        logging.getLogger("SpotiFLAC").error("Critical error during execution: %s", e)
 
 
 async def amain() -> None:

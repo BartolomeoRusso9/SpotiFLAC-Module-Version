@@ -58,6 +58,7 @@ NATIVE_TO_EXTENSION_ID: dict[str, str] = {
     "pandora": "pandora",
 }
 
+
 def _build_ext_provider(name: str, **kwargs) -> "BaseProvider | None":
     """
     Factory for providers with 'ext:' prefix.
@@ -73,16 +74,15 @@ def _build_ext_provider(name: str, **kwargs) -> "BaseProvider | None":
         from ..extensions.provider import JSExtensionProvider
     except ImportError as e:
         import logging
-        logging.getLogger(__name__).error(
-            "Failed to import extensions module: %s", e
-        )
+
+        logging.getLogger(__name__).error("Failed to import extensions module: %s", e)
         return None
 
     ext_id = name.removeprefix("ext:")
     return JSExtensionProvider(
-        ext_id          = ext_id,
-        settings        = kwargs.pop("ext_settings", None),
-        ext_dir         = kwargs.pop("ext_dir", None),
-        node_executable = kwargs.pop("node_executable", "node"),
-        timeout_s       = kwargs.pop("timeout_s", 120),
+        ext_id=ext_id,
+        settings=kwargs.pop("ext_settings", None),
+        ext_dir=kwargs.pop("ext_dir", None),
+        node_executable=kwargs.pop("node_executable", "node"),
+        timeout_s=kwargs.pop("timeout_s", 120),
     )

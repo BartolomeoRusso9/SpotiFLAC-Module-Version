@@ -27,8 +27,8 @@ Requirements:
     - Extension installed via ExtensionManager
 """
 
-from .manager  import ExtensionManager, InstalledExtension, RegistryEntry, REGISTRY_URL
-from .runtime  import JSRuntime, ExtensionRuntimeError
+from .manager import ExtensionManager, InstalledExtension, RegistryEntry, REGISTRY_URL
+from .runtime import JSRuntime, ExtensionRuntimeError
 from .provider import JSExtensionProvider, make_extension_provider
 
 __all__ = [

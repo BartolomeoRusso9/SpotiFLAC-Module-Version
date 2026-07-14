@@ -74,8 +74,8 @@ class DownloadOptions:
     post_download_command: str = ""
     tidal_custom_api: str | None = None
     timeout_s: int | None = None
-    auto_pair_extensions:    bool             = True
-    ext_dir:                 str | None       = None
+    auto_pair_extensions: bool = True
+    ext_dir: str | None = None
 
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
@@ -83,7 +83,9 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
 
     if name.startswith("ext:"):
         try:
-            return _build_ext_provider(name, ext_dir=opts.ext_dir, timeout_s=opts.timeout_s or 120)
+            return _build_ext_provider(
+                name, ext_dir=opts.ext_dir, timeout_s=opts.timeout_s or 120
+            )
         except Exception as e:
             logger.warning("Failed to create provider %s: %s", name, e)
             return None
@@ -122,17 +124,19 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
     if getattr(opts, "auto_pair_extensions", True):
         try:
             from .extensions.manager import ExtensionManager
+
             mgr = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=False)
-            
+
             possible_ext_ids = []
-            
+
             try:
                 from .providers import NATIVE_TO_EXTENSION_ID
+
                 if ext_id := NATIVE_TO_EXTENSION_ID.get(name):
                     possible_ext_ids.append(ext_id)
             except ImportError:
                 pass
-            
+
             # B. Aggiunge in automatico il nome base e la variante "-web" (es. qobuz, qobuz-web, tidal-web)
             if name not in possible_ext_ids:
                 possible_ext_ids.append(name)
@@ -144,9 +148,13 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
                     ext_provider = _build_provider(f"ext:{ext_id}", opts)
                     if ext_provider:
                         providers.append(ext_provider)
-                        logger.debug("[auto-pair] '%s' + extension '%s' added as fallback", name, ext_id)
+                        logger.debug(
+                            "[auto-pair] '%s' + extension '%s' added as fallback",
+                            name,
+                            ext_id,
+                        )
                     break
-                    
+
         except Exception as e:
             logger.debug("[auto-pair] Extension for '%s' skipped: %s", name, e)
 
@@ -214,7 +222,9 @@ async def download_one_async(
             if idx > 0:
                 is_ext = provider.name.startswith("ext:")
                 target_type = "extension" if is_ext else "provider"
-                safe_tqdm_write(f"  ⚠️  Fallback: switching to backup {target_type} ({provider.name})...")
+                safe_tqdm_write(
+                    f"  ⚠️  Fallback: switching to backup {target_type} ({provider.name})..."
+                )
 
             logger.info(
                 "[%s] Trying: %s — %s", provider.name, metadata.artists, metadata.title

@@ -7,19 +7,23 @@ import subprocess
 import threading
 import time
 import base64 as _b64
+import logging as _logging
+import logging
 from nodriver import cdp
 from typing import Optional
 from urllib.parse import parse_qsl, urlparse
+import nodriver as uc
+import inspect
+import os as _os
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TURNSTILE_CACHE_TTL_SECONDS = 900
 _TURNSTILE_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
 _RELOAD_CHECK_SECONDS = 10.0
 _MAX_RELOAD_ATTEMPTS = 3
 
-import nodriver as uc
 
-import inspect
-import os as _os
 
 _docker_flags = []
 if _os.name != "nt" and hasattr(_os, "geteuid") and _os.geteuid() == 0:
@@ -52,21 +56,26 @@ def _patch_nodriver_unknown_cdp_events() -> None:
     _original = _nd_connection.Connection.process_event
 
     if inspect.iscoroutinefunction(_original):
+
         async def _patched(self, *args, **kwargs):
             try:
                 return await _original(self, *args, **kwargs)
             except KeyError as exc:
                 import logging
+
                 logging.getLogger(__name__).debug(
                     "[turnstile] ignoring unknown CDP event: %s", exc
                 )
                 return None
+
     else:
+
         def _patched(self, *args, **kwargs):
             try:
                 return _original(self, *args, **kwargs)
             except KeyError as exc:
                 import logging
+
                 logging.getLogger(__name__).debug(
                     "[turnstile] ignoring unknown CDP event: %s", exc
                 )
@@ -77,7 +86,7 @@ def _patch_nodriver_unknown_cdp_events() -> None:
 
 
 _patch_nodriver_unknown_cdp_events()
-import logging as _logging
+
 _logging.getLogger("nodriver.core.connection").setLevel(_logging.CRITICAL)
 _logging.getLogger("asyncio").setLevel(_logging.ERROR)
 
@@ -120,7 +129,7 @@ def _find_chrome() -> str:
             "/usr/bin/chromium-browser",
             "/usr/bin/chromium",
             "/usr/bin/brave-browser",
-            "/usr/bin/microsoft-edge-stable"
+            "/usr/bin/microsoft-edge-stable",
         ]
 
     # 1. Controlla i percorsi standard
@@ -129,7 +138,14 @@ def _find_chrome() -> str:
             return path
 
     # 2. Ricerca dinamica nelle variabili d'ambiente globali (PATH)
-    for cmd in ["google-chrome", "chrome", "chromium", "chromium-browser", "msedge", "brave"]:
+    for cmd in [
+        "google-chrome",
+        "chrome",
+        "chromium",
+        "chromium-browser",
+        "msedge",
+        "brave",
+    ]:
         path = shutil.which(cmd)
         if path:
             return path
@@ -138,6 +154,7 @@ def _find_chrome() -> str:
         "No Chromium-based browser (Chrome, Edge, Brave, Arc) found on system. "
         "Install one of these browsers or set the CHROME_PATH environment variable."
     )
+
 
 def _get_profile_dir() -> str:
     """Return a persistent Chrome profile directory for the current OS."""
@@ -165,7 +182,13 @@ def _start_xvfb_if_needed() -> Optional[subprocess.Popen]:
     return proc
 
 
-async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback: bool = False, hold_open_seconds: float = 0.0) -> str | tuple[str, Optional[str]]:
+async def _solve_impl(
+    sitekey: str,
+    siteurl: str,
+    timeout: int,
+    capture_callback: bool = False,
+    hold_open_seconds: float = 0.0,
+) -> str | tuple[str, Optional[str]]:
     browser = await uc.start(
         browser_executable_path=_find_chrome(),
         headless=False,
@@ -264,7 +287,7 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
                 await page.minimize()
         except Exception:
             pass
-    
+
     async def get_token() -> Optional[str]:
         return await page.evaluate("""
             (() => {
@@ -282,7 +305,9 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
             })()
         """)
 
-    async def capture_callback_grant(current_url: Optional[str] = None) -> Optional[str]:
+    async def capture_callback_grant(
+        current_url: Optional[str] = None,
+    ) -> Optional[str]:
         nonlocal callback_grant
         if not capture_callback:
             return callback_grant
@@ -309,7 +334,7 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
                 return null;
             })())
         """)
-        if raw and raw != 'null':
+        if raw and raw != "null":
             return json.loads(raw)
         return None
 
@@ -321,7 +346,9 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
         else:
             cx = 20 + 28 + random.uniform(-3, 3)
             cy = 20 + 32 + random.uniform(-3, 3)
-            print(f"[solver] iframe not in DOM, clicking fixed position ({cx:.0f}, {cy:.0f})")
+            print(
+                f"[solver] iframe not in DOM, clicking fixed position ({cx:.0f}, {cy:.0f})"
+            )
         await page.mouse_move(cx - 80, cy - 20)
         await asyncio.sleep(random.uniform(0.15, 0.25))
         await page.mouse_move(cx, cy)
@@ -383,7 +410,9 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
         return token
 
     token: Optional[str] = None
-    per_attempt_seconds = min(_RELOAD_CHECK_SECONDS, float(timeout)) if timeout else _RELOAD_CHECK_SECONDS
+    per_attempt_seconds = (
+        min(_RELOAD_CHECK_SECONDS, float(timeout)) if timeout else _RELOAD_CHECK_SECONDS
+    )
     max_attempts = _MAX_RELOAD_ATTEMPTS
 
     try:
@@ -411,7 +440,9 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
                 break
 
             if attempt < max_attempts:
-                print(f"[solver] Tentativo {attempt}/{max_attempts} fallito, attendo 10s prima di riprovare…")
+                print(
+                    f"[solver] Tentativo {attempt}/{max_attempts} fallito, attendo 10s prima di riprovare…"
+                )
                 await asyncio.sleep(10.0)
 
         if token and hold_open_seconds > 0:
@@ -433,6 +464,7 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
         )
 
     return (token, callback_grant) if capture_callback else token
+
 
 def _extract_grant_from_callback_url(callback_url: str) -> Optional[str]:
     if not callback_url:
@@ -478,7 +510,9 @@ def clear_solver_cache() -> None:
     _TURNSTILE_CACHE.clear()
 
 
-def solve(sitekey: str, siteurl: str, timeout: int = 45, hold_open_seconds: float = 0.0) -> str:
+def solve(
+    sitekey: str, siteurl: str, timeout: int = 45, hold_open_seconds: float = 0.0
+) -> str:
     import warnings
 
     _ensure_xvfb()
@@ -500,13 +534,17 @@ def solve(sitekey: str, siteurl: str, timeout: int = 45, hold_open_seconds: floa
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        token = asyncio.run(_solve_impl(sitekey, siteurl, timeout, hold_open_seconds=hold_open_seconds))
+        token = asyncio.run(
+            _solve_impl(sitekey, siteurl, timeout, hold_open_seconds=hold_open_seconds)
+        )
     if hold_open_seconds <= 0:
         _TURNSTILE_CACHE[cache_key] = (now, token)
     return token
 
 
-def solve_with_callback(sitekey: str, siteurl: str, timeout: int = 45, hold_open_seconds: float = 0.0) -> tuple[str, Optional[str]]:
+def solve_with_callback(
+    sitekey: str, siteurl: str, timeout: int = 45, hold_open_seconds: float = 0.0
+) -> tuple[str, Optional[str]]:
     import warnings
 
     _ensure_xvfb()
@@ -514,7 +552,13 @@ def solve_with_callback(sitekey: str, siteurl: str, timeout: int = 45, hold_open
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         result = asyncio.run(
-            _solve_impl(sitekey, siteurl, timeout, capture_callback=True, hold_open_seconds=hold_open_seconds)
+            _solve_impl(
+                sitekey,
+                siteurl,
+                timeout,
+                capture_callback=True,
+                hold_open_seconds=hold_open_seconds,
+            )
         )
 
     if isinstance(result, tuple):

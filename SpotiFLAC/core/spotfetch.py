@@ -700,7 +700,9 @@ class SpotifyWebClient:
             # (2 letters + 3 alphanumeric + 7 digits) before accepting:
             # a match like "INTERNATIONA" (12 letters, zero
             # digits) is never a valid ISRC.
-            for match in re.finditer(rb"isrc[\x00-\x1f]+([A-Za-z0-9]{12})", resp.content):
+            for match in re.finditer(
+                rb"isrc[\x00-\x1f]+([A-Za-z0-9]{12})", resp.content
+            ):
                 candidate = match.group(1).decode(errors="ignore").upper()
                 if is_valid_isrc(candidate):
                     return candidate

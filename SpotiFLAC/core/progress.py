@@ -156,6 +156,7 @@ class DownloadItem:
     error_message: str = ""
     file_path: str = ""
 
+
 class _CrossLoopLock:
     """
     Adatta un threading.Lock (funziona correttamente attraverso PIÙ event

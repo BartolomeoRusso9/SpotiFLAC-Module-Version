@@ -56,12 +56,14 @@ POST /tickets — only support for the extra X-Zarz-Ticket header on POST
 request()).
 "/session/refresh" in the manifest, silently breaking session renewal.
 """
+
 from __future__ import annotations
 
 import asyncio
 import base64
 import hashlib
 import hmac
+import threading
 import json
 import logging
 import os
@@ -125,7 +127,9 @@ class _LocalGrantListener:
     This class remains for historical reference only.
     """
 
-    def __init__(self, host: str = _LOCAL_CALLBACK_HOST, path: str = _LOCAL_CALLBACK_PATH) -> None:
+    def __init__(
+        self, host: str = _LOCAL_CALLBACK_HOST, path: str = _LOCAL_CALLBACK_PATH
+    ) -> None:
         self.host = host
         self.path = path
         self.port: int | None = None
@@ -154,9 +158,9 @@ class _LocalGrantListener:
                     break
 
             try:
-                method, raw_target, _ = request_line.decode("latin-1").split(" ", 2)
+                _, raw_target, _ = request_line.decode("latin-1").split(" ", 2)
             except ValueError:
-                method, raw_target = "GET", "/"
+                _, raw_target = "GET", "/"
 
             parsed = urlparse(raw_target)
 
@@ -173,13 +177,15 @@ class _LocalGrantListener:
 
             if grant:
                 await self._respond(
-                    writer, 200,
+                    writer,
+                    200,
                     "<h2>Verification completed ✅</h2>"
                     "<p>You can close this window and return to the app.</p>",
                 )
             else:
                 await self._respond(
-                    writer, 200,
+                    writer,
+                    200,
                     "<h2>Verification failed</h2>"
                     f"<p>{error or 'Nessun grant ricevuto.'}</p>",
                 )
@@ -202,7 +208,9 @@ class _LocalGrantListener:
                 pass
 
     @staticmethod
-    async def _respond(writer: asyncio.StreamWriter, status: int, html_body: str) -> None:
+    async def _respond(
+        writer: asyncio.StreamWriter, status: int, html_body: str
+    ) -> None:
         reason = {200: "OK", 404: "Not Found"}.get(status, "OK")
         body = (
             f"<html><body style='font-family:sans-serif;text-align:center;"
@@ -314,7 +322,12 @@ class SignedSessionClient:
 
     def _session_path(self) -> Path:
         scope = "\n".join(
-            [self.namespace, self.base_url.lower(), self.app_version.lower(), self.platform.lower()]
+            [
+                self.namespace,
+                self.base_url.lower(),
+                self.app_version.lower(),
+                self.platform.lower(),
+            ]
         )
         h = hashlib.sha256(scope.encode()).hexdigest()[:16]
         return self.data_dir / f"{self.namespace}-{h}.json"
@@ -418,7 +431,11 @@ class SignedSessionClient:
         resp.raise_for_status()
         data = resp.json()
         logger.debug("[signed_session:%s] bootstrap response: %s", self.namespace, data)
-        if data.get("session_id") and data.get("session_secret") and data.get("expires_at"):
+        if (
+            data.get("session_id")
+            and data.get("session_secret")
+            and data.get("expires_at")
+        ):
             self.session_id = data["session_id"]
             self.session_secret = data["session_secret"]
             self.expires_at = data["expires_at"]
@@ -446,7 +463,11 @@ class SignedSessionClient:
             self._ensure_client()
             resp = await self._client.get(page_url, timeout=10, follow_redirects=True)
         except Exception as exc:
-            logger.debug("[signed_session:%s] sitekey scrape fetch failed: %s", self.namespace, exc)
+            logger.debug(
+                "[signed_session:%s] sitekey scrape fetch failed: %s",
+                self.namespace,
+                exc,
+            )
             return None
         if not resp.is_success:
             return None
@@ -454,7 +475,7 @@ class SignedSessionClient:
         for pattern in (
             r'data-sitekey=["\']([0-9A-Za-z_-]{10,})["\']',
             r'[\'"]sitekey[\'"]\s*:\s*[\'"]([0-9A-Za-z_-]{10,})[\'"]',
-            r'sitekey=([0-9A-Za-z_-]{10,})',
+            r"sitekey=([0-9A-Za-z_-]{10,})",
         ):
             match = re.search(pattern, html)
             if match:
@@ -479,7 +500,9 @@ class SignedSessionClient:
         parts[4] = urlencode(query)
         return urlunparse(parts)
 
-    def _build_challenge_url_with_callback(self, challenge_id: str, callback_url: str) -> str:
+    def _build_challenge_url_with_callback(
+        self, challenge_id: str, callback_url: str
+    ) -> str:
         """
         Replica ESATTAMENTE buildSignedSessionChallengeURL() del backend Go
         (extension_signed_session.go):
@@ -582,9 +605,7 @@ class SignedSessionClient:
         try:
             grant = await asyncio.wait_for(grant_awaitable, timeout=timeout)
         except asyncio.TimeoutError as exc:
-            raise RuntimeError(
-                f"Timeout ({timeout}s) waiting for grant entry"
-            ) from exc
+            raise RuntimeError(f"Timeout ({timeout}s) waiting for grant entry") from exc
 
         grant = grant.strip()
         if not grant:
@@ -674,7 +695,9 @@ class SignedSessionClient:
             callback(url)
             return
         logger.warning("[signed_session] Verification required: %s", url)
-        print(f"\n[SpotiFLAC] Verification required — open this link in the browser:\n  {url}\n")
+        print(
+            f"\n[SpotiFLAC] Verification required — open this link in the browser:\n  {url}\n"
+        )
 
     async def verify_challenge(self, challenge_id: str, turnstile_token: str) -> str:
         """
@@ -764,7 +787,9 @@ class SignedSessionClient:
 
     async def ensure_session(self) -> None:
         if not self.session_id or not self.session_secret:
-            raise RuntimeError("not authenticated: call bootstrap()/exchange_grant() first")
+            raise RuntimeError(
+                "not authenticated: call bootstrap()/exchange_grant() first"
+            )
 
         exp = self._parse_time(self.expires_at)
         if exp:
@@ -792,32 +817,48 @@ class SignedSessionClient:
         nonce = secrets.token_hex(12)
         body_hash = hashlib.sha256(body).hexdigest()
         window = int(time.time() // self.window_seconds)
-        
+
         rk_bytes = hmac.new(
             self.session_secret.encode(),
             f"{window}:{self.session_id}".encode(),
             hashlib.sha256,
         ).digest()
-        
+
         rk_string = base64.urlsafe_b64encode(rk_bytes).rstrip(b"=").decode("utf-8")
-        
+
         # --- CRITICAL FIX: THE PATH ---
         # Combine base_url (which contains /v2) and path (which contains /tickets)
         # and extract the final correct path that the server expects to sign.
         full_url = f"{self.base_url}{path}"
         parsed_path = urlparse(full_url).path
-        
+
         signing_input = "\n".join(
             [
-                self.scheme_label, method, parsed_path, "", body_hash, ts, nonce,
-                self.session_id, self.app_version, self.platform,
+                self.scheme_label,
+                method,
+                parsed_path,
+                "",
+                body_hash,
+                ts,
+                nonce,
+                self.session_id,
+                self.app_version,
+                self.platform,
             ]
         )
-        
-        sig = base64.urlsafe_b64encode(
-            hmac.new(rk_string.encode("utf-8"), signing_input.encode("utf-8"), hashlib.sha256).digest()
-        ).rstrip(b"=").decode("utf-8")
-        
+
+        sig = (
+            base64.urlsafe_b64encode(
+                hmac.new(
+                    rk_string.encode("utf-8"),
+                    signing_input.encode("utf-8"),
+                    hashlib.sha256,
+                ).digest()
+            )
+            .rstrip(b"=")
+            .decode("utf-8")
+        )
+
         p = self.header_prefix
         return {
             f"{p}Session": self.session_id,
@@ -837,7 +878,11 @@ class SignedSessionClient:
         extra_headers: dict | None = None,
     ) -> httpx.Response:
         await self.ensure_session()
-        body = json.dumps(json_body, separators=(',', ':')).encode() if json_body is not None else b""
+        body = (
+            json.dumps(json_body, separators=(",", ":")).encode()
+            if json_body is not None
+            else b""
+        )
         headers = self._sign_headers(method.upper(), path, body)
         if body:
             headers["Content-Type"] = "application/json"
@@ -849,17 +894,25 @@ class SignedSessionClient:
         try:
             b_preview = body[:1024]
             try:
-                b_text = b_preview.decode('utf-8')
+                b_text = b_preview.decode("utf-8")
             except Exception:
                 b_text = repr(b_preview)
             logger.debug(
                 "[signed_session:%s] OUT %s %s headers=%s body=%s",
-                self.namespace, method, path, headers, b_text,
+                self.namespace,
+                method,
+                path,
+                headers,
+                b_text,
             )
         except Exception:
             pass
         resp = await self._client.request(
-            method, f"{self.base_url}{path}", content=body, headers=headers, timeout=30,
+            method,
+            f"{self.base_url}{path}",
+            content=body,
+            headers=headers,
+            timeout=30,
         )
         if resp.status_code >= 400:
             print(f"\n[!!!] ZARZ API ERROR ({resp.status_code}):")
@@ -868,7 +921,7 @@ class SignedSessionClient:
         # as httpx but with the full request link.
         try:
             logger.info(
-                "HTTP Request: %s %s \"HTTP/1.1 %s %s\"",
+                'HTTP Request: %s %s "HTTP/1.1 %s %s"',
                 method,
                 str(resp.url),
                 resp.status_code,
@@ -893,7 +946,9 @@ class SignedSessionClient:
     # /dl/{provider} (that is specific to the provider).
 
     @staticmethod
-    def compute_resource_hash(provider: str, resource_id: str, resource_type: str = "track") -> str:
+    def compute_resource_hash(
+        provider: str, resource_id: str, resource_type: str = "track"
+    ) -> str:
         """
         Calcola il resource_hash richiesto da POST /tickets, ESATTAMENTE come
         the JS of official extensions does (e.g., tidal-web/index.js,
@@ -915,7 +970,7 @@ class SignedSessionClient:
         tickets_path: str = "/tickets",
     ) -> str:
         resource_hash = self.compute_resource_hash(provider, resource_id, resource_type)
-        
+
         resp = await self.request(
             "POST",
             tickets_path,
@@ -927,11 +982,11 @@ class SignedSessionClient:
         )
         resp.raise_for_status()
         data = resp.json()
-        
+
         ticket_id = str(data.get("ticket_id") or data.get("ticket") or "").strip()
         if not ticket_id:
             raise RuntimeError(f"ticket response missing ticket_id: {data}")
-            
+
         return ticket_id
 
     async def ticketed_request(
@@ -962,7 +1017,9 @@ class SignedSessionClient:
             provider, resource_id, resource_type, tickets_path=tickets_path
         )
         return await self.request(
-            "POST", dl_path, json_body=json_body,
+            "POST",
+            dl_path,
+            json_body=json_body,
             extra_headers={"X-Zarz-Ticket": ticket_id},
         )
 
@@ -973,7 +1030,7 @@ class SignedSessionClient:
             finally:
                 self._client = None
 
-import threading
+
 
 _AUTH_THREAD_LOCKS: dict[str, threading.Lock] = {}
 _AUTH_THREAD_LOCKS_GUARD = threading.Lock()
@@ -1027,6 +1084,7 @@ class _AsyncThreadLockCtx:
 def _get_auth_lock(namespace: str) -> "_AsyncThreadLockCtx":
     return _AsyncThreadLockCtx(_get_auth_thread_lock(namespace))
 
+
 async def perform_signed_fetch(
     client: SignedSessionClient,
     method: str,
@@ -1047,17 +1105,21 @@ async def perform_signed_fetch(
                 # Se un altro brano in parallelo ha appena fatto l'accesso al posto nostro,
                 # troveremo la sessione aggiornata e salteremo l'autenticazione!
                 client._load()
-                
+
                 if not client.authenticated:
                     try:
                         if use_turnstile_browser:
-                            await client.authenticate_with_turnstile(timeout=min(timeout, 90))
+                            await client.authenticate_with_turnstile(
+                                timeout=min(timeout, 90)
+                            )
                         else:
                             raise RuntimeError("turnstile automation disabled")
                     except Exception as exc:
                         logger.info(
                             "[signed_session:%s] Turnstile automatico fallito (%s), "
-                            "fallback al flusso manuale.", client.namespace, exc,
+                            "fallback al flusso manuale.",
+                            client.namespace,
+                            exc,
                         )
                         try:
                             await client.authenticate_with_manual_grant(
@@ -1068,7 +1130,8 @@ async def perform_signed_fetch(
                         except Exception as exc2:
                             logger.warning(
                                 "[signed_session:%s] Autenticazione manuale fallita: %s",
-                                client.namespace, exc2,
+                                client.namespace,
+                                exc2,
                             )
                             return {"error": str(exc2)}
 
@@ -1084,7 +1147,7 @@ async def perform_signed_fetch(
         raw_retry_after = resp.headers.get("Retry-After", "").strip()
         if raw_retry_after.isdigit():
             retry_after = max(0, int(raw_retry_after))
-            
+
         return {
             "statusCode": resp.status_code,
             "status": resp.status_code,
@@ -1095,11 +1158,15 @@ async def perform_signed_fetch(
             "retryAfterSeconds": retry_after,
         }
     except Exception as exc:
-        logger.debug("[signed_session:%s] signedFetch failed: %s", client.namespace, exc)
+        logger.debug(
+            "[signed_session:%s] signedFetch failed: %s", client.namespace, exc
+        )
         return {"error": str(exc)}
 
 
-def client_from_manifest(manifest_block: dict, data_dir: str = "~/.spotiflac/signed_sessions") -> SignedSessionClient:
+def client_from_manifest(
+    manifest_block: dict, data_dir: str = "~/.spotiflac/signed_sessions"
+) -> SignedSessionClient:
     """Builds a SignedSessionClient from an extension manifest's `signedSession` block."""
     return SignedSessionClient(
         base_url=manifest_block["baseUrl"],

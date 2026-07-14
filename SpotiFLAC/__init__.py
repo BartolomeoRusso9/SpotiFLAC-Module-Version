@@ -44,6 +44,7 @@ from .providers import (
     SpotifyMetadataClient,
 )
 from .core import TrackMetadata, DownloadResult
+
 # NOTE: no "from .extensions import ExtensionManager" at module level.
 # _sync_extensions() already does the local import — importing it here would force loading
 # the entire extensions package (and its dependencies, e.g. httpx) every time
@@ -91,6 +92,7 @@ def _sync_extensions(logger: "logging.Logger") -> None:
     """
     try:
         from .extensions import ExtensionManager
+
         em = ExtensionManager()
         status = em.sync_download_extensions()
         for ext_id, result in status.items():
@@ -195,6 +197,4 @@ def SpotiFLAC(
     except KeyboardInterrupt:
         print("\n\n[!] Operation interrupted by user.")
     except Exception as e:
-        logging.getLogger("SpotiFLAC").error(
-            "Critical error during execution: %s", e
-        )
+        logging.getLogger("SpotiFLAC").error("Critical error during execution: %s", e)

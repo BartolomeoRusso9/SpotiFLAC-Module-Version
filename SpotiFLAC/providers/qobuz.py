@@ -904,9 +904,7 @@ class QobuzProvider(BaseProvider):
                         "upload_to_r2": False,
                         "url": f"{_OPEN_URL}{track_id}",
                     }
-                    post_headers = {
-                        "User-Agent": _DEFAULT_UA
-                    }
+                    post_headers = {"User-Agent": _DEFAULT_UA}
                     # If this API is in the community list, adapt payload and headers
                     if api_base in _COMMUNITY_APIS:
                         # Community endpoints expect an 'id' numeric and quality like "24"/"16"

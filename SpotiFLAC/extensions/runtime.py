@@ -7,6 +7,7 @@ to call JavaScript extension methods synchronously.
 Each JSRuntime instance represents a session with a single extension.
 The extension's `storage` state persists for the entire runtime lifetime.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -60,20 +61,20 @@ class JSRuntime:
         startup_timeout: float = 20.0,
         session_handler: "Callable[[str, str, Any, dict], Awaitable[dict]] | None" = None,
     ) -> None:
-        self.ext_path        = Path(ext_path)
-        self.settings        = settings or {}
+        self.ext_path = Path(ext_path)
+        self.settings = settings or {}
         self.node_executable = node_executable
         self.startup_timeout = startup_timeout
         self.session_handler = session_handler
 
-        self._proc:        subprocess.Popen | None = None
-        self._seq          = 0
-        self._pending:     dict[int, queue.Queue] = {}
+        self._proc: subprocess.Popen | None = None
+        self._seq = 0
+        self._pending: dict[int, queue.Queue] = {}
         self._progress_cbs: dict[int, Callable[[float], None]] = {}
-        self._lock         = threading.Lock()
-        self._reader:      threading.Thread | None = None
-        self._ready_event  = threading.Event()
-        self._loop:        "asyncio.AbstractEventLoop | None" = None
+        self._lock = threading.Lock()
+        self._reader: threading.Thread | None = None
+        self._ready_event = threading.Event()
+        self._loop: "asyncio.AbstractEventLoop | None" = None
 
     # ─────────────────────── lifecycle ────────────────────────
 
@@ -100,9 +101,11 @@ class JSRuntime:
         env = os.environ.copy()
         try:
             v_out = subprocess.check_output([self.node_executable, "-v"], text=True)
-            v_major = int(v_out.strip().lstrip('v').split('.')[0])
+            v_major = int(v_out.strip().lstrip("v").split(".")[0])
             if v_major >= 17:
-                env["NODE_OPTIONS"] = (env.get("NODE_OPTIONS", "") + " --openssl-legacy-provider").strip()
+                env["NODE_OPTIONS"] = (
+                    env.get("NODE_OPTIONS", "") + " --openssl-legacy-provider"
+                ).strip()
         except Exception:
             pass
         # ----------------------------------
@@ -251,7 +254,11 @@ class JSRuntime:
                     bytes_received = msg.get("bytesReceived")
                     bytes_total = msg.get("bytesTotal")
                     if bytes_received is not None and bytes_total:
-                        cb(float(msg.get("value", 0.0)), int(bytes_received), int(bytes_total))
+                        cb(
+                            float(msg.get("value", 0.0)),
+                            int(bytes_received),
+                            int(bytes_total),
+                        )
                     else:
                         cb(float(msg.get("value", 0.0)))
                 except TypeError:
@@ -294,22 +301,29 @@ class JSRuntime:
         JSExtensionProvider is used (sync or async) in the rest of the program.
         """
         request_id = msg.get("requestId")
-        method  = msg.get("method", "GET")
-        path    = msg.get("path", "")
-        body    = msg.get("body")
+        method = msg.get("method", "GET")
+        path = msg.get("path", "")
+        body = msg.get("body")
         headers = msg.get("headers") or {}
 
         def _respond(result: dict) -> None:
             try:
-                line = json.dumps({
-                    "type": "session_signed_fetch_response",
-                    "requestId": request_id,
-                    "result": result,
-                }) + "\n"
+                line = (
+                    json.dumps(
+                        {
+                            "type": "session_signed_fetch_response",
+                            "requestId": request_id,
+                            "result": result,
+                        }
+                    )
+                    + "\n"
+                )
                 self._proc.stdin.write(line.encode())
                 self._proc.stdin.flush()
             except Exception as e:
-                logger.debug("[JSRuntime] unable to respond to session.signedFetch: %s", e)
+                logger.debug(
+                    "[JSRuntime] unable to respond to session.signedFetch: %s", e
+                )
 
         if self.session_handler is None:
             _respond({"error": "session.signedFetch: no session_handler configured"})

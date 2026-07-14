@@ -17,6 +17,7 @@ Direct URL flow (e.g. user pastes a SoundCloud link):
 The provider is registered in PROVIDER_REGISTRY with key "ext:{name}",
 e.g. "ext:soundcloud", "ext:pandora".
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +33,11 @@ from ..core.errors import SpotiflacError, ErrorKind
 from ..providers.base import BaseProvider
 from .manager import ExtensionManager, InstalledExtension
 from .runtime import JSRuntime, ExtensionRuntimeError
-from ..core.signed_session import SignedSessionClient, perform_signed_fetch, client_from_manifest
+from ..core.signed_session import (
+    SignedSessionClient,
+    perform_signed_fetch,
+    client_from_manifest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +53,16 @@ class JSExtensionProvider(BaseProvider):
 
     def __init__(
         self,
-        ext_id:          str,
-        settings:        dict | None = None,
-        ext_dir:         str | None  = None,
-        node_executable: str         = "node",
-        timeout_s:       int         = 120,
+        ext_id: str,
+        settings: dict | None = None,
+        ext_dir: str | None = None,
+        node_executable: str = "node",
+        timeout_s: int = 120,
     ) -> None:
-        self._timeout_s       = timeout_s
+        self._timeout_s = timeout_s
         self._node_executable = node_executable
-        self._progress_cb     = None
-        self._stop_event      = None
+        self._progress_cb = None
+        self._stop_event = None
 
         self._mgr = ExtensionManager(ext_dir=ext_dir)
         self._ext: InstalledExtension = self._load_extension(ext_id)
@@ -78,14 +83,14 @@ class JSExtensionProvider(BaseProvider):
         ss_config = self._ext.manifest.get("signedSession")
         if ss_config and any(f.startswith("signedSession") for f in required):
             self._signed_session = SignedSessionClient(
-                base_url       = ss_config["baseUrl"],
-                namespace      = ss_config["namespace"],
-                app_version    = ss_config.get("appVersion", "1.0"),
-                platform       = ss_config.get("platform", "extension"),
-                scheme_label   = ss_config.get("schemeLabel", "SPOTIFLAC-HMAC-V1"),
-                header_prefix  = ss_config.get("headerPrefix", "X-Sig-"),
-                window_seconds = ss_config.get("timeWindowSeconds", 300),
-                endpoints      = ss_config.get("endpoints"),
+                base_url=ss_config["baseUrl"],
+                namespace=ss_config["namespace"],
+                app_version=ss_config.get("appVersion", "1.0"),
+                platform=ss_config.get("platform", "extension"),
+                scheme_label=ss_config.get("schemeLabel", "SPOTIFLAC-HMAC-V1"),
+                header_prefix=ss_config.get("headerPrefix", "X-Sig-"),
+                window_seconds=ss_config.get("timeWindowSeconds", 300),
+                endpoints=ss_config.get("endpoints"),
             )
 
         # --- RUNTIME POOL CONFIGURATION ---
@@ -139,13 +144,14 @@ class JSExtensionProvider(BaseProvider):
     def _create_runtime(self) -> JSRuntime:
         """Creates a new isolated instance of the Node.js process."""
         rt = JSRuntime(
-            ext_path        = self._ext.index_js,
-            settings        = self._settings,
-            node_executable = self._node_executable,
-            startup_timeout = 30.0,
-            session_handler = (
+            ext_path=self._ext.index_js,
+            settings=self._settings,
+            node_executable=self._node_executable,
+            startup_timeout=30.0,
+            session_handler=(
                 self._session_signed_fetch_handler
-                if self._signed_session is not None else None
+                if self._signed_session is not None
+                else None
             ),
         )
         rt.start()
@@ -190,9 +196,9 @@ class JSExtensionProvider(BaseProvider):
                 return rt.call(method, *args, timeout=self._timeout_s, **kw)
         except ExtensionRuntimeError as e:
             raise SpotiflacError(
-                kind     = ErrorKind.NETWORK_ERROR,
-                message  = str(e),
-                provider = self.name,
+                kind=ErrorKind.NETWORK_ERROR,
+                message=str(e),
+                provider=self.name,
             ) from e
 
     def close(self) -> None:
@@ -230,14 +236,16 @@ class JSExtensionProvider(BaseProvider):
 
     def check_availability(
         self,
-        isrc:        str,
-        track_name:  str,
+        isrc: str,
+        track_name: str,
         artist_name: str,
-        options:     dict | None = None,
+        options: dict | None = None,
     ) -> dict:
         return self._call(
             "checkAvailability",
-            isrc, track_name, artist_name,
+            isrc,
+            track_name,
+            artist_name,
             options or {},
         ) or {"available": False}
 
@@ -269,40 +277,41 @@ class JSExtensionProvider(BaseProvider):
 
     async def download_track_async(
         self,
-        metadata:             TrackMetadata,
-        output_dir:           str,
+        metadata: TrackMetadata,
+        output_dir: str,
         *,
-        filename_format:      str          = "{title} - {artist}",
-        position:              int          = 1,
-        include_track_num:    bool         = False,
-        use_album_track_num:  bool         = False,
-        first_artist_only:    bool         = False,
-        allow_fallback:       bool         = True,
-        embed_lyrics:         bool         = False,
-        lyrics_providers:     list | None  = None,
-        enrich_metadata:      bool         = False,
-        enrich_providers:     list | None  = None,
-        qobuz_token:          str | None   = None,
-        is_album:             bool         = False,
-        quality:              str          = "best",
+        filename_format: str = "{title} - {artist}",
+        position: int = 1,
+        include_track_num: bool = False,
+        use_album_track_num: bool = False,
+        first_artist_only: bool = False,
+        allow_fallback: bool = True,
+        embed_lyrics: bool = False,
+        lyrics_providers: list | None = None,
+        enrich_metadata: bool = False,
+        enrich_providers: list | None = None,
+        qobuz_token: str | None = None,
+        is_album: bool = False,
+        quality: str = "best",
         **kwargs,
     ) -> DownloadResult:
         try:
             return await self._do_download_async(
-                metadata, output_dir,
-                filename_format      = filename_format,
-                position             = position,
-                include_track_num    = include_track_num,
-                use_album_track_num  = use_album_track_num,
-                first_artist_only    = first_artist_only,
-                quality              = quality,
-                allow_fallback       = allow_fallback,
-                embed_lyrics         = embed_lyrics,
-                lyrics_providers     = lyrics_providers,
-                enrich_metadata      = enrich_metadata,
-                enrich_providers     = enrich_providers,
-                qobuz_token          = qobuz_token,
-                is_album             = is_album,
+                metadata,
+                output_dir,
+                filename_format=filename_format,
+                position=position,
+                include_track_num=include_track_num,
+                use_album_track_num=use_album_track_num,
+                first_artist_only=first_artist_only,
+                quality=quality,
+                allow_fallback=allow_fallback,
+                embed_lyrics=embed_lyrics,
+                lyrics_providers=lyrics_providers,
+                enrich_metadata=enrich_metadata,
+                enrich_providers=enrich_providers,
+                qobuz_token=qobuz_token,
+                is_album=is_album,
             )
         except SpotiflacError as e:
             return DownloadResult.fail(self.name, str(e))
@@ -312,31 +321,31 @@ class JSExtensionProvider(BaseProvider):
 
     async def _do_download_async(
         self,
-        metadata:            TrackMetadata,
-        output_dir:          str,
+        metadata: TrackMetadata,
+        output_dir: str,
         *,
-        filename_format:     str,
-        position:            int,
-        include_track_num:   bool,
+        filename_format: str,
+        position: int,
+        include_track_num: bool,
         use_album_track_num: bool,
-        first_artist_only:   bool,
-        quality:             str,
-        allow_fallback:      bool         = True,
-        embed_lyrics:        bool         = False,
-        lyrics_providers:    list | None  = None,
-        enrich_metadata:     bool         = False,
-        enrich_providers:    list | None  = None,
-        qobuz_token:         str | None   = None,
-        is_album:            bool         = False,
+        first_artist_only: bool,
+        quality: str,
+        allow_fallback: bool = True,
+        embed_lyrics: bool = False,
+        lyrics_providers: list | None = None,
+        enrich_metadata: bool = False,
+        enrich_providers: list | None = None,
+        qobuz_token: str | None = None,
+        is_album: bool = False,
     ) -> DownloadResult:
         avail = await asyncio.to_thread(
             self.check_availability,
-            isrc        = metadata.isrc,
-            track_name  = metadata.title,
-            artist_name = metadata.artists,
-            options     = {
+            isrc=metadata.isrc,
+            track_name=metadata.title,
+            artist_name=metadata.artists,
+            options={
                 "duration_ms": metadata.duration_ms,
-                "spotify_id":  metadata.id,
+                "spotify_id": metadata.id,
             },
         )
 
@@ -346,24 +355,27 @@ class JSExtensionProvider(BaseProvider):
 
         track_id = avail.get("track_id", "")
         if not track_id:
-            return DownloadResult.fail(self.name, "checkAvailability returned no track_id")
+            return DownloadResult.fail(
+                self.name, "checkAvailability returned no track_id"
+            )
 
         ext_hint = _quality_to_ext(quality)
         output_path = self._build_output_path(
-            metadata            = metadata,
-            output_dir          = output_dir,
-            filename_format     = filename_format,
-            position            = position,
-            include_track_num   = include_track_num,
-            use_album_track_num = use_album_track_num,
-            first_artist_only   = first_artist_only,
-            extension           = ext_hint,
+            metadata=metadata,
+            output_dir=output_dir,
+            filename_format=filename_format,
+            position=position,
+            include_track_num=include_track_num,
+            use_album_track_num=use_album_track_num,
+            first_artist_only=first_artist_only,
+            extension=ext_hint,
         )
 
         if self._file_exists(output_path):
             return DownloadResult.skipped_result(
-                self.name, str(output_path),
-                fmt = _ext_to_fmt(output_path.suffix),
+                self.name,
+                str(output_path),
+                fmt=_ext_to_fmt(output_path.suffix),
             )
 
         def _progress_adapter(fraction: float) -> None:
@@ -396,8 +408,11 @@ class JSExtensionProvider(BaseProvider):
             dl_result = await asyncio.to_thread(
                 self._call,
                 "download",
-                track_id, quality, str(output_path), None,
-                progress_cb = _progress_adapter,
+                track_id,
+                quality,
+                str(output_path),
+                None,
+                progress_cb=_progress_adapter,
             )
         finally:
             poll_stop.set()
@@ -419,21 +434,32 @@ class JSExtensionProvider(BaseProvider):
         if Path(actual_path).suffix.lower() in [".m4a", ".mp4"]:
             codec = await _get_codec_async(actual_path)
             if codec == "flac":
-                logger.info("[%s] FLAC nascosto in contenitore M4A rilevato. Avvio estrazione (remux)...", self.name)
+                logger.info(
+                    "[%s] FLAC nascosto in contenitore M4A rilevato. Avvio estrazione (remux)...",
+                    self.name,
+                )
                 flac_path = str(Path(actual_path).with_suffix(".flac"))
-                
-                d_key = dl_result.get("decryption_key") or dl_result.get("decryptionKey")
-                
+
+                d_key = dl_result.get("decryption_key") or dl_result.get(
+                    "decryptionKey"
+                )
+
                 if await _remux_to_flac_async(actual_path, flac_path, d_key):
                     import os
+
                     try:
                         os.remove(actual_path)
                     except OSError:
                         pass
                     actual_path = flac_path
-                    logger.info("[%s] Estrazione FLAC completata con successo.", self.name)
+                    logger.info(
+                        "[%s] Estrazione FLAC completata con successo.", self.name
+                    )
                 else:
-                    logger.warning("[%s] Estrazione FLAC fallita, mantengo il file originale.", self.name)
+                    logger.warning(
+                        "[%s] Estrazione FLAC fallita, mantengo il file originale.",
+                        self.name,
+                    )
 
         fmt = _ext_to_fmt(Path(actual_path).suffix)
 
@@ -441,7 +467,10 @@ class JSExtensionProvider(BaseProvider):
         mb_tags: dict[str, str] = {}
         if enrich_metadata and metadata.isrc:
             try:
-                from ..core.musicbrainz import fetch_mb_metadata_async, mb_result_to_tags
+                from ..core.musicbrainz import (
+                    fetch_mb_metadata_async,
+                    mb_result_to_tags,
+                )
                 from ..core.isrc_utils import normalize_isrc
 
                 isrc_clean = normalize_isrc(metadata.isrc)
@@ -449,14 +478,18 @@ class JSExtensionProvider(BaseProvider):
                     mb_data = await fetch_mb_metadata_async(isrc_clean)
                     mb_tags = mb_result_to_tags(mb_data)
             except Exception as e:
-                logger.debug("[%s] MusicBrainz lookup failed (non-fatal): %s", self.name, e)
+                logger.debug(
+                    "[%s] MusicBrainz lookup failed (non-fatal): %s", self.name, e
+                )
 
         try:
             from ..core.tagger import embed_metadata_async, EmbedOptions
             from ..core.download_validation import validate_downloaded_track_async
 
             expected_s = metadata.duration_ms // 1000
-            valid, err_msg = await validate_downloaded_track_async(actual_path, expected_s)
+            valid, err_msg = await validate_downloaded_track_async(
+                actual_path, expected_s
+            )
             if not valid:
                 logger.warning("[%s] Validation failed: %s", self.name, err_msg)
                 return DownloadResult.fail(self.name, f"Validation failed: {err_msg}")
@@ -465,15 +498,15 @@ class JSExtensionProvider(BaseProvider):
                 Path(actual_path),
                 metadata,
                 EmbedOptions(
-                    cover_url          = metadata.cover_url or "",
-                    first_artist_only   = first_artist_only,
-                    embed_lyrics       = embed_lyrics,
-                    lyrics_providers   = lyrics_providers or [],
-                    enrich             = enrich_metadata,
-                    enrich_providers   = enrich_providers,
-                    enrich_qobuz_token = qobuz_token or "",
-                    is_album           = is_album,
-                    extra_tags         = mb_tags,
+                    cover_url=metadata.cover_url or "",
+                    first_artist_only=first_artist_only,
+                    embed_lyrics=embed_lyrics,
+                    lyrics_providers=lyrics_providers or [],
+                    enrich=enrich_metadata,
+                    enrich_providers=enrich_providers,
+                    enrich_qobuz_token=qobuz_token or "",
+                    is_album=is_album,
+                    extra_tags=mb_tags,
                 ),
             )
         except Exception as e:
@@ -507,7 +540,11 @@ class JSExtensionProvider(BaseProvider):
         or None if it was not possible to rebuild a valid file.
         """
         file_path = dl_result.get("file_path")
-        if file_path and Path(file_path).exists() and Path(file_path).stat().st_size > 0:
+        if (
+            file_path
+            and Path(file_path).exists()
+            and Path(file_path).stat().st_size > 0
+        ):
             return file_path
 
         segments: list[str] = dl_result.get("segments") or []
@@ -522,14 +559,17 @@ class JSExtensionProvider(BaseProvider):
                 parent.glob(f"{stem}.seg*"),
                 key=lambda p: p.name,
             )
-            segments = [str(p) for p in candidates if p.exists() and p.stat().st_size > 0]
+            segments = [
+                str(p) for p in candidates if p.exists() and p.stat().st_size > 0
+            ]
 
         if not segments:
             return None
 
         logger.info(
             "[%s] Reassembling %d segment(s) into a single stream…",
-            self.name, len(segments),
+            self.name,
+            len(segments),
         )
 
         raw_concat = output_path.with_suffix(".raw.tmp")
@@ -547,10 +587,15 @@ class JSExtensionProvider(BaseProvider):
         codec = "flac"
         try:
             rc, stdout, stderr = await self._run_ffprobe(
-                "ffprobe", "-v", "quiet",
-                "-select_streams", "a:0",
-                "-show_entries", "stream=codec_name",
-                "-of", "default=noprint_wrappers=1:nokey=1",
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
                 str(raw_concat),
             )
             if rc == 0 and stdout.strip():
@@ -558,14 +603,19 @@ class JSExtensionProvider(BaseProvider):
             else:
                 logger.warning(
                     "[%s] ffprobe failed on reassembled stream, guessing codec: %s",
-                    self.name, stderr.strip()[:150],
+                    self.name,
+                    stderr.strip()[:150],
                 )
         except Exception:
-            logger.warning("[%s] ffprobe failed to detect codec after reassembly", self.name)
+            logger.warning(
+                "[%s] ffprobe failed to detect codec after reassembly", self.name
+            )
 
         is_lossy = codec not in ("flac", "alac")
         final_dest = (
-            output_path.with_suffix(".m4a") if is_lossy else output_path.with_suffix(".flac")
+            output_path.with_suffix(".m4a")
+            if is_lossy
+            else output_path.with_suffix(".flac")
         )
 
         cmd = ["ffmpeg", "-y", "-i", str(raw_concat), "-vn"]
@@ -653,23 +703,37 @@ class JSExtensionProvider(BaseProvider):
 #  Helpers & Factory
 # ─────────────────────────────────────────────────────────────
 
+
 def _quality_to_ext(quality: str) -> str:
     q = quality.lower()
-    if "flac" in q:                return ".flac"
-    if "mp3" in q:                 return ".mp3"
-    if "aac" in q or "m4a" in q:  return ".m4a"
-    if "opus" in q:                return ".opus"
+    if "flac" in q:
+        return ".flac"
+    if "mp3" in q:
+        return ".mp3"
+    if "aac" in q or "m4a" in q:
+        return ".m4a"
+    if "opus" in q:
+        return ".opus"
     return ".flac"
+
 
 def _ext_to_fmt(suffix: str) -> str:
     return {".flac": "flac", ".mp3": "mp3", ".m4a": "m4a"}.get(suffix.lower(), "flac")
 
+
 async def _get_codec_async(filepath: str) -> str:
     try:
         cmd = [
-            "ffprobe", "-v", "quiet", "-select_streams", "a:0",
-            "-show_entries", "stream=codec_name", "-of",
-            "default=noprint_wrappers=1:nokey=1", filepath
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            filepath,
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -679,23 +743,28 @@ async def _get_codec_async(filepath: str) -> str:
     except Exception:
         return "m4a"
 
-async def _remux_to_flac_async(input_path: str, output_path: str, decryption_key: str = None) -> bool:
+
+async def _remux_to_flac_async(
+    input_path: str, output_path: str, decryption_key: str = None
+) -> bool:
     import logging
+
     logger = logging.getLogger(__name__)
     try:
         cmd = ["ffmpeg", "-y"]
         if decryption_key:
             cmd.extend(["-decryption_key", str(decryption_key).strip()])
-            
+
         cmd.extend(["-i", input_path, "-map", "0:a:0", "-c:a", "flac", output_path])
-        
+
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         _, stderr = await proc.communicate()
         from pathlib import Path
+
         if proc.returncode != 0:
-            err_msg = stderr.decode(errors='ignore')[-150:].replace('\n', ' ')
+            err_msg = stderr.decode(errors="ignore")[-150:].replace("\n", " ")
             logger.warning("Errore FFMPEG: %s", err_msg)
             return False
         return Path(output_path).exists()
@@ -703,17 +772,18 @@ async def _remux_to_flac_async(input_path: str, output_path: str, decryption_key
         logger.warning("FLAC remux error: %s", exc)
         return False
 
+
 def make_extension_provider(
-    ext_id:          str,
-    settings:        dict | None = None,
-    ext_dir:         str | None  = None,
-    node_executable: str         = "node",
-    timeout_s:       int         = 120,
+    ext_id: str,
+    settings: dict | None = None,
+    ext_dir: str | None = None,
+    node_executable: str = "node",
+    timeout_s: int = 120,
 ) -> JSExtensionProvider:
     return JSExtensionProvider(
-        ext_id          = ext_id,
-        settings        = settings,
-        ext_dir         = ext_dir,
-        node_executable = node_executable,
-        timeout_s       = timeout_s,
+        ext_id=ext_id,
+        settings=settings,
+        ext_dir=ext_dir,
+        node_executable=node_executable,
+        timeout_s=timeout_s,
     )
