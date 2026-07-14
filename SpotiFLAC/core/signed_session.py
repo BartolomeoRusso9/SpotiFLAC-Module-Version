@@ -38,22 +38,21 @@ oltre a bootstrap/challenge/verify/exchange, esiste un flusso di DOWNLOAD a
              "resource_hash": "<sha256 esadecimale>"}
       → {"ticket_id": "tkt_...", "expires_in": 60, "max_uses": 1}
 
-    POST {base_url}/dl/{short_id}   (signed, PIÙ un header extra)
-      header extra: X-Zarz-Ticket: <ticket_id ottenuto sopra>
-      body: {"id": "<track id del provider>", "quality": "<stringa qualità>"}
-      → presumibilmente URL/stream del file (non catturato: la richiesta
-        osservata ha ricevuto 502 dal server, quindi la risposta reale non è
-        nota)
+    POST {base_url}/dl/{short_id}   (signed, PLUS an extra header)
+      extra header: X-Zarz-Ticket: <ticket_id obtained above>
+      body: {"id": "<provider track id>", "quality": "<quality string>"}
+      → presumably file URL/stream (not captured: the observed request
+        received 502 from server, so actual response is unknown)
 
-Il "resource_hash" è calcolato lato JS dall'estensione (probabilmente hash di
-provider+id+qualità o simile) e non è replicabile qui senza il codice
-JS dell'estensione specifica (es. tidal-web/index.js) che lo genera. Il
-ticket è a singolo uso (max_uses=1) e vive solo 60s: va richiesto appena
-prima di ogni singola chiamata /dl/{short_id}, non riutilizzato.
-Se in futuro serve implementare anche questo, il metodo generico `request()`
-già presente qui sotto (usato per signedFetch) può essere riusato invariato
-per la POST /tickets — serve solo aggiungere il supporto per l'header extra
-X-Zarz-Ticket sulla POST /dl/{short_id} (extra_headers è già supportato da
+The "resource_hash" is computed client-side by the extension JS
+(likely hash of provider+id+quality or similar) and cannot be replicated
+here without the specific extension's JS code (e.g., tidal-web/index.js)
+that generates it. The ticket is single-use (max_uses=1) and lives only 60s:
+it should be requested just before each /dl/{short_id} call, not reused.
+If this needs to be implemented in the future, the generic `request()` method
+already present below (used for signedFetch) can be reused unchanged for the
+POST /tickets — only support for the extra X-Zarz-Ticket header on POST
+/dl/{short_id} needs to be added (extra_headers is already supported by
 request()).
 "/session/refresh" in the manifest, silently breaking session renewal.
 """
@@ -82,19 +81,19 @@ _DEFAULT_ENDPOINTS = {
     "bootstrap": "/bootstrap",
     "challenge": "/challenge",
     "exchange": "/session/exchange",
-    # NOTE: nessun default per "refresh": il backend Go di riferimento
+    # NOTE: no default for "refresh": il backend Go di riferimento
     # (extension_signed_session.go) non ne mette uno e tenta il refresh
     # solo se il manifest lo dichiara esplicitamente in endpoints.refresh.
     # Un default indovinato qui rischierebbe di colpire un path
     # inesistente quando il manifest non lo dichiara.
 }
 
-# Header "da browser reale" osservati via DevTools su una chiamata
-# riuscita a POST {base_url}/challenge/verify (Brave su macOS, Chromium 149).
-# Cloudflare/l'API applicano un controllo di fingerprint su questi header:
-# senza di essi la richiesta torna "Invalid request" anche con un token
-# Turnstile valido. Origin va calcolato per istanza (dipende da base_url)
-# e viene aggiunto in __init__, non qui.
+# Headers "from real browser" observed via DevTools su una chiamata
+# on a successful POST to {base_url}/challenge/verify (Brave on macOS, Chromium 149).
+# Cloudflare/the API apply fingerprint verification on these headers:
+# without them the request returns "Invalid request" even with a valid
+# Turnstile token. Origin must be calculated per-instance (depends on base_url)
+# and is added in __init__, not here.
 _BROWSER_FINGERPRINT_HEADERS = {
     # Use a minimal, mobile-extension-friendly fingerprint observed in the
     # Qobuz extension captures: prefer JSON responses and gzip encoding.
@@ -104,26 +103,26 @@ _BROWSER_FINGERPRINT_HEADERS = {
 
 _LOCAL_CALLBACK_HOST = "127.0.0.1"
 _LOCAL_CALLBACK_PATH = "/callback"
-_MANUAL_GRANT_TIMEOUT_S = 300  # 5 minuti per incollare il grant
+_MANUAL_GRANT_TIMEOUT_S = 300  # 5 minutes to paste the grant
 
 
 class _LocalGrantListener:
     """
-    STORICO / NON PIÙ USATA dal flusso principale (authenticate_with_manual_grant).
+    DEPRECATED / NO LONGER USED by the main flow (authenticate_with_manual_grant).
 
-    Ipotesi originaria: la pagina di sfida, dopo aver risolto il Turnstile,
-    avrebbe fatto un redirect al "cb" fornito (come fa l'app Flutter con lo
-    scheme "spotiflac://..."), catturabile da un piccolo server HTTP locale
-    che sostituisse quello scheme mobile con http://127.0.0.1:{porta}.
+    Original hypothesis: the challenge page, after resolving the Turnstile,
+    would redirect to the provided "cb" (like the Flutter app does with the
+    "spotiflac://..." scheme), capturable by a small local HTTP server that
+    would replace the mobile scheme with http://127.0.0.1:{port}.
 
-    Verificato via DevTools che questo NON accade in un browser esterno: la
-    pagina ottiene il grant chiamando internamente {endpoints.challenge}/verify,
-    ma poi non naviga da nessuna parte (il meccanismo "cb" sembra pensato per
-    una WebView nativa con bridge JS, non per un browser esterno). Il flusso
-    attuale (authenticate_with_manual_grant) evita del tutto il problema:
-    l'utente apre la pagina a mano, risolve il Turnstile, e legge/incolla
-    lui stesso il grant dalla risposta di quella chiamata in DevTools. Questa
-    classe resta solo per riferimento storico.
+    Verified via DevTools that this does NOT happen in an external browser:
+    the page obtains the grant by calling {endpoints.challenge}/verify
+    internally, but then doesn't navigate anywhere (the "cb" mechanism appears
+    to be designed for a native WebView with JS bridge, not an external
+    browser). The current flow (authenticate_with_manual_grant) avoids the
+    issue entirely: the user opens the page manually, resolves the Turnstile,
+    and reads/pastes the grant themselves from the response in DevTools.
+    This class remains for historical reference only.
     """
 
     def __init__(self, host: str = _LOCAL_CALLBACK_HOST, path: str = _LOCAL_CALLBACK_PATH) -> None:
@@ -134,7 +133,7 @@ class _LocalGrantListener:
         self._grant_future: asyncio.Future[str] | None = None
 
     async def start(self) -> str:
-        """Avvia il listener su una porta libera e ritorna l'URL di callback completo."""
+        """Start the listener on a free port and return the full callback URL."""
         loop = asyncio.get_running_loop()
         self._grant_future = loop.create_future()
         self._server = await asyncio.start_server(
@@ -148,7 +147,7 @@ class _LocalGrantListener:
     ) -> None:
         try:
             request_line = await asyncio.wait_for(reader.readline(), timeout=10)
-            # Consuma il resto degli header della richiesta (non ci servono)
+            # Consume the rest of the request headers (we don't need them)
             while True:
                 line = await asyncio.wait_for(reader.readline(), timeout=10)
                 if not line or line in (b"\r\n", b"\n"):
@@ -161,9 +160,9 @@ class _LocalGrantListener:
 
             parsed = urlparse(raw_target)
 
-            # Ignora qualsiasi richiesta che non sia il nostro path di callback
-            # (es. GET /favicon.ico che alcuni browser sparano automaticamente):
-            # non deve MAI toccare il future del grant.
+            # Ignore any request that is not our callback path
+            # (e.g., GET /favicon.ico that some browsers send automatically):
+            # must NEVER touch the grant future.
             if parsed.path != self.path:
                 await self._respond(writer, 404, "<h3>Not Found</h3>")
                 return
@@ -175,13 +174,13 @@ class _LocalGrantListener:
             if grant:
                 await self._respond(
                     writer, 200,
-                    "<h2>Verifica completata ✅</h2>"
-                    "<p>Puoi chiudere questa finestra e tornare all'app.</p>",
+                    "<h2>Verification completed ✅</h2>"
+                    "<p>You can close this window and return to the app.</p>",
                 )
             else:
                 await self._respond(
                     writer, 200,
-                    "<h2>Verifica non riuscita</h2>"
+                    "<h2>Verification failed</h2>"
                     f"<p>{error or 'Nessun grant ricevuto.'}</p>",
                 )
 
@@ -190,7 +189,7 @@ class _LocalGrantListener:
                     self._grant_future.set_result(grant)
                 else:
                     self._grant_future.set_exception(
-                        RuntimeError(f"callback senza grant: {error or 'sconosciuto'}")
+                        RuntimeError(f"callback without grant: {error or 'unknown'}")
                     )
         except Exception as exc:
             if self._grant_future is not None and not self._grant_future.done():
@@ -219,8 +218,8 @@ class _LocalGrantListener:
         await writer.drain()
 
     async def wait_for_grant(self, timeout: float) -> str:
-        """Blocca finché il browser non chiama il callback con ?grant=..., poi ferma il listener."""
-        assert self._grant_future is not None, "start() non è stato chiamato"
+        """Wait until the browser calls the callback with ?grant=..., then stop the listener."""
+        assert self._grant_future is not None, "start() has not been called"
         try:
             return await asyncio.wait_for(self._grant_future, timeout=timeout)
         finally:
@@ -262,9 +261,9 @@ class SignedSessionClient:
         self.data_dir = Path(os.path.expanduser(data_dir))
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._path = self._session_path()
-        # Origin è SOLO scheme://host (niente path): come confermato dallo
-        # screenshot DevTools, per base_url "https://api.zarz.moe/v2" il
-        # browser manda "Origin: https://api.zarz.moe", non ".../v2".
+        # Origin is ONLY scheme://host (no path): as confirmed by
+        # DevTools screenshot, for base_url "https://api.zarz.moe/v2"
+        # browser sends "Origin: https://api.zarz.moe", not ".../v2".
         _parsed_base = urlparse(self.base_url)
         _origin = f"{_parsed_base.scheme}://{_parsed_base.netloc}"
         # Build headers per-instance so we can include the exact User-Agent
@@ -289,15 +288,15 @@ class SignedSessionClient:
         """
         Inietta il cookie `cf_clearance` di Cloudflare nel client httpx.
 
-        Questo cookie è quello che nello screenshot DevTools compare nella
-        richiesta riuscita del browser a /challenge/verify — è legato alla
-        sessione/fingerprint TLS con cui è stato ottenuto (tipicamente la
-        stessa sessione browser/CDP che ha risolto il Turnstile), quindi
-        NON va hardcodato: va passato qui non appena disponibile, subito
-        prima di chiamare verify_challenge().
+        This cookie is the one that appears in the DevTools screenshot in the
+        browser's successful request to /challenge/verify — it is tied to the
+        TLS session/fingerprint with which it was obtained (typically the same
+        browser/CDP session that resolved the Turnstile), so it must NOT be
+        hardcoded: it should be passed here as soon as available, right before
+        calling verify_challenge().
 
-        Se il modulo core.turnstile.solve() è in grado di restituire anche
-        i cookie della pagina (oltre al solo token), passali qui, es.:
+        If the core.turnstile.solve() module is able to return both the page
+        cookies (beyond just the token), pass them here, e.g.:
 
             token, cookies = await asyncio.to_thread(solve, ...)
             if cookies.get("cf_clearance"):
@@ -332,34 +331,33 @@ class SignedSessionClient:
         self.session_id = record.get("session_id")
         self.session_secret = record.get("session_secret")
         self.expires_at = record.get("expires_at")
-        # Campi opzionali restituiti da bootstrap/exchange/refresh — confermati
-        # via cattura di rete reale (2026-07-12): la risposta di
-        # POST .../session/exchange include anche "refresh_after" (timestamp
-        # assoluto, preferito rispetto al nostro skew calcolato) e
-        # "capabilities" (lista di permessi della sessione, es.
+        # Optional fields returned by bootstrap/exchange/refresh — verified
+        # via real network capture (2026-07-12): the response from
+        # POST .../session/exchange also includes "refresh_after" (timestamp
+        # absolute, preferred over our calculated skew) and
+        # "capabilities" (list of session permissions, e.g.
         # ["resolve", "metadata", "download_ticket"]).
         self.refresh_after = record.get("refresh_after")
         self.capabilities = record.get("capabilities", [])
         self._save()
 
     def _ensure_client(self) -> None:
-        """Crea il client httpx in modo lazy e rimuove l'header "Connection".
+        """Creates the httpx client lazily and removes the "Connection" header.
 
-        NOTA: non basta omettere "Connection" dal dict passato a
-        `httpx.AsyncClient(headers=...)`. Il setter interno di
-        `httpx.Client.headers` costruisce sempre un set di default
-        (Accept, Accept-Encoding, Connection: keep-alive, User-Agent) e poi
-        ci fonde sopra quelli forniti da noi: se noi non specifichiamo
-        "Connection", resta comunque il default "keep-alive" di httpx,
-        indipendentemente da eventuali .pop() fatti sul nostro dict PRIMA
-        della creazione del client. Va quindi rimosso DOPO, agendo
-        direttamente sull'oggetto Headers già costruito dal client.
+        NOTE: it's not enough to omit "Connection" from the dict passed to
+        `httpx.AsyncClient(headers=...)`. The internal setter of
+        `httpx.Client.headers` always constructs a set of defaults
+        (Accept, Accept-Encoding, Connection: keep-alive, User-Agent) and then
+        merges those provided by us: if we don't specify "Connection", the
+        httpx default "keep-alive" remains regardless of any .pop() done on
+        our dict BEFORE client creation. It must therefore be removed AFTER,
+        acting directly on the Headers object already constructed by the client.
         """
         if self._client is None:
             self._client = httpx.AsyncClient(headers=self._client_headers, http2=True)
-            # Rimuoviamo l'header dall'oggetto Headers effettivo del client,
-            # non dal dict di input (che a questo punto è già stato fuso
-            # con i default interni di httpx).
+            # Remove the header from the client's actual Headers object,
+            # not from the input dict (which at this point has already been merged
+            # with httpx's internal defaults).
             self._client.headers.pop("Connection", None)
 
     def _save(self) -> None:
@@ -464,17 +462,17 @@ class SignedSessionClient:
         return None
 
     def _build_challenge_url(self, challenge_id: str) -> str:
-        # STORICO/DEPRECATO: questo helper NON aggiunge nessun "cb" — era
-        # basato sull'assunzione (rivelatasi sbagliata, vedi verify_challenge
-        # sotto) che il grant si ottenesse chiamando {endpoints.challenge}/verify
-        # direttamente. Il vero backend (extension_signed_session.go,
-        # buildSignedSessionChallengeURL) aggiunge SEMPRE un parametro "cb"
-        # con l'URL di callback. Per il flusso corretto vedi
+        # DEPRECATED: this helper does NOT add any "cb" — was
+        # based on the assumption (proven wrong, see verify_challenge
+        # below) that the grant was obtained by calling {endpoints.challenge}/verify
+        # directly. The real backend (extension_signed_session.go,
+        # buildSignedSessionChallengeURL) ALWAYS adds a "cb" parameter
+        # with the callback URL. For the correct flow see
         # _build_challenge_url_with_callback() + authenticate_with_browser().
-        # Questo metodo resta solo per lo scraping best-effort del sitekey
-        # dentro bootstrap() (vedi _scrape_sitekey_from_page), che oggi non
-        # serve più (non automatizziamo più la risoluzione del Turnstile),
-        # ma è innocuo lasciarlo.
+        # This method remains only for best-effort sitekey scraping
+        # within bootstrap() (see _scrape_sitekey_from_page), which today
+        # is no longer needed (we no longer automate Turnstile resolution),
+        # but it's harmless to leave it.
         parts = list(urlparse(f"{self.base_url}{self.endpoints['challenge']}"))
         query = dict(parse_qsl(parts[4]))
         query["id"] = challenge_id
@@ -487,14 +485,14 @@ class SignedSessionClient:
         (extension_signed_session.go):
 
           1. il callback riceve, nella propria query string, cb_version=v2grant
-             e state=<namespace> (nel Go è state=<extensionID>: qui usiamo il
-             namespace del client, dato che un'istanza Python serve un solo
-             "extension logico" alla volta);
+             and state=<namespace> (in Go it's state=<extensionID>: here we use the
+             client's namespace, since a Python instance serves only one
+             "logical extension" at a time);
           2. l'URL della pagina di sfida ({base}/challenge) riceve
              id=<challenge_id> e cb=<callback_url completo, urlencoded>.
 
-        `callback_url` qui è tipicamente quello restituito da
-        _LocalGrantListener.start(), cioè http://127.0.0.1:{porta}/callback
+        `callback_url` here is typically the one returned by
+        _LocalGrantListener.start(), i.e., http://127.0.0.1:{port}/callback
         al posto dello scheme mobile "spotiflac://session-grant" — la pagina
         di sfida non fa alcuna distinzione, fa comunque un redirect al "cb"
         fornito con ?grant=... aggiunto.
@@ -523,47 +521,47 @@ class SignedSessionClient:
         Fallback completamente manuale, senza Playwright: nessun browser viene
         aperto o automatizzato da qui.
 
-        Uso:
-          1. bootstrap() ottiene un challenge_id.
-          2. L'URL della pagina di sfida viene mostrato (via
-             on_verification_url, o stampato/loggato di default).
-          3. TU apri quell'URL in un browser qualsiasi e risolvi il Turnstile.
-          4. Apri DevTools → tab Network → cerca la richiesta "verify" (POST
-             a .../challenge/verify) → tab Preview: lì trovi
+        Usage:
+          1. bootstrap() obtains a challenge_id.
+          2. The challenge page URL is displayed (via
+             on_verification_url, or printed/logged by default).
+          3. YOU open that URL in any browser and solve the Turnstile.
+          4. Open DevTools → Network tab → find the "verify" request (POST
+             to .../challenge/verify) → Preview tab: there you find
              {"grant": "gr_...", "expires_in": 60}.
-          5. Copi quel valore di "grant" (senza virgolette) e lo incolli
-             quando richiesto (o lo passi tramite `grant_input`).
-          6. exchange_grant(grant) scambia il grant per una sessione vera.
+          5. Copy that "grant" value (without quotes) and paste it
+             when requested (or pass it via `grant_input`).
+          6. exchange_grant(grant) exchanges the grant for a real session.
 
-        Il grant ha vita breve (~60s dalla risposta di verify): copialo e
-        incollalo il più velocemente possibile.
+        The grant has a short lifespan (~60s from the verify response): copy and
+        paste it as quickly as possible.
 
-        Parametri:
-          on_verification_url – callback per mostrare l'URL (altrimenti
-              stampato su stdout e loggato a WARNING).
-          grant_input – funzione senza argomenti che ritorna il grant come
-              stringa (utile per integrazioni non interattive/GUI). Se non
-              fornita, chiede il grant via input() da terminale.
-          timeout – secondi massimi di attesa per l'inserimento del grant
-              (default 5 minuti). Solleva RuntimeError se scade prima che
-              tu (o grant_input) fornisca un valore. NOTA: se l'attesa è su
-              input() da terminale, il thread bloccato su quella chiamata
-              non viene interrotto allo scadere del timeout (limite di
-              Python: non si può cancellare un input() bloccante) — resta
-              in attesa in background finché non premi Invio, ma la
-              funzione ritorna comunque con l'errore di timeout appena
-              scattato, senza aspettarlo.
+        Parameters:
+          on_verification_url – callback to display the URL (otherwise
+              printed to stdout and logged as WARNING).
+          grant_input – function with no arguments that returns the grant as
+              string (useful for non-interactive/GUI integrations). If not
+              provided, asks for the grant via terminal input().
+          timeout – maximum seconds to wait for grant entry
+              (default 5 minutes). Raises RuntimeError if it expires before
+              you (or grant_input) provide a value. NOTE: if the wait is on
+              terminal input(), the thread blocked on that call
+              is not interrupted when the timeout expires (Python limitation:
+              you can't cancel a blocking input()) — it remains
+              waiting in background until you press Enter, but the
+              function still returns with the timeout error as soon as
+              it triggers, without waiting for it.
         """
         boot_result = await self.bootstrap()
         if boot_result is True:
-            return  # sessione ottenuta direttamente, nessuna verifica necessaria
+            return  # session obtained directly, no verification needed
 
         if not self.pending_challenge_id:
             if boot_result:
                 self._emit_verification_url(boot_result, on_verification_url)
             raise RuntimeError(
-                "Il server ha fornito un auth_url senza challenge_id: "
-                "impossibile costruire l'URL della sfida."
+                "The server provided an auth_url without challenge_id: "
+                "unable to build the challenge URL."
             )
 
         dummy_callback = f"http://{_LOCAL_CALLBACK_HOST}:1{_LOCAL_CALLBACK_PATH}"
@@ -578,19 +576,19 @@ class SignedSessionClient:
             grant_awaitable = asyncio.to_thread(
                 input,
                 "\nIncolla qui il grant (da DevTools → Network → verify → "
-                "Preview → campo 'grant'): ",
+                "Preview → field 'grant'): ",
             )
 
         try:
             grant = await asyncio.wait_for(grant_awaitable, timeout=timeout)
         except asyncio.TimeoutError as exc:
             raise RuntimeError(
-                f"Timeout ({timeout}s) in attesa dell'inserimento del grant"
+                f"Timeout ({timeout}s) waiting for grant entry"
             ) from exc
 
         grant = grant.strip()
         if not grant:
-            raise RuntimeError("Nessun grant fornito.")
+            raise RuntimeError("No grant provided.")
 
         await self.exchange_grant(grant)
 
@@ -602,39 +600,39 @@ class SignedSessionClient:
         Rende disponibile l'URL di verifica al chiamante, senza mai aprirlo
         automaticamente in un browser.
 
-        - Se `callback` è fornito, gli viene passato l'URL (il chiamante
-          decide cosa farne: webbrowser.open(), UI, notifica, ecc.).
-        - Altrimenti viene stampato su stdout e loggato a livello WARNING,
-          così resta visibile anche con la configurazione di logging di
-          default (WARNING) usata da SpotiFLAC(...).
+        - If `callback` is provided, the URL is passed to it (the caller
+          decides what to do: webbrowser.open(), UI, notification, etc.).
+        - Otherwise it is printed to stdout and logged at WARNING level,
+          so it remains visible even with the default logging configuration
+          (WARNING) used by SpotiFLAC(...).
         """
         if callback is not None:
             callback(url)
             return
-        logger.warning("[signed_session] Verifica richiesta: %s", url)
-        print(f"\n[SpotiFLAC] Verifica richiesta — apri questo link nel browser:\n  {url}\n")
+        logger.warning("[signed_session] Verification required: %s", url)
+        print(f"\n[SpotiFLAC] Verification required — open this link in the browser:\n  {url}\n")
 
     async def verify_challenge(self, challenge_id: str, turnstile_token: str) -> str:
         """
         NON CHIAMARLO DIRETTAMENTE da Python — lasciato solo per riferimento.
 
-        Questo endpoint ESISTE davvero ed è esattamente questo: POST
-        {base_url}{endpoints.challenge}/verify con
-        {"challenge_id": ..., "turnstile_token": ...}, risposta
-        {"grant": "...", "expires_in": 60} — confermato via DevTools su una
-        chiamata reale della pagina di sfida (200 OK).
+        This endpoint DOES exist and is exactly this: POST
+        {base_url}{endpoints.challenge}/verify with
+        {"challenge_id": ..., "turnstile_token": ...}, response
+        {"grant": "...", "expires_in": 60} — confirmed via DevTools on a
+        real call to the challenge page (200 OK).
 
-        Il motivo per cui chiamarlo noi stessi da Python fallisce (400): quella
-        richiesta, quando la fa la pagina, include un cookie `cf_clearance`
-        di Cloudflare legato a quella specifica tab/sessione browser (oltre
-        agli header di fingerprint già impostati su self._client). Un client
-        HTTP headless come questo non può ottenere quel cookie: richiede di
-        aver risolto realmente la sfida Cloudflare in un browser vero.
+        The reason calling it ourselves from Python fails (400): that
+        request, when made by the page, includes a `cf_clearance` cookie
+        from Cloudflare tied to that specific browser tab/session (in addition
+        to the fingerprint headers already set on self._client). A headless
+        HTTP client like this cannot obtain that cookie: it requires
+        actually solving the Cloudflare challenge in a real browser.
 
-        Il flusso corretto (vedi authenticate_with_manual_grant) non replica
-        questa chiamata: lasci che sia la PAGINA STESSA a farla (nel browser,
-        con i suoi cookie), e ne leggi/incolli tu il risultato dalla tab
-        Network di DevTools.
+        The correct flow (see authenticate_with_manual_grant) does not replicate
+        this call: let the PAGE ITSELF do it (in the browser,
+        with its cookies), and you read/paste the result from the
+        Network tab of DevTools.
         """
         self._ensure_client()
         resp = await self._client.post(
@@ -681,7 +679,7 @@ class SignedSessionClient:
     async def _refresh(self) -> None:
         refresh_path = self.endpoints.get("refresh")
         if not refresh_path:
-            return  # nessun endpoint di refresh dichiarato: comportamento identico a Go
+            return  # no refresh endpoint declared: behavior identical to Go
         body = {"install_id": self.install_id}
         headers = self._sign_headers("POST", refresh_path, json.dumps(body).encode())
         self._ensure_client()
@@ -711,10 +709,10 @@ class SignedSessionClient:
                 self.clear()
                 raise RuntimeError("session expired")
 
-            # Preferisci "refresh_after" (timestamp assoluto dato dal server,
-            # confermato via cattura di rete reale: es. 2h prima di expires_at,
-            # non 1h come il nostro skew di default) — più preciso dello skew
-            # calcolato, che resta solo un fallback se il server non lo manda.
+            # Prefer "refresh_after" (absolute timestamp given by the server,
+            # verified via real network capture: e.g., 2h before expires_at,
+            # not 1h like our default skew) — more precise than the calculated
+            # skew, which remains only a fallback if the server doesn't send it.
             refresh_at = self._parse_time(self.refresh_after)
             if refresh_at:
                 if now >= refresh_at:
@@ -739,9 +737,9 @@ class SignedSessionClient:
         
         rk_string = base64.urlsafe_b64encode(rk_bytes).rstrip(b"=").decode("utf-8")
         
-        # --- FIX CRITICO: IL PERCORSO (PATH) ---
-        # Uniamo il base_url (che contiene /v2) e il path (che contiene /tickets)
-        # ed estraiamo il percorso finale corretto che il server si aspetta di firmare.
+        # --- CRITICAL FIX: THE PATH ---
+        # Combine base_url (which contains /v2) and path (which contains /tickets)
+        # and extract the final correct path that the server expects to sign.
         full_url = f"{self.base_url}{path}"
         parsed_path = urlparse(full_url).path
         
@@ -783,7 +781,7 @@ class SignedSessionClient:
             headers.update(extra_headers)
 
         self._ensure_client()
-        # DEBUG: logghiamo header e body che stiamo per inviare al server
+        # Log headers and body we're about to send to the server
         try:
             b_preview = body[:1024]
             try:
@@ -800,10 +798,10 @@ class SignedSessionClient:
             method, f"{self.base_url}{path}", content=body, headers=headers, timeout=30,
         )
         if resp.status_code >= 400:
-            print(f"\n[!!!] ERRORE ZARZ API ({resp.status_code}):")
-            print(f"[!!!] DETTAGLIO: {resp.text}\n")
-        # INFO: logghiamo URL completo e status per avere la stessa linea
-        # informativa di httpx ma con il link completo della richiesta.
+            print(f"\n[!!!] ZARZ API ERROR ({resp.status_code}):")
+            print(f"[!!!] DETAILS: {resp.text}\n")
+        # Log full URL and status to have the same informational line
+        # as httpx but with the full request link.
         try:
             logger.info(
                 "HTTP Request: %s %s \"HTTP/1.1 %s %s\"",
@@ -820,27 +818,27 @@ class SignedSessionClient:
 
     # ─────────────────────── ticket / download layer ──────────────────────
     #
-    # Formula e struttura confermate leggendo il codice sorgente reale
-    # dell'estensione tidal-web (index.js, funzione signedTicket) e
-    # verificate contro una cattura di rete reale (2026-07-12):
+    # Formula and structure verified by reading the real source code
+    # of the tidal-web extension (index.js, signedTicket function) and
+    # verified against a real network capture (2026-07-12):
     #   sha256("tid:track:530979474") == "a5f4aee7d242692d616b4210cd61c48933b..."
-    # che è esattamente il resource_hash osservato nella richiesta reale.
-    # Questa parte è generica: vale per qualsiasi provider (non solo Tidal),
-    # dato che è il runtime signedSession a gestirla, non il singolo
-    # provider — cambia solo cosa il provider mette come body della POST
-    # /dl/{provider} (quello sì è specifico per provider).
+    # which is exactly the resource_hash observed in the real request.
+    # This part is generic: applies to any provider (not just Tidal),
+    # since it's the signedSession runtime that manages it, not the individual
+    # provider — only what the provider puts as the body of the POST
+    # /dl/{provider} (that is specific to the provider).
 
     @staticmethod
     def compute_resource_hash(provider: str, resource_id: str, resource_type: str = "track") -> str:
         """
         Calcola il resource_hash richiesto da POST /tickets, ESATTAMENTE come
-        fa il JS delle estensioni ufficiali (es. tidal-web/index.js,
+        the JS of official extensions does (e.g., tidal-web/index.js,
         signedTicket()):
 
             sha256(f"{provider}:{resource_type}:{str(resource_id).lower()}")
 
-        Es. compute_resource_hash("tid", "530979474") per una traccia Tidal
-        (il "type" di default è "track", come nel JS: `type || "track"`).
+        E.g., compute_resource_hash("tid", "530979474") for a Tidal track
+        (the "type" default is "track", like in JS: `type || "track"`).
         """
         raw = f"{provider}:{resource_type}:{str(resource_id).lower()}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -852,17 +850,6 @@ class SignedSessionClient:
         resource_type: str = "track",
         tickets_path: str = "/tickets",
     ) -> str:
-        """
-        Ottiene un ticket di download monouso (max_uses=1, vita breve ~60s).
-        """
-        # --- FIX TRAPPOLA DEEZER ---
-        # Se il provider è Deezer (dzr) e l'ID fornito è solo un numero 
-        # (cioè non inizia già con "http"), lo convertiamo automaticamente 
-        # nell'URL completo che il server di Zarz si aspetta per l'hash.
-        if provider == "dzr" or provider == "deezer" and not str(resource_id).startswith("http"):
-            resource_id = f"https://www.deezer.com/{resource_type}/{resource_id}"
-        # ---------------------------
-        print(f"[*] Sto chiedendo il ticket per: {resource_id}")
         resource_hash = self.compute_resource_hash(provider, resource_id, resource_type)
         
         resp = await self.request(
@@ -894,18 +881,18 @@ class SignedSessionClient:
     ) -> httpx.Response:
         """
         Ottiene un ticket per (provider, resource_id) e lo usa immediatamente
-        per una POST firmata a `dl_path`, aggiungendo l'header
-        "X-Zarz-Ticket: <ticket_id>" come fa il JS (postDownloadAPI()):
+        for a signed POST to `dl_path`, adding the header
+        "X-Zarz-Ticket: <ticket_id>" like the JS does (postDownloadAPI()):
 
             ticket_id = await get_download_ticket(provider, resource_id, resource_type)
-            POST {dl_path} con json_body, header extra X-Zarz-Ticket=ticket_id
+            POST {dl_path} with json_body, extra header X-Zarz-Ticket=ticket_id
 
-        La risposta e il body di `json_body` restano specifici del singolo
-        provider (es. per Tidal: {"id": track_id, "quality": "LOSSLESS"},
-        risposta {"data": {"manifest": ..., "audioQuality": ..., ...}} — un
-        manifest DASH/XML da parsare ulteriormente in modo specifico per
-        Tidal, non generico) — questo metodo si occupa solo del livello
-        "ticket + header", non del parsing del risultato.
+        The response and body of `json_body` remain specific to the individual
+        provider (e.g., for Tidal: {"id": track_id, "quality": "LOSSLESS"},
+        response {"data": {"manifest": ..., "audioQuality": ..., ...}} — a
+        DASH/XML manifest to be further parsed in a way specific to
+        Tidal, not generic) — this method handles only the
+        "ticket + header" level, not the parsing of the result.
         """
         ticket_id = await self.get_download_ticket(
             provider, resource_id, resource_type, tickets_path=tickets_path
@@ -938,18 +925,18 @@ async def perform_signed_fetch(
     call coming from the JS extension worker. Transparently bootstraps the
     session the first time it's needed, then performs the signed request.
 
-    L'autenticazione (quando serve) è completamente MANUALE, senza nessun
-    browser automatizzato: l'URL di verifica viene passato a
-    `on_verification_url(url)` se fornito (altrimenti stampato/loggato), tu
-    lo apri in un browser qualsiasi, risolvi il Turnstile, e incolli il
-    grant che vedi in DevTools → Network → verify → Preview
-    ({"grant": "gr_...", "expires_in": 60}) — vedi
-    SignedSessionClient.authenticate_with_manual_grant() per i dettagli.
-    `timeout` limita quanto aspettare l'inserimento del grant (default 5 min).
+    Authentication (when needed) is completely MANUAL, without any
+    automated browser: the verification URL is passed to
+    `on_verification_url(url)` if provided (otherwise printed/logged), you
+    open it in any browser, solve the Turnstile, and paste the
+    grant you see in DevTools → Network → verify → Preview
+    ({"grant": "gr_...", "expires_in": 60}) — see
+    SignedSessionClient.authenticate_with_manual_grant() for details.
+    `timeout` limits how long to wait for grant entry (default 5 min).
 
     Returns a JSON-serializable dict matching what index.js's signedJSON()
     expects: {"statusCode": int, "body": str} on success, or {"error": str}
-    on failure (inclusa una verifica non completata/annullata/scaduta).
+    on failure (including incomplete/cancelled/expired verification).
     """
     try:
         if not client.authenticated:
@@ -969,12 +956,12 @@ async def perform_signed_fetch(
         resp = await client.request(method, path, json_body=body, extra_headers=headers)
 
         if resp.status_code in (401, 428):
-            # Stesso comportamento del backend Go: una 401/428 invalida la
-            # sessione locale e riparte la verifica invece di restituire
-            # l'errore grezzo al chiamante. Qui NON riapriamo subito un
-            # browser durante una richiesta "di passaggio": segnaliamo solo
-            # che serve una nuova verifica, lasciando al chiamante decidere
-            # quando invocare di nuovo authenticate_with_browser().
+            # Same behavior as the Go backend: a 401/428 invalidates the
+            # local session and restarts verification instead of returning
+            # the raw error to the caller. Here we do NOT immediately reopen a
+            # browser during a "pass-through" request: we only signal
+            # that a new verification is needed, letting the caller decide
+            # when to invoke authenticate_with_browser() again.
             retry_auth_url = await client.bootstrap()
             if isinstance(retry_auth_url, str) and retry_auth_url:
                 return {"needsVerification": True, "auth_url": retry_auth_url}
