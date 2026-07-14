@@ -601,15 +601,24 @@ class SignedSessionClient:
         Autenticazione automatica tramite browser reale (core.turnstile),
         alternativa non-interattiva a authenticate_with_manual_grant().
 
-        Perché funziona dove verify_challenge() fallisce: qui è la PAGINA
-        stessa (dentro un vero Chrome pilotato da nodriver) a risolvere il
-        Turnstile e a chiamare il proprio /challenge/verify coi suoi cookie
-        di sessione (cf_clearance incluso) — non serve replicare quella
-        richiesta da Python. Dobbiamo solo:
+        AGGIORNAMENTO: turnstile.py ora cattura il grant direttamente dal
+        traffico di rete via CDP (stessa tecnica di grant_token.py /
+        capture_network — ascolto delle risposte JSON in cerca del campo
+        "grant"), invece di affidarsi all'URL di redirect finale. Questo
+        risolve il problema documentato in _LocalGrantListener: la pagina
+        di sfida chiama internamente {endpoints.challenge}/verify coi propri
+        cookie (cf_clearance incluso) ma NON naviga mai al "cb" fornito, quindi
+        l'estrazione da URL restava quasi sempre vuota. Ora la risposta JSON
+        di quella chiamata viene letta direttamente, senza serve replicarla
+        da Python né sperare in un redirect che non arriva.
+
+        Passi:
         1. bootstrap() per ottenere challenge_id + sitekey;
-        2. costruire l'URL di sfida con lo stesso "cb" del flusso manuale;
-        3. far risolvere il widget al browser reale e catturare il grant
-            dal redirect finale (?grant=...) tramite solve_with_callback();
+        2. costruire l'URL di sfida con lo stesso "cb" del flusso manuale
+           (serve solo come fallback, non più come meccanismo primario);
+        3. far risolvere il widget al browser reale — il grant viene
+           catturato in tempo reale non appena la pagina riceve la risposta
+           di /verify (solve_with_callback());
         4. scambiare il grant con exchange_grant(), come nel flusso manuale.
         """
         boot_result = await self.bootstrap()
@@ -629,9 +638,6 @@ class SignedSessionClient:
 
         from .turnstile import solve_with_callback
 
-        # solve_with_callback è sincrona e fa asyncio.run() al suo interno:
-        # va eseguita in un thread separato per non entrare in conflitto
-        # con il loop asyncio già in esecuzione qui.
         token, grant = await asyncio.to_thread(
             solve_with_callback,
             self.pending_sitekey,
@@ -643,12 +649,13 @@ class SignedSessionClient:
         if not grant:
             raise RuntimeError(
                 "Turnstile risolto (token ottenuto) ma nessun 'grant' catturato "
-                "dal redirect di callback. Prova ad aumentare hold_open_seconds "
-                "per dare tempo alla pagina di completare la verify() interna."
+                "né dalla rete né dal redirect di callback. Prova ad aumentare "
+                "hold_open_seconds per dare tempo alla pagina di completare "
+                "la verify() interna."
             )
 
         await self.exchange_grant(grant)
-    
+
     @staticmethod
     def _emit_verification_url(
         url: str, callback: "Callable[[str], None] | None"
@@ -966,18 +973,59 @@ class SignedSessionClient:
             finally:
                 self._client = None
 
-_AUTH_LOCKS: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
+import threading
 
-def _get_auth_lock(namespace: str) -> asyncio.Lock:
-    loop = asyncio.get_running_loop()
-    if namespace in _AUTH_LOCKS:
-        cached_loop, lock = _AUTH_LOCKS[namespace]
-        if cached_loop is loop:
-            return lock
-    # Crea un nuovo lock se non esiste o se il loop è cambiato
-    lock = asyncio.Lock()
-    _AUTH_LOCKS[namespace] = (loop, lock)
-    return lock
+_AUTH_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_AUTH_THREAD_LOCKS_GUARD = threading.Lock()
+
+
+def _get_auth_thread_lock(namespace: str) -> threading.Lock:
+    """
+    Lock condiviso per namespace attraverso TUTTI i thread ed event loop
+    del processo — non solo all'interno dello stesso loop asyncio.
+
+    PERCHÉ QUESTO CAMBIO: SpotiFLAC scarica più tracce in parallelo tramite
+    un ThreadPoolExecutor, dove ogni thread esegue il proprio asyncio.run()
+    (quindi ogni thread ha un event loop DIVERSO). Il vecchio _AUTH_LOCKS
+    era un asyncio.Lock keyed by (loop, namespace): funziona solo tra
+    coroutine sullo STESSO loop. Due thread paralleli, ognuno col proprio
+    loop, ottenevano ciascuno un asyncio.Lock "vergine" e quindi NON si
+    sincronizzavano affatto — risultato osservato: due finestre Chrome
+    aperte in parallelo per la stessa autenticazione, con due challenge_id
+    diversi, e la seconda che fallisce a catturare il grant in tempo.
+    """
+    with _AUTH_THREAD_LOCKS_GUARD:
+        lock = _AUTH_THREAD_LOCKS.get(namespace)
+        if lock is None:
+            lock = threading.Lock()
+            _AUTH_THREAD_LOCKS[namespace] = lock
+        return lock
+
+
+class _AsyncThreadLockCtx:
+    """
+    Adatta un threading.Lock (sincronizzazione cross-thread/cross-loop) a
+    un context manager awaitable, senza mai bloccare l'event loop: prova
+    ad acquisire in modo non bloccante e, se occupato, cede il controllo
+    con asyncio.sleep() finché non si libera.
+    """
+
+    def __init__(self, lock: threading.Lock, poll_interval: float = 0.1):
+        self._lock = lock
+        self._poll_interval = poll_interval
+
+    async def __aenter__(self):
+        while not self._lock.acquire(blocking=False):
+            await asyncio.sleep(self._poll_interval)
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self._lock.release()
+        return False
+
+
+def _get_auth_lock(namespace: str) -> "_AsyncThreadLockCtx":
+    return _AsyncThreadLockCtx(_get_auth_thread_lock(namespace))
 
 async def perform_signed_fetch(
     client: SignedSessionClient,

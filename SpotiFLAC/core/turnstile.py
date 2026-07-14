@@ -6,13 +6,80 @@ import random
 import subprocess
 import threading
 import time
+import base64 as _b64
+from nodriver import cdp
 from typing import Optional
 from urllib.parse import parse_qsl, urlparse
 
 DEFAULT_TURNSTILE_CACHE_TTL_SECONDS = 900
 _TURNSTILE_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
+_RELOAD_CHECK_SECONDS = 10.0
+_MAX_RELOAD_ATTEMPTS = 3
 
 import nodriver as uc
+
+import inspect
+import os as _os
+
+_docker_flags = []
+if _os.name != "nt" and hasattr(_os, "geteuid") and _os.geteuid() == 0:
+    _docker_flags = ["--no-sandbox", "--disable-dev-shm-usage"]
+
+
+def _patch_nodriver_unknown_cdp_events() -> None:
+    """
+    Le build recenti di Chrome emettono eventi CDP nuovi (es. l'heartbeat
+    di ad-tagging 'Network.requestAdblockInfoReceived') che il registro
+    tipizzato di nodriver non conosce ancora. Senza questa patch, ricevere
+    UN SOLO evento del genere solleva un KeyError non catturato dentro il
+    loop interno di gestione messaggi di nodriver, uccidendo l'intera
+    connessione CDP (e quindi la sessione del browser) — anche se
+    l'evento in sé è del tutto irrilevante per noi.
+
+    Firma flessibile (*args, **kwargs): la versione installata di nodriver
+    chiama process_event con argomenti posizionali aggiuntivi oltre al
+    messaggio (es. self.process_event(message, None)) — una firma rigida
+    (self, message) rompe la chiamata reale con un TypeError.
+
+    Idempotente: sicuro da chiamare più volte (applica la patch una
+    sola volta).
+    """
+    from nodriver.core import connection as _nd_connection
+
+    if getattr(_nd_connection, "_spotiflac_unknown_event_patch", False):
+        return
+
+    _original = _nd_connection.Connection.process_event
+
+    if inspect.iscoroutinefunction(_original):
+        async def _patched(self, *args, **kwargs):
+            try:
+                return await _original(self, *args, **kwargs)
+            except KeyError as exc:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "[turnstile] ignoring unknown CDP event: %s", exc
+                )
+                return None
+    else:
+        def _patched(self, *args, **kwargs):
+            try:
+                return _original(self, *args, **kwargs)
+            except KeyError as exc:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "[turnstile] ignoring unknown CDP event: %s", exc
+                )
+                return None
+
+    _nd_connection.Connection.process_event = _patched
+    _nd_connection._spotiflac_unknown_event_patch = True
+
+
+_patch_nodriver_unknown_cdp_events()
+import logging as _logging
+_logging.getLogger("nodriver.core.connection").setLevel(_logging.CRITICAL)
+_logging.getLogger("asyncio").setLevel(_logging.ERROR)
 
 
 def _find_chrome() -> str:
@@ -103,16 +170,60 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
         browser_executable_path=_find_chrome(),
         headless=False,
         user_data_dir=_get_profile_dir(),
+        browser_args=[
+            "--window-position=-32000,-32000",
+            "--window-size=1280,900",
+            *_docker_flags,
+        ],
     )
 
     page = None
     callback_grant = _extract_grant_from_callback_url(siteurl)
+    network_grant: dict[str, Optional[str]] = {"value": None}
 
-    try:
-        page = await browser.get(siteurl)
-        await asyncio.sleep(random.uniform(2.0, 3.0))
+    async def _on_response(event) -> None:
+        if not capture_callback or page is None:
+            return
+        try:
+            resp = event.response
+            mime = (getattr(resp, "mime_type", "") or "").lower()
+            if "json" not in mime:
+                return
+            body, is_base64 = await page.send(
+                cdp.network.get_response_body(event.request_id)
+            )
+            if is_base64:
+                try:
+                    body = _b64.b64decode(body).decode("utf-8", errors="ignore")
+                except Exception:
+                    return
+            data = json.loads(body)
+            if not isinstance(data, dict):
+                return
+            grant_val = data.get("grant")
+            if isinstance(grant_val, str) and grant_val.strip():
+                network_grant["value"] = grant_val.strip()
+                logger.debug("[solver:net] grant catturato dalla rete")
+                return
+            if network_grant["value"] is None:
+                for key in ("token", "code"):
+                    val = data.get(key)
+                    if isinstance(val, str) and val.strip():
+                        network_grant["value"] = val.strip()
+                        break
+        except Exception:
+            pass
 
-        # Inject widget into the live page DOM
+    async def _enable_network_capture() -> None:
+        if not capture_callback:
+            return
+        try:
+            await page.send(cdp.network.enable())
+            page.add_handler(cdp.network.ResponseReceived, _on_response)
+        except Exception as exc:
+            print(f"[solver] network capture non disponibile: {exc}")
+
+    async def _inject_widget() -> None:
         await page.evaluate(f"""
             (() => {{
                 if (document.getElementById('_ts_box')) return;
@@ -134,88 +245,104 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
             }})();
         """)
 
-        # Give Turnstile time to load and potentially auto-complete (invisible mode)
-        await asyncio.sleep(5.0)
-
-        async def get_token() -> Optional[str]:
-            return await page.evaluate("""
-                (() => {
-                    if (window._tsToken) return window._tsToken;
-                    const inp = document.querySelector('#_ts_box [name="cf-turnstile-response"]');
-                    return (inp && inp.value) ? inp.value : null;
-                })()
-            """)
-
-        async def get_current_url() -> str:
-            return await page.evaluate("""
-                (() => {
-                    try { return window.location.href || document.location.href || ''; }
-                    catch { return ''; }
-                })()
-            """)
-
-        async def capture_callback_grant(current_url: Optional[str] = None) -> Optional[str]:
-            nonlocal callback_grant
-            if not capture_callback:
-                return callback_grant
-            url = current_url or await get_current_url()
-            if not url:
-                return callback_grant
-            extracted = _extract_grant_from_callback_url(url)
-            if extracted:
-                callback_grant = extracted
-            return callback_grant
-
-        async def get_cf_iframe_rect() -> Optional[dict]:
-            raw = await page.evaluate("""
-                JSON.stringify((() => {
-                    for (const f of document.querySelectorAll('iframe')) {
-                        const src = f.src || f.getAttribute('src') || '';
-                        if (!src.includes('challenges.cloudflare.com')) continue;
-                        const r = f.getBoundingClientRect();
-                        if (r.width > 50 && r.height > 20) return {x:r.x, y:r.y, w:r.width, h:r.height};
-                    }
-                    return null;
-                })())
-            """)
-            if raw and raw != 'null':
-                return json.loads(raw)
-            return None
-
-        async def do_click(rect: Optional[dict]):
-            if rect:
-                cx = rect["x"] + 28 + random.uniform(-3, 3)
-                cy = rect["y"] + rect["h"] / 2 + random.uniform(-3, 3)
-                print(f"[solver] clicking Cloudflare iframe at ({cx:.0f}, {cy:.0f})")
-            else:
-                # Widget is fixed at top:20px left:20px
-                cx = 20 + 28 + random.uniform(-3, 3)
-                cy = 20 + 32 + random.uniform(-3, 3)
-                print(f"[solver] iframe not in DOM, clicking fixed position ({cx:.0f}, {cy:.0f})")
-            await page.mouse_move(cx - 80, cy - 20)
-            await asyncio.sleep(random.uniform(0.15, 0.25))
-            await page.mouse_move(cx, cy)
-            await asyncio.sleep(random.uniform(0.08, 0.15))
-            await page.mouse_click(cx, cy)
-
-        # Check if already auto-solved (invisible widget)
-        token = await get_token()
-        if token:
-            if hold_open_seconds > 0:
-                # Keep the tab open a bit longer: the challenge page still
-                # needs to call its own /verify endpoint and notify our
-                # callback URL in the background after the token appears.
-                # Closing the browser right away would cut that off.
-                await asyncio.sleep(hold_open_seconds)
-            if not capture_callback:
-                return token
+    async def _open_fresh_page() -> None:
+        """Chiude la pagina corrente (se presente) e ne apre una nuova
+        sullo stesso siteurl — usato per il retry con reload."""
+        nonlocal page
+        if page is not None:
             try:
-                await capture_callback_grant()
+                await page.close()
             except Exception:
                 pass
-            return (token, callback_grant)
+        page = await browser.get(siteurl)
+        await _try_hide_window()
+        await _enable_network_capture()
 
-        # Wait up to 10s for the visible checkbox iframe to appear
+    async def _try_hide_window() -> None:
+        try:
+            if hasattr(page, "minimize"):
+                await page.minimize()
+        except Exception:
+            pass
+    
+    async def get_token() -> Optional[str]:
+        return await page.evaluate("""
+            (() => {
+                if (window._tsToken) return window._tsToken;
+                const inp = document.querySelector('#_ts_box [name="cf-turnstile-response"]');
+                return (inp && inp.value) ? inp.value : null;
+            })()
+        """)
+
+    async def get_current_url() -> str:
+        return await page.evaluate("""
+            (() => {
+                try { return window.location.href || document.location.href || ''; }
+                catch { return ''; }
+            })()
+        """)
+
+    async def capture_callback_grant(current_url: Optional[str] = None) -> Optional[str]:
+        nonlocal callback_grant
+        if not capture_callback:
+            return callback_grant
+        if network_grant["value"]:
+            callback_grant = network_grant["value"]
+            return callback_grant
+        url = current_url or await get_current_url()
+        if not url:
+            return callback_grant
+        extracted = _extract_grant_from_callback_url(url)
+        if extracted:
+            callback_grant = extracted
+        return callback_grant
+
+    async def get_cf_iframe_rect() -> Optional[dict]:
+        raw = await page.evaluate("""
+            JSON.stringify((() => {
+                for (const f of document.querySelectorAll('iframe')) {
+                    const src = f.src || f.getAttribute('src') || '';
+                    if (!src.includes('challenges.cloudflare.com')) continue;
+                    const r = f.getBoundingClientRect();
+                    if (r.width > 50 && r.height > 20) return {x:r.x, y:r.y, w:r.width, h:r.height};
+                }
+                return null;
+            })())
+        """)
+        if raw and raw != 'null':
+            return json.loads(raw)
+        return None
+
+    async def do_click(rect: Optional[dict]):
+        if rect:
+            cx = rect["x"] + 28 + random.uniform(-3, 3)
+            cy = rect["y"] + rect["h"] / 2 + random.uniform(-3, 3)
+            print(f"[solver] clicking Cloudflare iframe at ({cx:.0f}, {cy:.0f})")
+        else:
+            cx = 20 + 28 + random.uniform(-3, 3)
+            cy = 20 + 32 + random.uniform(-3, 3)
+            print(f"[solver] iframe not in DOM, clicking fixed position ({cx:.0f}, {cy:.0f})")
+        await page.mouse_move(cx - 80, cy - 20)
+        await asyncio.sleep(random.uniform(0.15, 0.25))
+        await page.mouse_move(cx, cy)
+        await asyncio.sleep(random.uniform(0.08, 0.15))
+        await page.mouse_click(cx, cy)
+
+    async def _try_solve_within(window_seconds: float) -> Optional[str]:
+        """
+        Tenta di ottenere il token entro `window_seconds`, cliccando la
+        checkbox se necessario. In modalità capture_callback, considera
+        "risolto" anche il solo ottenimento del grant di rete, anche senza
+        un token esplicito (la pagina a volte non lo espone mai nel DOM).
+        """
+        token = await get_token()
+        if token:
+            return token
+        if capture_callback:
+            await capture_callback_grant()
+            if callback_grant:
+                return None  # grant già ottenuto, verificato dal chiamante
+
         rect = None
         for _ in range(20):
             rect = await get_cf_iframe_rect()
@@ -223,8 +350,7 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
                 break
             await asyncio.sleep(0.5)
 
-        # Click loop: click, wait, retry up to 3 times
-        deadline = asyncio.get_event_loop().time() + timeout
+        deadline = asyncio.get_event_loop().time() + window_seconds
         click_count = 0
         last_click = 0.0
 
@@ -248,32 +374,65 @@ async def _solve_impl(sitekey: str, siteurl: str, timeout: int, capture_callback
                 await do_click(rect)
                 last_click = asyncio.get_event_loop().time()
                 click_count += 1
-                # After a click, refresh iframe rect in case it moved
                 await asyncio.sleep(1.0)
                 rect = await get_cf_iframe_rect() or rect
                 continue
 
             await asyncio.sleep(0.3)
 
+        return token
+
+    token: Optional[str] = None
+    per_attempt_seconds = min(_RELOAD_CHECK_SECONDS, float(timeout)) if timeout else _RELOAD_CHECK_SECONDS
+    max_attempts = _MAX_RELOAD_ATTEMPTS
+
+    try:
+        page = await browser.get(siteurl)
+        await _try_hide_window()
+        await _enable_network_capture()
+        await asyncio.sleep(random.uniform(2.0, 3.0))
+        await _inject_widget()
+        await asyncio.sleep(5.0)
+
+        for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                print(
+                    f"[solver] Nessun risultato entro {per_attempt_seconds:.0f}s, "
+                    f"chiudo e riapro la pagina (tentativo {attempt}/{max_attempts})…"
+                )
+                await _open_fresh_page()
+                await asyncio.sleep(random.uniform(2.0, 3.0))
+                await _inject_widget()
+                await asyncio.sleep(5.0)
+
+            token = await _try_solve_within(per_attempt_seconds)
+
+            if token or (capture_callback and callback_grant):
+                break
+
+            if attempt < max_attempts:
+                print(f"[solver] Tentativo {attempt}/{max_attempts} fallito, attendo 10s prima di riprovare…")
+                await asyncio.sleep(10.0)
+
+        if token and hold_open_seconds > 0:
+            await asyncio.sleep(hold_open_seconds)
+
+        if capture_callback:
+            try:
+                await capture_callback_grant()
+            except Exception:
+                pass
+
     finally:
         browser.stop()
 
-    # In capture_callback mode, a successful redirect to the callback URL
-    # (i.e. callback_grant already captured) is a valid outcome even if the
-    # Turnstile token itself was never read from the widget - the page may
-    # have navigated away before get_token() ran again. Only raise if we
-    # have neither a token nor a grant.
     if not token and not (capture_callback and callback_grant):
-        raise TimeoutError(f"Turnstile token not obtained within {timeout}s")
-
-    if capture_callback and page is not None:
-        try:
-            await capture_callback_grant()
-        except Exception:
-            pass
+        raise TimeoutError(
+            f"Turnstile token non ottenuto dopo {max_attempts} tentativi "
+            f"({per_attempt_seconds:.0f}s ciascuno)"
+        )
 
     return (token, callback_grant) if capture_callback else token
-
 
 def _extract_grant_from_callback_url(callback_url: str) -> Optional[str]:
     if not callback_url:
