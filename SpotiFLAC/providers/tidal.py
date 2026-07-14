@@ -40,7 +40,7 @@ from ..core.endpoints import (
 )
 from ..core.errors import ErrorKind, ParseError, SpotiflacError, TrackNotFoundError
 from ..core.flac_validation import validate_and_repair_if_needed
-from ..core.http import NetworkManager, RetryConfig, async_zarz_rate_limiter
+from ..core.http import NetworkManager, RetryConfig
 from ..core.link_resolver import LinkResolver
 from ..core.models import DownloadResult, TrackMetadata
 from ..core.musicbrainz import fetch_mb_metadata_async, mb_result_to_tags
@@ -658,8 +658,6 @@ async def _fetch_tidal_url_once_async(
             delay *= 2
 
         try:
-            if is_post_api and "zarz.moe" in api_cleaning:
-                await async_zarz_rate_limiter.wait_for_slot()
 
             if is_post_api:
                 if quality == "DOLBY_ATMOS":

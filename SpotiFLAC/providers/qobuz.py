@@ -30,7 +30,6 @@ from ..core.http import (
     AsyncHttpClient,
     NetworkManager,
     RetryConfig,
-    async_zarz_rate_limiter,
 )
 from ..core.models import DownloadResult, TrackMetadata
 from ..core.musicbrainz import fetch_mb_metadata_async, mb_result_to_tags
@@ -63,7 +62,6 @@ _DEFAULT_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/146.0.0.0 Safari/537.36"
 )
-_ZARZ_USER_AGENT = "SpotiFLAC-Mobile/4.5.0"
 
 # Headers da usare per le richieste "community" verso mirror Qobuz
 _COMMUNITY_POST_HEADERS = {
@@ -678,7 +676,6 @@ class QobuzProvider(BaseProvider):
         api_cleaning = api_base.rstrip("/")
         is_local_api = bool(local_api_url) and api_cleaning == local_api_url.rstrip("/")
 
-        is_zarz = "zarz.moe" in api_cleaning
         is_gdstudio = "gdstudio" in api_cleaning
         is_wjhe = "wjhe.top" in api_cleaning
         is_squid = "squid.wtf" in api_cleaning
@@ -688,14 +685,13 @@ class QobuzProvider(BaseProvider):
         is_post = (
             api_base in _POST_APIS
             or api_base in _COMMUNITY_APIS
-            or is_zarz
             or is_gdstudio
             or is_fd
         )
         max_retries = _MAX_RETRIES_POST if is_post else _MAX_RETRIES_GET
 
         headers = {
-            "User-Agent": _ZARZ_USER_AGENT if is_zarz else _DEFAULT_UA,
+            "User-Agent": _DEFAULT_UA,
             "Accept": "application/json",
         }
         last_err: Exception = RuntimeError("no attempts made")
@@ -903,15 +899,13 @@ class QobuzProvider(BaseProvider):
                     )
 
                 elif is_post:
-                    if is_zarz:
-                        await async_zarz_rate_limiter.wait_for_slot()
                     payload = {
                         "quality": _map_musicdl_quality(quality),
                         "upload_to_r2": False,
                         "url": f"{_OPEN_URL}{track_id}",
                     }
                     post_headers = {
-                        "User-Agent": _ZARZ_USER_AGENT if is_zarz else _DEFAULT_UA
+                        "User-Agent": _DEFAULT_UA
                     }
                     # If this API is in the community list, adapt payload and headers
                     if api_base in _COMMUNITY_APIS:
