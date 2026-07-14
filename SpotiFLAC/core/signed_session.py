@@ -1031,7 +1031,6 @@ class SignedSessionClient:
                 self._client = None
 
 
-
 _AUTH_THREAD_LOCKS: dict[str, threading.Lock] = {}
 _AUTH_THREAD_LOCKS_GUARD = threading.Lock()
 

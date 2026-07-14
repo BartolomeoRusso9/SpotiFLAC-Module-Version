@@ -24,7 +24,6 @@ _RELOAD_CHECK_SECONDS = 10.0
 _MAX_RELOAD_ATTEMPTS = 3
 
 
-
 _docker_flags = []
 if _os.name != "nt" and hasattr(_os, "geteuid") and _os.geteuid() == 0:
     _docker_flags = ["--no-sandbox", "--disable-dev-shm-usage"]
