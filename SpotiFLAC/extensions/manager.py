@@ -33,7 +33,7 @@ DEFAULT_EXT_DIR = Path.home() / ".spotiflac" / "extensions"
 
 
 # ─────────────────────────────────────────────────────────────
-#  Modelli
+#  Models
 # ─────────────────────────────────────────────────────────────
 
 @dataclass
@@ -155,11 +155,11 @@ class ExtensionManager:
 
             # Otherwise, installs or updates
             action = "Update" if existing else "Installation"
-            logger.info("[ExtMgr] %s di '%s' alla versione %s...", action, entry.id, entry.version)
+            logger.info("[ExtMgr] %s of '%s' to version %s...", action, entry.id, entry.version)
             try:
                 self.install_from_url(entry.download_url)
             except Exception as e:
-                logger.error("[ExtMgr] Errore durante l'%s di '%s': %s", action.lower(), entry.id, e)
+                logger.error("[ExtMgr] Error during %s of '%s': %s", action.lower(), entry.id, e)
 
     # ── Remote Registry ──────────────────────────────────────
 

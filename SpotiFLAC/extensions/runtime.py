@@ -149,7 +149,7 @@ class JSRuntime:
     def __exit__(self, *_) -> None:
         self.stop()
 
-    # ─────────────────────── chiamate ─────────────────────────
+    # ─────────────────────── calls ─────────────────────────
 
     def call(
         self,
@@ -243,11 +243,11 @@ class JSRuntime:
             cb = self._progress_cbs.get(call_id)
             if cb is not None:
                 try:
-                    # NEW: se il callback accetta bytes_received/bytes_total
-                    # (firma "(fraction)" vs "(current, total)"), prova prima
-                    # la forma estesa così JSExtensionProvider._progress_adapter
-                    # può ricevere byte reali invece della sola frazione 0..1
-                    # quando disponibili (file.download li fornisce sempre ora).
+                    # NEW: if the callback accepts bytes_received/bytes_total
+                    # (signature "(fraction)" vs "(current, total)"), try first
+                    # the extended form so JSExtensionProvider._progress_adapter
+                    # can receive real bytes instead of just fraction 0..1
+                    # when available (file.download now always provides them).
                     bytes_received = msg.get("bytesReceived")
                     bytes_total = msg.get("bytesTotal")
                     if bytes_received is not None and bytes_total:
@@ -255,7 +255,7 @@ class JSRuntime:
                     else:
                         cb(float(msg.get("value", 0.0)))
                 except TypeError:
-                    # Il callback registrato accetta solo (fraction,)
+                    # The registered callback accepts only (fraction,)
                     try:
                         cb(float(msg.get("value", 0.0)))
                     except Exception:

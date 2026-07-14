@@ -98,15 +98,15 @@ class JSExtensionProvider(BaseProvider):
     # ─────────────────────── BaseProvider overrides ───────────
 
     def set_progress_callback(self, cb) -> None:
-        """Salva il callback per l'avanzamento fornito dal Downloader."""
+        """Saves the progress callback provided by the Downloader."""
         self._progress_cb = cb
 
     def set_stop_event_async(self, event: asyncio.Event) -> None:
-        """Salva l'evento di stop (timeout/cancellazione) fornito dal Downloader."""
+        """Saves the stop event (timeout/cancellation) provided by the Downloader."""
         self._stop_event = event
 
     def set_stop_event(self, event) -> None:
-        """Retrocompatibilità sincrona."""
+        """Synchronous backward compatibility."""
         self._stop_event = event
 
     # ─────────────────────── helpers ──────────────────────────
@@ -382,11 +382,11 @@ class JSExtensionProvider(BaseProvider):
         logger.info("[%s] Downloading '%s'", self.name, metadata.title)
 
         # ── Progress fallback via disk polling ──────────────────────────
-        # Copre il caso in cui l'estensione bypassi global.file.download
-        # (es. scrivendo segmenti manualmente via file.writeBytes) e quindi
-        # non generi mai eventi "progress" reali dal bridge. Se invece gli
-        # eventi reali arrivano (ora emessi da nodeFileDownload in
-        # _bridge.js), questo fallback è semplicemente ridondante e innocuo.
+        # Covers the case where the extension bypasses global.file.download
+        # (e.g., writing segments manually via file.writeBytes) and thus
+        # never generates real "progress" events from the bridge. If instead
+        # real events arrive (now emitted by nodeFileDownload in
+        # _bridge.js), this fallback is simply redundant and harmless.
         poll_stop = asyncio.Event()
         poll_task = asyncio.create_task(
             self._poll_file_progress_async(output_path, poll_stop)
@@ -409,7 +409,7 @@ class JSExtensionProvider(BaseProvider):
             err = (dl_result or {}).get("error_message", "download failed")
             return DownloadResult.fail(self.name, err)
 
-        # ── Riassembla eventuali segmenti (es. Tidal DASH via estensione) ──
+        # ── Reassemble any segments (e.g., Tidal DASH via extension) ──
         actual_path = await self._finalize_segments_async(dl_result, output_path)
         if actual_path is None:
             return DownloadResult.fail(
@@ -418,7 +418,7 @@ class JSExtensionProvider(BaseProvider):
 
         fmt = _ext_to_fmt(Path(actual_path).suffix)
 
-        # ── MusicBrainz, come nei provider nativi (tidal.py, qobuz.py, ecc.) ──
+        # ── MusicBrainz, like in native providers (tidal.py, qobuz.py, etc.) ──
         mb_tags: dict[str, str] = {}
         if enrich_metadata and metadata.isrc:
             try:
@@ -468,24 +468,24 @@ class JSExtensionProvider(BaseProvider):
         self, dl_result: dict, output_path: Path
     ) -> str | None:
         """
-        Alcune estensioni (es. tidal-web, che scarica via DASH/fMP4) possono
-        restituire i segmenti scaricati invece di un unico file audio pronto.
-        Contratto atteso, in ordine di priorità:
+        Some extensions (e.g., tidal-web, which downloads via DASH/fMP4) may
+        return downloaded segments instead of a single ready audio file.
+        Expected contract, in order of priority:
 
-          1. dl_result["file_path"] esiste ed è un file valido e non vuoto
-             → nessun lavoro extra, comportamento originale.
-          2. dl_result["segments"] è una lista ordinata di path assoluti
-             (init segment incluso, se presente) → li concateniamo come
-             byte grezzi in un file temporaneo e poi rimuxiamo con ffmpeg
-             (stesso schema di TidalProvider._download_from_manifest_async
-             + _mux_audio_async, generalizzato per qualsiasi estensione).
-          3. Fallback difensivo: se né 1 né 2 valgono, ma esistono file
-             residui accanto a output_path che matchano il pattern
-             "<stem>.partNN" o "<stem>.segNN" lasciati dall'estensione,
-             li ordiniamo e li trattiamo come (2).
+          1. dl_result["file_path"] exists and is a valid non-empty file
+             → no extra work, original behavior.
+          2. dl_result["segments"] is an ordered list of absolute paths
+             (init segment included, if present) → concatenate them as
+             raw bytes into a temp file and then remux with ffmpeg
+             (same schema as TidalProvider._download_from_manifest_async
+             + _mux_audio_async, generalized for any extension).
+          3. Defensive fallback: if neither 1 nor 2 apply, but residual files
+             exist next to output_path matching the pattern
+             "<stem>.partNN" or "<stem>.segNN" left by the extension,
+             order them and treat them as (2).
 
-        Returns il path finale (str) del file audio pronto per il tagging,
-        o None se non è stato possibile ricostruire un file valido.
+        Returns the path (str) of the final audio file ready for tagging,
+        or None if it was not possible to rebuild a valid file.
         """
         file_path = dl_result.get("file_path")
         if file_path and Path(file_path).exists() and Path(file_path).stat().st_size > 0:
@@ -579,11 +579,11 @@ class JSExtensionProvider(BaseProvider):
         self, output_path: Path, stop_event: asyncio.Event
     ) -> None:
         """
-        Osserva la crescita di output_path (o dei suoi varianti temporanei
-        più comuni: .part, .tmp, .download) e alimenta self._progress_cb
-        con una stima percentuale quando nessun evento "progress" reale
-        arriva dal bridge JS (es. estensioni che scrivono i propri file
-        senza passare da global.file.download).
+        Monitors the growth of output_path (or its common temporary variants:
+        .part, .tmp, .download) and feeds self._progress_cb with an estimated
+        percentage when no real "progress" events arrive from the JS bridge
+        (e.g., extensions that write their own files without passing through
+        global.file.download).
         """
         if self._progress_cb is None:
             return

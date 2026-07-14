@@ -2,29 +2,29 @@
 SpotiFLAC — Extension System
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Permette di installare ed eseguire estensioni JS (.spotiflac-ext)
-compatibili con SpotiFLAC Mobile, direttamente nel modulo Python.
+Allows installing and running JS extensions (.spotiflac-ext)
+compatible with SpotiFLAC Mobile, directly in the Python module.
 
-Esempio base:
+Basic example:
     from SpotiFLAC.extensions import ExtensionManager, JSExtensionProvider
 
-    # 1. Installa un'estensione dal registry
+    # 1. Install an extension from the registry
     em = ExtensionManager()
     em.install("soundcloud")
 
-    # 2. Usala come provider in un download
+    # 2. Use it as a provider for a download
     provider = JSExtensionProvider("soundcloud")
     result = provider.download_track(metadata, output_dir="/tmp/music")
     print(result.file_path)
 
-    # 3. Oppure passa "ext:soundcloud" direttamente a SpotiFLAC
+    # 3. Or pass "ext:soundcloud" directly to SpotiFLAC
     from SpotiFLAC import SpotiFLAC
     sf = SpotiFLAC(services=["ext:soundcloud", "tidal"])
     sf.download("https://open.spotify.com/track/...")
 
-Requisiti:
-    - Node.js ≥ 16  (comando 'node' nel PATH)
-    - Estensione installata via ExtensionManager
+Requirements:
+    - Node.js ≥ 16  ('node' command in PATH)
+    - Extension installed via ExtensionManager
 """
 
 from .manager  import ExtensionManager, InstalledExtension, RegistryEntry, REGISTRY_URL
