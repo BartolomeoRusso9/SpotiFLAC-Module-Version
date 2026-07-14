@@ -443,7 +443,6 @@ worker.on('message', async (msg) => {
     return;
   }
   if (msg.type === 'progress') {
-    // Invia al Python come evento separato (non bloccante)
     process.stdout.write(JSON.stringify({ type: 'progress', callId: msg.callId, value: msg.value }) + '\n');
     return;
   }

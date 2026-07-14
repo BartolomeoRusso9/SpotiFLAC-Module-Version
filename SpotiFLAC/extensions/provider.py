@@ -95,6 +95,20 @@ class JSExtensionProvider(BaseProvider):
         self._all_runtimes = []
         self._runtime_lock = threading.Lock()
 
+    # ─────────────────────── BaseProvider overrides ───────────
+
+    def set_progress_callback(self, cb) -> None:
+        """Salva il callback per l'avanzamento fornito dal Downloader."""
+        self._progress_cb = cb
+
+    def set_stop_event_async(self, event: asyncio.Event) -> None:
+        """Salva l'evento di stop (timeout/cancellazione) fornito dal Downloader."""
+        self._stop_event = event
+
+    def set_stop_event(self, event) -> None:
+        """Retrocompatibilità sincrona."""
+        self._stop_event = event
+    
     # ─────────────────────── helpers ──────────────────────────
 
     def _load_extension(self, ext_id: str) -> InstalledExtension:
