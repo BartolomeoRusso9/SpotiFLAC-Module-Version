@@ -210,7 +210,12 @@ async def download_one_async(
             await asyncio.sleep(wait)
             errors.clear()
 
-        for provider in providers:
+        for idx, provider in enumerate(providers):
+            if idx > 0:
+                is_ext = provider.name.startswith("ext:")
+                target_type = "extension" if is_ext else "provider"
+                safe_tqdm_write(f"  ⚠️  Fallback: switching to backup {target_type} ({provider.name})...")
+
             logger.info(
                 "[%s] Trying: %s — %s", provider.name, metadata.artists, metadata.title
             )
