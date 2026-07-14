@@ -665,7 +665,6 @@ def _ext_to_fmt(suffix: str) -> str:
     return {".flac": "flac", ".mp3": "mp3", ".m4a": "m4a"}.get(suffix.lower(), "flac")
 
 async def _get_codec_async(filepath: str) -> str:
-    import asyncio
     try:
         cmd = [
             "ffprobe", "-v", "quiet", "-select_streams", "a:0",
@@ -681,7 +680,6 @@ async def _get_codec_async(filepath: str) -> str:
         return "m4a"
 
 async def _remux_to_flac_async(input_path: str, output_path: str, decryption_key: str = None) -> bool:
-    import asyncio
     import logging
     logger = logging.getLogger(__name__)
     try:
