@@ -416,6 +416,22 @@ class JSExtensionProvider(BaseProvider):
                 self.name, "Download returned no usable audio (segments unmergeable)"
             )
 
+        if Path(actual_path).suffix.lower() in [".m4a", ".mp4"]:
+            codec = await _get_codec_async(actual_path)
+            if codec == "flac":
+                logger.info("[%s] FLAC in M4A. Starting extraction (remux)...", self.name)
+                flac_path = str(Path(actual_path).with_suffix(".flac"))
+                if await _remux_to_flac_async(actual_path, flac_path):
+                    import os
+                    try:
+                        os.remove(actual_path)
+                    except OSError:
+                        pass
+                    actual_path = flac_path
+                    logger.info("[%s] Extraction completed successfully.", self.name)
+                else:
+                    logger.warning("[%s] Extraction failed.", self.name)
+
         fmt = _ext_to_fmt(Path(actual_path).suffix)
 
         # ── MusicBrainz, like in native providers (tidal.py, qobuz.py, etc.) ──
@@ -447,7 +463,7 @@ class JSExtensionProvider(BaseProvider):
                 metadata,
                 EmbedOptions(
                     cover_url          = metadata.cover_url or "",
-                    first_artist_only  = first_artist_only,
+                    first_artist_only   = first_artist_only,
                     embed_lyrics       = embed_lyrics,
                     lyrics_providers   = lyrics_providers or [],
                     enrich             = enrich_metadata,
@@ -644,6 +660,36 @@ def _quality_to_ext(quality: str) -> str:
 
 def _ext_to_fmt(suffix: str) -> str:
     return {".flac": "flac", ".mp3": "mp3", ".m4a": "m4a"}.get(suffix.lower(), "flac")
+
+async def _get_codec_async(filepath: str) -> str:
+    """Usa ffprobe per scoprire il vero codec all'interno del file audio."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "quiet", "-select_streams", "a:0",
+            "-show_entries", "stream=codec_name", "-of",
+            "default=noprint_wrappers=1:nokey=1", filepath
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        return stdout.decode().strip().lower()
+    except Exception:
+        return "m4a"
+
+async def _remux_to_flac_async(input_path: str, output_path: str) -> bool:
+    """Estrae il flusso audio senza perdita di qualità (remux) in un contenitore FLAC vero."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", input_path, "-map", "0:a:0", "-c:a", "flac", output_path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        _, stderr = await proc.communicate()
+        from pathlib import Path
+        return proc.returncode == 0 and Path(output_path).exists()
+    except Exception as exc:
+        logger.warning("FLAC remux error: %s", exc)
+        return False
 
 def make_extension_provider(
     ext_id:          str,
