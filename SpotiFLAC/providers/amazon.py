@@ -837,33 +837,30 @@ class AmazonProvider(BaseProvider):
         except Exception:
             return "m4a"
 
-    async def _remux_to_flac(self, input_path: str, output_path: str) -> bool:
+    async def _remux_to_flac(self, input_path: str, output_path: str, decryption_key: str | None = None) -> bool:
         try:
+            cmd = [_ffmpeg_path(), "-y"]
+            # Iniettiamo la chiave DRM se è presente!
+            if decryption_key:
+                cmd.extend(["-decryption_key", str(decryption_key).strip()])
+                
+            cmd.extend(["-i", input_path, "-map", "0:a:0", "-c:a", "flac", output_path])
+            
             proc = await asyncio.create_subprocess_exec(
-                _ffmpeg_path(),
-                "-y",
-                "-i",
-                input_path,
-                "-map",
-                "0:a:0",
-                "-c:a",
-                "flac",
-                output_path,
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             _, stderr = await proc.communicate()
             if proc.returncode != 0:
-                logger.warning(
-                    "[amazon] FLAC remux failed: %s",
-                    stderr.decode(errors="ignore")[:200],
-                )
+                err_msg = stderr.decode(errors="ignore")[-150:].replace("\n", " ")
+                logger.warning("[amazon] FLAC remux failed: %s", err_msg)
                 return False
             return os.path.exists(output_path)
         except Exception as exc:
             logger.warning("[amazon] FLAC remux error: %s", exc)
             return False
-
+        
     async def _download_from_spotbye_api(
         self, asin: str, output_dir: str, provider_key: str
     ) -> tuple[str, dict]:
@@ -966,7 +963,7 @@ class AmazonProvider(BaseProvider):
             out = os.path.join(output_dir, f"{asin}{ext}")
 
             if ext == ".flac":
-                if not await self._remux_to_flac(temp_file, out):
+                if not await self._remux_to_flac(temp_file, out, decryption_key):
                     raise SpotiflacError(
                         ErrorKind.FILE_IO,
                         "Decryption failed: FLAC remux failed",
@@ -1090,7 +1087,7 @@ class AmazonProvider(BaseProvider):
             out = os.path.join(output_dir, f"{asin}{ext}")
 
             if ext == ".flac":
-                if not await self._remux_to_flac(temp_file, out):
+                if not await self._remux_to_flac(temp_file, out, decryption_key):
                     raise SpotiflacError(
                         ErrorKind.FILE_IO,
                         "Decryption failed: FLAC remux failed",
@@ -1232,7 +1229,18 @@ class AmazonProvider(BaseProvider):
         final = os.path.join(output_dir, f"{asin}{ext}")
         if os.path.exists(final):
             os.remove(final)
-        os.rename(temp_file, final)
+            
+        if codec == "flac":
+            logger.info("[amazon] FLAC in M4A from MusicDL. Remuxing...")
+            if await self._remux_to_flac(temp_file, final):
+                os.remove(temp_file)
+            else:
+                logger.warning("[amazon] Remux failed, keeping original as .m4a")
+                ext = ".m4a"
+                final = os.path.join(output_dir, f"{asin}{ext}")
+                os.rename(temp_file, final)
+        else:
+            os.rename(temp_file, final)
 
         api_meta = {}
         if data.get("title"):
@@ -1292,7 +1300,7 @@ class AmazonProvider(BaseProvider):
                         if decryption_key:
                             logger.info("[amazon] Decrypting Antra stream...")
                             if ext == ".flac":
-                                if await self._remux_to_flac(temp_file, out):
+                                if await self._remux_to_flac(temp_file, out, decryption_key):
                                     if os.path.exists(temp_file):
                                         os.remove(temp_file)
                                     success, repair_msg = await asyncio.to_thread(

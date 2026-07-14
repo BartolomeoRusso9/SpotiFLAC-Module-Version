@@ -419,18 +419,21 @@ class JSExtensionProvider(BaseProvider):
         if Path(actual_path).suffix.lower() in [".m4a", ".mp4"]:
             codec = await _get_codec_async(actual_path)
             if codec == "flac":
-                logger.info("[%s] FLAC in M4A. Starting extraction (remux)...", self.name)
+                logger.info("[%s] FLAC nascosto in contenitore M4A rilevato. Avvio estrazione (remux)...", self.name)
                 flac_path = str(Path(actual_path).with_suffix(".flac"))
-                if await _remux_to_flac_async(actual_path, flac_path):
+                
+                d_key = dl_result.get("decryption_key") or dl_result.get("decryptionKey")
+                
+                if await _remux_to_flac_async(actual_path, flac_path, d_key):
                     import os
                     try:
                         os.remove(actual_path)
                     except OSError:
                         pass
                     actual_path = flac_path
-                    logger.info("[%s] Extraction completed successfully.", self.name)
+                    logger.info("[%s] Estrazione FLAC completata con successo.", self.name)
                 else:
-                    logger.warning("[%s] Extraction failed.", self.name)
+                    logger.warning("[%s] Estrazione FLAC fallita, mantengo il file originale.", self.name)
 
         fmt = _ext_to_fmt(Path(actual_path).suffix)
 
@@ -662,7 +665,7 @@ def _ext_to_fmt(suffix: str) -> str:
     return {".flac": "flac", ".mp3": "mp3", ".m4a": "m4a"}.get(suffix.lower(), "flac")
 
 async def _get_codec_async(filepath: str) -> str:
-    """Usa ffprobe per scoprire il vero codec all'interno del file audio."""
+    import asyncio
     try:
         cmd = [
             "ffprobe", "-v", "quiet", "-select_streams", "a:0",
@@ -677,16 +680,27 @@ async def _get_codec_async(filepath: str) -> str:
     except Exception:
         return "m4a"
 
-async def _remux_to_flac_async(input_path: str, output_path: str) -> bool:
-    """Estrae il flusso audio senza perdita di qualità (remux) in un contenitore FLAC vero."""
+async def _remux_to_flac_async(input_path: str, output_path: str, decryption_key: str = None) -> bool:
+    import asyncio
+    import logging
+    logger = logging.getLogger(__name__)
     try:
+        cmd = ["ffmpeg", "-y"]
+        if decryption_key:
+            cmd.extend(["-decryption_key", str(decryption_key).strip()])
+            
+        cmd.extend(["-i", input_path, "-map", "0:a:0", "-c:a", "flac", output_path])
+        
         proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-i", input_path, "-map", "0:a:0", "-c:a", "flac", output_path,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         _, stderr = await proc.communicate()
         from pathlib import Path
-        return proc.returncode == 0 and Path(output_path).exists()
+        if proc.returncode != 0:
+            err_msg = stderr.decode(errors='ignore')[-150:].replace('\n', ' ')
+            logger.warning("Errore FFMPEG: %s", err_msg)
+            return False
+        return Path(output_path).exists()
     except Exception as exc:
         logger.warning("FLAC remux error: %s", exc)
         return False
