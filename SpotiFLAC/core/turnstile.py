@@ -30,23 +30,6 @@ if _os.name != "nt" and hasattr(_os, "geteuid") and _os.geteuid() == 0:
 
 
 def _patch_nodriver_unknown_cdp_events() -> None:
-    """
-    Le build recenti di Chrome emettono eventi CDP nuovi (es. l'heartbeat
-    di ad-tagging 'Network.requestAdblockInfoReceived') che il registro
-    tipizzato di nodriver non conosce ancora. Senza questa patch, ricevere
-    UN SOLO evento del genere solleva un KeyError non catturato dentro il
-    loop interno di gestione messaggi di nodriver, uccidendo l'intera
-    connessione CDP (e quindi la sessione del browser) — anche se
-    l'evento in sé è del tutto irrilevante per noi.
-
-    Firma flessibile (*args, **kwargs): la versione installata di nodriver
-    chiama process_event con argomenti posizionali aggiuntivi oltre al
-    messaggio (es. self.process_event(message, None)) — una firma rigida
-    (self, message) rompe la chiamata reale con un TypeError.
-
-    Idempotente: sicuro da chiamare più volte (applica la patch una
-    sola volta).
-    """
     from nodriver.core import connection as _nd_connection
 
     if getattr(_nd_connection, "_spotiflac_unknown_event_patch", False):
