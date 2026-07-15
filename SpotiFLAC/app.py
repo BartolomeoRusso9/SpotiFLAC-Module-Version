@@ -71,6 +71,15 @@ class SpotiFLAC_API:
         self.log("Python Backend connected.", "info")
         self.log(f"Default download folder: {self.download_dir}", "info")
         self._check_ffmpeg_startup()
+        try:
+            from .extensions.manager import ExtensionManager
+            self.log("Download extension...", "info")
+            threading.Thread(
+                target=lambda: ExtensionManager(auto_install_downloads=True),
+                daemon=True
+            ).start()
+        except Exception as e:
+            self.log(f"Errore avvio estensioni: {e}", "warn")
         app_version = self.app_version
         try:
             if self._window:

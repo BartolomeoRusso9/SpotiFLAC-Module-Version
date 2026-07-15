@@ -21,10 +21,7 @@ RUN apt-get update \
         fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-# Google Chrome has no official arm64 .deb build, so on arm64 we install
-# Chromium from the Debian repos instead and symlink it to the same command
-# name, so the rest of the app can keep calling "google-chrome-stable"
-# regardless of architecture.
+# Google Chrome / Chromium fallback
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
         wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
         && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
@@ -46,6 +43,12 @@ RUN python3 -m pip install --upgrade pip setuptools wheel \
 
 COPY . .
 RUN python3 -m pip install --no-cache-dir .
+RUN mkdir -p /app/downloads \
+             /root/.spotiflac/extensions \
+             /root/.cache/spotiflac \
+             /tmp/ts_profile
+
+VOLUME ["/app/downloads", "/root/.spotiflac", "/root/.cache/spotiflac", "/tmp/ts_profile"]
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
