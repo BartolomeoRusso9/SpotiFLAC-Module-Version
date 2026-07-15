@@ -226,10 +226,9 @@ async def _display_health_check() -> dict[str, bool]:
             f"\n  {RED('✗  No providers reachable — check your internet connection.')}"
         )
 
-    # Sezione a parte per il servizio centralizzato delle estensioni (Zarz)
     if ext_result is not None:
         icon = GREEN("✅") if ext_result.ok else RED("❌")
-        print(f"\n  {BOLD('Extensions')} {DIM('(Zarz)')}")
+        print(f"\n  {BOLD('Extensions')}")
         print(f"  {icon} {ext_result.detail}")
         status["extensions"] = ext_result.ok
 
