@@ -575,10 +575,10 @@ const API_SOURCES = [
   { id:'youtube',    type:'youtube',    name:'YouTube Music', url:'' },
   { id:'pandora',    type:'pandora',    name:'Pandora',       url:'' },
 ];
-// Servizio centralizzato usato dalle estensioni SpotiFLAC (Zarz), mostrato in una
+// Servizio centralizzato usato dalle estensioni SpotiFLAC, mostrato in una
 // sezione separata dai provider musicali veri e propri.
 const EXTENSION_SOURCES = [
-  { id:'extensions', type:'extensions', name:'Extensions (Zarz)', url:'' },
+  { id:'extensions', type:'extensions', name:'Extensions', url:'' },
 ];
 let apiStatusState = {
   checkingSources: {},
@@ -3200,7 +3200,7 @@ async function loadProfile() {
 
 // ── Health check ──────────────────────────────────────────────────────────────
 function renderHealthResults(data) {
-  // Le righe del servizio estensioni (Zarz) sono mostrate a parte, non sono
+  // Le righe del servizio estensioni sono mostrate a parte, non sono
   // un "provider" musicale e non devono contare nel totale provider.
   const extRows  = data.filter(r => r.provider === 'extensions');
   const provRows = data.filter(r => r.provider !== 'extensions');
@@ -3234,7 +3234,7 @@ function renderHealthResults(data) {
     container.appendChild(group);
   });
 
-  // Sezione a parte per le estensioni (Zarz)
+  // Sezione a parte per le estensioni
   if (extRows.length) {
     const anyOk = extRows.some(r => r.ok);
     const okCount = extRows.filter(r => r.ok).length;

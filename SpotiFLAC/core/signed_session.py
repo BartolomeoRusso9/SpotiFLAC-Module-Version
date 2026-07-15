@@ -857,11 +857,6 @@ class SignedSessionClient:
             headers=headers,
             timeout=30,
         )
-        if resp.status_code >= 400:
-            print(f"\n[!!!] ZARZ API ERROR ({resp.status_code}):")
-            print(f"[!!!] DETAILS: {resp.text}\n")
-        # Log full URL and status to have the same informational line
-        # as httpx but with the full request link.
         try:
             logger.info(
                 'HTTP Request: %s %s "HTTP/1.1 %s %s"',
