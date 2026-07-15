@@ -201,7 +201,7 @@ class DeezerProvider(BaseProvider):
         self, method: str, url: str, payload: Optional[Dict] = None
     ) -> Dict[str, Any]:
         headers: Dict[str, str] = {
-            _DEFAULT_UA,
+            "User-Agent": _DEFAULT_UA,
         }
         if method.upper() == "POST":
             headers["Content-Type"] = "application/json"
@@ -499,8 +499,9 @@ class DeezerProvider(BaseProvider):
                 if "temp_path" in locals() and temp_path.exists():
                     temp_path.unlink()
 
-        # 2. Fallback: s_deezer Server
+        # 2. Fallback: s_deezer Server (Deemix API)
         s_deezer_url = get_deezer_endpoint("s_deezer")
+        print(f"[deezer] s_deezer endpoint: {s_deezer_url}")
         if s_deezer_url:
             logger.info("[deezer] Attempting direct download via s_deezer server...")
             try:
@@ -524,101 +525,24 @@ class DeezerProvider(BaseProvider):
                     return {"file_path": str(file_path), "extension": file_extension}
                 else:
                     logger.warning(
-                        "[deezer] s_deezer returned an empty file. Falling back to resolvers..."
+                        "[deezer] s_deezer returned an empty file. Falling back to FlacDownloader..."
                     )
                     if file_path.exists():
                         file_path.unlink()
 
             except Exception as exc:
                 logger.warning(
-                    "[deezer] s_deezer stream failed: %s. Falling back to resolvers...",
+                    "[deezer] s_deezer stream failed: %s. Falling back to FlacDownloader...",
                     exc,
                 )
                 if "file_path" in locals() and file_path.exists():
                     file_path.unlink()
 
-        # 3. Fallback: Standard Resolver
-        try:
-            payload = {
-                "platform": "deezer",
-                "url": f"https://www.deezer.com/track/{track_id}",
-            }
-            api_data = await self._post_json_async(
-                get_deezer_endpoint("resolver"), payload
-            )
-
-            if not api_data.get("success"):
-                logger.info("[deezer] Trying FlacDownloader...")
-                return await self._download_via_flacdownloader_async(
-                    str(track_id), meta["title"], meta["artist"], output_dir
-                )
-
-            download_url = api_data.get("direct_download_url") or api_data.get(
-                "download_url"
-            )
-            if not download_url:
-                logger.warning("[deezer] No download URL returned by resolver.")
-                logger.info("[deezer] Trying FlacDownloader...")
-                return await self._download_via_flacdownloader_async(
-                    str(track_id), meta["title"], meta["artist"], output_dir
-                )
-
-            requires_decryption = api_data.get("requires_client_decryption", False)
-            if not requires_decryption and api_data.get("direct_downloadable") is False:
-                requires_decryption = True
-            if api_data.get("deezer_encrypted", False):
-                requires_decryption = True
-
-            file_extension = api_data.get("deezer_format", "flac").lower()
-
-        except Exception as exc:
-            logger.warning("[deezer] Resolver API failed: %s", exc)
-            logger.info("[deezer] Fallback: Trying FlacDownloader...")
-            return await self._download_via_flacdownloader_async(
-                str(track_id), meta["title"], meta["artist"], output_dir
-            )
-
-        out_dir_path = Path(output_dir)
-        out_dir_path.mkdir(parents=True, exist_ok=True)
-
-        filename = f"{self._safe(meta['artists'])} - {self._safe(meta['title'])}.{file_extension}"
-        file_path = out_dir_path / filename
-        temp_path = (
-            file_path.with_suffix(f".{file_extension}.encrypted")
-            if requires_decryption
-            else file_path
+        # 3. Fallback finale: FlacDownloader
+        logger.info("[deezer] Trying FlacDownloader as final fallback...")
+        return await self._download_via_flacdownloader_async(
+            str(track_id), meta["title"], meta["artist"], output_dir
         )
-
-        try:
-            await self._async_http.stream_to_file(
-                download_url, str(temp_path), self._progress_cb
-            )
-        except Exception as exc:
-            logger.warning("[deezer] Stream download failed: %s", exc)
-            if temp_path.exists():
-                temp_path.unlink()
-            logger.info("[deezer] Fallback: Trying FlacDownloader...")
-            return await self._download_via_flacdownloader_async(
-                str(track_id), meta["title"], meta["artist"], output_dir
-            )
-
-        if requires_decryption:
-            logger.info(
-                "[deezer] Encrypted file detected. Starting Blowfish decryption..."
-            )
-            try:
-                success = await asyncio.to_thread(
-                    self._decrypt_file, temp_path, file_path, str(track_id)
-                )
-                if not success:
-                    if file_path.exists():
-                        file_path.unlink()
-                    return None
-            finally:
-                if temp_path.exists():
-                    temp_path.unlink()
-
-        return {"file_path": str(file_path), "extension": file_extension}
     
     # ------------------------------------------------------------------
     # Async BaseProvider interface

@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 _SEED_PARTS = [b"spotif", b"lac:co", b"mmunity:url:v1"]
 _AAD = b"spotiflac|community|url|v1"
 
-_CLOUD_URL = "https://gist.githubusercontent.com/BartolomeoRusso9/ef9fdbbc894818aea89d25a8d99f8c77/raw/"
+_CLOUD_URL = "https://gist.githubusercontent.com/BartolomeoRusso9/ef9fdbbc894818aea89d25a8d99f8c77/raw"
 
 _CACHE_FILE = os.path.join(os.path.dirname(__file__), ".endpoints_cache.txt")
 
@@ -55,8 +55,11 @@ def _decrypt_base64_payload(b64_string: str) -> dict:
 def _load_registry() -> dict:
     """Download the encrypted JSON from GitHub, or use the local backup."""
     try:
+        cache_buster = int(time.time())
+        fresh_url = f"{_CLOUD_URL}?t={cache_buster}"
+
         req = httpx.get(
-            _CLOUD_URL, headers={"User-Agent": "SpotiFLAC-Agent"}, timeout=3.0
+            fresh_url, headers={"User-Agent": "SpotiFLAC-Agent"}, timeout=5.0
         )
         req.raise_for_status()
         cloud_string = req.text
@@ -76,7 +79,6 @@ def _load_registry() -> dict:
             f"Unable to contact Cloud servers ({e}). Falling back to local cache..."
         )
 
-        # 2. If it fails, try to read the last saved cache
         try:
             if os.path.exists(_CACHE_FILE):
                 with open(_CACHE_FILE, "r") as f:
@@ -86,8 +88,7 @@ def _load_registry() -> dict:
             logger.error(f"Unable to read local cache: {cache_e}")
 
         return {}
-
-
+        
 # In-memory cache with TTL: the Gist is rechecked after _TTL_SECONDS seconds.
 # Increase the value to reduce network calls in long-running processes.
 _TTL_SECONDS: int = 30
