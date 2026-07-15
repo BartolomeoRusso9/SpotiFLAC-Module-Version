@@ -122,7 +122,7 @@ def get_tidal_post_endpoints() -> list[str]:
 
 
 def get_deezer_endpoint(key: str) -> str:
-    """Valid keys: 'antra', 'resolver', 'flacdownloader_prepare', 'flacdownloader_asset'"""
+    """Valid keys: 'antra', 's_deezer', 'flacdownloader_prepare', 'flacdownloader_asset'"""
     return _get_registry().get("deezer", {}).get(key, "")
 
 

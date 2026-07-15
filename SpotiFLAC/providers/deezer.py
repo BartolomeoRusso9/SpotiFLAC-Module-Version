@@ -446,6 +446,7 @@ class DeezerProvider(BaseProvider):
             "[deezer] Found: %s - %s (ID: %s)", meta["artists"], meta["title"], track_id
         )
 
+        # 1. Fallback: Antra Server
         antra_url = get_deezer_endpoint("antra")
         if antra_url:
             logger.info("[deezer] Attempting direct download via Antra server...")
@@ -492,12 +493,51 @@ class DeezerProvider(BaseProvider):
 
             except Exception as exc:
                 logger.warning(
-                    "[deezer] Antra stream failed: %s. Falling back to resolvers...",
+                    "[deezer] Antra stream failed: %s. Falling back to next resolver...",
                     exc,
                 )
                 if "temp_path" in locals() and temp_path.exists():
                     temp_path.unlink()
 
+        # 2. Fallback: s_deezer Server
+        s_deezer_url = get_deezer_endpoint("s_deezer")
+        if s_deezer_url:
+            logger.info("[deezer] Attempting direct download via s_deezer server...")
+            try:
+                stream_url = f"{s_deezer_url.rstrip('/')}/download/stream/{track_id}"
+
+                out_dir_path = Path(output_dir)
+                out_dir_path.mkdir(parents=True, exist_ok=True)
+                file_extension = "flac"
+                filename = f"{self._safe(meta['artists'])} - {self._safe(meta['title'])}.{file_extension}"
+                file_path = out_dir_path / filename
+
+                await self._async_http.stream_to_file(
+                    stream_url,
+                    str(file_path),
+                    self._progress_cb
+                )
+
+                # Verifica rapida che il file sia stato scaricato e non sia vuoto
+                if file_path.exists() and file_path.stat().st_size > 0:
+                    logger.info("[deezer] s_deezer stream downloaded successfully.")
+                    return {"file_path": str(file_path), "extension": file_extension}
+                else:
+                    logger.warning(
+                        "[deezer] s_deezer returned an empty file. Falling back to resolvers..."
+                    )
+                    if file_path.exists():
+                        file_path.unlink()
+
+            except Exception as exc:
+                logger.warning(
+                    "[deezer] s_deezer stream failed: %s. Falling back to resolvers...",
+                    exc,
+                )
+                if "file_path" in locals() and file_path.exists():
+                    file_path.unlink()
+
+        # 3. Fallback: Standard Resolver
         try:
             payload = {
                 "platform": "deezer",
@@ -567,7 +607,6 @@ class DeezerProvider(BaseProvider):
                 "[deezer] Encrypted file detected. Starting Blowfish decryption..."
             )
             try:
-                # CPU-bound: run in thread pool to avoid blocking event loop
                 success = await asyncio.to_thread(
                     self._decrypt_file, temp_path, file_path, str(track_id)
                 )
@@ -580,7 +619,7 @@ class DeezerProvider(BaseProvider):
                     temp_path.unlink()
 
         return {"file_path": str(file_path), "extension": file_extension}
-
+    
     # ------------------------------------------------------------------
     # Async BaseProvider interface
     # ------------------------------------------------------------------
