@@ -1547,10 +1547,13 @@ class SpotiFLAC_API:
 
     def _health_check_task(self, services):
         try:
-            from .core.health_check import run_health_check as hc_run
+            from .core.health_check import run_health_check_with_extensions
 
             self.log(f"Health check started for: {', '.join(services)}", "info")
-            results = asyncio.run(hc_run(services))
+            results, ext_result = asyncio.run(
+                run_health_check_with_extensions(services)
+            )
+            all_results = list(results) + [ext_result]
             data = [
                 {
                     "provider": r.provider,
@@ -1560,12 +1563,16 @@ class SpotiFLAC_API:
                     "latency": round(r.latency) if r.latency >= 0 else -1,
                     "detail": r.detail,
                 }
-                for r in results
+                for r in all_results
             ]
             ok_providers = [r.provider for r in results if r.ok]
             self.log(
                 f"Health check — {len([r for r in results if r.ok])}/{len(results)} endpoints OK.",
                 "ok" if ok_providers else "error",
+            )
+            self.log(
+                f"Extensions — {'reachable' if ext_result.ok else 'unreachable'} ({ext_result.detail}).",
+                "ok" if ext_result.ok else "error",
             )
             try:
                 if self._window:
