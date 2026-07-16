@@ -85,44 +85,117 @@ On launch it automatically runs a **service health check** before asking any que
 
 ---
 
-## Docker Usage
+## Docker Usage & Headless Automation
 
-A CLI-focused Docker image is available for running SpotiFLAC without the desktop GUI.
+A lightweight, CLI-focused Docker image is available for running SpotiFLAC on servers, NAS devices, or any headless environment.
 
-Build the image:
+### Build the Image
+
 ```bash
 docker build -t spotiflac .
 ```
 
-Run a download with a mounted local output directory:
-```bash
-docker run --rm -v "$(pwd)/downloads:/app/downloads" spotiflac \
-  https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT \
-  ./downloads -s tidal -q LOSSLESS
-```
+### Basic Docker Usage
 
-The Docker image is intended for CLI mode only; it does not launch the webview GUI.
-
-For interactive terminal mode, run with `-it`:
-```bash
-docker run --rm -it -v "$(pwd)/downloads:/app/downloads" spotiflac \
-  --interactive
-```
-
-Published image (GHCR)
-
-Official images are published to GitHub Container Registry (GHCR) via GitHub Actions. You can pull them with:
+Run a download by mounting local directories to persist your downloads, configuration, cache, and extension registry across container restarts:
 
 ```bash
-docker pull ghcr.io/ShuShuzinhuu/SpotiFLAC-Module-Version:latest
+docker run --rm -it \
+  -v "$(pwd)/downloads:/app/downloads" \
+  -v ts_profile:/tmp/ts_profile \
+  -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
+  -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
+  spotiflac "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" \
+  /app/downloads -s deezer -q LOSSLESS
 ```
 
-Run a pulled image:
+---
+
+## Advanced Headless Setup (Telegram Bot Integration)
+
+When running in a headless environment, SpotiFLAC may occasionally encounter a Cloudflare challenge. Normally this requires opening a browser and manually completing the CAPTCHA.
+
+To make the entire workflow fully headless, SpotiFLAC can integrate with a Telegram bot. Whenever a challenge occurs, the bot will send you the challenge URL. Simply complete the CAPTCHA from your phone or browser, reply with the generated `grant` code (DevTools → Network → verify → Preview → field 'grant' or if you can't open DevTools wait a few seconds and the grant will appear in the site) and the download will resume automatically.
+
+### 1. Create a Telegram Bot
+
+Start a conversation with **@BotFather** on Telegram and run:
+
+```text
+/newbot
+```
+
+Follow the instructions to create your bot and copy the generated **Bot Token**.
+
+### 2. Get Your Chat ID
+
+Start a conversation with **@userinfobot** and copy your personal **Chat ID**.
+
+Your Chat ID is used to ensure that only you can provide grant codes to the running container.
+
+### 3. Create a `.env` File
+
+Store your credentials in a `.env` file:
+
+```dotenv
+TG_BOT_TOKEN=your_bot_token_here
+TG_CHAT_ID=your_chat_id_here
+```
+
+### 4. Run the Container
+
+Pass the environment file to Docker:
 
 ```bash
-docker run --rm -v "$(pwd)/downloads:/app/downloads" ghcr.io/ShuShuzinhuu/SpotiFLAC-Module-Version:latest \
-    https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT ./downloads -s tidal -q LOSSLESS
+docker run --rm -it \
+  --env-file .env \
+  -v "$(pwd)/downloads:/app/downloads" \
+  -v ts_profile:/tmp/ts_profile \
+  -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
+  -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
+  spotiflac "URL" /app/downloads -s deezer
 ```
+
+If a challenge appears, you will receive a Telegram notification containing the challenge URL.
+
+Complete the challenge, send the generated `grant` code back to the bot, and SpotiFLAC will automatically inject it into the running process and continue the download without requiring any interaction with the container.
+
+---
+
+## Published Image (GHCR)
+
+Official Docker images are published on GitHub Container Registry (GHCR), allowing you to run the latest version without building locally.
+
+```bash
+docker pull ghcr.io/BartolomeoRusso9/SpotiFLAC-Module-Version:latest
+```
+
+---
+
+## Extensions & Automatic Fallbacks
+
+SpotiFLAC features a dual-engine architecture consisting of **Native Python Providers** and **JavaScript Extensions**, which are downloaded dynamically from the **SpotiFLAC Extension Registry**.
+
+Understanding how these two systems interact is key to maximizing your download success rate.
+
+### Providers
+
+Examples:
+
+```text
+-s deezer
+-s qobuz
+```
+
+These providers use the built-in Python implementations shipped with SpotiFLAC. They are lightweight, fast, and require no additional downloads.
+
+### Automatic Fallback Strategy
+
+SpotiFLAC implements an intelligent fallback mechanism.
+
+When you request a native provider (for example `-s deezer`), the application first attempts the download using the built-in Python implementation.
+
+If the download fails due to API changes, temporary service issues, or network-related problems, SpotiFLAC will automatically look for the matching extension in your local extension directory.
 
 ---
 
