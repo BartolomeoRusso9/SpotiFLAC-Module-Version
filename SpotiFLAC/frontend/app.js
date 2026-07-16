@@ -575,6 +575,11 @@ const API_SOURCES = [
   { id:'youtube',    type:'youtube',    name:'YouTube Music', url:'' },
   { id:'pandora',    type:'pandora',    name:'Pandora',       url:'' },
 ];
+// Servizio centralizzato usato dalle estensioni SpotiFLAC, mostrato in una
+// sezione separata dai provider musicali veri e propri.
+const EXTENSION_SOURCES = [
+  { id:'extensions', type:'extensions', name:'Extensions', url:'' },
+];
 let apiStatusState = {
   checkingSources: {},
   statuses: {},
@@ -615,6 +620,9 @@ function copyLogs() {
 }
 
 function renderPlatformIcon(type) {
+  if (type === 'extensions') {
+    return '<span class="svc-icon icon-glyph extensions">🧩</span>';
+  }
   const iconMap = {
     tidal: 'tidal_l.png',
     qobuz: 'qbz.png',
@@ -654,6 +662,10 @@ function renderStatusGrids() {
   if (servicesGrid) {
     servicesGrid.innerHTML = API_SOURCES.map((source) => buildStatusCard(source)).join('');
   }
+  const extensionsGrid = $('status-extensions-grid');
+  if (extensionsGrid) {
+    extensionsGrid.innerHTML = EXTENSION_SOURCES.map((source) => buildStatusCard(source)).join('');
+  }
 }
 
 function updateStatusSummary(text) {
@@ -677,6 +689,10 @@ function checkAll() {
     apiStatusState.checkingSources[sourceId] = true;
     apiStatusState.statuses[sourceId] = 'checking';
   });
+  EXTENSION_SOURCES.forEach((source) => {
+    apiStatusState.checkingSources[source.id] = true;
+    apiStatusState.statuses[source.id] = 'checking';
+  });
   renderStatusGrids();
   updateStatusSummary('Checking all providers...');
   if (window.pywebview?.api?.run_health_check) {
@@ -685,6 +701,10 @@ function checkAll() {
       sources.forEach((sourceId) => {
         apiStatusState.statuses[sourceId] = 'offline';
         apiStatusState.checkingSources[sourceId] = false;
+      });
+      EXTENSION_SOURCES.forEach((source) => {
+        apiStatusState.statuses[source.id] = 'offline';
+        apiStatusState.checkingSources[source.id] = false;
       });
       renderStatusGrids();
       updateStatusSummary('Health check failed.');
@@ -695,6 +715,10 @@ function checkAll() {
       sources.forEach((sourceId) => {
         apiStatusState.statuses[sourceId] = 'offline';
         apiStatusState.checkingSources[sourceId] = false;
+      });
+      EXTENSION_SOURCES.forEach((source) => {
+        apiStatusState.statuses[source.id] = 'offline';
+        apiStatusState.checkingSources[source.id] = false;
       });
       renderStatusGrids();
       updateStatusSummary('Demo: all providers offline.');
@@ -745,7 +769,7 @@ function updateStatusesFromResults(data) {
       statusMap[result.provider] = 'offline';
     }
   });
-  for (const source of API_SOURCES) {
+  for (const source of [...API_SOURCES, ...EXTENSION_SOURCES]) {
     if (statusMap[source.id]) {
       apiStatusState.statuses[source.id] = statusMap[source.id];
     }
@@ -3176,9 +3200,14 @@ async function loadProfile() {
 
 // ── Health check ──────────────────────────────────────────────────────────────
 function renderHealthResults(data) {
+  // Le righe del servizio estensioni sono mostrate a parte, non sono
+  // un "provider" musicale e non devono contare nel totale provider.
+  const extRows  = data.filter(r => r.provider === 'extensions');
+  const provRows = data.filter(r => r.provider !== 'extensions');
+
   // Raggruppiamo prima per provider
   const provMap = {};
-  data.forEach(r => { if (!provMap[r.provider]) provMap[r.provider] = []; provMap[r.provider].push(r); });
+  provRows.forEach(r => { if (!provMap[r.provider]) provMap[r.provider] = []; provMap[r.provider].push(r); });
 
   // Calcoliamo i provider totali e quelli con almeno un endpoint funzionante (ok)
   const totalProviders = Object.keys(provMap).length;
@@ -3204,6 +3233,25 @@ function renderHealthResults(data) {
     `;
     container.appendChild(group);
   });
+
+  // Sezione a parte per le estensioni
+  if (extRows.length) {
+    const anyOk = extRows.some(r => r.ok);
+    const okCount = extRows.filter(r => r.ok).length;
+    const totalCount = extRows.length;
+    const group = document.createElement('div');
+    group.className = 'hc-prov-group hc-ext-group s-section';
+    group.style.padding = '10px 12px';
+    group.style.marginTop = '10px';
+    group.innerHTML = `
+      <div class="hc-prov-name">
+        <span class="hc-dot ${anyOk ? 'ok' : 'err'}"></span>
+        Extensions
+        <span style="font-size:10px;font-weight:400;color:var(--muted)">${okCount}/${totalCount} OK</span>
+      </div>
+    `;
+    container.appendChild(group);
+  }
 }
 
 // ── Window controls (no-drag safe wrappers) ───────────────────────────────────

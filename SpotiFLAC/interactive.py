@@ -15,7 +15,7 @@ import os
 import sys
 import asyncio
 
-from .core.health_check import run_health_check
+from .core.health_check import run_health_check_with_extensions
 from .core.quality import normalize_quality
 
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
@@ -184,10 +184,12 @@ async def _display_health_check() -> dict[str, bool]:
     print(f"  {DIM('Probing endpoints...')} ", end="", flush=True)
 
     try:
-        results = await run_health_check(_ALL_SERVICES, include_all_endpoints=True)
+        results, ext_result = await run_health_check_with_extensions(
+            _ALL_SERVICES, include_all_endpoints=True
+        )
     except Exception as e:
         print(f"\r  {RED(f'Health check error: {e}')}" + " " * 20)
-        results = []
+        results, ext_result = [], None
 
     print("\r" + " " * 40 + "\r", end="")
 
@@ -223,6 +225,12 @@ async def _display_health_check() -> dict[str, bool]:
         print(
             f"\n  {RED('✗  No providers reachable — check your internet connection.')}"
         )
+
+    if ext_result is not None:
+        icon = GREEN("✅") if ext_result.ok else RED("❌")
+        print(f"\n  {BOLD('Extensions')}")
+        print(f"  {icon} {ext_result.detail}")
+        status["extensions"] = ext_result.ok
 
     return status
 

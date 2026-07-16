@@ -125,7 +125,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
         try:
             from .extensions.manager import ExtensionManager
 
-            mgr = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=False)
+            mgr = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=True)
 
             possible_ext_ids = []
 

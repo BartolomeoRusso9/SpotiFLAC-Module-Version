@@ -380,6 +380,13 @@ async def amain() -> None:
     except Exception:
         pass
 
+    try:
+        from .extensions.manager import ExtensionManager
+        print("  🔄 Download extension...")
+        await asyncio.to_thread(ExtensionManager, auto_install_downloads=True)
+    except Exception as e:
+        print(f"  ⚠️ Impossibile verificare le estensioni: {e}")
+
     # GUI mode (explicit --gui flag) — resta sincrona: la GUI gestisce il proprio loop.
     if "--gui" in sys.argv:
         from .app import run_gui

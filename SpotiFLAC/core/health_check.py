@@ -53,7 +53,9 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     """
     Carica dinamicamente gli endpoint interrogando il registro centralizzato.
     Returns un dict {provider_name: [(method, url), ...]}
-    Esclude le API ufficiali, ma mantiene i check centralizzati Zarz.
+    Esclude le API ufficiali. Il check centralizzato Zarz NON fa più parte
+    degli endpoint dei singoli provider: viene sondato a parte come sezione
+    "Estensioni" (vedi check_extensions_health()).
     """
     from ..core.endpoints import (
         get_qobuz_endpoints,
@@ -63,11 +65,9 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         get_asian_provider_endpoint,
         get_soundcloud_cobalt,
         get_pandora_base_and_path,
-        get_health_zarz_url,
     )
 
     endpoints: dict[str, list[tuple[str, str]]] = {}
-    zarz_health = get_health_zarz_url() or "https://api.zarz.moe/v1/health"
 
     # ── Tidal ──────────────────────────────────────────────────────────────
     tidal_eps = []
@@ -83,7 +83,6 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
 
     for url in get_tidal_post_endpoints():
         tidal_eps.append(("POST", url))
-    tidal_eps.append(("GET", zarz_health))
     endpoints["tidal"] = tidal_eps
 
     # ── Qobuz ──────────────────────────────────────────────────────────────
@@ -103,7 +102,6 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     for url in get_qobuz_endpoints("flacdownloader"):
         qobuz_eps.append(("GET", f"{url.rstrip('/')}/prepare"))
 
-    qobuz_eps.append(("GET", zarz_health))
     endpoints["qobuz"] = qobuz_eps
 
     # ── Deezer ─────────────────────────────────────────────────────────────
@@ -115,7 +113,6 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         deezer_eps.append(("POST", dzr_res))
     if dzr_flac:
         deezer_eps.append(("GET", dzr_flac))
-    deezer_eps.append(("GET", zarz_health))
     endpoints["deezer"] = deezer_eps
 
     # ── Amazon ─────────────────────────────────────────────────────────────
@@ -123,7 +120,6 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     for key, method in [
         ("spotbye1", "POST"),
         ("spotbye2", "GET"),
-        ("zarz", "GET"),
         ("musicdl", "POST"),
         ("squid", "GET"),
     ]:
@@ -131,16 +127,14 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
         if url:
             amazon_eps.append((method, url))
 
-    amazon_eps.append(("GET", zarz_health))
     endpoints["amazon"] = amazon_eps
 
     # ── Apple Music ────────────────────────────────────────────────────────
-    endpoints["apple"] = [("GET", zarz_health)]
+    endpoints["apple"] = []
 
     # ── SoundCloud ─────────────────────────────────────────────────────────
     sc_cobalt = get_soundcloud_cobalt()
     endpoints["soundcloud"] = [("POST", sc_cobalt)] if sc_cobalt else []
-    endpoints["soundcloud"].append(("GET", zarz_health))
 
     # ── YouTube ────────────────────────────────────────────────────────────
     endpoints["youtube"] = []
@@ -150,7 +144,6 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     endpoints["pandora"] = []
     if pan_base and pan_path:
         endpoints["pandora"].append(("POST", f"{pan_base}{pan_path}"))
-    endpoints["pandora"].append(("GET", zarz_health))
 
     # ── GD Studio API (Netease, Kuwo, Migu, Joox) ──────────────────────────
     for provider in ["netease", "kuwo", "migu", "joox"]:
@@ -314,37 +307,6 @@ async def _check_one(
         if resp.status_code == 200:
             body = resp.text
 
-            # ── Centralised Zarz health check ──────────────────────────────
-            if "api.zarz.moe/v1/health" in url or "/v1/health" in url:
-                try:
-                    data = json.loads(body)
-                    services = data.get("services", {})
-                    svc_key = "qobuz" if provider == "qbz" else provider
-
-                    if svc_key in services:
-                        svc_info = services[svc_key]
-                        if (
-                            svc_info.get("status") == 401
-                            and svc_info.get("detail") == "auth_required"
-                        ):
-                            ok, detail = False, "Auth required"
-                        elif (
-                            svc_info.get("ok") is True or svc_info.get("status") == 200
-                        ):
-                            ok, detail = True, svc_info.get("detail") or "ok"
-                        else:
-                            ok = False
-                            detail = (
-                                f"Zarz {svc_info.get('status')} "
-                                f"({svc_info.get('detail') or 'error'})"
-                            )
-                    else:
-                        ok, detail = True, "Zarz Link OK"
-                except ValueError:
-                    detail = "Bad Health Payload"
-
-                return HealthResult(provider, url, method, ok, ms, detail)
-
             # ── Pandora / Tidal / Amazon ───────────────────────────────────
             if provider in ("pandora", "tidal", "amazon"):
                 if body.strip():
@@ -426,43 +388,41 @@ async def _check_one_gated(
         return await _check_one(client, provider, method, url)
 
 
-async def _zarz_bulk_check(
-    client: httpx.AsyncClient,
-    services: list[str],
-) -> dict[str, HealthResult]:
+async def check_extensions_health(
+    client: httpx.AsyncClient | None = None,
+) -> HealthResult:
     """
-    Una sola richiesta a Zarz per ricavare lo stato di tutti i provider.
-    Returns {provider: HealthResult} solo per i provider presenti nella risposta.
+    Controlla lo stato del servizio centralizzato delle estensioni
+    (api.zarz.moe/v1/health) come sezione a sé, separata dai provider.
+    Ritorna un unico HealthResult: ok=True (spunta verde) se risponde 200,
+    ok=False (x rossa) altrimenti.
     """
+    own_client = client is None
+    if own_client:
+        client = _make_async_client()
     try:
         t0 = time.perf_counter()
         resp = await client.get(_ZARZ_HEALTH_URL, headers={"User-Agent": _UA})
         ms = (time.perf_counter() - t0) * 1000
 
-        if resp.status_code != 200:
-            return {}
-
-        svc_map = json.loads(resp.text).get("services", {})
-        out: dict[str, HealthResult] = {}
-
-        for svc in services:
-            key = "qobuz" if svc == "qbz" else svc
-            if key not in svc_map:
-                continue
-            info = svc_map[key]
-            if info.get("status") == 401 and info.get("detail") == "auth_required":
-                ok, detail = False, "Auth required"
-            elif info.get("ok") is True or info.get("status") == 200:
-                ok, detail = True, info.get("detail") or "ok"
-            else:
-                ok = False
-                detail = f"Zarz {info.get('status')} ({info.get('detail', 'error')})"
-
-            out[svc] = HealthResult(svc, _ZARZ_HEALTH_URL, "GET", ok, ms, detail)
-
-        return out
-    except Exception:
-        return {}
+        if resp.status_code == 200:
+            return HealthResult(
+                "extensions", _ZARZ_HEALTH_URL, "GET", True, ms, "ok"
+            )
+        return HealthResult(
+            "extensions", _ZARZ_HEALTH_URL, "GET", False, ms, f"HTTP {resp.status_code}"
+        )
+    except httpx.TimeoutException:
+        return HealthResult(
+            "extensions", _ZARZ_HEALTH_URL, "GET", False, -1, "timeout"
+        )
+    except httpx.RequestError as exc:
+        return HealthResult(
+            "extensions", _ZARZ_HEALTH_URL, "GET", False, -1, str(exc)[:40]
+        )
+    finally:
+        if own_client:
+            await client.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +437,8 @@ async def run_health_check(
 ) -> list[HealthResult]:
     """
     Check the reachability of all indicated providers asynchronously.
+    Il check dell'estensione centralizzata Zarz non è più incluso qui: usa
+    check_extensions_health() (o run_health_check_with_extensions()) per quello.
     """
     results: list[HealthResult] = []
     task_list: list[tuple[str, str, str]] = []
@@ -496,32 +458,16 @@ async def run_health_check(
     sem = asyncio.Semaphore(_MAX_CONCURRENT)
 
     async with _make_async_client() as client:
-        zarz_results = await _zarz_bulk_check(client, remaining)
-
         for svc in remaining:
-            zarz_r = zarz_results.get(svc)
             eps = _ENDPOINTS.get(svc)
-
             if not eps:
-                if zarz_r:
-                    results.append(zarz_r)
                 continue
-
-            eps_to_probe = [(m, u) for m, u in eps if "zarz.moe/v1/health" not in u]
 
             if include_all_endpoints:
-                if zarz_r:
-                    results.append(zarz_r)
-                task_list.extend((svc, m, u) for m, u in eps_to_probe)
+                task_list.extend((svc, m, u) for m, u in eps)
             else:
-                if zarz_r and zarz_r.ok:
-                    results.append(zarz_r)
-                elif eps_to_probe:
-                    m, u = eps_to_probe[0]
-                    task_list.append((svc, m, u))
-                elif zarz_r:
-                    results.append(zarz_r)
-                continue
+                m, u = eps[0]
+                task_list.append((svc, m, u))
 
         if task_list:
             task_map: dict[asyncio.Task[HealthResult], tuple[str, str, str]] = {
@@ -570,6 +516,22 @@ async def run_health_check(
     return results
 
 
+async def run_health_check_with_extensions(
+    services: list[str],
+    *,
+    include_all_endpoints: bool = True,
+) -> tuple[list[HealthResult], HealthResult]:
+    """
+    Comodo helper: esegue in parallelo run_health_check() (provider) e
+    check_extensions_health() (Zarz), restituendo (provider_results, extensions_result).
+    """
+    provider_results, ext_result = await asyncio.gather(
+        run_health_check(services, include_all_endpoints=include_all_endpoints),
+        check_extensions_health(),
+    )
+    return provider_results, ext_result
+
+
 # ---------------------------------------------------------------------------
 # Report rendering
 # ---------------------------------------------------------------------------
@@ -581,6 +543,7 @@ def print_health_report(
     results: list[HealthResult],
     *,
     show_urls: bool = True,
+    extensions: HealthResult | None = None,
 ) -> None:
     """Stampa un report formattato a tabella dei risultati."""
     if not results:
@@ -633,6 +596,23 @@ def print_health_report(
         f"\n  {ok_count}/{len(results)} endpoints reachable "
         f"({prov_ok}/{prov_total} providers with at least one working endpoint).\n"
     )
+
+    if extensions is not None:
+        _print_extensions_section(extensions)
+
+
+def _print_extensions_section(extensions: HealthResult) -> None:
+    symbol = "✅" if extensions.ok else "❌"
+    lat_str = f"{extensions.latency:>5.0f} ms" if extensions.latency >= 0 else "timeout"
+
+    width = 14 + 3 + 6 + 3 + 12 + 3 + 9 + 6
+    print(f"  ┌{'─' * width}┐")
+    print(f"  │ Estensioni{' ' * (width - 11)}│")
+    print(f"  ├{'─' * width}┤")
+    row = f"  │ {symbol} {extensions.detail:<10} {lat_str:>10}"
+    print(f"{row}{' ' * max(0, width - len(row) + 4)}│")
+    print(f"  └{'─' * width}┘")
+    print(f"      {extensions.url}\n")
 
 
 # ---------------------------------------------------------------------------
