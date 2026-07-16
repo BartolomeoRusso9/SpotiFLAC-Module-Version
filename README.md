@@ -6,11 +6,11 @@
   </p>
   
   <p>
-    <a href="https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/stargazers"><img src="https://img.shields.io/github/stars/ShuShuzinhuu/SpotiFLAC-Module-Version?color=ffcb47&labelColor=black&logo=github&label=Stars" /></a>
-    <a href="https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/releases/latest"><img src="https://img.shields.io/github/v/release/ShuShuzinhuu/SpotiFLAC-Module-Version?color=8b5cf6&labelColor=black&logo=github&label=Latest%20Release" /></a>
+    <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/stargazers"><img src="https://img.shields.io/github/stars/BartolomeoRusso9/SpotiFLAC-Module-Version?color=ffcb47&labelColor=black&logo=github&label=Stars" /></a>
+    <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases/latest"><img src="https://img.shields.io/github/v/release/BartolomeoRusso9/SpotiFLAC-Module-Version?color=8b5cf6&labelColor=black&logo=github&label=Latest%20Release" /></a>
     <a href="https://pypi.org/project/SpotiFLAC/"><img src="https://img.shields.io/pypi/v/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000&color=7b97ed" /></a>
     <a href="https://pypi.org/project/SpotiFLAC/"><img src="https://img.shields.io/pypi/pyversions/spotiflac?logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed" /></a>
-    <a href="https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/releases"><img src="https://img.shields.io/github/downloads/ShuShuzinhuu/SpotiFLAC-Module-Version/total?color=22c55e&labelColor=black&logo=github&label=Downloads" /></a>
+    <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases"><img src="https://img.shields.io/github/downloads/BartolomeoRusso9/SpotiFLAC-Module-Version/total?color=22c55e&labelColor=black&logo=github&label=Downloads" /></a>
     <a href="https://pypi.org/project/SpotiFLAC/"><img src="https://img.shields.io/pepy/dt/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000" /></a>
     <a href="https://t.me/SpotiFLAC_Module_Version" target="_blank"><img src="https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white" /></a>
   </p>
@@ -752,7 +752,6 @@ _If this software is useful and brings you value,
 consider supporting the project by buying us a coffee.
 Your support helps keep development going._
 
-[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/shukurenais)
 [![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/bartolomeorusso9)
 
 ## API Credits
