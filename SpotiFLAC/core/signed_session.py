@@ -25,14 +25,10 @@ logger = logging.getLogger(__name__)
 
 def is_docker() -> bool:
     """
-    Rileva se il processo gira dentro un container Docker.
-
-    Stessa logica di telegram_wrapper.py (is_docker()): usata per decidere
-    se saltare direttamente authenticate_with_turnstile (che richiede un
-    browser reale automatizzato via CDP, tipicamente non disponibile/
-    affidabile in un container) e andare dritti al flusso manuale
-    (authenticate_with_manual_grant), il solo che telegram_wrapper.py sa
-    intercettare da stdout per inoltrare l'URL della challenge via Telegram.
+    Determine whether the process is running inside a Docker container.
+    
+    Returns:
+        bool: `True` if Docker container indicators are detected, `False` otherwise.
     """
     cgroup_path = "/proc/1/cgroup"
     if os.path.exists("/.dockerenv"):
@@ -843,6 +839,18 @@ class SignedSessionClient:
         json_body: Any = None,
         extra_headers: dict | None = None,
     ) -> httpx.Response:
+        """
+        Send a signed HTTP request to the specified API path.
+        
+        Parameters:
+        	method (str): HTTP method to use.
+        	path (str): Relative API path.
+        	json_body (Any): JSON-serializable request body.
+        	extra_headers (dict | None): Additional headers to include or override.
+        
+        Returns:
+        	httpx.Response: The server response.
+        """
         await self.ensure_session()
         body = (
             json.dumps(json_body, separators=(",", ":")).encode()
@@ -1056,6 +1064,23 @@ async def perform_signed_fetch(
     timeout: float = _MANUAL_GRANT_TIMEOUT_S,
     use_turnstile_browser: bool = True,
 ) -> dict:
+    """
+    Perform an authenticated signed request with automatic session recovery.
+    
+    Parameters:
+    	client (SignedSessionClient): Client used to authenticate and send the request.
+    	method (str): HTTP method.
+    	path (str): Request path.
+    	body (Any): JSON request body.
+    	headers (dict | None): Additional request headers.
+    	on_verification_url (Callable[[str], None] | None): Callback for manual verification URLs.
+    	grant_input (Callable[[], str] | None): Callback that supplies a manual grant.
+    	timeout (float): Maximum authentication time in seconds.
+    	use_turnstile_browser (bool): Whether to attempt automated Turnstile authentication.
+    
+    Returns:
+    	dict: Response details, a verification URL when reauthentication is required, or an error message.
+    """
     try:
         # Se non siamo autenticati, richiediamo il Lock asincrono
         if not client.authenticated:

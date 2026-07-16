@@ -591,6 +591,9 @@ function renderStatusIcon(status) {
   if (status === 'checking') return '<span class="status-icon-dot checking"></span>';
   return '<span class="status-icon-dot idle"></span>';
 }
+/**
+ * Copies the visible application logs to the clipboard.
+ */
 function copyLogs() {
     const logArea = $('logArea');
     if (!logArea) {
@@ -619,6 +622,11 @@ function copyLogs() {
     }
 }
 
+/**
+ * Creates the HTML icon markup for a platform or extension type.
+ * @param {string} type - The platform or extension identifier.
+ * @returns {string} HTML markup containing the corresponding icon.
+ */
 function renderPlatformIcon(type) {
   if (type === 'extensions') {
     return '<span class="svc-icon icon-glyph extensions">🧩</span>';
@@ -657,6 +665,9 @@ function buildStatusCard(source) {
   </div>`;
 }
 
+/**
+ * Renders the provider and extension status cards in their respective grids.
+ */
 function renderStatusGrids() {
   const servicesGrid = $('status-services-grid');
   if (servicesGrid) {
@@ -668,6 +679,10 @@ function renderStatusGrids() {
   }
 }
 
+/**
+ * Updates the health-check summary label.
+ * @param {string} text - The summary text to display.
+ */
 function updateStatusSummary(text) {
   const label = $('hc-summary');
   if (label) label.textContent = text;
@@ -682,6 +697,10 @@ function updateOverallStatus(okCount, totalCount) {
   el.querySelector('.status-overall-text').textContent = totalCount > 0 ? `${okCount}/${totalCount} providers OK` : 'No checks yet';
 }
 
+/**
+ * Checks the status of all configured providers and extensions.
+ * Updates the health-check interface while the check is running and marks all sources offline if the check fails or no backend is available.
+ */
 function checkAll() {
   setFetchingState('start', 'checking provider status...');
   const sources = API_SOURCES.map((source) => source.id);
@@ -758,6 +777,10 @@ function checkOne(sourceId) {
   }
 }
 
+/**
+ * Updates health-check statuses for providers and extensions.
+ * @param {Array<Object>} data - Health-check results containing provider identifiers and success states.
+ */
 function updateStatusesFromResults(data) {
   const statusMap = {};
   data.forEach((result) => {
@@ -3198,7 +3221,10 @@ async function loadProfile() {
   logMessage(`Profile '${name}' loaded.`, 'ok');
 }
 
-// ── Health check ──────────────────────────────────────────────────────────────
+/**
+ * Renders health-check results for providers and extensions.
+ * @param {Array<Object>} data - Health-check result rows containing provider identifiers and endpoint status.
+ */
 function renderHealthResults(data) {
   // Le righe del servizio estensioni sono mostrate a parte, non sono
   // un "provider" musicale e non devono contare nel totale provider.

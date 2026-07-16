@@ -371,7 +371,11 @@ async def _run_download_async(
 
 
 async def amain() -> None:
-    """Entry point async-nativo. Tutto il flusso CLI vive su un solo event loop."""
+    """
+    Coordinate GUI, interactive, and command-line execution for SpotiFLAC.
+    
+    Handles startup checks, extension installation, configuration loading, profile management, argument parsing, and download execution across the supported application modes.
+    """
     from .core.ffmpeg_check import print_ffmpeg_warning
 
     # Controllo aggiornamenti non bloccante: non deve mai impedire l'avvio.
