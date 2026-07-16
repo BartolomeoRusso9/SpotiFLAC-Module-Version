@@ -575,6 +575,11 @@ const API_SOURCES = [
   { id:'youtube',    type:'youtube',    name:'YouTube Music', url:'' },
   { id:'pandora',    type:'pandora',    name:'Pandora',       url:'' },
 ];
+// Servizio centralizzato usato dalle estensioni SpotiFLAC, mostrato in una
+// sezione separata dai provider musicali veri e propri.
+const EXTENSION_SOURCES = [
+  { id:'extensions', type:'extensions', name:'Extensions', url:'' },
+];
 let apiStatusState = {
   checkingSources: {},
   statuses: {},
@@ -586,6 +591,9 @@ function renderStatusIcon(status) {
   if (status === 'checking') return '<span class="status-icon-dot checking"></span>';
   return '<span class="status-icon-dot idle"></span>';
 }
+/**
+ * Copies the visible application logs to the clipboard.
+ */
 function copyLogs() {
     const logArea = $('logArea');
     if (!logArea) {
@@ -614,7 +622,15 @@ function copyLogs() {
     }
 }
 
+/**
+ * Creates the HTML icon markup for a platform or extension type.
+ * @param {string} type - The platform or extension identifier.
+ * @returns {string} HTML markup containing the corresponding icon.
+ */
 function renderPlatformIcon(type) {
+  if (type === 'extensions') {
+    return '<span class="svc-icon icon-glyph extensions">🧩</span>';
+  }
   const iconMap = {
     tidal: 'tidal_l.png',
     qobuz: 'qbz.png',
@@ -649,13 +665,24 @@ function buildStatusCard(source) {
   </div>`;
 }
 
+/**
+ * Renders the provider and extension status cards in their respective grids.
+ */
 function renderStatusGrids() {
   const servicesGrid = $('status-services-grid');
   if (servicesGrid) {
     servicesGrid.innerHTML = API_SOURCES.map((source) => buildStatusCard(source)).join('');
   }
+  const extensionsGrid = $('status-extensions-grid');
+  if (extensionsGrid) {
+    extensionsGrid.innerHTML = EXTENSION_SOURCES.map((source) => buildStatusCard(source)).join('');
+  }
 }
 
+/**
+ * Updates the health-check summary label.
+ * @param {string} text - The summary text to display.
+ */
 function updateStatusSummary(text) {
   const label = $('hc-summary');
   if (label) label.textContent = text;
@@ -670,12 +697,20 @@ function updateOverallStatus(okCount, totalCount) {
   el.querySelector('.status-overall-text').textContent = totalCount > 0 ? `${okCount}/${totalCount} providers OK` : 'No checks yet';
 }
 
+/**
+ * Checks the status of all configured providers and extensions.
+ * Updates the health-check interface while the check is running and marks all sources offline if the check fails or no backend is available.
+ */
 function checkAll() {
   setFetchingState('start', 'checking provider status...');
   const sources = API_SOURCES.map((source) => source.id);
   sources.forEach((sourceId) => {
     apiStatusState.checkingSources[sourceId] = true;
     apiStatusState.statuses[sourceId] = 'checking';
+  });
+  EXTENSION_SOURCES.forEach((source) => {
+    apiStatusState.checkingSources[source.id] = true;
+    apiStatusState.statuses[source.id] = 'checking';
   });
   renderStatusGrids();
   updateStatusSummary('Checking all providers...');
@@ -686,6 +721,10 @@ function checkAll() {
         apiStatusState.statuses[sourceId] = 'offline';
         apiStatusState.checkingSources[sourceId] = false;
       });
+      EXTENSION_SOURCES.forEach((source) => {
+        apiStatusState.statuses[source.id] = 'offline';
+        apiStatusState.checkingSources[source.id] = false;
+      });
       renderStatusGrids();
       updateStatusSummary('Health check failed.');
       updateOverallStatus(0, sources.length);
@@ -695,6 +734,10 @@ function checkAll() {
       sources.forEach((sourceId) => {
         apiStatusState.statuses[sourceId] = 'offline';
         apiStatusState.checkingSources[sourceId] = false;
+      });
+      EXTENSION_SOURCES.forEach((source) => {
+        apiStatusState.statuses[source.id] = 'offline';
+        apiStatusState.checkingSources[source.id] = false;
       });
       renderStatusGrids();
       updateStatusSummary('Demo: all providers offline.');
@@ -734,6 +777,10 @@ function checkOne(sourceId) {
   }
 }
 
+/**
+ * Updates health-check statuses for providers and extensions.
+ * @param {Array<Object>} data - Health-check results containing provider identifiers and success states.
+ */
 function updateStatusesFromResults(data) {
   const statusMap = {};
   data.forEach((result) => {
@@ -745,7 +792,7 @@ function updateStatusesFromResults(data) {
       statusMap[result.provider] = 'offline';
     }
   });
-  for (const source of API_SOURCES) {
+  for (const source of [...API_SOURCES, ...EXTENSION_SOURCES]) {
     if (statusMap[source.id]) {
       apiStatusState.statuses[source.id] = statusMap[source.id];
     }
@@ -3174,11 +3221,19 @@ async function loadProfile() {
   logMessage(`Profile '${name}' loaded.`, 'ok');
 }
 
-// ── Health check ──────────────────────────────────────────────────────────────
+/**
+ * Renders health-check results for providers and extensions.
+ * @param {Array<Object>} data - Health-check result rows containing provider identifiers and endpoint status.
+ */
 function renderHealthResults(data) {
+  // Le righe del servizio estensioni sono mostrate a parte, non sono
+  // un "provider" musicale e non devono contare nel totale provider.
+  const extRows  = data.filter(r => r.provider === 'extensions');
+  const provRows = data.filter(r => r.provider !== 'extensions');
+
   // Raggruppiamo prima per provider
   const provMap = {};
-  data.forEach(r => { if (!provMap[r.provider]) provMap[r.provider] = []; provMap[r.provider].push(r); });
+  provRows.forEach(r => { if (!provMap[r.provider]) provMap[r.provider] = []; provMap[r.provider].push(r); });
 
   // Calcoliamo i provider totali e quelli con almeno un endpoint funzionante (ok)
   const totalProviders = Object.keys(provMap).length;
@@ -3204,6 +3259,25 @@ function renderHealthResults(data) {
     `;
     container.appendChild(group);
   });
+
+  // Sezione a parte per le estensioni
+  if (extRows.length) {
+    const anyOk = extRows.some(r => r.ok);
+    const okCount = extRows.filter(r => r.ok).length;
+    const totalCount = extRows.length;
+    const group = document.createElement('div');
+    group.className = 'hc-prov-group hc-ext-group s-section';
+    group.style.padding = '10px 12px';
+    group.style.marginTop = '10px';
+    group.innerHTML = `
+      <div class="hc-prov-name">
+        <span class="hc-dot ${anyOk ? 'ok' : 'err'}"></span>
+        Extensions
+        <span style="font-size:10px;font-weight:400;color:var(--muted)">${okCount}/${totalCount} OK</span>
+      </div>
+    `;
+    container.appendChild(group);
+  }
 }
 
 // ── Window controls (no-drag safe wrappers) ───────────────────────────────────

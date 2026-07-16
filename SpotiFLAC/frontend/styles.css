@@ -1444,6 +1444,19 @@
       display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;
       margin-bottom: 6px;
     }
+    .status-section-title {
+      display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+      margin: 18px 0 12px; padding-top: 14px; border-top: 1px solid var(--border);
+      font-size: 13px; font-weight: 700; color: var(--text);
+    }
+    .status-section-hint { font-size: 11px; font-weight: 400; color: var(--muted); }
+    .status-grid-extensions { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .svc-icon.icon-glyph {
+      font-size: 17px; background: var(--surface);
+    }
+    .svc-icon.extensions {
+      background: var(--yellow-bg); color: var(--yellow);
+    }
     /* Status card reduced and made more compact */
     .status-card {
       padding: 16px 18px; border-radius: 18px; background: var(--surface);

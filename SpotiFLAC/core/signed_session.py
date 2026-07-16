@@ -1,61 +1,4 @@
 # SpotiFLAC/core/signed_session.py
-"""
-Generic HMAC "signed session" client, driven entirely by the `signedSession`
-block of an extension's manifest.json:
-
-    "signedSession": {
-      "namespace": "zarz-v2",
-      "baseUrl": "https://api.zarz.moe/v2",
-      "appVersion": "amzn@2.2.0",
-      "platform": "extension",
-      "callbackUrl": "spotiflac://session-grant",
-      "schemeLabel": "ZARZ-HMAC-V1",
-      "headerPrefix": "X-Zarz-",
-      "timeWindowSeconds": 300,
-      "endpoints": {
-        "bootstrap": "/bootstrap",
-        "challenge": "/challenge",
-        "exchange": "/session/exchange",
-        "refresh": "/session/refresh"
-      }
-    }
-
-This is the Python-side counterpart to the JS extension's `session.signedFetch`
-global (see extensions/_bridge.js): the session secret never touches the JS
-worker, only Python holds it and performs the actual signing + HTTP call.
-
-NOTE: every network path (bootstrap/challenge/exchange/refresh) reads its
-route from `endpoints`, with the historical hardcoded paths kept only as
-fallback defaults. This matters because a previous ad-hoc port of this class
-hardcoded the refresh path as "/refresh" while some deployments declare
-
-NOTE (2026-07-12, cattura di rete reale via HTTP Toolkit su SpotiFLAC-Mobile):
-oltre a bootstrap/challenge/verify/exchange, esiste un flusso di DOWNLOAD a
-"ticket" a valle della sessione firmata, non ancora implementato qui:
-
-    POST {base_url}/tickets   (signed, come ogni altra signedFetch)
-      body: {"capability": "download_ticket", "provider": "<short_id>",
-             "resource_hash": "<sha256 esadecimale>"}
-      → {"ticket_id": "tkt_...", "expires_in": 60, "max_uses": 1}
-
-    POST {base_url}/dl/{short_id}   (signed, PLUS an extra header)
-      extra header: X-Zarz-Ticket: <ticket_id obtained above>
-      body: {"id": "<provider track id>", "quality": "<quality string>"}
-      → presumably file URL/stream (not captured: the observed request
-        received 502 from server, so actual response is unknown)
-
-The "resource_hash" is computed client-side by the extension JS
-(likely hash of provider+id+quality or similar) and cannot be replicated
-here without the specific extension's JS code (e.g., tidal-web/index.js)
-that generates it. The ticket is single-use (max_uses=1) and lives only 60s:
-it should be requested just before each /dl/{short_id} call, not reused.
-If this needs to be implemented in the future, the generic `request()` method
-already present below (used for signedFetch) can be reused unchanged for the
-POST /tickets — only support for the extra X-Zarz-Ticket header on POST
-/dl/{short_id} needs to be added (extra_headers is already supported by
-request()).
-"/session/refresh" in the manifest, silently breaking session renewal.
-"""
 
 from __future__ import annotations
 
@@ -78,6 +21,25 @@ from urllib.parse import parse_qsl, parse_qs, urlencode, urlparse, urlunparse
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def is_docker() -> bool:
+    """
+    Determine whether the process is running inside a Docker container.
+    
+    Returns:
+        bool: `True` if Docker container indicators are detected, `False` otherwise.
+    """
+    cgroup_path = "/proc/1/cgroup"
+    if os.path.exists("/.dockerenv"):
+        return True
+    if os.path.isfile(cgroup_path):
+        try:
+            with open(cgroup_path) as f:
+                return any("docker" in line for line in f)
+        except OSError:
+            return False
+    return False
 
 _DEFAULT_ENDPOINTS = {
     "bootstrap": "/bootstrap",
@@ -877,6 +839,18 @@ class SignedSessionClient:
         json_body: Any = None,
         extra_headers: dict | None = None,
     ) -> httpx.Response:
+        """
+        Send a signed HTTP request to the specified API path.
+        
+        Parameters:
+        	method (str): HTTP method to use.
+        	path (str): Relative API path.
+        	json_body (Any): JSON-serializable request body.
+        	extra_headers (dict | None): Additional headers to include or override.
+        
+        Returns:
+        	httpx.Response: The server response.
+        """
         await self.ensure_session()
         body = (
             json.dumps(json_body, separators=(",", ":")).encode()
@@ -914,11 +888,6 @@ class SignedSessionClient:
             headers=headers,
             timeout=30,
         )
-        if resp.status_code >= 400:
-            print(f"\n[!!!] ZARZ API ERROR ({resp.status_code}):")
-            print(f"[!!!] DETAILS: {resp.text}\n")
-        # Log full URL and status to have the same informational line
-        # as httpx but with the full request link.
         try:
             logger.info(
                 'HTTP Request: %s %s "HTTP/1.1 %s %s"',
@@ -1095,6 +1064,23 @@ async def perform_signed_fetch(
     timeout: float = _MANUAL_GRANT_TIMEOUT_S,
     use_turnstile_browser: bool = True,
 ) -> dict:
+    """
+    Perform an authenticated signed request with automatic session recovery.
+    
+    Parameters:
+    	client (SignedSessionClient): Client used to authenticate and send the request.
+    	method (str): HTTP method.
+    	path (str): Request path.
+    	body (Any): JSON request body.
+    	headers (dict | None): Additional request headers.
+    	on_verification_url (Callable[[str], None] | None): Callback for manual verification URLs.
+    	grant_input (Callable[[], str] | None): Callback that supplies a manual grant.
+    	timeout (float): Maximum authentication time in seconds.
+    	use_turnstile_browser (bool): Whether to attempt automated Turnstile authentication.
+    
+    Returns:
+    	dict: Response details, a verification URL when reauthentication is required, or an error message.
+    """
     try:
         # Se non siamo autenticati, richiediamo il Lock asincrono
         if not client.authenticated:
@@ -1106,20 +1092,35 @@ async def perform_signed_fetch(
                 client._load()
 
                 if not client.authenticated:
+                    running_in_docker = is_docker()
                     try:
-                        if use_turnstile_browser:
+                        if running_in_docker:
+                            raise RuntimeError(
+                                "ambiente Docker rilevato: skip diretto al flusso "
+                                "manuale (authenticate_with_turnstile richiede un "
+                                "browser reale non disponibile/affidabile in container)"
+                            )
+                        elif use_turnstile_browser:
                             await client.authenticate_with_turnstile(
                                 timeout=min(timeout, 90)
                             )
                         else:
                             raise RuntimeError("turnstile automation disabled")
                     except Exception as exc:
-                        logger.info(
-                            "[signed_session:%s] Turnstile automatico fallito (%s), "
-                            "fallback al flusso manuale.",
-                            client.namespace,
-                            exc,
-                        )
+                        if running_in_docker:
+                            logger.info(
+                                "[signed_session:%s] Docker rilevato, uso il flusso "
+                                "manuale (%s).",
+                                client.namespace,
+                                exc,
+                            )
+                        else:
+                            logger.info(
+                                "[signed_session:%s] Turnstile automatico fallito (%s), "
+                                "fallback al flusso manuale.",
+                                client.namespace,
+                                exc,
+                            )
                         try:
                             await client.authenticate_with_manual_grant(
                                 on_verification_url=on_verification_url,

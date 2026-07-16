@@ -371,7 +371,11 @@ async def _run_download_async(
 
 
 async def amain() -> None:
-    """Entry point async-nativo. Tutto il flusso CLI vive su un solo event loop."""
+    """
+    Coordinate GUI, interactive, and command-line execution for SpotiFLAC.
+    
+    Handles startup checks, extension installation, configuration loading, profile management, argument parsing, and download execution across the supported application modes.
+    """
     from .core.ffmpeg_check import print_ffmpeg_warning
 
     # Controllo aggiornamenti non bloccante: non deve mai impedire l'avvio.
@@ -379,6 +383,13 @@ async def amain() -> None:
         await check_for_updates_async()
     except Exception:
         pass
+
+    try:
+        from .extensions.manager import ExtensionManager
+        print("  🔄 Download extension...")
+        await asyncio.to_thread(ExtensionManager, auto_install_downloads=True)
+    except Exception as e:
+        print(f"  ⚠️ Impossibile verificare le estensioni: {e}")
 
     # GUI mode (explicit --gui flag) — resta sincrona: la GUI gestisce il proprio loop.
     if "--gui" in sys.argv:
