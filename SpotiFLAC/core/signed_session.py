@@ -22,6 +22,29 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+def is_docker() -> bool:
+    """
+    Rileva se il processo gira dentro un container Docker.
+
+    Stessa logica di telegram_wrapper.py (is_docker()): usata per decidere
+    se saltare direttamente authenticate_with_turnstile (che richiede un
+    browser reale automatizzato via CDP, tipicamente non disponibile/
+    affidabile in un container) e andare dritti al flusso manuale
+    (authenticate_with_manual_grant), il solo che telegram_wrapper.py sa
+    intercettare da stdout per inoltrare l'URL della challenge via Telegram.
+    """
+    cgroup_path = "/proc/1/cgroup"
+    if os.path.exists("/.dockerenv"):
+        return True
+    if os.path.isfile(cgroup_path):
+        try:
+            with open(cgroup_path) as f:
+                return any("docker" in line for line in f)
+        except OSError:
+            return False
+    return False
+
 _DEFAULT_ENDPOINTS = {
     "bootstrap": "/bootstrap",
     "challenge": "/challenge",
@@ -1044,20 +1067,35 @@ async def perform_signed_fetch(
                 client._load()
 
                 if not client.authenticated:
+                    running_in_docker = is_docker()
                     try:
-                        if use_turnstile_browser:
+                        if running_in_docker:
+                            raise RuntimeError(
+                                "ambiente Docker rilevato: skip diretto al flusso "
+                                "manuale (authenticate_with_turnstile richiede un "
+                                "browser reale non disponibile/affidabile in container)"
+                            )
+                        elif use_turnstile_browser:
                             await client.authenticate_with_turnstile(
                                 timeout=min(timeout, 90)
                             )
                         else:
                             raise RuntimeError("turnstile automation disabled")
                     except Exception as exc:
-                        logger.info(
-                            "[signed_session:%s] Turnstile automatico fallito (%s), "
-                            "fallback al flusso manuale.",
-                            client.namespace,
-                            exc,
-                        )
+                        if running_in_docker:
+                            logger.info(
+                                "[signed_session:%s] Docker rilevato, uso il flusso "
+                                "manuale (%s).",
+                                client.namespace,
+                                exc,
+                            )
+                        else:
+                            logger.info(
+                                "[signed_session:%s] Turnstile automatico fallito (%s), "
+                                "fallback al flusso manuale.",
+                                client.namespace,
+                                exc,
+                            )
                         try:
                             await client.authenticate_with_manual_grant(
                                 on_verification_url=on_verification_url,
