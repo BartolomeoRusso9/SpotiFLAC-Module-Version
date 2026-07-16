@@ -200,6 +200,17 @@ class DeezerProvider(BaseProvider):
     async def _request_json_async(
         self, method: str, url: str, payload: Optional[Dict] = None
     ) -> Dict[str, Any]:
+        """
+        Send a JSON request to the Deezer API with retry handling for transient failures.
+        
+        Parameters:
+        	method (str): HTTP method to use.
+        	url (str): Request URL.
+        	payload (Optional[Dict]): JSON payload to include in the request.
+        
+        Returns:
+        	Dict[str, Any]: Parsed JSON response.
+        """
         headers: Dict[str, str] = {
             "User-Agent": _DEFAULT_UA,
         }
@@ -433,6 +444,16 @@ class DeezerProvider(BaseProvider):
     async def _download_flac_raw_async(
         self, isrc: str, output_dir: str
     ) -> Optional[Dict[str, Any]]:
+        """
+        Download a FLAC track using Deezer metadata and available fallback services.
+        
+        Parameters:
+        	isrc (str): ISRC used to locate the Deezer track.
+        	output_dir (str): Directory where the downloaded file is stored.
+        
+        Returns:
+        	Optional[Dict[str, Any]]: Download details containing `file_path` and `extension`, or `None` if the track cannot be found or all download methods fail.
+        """
         track_data = await self._get_track_by_isrc_async(isrc)
         if not track_data:
             return None

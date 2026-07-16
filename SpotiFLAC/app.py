@@ -68,6 +68,9 @@ class SpotiFLAC_API:
         self._window = window
 
     def _on_loaded(self):
+        """Initializes the frontend after the webview finishes loading.
+        
+        Starts extension initialization and updates the frontend with stored history, profiles, and the application version when a window is available."""
         self.log("Python Backend connected.", "info")
         self.log(f"Default download folder: {self.download_dir}", "info")
         self._check_ffmpeg_startup()
@@ -1555,6 +1558,9 @@ class SpotiFLAC_API:
             pass
 
     def _health_check_task(self, services):
+        """
+        Run provider and extension health checks and update the frontend with their results.
+        """
         try:
             from .core.health_check import run_health_check_with_extensions
 

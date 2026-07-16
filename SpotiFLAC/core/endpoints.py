@@ -53,7 +53,12 @@ def _decrypt_base64_payload(b64_string: str) -> dict:
 
 
 def _load_registry() -> dict:
-    """Download the encrypted JSON from GitHub, or use the local backup."""
+    """
+    Load the encrypted registry from the remote source, using the local cache as a fallback.
+    
+    Returns:
+        dict: The decrypted registry, or an empty dictionary when both sources are unavailable.
+    """
     try:
         cache_buster = int(time.time())
         fresh_url = f"{_CLOUD_URL}?t={cache_buster}"
@@ -123,7 +128,15 @@ def get_tidal_post_endpoints() -> list[str]:
 
 
 def get_deezer_endpoint(key: str) -> str:
-    """Valid keys: 'antra', 's_deezer', 'flacdownloader_prepare', 'flacdownloader_asset'"""
+    """
+    Retrieve a Deezer endpoint by key.
+    
+    Parameters:
+    	key (str): Endpoint key, such as `antra`, `s_deezer`, `flacdownloader_prepare`, or `flacdownloader_asset`.
+    
+    Returns:
+    	str: The configured endpoint, or an empty string if the key is unavailable.
+    """
     return _get_registry().get("deezer", {}).get(key, "")
 
 
@@ -193,11 +206,10 @@ def _jwt_payload(token: str) -> dict:
 
 def get_monochrome_token() -> str:
     """
-    Return the token (with 'Bearer ' prefix) read from the encrypted registry.
-    If the token is a JWT with 'exp' field, check expiration and log a
-    warning if already expired or expires within 24 hours — no automatic
-    refresh is performed: renewal remains manual (regenerate and
-    publish a new encrypted Gist).
+    Retrieve the Monochrome authentication token from the registry.
+    
+    Returns:
+        str: The stored token, including its `Bearer ` prefix, or an empty string when unavailable.
     """
     import time
 
