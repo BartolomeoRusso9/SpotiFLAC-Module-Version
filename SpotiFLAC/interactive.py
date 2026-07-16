@@ -182,9 +182,9 @@ _ALL_SERVICES = [
 async def _display_health_check() -> dict[str, bool]:
     """
     Display the reachability status of supported services and extensions.
-    
+
     Returns:
-    	dict[str, bool]: A mapping of service and, when available, extension names to their reachability status.
+        dict[str, bool]: A mapping of service and, when available, extension names to their reachability status.
     """
     _section("Service Availability Check")
     print(f"  {DIM('Probing endpoints...')} ", end="", flush=True)
@@ -1065,7 +1065,7 @@ async def run_interactive() -> dict:
 def _print_cli_command(cfg: dict) -> None:
     """
     Display the equivalent command-line invocation for a configuration.
-    
+
     Parameters:
         cfg (dict): Configuration values used to construct the command.
     """

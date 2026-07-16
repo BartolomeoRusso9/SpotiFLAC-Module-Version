@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 def is_docker() -> bool:
     """
     Determine whether the process is running inside a Docker container.
-    
+
     Returns:
         bool: `True` if Docker container indicators are detected, `False` otherwise.
     """
@@ -40,6 +40,7 @@ def is_docker() -> bool:
         except OSError:
             return False
     return False
+
 
 _DEFAULT_ENDPOINTS = {
     "bootstrap": "/bootstrap",
@@ -841,15 +842,15 @@ class SignedSessionClient:
     ) -> httpx.Response:
         """
         Send a signed HTTP request to the specified API path.
-        
+
         Parameters:
-        	method (str): HTTP method to use.
-        	path (str): Relative API path.
-        	json_body (Any): JSON-serializable request body.
-        	extra_headers (dict | None): Additional headers to include or override.
-        
+                method (str): HTTP method to use.
+                path (str): Relative API path.
+                json_body (Any): JSON-serializable request body.
+                extra_headers (dict | None): Additional headers to include or override.
+
         Returns:
-        	httpx.Response: The server response.
+                httpx.Response: The server response.
         """
         await self.ensure_session()
         body = (
@@ -1066,20 +1067,20 @@ async def perform_signed_fetch(
 ) -> dict:
     """
     Perform an authenticated signed request with automatic session recovery.
-    
+
     Parameters:
-    	client (SignedSessionClient): Client used to authenticate and send the request.
-    	method (str): HTTP method.
-    	path (str): Request path.
-    	body (Any): JSON request body.
-    	headers (dict | None): Additional request headers.
-    	on_verification_url (Callable[[str], None] | None): Callback for manual verification URLs.
-    	grant_input (Callable[[], str] | None): Callback that supplies a manual grant.
-    	timeout (float): Maximum authentication time in seconds.
-    	use_turnstile_browser (bool): Whether to attempt automated Turnstile authentication.
-    
+        client (SignedSessionClient): Client used to authenticate and send the request.
+        method (str): HTTP method.
+        path (str): Request path.
+        body (Any): JSON request body.
+        headers (dict | None): Additional request headers.
+        on_verification_url (Callable[[str], None] | None): Callback for manual verification URLs.
+        grant_input (Callable[[], str] | None): Callback that supplies a manual grant.
+        timeout (float): Maximum authentication time in seconds.
+        use_turnstile_browser (bool): Whether to attempt automated Turnstile authentication.
+
     Returns:
-    	dict: Response details, a verification URL when reauthentication is required, or an error message.
+        dict: Response details, a verification URL when reauthentication is required, or an error message.
     """
     try:
         # Se non siamo autenticati, richiediamo il Lock asincrono

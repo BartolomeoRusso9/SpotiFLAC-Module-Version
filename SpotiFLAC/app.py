@@ -69,17 +69,19 @@ class SpotiFLAC_API:
 
     def _on_loaded(self):
         """Initializes the frontend after the webview finishes loading.
-        
-        Starts extension initialization and updates the frontend with stored history, profiles, and the application version when a window is available."""
+
+        Starts extension initialization and updates the frontend with stored history, profiles, and the application version when a window is available.
+        """
         self.log("Python Backend connected.", "info")
         self.log(f"Default download folder: {self.download_dir}", "info")
         self._check_ffmpeg_startup()
         try:
             from .extensions.manager import ExtensionManager
+
             self.log("Download extension...", "info")
             threading.Thread(
                 target=lambda: ExtensionManager(auto_install_downloads=True),
-                daemon=True
+                daemon=True,
             ).start()
         except Exception as e:
             self.log(f"Errore avvio estensioni: {e}", "warn")

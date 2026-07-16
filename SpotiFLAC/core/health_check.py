@@ -52,9 +52,9 @@ _TIDAL_MAX_MIRRORS = 8
 def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     """
     Build the provider endpoint map used for health checks.
-    
+
     The centralized extensions service is excluded from provider endpoints and checked separately.
-    
+
     Returns:
         dict[str, list[tuple[str, str]]]: A mapping of provider names to method and URL pairs.
     """
@@ -225,15 +225,15 @@ async def _check_one(
 ) -> HealthResult:
     """
     Probe an endpoint and classify its health based on the response.
-    
+
     Parameters:
-    	client (httpx.AsyncClient): HTTP client used to send the request.
-    	provider (str): Provider associated with the endpoint.
-    	method (str): HTTP method to use.
-    	url (str): Endpoint URL to probe.
-    
+        client (httpx.AsyncClient): HTTP client used to send the request.
+        provider (str): Provider associated with the endpoint.
+        method (str): HTTP method to use.
+        url (str): Endpoint URL to probe.
+
     Returns:
-    	HealthResult: The provider, endpoint, request method, health status, latency in milliseconds, and response detail.
+        HealthResult: The provider, endpoint, request method, health status, latency in milliseconds, and response detail.
     """
     try:
         t0 = time.perf_counter()
@@ -397,15 +397,15 @@ async def _check_one_gated(
 ) -> HealthResult:
     """
     Checks an endpoint while respecting the shared concurrency limit.
-    
+
     Parameters:
-    	sem (asyncio.Semaphore): Semaphore controlling concurrent checks.
-    	provider (str): Provider associated with the endpoint.
-    	method (str): HTTP method used for the request.
-    	url (str): Endpoint URL to check.
-    
+        sem (asyncio.Semaphore): Semaphore controlling concurrent checks.
+        provider (str): Provider associated with the endpoint.
+        method (str): HTTP method used for the request.
+        url (str): Endpoint URL to check.
+
     Returns:
-    	HealthResult: Result of the endpoint health check.
+        HealthResult: Result of the endpoint health check.
     """
     async with sem:
         return await _check_one(client, provider, method, url)
@@ -416,10 +416,10 @@ async def check_extensions_health(
 ) -> HealthResult:
     """
     Check the health of the centralized extensions service.
-    
+
     Parameters:
         client (httpx.AsyncClient | None): Optional HTTP client to use for the request.
-    
+
     Returns:
         HealthResult: The extensions service health result, marked successful for an HTTP 200 response.
     """
@@ -432,16 +432,12 @@ async def check_extensions_health(
         ms = (time.perf_counter() - t0) * 1000
 
         if resp.status_code == 200:
-            return HealthResult(
-                "extensions", _ZARZ_HEALTH_URL, "GET", True, ms, "ok"
-            )
+            return HealthResult("extensions", _ZARZ_HEALTH_URL, "GET", True, ms, "ok")
         return HealthResult(
             "extensions", _ZARZ_HEALTH_URL, "GET", False, ms, f"HTTP {resp.status_code}"
         )
     except httpx.TimeoutException:
-        return HealthResult(
-            "extensions", _ZARZ_HEALTH_URL, "GET", False, -1, "timeout"
-        )
+        return HealthResult("extensions", _ZARZ_HEALTH_URL, "GET", False, -1, "timeout")
     except httpx.RequestError as exc:
         return HealthResult(
             "extensions", _ZARZ_HEALTH_URL, "GET", False, -1, str(exc)[:40]
@@ -463,11 +459,11 @@ async def run_health_check(
 ) -> list[HealthResult]:
     """
     Check the reachability of the requested providers and their configured endpoints.
-    
+
     Parameters:
         services (list[str]): Provider names to check.
         include_all_endpoints (bool): Whether to check every configured endpoint or only the first endpoint for each provider.
-    
+
     Returns:
         list[HealthResult]: Endpoint health results, including a local success result for YouTube.
     """
@@ -554,13 +550,13 @@ async def run_health_check_with_extensions(
 ) -> tuple[list[HealthResult], HealthResult]:
     """
     Run provider endpoint checks and the extensions service health check concurrently.
-    
+
     Parameters:
-    	services (list[str]): Providers whose endpoints should be checked.
-    	include_all_endpoints (bool): Whether to check every configured endpoint for each provider.
-    
+        services (list[str]): Providers whose endpoints should be checked.
+        include_all_endpoints (bool): Whether to check every configured endpoint for each provider.
+
     Returns:
-    	tuple[list[HealthResult], HealthResult]: Provider check results and the extensions service result.
+        tuple[list[HealthResult], HealthResult]: Provider check results and the extensions service result.
     """
     provider_results, ext_result = await asyncio.gather(
         run_health_check(services, include_all_endpoints=include_all_endpoints),
@@ -584,7 +580,7 @@ def print_health_report(
 ) -> None:
     """
     Print a table-formatted health report for provider endpoints.
-    
+
     Parameters:
         results (list[HealthResult]): Endpoint health-check results to display.
         show_urls (bool): Whether to include endpoint URLs in the report.

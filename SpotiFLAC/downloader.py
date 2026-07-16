@@ -109,13 +109,13 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
 
 def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProvider]:
     """Build the provider list for a service name, optionally adding an installed extension fallback.
-    
+
     Parameters:
-    	name (str): Native service name or an explicit extension identifier prefixed with `ext:`.
-    	opts (DownloadOptions): Provider and extension configuration.
-    
+        name (str): Native service name or an explicit extension identifier prefixed with `ext:`.
+        opts (DownloadOptions): Provider and extension configuration.
+
     Returns:
-    	list[BaseProvider]: Providers ordered with the requested native provider first, followed by at most one extension fallback.
+        list[BaseProvider]: Providers ordered with the requested native provider first, followed by at most one extension fallback.
     """
     providers: list[BaseProvider] = []
 

@@ -55,7 +55,7 @@ def _decrypt_base64_payload(b64_string: str) -> dict:
 def _load_registry() -> dict:
     """
     Load the encrypted registry from the remote source, using the local cache as a fallback.
-    
+
     Returns:
         dict: The decrypted registry, or an empty dictionary when both sources are unavailable.
     """
@@ -93,7 +93,8 @@ def _load_registry() -> dict:
             logger.error(f"Unable to read local cache: {cache_e}")
 
         return {}
-        
+
+
 # In-memory cache with TTL: the Gist is rechecked after _TTL_SECONDS seconds.
 # Increase the value to reduce network calls in long-running processes.
 _TTL_SECONDS: int = 30
@@ -130,12 +131,12 @@ def get_tidal_post_endpoints() -> list[str]:
 def get_deezer_endpoint(key: str) -> str:
     """
     Retrieve a Deezer endpoint by key.
-    
+
     Parameters:
-    	key (str): Endpoint key, such as `antra`, `s_deezer`, `flacdownloader_prepare`, or `flacdownloader_asset`.
-    
+        key (str): Endpoint key, such as `antra`, `s_deezer`, `flacdownloader_prepare`, or `flacdownloader_asset`.
+
     Returns:
-    	str: The configured endpoint, or an empty string if the key is unavailable.
+        str: The configured endpoint, or an empty string if the key is unavailable.
     """
     return _get_registry().get("deezer", {}).get(key, "")
 
@@ -207,7 +208,7 @@ def _jwt_payload(token: str) -> dict:
 def get_monochrome_token() -> str:
     """
     Retrieve the Monochrome authentication token from the registry.
-    
+
     Returns:
         str: The stored token, including its `Bearer ` prefix, or an empty string when unavailable.
     """

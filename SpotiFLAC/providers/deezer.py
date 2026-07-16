@@ -202,14 +202,14 @@ class DeezerProvider(BaseProvider):
     ) -> Dict[str, Any]:
         """
         Send a JSON request to the Deezer API with retry handling for transient failures.
-        
+
         Parameters:
-        	method (str): HTTP method to use.
-        	url (str): Request URL.
-        	payload (Optional[Dict]): JSON payload to include in the request.
-        
+                method (str): HTTP method to use.
+                url (str): Request URL.
+                payload (Optional[Dict]): JSON payload to include in the request.
+
         Returns:
-        	Dict[str, Any]: Parsed JSON response.
+                Dict[str, Any]: Parsed JSON response.
         """
         headers: Dict[str, str] = {
             "User-Agent": _DEFAULT_UA,
@@ -446,13 +446,13 @@ class DeezerProvider(BaseProvider):
     ) -> Optional[Dict[str, Any]]:
         """
         Download a FLAC track using Deezer metadata and available fallback services.
-        
+
         Parameters:
-        	isrc (str): ISRC used to locate the Deezer track.
-        	output_dir (str): Directory where the downloaded file is stored.
-        
+                isrc (str): ISRC used to locate the Deezer track.
+                output_dir (str): Directory where the downloaded file is stored.
+
         Returns:
-        	Optional[Dict[str, Any]]: Download details containing `file_path` and `extension`, or `None` if the track cannot be found or all download methods fail.
+                Optional[Dict[str, Any]]: Download details containing `file_path` and `extension`, or `None` if the track cannot be found or all download methods fail.
         """
         track_data = await self._get_track_by_isrc_async(isrc)
         if not track_data:
@@ -535,9 +535,7 @@ class DeezerProvider(BaseProvider):
                 file_path = out_dir_path / filename
 
                 await self._async_http.stream_to_file(
-                    stream_url,
-                    str(file_path),
-                    self._progress_cb
+                    stream_url, str(file_path), self._progress_cb
                 )
 
                 # Verifica rapida che il file sia stato scaricato e non sia vuoto
@@ -564,7 +562,7 @@ class DeezerProvider(BaseProvider):
         return await self._download_via_flacdownloader_async(
             str(track_id), meta["title"], meta["artist"], output_dir
         )
-    
+
     # ------------------------------------------------------------------
     # Async BaseProvider interface
     # ------------------------------------------------------------------

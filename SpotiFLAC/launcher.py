@@ -373,7 +373,7 @@ async def _run_download_async(
 async def amain() -> None:
     """
     Coordinate GUI, interactive, and command-line execution for SpotiFLAC.
-    
+
     Handles startup checks, extension installation, configuration loading, profile management, argument parsing, and download execution across the supported application modes.
     """
     from .core.ffmpeg_check import print_ffmpeg_warning
@@ -386,6 +386,7 @@ async def amain() -> None:
 
     try:
         from .extensions.manager import ExtensionManager
+
         print("  🔄 Download extension...")
         await asyncio.to_thread(ExtensionManager, auto_install_downloads=True)
     except Exception as e:
