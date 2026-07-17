@@ -110,7 +110,7 @@ This API is fully backwards-compatible with previous releases and is recommended
 | `SpotiFLAC` | Scripts, CLI wrappers, automation |
 | `AsyncSpotiFLAC` | Discord bots, Telegram bots, FastAPI, asyncio applications |
 
-### 🚀 Asynchronous API (New in v1.4.0)
+### Asynchronous API
 
 SpotiFLAC now features a 100% native asynchronous engine, making it ideal for modern Python applications built on asyncio, including:
 
@@ -161,7 +161,7 @@ asyncio.run(main())
 
 ---
 
-## 🧩 JavaScript Extensions
+## JavaScript Extensions
 
 SpotiFLAC supports modular JavaScript extensions originally developed for SpotiFLAC Mobile and now shared across all SpotiFLAC projects.
 
