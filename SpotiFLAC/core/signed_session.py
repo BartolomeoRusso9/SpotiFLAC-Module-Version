@@ -6,7 +6,6 @@ import asyncio
 import base64
 import hashlib
 import hmac
-import threading
 import json
 import logging
 import os
@@ -1001,57 +1000,32 @@ class SignedSessionClient:
                 self._client = None
 
 
-_AUTH_THREAD_LOCKS: dict[str, threading.Lock] = {}
-_AUTH_THREAD_LOCKS_GUARD = threading.Lock()
+# --- Fase 4: sincronizzazione dell'autenticazione (async-native) --------
+#
+# PRIMA: SpotiFLAC scaricava più tracce in parallelo tramite un
+# ThreadPoolExecutor dove ogni thread eseguiva il proprio asyncio.run()
+# (quindi ogni thread aveva un event loop DIVERSO). Un asyncio.Lock keyed
+# per (loop, namespace) non basta in quel caso: due thread paralleli, ognuno
+# col proprio loop, otterrebbero ciascuno un lock "vergine" e non si
+# sincronizzerebbero affatto — da qui l'accrocchio _AsyncThreadLockCtx che
+# avvolgeva un threading.Lock con polling asincrono.
+#
+# ORA: con un solo processo/thread e un solo event loop condiviso (nessun
+# download avvia più il proprio asyncio.run()), un dict di asyncio.Lock()
+# indicizzato per namespace è sufficiente e corretto: tutte le coroutine
+# "in gara" per autenticare lo stesso namespace girano sullo stesso loop,
+# quindi asyncio.Lock le serializza nativamente senza bisogno di polling
+# né di primitive thread-safe.
+_AUTH_LOCKS: dict[str, asyncio.Lock] = {}
 
 
-def _get_auth_thread_lock(namespace: str) -> threading.Lock:
-    """
-    Lock condiviso per namespace attraverso TUTTI i thread ed event loop
-    del processo — non solo all'interno dello stesso loop asyncio.
-
-    PERCHÉ QUESTO CAMBIO: SpotiFLAC scarica più tracce in parallelo tramite
-    un ThreadPoolExecutor, dove ogni thread esegue il proprio asyncio.run()
-    (quindi ogni thread ha un event loop DIVERSO). Il vecchio _AUTH_LOCKS
-    era un asyncio.Lock keyed by (loop, namespace): funziona solo tra
-    coroutine sullo STESSO loop. Due thread paralleli, ognuno col proprio
-    loop, ottenevano ciascuno un asyncio.Lock "vergine" e quindi NON si
-    sincronizzavano affatto — risultato osservato: due finestre Chrome
-    aperte in parallelo per la stessa autenticazione, con due challenge_id
-    diversi, e la seconda che fallisce a catturare il grant in tempo.
-    """
-    with _AUTH_THREAD_LOCKS_GUARD:
-        lock = _AUTH_THREAD_LOCKS.get(namespace)
-        if lock is None:
-            lock = threading.Lock()
-            _AUTH_THREAD_LOCKS[namespace] = lock
-        return lock
-
-
-class _AsyncThreadLockCtx:
-    """
-    Adatta un threading.Lock (sincronizzazione cross-thread/cross-loop) a
-    un context manager awaitable, senza mai bloccare l'event loop: prova
-    ad acquisire in modo non bloccante e, se occupato, cede il controllo
-    con asyncio.sleep() finché non si libera.
-    """
-
-    def __init__(self, lock: threading.Lock, poll_interval: float = 0.1):
-        self._lock = lock
-        self._poll_interval = poll_interval
-
-    async def __aenter__(self):
-        while not self._lock.acquire(blocking=False):
-            await asyncio.sleep(self._poll_interval)
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        self._lock.release()
-        return False
-
-
-def _get_auth_lock(namespace: str) -> "_AsyncThreadLockCtx":
-    return _AsyncThreadLockCtx(_get_auth_thread_lock(namespace))
+def _get_auth_lock(namespace: str) -> asyncio.Lock:
+    """Restituisce (creandolo se assente) l'asyncio.Lock per il namespace."""
+    lock = _AUTH_LOCKS.get(namespace)
+    if lock is None:
+        lock = asyncio.Lock()
+        _AUTH_LOCKS[namespace] = lock
+    return lock
 
 
 async def perform_signed_fetch(

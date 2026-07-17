@@ -76,6 +76,11 @@ class DownloadOptions:
     timeout_s: int | None = None
     auto_pair_extensions: bool = True
     ext_dir: str | None = None
+    # Fase 2: numero massimo di download concorrenti gestiti dal semaforo
+    # asyncio.Semaphore in DownloadWorker._run_downloads_async(). Prima era
+    # una costante hardcoded (MAX_CONCURRENT_DOWNLOADS = 2) — ora è
+    # configurabile dal chiamante (CLI/API), mantenendo lo stesso default.
+    max_concurrent_downloads: int = 2
 
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
@@ -411,59 +416,87 @@ class DownloadWorker:
         base_out: str,
         start: float,
     ) -> list[tuple[str, str, str]]:
-        MAX_CONCURRENT_DOWNLOADS = 2
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
+        """
+        Fase 2 — concorrenza nativa asyncio.
 
-        async def worker_task(i: int, track: TrackMetadata):
+        Prima: una lista di asyncio.Task consumata con asyncio.as_completed().
+        Funzionalmente corretto, ma senza propagazione strutturata degli
+        errori (un task che solleva un'eccezione non attesa non annullava
+        gli altri, e la cancellazione andava gestita a mano).
+
+        Ora: asyncio.TaskGroup (structured concurrency, PEP 654/3.11+).
+        Il rate-limiting resta un asyncio.Semaphore(max_concurrent_downloads)
+        acquisito da ogni worker prima di fare I/O pesante (richieste di
+        rete / scrittura su disco). I risultati vengono processati man mano
+        che arrivano tramite una asyncio.Queue interna, così l'aggiornamento
+        della progress bar resta "a mano a mano" come nella versione con
+        as_completed, ma dentro un TaskGroup che garantisce: se un worker
+        solleva un'eccezione realmente inattesa, tutti gli altri task del
+        gruppo vengono cancellati in modo pulito invece di proseguire
+        silenziosamente.
+        """
+        max_concurrent = max(1, getattr(self._opts, "max_concurrent_downloads", 2))
+        semaphore = asyncio.Semaphore(max_concurrent)
+        results_queue: asyncio.Queue[
+            tuple[TrackMetadata, "object"] | None
+        ] = asyncio.Queue()
+
+        async def download_worker(i: int, track: TrackMetadata) -> None:
             position = i + 1
-            print_track_header(position, total, track.title, track.artists, track.album)
-            await manager.start_download(track.id)
-
-            out_dir = await self._track_output_dir_async(base_out, track)
-            result = await download_one_async(
-                track,
-                out_dir,
-                self._providers,
-                self._opts,
-                position,
-                self._is_album,
-            )
-            return track, result
-
-        async def limited_worker(i: int, track: TrackMetadata):
             async with semaphore:
-                return await worker_task(i, track)
-
-        tasks = [
-            asyncio.create_task(limited_worker(i, track))
-            for i, track in enumerate(self._tracks)
-        ]
-
-        for coro in asyncio.as_completed(tasks):
-            track, result = await coro
-            if result.success and result.skipped:
-                await manager.skip_download(track.id)
-            elif result.success:
-                size_mb = await _get_file_size_mb_async(result.file_path)
-                await manager.complete_download(
-                    track.id, result.file_path or "", size_mb
+                print_track_header(
+                    position, total, track.title, track.artists, track.album
                 )
-            else:
-                err = result.error or "unknown"
-                self._failed.append((track.id, track.title, track.artists, err))
-                safe_tqdm_write(
-                    f"\n  ✗  Failed: {track.title} — {track.artists}: {err}",
-                    file=sys.stderr,
-                )
-                logger.debug(
-                    "[worker] Failed: %s — %s: %s", track.title, track.artists, err
-                )
-                await manager.fail_download(track.id, err)
-                from .core.progress import ProgressCallback
+                await manager.start_download(track.id)
 
-                ProgressCallback.clear_item(track.id)
+                out_dir = await self._track_output_dir_async(base_out, track)
+                try:
+                    result = await download_one_async(
+                        track,
+                        out_dir,
+                        self._providers,
+                        self._opts,
+                        position,
+                        self._is_album,
+                    )
+                except Exception as exc:  # noqa: BLE001 — isoliamo il worker
+                    logger.exception(
+                        "[worker] Unexpected exception downloading '%s'", track.title
+                    )
+                    result = DownloadResult.fail("none", f"Unexpected error: {exc}")
 
-            ProgressManager.increment_master()
+            await results_queue.put((track, result))
+
+        async def consume_results() -> None:
+            for _ in range(total):
+                track, result = await results_queue.get()
+
+                if result.success and result.skipped:
+                    await manager.skip_download(track.id)
+                elif result.success:
+                    size_mb = await _get_file_size_mb_async(result.file_path)
+                    await manager.complete_download(
+                        track.id, result.file_path or "", size_mb
+                    )
+                else:
+                    err = result.error or "unknown"
+                    self._failed.append((track.id, track.title, track.artists, err))
+                    safe_tqdm_write(
+                        f"\n  ✗  Failed: {track.title} — {track.artists}: {err}",
+                        file=sys.stderr,
+                    )
+                    logger.debug(
+                        "[worker] Failed: %s — %s: %s", track.title, track.artists, err
+                    )
+                    await manager.fail_download(track.id, err)
+                    ProgressCallback.clear_item(track.id)
+
+                ProgressManager.increment_master()
+
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(consume_results())
+            for i, track in enumerate(self._tracks):
+                tg.create_task(download_worker(i, track))
 
         elapsed = time.perf_counter() - start
         self._print_summary(elapsed)

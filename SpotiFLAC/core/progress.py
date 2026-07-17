@@ -1,22 +1,22 @@
+"""
+progress.py — Async-native progress tracking
+"""
+
 from __future__ import annotations
 
 import asyncio
 import io
 import logging
 import sys
-import threading
 import time
-import queue as _queue
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-
 from tqdm import tqdm
 
-# Sincronizzazione visiva centralizzata sul core di tqdm.
-_CONSOLE_LOCK = threading.RLock()
-tqdm.set_lock(_CONSOLE_LOCK)
+# tqdm.get_lock() rimane come lock nativo di tqdm (non è un nostro accrocchio,
+# è la sincronizzazione interna della libreria per la scrittura su stderr).
 
 
 def safe_print(*args: object, **kwargs: Any) -> None:
@@ -34,28 +34,18 @@ class TqdmLoggingHandler(logging.Handler):
     def __init__(self) -> None:
         super().__init__()
         self._message_cache: dict[str, float] = {}
-        self._cache_ttl = 0.5  # 500ms deduplication window
+        self._cache_ttl = 0.5
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
             now = time.time()
-
-            # Deduplication: skip if same message logged recently
-            if msg in self._message_cache:
-                if now - self._message_cache[msg] < self._cache_ttl:
-                    return
-
-            # Update cache and write
+            if msg in self._message_cache and now - self._message_cache[msg] < self._cache_ttl:
+                return
             self._message_cache[msg] = now
-
-            # Cleanup old entries (keep cache small)
             self._message_cache = {
-                k: v
-                for k, v in self._message_cache.items()
-                if now - v < self._cache_ttl * 2
+                k: v for k, v in self._message_cache.items() if now - v < self._cache_ttl * 2
             }
-
             with tqdm.get_lock():
                 tqdm.write(msg, file=sys.stderr)
         except Exception:
@@ -108,21 +98,19 @@ def install_console_interception() -> None:
         if isinstance(handler, logging.StreamHandler):
             root.removeHandler(handler)
 
-    # Some SpotiFLAC loggers may have their own StreamHandler attached,
-    # which would duplicate warnings and info messages along with the root handler.
-    for name, logger in list(logging.Logger.manager.loggerDict.items()):
-        if isinstance(logger, logging.Logger) and (
+    for name, logger_obj in list(logging.Logger.manager.loggerDict.items()):
+        if isinstance(logger_obj, logging.Logger) and (
             name == "SpotiFLAC" or name.startswith("SpotiFLAC.")
         ):
-            for handler in list(logger.handlers):
+            for handler in list(logger_obj.handlers):
                 if isinstance(handler, logging.StreamHandler):
-                    logger.removeHandler(handler)
-            logger.propagate = True
+                    logger_obj.removeHandler(handler)
+            logger_obj.propagate = True
 
     new_handler = TqdmLoggingHandler()
     new_handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
-    new_handler.setLevel(root.level or logging.WARNING)
-    root.addHandler(new_handler)
+    new_handler.setLevel(logging.getLogger().level or logging.WARNING)
+    logging.getLogger().addHandler(new_handler)
 
 
 def uninstall_console_interception() -> None:
@@ -157,47 +145,21 @@ class DownloadItem:
     file_path: str = ""
 
 
-class _CrossLoopLock:
-    """
-    Adatta un threading.Lock (funziona correttamente attraverso PIÙ event
-    loop/thread, a differenza di asyncio.Lock che si lega permanentemente
-    al loop del thread che lo usa per primo) a un context manager
-    awaitable, senza mai bloccare l'event loop chiamante: prova ad
-    acquisire in modo non bloccante e, se occupato, cede il controllo con
-    asyncio.sleep() finché non si libera.
-
-    Necessario perché DownloadManager/DownloadBroadcaster sono singleton
-    globali usati da tracce scaricate in thread paralleli, ognuno col
-    proprio event loop (ogni thread fa il proprio asyncio.run()): un
-    asyncio.Lock creato la prima volta si legherebbe per sempre al loop
-    di quel primo thread, e ogni altro thread/loop che lo acquisisce
-    andrebbe in crash con "RuntimeError: ... is bound to a different
-    event loop" — lo stesso bug già visto e risolto per ProgressManager.
-    """
-
-    def __init__(self, poll_interval: float = 0.01):
-        self._lock = threading.Lock()
-        self._poll_interval = poll_interval
-
-    async def __aenter__(self):
-        while not self._lock.acquire(blocking=False):
-            await asyncio.sleep(self._poll_interval)
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        self._lock.release()
-        return False
-
-
 class DownloadBroadcaster:
-    _instance = None
+    """
+    Singleton per lo streaming degli eventi di progresso verso eventuali
+    listener esterni (es. la GUI webview). Prima usava _CrossLoopLock per
+    proteggere l'accesso a self._listeners da più thread/loop paralleli.
+    Con un unico event loop, asyncio.Lock() è sufficiente e corretto.
+    """
+
+    _instance: "DownloadBroadcaster | None" = None
 
     def __new__(cls) -> "DownloadBroadcaster":
-        # Removed _creation_lock: now thread-safe in single-thread asyncio context
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._listeners = set()
-            cls._instance._lock = _CrossLoopLock()
+            cls._instance._lock = asyncio.Lock()
             cls._instance._last_broadcast_time = 0.0
         return cls._instance
 
@@ -229,25 +191,27 @@ class DownloadBroadcaster:
 
 
 class DownloadManager:
+    """
+    Singleton che tiene lo stato della coda di download.
+    _CrossLoopLock -> asyncio.Lock(): valido perché non esistono più event
+    loop multipli concorrenti (nessun thread fa più il proprio asyncio.run()).
+    """
+
     _instance: "DownloadManager | None" = None
-    _creation_lock = threading.Lock()
 
     def __new__(cls) -> "DownloadManager":
-        with cls._creation_lock:
-            if cls._instance is None:
-                inst = super().__new__(cls)
-                inst._init_state()
-                cls._instance = inst
+        if cls._instance is None:
+            inst = super().__new__(cls)
+            inst._init_state()
+            cls._instance = inst
         return cls._instance
 
     def _init_state(self) -> None:
-        self._lock = _CrossLoopLock()
+        self._lock = asyncio.Lock()
         self._queue: list[DownloadItem] = []
         self.total_downloaded = 0.0
         self.current_item_id = ""
         self.session_start = 0.0
-
-    # Rimosse le properties is_downloading e current_speed per evitare accessi fuori lock/deadlock.
 
     async def add_to_queue(
         self,
@@ -346,7 +310,6 @@ class DownloadManager:
         await DownloadBroadcaster().broadcast_immediate(stats)
 
     async def get_item_speed(self, item_id: str) -> float:
-        """Safe method to get speed without direct queue access from the callback."""
         async with self._lock:
             for item in self._queue:
                 if item.id == item_id:
@@ -382,7 +345,6 @@ class DownloadManager:
                 }
                 queue_items.append(item_data)
 
-                # Statistiche calcolate in-place per evitare deadlock o chiamate incoerenti
                 if i.status == DownloadStatus.DOWNLOADING:
                     is_downloading = True
                     current_speed += i.speed
@@ -424,71 +386,61 @@ class DownloadManager:
 
 
 class ProgressManager:
+    """
+    Gestisce le barre tqdm per-track.
+
+    Prima: queue.Queue (thread-safe nativa) + threading.Thread consumer,
+    necessari perché ogni download girava nel proprio thread/event loop.
+
+    Ora: asyncio.Queue() + asyncio.Task consumer. Un solo event loop, quindi
+    niente più bisogno di primitive thread-safe: enqueue_progress() è una
+    semplice put_nowait() sulla queue asyncio (safe da qualunque coroutine
+    o callback sincrono chiamato all'interno dello stesso loop).
+    """
+
     _bars: dict[str, tqdm] = {}
     _slot_map: dict[str, int] = {}
     _master_bar: tqdm | None = None
     _master_enabled: bool = False
 
-    # queue.Queue (thread-safe nativa) invece di asyncio.Queue: non ha
-    # alcun concetto di "event loop di appartenenza", quindi funziona
-    # correttamente anche con più thread paralleli che girano ognuno il
-    # proprio event loop (ogni thread di download fa il proprio
-    # asyncio.run()). Un asyncio.Queue creato durante il primo
-    # enqueue_progress() si legherebbe per sempre a quel loop specifico:
-    # ogni altro thread/loop che tenta un .put()/.get() va in crash con
-    # "RuntimeError: <Queue ...> is bound to a different event loop"
-    # (esattamente il traceback osservato).
-    _event_queue: "_queue.Queue | None" = None
-    _worker_thread: threading.Thread | None = None
-    _worker_lock = threading.Lock()
-    _stop_event: threading.Event | None = None
+    _event_queue: "asyncio.Queue | None" = None
+    _worker_task: "asyncio.Task | None" = None
+
+    # ------------------------------------------------------------------
+    # Worker lifecycle
+    # ------------------------------------------------------------------
 
     @classmethod
     def start_worker(cls) -> None:
         """
-        Avvia il thread consumer in modo idempotente e thread-safe.
-        Non è più una coroutine: un vero threading.Thread di sistema non
-        è legato a nessun event loop, quindi consuma eventi inseriti da
-        QUALUNQUE thread/loop senza mai incappare nel problema sopra.
+        Avvia il task consumer in modo idempotente. Deve essere chiamato da
+        dentro l'event loop attivo (create_task lo richiede).
         """
-        with cls._worker_lock:
-            if cls._event_queue is None:
-                cls._event_queue = _queue.Queue()
-            if cls._stop_event is None:
-                cls._stop_event = threading.Event()
+        if cls._event_queue is None:
+            cls._event_queue = asyncio.Queue()
 
-            if cls._worker_thread is not None and cls._worker_thread.is_alive():
-                return
+        if cls._worker_task is not None and not cls._worker_task.done():
+            return
 
-            cls._stop_event.clear()
-            cls._worker_thread = threading.Thread(
-                target=cls._process_events_sync, daemon=True
-            )
-            cls._worker_thread.start()
+        cls._worker_task = asyncio.create_task(cls._process_events_async())
 
     @classmethod
     async def stop_worker(cls) -> None:
-        if cls._worker_thread is not None:
-            if cls._stop_event is not None:
-                cls._stop_event.set()
+        if cls._worker_task is not None:
             if cls._event_queue is not None:
-                # sblocca il .get() bloccante nel thread consumer
-                try:
-                    cls._event_queue.put_nowait(None)
-                except Exception:
-                    pass
-            cls._worker_thread.join(timeout=5)
-            cls._worker_thread = None
+                # sblocca il .get() in attesa nel task consumer
+                await cls._event_queue.put(None)
+            try:
+                await asyncio.wait_for(cls._worker_task, timeout=5)
+            except asyncio.TimeoutError:
+                cls._worker_task.cancel()
+            cls._worker_task = None
 
     @classmethod
-    def _process_events_sync(cls) -> None:
+    async def _process_events_async(cls) -> None:
         assert cls._event_queue is not None
-        while not (cls._stop_event and cls._stop_event.is_set()):
-            try:
-                event = cls._event_queue.get()
-            except Exception:
-                break
-
+        while True:
+            event = await cls._event_queue.get()
             if event is None:
                 break
 
@@ -514,17 +466,16 @@ class ProgressManager:
                     if total_bytes is not None and current_bytes >= total_bytes:
                         cls.release_bar(item_id)
             except Exception:
-                logging.getLogger(__name__).exception(
-                    "ProgressManager consumer crashed"
-                )
+                logging.getLogger(__name__).exception("ProgressManager consumer crashed")
 
     @classmethod
     def enqueue_progress(
         cls, item_id: str, track_name: str, current_bytes: int, total_bytes: int | None
     ) -> None:
         """
-        Ora sincrona: un put su queue.Queue è già non bloccante e
-        thread-safe, non serve alcun event loop né `await`.
+        Chiamata da coroutine/callback dentro il loop principale. Va avviato
+        il worker lazy la prima volta (idempotente) e poi si fa una semplice
+        put_nowait() — nessuna primitiva thread-safe necessaria.
         """
         cls.start_worker()
         if cls._event_queue is not None:
@@ -535,16 +486,18 @@ class ProgressManager:
             except Exception:
                 pass
 
+    # ------------------------------------------------------------------
+    # Bar management (sync, invariato — protetto da tqdm.get_lock())
+    # ------------------------------------------------------------------
+
     @classmethod
     def _allocate_slot(cls, item_id: str) -> int:
         if item_id in cls._slot_map:
             return cls._slot_map[item_id]
-
         used_slots = set(cls._slot_map.values())
         slot = 0
         while slot in used_slots:
             slot += 1
-
         cls._slot_map[item_id] = slot
         return slot
 
@@ -585,7 +538,6 @@ class ProgressManager:
         if bar is None:
             cls._slot_map.pop(item_id, None)
             return
-
         try:
             bar.clear()
             bar.close()
@@ -615,7 +567,6 @@ class ProgressManager:
             raise ValueError(
                 "Only top-aligned master bar is supported by ProgressManager at this time."
             )
-
         with tqdm.get_lock():
             cls.clear_master_bar()
             cls._master_enabled = True
@@ -635,7 +586,6 @@ class ProgressManager:
             if cls._master_bar is None:
                 cls._master_enabled = False
                 return
-
             try:
                 cls._master_bar.clear()
                 cls._master_bar.close()
@@ -649,7 +599,6 @@ class ProgressManager:
         with tqdm.get_lock():
             if cls._master_bar is None:
                 return
-
             cls._master_bar.update(step)
             cls._master_bar.refresh()
 
@@ -658,20 +607,20 @@ class ProgressManager:
         with tqdm.get_lock():
             if cls._master_bar is None:
                 return
-
             cls._master_bar.reset(total=total_items)
             cls._master_bar.refresh()
 
 
 class ProgressCallback:
-    _bytes_since_refresh: int
-    _last_refresh_time: float
-    _last_reported_bytes: int
+    """
+    Callback di progresso passato ai provider. Invariato nella logica di
+    throttling; enqueue_progress() ora è thread-agnostic per costruzione
+    (asyncio.Queue), quindi resta sincrona e non-bloccante come prima.
+    """
 
     def __init__(self, item_id: str = "", track_name: str = "") -> None:
         self._item_id = item_id
         self._track_name = track_name
-        self._bytes_since_refresh = 0
         self._last_refresh_time = 0.0
         self._last_reported_bytes = 0
 
@@ -679,9 +628,6 @@ class ProgressCallback:
         now = time.time()
         is_final = bool(total_bytes and current_bytes >= total_bytes)
 
-        # Miglioria prestazionale critica: Throttling a monte.
-        # Ignore the update if at least 100ms have not passed and it is not the final piece,
-        # preventing event loop congestion with tens of thousands of tasks.
         if (
             not is_final
             and self._last_refresh_time > 0
@@ -692,8 +638,6 @@ class ProgressCallback:
         current_bytes = max(0, current_bytes)
         total_bytes = total_bytes if total_bytes > 0 else None
 
-        # enqueue_progress ora è sincrona (queue.Queue thread-safe):
-        # l'inserimento è istantaneo, non serve più asyncio.create_task.
         ProgressManager.enqueue_progress(
             self._item_id, self._track_name, current_bytes, total_bytes
         )
@@ -711,7 +655,6 @@ class ProgressCallback:
             self._last_refresh_time = now
             self._last_reported_bytes = current_bytes
 
-        # Fire-and-forget del manager per non ritardare il download
         asyncio.create_task(
             DownloadManager().update_progress(
                 self._item_id, current_mb, total_mb, speed_mbps
