@@ -460,20 +460,22 @@ SpotiFLAC(
 | `none` | Do nothing (default) |
 | `open_folder` | Open the output folder in the system file manager |
 | `notify` | Send an OS desktop notification with a summary |
-| `command` | Run a custom shell command — placeholders: `{folder}`, `{succeeded}`, `{failed}` |
+| `command` | Run a custom shell command — placeholders: `{folder}`, `{succeeded}`, `{failed}` (quote `{folder}` in your template, e.g. `'{folder}'`) |
 
 ```python
 SpotiFLAC(url="...", output_dir="./downloads", post_download_action="open_folder")
 
 SpotiFLAC(url="...", output_dir="./downloads",
           post_download_action="command",
-          post_download_command="rsync -av {folder}/ user@nas:/music/")
+          post_download_command="rsync -av '{folder}/' user@nas:/music/")
 ```
 
 ```bash
 spotiflac https://... ./out --post-action notify
-spotiflac https://... ./out --post-action command --post-command "rsync -av {folder}/ user@nas:/music/"
+spotiflac https://... ./out --post-action command --post-command "rsync -av '{folder}/' user@nas:/music/"
 ```
+
+> **Note:** Always wrap `{folder}` in quotes in your command template, since the substituted path may contain spaces or special characters.
 
 ### Discography Download
 
@@ -665,7 +667,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `url` | `str` / `list[str]` | Required | A single URL or a list of URLs (batch mode) for Spotify, Tidal, Apple Music, SoundCloud, YouTube or Pandora. |
 | `output_dir` | `str` | Required | The destination directory path where the audio files will be saved. |
 | `output_path` | `str` | `None` | Exact destination file path for single track downloads. Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies. |
-| `services` | `list` | `["tidal"]` | Specifies which services to use and their priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `soundcloud`, `youtube`, `apple`, `pandora`, `joox`, `netease`, `migu`, `kuwo`. |
+| `services` | `list` | `["tidal"]` | Specifies which services to use and their priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `soundcloud`, `youtube`, `apple`, `pandora`, `joox`, `netease`, `migu`, `kuwo`. Also accepts `ext:<extension-name>` (e.g. `ext:tidal-web`) to use an installed [JavaScript extension](#-javascript-extensions) as a provider; native and `ext:` providers can be freely mixed in the same priority list. |
 | `filename_format` | `str` | `"{title} - {artist}"` | Format for naming downloaded files. See placeholders below. |
 | `use_track_numbers` | `bool` | `False` | Prefixes the filename with the track number. |
 | `use_album_track_numbers` | `bool` | `False` | Uses the track's original album number instead of the download queue position. |
@@ -686,7 +688,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `enrich_providers` | `list` | `["deezer", "apple", "qobuz", "tidal", "soundcloud"]` | Priority order of metadata providers to attempt. |
 | `qobuz_local_api_url` | `str` | `None` | Optional local Qobuz stream API URL. When set, the provider uses this endpoint for Qobuz stream requests. |
 | `post_download_action` | `str` | `"none"` | Action after all downloads finish: `"none"`, `"open_folder"`, `"notify"`, `"command"`. |
-| `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{failed}` placeholders. |
+| `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 
 ### Filename Format Placeholders
 
@@ -707,7 +709,7 @@ When customizing the `filename_format` string, you can use the following dynamic
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--service` | `-s` | `tidal` | One or more providers in priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `soundcloud`, `youtube`, `apple`, `pandora`, `joox`, `netease`, `migu`, `kuwo`. |
+| `--service` | `-s` | `tidal` | One or more providers in priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `soundcloud`, `youtube`, `apple`, `pandora`, `joox`, `netease`, `migu`, `kuwo`. Also accepts `ext:<extension-name>` (e.g. `ext:tidal-web`) for installed JavaScript extension providers, mixable with native providers in the same list. |
 | `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
 | `--output-path` | `-o` | `None` | Exact output file path for single track downloads. Ignored for albums, playlists and discographies. |
 | `--quality` | `-q` | `LOSSLESS` | Audio quality. Tidal: `DOLBY_ATMOS`, `HI_RES_LOSSLESS`, `LOSSLESS`, `HIGH`, `LOW`. Qobuz: `6`, `7`, `27`. Apple Music: `alac`, `atmos`, `ac3`, `aac`, `aac-legacy`. Pandora: `mp3_192`, `aac_64`, `aac_32`. |
@@ -781,4 +783,4 @@ If this software is useful and brings you value, consider supporting the project
 [Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [qobuz-rest-api](https://github.com/BartolomeoRusso9/qobuz-rest-api) ·[dabmusic.xyz](https://dabmusic.xyz) · [GD Studio Music API](https://music.gdstudio.xyz) · [Music Wjhe API](https://music.wjhe.top/) · [afkarxyz](https://github.com/afkarxyz) · [MusicBrainz](https://musicbrainz.org) · [SoundCloud](https://soundcloud.com) · [Apple Music](https://music.apple.com) · [YouTube Music](https://music.youtube.com) · [Pandora](https://www.pandora.com) · [squid.wtf](https://squid.wtf) · [flacdownloader.com](https://flacdownloader.com)
 
 > **[!TIP]**
-> Star Us — you will receive all release notifications from GitHub without any delay.
+> Star the repo to show support, and click **Watch → Custom → Releases** on GitHub if you want to be notified as soon as a new release goes out.
