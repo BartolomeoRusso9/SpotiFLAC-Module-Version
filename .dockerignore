@@ -34,7 +34,13 @@ tests/
 
 # Downloads and local output
 Downloads/
+downloads/
 output/
+out/
+
+# SpotiFLAC local data and caches
+.spotiflac_docker/
+.cache_docker/
 
 # Docker-related
 frontend/
