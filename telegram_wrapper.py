@@ -17,21 +17,23 @@ def is_docker():
 # Base command:
 # - Use launcher.py when running from source.
 # - Use "spotiflac" if installed via pip.
-cmd = ["python", "spotiflac"] + sys.argv[1:]
+cmd = ["spotiflac"] + sys.argv[1:]
 
 if not is_docker():
-    # OUTSIDE DOCKER: Run normally without Telegram integration.
-    os.execvp("python", cmd)
+    os.execvp("spotiflac", cmd)
 
-# INSIDE DOCKER: Enable Telegram listener.
 bot_token = os.environ.get("TG_BOT_TOKEN")
 chat_id = os.environ.get("TG_CHAT_ID")
 
 # If the bot is not configured, run normally anyway.
 if not bot_token or not chat_id:
-    os.execvp("python", cmd)
+    os.execvp("spotiflac", cmd)
 
 print("🤖 [Docker Wrapper] Docker environment detected: Starting Telegram listener...")
+print("Wrapper avviato")
+print("BOT:", bool(bot_token))
+print("CHAT:", chat_id)
+print("CMD:", cmd)
 
 p = subprocess.Popen(
     cmd,

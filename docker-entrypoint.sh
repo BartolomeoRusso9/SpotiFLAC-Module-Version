@@ -11,4 +11,4 @@ if [ "$#" -eq 0 ]; then
   exec spotiflac --help
 fi
 
-exec spotiflac "$@"
+exec python /app/telegram_wrapper.py "$@"
