@@ -150,7 +150,6 @@ Pass the environment file to Docker:
 docker run --rm -it \
   --env-file .env \
   -v "$(pwd)/downloads:/app/downloads" \
-  -v ts_profile:/tmp/ts_profile \
   -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
   -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
   spotiflac "URL" /app/downloads -s deezer
@@ -167,7 +166,7 @@ Complete the challenge, send the generated `grant` code back to the bot, and Spo
 Official Docker images are published on GitHub Container Registry (GHCR), allowing you to run the latest version without building locally.
 
 ```bash
-docker pull ghcr.io/BartolomeoRusso9/SpotiFLAC-Module-Version:latest
+docker pull ghcr.io/bartolomeobusso9/spotiflac-module-version:latest
 ```
 
 ---

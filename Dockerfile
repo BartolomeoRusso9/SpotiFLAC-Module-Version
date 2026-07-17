@@ -3,8 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    TS_PROFILE_DIR=/tmp/ts_profile
+    PYTHONUNBUFFERED=1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -25,9 +24,9 @@ RUN python3 -m pip install --no-cache-dir .
 RUN mkdir -p /app/downloads \
              /root/.spotiflac/extensions \
              /root/.cache/spotiflac \
-             /tmp/ts_profile
+             /root/.spotiflac/signed_sessions
 
-VOLUME ["/app/downloads", "/root/.spotiflac", "/root/.cache/spotiflac", "/tmp/ts_profile"]
+VOLUME ["/app/downloads", "/root/.spotiflac", "/root/.cache/spotiflac"]
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

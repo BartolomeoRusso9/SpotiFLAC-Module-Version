@@ -1,10 +1,8 @@
 import sys
 import os
-import time
-import httpx
-import subprocess
 import re
-
+import asyncio
+import httpx
 
 def is_docker():
     """Check whether the script is running inside a Docker container."""
@@ -13,115 +11,126 @@ def is_docker():
         os.path.isfile(path) and any("docker" in line for line in open(path))
     )
 
-
 # Base command:
 # - Use launcher.py when running from source.
 # - Use "spotiflac" if installed via pip.
-cmd = ["python", "spotiflac"] + sys.argv[1:]
+cmd = ["spotiflac"] + sys.argv[1:]
 
 if not is_docker():
-    # OUTSIDE DOCKER: Run normally without Telegram integration.
-    os.execvp("python", cmd)
+    os.execvp("spotiflac", cmd)
 
-# INSIDE DOCKER: Enable Telegram listener.
 bot_token = os.environ.get("TG_BOT_TOKEN")
 chat_id = os.environ.get("TG_CHAT_ID")
 
 # If the bot is not configured, run normally anyway.
 if not bot_token or not chat_id:
-    os.execvp("python", cmd)
+    os.execvp("spotiflac", cmd)
 
 print("🤖 [Docker Wrapper] Docker environment detected: Starting Telegram listener...")
+print("Wrapper avviato")
+print("BOT:", bool(bot_token))
+print("CHAT:", chat_id)
+print("CMD:", cmd)
 
-p = subprocess.Popen(
-    cmd,
-    stdout=subprocess.PIPE,
-    stdin=subprocess.PIPE,
-    stderr=subprocess.STDOUT,
-    text=True,
-    bufsize=1,
-)
+async def main():
+    # Avvia il processo in modalità asincrona
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stdin=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
 
-url_regex = re.compile(r"(https://api\.zarz\.moe/v2/challenge\S+)")
-offset = -1
+    url_regex = re.compile(r"(https://api\.zarz\.moe/v2/challenge\S+)")
+    offset = -1
 
-while True:
-    line = p.stdout.readline()
-    if not line and p.poll() is not None:
-        break
+    # Usiamo httpx.AsyncClient() per mantenere viva la connessione HTTP
+    async with httpx.AsyncClient() as client:
+        while True:
+            # Legge l'output di SpotiFLAC riga per riga senza bloccare il thread
+            line_bytes = await process.stdout.readline()
+            
+            if not line_bytes:
+                break  # Fine dell'output (il processo è terminato)
 
-    sys.stdout.write(line)
-    sys.stdout.flush()
+            line = line_bytes.decode('utf-8', errors='replace')
+            sys.stdout.write(line)
+            sys.stdout.flush()
 
-    match = url_regex.search(line)
-    if match:
-        challenge_url = match.group(1)
+            match = url_regex.search(line)
+            if match:
+                challenge_url = match.group(1)
 
-        msg = (
-            "⚠️ *SpotiFLAC Turnstile Challenge*\n\n"
-            "Complete the CAPTCHA using the link below, then send me the `grant` code in this chat:\n\n"
-            f"{challenge_url}"
-        )
-
-        try:
-            httpx.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": msg,
-                    "parse_mode": "Markdown",
-                },
-            )
-            print(
-                "🤖 [Docker Wrapper] Telegram notification sent! Waiting for your reply..."
-            )
-        except Exception as e:
-            print(f"🤖 [Docker Wrapper] Failed to send Telegram notification: {e}")
-
-        # Continuously poll Telegram until a valid grant is received.
-        waiting = True
-
-        while waiting:
-            try:
-                resp = httpx.get(
-                    f"https://api.telegram.org/bot{bot_token}/getUpdates",
-                    params={"offset": offset, "timeout": 10},
-                    timeout=15.0,
+                msg = (
+                    "⚠️ <b>SpotiFLAC Turnstile Challenge</b>\n\n"
+                    "Complete the CAPTCHA using the link below, then send me the <code>grant</code> code in this chat:\n\n"
+                    f"{challenge_url}"
                 )
 
-                data = resp.json()
+                try:
+                    await client.post(
+                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                        json={
+                            "chat_id": chat_id,
+                            "text": msg,
+                            "parse_mode": "HTML",
+                        },
+                    )
+                    print("🤖 [Docker Wrapper] Telegram notification sent! Waiting for your reply...")
+                except Exception as e:
+                    print(f"🤖 [Docker Wrapper] Failed to send Telegram notification: {e}")
 
-                if data.get("ok") and data.get("result"):
-                    for update in data["result"]:
-                        offset = update["update_id"] + 1
+                # Polling asincrono su Telegram
+                waiting = True
 
-                        if "message" in update and "text" in update["message"]:
+                while waiting:
+                    try:
+                        resp = await client.get(
+                            f"https://api.telegram.org/bot{bot_token}/getUpdates",
+                            params={"offset": offset, "timeout": 10},
+                            timeout=15.0,
+                        )
 
-                            # Ignore messages from other chats.
-                            if str(update["message"]["chat"]["id"]) != str(chat_id):
-                                continue
+                        data = resp.json()
 
-                            text = update["message"]["text"].strip()
+                        if data.get("ok") and data.get("result"):
+                            for update in data["result"]:
+                                offset = update["update_id"] + 1
 
-                            if len(text) > 20:
-                                httpx.post(
-                                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                                    json={
-                                        "chat_id": chat_id,
-                                        "text": "✅ Grant received! Injecting it into the process...",
-                                    },
-                                )
+                                if "message" in update and "text" in update["message"]:
 
-                                p.stdin.write(text + "\n")
-                                p.stdin.flush()
-                                waiting = False
-                                break
+                                    # Ignora messaggi provenienti da altre chat
+                                    if str(update["message"]["chat"]["id"]) != str(chat_id):
+                                        continue
 
-            except Exception:
-                pass
+                                    text = update["message"]["text"].strip()
 
-            if waiting:
-                time.sleep(2)
+                                    if len(text) > 20:
+                                        await client.post(
+                                            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                                            json={
+                                                "chat_id": chat_id,
+                                                "text": "✅ Grant received! Injecting it into the process...",
+                                            },
+                                        )
 
-p.wait()
-sys.exit(p.returncode)
+                                        # Inietta asincronamente il grant nello stdin del terminale virtuale
+                                        process.stdin.write(text.encode('utf-8') + b"\n")
+                                        await process.stdin.drain()
+                                        
+                                        waiting = False
+                                        break
+
+                    except Exception:
+                        pass
+
+                    if waiting:
+                        await asyncio.sleep(2)
+
+    # Attende la chiusura del processo in modo pulito
+    await process.wait()
+    return process.returncode
+
+if __name__ == "__main__":
+    # Avvia l'event loop di asyncio
+    sys.exit(asyncio.run(main()))
