@@ -71,7 +71,7 @@ while True:
                 json={
                     "chat_id": chat_id,
                     "text": msg,
-                    "parse_mode": "Markdown",
+                    "parse_mode": "HTML",
                 },
             )
             print(
