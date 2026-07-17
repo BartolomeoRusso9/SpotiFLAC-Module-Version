@@ -460,7 +460,7 @@ SpotiFLAC(
 | `none` | Do nothing (default) |
 | `open_folder` | Open the output folder in the system file manager |
 | `notify` | Send an OS desktop notification with a summary |
-| `command` | Run a custom shell command — placeholders: `{folder}`, `{succeeded}`, `{failed}` (quote `{folder}` in your template, e.g. `'{folder}'`) |
+| `command` | Run a custom shell command — placeholders: `{folder}`, `{succeeded}`, `{failed}` (quote `{folder}` in your template, e.g. `'{folder}'`, to handle spaces; this does not protect against an apostrophe inside the path itself) |
 
 ```python
 SpotiFLAC(url="...", output_dir="./downloads", post_download_action="open_folder")
@@ -475,7 +475,7 @@ spotiflac https://... ./out --post-action notify
 spotiflac https://... ./out --post-action command --post-command "rsync -av '{folder}/' user@nas:/music/"
 ```
 
-> **Note:** Always wrap `{folder}` in quotes in your command template, since the substituted path may contain spaces or special characters.
+> **Note:** Wrap `{folder}` in single quotes in your command template (e.g. `'{folder}'`) to safely handle spaces and most special characters. Single quotes do not protect against an apostrophe (`'`) inside the output path itself — avoid apostrophes in `output_dir`, or escape them manually for your shell before running the command.
 
 ### Discography Download
 
@@ -730,7 +730,7 @@ When customizing the `filename_format` string, you can use the following dynamic
 | `--no-enrich` | | `False` | Disable multi-provider metadata enrichment (enrichment is enabled by default). |
 | `--enrich-providers` | | `deezer apple qobuz tidal soundcloud` | Metadata enrichment provider priority order. |
 | `--post-action` | | `none` | Action after all downloads finish: `none`, `open_folder`, `notify`, `command`. |
-| `--post-command` | | `""` | Shell command for `--post-action=command`. Placeholders: `{folder}`, `{succeeded}`, `{failed}`. |
+| `--post-command` | | `""` | Shell command for `--post-action=command`. Placeholders: `{folder}`, `{succeeded}`, `{failed}`; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 | `--profile` | | `None` | Load a saved profile. CLI flags override profile values. |
 | `--save-profile` | | `None` | Save current CLI configuration as a named profile after the run. |
 
