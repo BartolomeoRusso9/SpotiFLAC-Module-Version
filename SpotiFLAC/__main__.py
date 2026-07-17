@@ -25,7 +25,9 @@ async def _run_cli_download(args, merged_defaults: dict) -> None:
     )
     tidal_custom_api = args.tidal_custom_api or merged_defaults.get("tidal_custom_api")
     timeout_s = (
-        args.timeout_s if args.timeout_s is not None else merged_defaults.get("timeout_s")
+        args.timeout_s
+        if args.timeout_s is not None
+        else merged_defaults.get("timeout_s")
     )
     track_max_retries = (
         args.retries
@@ -132,7 +134,8 @@ async def main() -> None:
 
         log_level = logging.WARNING
         logging.basicConfig(
-            level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            level=log_level,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
 
         async with AsyncSpotiFLAC(

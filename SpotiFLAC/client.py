@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from types import TracebackType
-from typing import Any, Optional, Type
+from typing import Optional, Type
 
 from .core.http import NetworkManager
 from .core.models import TrackMetadata

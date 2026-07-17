@@ -40,11 +40,16 @@ class TqdmLoggingHandler(logging.Handler):
         try:
             msg = self.format(record)
             now = time.time()
-            if msg in self._message_cache and now - self._message_cache[msg] < self._cache_ttl:
+            if (
+                msg in self._message_cache
+                and now - self._message_cache[msg] < self._cache_ttl
+            ):
                 return
             self._message_cache[msg] = now
             self._message_cache = {
-                k: v for k, v in self._message_cache.items() if now - v < self._cache_ttl * 2
+                k: v
+                for k, v in self._message_cache.items()
+                if now - v < self._cache_ttl * 2
             }
             with tqdm.get_lock():
                 tqdm.write(msg, file=sys.stderr)
@@ -466,7 +471,9 @@ class ProgressManager:
                     if total_bytes is not None and current_bytes >= total_bytes:
                         cls.release_bar(item_id)
             except Exception:
-                logging.getLogger(__name__).exception("ProgressManager consumer crashed")
+                logging.getLogger(__name__).exception(
+                    "ProgressManager consumer crashed"
+                )
 
     @classmethod
     def enqueue_progress(

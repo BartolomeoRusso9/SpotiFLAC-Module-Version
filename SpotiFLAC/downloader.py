@@ -437,9 +437,9 @@ class DownloadWorker:
         """
         max_concurrent = max(1, getattr(self._opts, "max_concurrent_downloads", 2))
         semaphore = asyncio.Semaphore(max_concurrent)
-        results_queue: asyncio.Queue[
-            tuple[TrackMetadata, "object"] | None
-        ] = asyncio.Queue()
+        results_queue: asyncio.Queue[tuple[TrackMetadata, "object"] | None] = (
+            asyncio.Queue()
+        )
 
         async def download_worker(i: int, track: TrackMetadata) -> None:
             position = i + 1
