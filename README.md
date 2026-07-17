@@ -16,8 +16,6 @@
   </p>
 </div>
 
-Integrate **SpotiFLAC** directly into your Python projects. Perfect for building custom Telegram bots, automation tools, bulk downloaders, downloading music for Jellyfin or web interfaces.
-
 > **Looking for a standalone app?**
 > - [SpotiFLAC (Desktop)](https://github.com/afkarxyz/SpotiFLAC) — Download music in true lossless FLAC from different providers for Windows, macOS & Linux
 > - [SpotiFLAC (Mobile)](https://github.com/zarzet/SpotiFLAC-Mobile) — SpotiFLAC for Android & iOS, maintained by [@zarzet](https://github.com/zarzet)
@@ -26,16 +24,15 @@ Integrate **SpotiFLAC** directly into your Python projects. Perfect for building
 
 ## Features
 
-- 🎵 Download from Spotify, Tidal, Apple Music, SoundCloud, YouTube and Pandora
-- 🚀 Native synchronous and asynchronous Python APIs
-- 🧩 Modular JavaScript Extension system
-- 🔄 Automatic provider fallback
-- 🎨 Built-in GUI
-- 🖥️ Interactive CLI Wizard
-- 🐳 Docker support
-- 📚 Configuration Profiles
-- ❤️ MusicBrainz metadata enrichment
-- 🎤 Embedded synchronized lyrics
+- Native synchronous and asynchronous Python APIs
+- Modular JavaScript Extension system
+- Automatic provider fallback
+- Built-in GUI
+- Interactive CLI Wizard
+- Docker support
+- Configuration Profiles
+- MusicBrainz metadata enrichment
+- Embedded synchronized lyrics
 
 ---
 
