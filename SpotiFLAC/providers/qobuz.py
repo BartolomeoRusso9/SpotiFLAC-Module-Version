@@ -42,6 +42,12 @@ from ..core.quality import map_musicdl_quality
 from ..core.tagger import EmbedOptions, _print_mb_summary, embed_metadata_async
 from .base import BaseProvider
 
+# Importiamo la logica di firma e validazione sessione per la Community
+from ..core.signed_session_desktop import (
+    ensure_community_session,
+    sign_community_request,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -930,6 +936,18 @@ class QobuzProvider(BaseProvider):
                             }
                         # set headers required by community (use shared constant)
                         post_headers = dict(_COMMUNITY_POST_HEADERS)
+
+                        # --- Iniezione firma per le chiamate alla rete Community ---
+                        try:
+                            record = await asyncio.to_thread(ensure_community_session)
+                            body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+                            sig_headers = await asyncio.to_thread(
+                                sign_community_request, "POST", api_base, body_bytes, record
+                            )
+                            post_headers.update(sig_headers)
+                        except Exception as e:
+                            logger.error("[qobuz] Fallimento nella firma della richiesta community: %s", e)
+                        # --------------------------------------------------
 
                     # Attempt request, refresh credentials and retry once on 400/401
                     resp = await client.post(
