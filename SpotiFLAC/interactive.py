@@ -733,9 +733,6 @@ async def run_interactive() -> dict:
     # ── 4. Audio Quality ─────────────────────────────────────────────────────
     _section("4 · Audio Quality")
 
-    # ── 4. Audio Quality ─────────────────────────────────────────────────────
-    _section("4 · Audio Quality")
-
     if is_soundcloud_url:
         cfg["quality"] = "LOSSLESS"
         cfg["allow_fallback"] = True
