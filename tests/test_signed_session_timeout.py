@@ -1,7 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from SpotiFLAC.core.signed_session import perform_signed_fetch
+from SpotiFLAC.core.signed_session_mobile import perform_signed_fetch
 
 
 class DummyClient:

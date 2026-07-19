@@ -33,7 +33,7 @@ from ..core.errors import SpotiflacError, ErrorKind
 from ..providers.base import BaseProvider
 from .manager import ExtensionManager, InstalledExtension
 from .runtime import JSRuntime, ExtensionRuntimeError
-from ..core.signed_session import (
+from ..core.signed_session_mobile import (
     SignedSessionClient,
     perform_signed_fetch,
     client_from_manifest,
