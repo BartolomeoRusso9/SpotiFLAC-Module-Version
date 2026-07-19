@@ -1,4 +1,4 @@
-# SpotiFLAC/core/signed_session.py
+# SpotiFLAC/core/signed_session_mobile.py
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import parse_qsl, parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
@@ -68,141 +68,6 @@ _BROWSER_FINGERPRINT_HEADERS = {
 _LOCAL_CALLBACK_HOST = "127.0.0.1"
 _LOCAL_CALLBACK_PATH = "/callback"
 _MANUAL_GRANT_TIMEOUT_S = 300  # 5 minutes to paste the grant
-
-
-class _LocalGrantListener:
-    """
-    DEPRECATED / NO LONGER USED by the main flow (authenticate_with_manual_grant).
-
-    Original hypothesis: the challenge page, after resolving the Turnstile,
-    would redirect to the provided "cb" (like the Flutter app does with the
-    "spotiflac://..." scheme), capturable by a small local HTTP server that
-    would replace the mobile scheme with http://127.0.0.1:{port}.
-
-    Verified via DevTools that this does NOT happen in an external browser:
-    the page obtains the grant by calling {endpoints.challenge}/verify
-    internally, but then doesn't navigate anywhere (the "cb" mechanism appears
-    to be designed for a native WebView with JS bridge, not an external
-    browser). The current flow (authenticate_with_manual_grant) avoids the
-    issue entirely: the user opens the page manually, resolves the Turnstile,
-    and reads/pastes the grant themselves from the response in DevTools.
-    This class remains for historical reference only.
-    """
-
-    def __init__(
-        self, host: str = _LOCAL_CALLBACK_HOST, path: str = _LOCAL_CALLBACK_PATH
-    ) -> None:
-        self.host = host
-        self.path = path
-        self.port: int | None = None
-        self._server: asyncio.AbstractServer | None = None
-        self._grant_future: asyncio.Future[str] | None = None
-
-    async def start(self) -> str:
-        """Start the listener on a free port and return the full callback URL."""
-        loop = asyncio.get_running_loop()
-        self._grant_future = loop.create_future()
-        self._server = await asyncio.start_server(
-            self._handle_connection, host=self.host, port=0
-        )
-        self.port = self._server.sockets[0].getsockname()[1]
-        return f"http://{self.host}:{self.port}{self.path}"
-
-    async def _handle_connection(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        try:
-            request_line = await asyncio.wait_for(reader.readline(), timeout=10)
-            # Consume the rest of the request headers (we don't need them)
-            while True:
-                line = await asyncio.wait_for(reader.readline(), timeout=10)
-                if not line or line in (b"\r\n", b"\n"):
-                    break
-
-            try:
-                _, raw_target, _ = request_line.decode("latin-1").split(" ", 2)
-            except ValueError:
-                _, raw_target = "GET", "/"
-
-            parsed = urlparse(raw_target)
-
-            # Ignore any request that is not our callback path
-            # (e.g., GET /favicon.ico that some browsers send automatically):
-            # must NEVER touch the grant future.
-            if parsed.path != self.path:
-                await self._respond(writer, 404, "<h3>Not Found</h3>")
-                return
-
-            params = parse_qs(parsed.query)
-            grant = (params.get("grant") or [None])[0]
-            error = (params.get("error") or [None])[0]
-
-            if grant:
-                await self._respond(
-                    writer,
-                    200,
-                    "<h2>Verification completed ✅</h2>"
-                    "<p>You can close this window and return to the app.</p>",
-                )
-            else:
-                await self._respond(
-                    writer,
-                    200,
-                    "<h2>Verification failed</h2>"
-                    f"<p>{error or 'Nessun grant ricevuto.'}</p>",
-                )
-
-            if self._grant_future is not None and not self._grant_future.done():
-                if grant:
-                    self._grant_future.set_result(grant)
-                else:
-                    self._grant_future.set_exception(
-                        RuntimeError(f"callback without grant: {error or 'unknown'}")
-                    )
-        except Exception as exc:
-            if self._grant_future is not None and not self._grant_future.done():
-                self._grant_future.set_exception(exc)
-        finally:
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
-
-    @staticmethod
-    async def _respond(
-        writer: asyncio.StreamWriter, status: int, html_body: str
-    ) -> None:
-        reason = {200: "OK", 404: "Not Found"}.get(status, "OK")
-        body = (
-            f"<html><body style='font-family:sans-serif;text-align:center;"
-            f"padding-top:4em'>{html_body}</body></html>"
-        ).encode("utf-8")
-        response = (
-            f"HTTP/1.1 {status} {reason}\r\n"
-            f"Content-Type: text/html; charset=utf-8\r\n"
-            f"Content-Length: {len(body)}\r\n"
-            f"Connection: close\r\n\r\n"
-        ).encode("utf-8") + body
-        writer.write(response)
-        await writer.drain()
-
-    async def wait_for_grant(self, timeout: float) -> str:
-        """Wait until the browser calls the callback with ?grant=..., then stop the listener."""
-        assert self._grant_future is not None, "start() has not been called"
-        try:
-            return await asyncio.wait_for(self._grant_future, timeout=timeout)
-        finally:
-            await self.stop()
-
-    async def stop(self) -> None:
-        if self._server is not None:
-            self._server.close()
-            try:
-                await self._server.wait_closed()
-            except Exception:
-                pass
-            self._server = None
 
 
 class SignedSessionClient:

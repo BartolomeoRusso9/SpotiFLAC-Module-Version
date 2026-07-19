@@ -188,6 +188,11 @@ spotiflac URL ./out \
   --service tidal ext:qobuz-web deezer
 ```
 
+> **Note:** Automatic fallback to extensions is enabled by default whenever a native provider for
+> the same service is installed as an extension. Disable it with `use_extensions_fallback=False`
+> (Python) or `--no-extensions-fallback` (CLI) if you want SpotiFLAC to use only the explicitly
+> requested providers in `services`/`--service`.
+
 ---
 
 ## Docker Usage & Headless Automation
@@ -610,6 +615,7 @@ The wizard prompts for a custom Tidal API URL at step 12.5, right after the opti
                         [--tidal-api URL]
                         [--timeout seconds]
                         [--loop minutes]
+                        [--no-extensions-fallback]
                         [--verbose]
                         [--no-lyrics]
                         [--lyrics-providers spotify apple musixmatch amazon lrclib]
@@ -639,6 +645,7 @@ chmod +x SpotiFLAC-Linux-arm64
                         [--tidal-api URL]
                         [--timeout seconds]
                         [--loop minutes]
+                        [--no-extensions-fallback]
                         [--verbose]
                         [--no-lyrics]
                         [--lyrics-providers spotify apple musixmatch amazon lrclib]
@@ -684,6 +691,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `enrich_metadata` | `bool` | `True` | Enables multi-provider metadata enrichment (HD covers, BPM, labels, etc.). |
 | `enrich_providers` | `list` | `["deezer", "apple", "qobuz", "tidal", "soundcloud"]` | Priority order of metadata providers to attempt. |
 | `qobuz_local_api_url` | `str` | `None` | Optional local Qobuz stream API URL. When set, the provider uses this endpoint for Qobuz stream requests. |
+| `use_extensions_fallback` | `bool` | `True` | Whether to automatically pair a matching installed [JavaScript extension](#-javascript-extensions) as a fallback provider when a native provider fails. Set to `False` to use only the providers explicitly listed in `services`. |
 | `post_download_action` | `str` | `"none"` | Action after all downloads finish: `"none"`, `"open_folder"`, `"notify"`, `"command"`. |
 | `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 
@@ -719,6 +727,8 @@ When customizing the `filename_format` string, you can use the following dynamic
 | `--qobuz-local-api` | | `None` | Optional local Qobuz stream API URL. |
 | `--tidal-api` | | `None` | URL of a self-hosted hifi-api instance. Takes priority over the built-in public mirror pool. |
 | `--timeout` | | `None` | Per-track download timeout in seconds. If a track download stalls or takes longer than this limit, it is forcibly terminated and marked as failed, then SpotiFLAC moves to the next provider or retry. |
+| `--loop` | `-l` | `None` | Keep retrying permanently failed tracks every N minutes. |
+ `--no-extensions-fallback` | | `False` | Disable automatic fallback to installed JS extensions when a native provider fails (fallback is enabled by default). |
 | `--loop` | `-l` | `None` | Keep retrying permanently failed tracks every N minutes. |
 | `--retries` | | `0` | Extra per-track download attempts on failure. Cycles through all providers with exponential backoff. |
 | `--verbose` | `-v` | `False` | Enable debug logging. |

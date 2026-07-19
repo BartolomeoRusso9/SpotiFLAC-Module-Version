@@ -51,6 +51,12 @@ from .base import BaseProvider
 from .qobuz import _API_BASE as QOBUZ_API_BASE
 from .qobuz import _compute_signature, _scrape_credentials_async
 
+# Importiamo la logica di firma e validazione sessione per la Community
+from ..core.signed_session_desktop import (
+    ensure_community_session,
+    sign_community_request,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -626,16 +632,19 @@ async def _fetch_tidal_url_once_async(
     is_post_api = api_cleaning in _CLEAN_POST_APIS
     quality = _normalize_quality(quality)
     headers = {"User-Agent": _POST_USER_AGENT[0] if is_post_api else _TIDAL_USER_AGENT}
-    # If this API is the community mirror, use dedicated headers for POST requests
+
+    is_community = False
     try:
         if (
             is_post_api
             and _TIDAL_COMMUNITY_URL
             and api_cleaning == _TIDAL_COMMUNITY_URL.rstrip("/")
         ):
-            headers = _COMMUNITY_POST_HEADERS
+            headers = dict(_COMMUNITY_POST_HEADERS)
+            is_community = True
     except Exception:
         pass
+
     delay = _RETRY_DELAY_S
     last_err: Exception = RuntimeError("no attempts made")
 
@@ -658,19 +667,48 @@ async def _fetch_tidal_url_once_async(
             delay *= 2
 
         try:
+            req_headers = dict(headers)
 
             if is_post_api:
                 if quality == "DOLBY_ATMOS":
-                    resp = await client.post(
-                        api_cleaning,
-                        json={
-                            "id": str(track_id),
-                            "endpoint": "manifests",
-                            "formats": ["EAC3_JOC"],
-                        },
-                        headers=headers,
-                        timeout=timeout_s,
-                    )
+                    payload = {
+                        "id": str(track_id),
+                        "endpoint": "manifests",
+                        "formats": ["EAC3_JOC"],
+                    }
+                else:
+                    payload = {"id": str(track_id), "quality": quality}
+
+                # --- Iniezione firma per le chiamate alla rete Community ---
+                if is_community:
+                    try:
+                        record = await asyncio.to_thread(ensure_community_session)
+                        body_bytes = json.dumps(payload, separators=(",", ":")).encode(
+                            "utf-8"
+                        )
+                        sig_headers = await asyncio.to_thread(
+                            sign_community_request,
+                            "POST",
+                            api_cleaning,
+                            body_bytes,
+                            record,
+                        )
+                        req_headers.update(sig_headers)
+                    except Exception as e:
+                        logger.error(
+                            "[tidal] Fallimento nella firma della richiesta community: %s",
+                            e,
+                        )
+                # --------------------------------------------------
+
+                resp = await client.post(
+                    api_cleaning,
+                    json=payload,
+                    headers=req_headers,
+                    timeout=timeout_s,
+                )
+
+                if quality == "DOLBY_ATMOS":
                     if resp.status_code == 429:
                         wait_s = float(
                             resp.headers.get("Retry-After", _RATE_LIMIT_DEFAULT)
@@ -725,16 +763,11 @@ async def _fetch_tidal_url_once_async(
                     _clear_api_rate_limit(api_cleaning)
                     return "MANIFEST:" + base64.b64encode(mpd_resp.content).decode()
 
-                resp = await client.post(
-                    api_cleaning,
-                    json={"id": str(track_id), "quality": quality},
-                    headers=headers,
-                    timeout=timeout_s,
-                )
             else:
                 url = f"{api_cleaning}/track/?id={track_id}&quality={quality}"
-                resp = await client.get(url, headers=headers, timeout=timeout_s)
+                resp = await client.get(url, headers=req_headers, timeout=timeout_s)
 
+            # --- Fallthrough per parsing risposte comuni ---
             if resp.status_code == 429:
                 wait_s = float(resp.headers.get("Retry-After", _RATE_LIMIT_DEFAULT))
                 _mark_api_rate_limited(api_cleaning, wait_s)

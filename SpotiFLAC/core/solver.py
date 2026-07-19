@@ -320,6 +320,28 @@ async def _solve_impl(
             return json.loads(raw)
         return None
 
+    async def _has_native_widget() -> bool:
+        rect = await get_cf_iframe_rect()
+        return rect is not None
+
+    async def _wait_for_native_widget(
+        min_wait: float = 6.0, poll_interval: float = 0.5
+    ) -> bool:
+        """
+        Aspetta fino a `min_wait` secondi che compaia il widget Turnstile
+        NATIVO della pagina (quello che nel browser reale appare dopo ~5s
+        di countdown), invece di iniettarne subito uno nostro. Ritorna True
+        se il widget nativo è comparso, False se bisogna ricorrere al
+        fallback di _inject_widget().
+        """
+        elapsed = 0.0
+        while elapsed < min_wait:
+            if await _has_native_widget():
+                return True
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+        return await _has_native_widget()
+
     async def do_click(rect: Optional[dict]):
         if rect:
             cx = rect["x"] + 28 + random.uniform(-3, 3)
@@ -401,9 +423,11 @@ async def _solve_impl(
         page = await browser.get(siteurl)
         await _try_hide_window()
         await _enable_network_capture()
-        await asyncio.sleep(random.uniform(2.0, 3.0))
-        await _inject_widget()
-        await asyncio.sleep(5.0)
+
+        native_ready = await _wait_for_native_widget(min_wait=6.0)
+        if not native_ready:
+            await _inject_widget()
+            await asyncio.sleep(2.0)
 
         for attempt in range(1, max_attempts + 1):
             if attempt > 1:
@@ -412,9 +436,10 @@ async def _solve_impl(
                     f"chiudo e riapro la pagina (tentativo {attempt}/{max_attempts})…"
                 )
                 await _open_fresh_page()
-                await asyncio.sleep(random.uniform(2.0, 3.0))
-                await _inject_widget()
-                await asyncio.sleep(5.0)
+                native_ready = await _wait_for_native_widget(min_wait=6.0)
+                if not native_ready:
+                    await _inject_widget()
+                    await asyncio.sleep(2.0)
 
             token = await _try_solve_within(per_attempt_seconds)
 

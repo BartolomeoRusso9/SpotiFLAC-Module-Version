@@ -44,7 +44,10 @@ async def main():
         stderr=asyncio.subprocess.STDOUT,
     )
 
-    url_regex = re.compile(r"(https://api\.zarz\.moe/v2/challenge\S+)")
+    # Regex aggiornata: cattura sia le challenge di Zarz che quelle della nuova Community
+    url_regex = re.compile(
+        r"(https://(?:api\.zarz\.moe|verify\.spotbye\.qzz\.io)\S*challenge\S+)"
+    )
     offset = -1
 
     # Usiamo httpx.AsyncClient() per mantenere viva la connessione HTTP
@@ -65,8 +68,8 @@ async def main():
                 challenge_url = match.group(1)
 
                 msg = (
-                    "⚠️ <b>SpotiFLAC Turnstile Challenge</b>\n\n"
-                    "Complete the CAPTCHA using the link below, then send me the <code>grant</code> code in this chat:\n\n"
+                    "⚠️ <b>SpotiFLAC Verification Challenge</b>\n\n"
+                    "Complete the verification using the link below, then send me the <code>grant</code> code in this chat:\n\n"
                     f"{challenge_url}"
                 )
 
