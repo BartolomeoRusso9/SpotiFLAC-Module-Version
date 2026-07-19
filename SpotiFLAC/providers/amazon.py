@@ -191,14 +191,9 @@ class AmazonProvider(BaseProvider):
     ) -> httpx.Response:
         
         # --- Iniezione firma per le chiamate alla rete Community ---
-        is_community = "spotbye" in url or "qzz.io" in url
-        try:
-            from ..core.endpoints import get_community_url
-            comm_url = get_community_url("amazon")
-            if comm_url and url.startswith(comm_url):
-                is_community = True
-        except ImportError:
-            pass
+        from ..core.endpoints import get_community_url
+        comm_url = get_community_url("amazon")
+        is_community = bool(comm_url) and url.startswith(comm_url.rstrip("/"))
 
         if is_community:
             try:
@@ -818,45 +813,44 @@ class AmazonProvider(BaseProvider):
             return False
 
     async def _download_from_community_api(
-        self, asin: str, output_dir: str, provider_key: str, quality: str
+        self, asin: str, output_dir: str, quality: str
     ) -> tuple[str, dict]:
+        from ..core.endpoints import get_community_url
+
+        community_url = get_community_url("amazon")
+        if not community_url:
+            raise SpotiflacError(
+                ErrorKind.NETWORK,
+                "Community endpoint not configured for amazon",
+                self.name,
+            )
+
         logger.info(
-            "[amazon] Fetching track from %s API (ASIN: %s, Quality: %s)", provider_key, asin, quality
+            "[amazon] Fetching track from community API (ASIN: %s, Quality: %s)",
+            asin, quality,
         )
 
-        endpoint_url = get_amazon_endpoint(provider_key)
-        if not endpoint_url:
-            raise SpotiflacError(ErrorKind.NETWORK, f"Invalid endpoint: {provider_key}")
-
-        # Payload aggiornato alla nuova logica Go ("id" e "quality" come stringhe normalizzate)
         payload = {
             "id": asin,
             "quality": map_amazon_community_quality(quality),
-            "country": "US"
+            "country": "US",
         }
         headers = {
             "Content-Type": "application/json",
-            "Accept": "application/json"
+            "Accept": "application/json",
         }
 
-        url = f"{endpoint_url.rstrip('/')}/track"
-        if provider_key == "spotbye2" or provider_key == "spotbye":
-             # Per mantenere compatibilità coi path personalizzati se necessario. Il go manda la POST alla base
-             url = endpoint_url.rstrip('/')
+        url = community_url.rstrip('/')
 
         try:
+            # _do_request_with_retry riconosce questo URL come community endpoint
+            # e applica automaticamente ensure_community_session() + sign_community_request()
             resp = await self._do_request_with_retry(
-                "POST",
-                url,
-                json=payload,
-                headers=headers,
-                timeout=30,
+                "POST", url, json=payload, headers=headers, timeout=30,
             )
         except (httpx.RequestError, httpx.ConnectError) as exc:
             raise SpotiflacError(
-                ErrorKind.UNAVAILABLE,
-                f"{provider_key} API request failed: {exc}",
-                self.name,
+                ErrorKind.UNAVAILABLE, f"Community API request failed: {exc}", self.name
             ) from exc
 
         if resp.status_code != 200:
@@ -867,7 +861,7 @@ class AmazonProvider(BaseProvider):
                 pass
             raise SpotiflacError(
                 ErrorKind.UNAVAILABLE,
-                f"{provider_key} API returned {resp.status_code}: {err_msg}",
+                f"community API returned {resp.status_code}: {err_msg}",
                 self.name,
             )
 
@@ -898,7 +892,7 @@ class AmazonProvider(BaseProvider):
         if not stream_url:
             raise SpotiflacError(
                 ErrorKind.UNAVAILABLE,
-                f"No stream URL in {provider_key} response",
+                "No stream URL in community response",
                 self.name,
             )
 
@@ -918,7 +912,7 @@ class AmazonProvider(BaseProvider):
         except Exception as exc:
             raise SpotiflacError(
                 ErrorKind.UNAVAILABLE,
-                f"Failed to download stream from {provider_key}: {exc}",
+                f"Failed to download stream from community API: {exc}",
                 self.name,
             )
 
@@ -1103,8 +1097,30 @@ class AmazonProvider(BaseProvider):
 
         fallback_quality = str(quality).upper()
 
-        antra_url = get_amazon_endpoint("antra")
-        if antra_url:
+        from ..core.endpoints import get_community_url
+
+        _community_ep = get_community_url("amazon")
+        _antra_ep = get_amazon_endpoint("antra")
+        _s_ep = get_amazon_endpoint("s_stream")
+        _musicdl_ep = get_amazon_endpoint("musicdl")
+        if not any([_community_ep, _antra_ep, _s_ep, _musicdl_ep]):
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                "No Amazon endpoints configured in registry",
+                self.name,
+            )
+
+        # ── 1. Community (primo tentativo) ──────────────────────────────
+        if _community_ep:
+            logger.info("[amazon] Trying Community (ASIN: %s)", asin)
+            print_source_banner("amazon", "", fallback_quality)
+            try:
+                return await self._download_from_community_api(asin, output_dir, quality)
+            except Exception as exc:
+                logger.warning("[amazon] Community failed: %s", exc)
+
+        # ── 2. Antra ─────────────────────────────────────────────────────
+        if _antra_ep:
             logger.info(
                 "[amazon] Attempting direct download via Antra server (ASIN: %s)", asin
             )
@@ -1114,7 +1130,7 @@ class AmazonProvider(BaseProvider):
                     "X-API-Key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f",
                     "api-key": "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f",
                 }
-                antra_api_url = f"{antra_url.rstrip('/')}/api/track/{asin}"
+                antra_api_url = f"{_antra_ep.rstrip('/')}/api/track/{asin}"
 
                 client = await self._async_http._client()
                 resp = await client.get(
@@ -1190,17 +1206,8 @@ class AmazonProvider(BaseProvider):
                     exc,
                 )
 
-        _s_ep = get_amazon_endpoint("s_stream")
-        _spotbye1_ep = get_amazon_endpoint("spotbye1")
-        _spotbye2_ep = get_amazon_endpoint("spotbye2")
-        _musicdl_ep = get_amazon_endpoint("musicdl")
-        if not any([_s_ep, _spotbye1_ep, _spotbye2_ep, _musicdl_ep]):
-            raise SpotiflacError(
-                ErrorKind.UNAVAILABLE,
-                "No Amazon endpoints configured in registry",
-                self.name,
-            )
-
+        # ── 3. s (PoW captcha) ───────────────────────────────────────────
+        logger.info("[amazon] Community/Antra failed. Trying s…")
         print_source_banner("amazon", "", fallback_quality)
         try:
             s_result = await self._download_from_s_api(asin, output_dir, quality)
@@ -1209,26 +1216,9 @@ class AmazonProvider(BaseProvider):
         except Exception as exc:
             logger.warning("[amazon] s failed: %s", exc)
 
-        logger.info("[amazon] s failed. Trying Spotbye1…")
+        logger.info("[amazon] s failed. Trying MusicDL API…")
 
-        print_source_banner("amazon", "", fallback_quality)
-        try:
-            return await self._download_from_community_api(asin, output_dir, "spotbye1", quality)
-        except Exception as exc:
-            logger.warning("[amazon] Spotbye1 failed: %s", exc)
-
-        logger.info("[amazon] Spotbye1 failed. Trying Spotbye2…")
-
-        print_source_banner("amazon", "", fallback_quality)
-        try:
-            return await self._download_from_community_api(
-                asin, output_dir, "spotbye2", quality
-            )
-        except Exception as exc:
-            logger.warning("[amazon] Spotbye2 failed: %s", exc)
-
-        logger.info("[amazon] Spotbye2 failed. Trying MusicDL API…")
-
+        # ── 4. MusicDL (ultima risorsa) ──────────────────────────────────
         print_source_banner(
             "amazon", "", "BEST QUALITY AVAILABLE (MOSTLY 16 bit 44.1 Hz)"
         )
@@ -1241,7 +1231,6 @@ class AmazonProvider(BaseProvider):
                 f"All Amazon APIs (including MusicDL) failed. Last error: {exc}",
                 self.name,
             ) from exc
-
     # ------------------------------------------------------------------
     # Metadata Embedding
     # ------------------------------------------------------------------
