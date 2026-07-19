@@ -974,7 +974,7 @@ class QobuzProvider(BaseProvider):
                                         sign_community_request, "POST", api_base, body_bytes, record
                                     )
                                     post_headers.update(sig_headers)
-                                except Exception as e:
+                                except Exception:
                                     pass
                             # ----------------------------------------------------------------------
 
