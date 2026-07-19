@@ -80,3 +80,14 @@ def map_musicdl_quality(q: str) -> str:
     if n == "HI_RES":
         return "hi-res"
     return "cd"
+
+
+def map_amazon_community_quality(q: str) -> str:
+    """Map generic quality to Amazon Community 'quality' strings (16, 24, atmos)."""
+    n = normalize_quality(q)
+    if n == "DOLBY_ATMOS":
+        return "atmos"
+    if n in ("LOSSLESS", "HIGH", "LOW"):
+        return "16"
+    # Copre HI_RES_LOSSLESS e HI_RES
+    return "24"
