@@ -376,9 +376,9 @@ class JSExtensionProvider(BaseProvider):
                 if stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4"):
                     if stale.exists() and stale.stat().st_size == 0:
                         stale.unlink()
-                        logger.info("[%s] Removed stale zero-byte file: %s", self.name, stale.name)
-        except Exception as exc:
-            logger.warning("[%s] Stale file cleanup failed: %s", self.name, exc)
+                        logger.debug("[%s] Removed stale zero-byte file: %s", self.name, stale.name)
+        except Exception:
+            pass
 
         if self._file_exists(output_path):
             return DownloadResult.skipped_result(
@@ -520,6 +520,23 @@ class JSExtensionProvider(BaseProvider):
             )
         except Exception as e:
             logger.warning("[%s] Tagging failed (non-fatal): %s", self.name, e)
+
+        try:
+            for stale in output_path.parent.glob(f"{output_path.stem}.*"):
+                if (
+                    stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4")
+                    and stale.exists()
+                    and stale.stat().st_size == 0
+                    and str(stale) != str(actual_path)
+                ):
+                    stale.unlink()
+                    logger.info(
+                        "[%s] Removed leftover zero-byte file: %s",
+                        self.name,
+                        stale.name,
+                    )
+        except Exception as exc:
+            logger.warning("[%s] Post-download cleanup failed: %s", self.name, exc)
 
         return DownloadResult.ok(self.name, actual_path, fmt)
 
