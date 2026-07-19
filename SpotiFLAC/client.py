@@ -116,6 +116,7 @@ class AsyncSpotiFLAC:
         if self._sync_extensions_on_enter:
             try:
                 from .extensions.manager import ExtensionManager
+
                 await asyncio.to_thread(ExtensionManager, auto_install_downloads=True)
             except Exception as exc:
                 self._logger.warning("[client] Extension sync skipped: %s", exc)
@@ -191,6 +192,7 @@ class AsyncSpotiFLAC:
 # ---------------------------------------------------------------------------
 # Wrapper sincrono retrocompatibile
 # ---------------------------------------------------------------------------
+
 
 def SpotiFLAC(
     url: str | list[str],

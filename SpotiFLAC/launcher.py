@@ -181,7 +181,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         dest="use_extensions_fallback",
         default=pd.get("auto_pair_extensions", True),
         help="Disable automatic fallback to JS extensions when a native "
-             "provider fails (enabled by default).",
+        "provider fails (enabled by default).",
     )
     parser.add_argument("--loop", "-l", type=int, default=pd.get("loop", None))
     parser.add_argument(

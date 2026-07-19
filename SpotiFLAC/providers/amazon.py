@@ -57,6 +57,7 @@ source_url = "https://open.spotify.com/track/{track_id}"
 # Backward Compatibility for Tagger
 # ---------------------------------------------------------------------------
 
+
 class _APIEndpointsProxy(dict):
     def __getitem__(self, key: str) -> str:
         return get_amazon_endpoint(key)
@@ -75,21 +76,89 @@ API_ENDPOINTS = _APIEndpointsProxy()
 _AMAZON_DEBUG_KEY_SEED = b"spotif" + b"lac:am" + b"azon:spotbye:api:v1"
 _AMAZON_DEBUG_KEY_AAD = bytes(
     [
-        0x61, 0x6D, 0x61, 0x7A, 0x6F, 0x6E, 0x7C, 0x73, 0x70, 0x6F, 0x74,
-        0x62, 0x79, 0x65, 0x7C, 0x64, 0x65, 0x62, 0x75, 0x67, 0x7C, 0x76, 0x31,
+        0x61,
+        0x6D,
+        0x61,
+        0x7A,
+        0x6F,
+        0x6E,
+        0x7C,
+        0x73,
+        0x70,
+        0x6F,
+        0x74,
+        0x62,
+        0x79,
+        0x65,
+        0x7C,
+        0x64,
+        0x65,
+        0x62,
+        0x75,
+        0x67,
+        0x7C,
+        0x76,
+        0x31,
     ]
 )
 _AMAZON_DEBUG_KEY_NONCE = bytes(
     [
-        0x52, 0x1F, 0xA4, 0x9C, 0x13, 0x77, 0x5B, 0xE2, 0x81, 0x44, 0x90, 0x6D,
+        0x52,
+        0x1F,
+        0xA4,
+        0x9C,
+        0x13,
+        0x77,
+        0x5B,
+        0xE2,
+        0x81,
+        0x44,
+        0x90,
+        0x6D,
     ]
 )
 _AMAZON_DEBUG_KEY_CIPHERTEXT_TAG = bytes(
     [
-        0x5B, 0xF9, 0xC1, 0x2E, 0x58, 0xF8, 0x5B, 0xC0, 0x04, 0x68, 0x7E, 0xFF,
-        0x3D, 0xD6, 0x8B, 0xE3, 0x86, 0x49, 0x6C, 0xFD, 0xC1, 0x49, 0x0B, 0xFB,
-        0x6C, 0x21, 0x98, 0x51, 0xF2, 0x38, 0x4B, 0x4A, 0x23, 0xE1, 0xC6, 0xD7,
-        0x65, 0x7F, 0xFB, 0xA1,
+        0x5B,
+        0xF9,
+        0xC1,
+        0x2E,
+        0x58,
+        0xF8,
+        0x5B,
+        0xC0,
+        0x04,
+        0x68,
+        0x7E,
+        0xFF,
+        0x3D,
+        0xD6,
+        0x8B,
+        0xE3,
+        0x86,
+        0x49,
+        0x6C,
+        0xFD,
+        0xC1,
+        0x49,
+        0x0B,
+        0xFB,
+        0x6C,
+        0x21,
+        0x98,
+        0x51,
+        0xF2,
+        0x38,
+        0x4B,
+        0x4A,
+        0x23,
+        0xE1,
+        0xC6,
+        0xD7,
+        0x65,
+        0x7F,
+        0xFB,
+        0xA1,
     ]
 )
 
@@ -169,7 +238,7 @@ class AmazonProvider(BaseProvider):
             raise ValueError(f"Endpoint not found for provider: {provider_key}")
 
         url = f"{base_url}{endpoint}"
-        
+
         req_kwargs = {"timeout": 30}
         if headers:
             req_kwargs["headers"] = headers.copy()
@@ -178,7 +247,9 @@ class AmazonProvider(BaseProvider):
         if payload and method.upper() == "POST":
             req_kwargs["json"] = payload
 
-        return await self._do_request_with_retry(method, url, max_retries=1, **req_kwargs)
+        return await self._do_request_with_retry(
+            method, url, max_retries=1, **req_kwargs
+        )
 
     async def _do_request_with_retry(
         self,
@@ -189,8 +260,9 @@ class AmazonProvider(BaseProvider):
         base_delay_s: float = 2.0,
         **kwargs,
     ) -> httpx.Response:
-        
+
         from ..core.endpoints import get_community_url
+
         comm_url = get_community_url("amazon")
         is_community = bool(comm_url) and url.startswith(comm_url.rstrip("/"))
 
@@ -213,28 +285,38 @@ class AmazonProvider(BaseProvider):
             if is_community:
                 try:
                     record = await asyncio.to_thread(ensure_community_session)
-                    
+
                     body_bytes = b""
                     if "json" in current_kwargs and current_kwargs["json"] is not None:
-                        body_bytes = json.dumps(current_kwargs["json"], separators=(',', ':')).encode('utf-8')
+                        body_bytes = json.dumps(
+                            current_kwargs["json"], separators=(",", ":")
+                        ).encode("utf-8")
                         current_kwargs["content"] = body_bytes
                         current_kwargs["headers"]["Content-Type"] = "application/json"
                         del current_kwargs["json"]
-                    elif "content" in current_kwargs and current_kwargs["content"] is not None:
+                    elif (
+                        "content" in current_kwargs
+                        and current_kwargs["content"] is not None
+                    ):
                         body_bytes = current_kwargs["content"]
-                    elif "data" in current_kwargs and current_kwargs["data"] is not None:
+                    elif (
+                        "data" in current_kwargs and current_kwargs["data"] is not None
+                    ):
                         if isinstance(current_kwargs["data"], str):
-                            body_bytes = current_kwargs["data"].encode('utf-8')
+                            body_bytes = current_kwargs["data"].encode("utf-8")
                         else:
                             body_bytes = current_kwargs["data"]
-                    
+
                     sig_headers = await asyncio.to_thread(
                         sign_community_request, method, url, body_bytes, record
                     )
-                    
+
                     current_kwargs["headers"].update(sig_headers)
                 except Exception as e:
-                    logger.error("[amazon] Fallimento nella firma della richiesta community: %s", e)
+                    logger.error(
+                        "[amazon] Fallimento nella firma della richiesta community: %s",
+                        e,
+                    )
             # ----------------------------------------------------
 
             try:
@@ -243,7 +325,9 @@ class AmazonProvider(BaseProvider):
                 if attempt < max_retries - 1:
                     logger.warning(
                         "[amazon] HTTP request error on attempt %d/%d: %s",
-                        attempt + 1, max_retries, exc,
+                        attempt + 1,
+                        max_retries,
+                        exc,
                     )
                     await asyncio.sleep(base_delay_s * (attempt + 1))
                     continue
@@ -254,7 +338,11 @@ class AmazonProvider(BaseProvider):
                     if response.status_code == 429:
                         retry_after = response.headers.get("Retry-After")
                         try:
-                            delay = float(retry_after) if retry_after else base_delay_s * (attempt + 1)
+                            delay = (
+                                float(retry_after)
+                                if retry_after
+                                else base_delay_s * (attempt + 1)
+                            )
                         except ValueError:
                             delay = base_delay_s * (attempt + 1)
                         delay = min(delay, 10.0)
@@ -263,7 +351,11 @@ class AmazonProvider(BaseProvider):
 
                     logger.warning(
                         "[amazon] Retry %d/%d due to HTTP %d (%s %s)",
-                        attempt + 1, max_retries, response.status_code, method.upper(), url,
+                        attempt + 1,
+                        max_retries,
+                        response.status_code,
+                        method.upper(),
+                        url,
                     )
                     await response.aclose()
                     await asyncio.sleep(delay)
@@ -271,7 +363,7 @@ class AmazonProvider(BaseProvider):
 
             return response
         return response
-    
+
     # ------------------------------------------------------------------
     # Songlink / Fallback -> Amazon URL Resolver
     # ------------------------------------------------------------------
@@ -821,7 +913,8 @@ class AmazonProvider(BaseProvider):
 
         logger.info(
             "[amazon] Fetching track from community API (ASIN: %s, Quality: %s)",
-            asin, quality,
+            asin,
+            quality,
         )
 
         payload = {
@@ -834,13 +927,17 @@ class AmazonProvider(BaseProvider):
             "Accept": "application/json",
         }
 
-        url = community_url.rstrip('/')
+        url = community_url.rstrip("/")
 
         try:
             # _do_request_with_retry riconosce questo URL come community endpoint
             # e applica automaticamente ensure_community_session() + sign_community_request()
             resp = await self._do_request_with_retry(
-                "POST", url, json=payload, headers=headers, timeout=30,
+                "POST",
+                url,
+                json=payload,
+                headers=headers,
+                timeout=30,
             )
         except (httpx.RequestError, httpx.ConnectError) as exc:
             raise SpotiflacError(
@@ -860,11 +957,15 @@ class AmazonProvider(BaseProvider):
             )
 
         data = resp.json()
-        
+
         # Nuova struttura di risposta JSON in base al Go
         stream_url = data.get("stream_url") or data.get("url") or data.get("streamUrl")
         codec = str(data.get("codec", "")).lower().strip()
-        captcha_token = data.get("captcha") or data.get("x-captcha-token") or data.get("xCaptchaToken")
+        captcha_token = (
+            data.get("captcha")
+            or data.get("x-captcha-token")
+            or data.get("xCaptchaToken")
+        )
         api_meta = data.get("metadata", {})
 
         key_specs = data.get("key_specs", [])
@@ -912,7 +1013,11 @@ class AmazonProvider(BaseProvider):
 
         # Logica codec allineata al Go
         target_ext = ".flac"
-        if map_amazon_community_quality(quality) == "atmos" or codec in ("eac3", "ec-3", "ac-3"):
+        if map_amazon_community_quality(quality) == "atmos" or codec in (
+            "eac3",
+            "ec-3",
+            "ac-3",
+        ):
             target_ext = ".m4a"
 
         out = os.path.join(output_dir, f"{asin}{target_ext}")
@@ -1109,7 +1214,9 @@ class AmazonProvider(BaseProvider):
             logger.info("[amazon] Trying Community (ASIN: %s)", asin)
             print_source_banner("amazon", "", fallback_quality)
             try:
-                return await self._download_from_community_api(asin, output_dir, quality)
+                return await self._download_from_community_api(
+                    asin, output_dir, quality
+                )
             except Exception as exc:
                 logger.warning("[amazon] Community failed: %s", exc)
 
@@ -1225,6 +1332,7 @@ class AmazonProvider(BaseProvider):
                 f"All Amazon APIs (including MusicDL) failed. Last error: {exc}",
                 self.name,
             ) from exc
+
     # ------------------------------------------------------------------
     # Metadata Embedding
     # ------------------------------------------------------------------
@@ -1416,12 +1524,14 @@ class AmazonProvider(BaseProvider):
             # --- IMPLEMENTAZIONE DELLA LOGICA DI FALLBACK AMAZON (Atmos -> 24 -> 16) ---
             qualities_to_try = [quality]
             amz_q = map_amazon_community_quality(quality)
-            
+
             allow_atmos_fallback = kwargs.get("allow_atmos_fallback", True)
             atmos_fallback_quality = kwargs.get("atmos_fallback_quality", "24")
 
             if amz_q == "atmos" and allow_atmos_fallback:
-                fallback_q = "16" if str(atmos_fallback_quality).strip() == "16" else "24"
+                fallback_q = (
+                    "16" if str(atmos_fallback_quality).strip() == "16" else "24"
+                )
                 qualities_to_try.append(fallback_q)
                 if fallback_q == "24" and allow_fallback:
                     qualities_to_try.append("16")
@@ -1434,9 +1544,15 @@ class AmazonProvider(BaseProvider):
 
             for q_idx, q_tier in enumerate(qualities_to_try):
                 if q_idx > 0:
-                    logger.info("[amazon] %s failed, falling back to %s-bit FLAC...", qualities_to_try[q_idx-1], q_tier)
+                    logger.info(
+                        "[amazon] %s failed, falling back to %s-bit FLAC...",
+                        qualities_to_try[q_idx - 1],
+                        q_tier,
+                    )
                 try:
-                    downloaded, api_metadata = await self._download_from_api(amazon_url, output_dir, q_tier)
+                    downloaded, api_metadata = await self._download_from_api(
+                        amazon_url, output_dir, q_tier
+                    )
                     if downloaded:
                         break
                 except Exception as e:
@@ -1445,9 +1561,9 @@ class AmazonProvider(BaseProvider):
 
             if not downloaded:
                 raise SpotiflacError(
-                    ErrorKind.UNAVAILABLE, 
-                    f"All requested Amazon qualities failed. Last error: {last_err}", 
-                    self.name
+                    ErrorKind.UNAVAILABLE,
+                    f"All requested Amazon qualities failed. Last error: {last_err}",
+                    self.name,
                 )
             # -----------------------------------------------------------------------------
 

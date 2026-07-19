@@ -940,13 +940,22 @@ class QobuzProvider(BaseProvider):
                         # --- Iniezione firma per le chiamate alla rete Community ---
                         try:
                             record = await asyncio.to_thread(ensure_community_session)
-                            body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+                            body_bytes = json.dumps(
+                                payload, separators=(",", ":")
+                            ).encode("utf-8")
                             sig_headers = await asyncio.to_thread(
-                                sign_community_request, "POST", api_base, body_bytes, record
+                                sign_community_request,
+                                "POST",
+                                api_base,
+                                body_bytes,
+                                record,
                             )
                             post_headers.update(sig_headers)
                         except Exception as e:
-                            logger.error("[qobuz] Fallimento nella firma della richiesta community: %s", e)
+                            logger.error(
+                                "[qobuz] Fallimento nella firma della richiesta community: %s",
+                                e,
+                            )
                         # --------------------------------------------------
 
                     # Attempt request, refresh credentials and retry once on 400/401
@@ -965,13 +974,21 @@ class QobuzProvider(BaseProvider):
                                     post_headers["X-User-Auth-Token"] = (
                                         creds.user_auth_token
                                     )
-                                    
+
                             if api_base in _COMMUNITY_APIS:
                                 try:
-                                    record = await asyncio.to_thread(ensure_community_session)
-                                    body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+                                    record = await asyncio.to_thread(
+                                        ensure_community_session
+                                    )
+                                    body_bytes = json.dumps(
+                                        payload, separators=(",", ":")
+                                    ).encode("utf-8")
                                     sig_headers = await asyncio.to_thread(
-                                        sign_community_request, "POST", api_base, body_bytes, record
+                                        sign_community_request,
+                                        "POST",
+                                        api_base,
+                                        body_bytes,
+                                        record,
                                     )
                                     post_headers.update(sig_headers)
                                 except Exception:

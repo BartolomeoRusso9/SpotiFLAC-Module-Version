@@ -4,12 +4,14 @@ import re
 import asyncio
 import httpx
 
+
 def is_docker():
     """Check whether the script is running inside a Docker container."""
     path = "/proc/1/cgroup"
     return os.path.exists("/.dockerenv") or (
         os.path.isfile(path) and any("docker" in line for line in open(path))
     )
+
 
 # Base command:
 # - Use launcher.py when running from source.
@@ -32,6 +34,7 @@ print("BOT:", bool(bot_token))
 print("CHAT:", chat_id)
 print("CMD:", cmd)
 
+
 async def main():
     # Avvia il processo in modalità asincrona
     process = await asyncio.create_subprocess_exec(
@@ -42,7 +45,9 @@ async def main():
     )
 
     # Regex aggiornata: cattura sia le challenge di Zarz che quelle della nuova Community
-    url_regex = re.compile(r"(https://(?:api\.zarz\.moe|verify\.spotbye\.qzz\.io)\S*challenge\S+)")
+    url_regex = re.compile(
+        r"(https://(?:api\.zarz\.moe|verify\.spotbye\.qzz\.io)\S*challenge\S+)"
+    )
     offset = -1
 
     # Usiamo httpx.AsyncClient() per mantenere viva la connessione HTTP
@@ -50,11 +55,11 @@ async def main():
         while True:
             # Legge l'output di SpotiFLAC riga per riga senza bloccare il thread
             line_bytes = await process.stdout.readline()
-            
+
             if not line_bytes:
                 break  # Fine dell'output (il processo è terminato)
 
-            line = line_bytes.decode('utf-8', errors='replace')
+            line = line_bytes.decode("utf-8", errors="replace")
             sys.stdout.write(line)
             sys.stdout.flush()
 
@@ -77,9 +82,13 @@ async def main():
                             "parse_mode": "HTML",
                         },
                     )
-                    print("🤖 [Docker Wrapper] Telegram notification sent! Waiting for your reply...")
+                    print(
+                        "🤖 [Docker Wrapper] Telegram notification sent! Waiting for your reply..."
+                    )
                 except Exception as e:
-                    print(f"🤖 [Docker Wrapper] Failed to send Telegram notification: {e}")
+                    print(
+                        f"🤖 [Docker Wrapper] Failed to send Telegram notification: {e}"
+                    )
 
                 # Polling asincrono su Telegram
                 waiting = True
@@ -101,7 +110,9 @@ async def main():
                                 if "message" in update and "text" in update["message"]:
 
                                     # Ignora messaggi provenienti da altre chat
-                                    if str(update["message"]["chat"]["id"]) != str(chat_id):
+                                    if str(update["message"]["chat"]["id"]) != str(
+                                        chat_id
+                                    ):
                                         continue
 
                                     text = update["message"]["text"].strip()
@@ -116,9 +127,11 @@ async def main():
                                         )
 
                                         # Inietta asincronamente il grant nello stdin del terminale virtuale
-                                        process.stdin.write(text.encode('utf-8') + b"\n")
+                                        process.stdin.write(
+                                            text.encode("utf-8") + b"\n"
+                                        )
                                         await process.stdin.drain()
-                                        
+
                                         waiting = False
                                         break
 
@@ -131,6 +144,7 @@ async def main():
     # Attende la chiusura del processo in modo pulito
     await process.wait()
     return process.returncode
+
 
 if __name__ == "__main__":
     # Avvia l'event loop di asyncio

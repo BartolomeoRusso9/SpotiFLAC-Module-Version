@@ -632,7 +632,7 @@ async def _fetch_tidal_url_once_async(
     is_post_api = api_cleaning in _CLEAN_POST_APIS
     quality = _normalize_quality(quality)
     headers = {"User-Agent": _POST_USER_AGENT[0] if is_post_api else _TIDAL_USER_AGENT}
-    
+
     is_community = False
     try:
         if (
@@ -683,13 +683,22 @@ async def _fetch_tidal_url_once_async(
                 if is_community:
                     try:
                         record = await asyncio.to_thread(ensure_community_session)
-                        body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+                        body_bytes = json.dumps(payload, separators=(",", ":")).encode(
+                            "utf-8"
+                        )
                         sig_headers = await asyncio.to_thread(
-                            sign_community_request, "POST", api_cleaning, body_bytes, record
+                            sign_community_request,
+                            "POST",
+                            api_cleaning,
+                            body_bytes,
+                            record,
                         )
                         req_headers.update(sig_headers)
                     except Exception as e:
-                        logger.error("[tidal] Fallimento nella firma della richiesta community: %s", e)
+                        logger.error(
+                            "[tidal] Fallimento nella firma della richiesta community: %s",
+                            e,
+                        )
                 # --------------------------------------------------
 
                 resp = await client.post(
@@ -698,7 +707,7 @@ async def _fetch_tidal_url_once_async(
                     headers=req_headers,
                     timeout=timeout_s,
                 )
-                
+
                 if quality == "DOLBY_ATMOS":
                     if resp.status_code == 429:
                         wait_s = float(

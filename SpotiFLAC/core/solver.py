@@ -319,12 +319,14 @@ async def _solve_impl(
         if raw and raw != "null":
             return json.loads(raw)
         return None
-    
+
     async def _has_native_widget() -> bool:
         rect = await get_cf_iframe_rect()
         return rect is not None
 
-    async def _wait_for_native_widget(min_wait: float = 6.0, poll_interval: float = 0.5) -> bool:
+    async def _wait_for_native_widget(
+        min_wait: float = 6.0, poll_interval: float = 0.5
+    ) -> bool:
         """
         Aspetta fino a `min_wait` secondi che compaia il widget Turnstile
         NATIVO della pagina (quello che nel browser reale appare dopo ~5s

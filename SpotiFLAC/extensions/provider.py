@@ -376,7 +376,11 @@ class JSExtensionProvider(BaseProvider):
                 if stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4"):
                     if stale.exists() and stale.stat().st_size == 0:
                         stale.unlink()
-                        logger.debug("[%s] Removed stale zero-byte file: %s", self.name, stale.name)
+                        logger.debug(
+                            "[%s] Removed stale zero-byte file: %s",
+                            self.name,
+                            stale.name,
+                        )
         except Exception:
             pass
 
@@ -576,14 +580,16 @@ class JSExtensionProvider(BaseProvider):
         import re
 
         def _natural_sort_key(p) -> tuple:
-            m = re.search(r'(\d+)(?!.*\d)', p.stem)
+            m = re.search(r"(\d+)(?!.*\d)", p.stem)
             return (int(m.group(1)) if m else 0, p.name)
 
         segments: list[str] = list(dl_result.get("segments") or [])
 
         logger.debug(
             "[%s] bridge-provided segments (count=%d): %s",
-            self.name, len(segments), segments[:3] + ["..."] if len(segments) > 3 else segments,
+            self.name,
+            len(segments),
+            segments[:3] + ["..."] if len(segments) > 3 else segments,
         )
 
         if not segments:
@@ -600,14 +606,18 @@ class JSExtensionProvider(BaseProvider):
             )
 
             ordered = [
-                p for p in (init_candidates + media_candidates)
+                p
+                for p in (init_candidates + media_candidates)
                 if p.exists() and p.stat().st_size > 0
             ]
             segments = [str(p) for p in ordered]
 
             logger.debug(
                 "[%s] fallback glob found %d segment file(s) (init=%d, media=%d), first=%s last=%s",
-                self.name, len(segments), len(init_candidates), len(media_candidates),
+                self.name,
+                len(segments),
+                len(init_candidates),
+                len(media_candidates),
                 segments[0] if segments else None,
                 segments[-1] if segments else None,
             )
