@@ -31,6 +31,12 @@ from ..core.tagger import EmbedOptions, embed_metadata_async
 from .base import BaseProvider
 from .tidal import _find_isrc_via_qobuz
 
+# Importiamo la logica di firma e validazione sessione per la Community
+from ..core.signed_session_desktop import (
+    ensure_community_session,
+    sign_community_request,
+)
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_UA = (
@@ -44,20 +50,11 @@ _S_UA = (
     "Chrome/149.0.0.0 Safari/537.36"
 )
 
-# Headers da usare per le richieste "community" verso mirror Amazon
-_COMMUNITY_POST_HEADERS = {
-    "User-Agent": "SpotiFLAC/7.1.9",
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-    "x-api-key": "explore-obscure-chivalry-travesty-blinks",
-}
-
 source_url = "https://open.spotify.com/track/{track_id}"
 
 # ---------------------------------------------------------------------------
 # Backward Compatibility for Tagger
 # ---------------------------------------------------------------------------
-
 
 class _APIEndpointsProxy(dict):
     """
@@ -82,89 +79,21 @@ API_ENDPOINTS = _APIEndpointsProxy()
 _AMAZON_DEBUG_KEY_SEED = b"spotif" + b"lac:am" + b"azon:spotbye:api:v1"
 _AMAZON_DEBUG_KEY_AAD = bytes(
     [
-        0x61,
-        0x6D,
-        0x61,
-        0x7A,
-        0x6F,
-        0x6E,
-        0x7C,
-        0x73,
-        0x70,
-        0x6F,
-        0x74,
-        0x62,
-        0x79,
-        0x65,
-        0x7C,
-        0x64,
-        0x65,
-        0x62,
-        0x75,
-        0x67,
-        0x7C,
-        0x76,
-        0x31,
+        0x61, 0x6D, 0x61, 0x7A, 0x6F, 0x6E, 0x7C, 0x73, 0x70, 0x6F, 0x74,
+        0x62, 0x79, 0x65, 0x7C, 0x64, 0x65, 0x62, 0x75, 0x67, 0x7C, 0x76, 0x31,
     ]
 )
 _AMAZON_DEBUG_KEY_NONCE = bytes(
     [
-        0x52,
-        0x1F,
-        0xA4,
-        0x9C,
-        0x13,
-        0x77,
-        0x5B,
-        0xE2,
-        0x81,
-        0x44,
-        0x90,
-        0x6D,
+        0x52, 0x1F, 0xA4, 0x9C, 0x13, 0x77, 0x5B, 0xE2, 0x81, 0x44, 0x90, 0x6D,
     ]
 )
 _AMAZON_DEBUG_KEY_CIPHERTEXT_TAG = bytes(
     [
-        0x5B,
-        0xF9,
-        0xC1,
-        0x2E,
-        0x58,
-        0xF8,
-        0x5B,
-        0xC0,
-        0x04,
-        0x68,
-        0x7E,
-        0xFF,
-        0x3D,
-        0xD6,
-        0x8B,
-        0xE3,
-        0x86,
-        0x49,
-        0x6C,
-        0xFD,
-        0xC1,
-        0x49,
-        0x0B,
-        0xFB,
-        0x6C,
-        0x21,
-        0x98,
-        0x51,
-        0xF2,
-        0x38,
-        0x4B,
-        0x4A,
-        0x23,
-        0xE1,
-        0xC6,
-        0xD7,
-        0x65,
-        0x7F,
-        0xFB,
-        0xA1,
+        0x5B, 0xF9, 0xC1, 0x2E, 0x58, 0xF8, 0x5B, 0xC0, 0x04, 0x68, 0x7E, 0xFF,
+        0x3D, 0xD6, 0x8B, 0xE3, 0x86, 0x49, 0x6C, 0xFD, 0xC1, 0x49, 0x0B, 0xFB,
+        0x6C, 0x21, 0x98, 0x51, 0xF2, 0x38, 0x4B, 0x4A, 0x23, 0xE1, 0xC6, 0xD7,
+        0x65, 0x7F, 0xFB, 0xA1,
     ]
 )
 
@@ -246,21 +175,18 @@ class AmazonProvider(BaseProvider):
             raise ValueError(f"Endpoint not found for provider: {provider_key}")
 
         url = f"{base_url}{endpoint}"
+        
+        req_kwargs = {"timeout": 30}
+        if headers:
+            req_kwargs["headers"] = headers.copy()
+        if params:
+            req_kwargs["params"] = params
+        if payload and method.upper() == "POST":
+            req_kwargs["json"] = payload
 
-        # Se questa base corrisponde all'endpoint community registrato, applica gli header specifici
-        hdrs = headers or {}
-        try:
-            community_url = get_amazon_endpoint("community")
-            if community_url and base_url.rstrip("/") == community_url.rstrip("/"):
-                hdrs = {**hdrs, **_COMMUNITY_POST_HEADERS}
-        except Exception:
-            pass
-
-        if method.upper() == "POST":
-            return await self._async_http.post(
-                url, json=payload, headers=hdrs, timeout=30
-            )
-        return await self._async_http.get(url, params=params, headers=hdrs, timeout=30)
+        # Delegating to _do_request_with_retry ensures that Community requests
+        # get signed headers correctly.
+        return await self._do_request_with_retry(method, url, max_retries=1, **req_kwargs)
 
     async def _do_request_with_retry(
         self,
@@ -271,6 +197,54 @@ class AmazonProvider(BaseProvider):
         base_delay_s: float = 2.0,
         **kwargs,
     ) -> httpx.Response:
+        
+        # --- Iniezione firma per le chiamate alla rete Community ---
+        is_community = "spotbye" in url or "qzz.io" in url
+        try:
+            from ..core.endpoints import get_community_url
+            comm_url = get_community_url("amazon")
+            if comm_url and url.startswith(comm_url):
+                is_community = True
+        except ImportError:
+            pass
+
+        if is_community:
+            try:
+                # 1. Recupero/Verifica sessione (bloccante -> in un thread per non fermare il loop)
+                record = await asyncio.to_thread(ensure_community_session)
+                
+                headers = kwargs.get("headers", {})
+                if headers is None:
+                    headers = {}
+                else:
+                    headers = dict(headers)
+                
+                # 2. Estrazione corpo in byte per il calcolo dell'HMAC
+                body_bytes = b""
+                if "json" in kwargs and kwargs["json"] is not None:
+                    body_bytes = json.dumps(kwargs["json"], separators=(',', ':')).encode('utf-8')
+                    kwargs["content"] = body_bytes
+                    headers["Content-Type"] = "application/json"
+                    del kwargs["json"]
+                elif "content" in kwargs and kwargs["content"] is not None:
+                    body_bytes = kwargs["content"]
+                elif "data" in kwargs and kwargs["data"] is not None:
+                    if isinstance(kwargs["data"], str):
+                        body_bytes = kwargs["data"].encode('utf-8')
+                    else:
+                        body_bytes = kwargs["data"]
+                
+                # 3. Firma della richiesta (genera gli header HMAC)
+                sig_headers = await asyncio.to_thread(
+                    sign_community_request, method, url, body_bytes, record
+                )
+                
+                headers.update(sig_headers)
+                kwargs["headers"] = headers
+            except Exception as e:
+                logger.error("[amazon] Fallimento nella firma della richiesta community: %s", e)
+        # --------------------------------------------------
+
         retry_statuses = {429, 500, 502, 503, 504}
         client = await self._async_http._client()
 
