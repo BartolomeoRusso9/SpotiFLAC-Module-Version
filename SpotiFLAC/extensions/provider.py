@@ -371,6 +371,15 @@ class JSExtensionProvider(BaseProvider):
             extension=ext_hint,
         )
 
+        try:
+            for stale in output_path.parent.glob(f"{output_path.stem}.*"):
+                if stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4"):
+                    if stale.exists() and stale.stat().st_size == 0:
+                        stale.unlink()
+                        logger.info("[%s] Removed stale zero-byte file: %s", self.name, stale.name)
+        except Exception as exc:
+            logger.warning("[%s] Stale file cleanup failed: %s", self.name, exc)
+
         if self._file_exists(output_path):
             return DownloadResult.skipped_result(
                 self.name,
@@ -547,21 +556,44 @@ class JSExtensionProvider(BaseProvider):
         ):
             return file_path
 
-        segments: list[str] = dl_result.get("segments") or []
+        import re
+
+        def _natural_sort_key(p) -> tuple:
+            m = re.search(r'(\d+)(?!.*\d)', p.stem)
+            return (int(m.group(1)) if m else 0, p.name)
+
+        segments: list[str] = list(dl_result.get("segments") or [])
+
+        logger.debug(
+            "[%s] bridge-provided segments (count=%d): %s",
+            self.name, len(segments), segments[:3] + ["..."] if len(segments) > 3 else segments,
+        )
 
         if not segments:
             parent = output_path.parent
             stem = output_path.stem
-            candidates = sorted(
+
+            init_candidates = sorted(parent.glob(f"{stem}.init*"))
+            media_candidates = sorted(
                 parent.glob(f"{stem}.part*"),
-                key=lambda p: p.name,
+                key=_natural_sort_key,
             ) or sorted(
                 parent.glob(f"{stem}.seg*"),
-                key=lambda p: p.name,
+                key=_natural_sort_key,
             )
-            segments = [
-                str(p) for p in candidates if p.exists() and p.stat().st_size > 0
+
+            ordered = [
+                p for p in (init_candidates + media_candidates)
+                if p.exists() and p.stat().st_size > 0
             ]
+            segments = [str(p) for p in ordered]
+
+            logger.debug(
+                "[%s] fallback glob found %d segment file(s) (init=%d, media=%d), first=%s last=%s",
+                self.name, len(segments), len(init_candidates), len(media_candidates),
+                segments[0] if segments else None,
+                segments[-1] if segments else None,
+            )
 
         if not segments:
             return None
@@ -634,7 +666,7 @@ class JSExtensionProvider(BaseProvider):
                     pass
 
         if rc != 0:
-            logger.error("[%s] ffmpeg mux failed: %s", self.name, stderr[:300])
+            logger.error("[%s] ffmpeg mux failed: %s", self.name, stderr[:15000])
             if final_dest.exists():
                 final_dest.unlink(missing_ok=True)
             return None

@@ -190,58 +190,60 @@ class AmazonProvider(BaseProvider):
         **kwargs,
     ) -> httpx.Response:
         
-        # --- Iniezione firma per le chiamate alla rete Community ---
         from ..core.endpoints import get_community_url
         comm_url = get_community_url("amazon")
         is_community = bool(comm_url) and url.startswith(comm_url.rstrip("/"))
 
-        if is_community:
-            try:
-                record = await asyncio.to_thread(ensure_community_session)
-                
-                headers = kwargs.get("headers", {})
-                if headers is None:
-                    headers = {}
-                else:
-                    headers = dict(headers)
-                
-                body_bytes = b""
-                if "json" in kwargs and kwargs["json"] is not None:
-                    body_bytes = json.dumps(kwargs["json"], separators=(',', ':')).encode('utf-8')
-                    kwargs["content"] = body_bytes
-                    headers["Content-Type"] = "application/json"
-                    del kwargs["json"]
-                elif "content" in kwargs and kwargs["content"] is not None:
-                    body_bytes = kwargs["content"]
-                elif "data" in kwargs and kwargs["data"] is not None:
-                    if isinstance(kwargs["data"], str):
-                        body_bytes = kwargs["data"].encode('utf-8')
-                    else:
-                        body_bytes = kwargs["data"]
-                
-                sig_headers = await asyncio.to_thread(
-                    sign_community_request, method, url, body_bytes, record
-                )
-                
-                headers.update(sig_headers)
-                kwargs["headers"] = headers
-            except Exception as e:
-                logger.error("[amazon] Fallimento nella firma della richiesta community: %s", e)
-        # --------------------------------------------------
-
         retry_statuses = {429, 500, 502, 503, 504}
         client = await self._async_http._client()
 
+        # Salviamo gli argomenti originali per non "sporcarli" tra un retry e l'altro
+        original_kwargs = dict(kwargs)
+        if "headers" in original_kwargs and original_kwargs["headers"] is not None:
+            original_kwargs["headers"] = dict(original_kwargs["headers"])
+        else:
+            original_kwargs["headers"] = {}
+
         for attempt in range(max_retries):
+            # Ricreiamo gli argomenti freschi per questo specifico tentativo
+            current_kwargs = dict(original_kwargs)
+            current_kwargs["headers"] = dict(original_kwargs["headers"])
+
+            # --- Generazione firma "fresca" ad ogni tentativo ---
+            if is_community:
+                try:
+                    record = await asyncio.to_thread(ensure_community_session)
+                    
+                    body_bytes = b""
+                    if "json" in current_kwargs and current_kwargs["json"] is not None:
+                        body_bytes = json.dumps(current_kwargs["json"], separators=(',', ':')).encode('utf-8')
+                        current_kwargs["content"] = body_bytes
+                        current_kwargs["headers"]["Content-Type"] = "application/json"
+                        del current_kwargs["json"]
+                    elif "content" in current_kwargs and current_kwargs["content"] is not None:
+                        body_bytes = current_kwargs["content"]
+                    elif "data" in current_kwargs and current_kwargs["data"] is not None:
+                        if isinstance(current_kwargs["data"], str):
+                            body_bytes = current_kwargs["data"].encode('utf-8')
+                        else:
+                            body_bytes = current_kwargs["data"]
+                    
+                    sig_headers = await asyncio.to_thread(
+                        sign_community_request, method, url, body_bytes, record
+                    )
+                    
+                    current_kwargs["headers"].update(sig_headers)
+                except Exception as e:
+                    logger.error("[amazon] Fallimento nella firma della richiesta community: %s", e)
+            # ----------------------------------------------------
+
             try:
-                response = await client.request(method, url, **kwargs)
+                response = await client.request(method, url, **current_kwargs)
             except httpx.RequestError as exc:
                 if attempt < max_retries - 1:
                     logger.warning(
                         "[amazon] HTTP request error on attempt %d/%d: %s",
-                        attempt + 1,
-                        max_retries,
-                        exc,
+                        attempt + 1, max_retries, exc,
                     )
                     await asyncio.sleep(base_delay_s * (attempt + 1))
                     continue
@@ -252,11 +254,7 @@ class AmazonProvider(BaseProvider):
                     if response.status_code == 429:
                         retry_after = response.headers.get("Retry-After")
                         try:
-                            delay = (
-                                float(retry_after)
-                                if retry_after
-                                else base_delay_s * (attempt + 1)
-                            )
+                            delay = float(retry_after) if retry_after else base_delay_s * (attempt + 1)
                         except ValueError:
                             delay = base_delay_s * (attempt + 1)
                         delay = min(delay, 10.0)
@@ -265,11 +263,7 @@ class AmazonProvider(BaseProvider):
 
                     logger.warning(
                         "[amazon] Retry %d/%d due to HTTP %d (%s %s)",
-                        attempt + 1,
-                        max_retries,
-                        response.status_code,
-                        method.upper(),
-                        url,
+                        attempt + 1, max_retries, response.status_code, method.upper(), url,
                     )
                     await response.aclose()
                     await asyncio.sleep(delay)
@@ -277,7 +271,7 @@ class AmazonProvider(BaseProvider):
 
             return response
         return response
-
+    
     # ------------------------------------------------------------------
     # Songlink / Fallback -> Amazon URL Resolver
     # ------------------------------------------------------------------
