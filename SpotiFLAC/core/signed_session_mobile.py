@@ -1,4 +1,4 @@
-# SpotiFLAC/core/signed_session.py
+# SpotiFLAC/core/signed_session_mobile.py
 
 from __future__ import annotations
 

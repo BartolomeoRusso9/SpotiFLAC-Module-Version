@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import hmac
@@ -10,16 +11,30 @@ import urllib.parse
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from ..core.endpoints import get_community_url
 import queue
 import requests
 import logging
+
+from ..core.endpoints import get_community_url
 
 logger = logging.getLogger(__name__)
 
 # Costanti
 COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
 COMMUNITY_VERIFY_TIMEOUT = 300  # secondi (5 minuti)
+
+def is_docker() -> bool:
+    """Rileva se il codice è in esecuzione dentro un container Docker."""
+    cgroup_path = "/proc/1/cgroup"
+    if os.path.exists("/.dockerenv"):
+        return True
+    if os.path.isfile(cgroup_path):
+        try:
+            with open(cgroup_path) as f:
+                return any("docker" in line for line in f)
+        except OSError:
+            return False
+    return False
 
 def fetch_latest_version() -> str:
     url = "https://api.github.com/repos/spotbye/SpotiFLAC/releases/latest"
@@ -56,7 +71,7 @@ class CommunitySessionExchange:
 
 
 def ensure_app_dir() -> str:
-    """Mock di EnsureAppDir(). Restituisce la cartella dell'app."""
+    """Restituisce la cartella dell'app."""
     app_dir = os.path.expanduser("~/.spotiflac")
     os.makedirs(app_dir, exist_ok=True)
     return app_dir
@@ -142,6 +157,21 @@ def clear_community_session_credentials():
         except Exception:
             pass
 
+def _run_manual_terminal_verification(challenge_url: str) -> str:
+    """
+    Fallback da terminale (o Docker/Telegram).
+    Mostra l'URL e attende l'input dell'utente su sys.stdin.
+    """
+    print(f"\n[SpotiFLAC] Verification required — open this link in the browser:\n  {challenge_url}\n")
+    try:
+        grant = input("Incolla qui il grant (da DevTools → Network → verify → Preview → field 'grant'): ")
+        grant = grant.strip()
+        if not grant:
+            raise RuntimeError("No grant provided.")
+        return grant
+    except EOFError:
+        raise Exception("verification cancelled (EOF)")
+
 def run_community_verification(record: CommunitySessionRecord) -> str:
     grant_queue = queue.Queue(maxsize=1)
     callback_state = community_random_hex(16)
@@ -153,6 +183,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 self.send_error(404)
                 return
                 
+            # Errore di battitura corretto qui: parse_qs
             qs = urllib.parse.parse_qs(parsed_path.query)
             state = qs.get("state", [""])[0]
             
@@ -222,24 +253,55 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
         challenge_qs = urllib.parse.parse_qs(parsed_challenge.query)
         challenge_qs["cb"] = [callback_url]
         
-        # Ricostruiamo l'URL
         new_query = urllib.parse.urlencode(challenge_qs, doseq=True)
         final_challenge_url = urllib.parse.urlunparse(parsed_challenge._replace(query=new_query))
         
+        # === MODO 1: GUI Integrata (Se configurata tramite la UI di SpotiFLAC) ===
         with community_browser_mu:
             open_browser = community_browser_open
             
-        if not open_browser:
-            raise Exception("browser integration is not ready")
-            
-        open_browser(final_challenge_url)
+        if open_browser:
+            open_browser(final_challenge_url)
+            try:
+                grant = grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
+                return grant
+            except queue.Empty:
+                raise Exception("verification timed out (GUI browser)")
 
-        # Attendiamo il grant
-        try:
-            grant = grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
-            return grant
-        except queue.Empty:
-            raise Exception("verification timed out")
+        # === MODO 2: Automazione via solver.py (Playwright/Selenium) ===
+        if not is_docker():
+            logger.info("Attempting automated verification via solver.py...")
+            try:
+                from ..core.solver import solve_with_callback
+                
+                # Prova ad estrarre la sitekey se esposta nella pagina HTML
+                sitekey = ""
+                try:
+                    html_resp = requests.get(final_challenge_url, timeout=10)
+                    for pattern in (r'data-sitekey=["\']([0-9A-Za-z_-]{10,})["\']', r'sitekey=([0-9A-Za-z_-]{10,})'):
+                        match = re.search(pattern, html_resp.text)
+                        if match:
+                            sitekey = match.group(1)
+                            break
+                except Exception:
+                    pass
+
+                # Invoca il solver (sincrono)
+                token, grant = solve_with_callback(sitekey, final_challenge_url, 60, 3.0)
+                if grant:
+                    logger.info("Automated verification successful!")
+                    return grant
+                else:
+                    logger.warning("Solver finished but no grant was found in network traffic.")
+                    
+            except ImportError:
+                logger.info("solver.py not found or Playwright dependencies missing.")
+            except Exception as e:
+                logger.warning(f"Automated verification failed: {e}")
+
+        # === MODO 3: Fallback Manuale via Terminale (Es. Bot Telegram / Docker) ===
+        logger.info("Falling back to manual terminal input.")
+        return _run_manual_terminal_verification(final_challenge_url)
             
     finally:
         server.shutdown()
