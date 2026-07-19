@@ -92,7 +92,12 @@ def set_community_verification_handlers(open_browser_func, foreground_func):
 def community_session_path() -> str:
     directory = ensure_app_dir()
     os.chmod(directory, 0o700)
-    return os.path.join(directory, "community_session.json")
+
+    signed_sessions_dir = os.path.join(directory, "signed_sessions")
+    os.makedirs(signed_sessions_dir, exist_ok=True)
+    os.chmod(signed_sessions_dir, 0o700)
+
+    return os.path.join(signed_sessions_dir, "community_sessions.json")
 
 
 def load_community_session() -> CommunitySessionRecord:
