@@ -6,29 +6,15 @@ Minimum use:
     SpotiFLAC("URL_SPOTIFY", "./downloads")
 
 Advanced use:
-    SpotiFLAC(
-        url="URL_SPOTIFY",
-        output_dir="./Music",
-        services=["qobuz", "tidal"],
-        enrich_metadata=True,
-        embed_lyrics=True,
-        quality="LOSSLESS",
-        track_max_retries=2,
-        post_download_action="open_folder",
-    )
-
-Batch (more URL):
-    SpotiFLAC(
-        url=["URL_1", "URL_2", "URL_3"],
-        output_dir="./Music",
-    )
+    from SpotiFLAC import AsyncSpotiFLAC
+    # Vedi documentazione per l'uso asincrono avanzato
 """
 
 from __future__ import annotations
-import logging
 import importlib.metadata
-import sys
-import asyncio
+
+# Unica implementazione canonica del client (sia sincrono che asincrono)
+from .client import SpotiFLAC, AsyncSpotiFLAC
 
 from .downloader import SpotiflacDownloader, DownloadOptions
 from .providers import (
@@ -45,17 +31,13 @@ from .providers import (
 )
 from .core import TrackMetadata, DownloadResult
 
-# NOTE: no "from .extensions import ExtensionManager" at module level.
-# _sync_extensions() already does the local import — importing it here would force loading
-# the entire extensions package (and its dependencies, e.g. httpx) every time
-# SpotiFLAC is imported, even when sync_extensions=False or extensions are never used.
-
 try:
     __version__ = importlib.metadata.version("SpotiFLAC")
 except importlib.metadata.PackageNotFoundError:
     __version__ = "unknown"
 
 __all__ = [
+    "AsyncSpotiFLAC",
     "SpotiFLAC",
     "SpotiflacDownloader",
     "DownloadOptions",
@@ -72,131 +54,3 @@ __all__ = [
     "TrackMetadata",
     "DownloadResult",
 ]
-
-
-def _setup_logger(level: int):
-    logger = logging.getLogger("SpotiFLAC")
-    if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-    logger.setLevel(level)
-    return logger
-
-
-def _sync_extensions(logger: "logging.Logger") -> None:
-    """
-    Syncs download-category JS extensions from official registry.
-    Never blocks execution: any error becomes just a warning.
-    """
-    try:
-        from .extensions import ExtensionManager
-
-        em = ExtensionManager()
-        status = em.sync_download_extensions()
-        for ext_id, result in status.items():
-            if result.startswith("error"):
-                logger.warning("[Extensions] %s: %s", ext_id, result)
-            elif result.startswith(("installed", "updated")):
-                logger.info("[Extensions] %s: %s", ext_id, result)
-            # "up_to_date" is not logged to avoid noise on every run
-    except Exception as e:
-        logger.warning("[Extensions] Startup sync failed (non-blocking): %s", e)
-
-
-def SpotiFLAC(
-    url: str | list[str],
-    output_dir: str,
-    services: list[str] | None = None,
-    filename_format: str = "{title} - {artist}",
-    use_track_numbers: bool = False,
-    use_album_track_numbers: bool = False,
-    use_artist_subfolders: bool = False,
-    use_album_subfolders: bool = False,
-    loop: int | None = None,
-    allow_fallback: bool = True,
-    quality: str = "LOSSLESS",
-    first_artist_only: bool = False,
-    include_featuring: bool = False,
-    log_level: int = logging.WARNING,
-    output_path: str | None = None,
-    embed_lyrics: bool = True,
-    lyrics_providers: list[str] | None = None,
-    enrich_metadata: bool = True,
-    enrich_providers: list[str] | None = None,
-    qobuz_token: str | None = None,
-    qobuz_local_api_url: str | None = None,
-    track_max_retries: int = 0,
-    post_download_action: str = "none",
-    post_download_command: str = "",
-    tidal_custom_api: str | None = None,
-    timeout_s: int | None = None,
-    sync_extensions: bool = True,
-    use_extensions_fallback: bool = True,
-) -> None:
-    """
-    Download tracks/album/playlist from Spotify, Tidal, Apple Music, Deezer, SoundCloud, Pandora and YouTube.
-
-    Args:
-        url: single URL (str) or list of URLs (list[str]) for batch.
-        output_dir: Destination folder.
-        services: Providers in priority order (default: ["tidal"]).
-        track_max_retries: Extra retry attempts per track on failure (default: 0).
-        post_download_action: Action after completion — "none" | "open_folder" | "notify" | "command".
-        post_download_command: Shell command to run with {folder}, {succeeded}, {failed}.
-        sync_extensions: If True (default), syncs JS extensions of "download" category on startup
-            from official registry (installs missing ones, updates those with newer versions available).
-    """
-    logger = _setup_logger(log_level)
-
-    if sync_extensions:
-        _sync_extensions(logger)
-
-    opts = DownloadOptions(
-        output_dir=output_dir,
-        services=services or ["tidal"],
-        filename_format=filename_format,
-        use_track_numbers=use_track_numbers,
-        use_album_track_numbers=use_album_track_numbers,
-        use_artist_subfolders=use_artist_subfolders,
-        allow_fallback=allow_fallback,
-        use_album_subfolders=use_album_subfolders,
-        quality=quality,
-        first_artist_only=first_artist_only,
-        include_featuring=include_featuring,
-        output_path=output_path,
-        embed_lyrics=embed_lyrics,
-        lyrics_providers=lyrics_providers
-        or ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
-        enrich_metadata=enrich_metadata,
-        enrich_providers=enrich_providers
-        or ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
-        qobuz_token=qobuz_token,
-        qobuz_local_api_url=qobuz_local_api_url,
-        track_max_retries=track_max_retries,
-        post_download_action=post_download_action,
-        post_download_command=post_download_command,
-        tidal_custom_api=tidal_custom_api,
-        timeout_s=timeout_s,
-        auto_pair_extensions=use_extensions_fallback,
-    )
-
-    try:
-        downloader = SpotiflacDownloader(opts)
-
-        # Handle starting the async loop in a safe way
-        # (covers both standard calls and calls from already-async contexts such as Jupyter)
-        try:
-            asyncio.run(downloader.run_async(url, loop_minutes=loop))
-        except RuntimeError:
-            # Fallback if an event loop is already running in the current thread
-            loop_instance = asyncio.get_event_loop()
-            loop_instance.run_until_complete(
-                downloader.run_async(url, loop_minutes=loop)
-            )
-
-    except KeyboardInterrupt:
-        print("\n\n[!] Operation interrupted by user.")
-    except Exception as e:
-        logging.getLogger("SpotiFLAC").error("Critical error during execution: %s", e)

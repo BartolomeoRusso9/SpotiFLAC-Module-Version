@@ -9,14 +9,6 @@ asyncio.run() internally). It uses `SpotiflacDownloader` directly, which is
 already 100% async-native, and that is why `check_for_updates_async`
 and `run_interactive()` can now be awaited in the same loop instead of
 opening a new one each time.
-
-New flags vs previous version:
-  --retries N               Extra download attempts per track (default: 0)
-  --post-action ACTION      Action after all downloads finish (none|open_folder|notify|command)
-  --post-command CMD        Shell command to run when --post-action=command
-  --profile NAME            Load a saved profile before parsing remaining args
-  --save-profile NAME       Save current args as a named profile after run
-  --timeout SECONDS         Max seconds per track download; track skipped if exceeded
 """
 
 import argparse
@@ -337,7 +329,7 @@ async def _run_download_async(
     """
     Bridge async verso SpotiflacDownloader, senza passare per il wrapper
     sincrono `SpotiFLAC()` (che farebbe un `asyncio.run()` annidato e
-    would fail because we are already inside a loop).
+    fallirebbe).
     """
     logger = logging.getLogger("SpotiFLAC")
     if not logger.handlers:
@@ -388,7 +380,6 @@ async def amain() -> None:
     """
     from .core.ffmpeg_check import print_ffmpeg_warning
 
-    # Controllo aggiornamenti non bloccante: non deve mai impedire l'avvio.
     try:
         await check_for_updates_async()
     except Exception:
@@ -402,14 +393,12 @@ async def amain() -> None:
     except Exception as e:
         print(f"  ⚠️ Impossibile verificare le estensioni: {e}")
 
-    # GUI mode (explicit --gui flag) — resta sincrona: la GUI gestisce il proprio loop.
     if "--gui" in sys.argv:
         from .app import run_gui
 
         run_gui()
         return
 
-    # Interactive mode (explicit --interactive flag)
     if "--interactive" in sys.argv:
         print_ffmpeg_warning()
         cfg = await run_interactive()
@@ -467,7 +456,6 @@ async def amain() -> None:
         parser.print_help()
         return
 
-    # ── CLI mode ──────────────────────────────────────────────────────
     print_ffmpeg_warning()
     profile_defaults: dict = {}
     if "--profile" in sys.argv:
@@ -480,7 +468,6 @@ async def amain() -> None:
 
     args = parse_args(profile_defaults=merged_defaults)
 
-    # Check that URL and output_dir are provided for CLI mode
     if not args.url or not args.output_dir:
         parser = argparse.ArgumentParser(
             prog="spotiflac",
@@ -585,7 +572,10 @@ async def amain() -> None:
 
 
 def main() -> None:
-    asyncio.run(amain())
+    try:
+        asyncio.run(amain())
+    except KeyboardInterrupt:
+        print("\n\n[!] Operation interrupted by user.")
 
 
 if __name__ == "__main__":

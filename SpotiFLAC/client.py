@@ -111,17 +111,11 @@ class AsyncSpotiFLAC:
     # ------------------------------------------------------------------
 
     async def __aenter__(self) -> "AsyncSpotiFLAC":
-        # Inizializza (lazy, ma esplicito qui) l'httpx.AsyncClient condiviso
-        # per l'event loop corrente. NetworkManager fa già connection
-        # pooling e dedup per-loop; chiamarlo qui dentro __aenter__ assicura
-        # che il client sia pronto PRIMA che qualunque provider lo usi,
-        # evitando la creazione lazy sparsa nel primo metodo chiamato.
         await NetworkManager.get_async_client_safe()
 
         if self._sync_extensions_on_enter:
             try:
                 from .extensions.manager import ExtensionManager
-
                 await asyncio.to_thread(ExtensionManager, auto_install_downloads=True)
             except Exception as exc:
                 self._logger.warning("[client] Extension sync skipped: %s", exc)
@@ -138,7 +132,6 @@ class AsyncSpotiFLAC:
         await self.aclose()
 
     async def aclose(self) -> None:
-        """Chiude il client HTTP condiviso legato all'event loop corrente."""
         await NetworkManager.aclose_loop_client()
         self._entered = False
 
@@ -149,26 +142,16 @@ class AsyncSpotiFLAC:
     async def download_track(
         self, url: str, *, loop_minutes: int | None = None
     ) -> list[TrackMetadata]:
-        """
-        Scarica una singola URL (track/album/playlist/artista/URL nativo di
-        un altro provider). Restituisce le eventuali tracce fallite
-        (per un'eventuale retry manuale da parte del chiamante).
-        """
         self._ensure_entered()
         return await self._downloader._run_once_async(url)
 
     async def download_batch(
         self, urls: list[str], *, loop_minutes: int | None = None
     ) -> None:
-        """Scarica una lista di URL in sequenza, con loop di retry opzionale."""
         self._ensure_entered()
         await self._downloader.run_async(urls, loop_minutes=loop_minutes)
 
     async def get_playlist(self, url: str) -> tuple[dict, list[TrackMetadata]]:
-        """
-        Recupera solo i metadati di una playlist/album/artista, senza
-        scaricare nulla. Utile per costruire UI o code di lavoro custom.
-        """
         self._ensure_entered()
         collection_name, tracks, info = await self._downloader._resolve_metadata_async(
             url
@@ -176,7 +159,6 @@ class AsyncSpotiFLAC:
         return {"name": collection_name, **info}, tracks
 
     async def get_track_metadata(self, url_or_id: str) -> TrackMetadata:
-        """Recupera i metadati di una singola track Spotify."""
         self._ensure_entered()
         client = self._get_metadata_client()
         if url_or_id.startswith("http") or url_or_id.startswith("spotify:"):
@@ -185,7 +167,6 @@ class AsyncSpotiFLAC:
         return await client.get_track_async(url_or_id)
 
     async def search(self, query: str, limit: int = 20) -> dict[str, list]:
-        """Ricerca unificata (tracks/albums/artists/playlists) su Spotify."""
         self._ensure_entered()
         client = self._get_metadata_client()
         return await client.search_async(query, limit=limit)
@@ -201,10 +182,6 @@ class AsyncSpotiFLAC:
 
     def _ensure_entered(self) -> None:
         if not self._entered:
-            # Non è un errore bloccante: NetworkManager crea comunque il
-            # client lazy alla prima richiesta. Segnaliamo solo che l'uso
-            # raccomandato è tramite `async with AsyncSpotiFLAC(...) as c:`
-            # per garantire cleanup deterministico delle connessioni.
             self._logger.debug(
                 "[client] AsyncSpotiFLAC used outside of 'async with' — "
                 "resources will not be closed automatically."
@@ -214,7 +191,6 @@ class AsyncSpotiFLAC:
 # ---------------------------------------------------------------------------
 # Wrapper sincrono retrocompatibile
 # ---------------------------------------------------------------------------
-
 
 def SpotiFLAC(
     url: str | list[str],
@@ -251,17 +227,9 @@ def SpotiFLAC(
     Wrapper SINCRONO retrocompatibile.
 
     Firma e comportamento osservabile identici alla vecchia `SpotiFLAC()`:
-    chi la chiama da codice sincrono (script, notebook, bot Telegram non
-    async, ecc.) non deve cambiare nulla. Internamente istanzia
-    `AsyncSpotiFLAC` e la esegue con `asyncio.run()`, quindi apre/chiude
-    UN SOLO event loop per l'intera chiamata — niente più
-    "un event loop per thread".
-
-    Se sei già dentro un contesto async, usa direttamente `AsyncSpotiFLAC`
-    con `async with`; chiamare questo wrapper da dentro un event loop già
-    attivo (es. Jupyter, un altro `async def`) solleverebbe
-    "asyncio.run() cannot be called from a running event loop" — in quel
-    caso, semplicemente `await`a `AsyncSpotiFLAC` direttamente.
+    chi la chiama da codice sincrono non deve cambiare nulla. Internamente
+    istanzia `AsyncSpotiFLAC` e la esegue con `asyncio.run()`, garantendo un
+    unico event loop pulito per l'esecuzione.
     """
 
     async def _run() -> None:
