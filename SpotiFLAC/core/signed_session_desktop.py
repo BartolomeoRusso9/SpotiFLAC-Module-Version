@@ -13,13 +13,28 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from ..core.endpoints import get_community_url
 import queue
 import requests
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Costanti
 COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
 COMMUNITY_VERIFY_TIMEOUT = 300  # secondi (5 minuti)
 
-# Variabili globali per l'integrazione con l'app
-APP_VERSION = "7.2.0"  # Sostituisci con la tua versione
+def fetch_latest_version() -> str:
+    url = "https://api.github.com/repos/spotbye/SpotiFLAC/releases/latest"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        
+        tag_name = response.json().get("tag_name", "")
+        return tag_name.lstrip("v")
+        
+    except requests.RequestException as e:
+        logger.warning("No version retrieved from GitHub: %s", e)
+        return ""
+
+APP_VERSION = fetch_latest_version()
 
 community_session_mu = threading.Lock()
 community_browser_mu = threading.Lock()
