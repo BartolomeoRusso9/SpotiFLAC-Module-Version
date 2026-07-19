@@ -67,6 +67,7 @@ async def _run_cli_download(args, merged_defaults: dict) -> None:
         post_download_action=args.post_action,
         post_download_command=args.post_command,
         timeout_s=timeout_s,
+        use_extensions_fallback=getattr(args, "use_extensions_fallback", True),
     ) as client:
         urls = args.url if isinstance(args.url, list) else [args.url]
         await client.download_batch(urls, loop_minutes=args.loop)
@@ -162,6 +163,7 @@ async def main() -> None:
             post_download_action=cfg.get("post_download_action", "none"),
             post_download_command=cfg.get("post_download_command", ""),
             timeout_s=cfg.get("timeout_s"),
+            use_extensions_fallback=cfg.get("use_extensions_fallback", True),
         ) as client:
             await client.download_batch([cfg["url"]], loop_minutes=cfg.get("loop"))
         return

@@ -133,6 +133,7 @@ def SpotiFLAC(
     tidal_custom_api: str | None = None,
     timeout_s: int | None = None,
     sync_extensions: bool = True,
+    use_extensions_fallback: bool = True,
 ) -> None:
     """
     Download tracks/album/playlist from Spotify, Tidal, Apple Music, Deezer, SoundCloud, Pandora and YouTube.
@@ -178,6 +179,7 @@ def SpotiFLAC(
         post_download_command=post_download_command,
         tidal_custom_api=tidal_custom_api,
         timeout_s=timeout_s,
+        auto_pair_extensions=use_extensions_fallback,
     )
 
     try:

@@ -67,6 +67,7 @@ class AsyncSpotiFLAC:
         timeout_s: int | None = None,
         max_concurrent_downloads: int = 2,
         sync_extensions: bool = True,
+        use_extensions_fallback: bool = True,
     ) -> None:
         self._logger = _setup_logger(log_level)
         self._sync_extensions_on_enter = sync_extensions
@@ -99,6 +100,7 @@ class AsyncSpotiFLAC:
             tidal_custom_api=tidal_custom_api,
             timeout_s=timeout_s,
             max_concurrent_downloads=max_concurrent_downloads,
+            auto_pair_extensions=use_extensions_fallback,
         )
 
         self._downloader = SpotiflacDownloader(self._opts)
@@ -243,6 +245,7 @@ def SpotiFLAC(
     timeout_s: int | None = None,
     max_concurrent_downloads: int = 2,
     sync_extensions: bool = True,
+    use_extensions_fallback: bool = True,
 ) -> None:
     """
     Wrapper SINCRONO retrocompatibile.
@@ -289,6 +292,7 @@ def SpotiFLAC(
             timeout_s=timeout_s,
             max_concurrent_downloads=max_concurrent_downloads,
             sync_extensions=sync_extensions,
+            use_extensions_fallback=use_extensions_fallback,
         ) as client:
             await client.download_batch(
                 [url] if isinstance(url, str) else list(url),

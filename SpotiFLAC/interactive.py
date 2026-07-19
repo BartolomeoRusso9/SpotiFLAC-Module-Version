@@ -449,6 +449,9 @@ def _summary(cfg: dict) -> None:
     row("Quality", cfg["quality"])
     row("Filename format", cfg["filename_format"])
 
+    if not cfg.get("use_extensions_fallback", True):
+        row("Extensions fallback", "disabled")
+
     flags = []
     if cfg["use_track_numbers"]:
         flags.append("track-numbers")
@@ -713,6 +716,22 @@ async def run_interactive() -> dict:
             defaults=cfg.get("services", ["tidal"]),
             ordered=True,
         )
+
+    # ── 3.5. Extensions Fallback ─────────────────────────────────────────────
+    _section("3.5 · Extensions Fallback")
+    print(
+        f"  {DIM('When a native provider fails, SpotiFLAC can automatically fall back')}"
+    )
+    print(
+        f"  {DIM('to a matching installed JavaScript extension (e.g. ext:tidal-web).')}"
+    )
+    cfg["use_extensions_fallback"] = _ask_bool(
+        "Use installed extensions as automatic fallback?",
+        cfg.get("use_extensions_fallback", True),
+    )
+
+    # ── 4. Audio Quality ─────────────────────────────────────────────────────
+    _section("4 · Audio Quality")
 
     # ── 4. Audio Quality ─────────────────────────────────────────────────────
     _section("4 · Audio Quality")
@@ -1073,6 +1092,8 @@ def _print_cli_command(cfg: dict) -> None:
     if cfg.get("output_path"):
         parts.append(f'-o "{cfg["output_path"]}"')
     parts.append(f'-s {" ".join(cfg["services"])}')
+    if not cfg.get("use_extensions_fallback", True):
+        parts.append("--no-extensions-fallback")
     if cfg["quality"] not in ("LOSSLESS", "BEST"):
         parts.append(f'-q {cfg["quality"]}')
     if cfg["filename_format"] != "{title} - {artist}":
