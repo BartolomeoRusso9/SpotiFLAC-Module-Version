@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "1.4.5"
+version = "1.4.6"
 description = "Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
-    { name="ShuKurenais, BartolomeoRusso9" }
+    { name=" BartolomeoRusso9, ShuKurenais" }
 ]
 
 keywords = [

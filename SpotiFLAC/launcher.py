@@ -388,7 +388,6 @@ async def amain() -> None:
     try:
         from .extensions.manager import ExtensionManager
 
-        print("  🔄 Download extension...")
         await asyncio.to_thread(ExtensionManager, auto_install_downloads=True)
     except Exception as e:
         print(f"  ⚠️ Impossibile verificare le estensioni: {e}")
