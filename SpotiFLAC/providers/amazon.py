@@ -40,8 +40,7 @@ from ..core.signed_session_desktop import (
 
 # Importiamo la logica di sessione Turnstile per Monochrome (amz.geeked.wtf)
 from ..core.signed_session_mono import (
-    fetch_mono_track_via_browser,
-    get_monochrome_auth_headers,
+    fetch_mono_track_via_browser
 )
 
 logger = logging.getLogger(__name__)
@@ -1264,17 +1263,11 @@ class AmazonProvider(BaseProvider):
         temp_file = os.path.join(output_dir, f"{asin}_mono.enc")
 
         try:
-            stream_headers = await asyncio.to_thread(get_monochrome_auth_headers)
-        except Exception:
-            stream_headers = {}
-
-        try:
             await self._async_http.stream_to_file(
                 url=stream_url,
                 dest_path=temp_file,
                 progress_cb=self._progress_cb,
-                chunk_size=65536,
-                extra_headers=stream_headers,
+                chunk_size=65536
             )
         except Exception as exc:
             raise SpotiflacError(
