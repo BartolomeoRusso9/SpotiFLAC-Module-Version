@@ -679,40 +679,48 @@ class SpotiflacDownloader:
                 from .providers.tidal_metadata import TidalMetadataClient
 
                 client = TidalMetadataClient()
-                collection_name, tracks, *collection_cover = await _call_metadata_get_url(
-                    client, url, include_featuring=self._opts.include_featuring
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(
+                        client, url, include_featuring=self._opts.include_featuring
+                    )
                 )
             elif is_apple:
                 from .providers.apple_music_metadata import AppleMusicMetadataClient
 
                 client = AppleMusicMetadataClient()
-                collection_name, tracks, *collection_cover = await _call_metadata_get_url(
-                    client, url, include_featuring=self._opts.include_featuring
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(
+                        client, url, include_featuring=self._opts.include_featuring
+                    )
                 )
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
 
                 client = SoundCloudProvider()
-                collection_name, tracks, *collection_cover = await _call_metadata_get_url(
-                    client, url
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(client, url)
                 )
             elif is_youtube:
                 from .providers.youtube import YouTubeProvider
 
                 client = YouTubeProvider()
-                collection_name, tracks, *collection_cover = await _call_metadata_get_url(
-                    client, url
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(client, url)
                 )
             elif is_pandora:
                 from .providers.pandora import PandoraProvider
 
                 client = PandoraProvider()
-                collection_name, tracks, *collection_cover = await _call_metadata_get_url(
-                    client, url
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(client, url)
                 )
             else:
-                collection_name, tracks, *collection_cover = await _call_metadata_get_url(
-                    self._client, url, include_featuring=self._opts.include_featuring
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(
+                        self._client,
+                        url,
+                        include_featuring=self._opts.include_featuring,
+                    )
                 )
         except SpotiflacError:
             raise
