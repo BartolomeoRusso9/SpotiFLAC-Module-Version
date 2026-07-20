@@ -4,15 +4,17 @@ import google.generativeai as genai
 
 # 1. AI API Configuration (e.g., Gemini)
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 # 2. Get the commit logs of the last PR (or the git diff)
 # This command extracts the recently added commit messages
 log_cmd = "git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:'- %s'"
 try:
-    commits = subprocess.check_output(log_cmd, shell=True).decode('utf-8')
+    commits = subprocess.check_output(log_cmd, shell=True).decode("utf-8")
 except Exception:
-    commits = subprocess.check_output("git log -10 --pretty=format:'- %s'", shell=True).decode('utf-8')
+    commits = subprocess.check_output(
+        "git log -10 --pretty=format:'- %s'", shell=True
+    ).decode("utf-8")
 
 # 3. Build the Prompt
 prompt = f"""
