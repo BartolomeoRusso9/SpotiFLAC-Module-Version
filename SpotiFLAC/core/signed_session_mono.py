@@ -144,7 +144,9 @@ def load_monochrome_session() -> MonochromeSessionRecord:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 # Filtra le chiavi extra per compatibilità all'indietro se ci sono sessioni vecchie
-                valid_keys = {f.name for f in dataclasses.fields(MonochromeSessionRecord)}
+                valid_keys = {
+                    f.name for f in dataclasses.fields(MonochromeSessionRecord)
+                }
                 filtered_data = {k: v for k, v in data.items() if k in valid_keys}
                 record = MonochromeSessionRecord(**filtered_data)
         except Exception:
@@ -262,7 +264,7 @@ def _run_manual_terminal_verification() -> dict:
             "user_agent": _DESKTOP_UA,
             "sec_ch_ua": '"Not(A:Brand";v="99", "Google Chrome";v="150", "Chromium";v="150"',
             "sec_ch_ua_mobile": "?0",
-            "sec_ch_ua_platform": '"macOS"'
+            "sec_ch_ua_platform": '"macOS"',
         }
     except EOFError:
         raise Exception("verification cancelled (EOF)")
@@ -270,7 +272,7 @@ def _run_manual_terminal_verification() -> dict:
 
 async def _solve_via_monochrome_page_async(timeout: float) -> dict:
     import random
-    
+
     result: dict = {}
 
     browser = await uc.start(
@@ -298,7 +300,7 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
             resp = event.response
             if "auth/turnstile" not in resp.url:
                 return
-            
+
             mime = (getattr(resp, "mime_type", "") or "").lower()
             if "json" not in mime:
                 return
@@ -317,18 +319,25 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
                 return
 
             token = data.get("access_token")
-            
+
             # Verifichiamo che sia un JWT reale (è sempre una stringa lunga e divisa da punti)
             if isinstance(token, str) and token.strip() and len(token) > 30:
                 result["access_token"] = token.strip()
-                
+
                 # Catturiamo gli header reali di rete inviati dal browser
                 req_headers = getattr(resp, "request_headers", {})
                 if not req_headers and hasattr(resp, "requestHeaders"):
                     req_headers = resp.requestHeaders
 
                 def get_h(k):
-                    return next((v for key, v in req_headers.items() if key.lower() == k.lower()), "")
+                    return next(
+                        (
+                            v
+                            for key, v in req_headers.items()
+                            if key.lower() == k.lower()
+                        ),
+                        "",
+                    )
 
                 result["user_agent"] = get_h("user-agent")
                 result["sec_ch_ua"] = get_h("sec-ch-ua")
@@ -354,7 +363,7 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
             logger.debug("[monochrome] network capture unavailable: %s", exc)
 
         async def get_cf_iframe_rect():
-            raw = await page.evaluate('''
+            raw = await page.evaluate("""
                 JSON.stringify((() => {
                     for (const f of document.querySelectorAll('iframe')) {
                         const src = f.src || f.getAttribute('src') || '';
@@ -364,18 +373,18 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
                     }
                     return null;
                 })())
-            ''')
+            """)
             if raw and raw != "null":
                 return json.loads(raw)
             return None
 
         deadline = time.monotonic() + timeout
         click_count = 0
-        
+
         while "access_token" not in result and time.monotonic() < deadline:
-            
+
             chunk_deadline = min(time.monotonic() + 10.0, deadline)
-            
+
             while "access_token" not in result and time.monotonic() < chunk_deadline:
                 rect = await get_cf_iframe_rect()
                 if rect and click_count < 5:
@@ -392,7 +401,9 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
                     await asyncio.sleep(0.5)
 
             if "access_token" not in result and time.monotonic() < deadline:
-                logger.info("[monochrome] Nessun token ricevuto in 10 secondi. Ricarico la pagina...")
+                logger.info(
+                    "[monochrome] Nessun token ricevuto in 10 secondi. Ricarico la pagina..."
+                )
                 try:
                     await page.reload()
                     await asyncio.sleep(2.0)
@@ -403,12 +414,14 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
         browser.stop()
 
     if "access_token" not in result:
-        raise Exception(f"Timeout: nessun access_token JWT catturato entro {timeout:.0f}s")
-        
+        raise Exception(
+            f"Timeout: nessun access_token JWT catturato entro {timeout:.0f}s"
+        )
+
     # Fallback JS se il CDP non ha popolato i request_headers
     if (not result.get("user_agent") or not result.get("sec_ch_ua")) and page:
         try:
-            ua_info = await page.evaluate('''
+            ua_info = await page.evaluate("""
                 () => {
                     let brands = "";
                     let mobile = "?0";
@@ -425,7 +438,7 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
                         platform: platform
                     };
                 }
-            ''')
+            """)
             result["user_agent"] = ua_info.get("ua", _DESKTOP_UA)
             result["sec_ch_ua"] = ua_info.get("brands", "")
             result["sec_ch_ua_mobile"] = ua_info.get("mobile", "?0")
@@ -434,6 +447,7 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
             logger.debug(f"[monochrome] Fallback UA JS failed: {e}")
 
     return result
+
 
 def _solve_via_monochrome_page(timeout: float) -> dict:
     """Wrapper sincrono di _solve_via_monochrome_page_async."""
@@ -470,7 +484,9 @@ def get_monochrome_auth_headers() -> dict:
     if record.sec_ch_ua:
         headers["sec-ch-ua"] = record.sec_ch_ua
     else:
-        headers["sec-ch-ua"] = '"Not;A=Brand";v="8", "Chromium";v="150", "Brave";v="150"'
+        headers["sec-ch-ua"] = (
+            '"Not;A=Brand";v="8", "Chromium";v="150", "Brave";v="150"'
+        )
     if record.sec_ch_ua_mobile:
         headers["sec-ch-ua-mobile"] = record.sec_ch_ua_mobile
     if record.sec_ch_ua_platform:
@@ -567,7 +583,7 @@ class _MonochromeBrowserSession:
                 pass
 
         async def get_cf_iframe_rect():
-            raw = await self._page.evaluate('''
+            raw = await self._page.evaluate("""
                 JSON.stringify((() => {
                     for (const f of document.querySelectorAll('iframe')) {
                         const src = f.src || f.getAttribute('src') || '';
@@ -577,21 +593,22 @@ class _MonochromeBrowserSession:
                     }
                     return null;
                 })())
-            ''')
+            """)
             if raw and raw != "null":
                 return json.loads(raw)
             return None
 
         import random
+
         deadline = time.monotonic() + timeout
         click_count = 0
         reload_count = 0  # <--- AGGIUNGIAMO IL CONTATORE
-        
+
         while "access_token" not in result and time.monotonic() < deadline:
-            
+
             # Aspettiamo fino a 10 secondi per questo ciclo
             chunk_deadline = min(time.monotonic() + 10.0, deadline)
-            
+
             while "access_token" not in result and time.monotonic() < chunk_deadline:
                 rect = await get_cf_iframe_rect()
                 if rect and click_count < 5:
@@ -610,7 +627,9 @@ class _MonochromeBrowserSession:
             if "access_token" not in result and time.monotonic() < deadline:
                 if reload_count < 2:
                     reload_count += 1
-                    logger.info(f"[mono] No token received. Refreshing the page (attempt {reload_count}/2)...")
+                    logger.info(
+                        f"[mono] No token received. Refreshing the page (attempt {reload_count}/2)..."
+                    )
                     try:
                         await self._page.reload()
                         await asyncio.sleep(2.0)
@@ -621,11 +640,13 @@ class _MonochromeBrowserSession:
                     break
 
         if "access_token" not in result:
-            raise Exception(f"Timeout: nessun access_token JWT catturato entro {timeout:.0f}s")
+            raise Exception(
+                f"Timeout: nessun access_token JWT catturato entro {timeout:.0f}s"
+            )
 
         self._ever_solved = True
         return result["access_token"]
-    
+
     async def _ensure_token(self) -> str:
         if monochrome_session_valid(self._record):
             return self._record.jwt
@@ -643,7 +664,7 @@ class _MonochromeBrowserSession:
 
     async def _do_fetch(self, full_url: str, token: str) -> dict:
         raw = await self._page.evaluate(
-            f'''
+            f"""
             (async () => {{
                 try {{
                     const r = await fetch({json.dumps(full_url)}, {{
@@ -655,7 +676,7 @@ class _MonochromeBrowserSession:
                     return JSON.stringify({{ok: false, status: 0, body: String(e)}});
                 }}
             }})()
-            ''',
+            """,
             await_promise=True,
         )
         return json.loads(raw)
@@ -664,14 +685,18 @@ class _MonochromeBrowserSession:
         async with self._lock:
             return await self._fetch_track_with_restart(params, allow_restart=True)
 
-    async def _fetch_track_with_restart(self, params: dict, *, allow_restart: bool) -> dict:
+    async def _fetch_track_with_restart(
+        self, params: dict, *, allow_restart: bool
+    ) -> dict:
         await self._ensure_browser()
         token = await self._ensure_token()
 
         mono_url = get_amazon_endpoint("mono")
         qs = urlencode(params)
         sep = "&" if "?" in mono_url else "?"
-        full_url = f"{mono_url.rstrip('/') if '?' not in mono_url else mono_url}{sep}{qs}"
+        full_url = (
+            f"{mono_url.rstrip('/') if '?' not in mono_url else mono_url}{sep}{qs}"
+        )
 
         try:
             outer = await asyncio.wait_for(
@@ -700,7 +725,9 @@ class _MonochromeBrowserSession:
                 )
                 await self._hard_reset()
                 if not allow_restart:
-                    raise RuntimeError("mono API request timed out after browser restart")
+                    raise RuntimeError(
+                        "mono API request timed out after browser restart"
+                    )
                 return await self._fetch_track_with_restart(params, allow_restart=False)
 
         if not outer.get("ok"):

@@ -216,6 +216,7 @@ def _ffmpeg_path() -> str:
 def _ffprobe_path() -> str:
     return "ffprobe"
 
+
 def _is_running_in_docker() -> bool:
     if os.path.exists("/.dockerenv"):
         return True
@@ -1471,11 +1472,15 @@ class AmazonProvider(BaseProvider):
         # ── 3. Mono (Monochrome/geeked.wtf, Turnstile bearer) ────────────
         if _mono_ep and metadata is not None:
             if _is_running_in_docker():
-                logger.info("[amazon] Docker: skip  mono (requires non headless browser).")
+                logger.info(
+                    "[amazon] Docker: skip  mono (requires non headless browser)."
+                )
             else:
                 logger.info("[amazon] Attempting mono API (ASIN: %s)", asin)
                 try:
-                    mono_result = await self._download_from_mono_api(metadata, output_dir)
+                    mono_result = await self._download_from_mono_api(
+                        metadata, output_dir
+                    )
                     if mono_result and os.path.exists(mono_result[0]):
                         return mono_result
                 except Exception as exc:
