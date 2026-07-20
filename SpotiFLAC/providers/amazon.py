@@ -39,9 +39,7 @@ from ..core.signed_session_desktop import (
 )
 
 # Importiamo la logica di sessione Turnstile per Monochrome (amz.geeked.wtf)
-from ..core.signed_session_mono import (
-    fetch_mono_track_via_browser
-)
+from ..core.signed_session_mono import fetch_mono_track_via_browser
 
 logger = logging.getLogger(__name__)
 
@@ -1267,7 +1265,7 @@ class AmazonProvider(BaseProvider):
                 url=stream_url,
                 dest_path=temp_file,
                 progress_cb=self._progress_cb,
-                chunk_size=65536
+                chunk_size=65536,
             )
         except Exception as exc:
             raise SpotiflacError(

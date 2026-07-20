@@ -1,10 +1,10 @@
 """
 Gestione della sessione "Monochrome" (amz.geeked.wtf).
 
-Poiché il backend verifica il JWT associandolo all'impronta TLS/di rete del browser 
-(claim 'fp'), il semplice passaggio degli header a httpx fallisce con un 401. 
-La soluzione implementata qui mantiene un browser CDP persistente in background e 
-instrada la richiesta GET /api/track/ direttamente tramite la funzione fetch() 
+Poiché il backend verifica il JWT associandolo all'impronta TLS/di rete del browser
+(claim 'fp'), il semplice passaggio degli header a httpx fallisce con un 401.
+La soluzione implementata qui mantiene un browser CDP persistente in background e
+instrada la richiesta GET /api/track/ direttamente tramite la funzione fetch()
 nel contesto della pagina, garantendo il perfetto allineamento del fingerprint.
 """
 
@@ -39,6 +39,7 @@ MONOCHROME_PAGE_URL = "https://monochrome.tf/"
 
 _patch_nodriver_unknown_cdp_events()
 
+
 @dataclass
 class MonochromeSessionRecord:
     jwt: str = ""
@@ -70,7 +71,9 @@ def load_monochrome_session() -> MonochromeSessionRecord:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                valid_keys = {f.name for f in dataclasses.fields(MonochromeSessionRecord)}
+                valid_keys = {
+                    f.name for f in dataclasses.fields(MonochromeSessionRecord)
+                }
                 filtered_data = {k: v for k, v in data.items() if k in valid_keys}
                 record = MonochromeSessionRecord(**filtered_data)
         except Exception:
@@ -137,7 +140,7 @@ class _MonochromeBrowserSession:
         if self._browser is not None and self._page is not None:
             return
         _ensure_xvfb()
-        
+
         self._browser = await uc.start(
             browser_executable_path=_find_chrome(),
             headless=False,
@@ -147,7 +150,7 @@ class _MonochromeBrowserSession:
                 "--disable-background-timer-throttling",
                 "--disable-backgrounding-occluded-windows",
                 "--disable-renderer-backgrounding",
-                "--window-size=1280,900"
+                "--window-size=1280,900",
             ],
         )
         self._page = await self._browser.get(MONOCHROME_PAGE_URL)
@@ -205,16 +208,18 @@ class _MonochromeBrowserSession:
         reload_count = 0
 
         while "access_token" not in result and time.monotonic() < deadline:
-            
+
             chunk_deadline = min(time.monotonic() + 10.0, deadline)
-            
+
             while "access_token" not in result and time.monotonic() < chunk_deadline:
                 await asyncio.sleep(0.5)
 
             if "access_token" not in result and time.monotonic() < deadline:
                 if reload_count < 2:
                     reload_count += 1
-                    logger.info(f"[mono] No token received. Refreshing the page (attempt {reload_count}/2)...")
+                    logger.info(
+                        f"[mono] No token received. Refreshing the page (attempt {reload_count}/2)..."
+                    )
                     try:
                         await self._page.reload()
                         await asyncio.sleep(2.0)
@@ -225,11 +230,13 @@ class _MonochromeBrowserSession:
                     break
 
         if "access_token" not in result:
-            raise Exception(f"Timeout: nessun access_token JWT catturato entro {timeout:.0f}s")
+            raise Exception(
+                f"Timeout: nessun access_token JWT catturato entro {timeout:.0f}s"
+            )
 
         self._ever_solved = True
         return result["access_token"]
-    
+
     async def _ensure_token(self) -> str:
         if monochrome_session_valid(self._record):
             return self._record.jwt
