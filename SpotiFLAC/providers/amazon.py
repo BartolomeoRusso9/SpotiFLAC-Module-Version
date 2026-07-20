@@ -216,6 +216,18 @@ def _ffmpeg_path() -> str:
 def _ffprobe_path() -> str:
     return "ffprobe"
 
+def _is_running_in_docker() -> bool:
+    if os.path.exists("/.dockerenv"):
+        return True
+    try:
+        with open("/proc/1/cgroup", "rt") as f:
+            content = f.read()
+            if "docker" in content or "lxc" in content:
+                return True
+    except Exception:
+        pass
+    return False
+
 
 # ---------------------------------------------------------------------------
 # AmazonProvider
@@ -1458,13 +1470,16 @@ class AmazonProvider(BaseProvider):
 
         # ── 3. Mono (Monochrome/geeked.wtf, Turnstile bearer) ────────────
         if _mono_ep and metadata is not None:
-            logger.info("[amazon] Attempting mono API (ASIN: %s)", asin)
-            try:
-                mono_result = await self._download_from_mono_api(metadata, output_dir)
-                if mono_result and os.path.exists(mono_result[0]):
-                    return mono_result
-            except Exception as exc:
-                logger.warning("[amazon] mono failed: %s", exc)
+            if _is_running_in_docker():
+                logger.info("[amazon] Docker: skip  mono (requires non headless browser).")
+            else:
+                logger.info("[amazon] Attempting mono API (ASIN: %s)", asin)
+                try:
+                    mono_result = await self._download_from_mono_api(metadata, output_dir)
+                    if mono_result and os.path.exists(mono_result[0]):
+                        return mono_result
+                except Exception as exc:
+                    logger.warning("[amazon] mono failed: %s", exc)
 
         # ── 4. s (PoW captcha) ───────────────────────────────────────────
         logger.info("[amazon] Community/Antra/mono failed. Trying s…")
