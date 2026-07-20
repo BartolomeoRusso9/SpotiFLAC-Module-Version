@@ -218,6 +218,18 @@ class DownloadManager:
         self.current_item_id = ""
         self.session_start = 0.0
 
+    def get_stats_sync(self) -> dict:
+        """Sync wrapper for callers (e.g. pywebview) that can't await."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.get_stats())
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                return ex.submit(asyncio.run, self.get_stats()).result()
+        return loop.run_until_complete(self.get_stats())
+
     async def add_to_queue(
         self,
         item_id: str,
