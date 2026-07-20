@@ -206,11 +206,13 @@ jobs:
           env:
             GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           run: |
-            pip install google-generativeai
+            pip install google-genai
             python -c "
-            import os, subprocess, google.generativeai as genai
-            genai.configure(api_key=os.environ['GEMINI_API_KEY'])
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            import os, subprocess
+            from google import genai
+            
+            # Inizializza il client con il nuovo SDK
+            client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
             
             try:
                 # Recupera i commit effettuati dal tag precedente a quello attuale
@@ -225,7 +227,12 @@ jobs:
             # Prompt in inglese, sezioni fisse, NO EMOJI come richiesto
             prompt = f'''You are a technical assistant. Here are the recent commits:\n{commits}\nGenerate professional release notes in Markdown. Sections: New Features, Bug Fixes, Maintenance. Explain in simple terms, ignore system commits. DO NOT use emojis.'''
             
-            response = model.generate_content(prompt)
+            # Genera il contenuto usando la nuova sintassi
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt
+            )
+            
             with open('ai_changelog.md', 'w', encoding='utf-8') as f:
                 f.write(response.text)
             "
