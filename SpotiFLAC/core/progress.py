@@ -226,6 +226,7 @@ class DownloadManager:
             return asyncio.run(self.get_stats())
         if loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                 return ex.submit(asyncio.run, self.get_stats()).result()
         return loop.run_until_complete(self.get_stats())
