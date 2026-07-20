@@ -17,3 +17,4 @@ SpotiFLAC/provider_test_report.txt
 /.vscode
 .env
 test_mono_download.py
+*.flac
