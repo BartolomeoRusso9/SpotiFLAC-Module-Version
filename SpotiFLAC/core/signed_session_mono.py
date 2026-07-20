@@ -207,7 +207,6 @@ def ensure_monochrome_session() -> MonochromeSessionRecord:
 
         auth_data = run_monochrome_verification()
         access_token = auth_data["access_token"]
-        print(f"\n[DEBUG] TOKEN ESTRATTO: {access_token}\n")
 
         exp_dt = _decode_jwt_exp(access_token)
         if exp_dt is None:
@@ -280,7 +279,11 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
         user_data_dir=_get_profile_dir(),
         browser_args=[
             "--incognito",
-            "--window-position=-32000,-32000",
+            # Flag per prevenire il throttle della CPU/JS in background,
+            # in modo che Turnstile non si blocchi se la finestra è minimizzata
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
             "--window-size=1280,900",
             *_docker_flags,
         ],
@@ -318,26 +321,6 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
             # Verifichiamo che sia un JWT reale (è sempre una stringa lunga e divisa da punti)
             if isinstance(token, str) and token.strip() and len(token) > 30:
                 result["access_token"] = token.strip()
-                # --- TEST DIAGNOSTICO: prova la GET direttamente nella sessione del browser ---
-            if "access_token" in result:
-                try:
-                    test_result = await page.evaluate(f'''
-                        (async () => {{
-                            try {{
-                                const r = await fetch("https://amz.geeked.wtf/api/track/?track=Bad+Guy&duration=169&album=Savage+Mode&artist=21+Savage%2C+Metro+Boomin&quality=UHD", {{
-                                    headers: {{ "X-Turnstile-JWT": "{result['access_token']}" }}
-                                }});
-                                const text = await r.text();
-                                return JSON.stringify({{status: r.status, body: text.slice(0, 300)}});
-                            }} catch (e) {{
-                                return JSON.stringify({{error: String(e)}});
-                            }}
-                        }})()
-                    ''', await_promise=True)
-                    logger.info("[monochrome DIAGNOSTIC] fetch in-browser result: %s", test_result)
-                except Exception as exc:
-                    logger.warning("[monochrome DIAGNOSTIC] in-browser fetch test failed: %s", exc)
-            # --------------------------------------------------------------------------------
                 
                 # Catturiamo gli header reali di rete inviati dal browser
                 req_headers = getattr(resp, "request_headers", {})
@@ -358,6 +341,11 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
     try:
         page = await browser.get(MONOCHROME_PAGE_URL)
 
+        try:
+            if hasattr(page, "minimize"):
+                await page.minimize()
+        except Exception:
+            pass
 
         try:
             await page.send(cdp.network.enable())
@@ -365,7 +353,6 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
         except Exception as exc:
             logger.debug("[monochrome] network capture unavailable: %s", exc)
 
-        # --- AUTO-CLICKER per Cloudflare Turnstile ---
         async def get_cf_iframe_rect():
             raw = await page.evaluate('''
                 JSON.stringify((() => {
@@ -386,21 +373,31 @@ async def _solve_via_monochrome_page_async(timeout: float) -> dict:
         click_count = 0
         
         while "access_token" not in result and time.monotonic() < deadline:
-            # Cerca il widget di Cloudflare e clicca il centro se appare
-            rect = await get_cf_iframe_rect()
-            if rect and click_count < 5:
-                cx = rect["x"] + 28 + random.uniform(-3, 3)
-                cy = rect["y"] + rect["h"] / 2 + random.uniform(-3, 3)
-                await page.mouse_move(cx - 80, cy - 20)
-                await asyncio.sleep(random.uniform(0.15, 0.25))
-                await page.mouse_move(cx, cy)
-                await asyncio.sleep(random.uniform(0.08, 0.15))
-                await page.mouse_click(cx, cy)
-                click_count += 1
-                await asyncio.sleep(1.0)
-            else:
-                await asyncio.sleep(0.5)
-        # ---------------------------------------------
+            
+            chunk_deadline = min(time.monotonic() + 10.0, deadline)
+            
+            while "access_token" not in result and time.monotonic() < chunk_deadline:
+                rect = await get_cf_iframe_rect()
+                if rect and click_count < 5:
+                    cx = rect["x"] + 28 + random.uniform(-3, 3)
+                    cy = rect["y"] + rect["h"] / 2 + random.uniform(-3, 3)
+                    await page.mouse_move(cx - 80, cy - 20)
+                    await asyncio.sleep(random.uniform(0.15, 0.25))
+                    await page.mouse_move(cx, cy)
+                    await asyncio.sleep(random.uniform(0.08, 0.15))
+                    await page.mouse_click(cx, cy)
+                    click_count += 1
+                    await asyncio.sleep(1.0)
+                else:
+                    await asyncio.sleep(0.5)
+
+            if "access_token" not in result and time.monotonic() < deadline:
+                logger.info("[monochrome] Nessun token ricevuto in 10 secondi. Ricarico la pagina...")
+                try:
+                    await page.reload()
+                    await asyncio.sleep(2.0)
+                except Exception:
+                    pass
 
     finally:
         browser.stop()
@@ -479,7 +476,6 @@ def get_monochrome_auth_headers() -> dict:
     if record.sec_ch_ua_platform:
         headers["sec-ch-ua-platform"] = record.sec_ch_ua_platform
 
-    print(f"\n[DEBUG] HEADERS DA INVIARE ALLA GET: {headers}\n")
     return headers
 
 
@@ -512,11 +508,20 @@ class _MonochromeBrowserSession:
             user_data_dir=_get_profile_dir(),
             browser_args=[
                 "--incognito",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
                 "--window-size=1280,900",
                 *_docker_flags,
             ],
         )
         self._page = await self._browser.get(MONOCHROME_PAGE_URL)
+
+        try:
+            if hasattr(self._page, "minimize"):
+                await self._page.minimize()
+        except Exception:
+            pass
 
     async def _solve_turnstile_on_page(self, timeout: float) -> str:
         result: dict = {}
@@ -580,6 +585,7 @@ class _MonochromeBrowserSession:
         import random
         deadline = time.monotonic() + timeout
         click_count = 0
+        reload_count = 0  # <--- AGGIUNGIAMO IL CONTATORE
         
         while "access_token" not in result and time.monotonic() < deadline:
             
@@ -602,12 +608,17 @@ class _MonochromeBrowserSession:
                     await asyncio.sleep(0.5)
 
             if "access_token" not in result and time.monotonic() < deadline:
-                logger.info("[monochrome] Nessun token ricevuto in 10 secondi. Ricarico la pagina...")
-                try:
-                    await self._page.reload()
-                    await asyncio.sleep(2.0)
-                except Exception:
-                    pass
+                if reload_count < 2:
+                    reload_count += 1
+                    logger.info(f"[mono] No token received. Refreshing the page (attempt {reload_count}/2)...")
+                    try:
+                        await self._page.reload()
+                        await asyncio.sleep(2.0)
+                    except Exception:
+                        pass
+                else:
+                    logger.warning("[mono] Max attempt, no token received.")
+                    break
 
         if "access_token" not in result:
             raise Exception(f"Timeout: nessun access_token JWT catturato entro {timeout:.0f}s")

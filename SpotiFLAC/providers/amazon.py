@@ -38,6 +38,12 @@ from ..core.signed_session_desktop import (
     sign_community_request,
 )
 
+# Importiamo la logica di sessione Turnstile per Monochrome (amz.geeked.wtf)
+from ..core.signed_session_mono import (
+    fetch_mono_track_via_browser,
+    get_monochrome_auth_headers,
+)
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_UA = (
@@ -1186,8 +1192,150 @@ class AmazonProvider(BaseProvider):
 
         return final, api_meta
 
+    async def _download_from_mono_api(
+        self, metadata: TrackMetadata, output_dir: str
+    ) -> tuple[str, dict]:
+        """
+        Monochrome (amz.geeked.wtf). A differenza degli altri fallback non
+        lavora per ASIN ma per titolo/artista/album/durata (vedi HAR):
+        GET /api/track/?track=...&duration=...&album=...&artist=...&quality=UHD
+        con header X-Turnstile-JWT. Risposta: stream_url + decryption_key,
+        stesso pattern usato per Antra/community.
+        """
+        mono_url = get_amazon_endpoint("mono")
+        if not mono_url:
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE, "mono endpoint not configured", self.name
+            )
+
+        logger.info(
+            "[amazon] Trying mono API (Monochrome) — %s", getattr(metadata, "title", "")
+        )
+
+        try:
+            duration_s = int(
+                round(
+                    getattr(metadata, "duration", 0)
+                    or (getattr(metadata, "duration_ms", 0) / 1000)
+                    or 0
+                )
+            )
+        except Exception:
+            duration_s = 0
+
+        params = {
+            "track": getattr(metadata, "title", "") or "",
+            "duration": duration_s,
+            "album": getattr(metadata, "album", "") or "",
+            "artist": getattr(metadata, "artists", "") or "",
+            "quality": "UHD",
+        }
+
+        try:
+            data = await fetch_mono_track_via_browser(params)
+        except Exception as exc:
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"mono API (in-browser) request failed: {exc}",
+                self.name,
+            ) from exc
+        stream_url = data.get("stream_url")
+        decryption_key = data.get("decryption_key")
+        asin = data.get("asin") or "mono"
+
+        if not stream_url:
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE, "No stream URL in mono response", self.name
+            )
+
+        temp_file = os.path.join(output_dir, f"{asin}_mono.enc")
+
+        try:
+            stream_headers = await asyncio.to_thread(get_monochrome_auth_headers)
+        except Exception:
+            stream_headers = {}
+
+        try:
+            await self._async_http.stream_to_file(
+                url=stream_url,
+                dest_path=temp_file,
+                progress_cb=self._progress_cb,
+                chunk_size=65536,
+                extra_headers=stream_headers,
+            )
+        except Exception as exc:
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"Failed to download stream from mono API: {exc}",
+                self.name,
+            )
+
+        codec = await self._get_codec(temp_file)
+        ext = ".flac" if codec == "flac" else ".m4a"
+        out = os.path.join(output_dir, f"{asin}{ext}")
+
+        if decryption_key:
+            if ext == ".flac":
+                if not await self._remux_to_flac(temp_file, out, decryption_key):
+                    raise SpotiflacError(
+                        ErrorKind.FILE_IO,
+                        "Decryption failed: FLAC remux failed",
+                        self.name,
+                    )
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    _ffmpeg_path(),
+                    "-y",
+                    "-decryption_key",
+                    decryption_key.strip(),
+                    "-i",
+                    temp_file,
+                    "-c",
+                    "copy",
+                    out,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.communicate()
+
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+
+                if proc.returncode != 0:
+                    raise SpotiflacError(
+                        ErrorKind.FILE_IO, "mono decryption failed", self.name
+                    )
+        else:
+            if os.path.exists(out):
+                os.remove(out)
+            os.rename(temp_file, out)
+
+        if ext == ".flac":
+            success, repair_msg = await asyncio.to_thread(
+                validate_and_repair_if_needed, out
+            )
+            if not success:
+                logger.error("[amazon] FLAC file validation failed: %s", repair_msg)
+                if os.path.exists(out):
+                    os.remove(out)
+                raise SpotiflacError(
+                    ErrorKind.FILE_IO,
+                    f"FLAC validation failed: {repair_msg}",
+                    self.name,
+                )
+            if repair_msg:
+                logger.info("[amazon] FLAC file repair status: %s", repair_msg)
+
+        return out, {}
+
     async def _download_from_api(
-        self, amazon_url: str, output_dir: str, quality: str
+        self,
+        amazon_url: str,
+        output_dir: str,
+        quality: str,
+        metadata: TrackMetadata | None = None,
     ) -> tuple[str, dict]:
         asin_match = re.search(r"(B[0-9A-Z]{9})", amazon_url)
         if not asin_match:
@@ -1200,9 +1348,10 @@ class AmazonProvider(BaseProvider):
 
         _community_ep = get_community_url("amazon")
         _antra_ep = get_amazon_endpoint("antra")
+        _mono_ep = get_amazon_endpoint("mono")
         _s_ep = get_amazon_endpoint("s_stream")
         _musicdl_ep = get_amazon_endpoint("musicdl")
-        if not any([_community_ep, _antra_ep, _s_ep, _musicdl_ep]):
+        if not any([_community_ep, _antra_ep, _mono_ep, _s_ep, _musicdl_ep]):
             raise SpotiflacError(
                 ErrorKind.UNAVAILABLE,
                 "No Amazon endpoints configured in registry",
@@ -1307,8 +1456,18 @@ class AmazonProvider(BaseProvider):
                     exc,
                 )
 
-        # ── 3. s (PoW captcha) ───────────────────────────────────────────
-        logger.info("[amazon] Community/Antra failed. Trying s…")
+        # ── 3. Mono (Monochrome/geeked.wtf, Turnstile bearer) ────────────
+        if _mono_ep and metadata is not None:
+            logger.info("[amazon] Attempting mono API (ASIN: %s)", asin)
+            try:
+                mono_result = await self._download_from_mono_api(metadata, output_dir)
+                if mono_result and os.path.exists(mono_result[0]):
+                    return mono_result
+            except Exception as exc:
+                logger.warning("[amazon] mono failed: %s", exc)
+
+        # ── 4. s (PoW captcha) ───────────────────────────────────────────
+        logger.info("[amazon] Community/Antra/mono failed. Trying s…")
         print_source_banner("amazon", "", fallback_quality)
         try:
             s_result = await self._download_from_s_api(asin, output_dir, quality)
@@ -1319,7 +1478,7 @@ class AmazonProvider(BaseProvider):
 
         logger.info("[amazon] s failed. Trying MusicDL API…")
 
-        # ── 4. MusicDL (ultima risorsa) ──────────────────────────────────
+        # ── 5. MusicDL (ultima risorsa) ──────────────────────────────────
         print_source_banner(
             "amazon", "", "BEST QUALITY AVAILABLE (MOSTLY 16 bit 44.1 Hz)"
         )
@@ -1551,7 +1710,7 @@ class AmazonProvider(BaseProvider):
                     )
                 try:
                     downloaded, api_metadata = await self._download_from_api(
-                        amazon_url, output_dir, q_tier
+                        amazon_url, output_dir, q_tier, metadata=metadata
                     )
                     if downloaded:
                         break
