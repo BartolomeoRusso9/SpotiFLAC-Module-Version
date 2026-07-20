@@ -82,7 +82,6 @@ jobs:
           fi
           
           # 3. Creazione e Push del Tag
-          # Se il tag esiste già (es. input manuale già usato), forziamo l'aggiornamento all'ultimo commit
           if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
             echo "Tag $NEW_TAG already exists. Moving it to the current commit..."
             git tag -f "$NEW_TAG"
@@ -127,6 +126,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
+      with:
+        ref: refs/tags/${{ needs.lint-and-bump.outputs.release_tag }}
 
     - name: Setup Python
       if: matrix.arch == 'x86_64'
@@ -183,6 +184,17 @@ jobs:
       if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
       
       steps:
+        - name: Checkout code (For Changelog Generation)
+          uses: actions/checkout@v5
+          with:
+            fetch-depth: 0
+            ref: refs/tags/${{ needs.lint-and-bump.outputs.release_tag }}
+
+        - name: Setup Python for AI
+          uses: actions/setup-python@v6
+          with:
+            python-version: '3.12'
+
         - name: Download all build artifacts
           uses: actions/download-artifact@v4
           with:
@@ -190,43 +202,81 @@ jobs:
             path: release-files
             merge-multiple: true
 
+        - name: Generate AI Changelog
+          env:
+            GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          run: |
+            pip install google-generativeai
+            python -c "
+            import os, subprocess, google.generativeai as genai
+            genai.configure(api_key=os.environ['GEMINI_API_KEY'])
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            try:
+                # Recupera i commit effettuati dal tag precedente a quello attuale
+                cmd = 'git log \$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD --pretty=format:\"- %s\"'
+                commits = subprocess.check_output(cmd, shell=True).decode('utf-8')
+            except Exception:
+                commits = subprocess.check_output('git log -10 --pretty=format:\"- %s\"', shell=True).decode('utf-8')
+                
+            if not commits.strip(): 
+                commits = '- Maintenance and minor updates'
+            
+            # Prompt in inglese, sezioni fisse, NO EMOJI come richiesto
+            prompt = f'''You are a technical assistant. Here are the recent commits:\n{commits}\nGenerate professional release notes in Markdown. Sections: New Features, Bug Fixes, Maintenance. Explain in simple terms, ignore system commits. DO NOT use emojis.'''
+            
+            response = model.generate_content(prompt)
+            with open('ai_changelog.md', 'w', encoding='utf-8') as f:
+                f.write(response.text)
+            "
+
+        - name: Prepare Final Release Body
+          run: |
+            cat << 'EOF' > release_body.md
+            ## Changelog
+            
+            EOF
+            
+            cat ai_changelog.md >> release_body.md
+            
+            cat << 'EOF' >> release_body.md
+            
+            ### WORKING APIs
+
+            ## Downloads
+            
+            [![Windows](https://img.shields.io/badge/Windows-[SPOTIFLAC.EXE]-0078D6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMjAgMjAiPjxwYXRoIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTIwIDEwLjg3M1YyMEw4LjQ3OSAxOC41MzdsLjAwMS03LjY2NEgyMFptLTEzLjEyIDBsLS4wMDEgNy40NjFMMCAxNy40NjF2LTYuNTg4aDYuODhaTTIwIDkuMjczSDguNDhsLS4wMDEtNy44MUwyMCAwdjkuMjczWk02Ljg3OSAxLjY2NmwuMDAxIDcuNjA3SDBWMi41MzlsNi44NzktLjg3M1oiLz48L3N2Zz4=)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-[SPOTIFLAC--macos]-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-macOS) [![Linux](https://img.shields.io/badge/Linux-[SPOTIFLAC--linux]-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-Linux-x86_64)
+
+            <details>
+            <summary><b>💻 Usage Instructions</b></summary>
+            
+            ### Windows (PowerShell ou CMD)
+            ```cmd
+            SpotiFLAC-Windows.exe [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
+            ```
+
+            ### 🍏 macOS
+            ```bash
+            chmod +x SpotiFLAC-macOS
+            ./SpotiFLAC-macOS [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
+            ```
+
+            ### 🐧 Linux
+            ```bash
+            chmod +x SpotiFLAC-Linux-x86_64
+            ./SpotiFLAC-Linux-x86_64 [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
+            ```
+            *(For ARM devices like Raspberry Pi, replace `x86_64` with `arm64`)*
+            </details>
+            EOF
+
         - name: Create GitHub Release
           uses: softprops/action-gh-release@v2
           with:
             tag_name: ${{ needs.lint-and-bump.outputs.release_tag }}
             files: release-files/*
-            draft: true
+            draft: false
             prerelease: false
-            body: |
-              ## Changelog
-              
-              *(Adicione as novidades da versão aqui)*
-              ### WORKING APIs
-
-              ## Downloads
-              
-              [![Windows](https://img.shields.io/badge/Windows-[SPOTIFLAC.EXE]-0078D6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMjAgMjAiPjxwYXRoIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTIwIDEwLjg3M1YyMEw4LjQ3OSAxOC41MzdsLjAwMS03LjY2NEgyMFptLTEzLjEyIDBsLS4wMDEgNy40NjFMMCAxNy40NjF2LTYuNTg4aDYuODhaTTIwIDkuMjczSDguNDhsLS4wMDEtNy44MUwyMCAwdjkuMjczWk02Ljg3OSAxLjY2NmwuMDAxIDcuNjA3SDBWMi41MzlsNi44NzktLjg3M1oiLz48L3N2Zz4=)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-[SPOTIFLAC--macos]-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-macOS) [![Linux](https://img.shields.io/badge/Linux-[SPOTIFLAC--linux]-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-Linux-x86_64)
-
-              <details>
-              <summary><b>💻 Usage Instructions</b></summary>
-              
-              ### Windows (PowerShell ou CMD)
-              ```cmd
-              SpotiFLAC-Windows.exe [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
-              ```
-
-              ### 🍏 macOS
-              ```bash
-              chmod +x SpotiFLAC-macOS
-              ./SpotiFLAC-macOS [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
-              ```
-
-              ### 🐧 Linux
-              ```bash
-              chmod +x SpotiFLAC-Linux-x86_64
-              ./SpotiFLAC-Linux-x86_64 [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
-              ```
-              *(For ARM devices like Raspberry Pi, replace `x86_64` with `arm64`)*
-              </details>
+            body_path: release_body.md
           env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

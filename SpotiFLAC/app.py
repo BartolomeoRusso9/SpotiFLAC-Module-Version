@@ -154,6 +154,10 @@ class SpotiFLAC_API:
         except Exception as exc:
             self.log(f"ffmpeg check error: {exc}", "warn")
 
+    def get_artist_images(self, url):
+        # Non implementato: ritorna lista vuota per far scattare il fallback JS
+        return []
+
     # ── Optional public method (JS can query it later as well) ─────────────
     def get_ffmpeg_status(self) -> dict:
         from .core.ffmpeg_check import check_ffmpeg
@@ -279,9 +283,9 @@ class SpotiFLAC_API:
 
     def get_history(self):
         try:
-            from .core.session_memory import get_url_history
+            from .core.session_memory import get_url_history_async
 
-            return get_url_history()
+            return asyncio.run(get_url_history_async())
         except Exception:
             return []
 
@@ -541,9 +545,9 @@ class SpotiFLAC_API:
 
     def remove_history_item(self, url):
         try:
-            from .core.session_memory import remove_url_from_history
+            from .core.session_memory import remove_url_from_history_async
 
-            remove_url_from_history(url)
+            asyncio.run(remove_url_from_history_async(url))
         except Exception:
             pass
 

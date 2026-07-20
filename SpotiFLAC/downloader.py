@@ -40,6 +40,21 @@ from .core.quality import normalize_quality
 logger = logging.getLogger(__name__)
 
 
+async def _call_metadata_get_url(client, url: str, **kwargs):
+    """
+    Calls client.get_url_async(url, **kwargs) if it exists, otherwise
+    client.get_url(url, **kwargs) — awaiting it directly if it's already
+    a coroutine function, or offloading to a thread only if it's truly sync.
+    """
+    fn = getattr(client, "get_url_async", None)
+    if fn is None:
+        fn = client.get_url
+
+    if asyncio.iscoroutinefunction(fn):
+        return await fn(url, **kwargs)
+    return await asyncio.to_thread(fn, url, **kwargs)
+
+
 @dataclass
 class DownloadOptions:
     output_dir: str
@@ -664,89 +679,49 @@ class SpotiflacDownloader:
                 from .providers.tidal_metadata import TidalMetadataClient
 
                 client = TidalMetadataClient()
-                if hasattr(client, "get_url_async"):
-                    collection_name, tracks, *collection_cover = (
-                        await client.get_url_async(
-                            url, include_featuring=self._opts.include_featuring
-                        )
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(
+                        client, url, include_featuring=self._opts.include_featuring
                     )
-                else:
-                    collection_name, tracks, *collection_cover = (
-                        await asyncio.to_thread(
-                            client.get_url,
-                            url,
-                            include_featuring=self._opts.include_featuring,
-                        )
-                    )
+                )
             elif is_apple:
                 from .providers.apple_music_metadata import AppleMusicMetadataClient
 
                 client = AppleMusicMetadataClient()
-                if hasattr(client, "get_url_async"):
-                    collection_name, tracks, *collection_cover = (
-                        await client.get_url_async(
-                            url, include_featuring=self._opts.include_featuring
-                        )
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(
+                        client, url, include_featuring=self._opts.include_featuring
                     )
-                else:
-                    collection_name, tracks, *collection_cover = (
-                        await asyncio.to_thread(
-                            client.get_url,
-                            url,
-                            include_featuring=self._opts.include_featuring,
-                        )
-                    )
+                )
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
 
                 client = SoundCloudProvider()
-                if hasattr(client, "get_url_async"):
-                    collection_name, tracks, *collection_cover = (
-                        await client.get_url_async(url)
-                    )
-                else:
-                    collection_name, tracks, *collection_cover = (
-                        await asyncio.to_thread(client.get_url, url)
-                    )
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(client, url)
+                )
             elif is_youtube:
                 from .providers.youtube import YouTubeProvider
 
                 client = YouTubeProvider()
-                if hasattr(client, "get_url_async"):
-                    collection_name, tracks, *collection_cover = (
-                        await client.get_url_async(url)
-                    )
-                else:
-                    collection_name, tracks, *collection_cover = (
-                        await asyncio.to_thread(client.get_url, url)
-                    )
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(client, url)
+                )
             elif is_pandora:
                 from .providers.pandora import PandoraProvider
 
                 client = PandoraProvider()
-                if hasattr(client, "get_url_async"):
-                    collection_name, tracks, *collection_cover = (
-                        await client.get_url_async(url)
-                    )
-                else:
-                    collection_name, tracks, *collection_cover = (
-                        await asyncio.to_thread(client.get_url, url)
-                    )
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(client, url)
+                )
             else:
-                if hasattr(self._client, "get_url_async"):
-                    collection_name, tracks, *collection_cover = (
-                        await self._client.get_url_async(
-                            url, include_featuring=self._opts.include_featuring
-                        )
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(
+                        self._client,
+                        url,
+                        include_featuring=self._opts.include_featuring,
                     )
-                else:
-                    collection_name, tracks, *collection_cover = (
-                        await asyncio.to_thread(
-                            self._client.get_url,
-                            url,
-                            include_featuring=self._opts.include_featuring,
-                        )
-                    )
+                )
         except SpotiflacError:
             raise
         except Exception as exc:
