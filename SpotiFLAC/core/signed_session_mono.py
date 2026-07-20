@@ -25,7 +25,6 @@ import nodriver as uc
 
 from ..core.endpoints import get_amazon_endpoint
 from ..core.solver import (
-    _docker_flags,
     _ensure_xvfb,
     _find_chrome,
     _get_profile_dir,
@@ -148,8 +147,7 @@ class _MonochromeBrowserSession:
                 "--disable-background-timer-throttling",
                 "--disable-backgrounding-occluded-windows",
                 "--disable-renderer-backgrounding",
-                "--window-size=1280,900",
-                *_docker_flags,
+                "--window-size=1280,900"
             ],
         )
         self._page = await self._browser.get(MONOCHROME_PAGE_URL)
