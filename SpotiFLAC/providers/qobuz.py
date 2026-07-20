@@ -429,62 +429,6 @@ _dns_failed_hosts: set[str] = set()
 _dns_failed_hosts_lock: threading.Lock = threading.Lock()
 
 
-def _get_fd_token(
-    client: httpx.Client,
-    origin: str,
-    timeout_s: int,
-) -> str:
-    fd_headers = {
-        "User-Agent": _DEFAULT_UA,
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
-        "Referer": f"{origin}/download",
-        "Cookie": "csrftoken=IaFTROF6th29hXV3Q5KtVw1oelBIGBXS",
-    }
-
-    now = time.time()
-    with _fd_token_lock:
-        cached = _fd_token_cache.get(origin)
-        if cached and (now - cached[1]) < 55.0:
-            return cached[0]
-
-    prep_resp = client.get(f"{origin}/prepare", headers=fd_headers, timeout=timeout_s)
-    if prep_resp.status_code == 429:
-        raise RuntimeError("rate limited (HTTP 429) su /prepare")
-    if prep_resp.status_code != 200:
-        raise RuntimeError(f"HTTP {prep_resp.status_code} su /prepare (fd)")
-
-    t_token = prep_resp.json().get("t")
-    if not t_token:
-        raise RuntimeError("fd /prepare: no token 't'")
-
-    with _fd_token_lock:
-        _fd_token_cache[origin] = (t_token, now)
-
-    return t_token
-
-
-def _get_gdstudio_ts9(host: str) -> str:
-    now = time.time()
-    with _gdstudio_ts9_lock:
-        cached = _gdstudio_ts9_cache.get(host)
-        if cached and (now - cached[1]) < 5.0:
-            return cached[0]
-    try:
-        client = NetworkManager.get_sync_client()
-        r = client.get(f"https://{host}/time", timeout=5)
-        if r.status_code == 200:
-            ts = r.text.strip()
-            if len(ts) >= 9:
-                result = ts[:9]
-                with _gdstudio_ts9_lock:
-                    _gdstudio_ts9_cache[host] = (result, now)
-                return result
-    except Exception:
-        pass
-    return str(int(time.time() * 1000))[:9]
-
-
 def _build_gdstudio_signature(host: str, track_id: str, ts9: str) -> str:
     version = "20260510"
     escaped_track_id = quote(track_id).replace("+", "%20")
