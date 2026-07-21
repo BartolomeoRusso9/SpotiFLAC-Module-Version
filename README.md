@@ -789,7 +789,7 @@ If this software is useful and brings you value, consider supporting the project
 
 ## API Credits
 
-[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [qobuz-rest-api](https://github.com/BartolomeoRusso9/qobuz-rest-api) ·[dabmusic.xyz](https://dabmusic.xyz) · [GD Studio Music API](https://music.gdstudio.xyz) · [Music Wjhe API](https://music.wjhe.top/) · [afkarxyz](https://github.com/afkarxyz) · [MusicBrainz](https://musicbrainz.org) · [SoundCloud](https://soundcloud.com) · [Apple Music](https://music.apple.com) · [YouTube Music](https://music.youtube.com) · [Pandora](https://www.pandora.com) · [squid.wtf](https://squid.wtf) · [flacdownloader.com](https://flacdownloader.com)
+[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [qobuz-rest-api](https://github.com/BartolomeoRusso9/qobuz-rest-api) ·[dabmusic.xyz](https://dabmusic.xyz) · [GD Studio Music API](https://music.gdstudio.xyz) · [Music Wjhe API](https://music.wjhe.top/) · [afkarxyz](https://github.com/afkarxyz) · [MusicBrainz](https://musicbrainz.org) · [SoundCloud](https://soundcloud.com) · [Apple Music](https://music.apple.com) · [YouTube Music](https://music.youtube.com) · [Pandora](https://www.pandora.com) · [squid.wtf](https://squid.wtf) · [flacdownloader.com](https://flacdownloader.com) · [monochrome](https://monochrome.tf) · [spotiflacapp](https://github.com/spotiflacapp/SpotiFLAC-Mobile)
 
 > **[!TIP]**
 > Star the repo to show support, and click **Watch → Custom → Releases** on GitHub if you want to be notified as soon as a new release goes out.
