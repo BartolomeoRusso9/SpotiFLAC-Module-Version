@@ -6,13 +6,14 @@ import os
 import re
 from typing import Any
 
-from ..core.console import print_source_banner
-from ..core.download_validation import validate_downloaded_track_async
-from ..core.endpoints import get_asian_provider_endpoint
-from ..core.errors import ErrorKind, SpotiflacError, TrackNotFoundError
-from ..core.models import DownloadResult, TrackMetadata
-from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
-from ..core.tagger import EmbedOptions, embed_metadata_async
+from SpotiFLAC.core.console import print_source_banner
+from SpotiFLAC.core.download_validation import validate_downloaded_track_async
+from SpotiFLAC.core.endpoints import get_asian_provider_endpoint
+from SpotiFLAC.core.errors import ErrorKind, SpotiflacError, TrackNotFoundError
+from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from SpotiFLAC.core.musicbrainz import AsyncMBFetch, mb_result_to_tags
+from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
+
 from .base import BaseProvider
 
 logger = logging.getLogger(__name__)
@@ -57,12 +58,17 @@ class GDStudioProvider(BaseProvider):
                 return data.get("data", data.get("result", []))
         except Exception as exc:
             logger.debug(
-                "[%s] Async search failed for '%s': %s", self._source, query, exc
+                "[%s] Async search failed for '%s': %s",
+                self._source,
+                query,
+                exc,
             )
         return []
 
     async def _get_stream_async(
-        self, track_id: str, requested_quality: int | None = None
+        self,
+        track_id: str,
+        requested_quality: int | None = None,
     ) -> tuple[str, int]:
         try:
             params = {"types": "url", "source": self._source, "id": track_id}
@@ -159,7 +165,9 @@ class GDStudioProvider(BaseProvider):
         return []
 
     async def _item_to_metadata_async(
-        self, item: dict, position: int = 1
+        self,
+        item: dict,
+        position: int = 1,
     ) -> TrackMetadata:
         track_id = str(item.get("id", ""))
         title = item.get("name", "Unknown")
@@ -218,7 +226,9 @@ class GDStudioProvider(BaseProvider):
         items = await self._search_async(query, count=20)
         if not items:
             raise SpotiflacError(
-                ErrorKind.TRACK_NOT_FOUND, f"No results for: {query}", self.name
+                ErrorKind.TRACK_NOT_FOUND,
+                f"No results for: {query}",
+                self.name,
             )
         tracks = [
             await self._item_to_metadata_async(it, i + 1) for i, it in enumerate(items)
@@ -226,7 +236,10 @@ class GDStudioProvider(BaseProvider):
         return f"Search: {query}", tracks
 
     async def download_track_async(
-        self, metadata: TrackMetadata, output_dir: str, **kwargs: Any
+        self,
+        metadata: TrackMetadata,
+        output_dir: str,
+        **kwargs: Any,
     ) -> DownloadResult:
         try:
             extra = metadata.extra_info or {}
@@ -236,7 +249,8 @@ class GDStudioProvider(BaseProvider):
                 items = await self._search_async(query, count=5)
                 if not items:
                     raise TrackNotFoundError(
-                        self.name, f"Track not found on {self._source}: {query}"
+                        self.name,
+                        f"Track not found on {self._source}: {query}",
                     )
                 raw_track_id = str(items[0].get("id", ""))
                 extra = {
@@ -245,7 +259,7 @@ class GDStudioProvider(BaseProvider):
                     "lyric_id": str(items[0].get("lyric_id", raw_track_id)),
                 }
 
-            dl_url, actual_br = await self._get_stream_async(raw_track_id)
+            dl_url, _actual_br = await self._get_stream_async(raw_track_id)
             if not dl_url:
                 raise SpotiflacError(
                     ErrorKind.UNAVAILABLE,
@@ -267,14 +281,16 @@ class GDStudioProvider(BaseProvider):
                 return DownloadResult.skipped_result(self.name, str(dest), fmt="flac")
 
             import concurrent.futures
-            from ..core.isrc_utils import normalize_isrc
+
+            from SpotiFLAC.core.isrc_utils import normalize_isrc
 
             _isrc_for_mb = normalize_isrc(getattr(metadata, "isrc", None) or "")
             logger.debug("[%s] ISRC at MB lookup: %r", self._source, _isrc_for_mb)
             mb_fetcher = AsyncMBFetch(_isrc_for_mb) if _isrc_for_mb else None
             if not mb_fetcher:
                 logger.warning(
-                    "[%s] MusicBrainz skipped: no valid ISRC available", self._source
+                    "[%s] MusicBrainz skipped: no valid ISRC available",
+                    self._source,
                 )
             print_source_banner(self._source, "", "FLAC")
             await self._async_http.stream_to_file(
@@ -286,7 +302,8 @@ class GDStudioProvider(BaseProvider):
 
             expected_s = metadata.duration_ms // 1000
             valid, err_msg = await validate_downloaded_track_async(
-                str(dest), expected_s
+                str(dest),
+                expected_s,
             )
             if not valid:
                 if dest.exists():
@@ -301,7 +318,7 @@ class GDStudioProvider(BaseProvider):
             if mb_fetcher:
                 try:
                     res = await asyncio.to_thread(
-                        lambda: mb_fetcher.future.result(timeout=12)
+                        lambda: mb_fetcher.future.result(timeout=12),
                     )
                     mb_tags = mb_result_to_tags(res)
                     if mb_tags:
@@ -356,7 +373,7 @@ class GDStudioProvider(BaseProvider):
             return DownloadResult.ok(self.name, str(dest))
 
         except SpotiflacError as exc:
-            logger.error("[%s] %s", self._source, exc)
+            logger.exception("[%s] %s", self._source, exc)
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
             logger.exception("[%s] unexpected error", self._source)

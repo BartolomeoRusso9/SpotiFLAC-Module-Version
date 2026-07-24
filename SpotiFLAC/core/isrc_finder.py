@@ -1,29 +1,33 @@
 # backend/core/isrc_finder.py
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _SPOTIFY_TRACK_ID_RE = re.compile(
-    r"^(?:spotify:track:|https?://(?:open\.spotify\.com|play\.spotify\.com)/track/)?([A-Za-z0-9]{22})(?:[/?].*)?$"
+    r"^(?:spotify:track:|https?://(?:open\.spotify\.com|play\.spotify\.com)/track/)?([A-Za-z0-9]{22})(?:[/?].*)?$",
 )
 
 
 def spotify_id_to_gid(track_id: str) -> str:
     if not track_id or not isinstance(track_id, str):
-        raise ValueError("Invalid Spotify track identifier")
+        msg = "Invalid Spotify track identifier"
+        raise ValueError(msg)
 
     match = _SPOTIFY_TRACK_ID_RE.match(track_id.strip())
     if not match:
-        raise ValueError(f"Invalid Spotify track identifier: {track_id}")
+        msg = f"Invalid Spotify track identifier: {track_id}"
+        raise ValueError(msg)
 
     return match.group(1)
 
 
-def _normalize_isrc(value: Any) -> Optional[str]:
+def _normalize_isrc(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     from .isrc_utils import normalize_isrc
@@ -33,7 +37,7 @@ def _normalize_isrc(value: Any) -> Optional[str]:
 
 
 class IsrcFinder:
-    def __init__(self, http_client):
+    def __init__(self, http_client) -> None:
         self.http = http_client
         self._spotify_client = None
 
@@ -48,7 +52,7 @@ class IsrcFinder:
                 logger.debug("[isrc_finder] Could not init SpotifyWebClient: %s", e)
         return self._spotify_client
 
-    async def find_isrc_async(self, track_id: str) -> Optional[str]:
+    async def find_isrc_async(self, track_id: str) -> str | None:
         # NOTE: the endpoint spclient.wg.spotify.com/metadata/4/track/{gid}
         # returns a binary protobuf blob (content-type
         # "vnd.spotify/metadata-track"), never JSON. A previous attempt
@@ -66,7 +70,7 @@ class IsrcFinder:
         client = self._get_spotify_client()
         if not client or not client.access_token or not client.client_token:
             logger.debug(
-                "[isrc_finder] SpotifyWebClient is not initialized or missing access token"
+                "[isrc_finder] SpotifyWebClient is not initialized or missing access token",
             )
             return None
 

@@ -1,5 +1,4 @@
-"""
-TidalMetadataClient — retrieves metadata for tracks/albums/playlists/artists
+"""TidalMetadataClient — retrieves metadata for tracks/albums/playlists/artists
 from the public Tidal API when the input URL is a Tidal link (not Spotify).
 """
 
@@ -12,7 +11,7 @@ import unicodedata
 from typing import Any
 from urllib.parse import urlparse
 
-from ..core.errors import (
+from SpotiFLAC.core.errors import (
     AuthError,
     ErrorKind,
     InvalidUrlError,
@@ -21,8 +20,8 @@ from ..core.errors import (
     SpotiflacError,
     TrackNotFoundError,
 )
-from ..core.http import AsyncHttpClient
-from ..core.models import TrackMetadata
+from SpotiFLAC.core.http import AsyncHttpClient
+from SpotiFLAC.core.models import TrackMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -62,22 +61,25 @@ def is_tidal_url(url: str) -> bool:
 
 
 def parse_tidal_url(url: str) -> dict[str, str]:
-    """
-    Parse a Tidal URL or deep link and return {"type": ..., "id": ...}.
+    """Parse a Tidal URL or deep link and return {"type": ..., "id": ...}.
     Synchronized with the parseURL logic from index.js.
     """
     text = url.strip()
 
     # 1. Prefisso puro (es. tidal:track:12345)
     prefix_match = re.match(
-        r"^tidal:(track|album|artist|playlist):([^?#/]+)", text, re.IGNORECASE
+        r"^tidal:(track|album|artist|playlist):([^?#/]+)",
+        text,
+        re.IGNORECASE,
     )
     if prefix_match:
         return {"type": prefix_match.group(1).lower(), "id": prefix_match.group(2)}
 
     # 2. Deep link (es. tidal://track/12345)
     deep_link_match = re.match(
-        r"^tidal:\/\/\/?(track|album|artist|playlist)\/([^?#/]+)", text, re.IGNORECASE
+        r"^tidal:\/\/\/?(track|album|artist|playlist)\/([^?#/]+)",
+        text,
+        re.IGNORECASE,
     )
     if deep_link_match:
         return {
@@ -127,8 +129,7 @@ def _remove_diacritics(s: str) -> str:
     s = re.sub(r"[đĐ]", "dj", s)
     s = re.sub(r"[ßẞ]", "ss", s)
     s = re.sub(r"[æÆ]", "ae", s)
-    s = re.sub(r"[œŒ]", "oe", s)
-    return s
+    return re.sub(r"[œŒ]", "oe", s)
 
 
 def _normalize_artist(s: str) -> str:
@@ -188,7 +189,8 @@ class TidalMetadataClient:
                 return resp.json()
 
             except AuthError:
-                raise AuthError("tidal_metadata", "Tidal token invalid or expired")
+                msg = "tidal_metadata"
+                raise AuthError(msg, "Tidal token invalid or expired")
 
             except TrackNotFoundError:
                 raise SpotiflacError(
@@ -199,8 +201,9 @@ class TidalMetadataClient:
 
             except RateLimitedError as exc:
                 if attempt >= _MAX_RETRIES:
+                    msg = "tidal_metadata"
                     raise NetworkError(
-                        "tidal_metadata",
+                        msg,
                         f"Rate limit persistente dopo {_MAX_RETRIES} tentativi su {path}",
                     )
                 wait = int(getattr(exc, "retry_after", 5)) + 1
@@ -217,7 +220,8 @@ class TidalMetadataClient:
                     raise
                 await asyncio.sleep(2)
 
-        raise NetworkError("tidal_metadata", f"Unable to complete request to {path}")
+        msg = "tidal_metadata"
+        raise NetworkError(msg, f"Unable to complete request to {path}")
 
     async def _pagete(
         self,
@@ -257,11 +261,7 @@ class TidalMetadataClient:
         album_id: str,
         preloaded_album: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], list[TrackMetadata]]:
-        album = (
-            preloaded_album
-            if preloaded_album
-            else await self._get(f"/albums/{album_id}")
-        )
+        album = preloaded_album or await self._get(f"/albums/{album_id}")
         items = await self._pagete(f"/albums/{album_id}/tracks")
         tracks = [self._track_from_album_item(item, album) for item in items]
 
@@ -291,7 +291,7 @@ class TidalMetadataClient:
                 )
                 continue
             tracks.append(
-                await self._track_from_raw(track_data, fetch_album_details=False)
+                await self._track_from_raw(track_data, fetch_album_details=False),
             )
 
         return playlist, tracks
@@ -354,7 +354,7 @@ class TidalMetadataClient:
             *[
                 _fetch_one(aid, preloaded, is_comp)
                 for aid, preloaded, is_comp in albums_to_fetch
-            ]
+            ],
         )
 
         fetched: dict[str, tuple[list[TrackMetadata], bool]] = {}

@@ -1,9 +1,11 @@
 from __future__ import annotations
-import time
-import struct
-import hmac
+
 import hashlib
+import hmac
 import logging
+import struct
+import time
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -195,9 +197,7 @@ def generate_spotify_totp(
     timestamp: float | None = None,
     version: int | None = None,
 ) -> tuple[str, int]:
-    """
-    Generates a Spotify TOTP code dynamically.
-    """
+    """Generates a Spotify TOTP code dynamically."""
     try:
         secrets = get_secrets()
         if version is None:
@@ -212,5 +212,5 @@ def generate_spotify_totp(
         code = _hotp(key_bytes, counter)
         return code, version
     except Exception as exc:
-        logger.error("[spotify_totp] Code generation error: %s", exc)
+        logger.exception("[spotify_totp] Code generation error: %s", exc)
         return "", (version or _TOTP_VERSION)

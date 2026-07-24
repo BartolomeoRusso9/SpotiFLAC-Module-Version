@@ -1,19 +1,20 @@
-import unittest
 import asyncio
-from unittest.mock import patch, AsyncMock
+import unittest
+from unittest.mock import AsyncMock, patch
+
 from SpotiFLAC.providers.base import BaseProvider
 
 
 class DummyProvider(BaseProvider):
     name = "dummy"
 
-    async def download_track_async(self, metadata, output_dir, **kwargs):
+    async def download_track_async(self, metadata, output_dir, **kwargs) -> None:
         pass
 
 
 class BaseProviderTests(unittest.TestCase):
     @patch("asyncio.create_subprocess_exec")
-    def test_run_ffprobe_executes_successfully(self, mock_exec):
+    def test_run_ffprobe_executes_successfully(self, mock_exec) -> None:
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"some stdout", b"some stderr")
         mock_proc.returncode = 0
@@ -22,9 +23,9 @@ class BaseProviderTests(unittest.TestCase):
         provider = DummyProvider()
         rc, stdout, stderr = asyncio.run(provider._run_ffprobe("ffprobe", "-version"))
 
-        self.assertEqual(rc, 0)
-        self.assertEqual(stdout, "some stdout")
-        self.assertEqual(stderr, "some stderr")
+        assert rc == 0
+        assert stdout == "some stdout"
+        assert stderr == "some stderr"
         mock_exec.assert_called_once_with(
             "ffprobe",
             "-version",
@@ -33,7 +34,7 @@ class BaseProviderTests(unittest.TestCase):
         )
 
     @patch("asyncio.create_subprocess_exec")
-    def test_run_ffmpeg_executes_successfully(self, mock_exec):
+    def test_run_ffmpeg_executes_successfully(self, mock_exec) -> None:
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"some ffmpeg output", b"")
         mock_proc.returncode = 0
@@ -42,9 +43,9 @@ class BaseProviderTests(unittest.TestCase):
         provider = DummyProvider()
         rc, stdout, stderr = asyncio.run(provider._run_ffmpeg("ffmpeg", "-version"))
 
-        self.assertEqual(rc, 0)
-        self.assertEqual(stdout, "some ffmpeg output")
-        self.assertEqual(stderr, "")
+        assert rc == 0
+        assert stdout == "some ffmpeg output"
+        assert stderr == ""
         mock_exec.assert_called_once_with(
             "ffmpeg",
             "-version",
@@ -59,11 +60,18 @@ class BaseProviderTests(unittest.TestCase):
     @patch("SpotiFLAC.providers.deezer.DeezerProvider._get_track_by_isrc_async")
     @patch("SpotiFLAC.providers.deezer.DeezerProvider._download_flac_raw_async")
     def test_deezer_unlinks_dest_on_failure(
-        self, mock_dl, mock_isrc, mock_embed, mock_validate, mock_move, mock_mb
-    ):
-        from SpotiFLAC.providers.deezer import DeezerProvider
-        from SpotiFLAC.core.models import TrackMetadata
+        self,
+        mock_dl,
+        mock_isrc,
+        mock_embed,
+        mock_validate,
+        mock_move,
+        mock_mb,
+    ) -> None:
         from unittest.mock import MagicMock
+
+        from SpotiFLAC.core.models import TrackMetadata
+        from SpotiFLAC.providers.deezer import DeezerProvider
 
         # Setup mocks
         mock_isrc.return_value = {"isrc": "USUM71703861"}
@@ -89,7 +97,7 @@ class BaseProviderTests(unittest.TestCase):
 
             res = asyncio.run(provider.download_track_async(meta, "out"))
 
-            self.assertFalse(res.success)
+            assert not res.success
             mock_dest.unlink.assert_called_once()
 
 

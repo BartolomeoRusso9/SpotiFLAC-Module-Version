@@ -1,22 +1,21 @@
-"""
-MusicBrainz API Client — versione originale sync + nuova variante async (Phase 2).
+"""MusicBrainz API Client — versione originale sync + nuova variante async (Phase 2).
 La variante async usa asyncio.Event per deduplicazione in-flight invece di threading.Event.
 """
 
 from __future__ import annotations
 
 import asyncio
+import atexit as _atexit
 import logging
 import threading
+import threading as _threading
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
-import atexit as _atexit
 
 import httpx
 
 from .http import NetworkManager
-import threading as _threading
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +79,10 @@ def _wait_for_request_slot() -> None:
 
     with _mb_throttle_mu:
         ready_at = _mb_next_request
-        if _mb_blocked_till > ready_at:
-            ready_at = _mb_blocked_till
+        ready_at = max(ready_at, _mb_blocked_till)
 
         now = time.time()
-        if ready_at < now:
-            ready_at = now
+        ready_at = max(ready_at, now)
 
         _mb_next_request = ready_at + _MB_MIN_REQ_INTERVAL
         wait_duration = ready_at - now
@@ -100,12 +97,10 @@ async def _wait_for_request_slot_async() -> None:
 
     with _mb_throttle_mu:
         ready_at = _mb_next_request
-        if _mb_blocked_till > ready_at:
-            ready_at = _mb_blocked_till
+        ready_at = max(ready_at, _mb_blocked_till)
 
         now = time.time()
-        if ready_at < now:
-            ready_at = now
+        ready_at = max(ready_at, now)
 
         _mb_next_request = ready_at + _MB_MIN_REQ_INTERVAL
         wait_duration = ready_at - now
@@ -129,10 +124,8 @@ def _note_throttle() -> None:
     global _mb_blocked_till, _mb_next_request
     with _mb_throttle_mu:
         cooldown_until = time.time() + _MB_THROTTLE_COOLDOWN
-        if cooldown_until > _mb_blocked_till:
-            _mb_blocked_till = cooldown_until
-        if _mb_next_request < _mb_blocked_till:
-            _mb_next_request = _mb_blocked_till
+        _mb_blocked_till = max(_mb_blocked_till, cooldown_until)
+        _mb_next_request = max(_mb_next_request, _mb_blocked_till)
 
 
 async def _query_recordings_async(query: str) -> dict:
@@ -354,8 +347,7 @@ def fetch_mb_metadata(isrc: str) -> dict:
 
 
 async def fetch_mb_metadata_async(isrc: str) -> dict:
-    """
-    Versione async di fetch_mb_metadata.
+    """Versione async di fetch_mb_metadata.
     Usa asyncio.Event per deduplicazione in-flight invece di threading.Event.
     Stessa logica di caching della versione sync.
     """
@@ -473,7 +465,7 @@ class AsyncMBFetch:
                 cls._executor = ThreadPoolExecutor(max_workers=4)
             return cls._executor
 
-    def __init__(self, isrc: str):
+    def __init__(self, isrc: str) -> None:
         self.isrc = isrc
         try:
             self.future = self._get_executor().submit(fetch_mb_metadata, isrc)

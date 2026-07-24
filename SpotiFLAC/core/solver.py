@@ -1,20 +1,23 @@
+from __future__ import annotations
+
 import asyncio
+import base64 as _b64
+import contextlib
+import inspect
 import json
+import logging
+import logging as _logging
 import os
+import os as _os
 import platform
 import random
 import subprocess
 import threading
 import time
-import base64 as _b64
-import logging as _logging
-import logging
-from nodriver import cdp
-from typing import Optional
 from urllib.parse import parse_qsl, urlparse
+
 import nodriver as uc
-import inspect
-import os as _os
+from nodriver import cdp
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +49,8 @@ def _patch_nodriver_unknown_cdp_events() -> None:
                 import logging
 
                 logging.getLogger(__name__).debug(
-                    "[turnstile] ignoring unknown CDP event: %s", exc
+                    "[turnstile] ignoring unknown CDP event: %s",
+                    exc,
                 )
                 return None
 
@@ -59,7 +63,8 @@ def _patch_nodriver_unknown_cdp_events() -> None:
                 import logging
 
                 logging.getLogger(__name__).debug(
-                    "[turnstile] ignoring unknown CDP event: %s", exc
+                    "[turnstile] ignoring unknown CDP event: %s",
+                    exc,
                 )
                 return None
 
@@ -75,8 +80,8 @@ _logging.getLogger("asyncio").setLevel(_logging.ERROR)
 
 def _find_chrome() -> str:
     """Return the Chrome executable path, checking common locations per OS, including macOS and alternative Chromium browsers."""
-    import platform
     import os
+    import platform
     import shutil
 
     if os.environ.get("CHROME_PATH"):
@@ -132,9 +137,12 @@ def _find_chrome() -> str:
         if path:
             return path
 
-    raise FileNotFoundError(
+    msg = (
         "No Chromium-based browser (Chrome, Edge, Brave, Arc) found on system. "
         "Install one of these browsers or set the CHROME_PATH environment variable."
+    )
+    raise FileNotFoundError(
+        msg,
     )
 
 
@@ -148,7 +156,7 @@ def _get_profile_dir() -> str:
     return "/tmp/ts_profile"
 
 
-def _start_xvfb_if_needed() -> Optional[subprocess.Popen]:
+def _start_xvfb_if_needed() -> subprocess.Popen | None:
     """On Linux headless servers, start a virtual display so Chrome can run."""
     if platform.system() != "Linux":
         return None
@@ -170,7 +178,7 @@ async def _solve_impl(
     timeout: int,
     capture_callback: bool = False,
     hold_open_seconds: float = 0.0,
-) -> str | tuple[str, Optional[str]]:
+) -> str | tuple[str, str | None]:
     browser = await uc.start(
         browser_executable_path=_find_chrome(),
         headless=False,
@@ -184,7 +192,7 @@ async def _solve_impl(
 
     page = None
     callback_grant = _extract_grant_from_callback_url(siteurl)
-    network_grant: dict[str, Optional[str]] = {"value": None}
+    network_grant: dict[str, str | None] = {"value": None}
 
     async def _on_response(event) -> None:
         if not capture_callback or page is None:
@@ -195,7 +203,7 @@ async def _solve_impl(
             if "json" not in mime:
                 return
             body, is_base64 = await page.send(
-                cdp.network.get_response_body(event.request_id)
+                cdp.network.get_response_body(event.request_id),
             )
             if is_base64:
                 try:
@@ -225,8 +233,8 @@ async def _solve_impl(
         try:
             await page.send(cdp.network.enable())
             page.add_handler(cdp.network.ResponseReceived, _on_response)
-        except Exception as exc:
-            print(f"[solver] network capture non disponibile: {exc}")
+        except Exception:
+            pass
 
     async def _inject_widget() -> None:
         await page.evaluate(f"""
@@ -252,13 +260,12 @@ async def _solve_impl(
 
     async def _open_fresh_page() -> None:
         """Chiude la pagina corrente (se presente) e ne apre una nuova
-        sullo stesso siteurl — usato per il retry con reload."""
+        sullo stesso siteurl — usato per il retry con reload.
+        """
         nonlocal page
         if page is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await page.close()
-            except Exception:
-                pass
         page = await browser.get(siteurl)
         await _try_hide_window()
         await _enable_network_capture()
@@ -270,7 +277,7 @@ async def _solve_impl(
         except Exception:
             pass
 
-    async def get_token() -> Optional[str]:
+    async def get_token() -> str | None:
         return await page.evaluate("""
             (() => {
                 if (window._tsToken) return window._tsToken;
@@ -288,8 +295,8 @@ async def _solve_impl(
         """)
 
     async def capture_callback_grant(
-        current_url: Optional[str] = None,
-    ) -> Optional[str]:
+        current_url: str | None = None,
+    ) -> str | None:
         nonlocal callback_grant
         if not capture_callback:
             return callback_grant
@@ -304,7 +311,7 @@ async def _solve_impl(
             callback_grant = extracted
         return callback_grant
 
-    async def get_cf_iframe_rect() -> Optional[dict]:
+    async def get_cf_iframe_rect() -> dict | None:
         raw = await page.evaluate("""
             JSON.stringify((() => {
                 for (const f of document.querySelectorAll('iframe')) {
@@ -325,10 +332,10 @@ async def _solve_impl(
         return rect is not None
 
     async def _wait_for_native_widget(
-        min_wait: float = 6.0, poll_interval: float = 0.5
+        min_wait: float = 6.0,
+        poll_interval: float = 0.5,
     ) -> bool:
-        """
-        Aspetta fino a `min_wait` secondi che compaia il widget Turnstile
+        """Aspetta fino a `min_wait` secondi che compaia il widget Turnstile
         NATIVO della pagina (quello che nel browser reale appare dopo ~5s
         di countdown), invece di iniettarne subito uno nostro. Ritorna True
         se il widget nativo è comparso, False se bisogna ricorrere al
@@ -342,26 +349,21 @@ async def _solve_impl(
             elapsed += poll_interval
         return await _has_native_widget()
 
-    async def do_click(rect: Optional[dict]):
+    async def do_click(rect: dict | None) -> None:
         if rect:
             cx = rect["x"] + 28 + random.uniform(-3, 3)
             cy = rect["y"] + rect["h"] / 2 + random.uniform(-3, 3)
-            print(f"[solver] clicking Cloudflare iframe at ({cx:.0f}, {cy:.0f})")
         else:
             cx = 20 + 28 + random.uniform(-3, 3)
             cy = 20 + 32 + random.uniform(-3, 3)
-            print(
-                f"[solver] iframe not in DOM, clicking fixed position ({cx:.0f}, {cy:.0f})"
-            )
         await page.mouse_move(cx - 80, cy - 20)
         await asyncio.sleep(random.uniform(0.15, 0.25))
         await page.mouse_move(cx, cy)
         await asyncio.sleep(random.uniform(0.08, 0.15))
         await page.mouse_click(cx, cy)
 
-    async def _try_solve_within(window_seconds: float) -> Optional[str]:
-        """
-        Tenta di ottenere il token entro `window_seconds`, cliccando la
+    async def _try_solve_within(window_seconds: float) -> str | None:
+        """Tenta di ottenere il token entro `window_seconds`, cliccando la
         checkbox se necessario. In modalità capture_callback, considera
         "risolto" anche il solo ottenimento del grant di rete, anche senza
         un token esplicito (la pagina a volte non lo espone mai nel DOM).
@@ -413,7 +415,7 @@ async def _solve_impl(
 
         return token
 
-    token: Optional[str] = None
+    token: str | None = None
     per_attempt_seconds = (
         min(_RELOAD_CHECK_SECONDS, float(timeout)) if timeout else _RELOAD_CHECK_SECONDS
     )
@@ -431,10 +433,6 @@ async def _solve_impl(
 
         for attempt in range(1, max_attempts + 1):
             if attempt > 1:
-                print(
-                    f"[solver] Nessun risultato entro {per_attempt_seconds:.0f}s, "
-                    f"chiudo e riapro la pagina (tentativo {attempt}/{max_attempts})…"
-                )
                 await _open_fresh_page()
                 native_ready = await _wait_for_native_widget(min_wait=6.0)
                 if not native_ready:
@@ -447,33 +445,31 @@ async def _solve_impl(
                 break
 
             if attempt < max_attempts:
-                print(
-                    f"[solver] Tentativo {attempt}/{max_attempts} fallito, attendo 10s prima di riprovare…"
-                )
                 await asyncio.sleep(10.0)
 
         if token and hold_open_seconds > 0:
             await asyncio.sleep(hold_open_seconds)
 
         if capture_callback:
-            try:
+            with contextlib.suppress(Exception):
                 await capture_callback_grant()
-            except Exception:
-                pass
 
     finally:
         browser.stop()
 
     if not token and not (capture_callback and callback_grant):
-        raise TimeoutError(
+        msg = (
             f"Turnstile token non ottenuto dopo {max_attempts} tentativi "
             f"({per_attempt_seconds:.0f}s ciascuno)"
+        )
+        raise TimeoutError(
+            msg,
         )
 
     return (token, callback_grant) if capture_callback else token
 
 
-def _extract_grant_from_callback_url(callback_url: str) -> Optional[str]:
+def _extract_grant_from_callback_url(callback_url: str) -> str | None:
     if not callback_url:
         return None
     try:
@@ -496,8 +492,7 @@ _xvfb_started = False
 
 
 def _ensure_xvfb() -> None:
-    """
-    Starts a virtual display on headless Linux servers if one isn't already
+    """Starts a virtual display on headless Linux servers if one isn't already
     running. Previously this only happened in the __main__ CLI entry point,
     so any caller using solve()/solve_with_callback() as a library (e.g. the
     signed-session bridge) on a headless box without a DISPLAY would fail to
@@ -518,7 +513,10 @@ def clear_solver_cache() -> None:
 
 
 def solve(
-    sitekey: str, siteurl: str, timeout: int = 45, hold_open_seconds: float = 0.0
+    sitekey: str,
+    siteurl: str,
+    timeout: int = 45,
+    hold_open_seconds: float = 0.0,
 ) -> str:
     import warnings
 
@@ -542,7 +540,7 @@ def solve(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         token = asyncio.run(
-            _solve_impl(sitekey, siteurl, timeout, hold_open_seconds=hold_open_seconds)
+            _solve_impl(sitekey, siteurl, timeout, hold_open_seconds=hold_open_seconds),
         )
     if hold_open_seconds <= 0:
         _TURNSTILE_CACHE[cache_key] = (now, token)
@@ -550,8 +548,11 @@ def solve(
 
 
 def solve_with_callback(
-    sitekey: str, siteurl: str, timeout: int = 45, hold_open_seconds: float = 0.0
-) -> tuple[str, Optional[str]]:
+    sitekey: str,
+    siteurl: str,
+    timeout: int = 45,
+    hold_open_seconds: float = 0.0,
+) -> tuple[str, str | None]:
     import warnings
 
     _ensure_xvfb()
@@ -565,7 +566,7 @@ def solve_with_callback(
                 timeout,
                 capture_callback=True,
                 hold_open_seconds=hold_open_seconds,
-            )
+            ),
         )
 
     if isinstance(result, tuple):
@@ -577,8 +578,6 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 3:
-        print("Usage: python solver.py <sitekey> <siteurl>")
         sys.exit(1)
 
     token = solve(sys.argv[1], sys.argv[2])
-    print(token)

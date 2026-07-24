@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import sys
+
 from tqdm import tqdm
 
 _BANNER_WIDTH = 60
@@ -50,7 +52,11 @@ def _maybe_print_api_failure_summary(provider: str) -> None:
 
 
 def print_track_header(
-    position: int, total: int, title: str, artists: str, album: str
+    position: int,
+    total: int,
+    title: str,
+    artists: str,
+    album: str,
 ) -> None:
     _reset_api_failure_state()
     pos = f"[{position}/{total}]"
@@ -78,7 +84,10 @@ def print_official_source(provider: str, quality: str) -> None:
 
 
 def print_summary(
-    total: int, succeeded: int, failed: list[tuple[str, str, str]], elapsed_s: float
+    total: int,
+    succeeded: int,
+    failed: list[tuple[str, str, str]],
+    elapsed_s: float,
 ) -> None:
     bar = "═" * _BANNER_WIDTH
     summary = f"\n╔{bar}╗\n"
@@ -124,7 +133,7 @@ def _shorten_api(provider: str, url: str) -> str:
 
 
 def _fmt_seconds(s: float) -> str:
-    s = int(round(s))
+    s = round(s)
     parts = []
     for unit, div in [("h", 3600), ("m", 60), ("s", 1)]:
         val, s = divmod(s, div)
@@ -156,4 +165,4 @@ def _clean_error(err: str) -> str:
         return "HTTP 403 Forbidden (Cloudflare/WAF blocked)"
     if "Expecting value: line 1" in err_str or "invalid JSON" in err_str.lower():
         return "Invalid JSON response"
-    return err_str.split("\n")[0][:60]
+    return err_str.split("\n", maxsplit=1)[0][:60]

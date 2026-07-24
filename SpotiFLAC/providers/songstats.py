@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import json
 import logging
 import re
-from typing import Dict, Optional
+from typing import TYPE_CHECKING
 
-from ..core.http import AsyncHttpClient
+if TYPE_CHECKING:
+    from SpotiFLAC.core.http import AsyncHttpClient
 
 logger = logging.getLogger(__name__)
 
@@ -11,14 +14,14 @@ logger = logging.getLogger(__name__)
 class SongstatsProvider:
     """Extracts ISRC and platform links from the public Songstats page via JSON-LD."""
 
-    def __init__(self, http_client: AsyncHttpClient):
+    def __init__(self, http_client: AsyncHttpClient) -> None:
         self.http = http_client
 
-    async def get_isrc_async(self, track_id: str) -> Optional[str]:
+    async def get_isrc_async(self, track_id: str) -> str | None:
         data = await self.get_data_async(track_id)
         return data.get("isrc")
 
-    async def get_data_async(self, track_id: str) -> Dict[str, Optional[str]]:
+    async def get_data_async(self, track_id: str) -> dict[str, str | None]:
         url = f"https://songstats.com/track/{track_id}"
         results = {"isrc": None, "tidal": None, "amazon": None, "deezer": None}
 
@@ -49,7 +52,7 @@ class SongstatsProvider:
 
         return results
 
-    def _collect_links(self, data, results):
+    def _collect_links(self, data, results) -> None:
         if isinstance(data, dict):
             if "sameAs" in data:
                 self._apply_same_as(data["sameAs"], results)
@@ -59,7 +62,7 @@ class SongstatsProvider:
             for item in data:
                 self._collect_links(item, results)
 
-    def _apply_same_as(self, same_as, results):
+    def _apply_same_as(self, same_as, results) -> None:
         if isinstance(same_as, str):
             self._assign_link(same_as, results)
         elif isinstance(same_as, list):
@@ -67,7 +70,7 @@ class SongstatsProvider:
                 if isinstance(item, str):
                     self._assign_link(item, results)
 
-    def _assign_link(self, link: str, results: Dict[str, Optional[str]]):
+    def _assign_link(self, link: str, results: dict[str, str | None]) -> None:
         link = link.strip()
         if not link:
             return

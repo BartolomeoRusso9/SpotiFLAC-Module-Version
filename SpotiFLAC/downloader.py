@@ -1,16 +1,16 @@
-"""
-Downloader — main orchestrator (100% Async Native).
+"""Downloader — main orchestrator (100% Async Native).
 Changes compared to the original:
   - DownloadOptions: +track_max_retries, +post_download_action, +post_download_command
   - download_one_async(): per-track retry with exponential backoff and pure async flow
   - DownloadWorker.run_async(): async semaphores for concurrent task orchestration
   - SpotiflacDownloader.run_async(): fully async batch processing and metadata fetching
-  - 100% Asynchronous I/O wrappers for filesystem operations
+  - 100% Asynchronous I/O wrappers for filesystem operations.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import re
@@ -19,30 +19,32 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from .core.console import print_track_header, print_summary
-from .core.errors import SpotiflacError, ErrorKind
-from .core.models import TrackMetadata, DownloadResult
+from .core.console import print_summary, print_track_header
+from .core.errors import ErrorKind, SpotiflacError
+from .core.http import AsyncHttpClient
+from .core.isrc_helper import IsrcHelper
+from .core.models import DownloadResult, TrackMetadata
 from .core.progress import (
     DownloadManager,
-    ProgressManager,
     ProgressCallback,
-    safe_tqdm_write,
+    ProgressManager,
     install_console_interception,
+    safe_tqdm_write,
     uninstall_console_interception,
 )
-from .providers.base import BaseProvider
-from .providers.spotify_metadata import SpotifyMetadataClient
-from .core.isrc_helper import IsrcHelper
-from .core.http import AsyncHttpClient
 from .core.quality import normalize_quality
+from .providers.spotify_metadata import SpotifyMetadataClient
+
+if TYPE_CHECKING:
+    from .providers.base import BaseProvider
 
 logger = logging.getLogger(__name__)
 
 
 async def _call_metadata_get_url(client, url: str, **kwargs):
-    """
-    Calls client.get_url_async(url, **kwargs) if it exists, otherwise
+    """Calls client.get_url_async(url, **kwargs) if it exists, otherwise
     client.get_url(url, **kwargs) — awaiting it directly if it's already
     a coroutine function, or offloading to a thread only if it's truly sync.
     """
@@ -74,12 +76,12 @@ class DownloadOptions:
 
     embed_lyrics: bool = True
     lyrics_providers: list[str] = field(
-        default_factory=lambda: ["spotify", "apple", "musixmatch", "lrclib", "amazon"]
+        default_factory=lambda: ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
     )
 
     enrich_metadata: bool = True
     enrich_providers: list[str] = field(
-        default_factory=lambda: ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
+        default_factory=lambda: ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
     )
     qobuz_token: str | None = None
     qobuz_local_api_url: str | None = None
@@ -104,7 +106,9 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
     if name.startswith("ext:"):
         try:
             return _build_ext_provider(
-                name, ext_dir=opts.ext_dir, timeout_s=opts.timeout_s or 120
+                name,
+                ext_dir=opts.ext_dir,
+                timeout_s=opts.timeout_s or 120,
             )
         except Exception as e:
             logger.warning("Failed to create provider %s: %s", name, e)
@@ -130,12 +134,15 @@ def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
 def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProvider]:
     """Build the provider list for a service name, optionally adding an installed extension fallback.
 
-    Parameters:
+    Parameters
+    ----------
         name (str): Native service name or an explicit extension identifier prefixed with `ext:`.
         opts (DownloadOptions): Provider and extension configuration.
 
-    Returns:
+    Returns
+    -------
         list[BaseProvider]: Providers ordered with the requested native provider first, followed by at most one extension fallback.
+
     """
     providers: list[BaseProvider] = []
 
@@ -193,7 +200,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
 async def _move_file_async(src: str, dst: str) -> None:
     """Async thread-safe helper to rename/move files."""
 
-    def _do_move():
+    def _do_move() -> None:
         os.makedirs(os.path.dirname(os.path.abspath(dst)) or ".", exist_ok=True)
         if os.path.abspath(src) != os.path.abspath(dst):
             if os.path.exists(dst):
@@ -222,8 +229,7 @@ async def download_one_async(
     position: int = 1,
     is_album: bool = False,
 ) -> DownloadResult:
-    """
-    Attempts to download a single track across all providers in order,
+    """Attempts to download a single track across all providers in order,
     with per-track retry if track_max_retries > 0.
     """
     stop_event = asyncio.Event()
@@ -236,13 +242,14 @@ async def download_one_async(
             opts.timeout_s and time.monotonic() - started_at >= opts.timeout_s
         ):
             return DownloadResult.fail(
-                "none", f"Download timed out after {opts.timeout_s}s"
+                "none",
+                f"Download timed out after {opts.timeout_s}s",
             )
 
         if attempt > 0:
             wait = min(2**attempt, 30)
             safe_tqdm_write(
-                f"\n  ↺  Retry {attempt}/{opts.track_max_retries} in {wait}s…"
+                f"\n  ↺  Retry {attempt}/{opts.track_max_retries} in {wait}s…",
             )
             await asyncio.sleep(wait)
             errors.clear()
@@ -252,21 +259,22 @@ async def download_one_async(
                 is_ext = provider.name.startswith("ext:")
                 target_type = "extension" if is_ext else "provider"
                 safe_tqdm_write(
-                    f"  ⚠️  Fallback: switching to backup {target_type} ({provider.name})..."
+                    f"  ⚠️  Fallback: switching to backup {target_type} ({provider.name})...",
                 )
 
             logger.info(
-                "[%s] Trying: %s — %s", provider.name, metadata.artists, metadata.title
+                "[%s] Trying: %s — %s",
+                provider.name,
+                metadata.artists,
+                metadata.title,
             )
             cb = ProgressCallback(item_id=metadata.id, track_name=metadata.title)
             provider.set_progress_callback(cb)
 
             # Cooperative shutdown propagation
             if hasattr(provider, "set_stop_event_async"):
-                try:
+                with contextlib.suppress(Exception):
                     provider.set_stop_event_async(stop_event)
-                except Exception:
-                    pass
 
             try:
                 # Wrap inside asyncio.wait_for to enforce track timeout strictly at the IO level
@@ -301,13 +309,15 @@ async def download_one_async(
             except asyncio.TimeoutError:
                 stop_event.set()
                 logger.warning(
-                    "[downloader] timeout exceeded for track '%s'", metadata.title
+                    "[downloader] timeout exceeded for track '%s'",
+                    metadata.title,
                 )
                 safe_tqdm_write(
-                    f"\n  ⏱  Timeout reached for '{metadata.title}' — skipping track."
+                    f"\n  ⏱  Timeout reached for '{metadata.title}' — skipping track.",
                 )
                 return DownloadResult.fail(
-                    "none", f"Download timed out after {opts.timeout_s}s"
+                    "none",
+                    f"Download timed out after {opts.timeout_s}s",
                 )
 
             if result.success:
@@ -326,11 +336,16 @@ async def download_one_async(
                     # Spostamento delegato all'I/O asincrono
                     await _move_file_async(result.file_path, target)
                     result = DownloadResult.ok(
-                        result.provider, target, result.format or "flac"
+                        result.provider,
+                        target,
+                        result.format or "flac",
                     )
 
                 logger.info(
-                    "[%s] ✓ %s — %s", provider.name, metadata.artists, metadata.title
+                    "[%s] ✓ %s — %s",
+                    provider.name,
+                    metadata.artists,
+                    metadata.title,
                 )
                 return result
 
@@ -341,7 +356,8 @@ async def download_one_async(
     attempts_str = f"{opts.track_max_retries + 1} attempt(s)"
     summary = "; ".join(f"{k}: {v}" for k, v in errors.items())
     return DownloadResult.fail(
-        "none", f"All providers failed after {attempts_str} — {summary}"
+        "none",
+        f"All providers failed after {attempts_str} — {summary}",
     )
 
 
@@ -357,11 +373,11 @@ async def _send_system_notify_async(title: str, body: str) -> None:
             script = f'display notification "{body}" with title "{title}"'
             await asyncio.create_subprocess_exec("osascript", "-e", script)
         elif sys.platform == "win32":
-            print(f"\n  🔔 {title}: {body}")
+            pass
         else:
             await asyncio.create_subprocess_exec("notify-send", title, body)
     except Exception:
-        print(f"\n  🔔 {title}: {body}")
+        pass
 
 
 async def _open_folder_async(path: str) -> None:
@@ -404,7 +420,8 @@ class DownloadWorker:
         for name in self._opts.services:
             result.extend(_build_providers_for_name(name, self._opts))
         if not result:
-            raise ValueError(f"No valid providers found in: {self._opts.services}")
+            msg = f"No valid providers found in: {self._opts.services}"
+            raise ValueError(msg)
         return result
 
     async def run_async(self) -> list[tuple[str, str, str]]:
@@ -431,8 +448,7 @@ class DownloadWorker:
         base_out: str,
         start: float,
     ) -> list[tuple[str, str, str]]:
-        """
-        Fase 2 — concorrenza nativa asyncio.
+        """Fase 2 — concorrenza nativa asyncio.
 
         Prima: una lista di asyncio.Task consumata con asyncio.as_completed().
         Funzionalmente corretto, ma senza propagazione strutturata degli
@@ -452,7 +468,7 @@ class DownloadWorker:
         """
         max_concurrent = max(1, getattr(self._opts, "max_concurrent_downloads", 2))
         semaphore = asyncio.Semaphore(max_concurrent)
-        results_queue: asyncio.Queue[tuple[TrackMetadata, "object"] | None] = (
+        results_queue: asyncio.Queue[tuple[TrackMetadata, object] | None] = (
             asyncio.Queue()
         )
 
@@ -460,7 +476,11 @@ class DownloadWorker:
             position = i + 1
             async with semaphore:
                 print_track_header(
-                    position, total, track.title, track.artists, track.album
+                    position,
+                    total,
+                    track.title,
+                    track.artists,
+                    track.album,
                 )
                 await manager.start_download(track.id)
 
@@ -474,9 +494,10 @@ class DownloadWorker:
                         position,
                         self._is_album,
                     )
-                except Exception as exc:  # noqa: BLE001 — isoliamo il worker
+                except Exception as exc:
                     logger.exception(
-                        "[worker] Unexpected exception downloading '%s'", track.title
+                        "[worker] Unexpected exception downloading '%s'",
+                        track.title,
                     )
                     result = DownloadResult.fail("none", f"Unexpected error: {exc}")
 
@@ -491,7 +512,9 @@ class DownloadWorker:
                 elif result.success:
                     size_mb = await _get_file_size_mb_async(result.file_path)
                     await manager.complete_download(
-                        track.id, result.file_path or "", size_mb
+                        track.id,
+                        result.file_path or "",
+                        size_mb,
                     )
                 else:
                     err = result.error or "unknown"
@@ -501,7 +524,10 @@ class DownloadWorker:
                         file=sys.stderr,
                     )
                     logger.debug(
-                        "[worker] Failed: %s — %s: %s", track.title, track.artists, err
+                        "[worker] Failed: %s — %s: %s",
+                        track.title,
+                        track.artists,
+                        err,
                     )
                     await manager.fail_download(track.id, err)
                     ProgressCallback.clear_item(track.id)
@@ -534,16 +560,13 @@ class DownloadWorker:
         def _do_resolve():
             if self._opts.output_path:
                 out = os.path.normpath(
-                    os.path.dirname(os.path.abspath(self._opts.output_path))
+                    os.path.dirname(os.path.abspath(self._opts.output_path)),
                 )
                 os.makedirs(out, exist_ok=True)
                 return out
 
             out = os.path.normpath(self._opts.output_dir)
-            if self._is_playlist and self._collection_name:
-                safe_name = re.sub(r'[<>:"/\\|?*]', "_", self._collection_name.strip())
-                out = os.path.join(out, safe_name)
-            elif (
+            if (self._is_playlist and self._collection_name) or (
                 self._is_album
                 and self._collection_name
                 and not self._opts.use_album_subfolders
@@ -586,7 +609,6 @@ class DownloadWorker:
         failed_count = len(self._failed)
 
         if action == "open_folder":
-            print(f"\n  📂 Opening folder: {output_dir}")
             await _open_folder_async(output_dir)
 
         elif action == "notify":
@@ -599,7 +621,7 @@ class DownloadWorker:
             cmd_template = self._opts.post_download_command
             if not cmd_template:
                 logger.warning(
-                    "[post-action] action=command but post_download_command is empty"
+                    "[post-action] action=command but post_download_command is empty",
                 )
                 return
             cmd = (
@@ -608,7 +630,6 @@ class DownloadWorker:
                 .replace("{failed}", str(failed_count))
             )
             try:
-                print(f"\n  ▶  Executing post-download command: {cmd[:80]}")
                 await asyncio.create_subprocess_shell(cmd)
             except Exception as exc:
                 logger.warning("[post-action] command failed: %s", exc)
@@ -628,43 +649,37 @@ class SpotiflacDownloader:
         self._client = SpotifyMetadataClient()
 
     async def run_async(
-        self, input_url: str | list[str], loop_minutes: int | None = None
+        self,
+        input_url: str | list[str],
+        loop_minutes: int | None = None,
     ) -> None:
-        """
-        Starts downloading one or more URLs using the async worker pipeline.
-        """
+        """Starts downloading one or more URLs using the async worker pipeline."""
         urls = [input_url] if isinstance(input_url, str) else list(input_url)
 
-        for idx, url in enumerate(urls):
+        for _idx, url in enumerate(urls):
             if len(urls) > 1:
-                print(f"\n{'═' * 55}")
-                print(f"  URL {idx + 1}/{len(urls)}: {url[:55]}")
-                print(f"{'═' * 55}")
+                pass
 
             failed_tracks = None
             while True:
                 failed_tracks = await self._run_once_async(
-                    url, target_tracks=failed_tracks
+                    url,
+                    target_tracks=failed_tracks,
                 )
                 if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
                     break
-                print(
-                    f"\n{len(failed_tracks)} tracks failed. "
-                    f"Next attempt in {loop_minutes} minutes…"
-                )
                 await asyncio.sleep(loop_minutes * 60)
 
     async def _resolve_metadata_async(
-        self, url: str
+        self,
+        url: str,
     ) -> tuple[str, list[TrackMetadata], dict]:
-        from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
         from .providers.apple_music_metadata import (
             is_apple_music_url,
             parse_apple_music_url,
         )
         from .providers.pandora import is_pandora_url, parse_pandora_url
-
-        print("Fetching metadata…")
+        from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
 
         is_tidal = is_tidal_url(url)
         is_apple = is_apple_music_url(url)
@@ -681,7 +696,8 @@ class SpotiflacDownloader:
 
         if "amazon." in url.lower():
             raise SpotiflacError(
-                ErrorKind.INVALID_URL, "Amazon links cannot be inserted."
+                ErrorKind.INVALID_URL,
+                "Amazon links cannot be inserted.",
             )
 
         try:
@@ -689,54 +705,72 @@ class SpotiflacDownloader:
                 from .providers.tidal_metadata import TidalMetadataClient
 
                 client = TidalMetadataClient()
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(
-                        client, url, include_featuring=self._opts.include_featuring
-                    )
+                (
+                    collection_name,
+                    tracks,
+                    *collection_cover,
+                ) = await _call_metadata_get_url(
+                    client,
+                    url,
+                    include_featuring=self._opts.include_featuring,
                 )
             elif is_apple:
                 from .providers.apple_music_metadata import AppleMusicMetadataClient
 
                 client = AppleMusicMetadataClient()
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(
-                        client, url, include_featuring=self._opts.include_featuring
-                    )
+                (
+                    collection_name,
+                    tracks,
+                    *collection_cover,
+                ) = await _call_metadata_get_url(
+                    client,
+                    url,
+                    include_featuring=self._opts.include_featuring,
                 )
             elif is_soundcloud:
                 from .providers.soundcloud import SoundCloudProvider
 
                 client = SoundCloudProvider()
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(client, url)
-                )
+                (
+                    collection_name,
+                    tracks,
+                    *collection_cover,
+                ) = await _call_metadata_get_url(client, url)
             elif is_youtube:
                 from .providers.youtube import YouTubeProvider
 
                 client = YouTubeProvider()
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(client, url)
-                )
+                (
+                    collection_name,
+                    tracks,
+                    *collection_cover,
+                ) = await _call_metadata_get_url(client, url)
             elif is_pandora:
                 from .providers.pandora import PandoraProvider
 
                 client = PandoraProvider()
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(client, url)
-                )
+                (
+                    collection_name,
+                    tracks,
+                    *collection_cover,
+                ) = await _call_metadata_get_url(client, url)
             else:
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(
-                        self._client,
-                        url,
-                        include_featuring=self._opts.include_featuring,
-                    )
+                (
+                    collection_name,
+                    tracks,
+                    *_collection_cover,
+                ) = await _call_metadata_get_url(
+                    self._client,
+                    url,
+                    include_featuring=self._opts.include_featuring,
                 )
         except SpotiflacError:
             raise
         except Exception as exc:
             raise SpotiflacError(
-                ErrorKind.NETWORK_ERROR, f"Metadata fetch failed: {exc}", cause=exc
+                ErrorKind.NETWORK_ERROR,
+                f"Metadata fetch failed: {exc}",
+                cause=exc,
             )
 
         if not tracks:
@@ -773,14 +807,15 @@ class SpotiflacDownloader:
 
         if not info:
             raise SpotiflacError(
-                ErrorKind.INVALID_URL, f"Unsupported or invalid URL: {url}"
+                ErrorKind.INVALID_URL,
+                f"Unsupported or invalid URL: {url}",
             )
 
-        print(f"Found {len(tracks)} track(s) in: {collection_name}")
         return collection_name, tracks, info
 
     async def _resolve_isrc_bulk_async(
-        self, tracks: list[TrackMetadata]
+        self,
+        tracks: list[TrackMetadata],
     ) -> list[TrackMetadata]:
         missing = [t for t in tracks if not t.isrc]
         if not missing:
@@ -793,7 +828,6 @@ class SpotiflacDownloader:
         if only_youtube:
             return tracks
 
-        print(f"Resolving ISRC for {len(missing)} track(s)…")
         try:
             resolver = IsrcHelper(AsyncHttpClient("isrc"))
 
@@ -836,7 +870,11 @@ class SpotiflacDownloader:
             track_item_id = t.id or t.external_url or f"queue-{i}-{uuid.uuid4().hex}"
             track_spotify_id = t.id or t.external_url or track_item_id
             await manager.add_to_queue(
-                track_item_id, t.title, t.artists, t.album, track_spotify_id
+                track_item_id,
+                t.title,
+                t.artists,
+                t.album,
+                track_spotify_id,
             )
             if not t.id:
                 t = t.model_copy(update={"id": track_item_id})
@@ -855,27 +893,30 @@ class SpotiflacDownloader:
         return [t for t in updated_tracks if t.id in failed_ids]
 
     async def _run_once_async(
-        self, url: str, target_tracks=None
+        self,
+        url: str,
+        target_tracks=None,
     ) -> list[TrackMetadata]:
         if target_tracks is not None:
-            print(f"\nRetrying download for {len(target_tracks)} track(s)...")
             tracks = target_tracks
             collection_name = "Retry Failed Tracks"
             is_album = self._opts.is_album
             is_playlist = len(tracks) > 1
             return await self._run_worker_async(
-                tracks, collection_name, {}, is_album, is_playlist
+                tracks,
+                collection_name,
+                {},
+                is_album,
+                is_playlist,
             )
 
         try:
             collection_name, tracks, info = await self._resolve_metadata_async(url)
         except SpotiflacError as exc:
-            logger.error("Metadata fetch failed: %s", exc)
-            print(f"Error: {exc}")
+            logger.exception("Metadata fetch failed: %s", exc)
             return []
 
         if not tracks:
-            print("No tracks found.")
             return []
 
         is_album = info.get("type") == "album"
@@ -928,12 +969,17 @@ class SpotiflacDownloader:
             logger.debug("[downloader] Failed operation: %s", exc)
 
         return await self._run_worker_async(
-            tracks, collection_name, info, is_album, is_playlist, opts=effective_opts
+            tracks,
+            collection_name,
+            info,
+            is_album,
+            is_playlist,
+            opts=effective_opts,
         )
 
     @staticmethod
     def _format_seconds(seconds: float) -> str:
-        s = int(round(seconds))
+        s = round(seconds)
         parts = []
         for unit, div in [("d", 86400), ("h", 3600), ("m", 60), ("s", 1)]:
             val, s = divmod(s, div)

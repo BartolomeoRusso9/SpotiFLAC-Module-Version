@@ -1,6 +1,5 @@
-"""
-Profile management — salva/carica preset di configurazione con nome.
-File: ~/.cache/spotiflac/profiles.json
+"""Profile management — salva/carica preset di configurazione con nome.
+File: ~/.cache/spotiflac/profiles.json.
 
 Uso asincrono:
     await save_profile_async("tidal-hires", cfg)
@@ -10,11 +9,11 @@ Uso asincrono:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import time
 from pathlib import Path
-import asyncio
-import logging
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -37,11 +36,11 @@ class ProfileConfig(BaseModel):
     quality: str = "LOSSLESS"
     embed_lyrics: bool = True
     lyrics_providers: list[str] = Field(
-        default_factory=lambda: ["spotify", "apple", "musixmatch", "amazon", "lrclib"]
+        default_factory=lambda: ["spotify", "apple", "musixmatch", "amazon", "lrclib"],
     )
     enrich_metadata: bool = True
     enrich_providers: list[str] = Field(
-        default_factory=lambda: ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
+        default_factory=lambda: ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
     )
     track_max_retries: int = 0
     post_download_action: str = "none"
@@ -80,8 +79,10 @@ class ProfileConfig(BaseModel):
             mapped = aliases.get(normalized)
             if mapped:
                 return logging.getLevelName(mapped)
-            raise ValueError(f"Invalid log level: {value}")
-        raise TypeError("log_level must be an integer or a named log level string")
+            msg = f"Invalid log level: {value}"
+            raise ValueError(msg)
+        msg = "log_level must be an integer or a named log level string"
+        raise TypeError(msg)
 
 
 # Synchronous I/O helpers to be executed in a thread
@@ -111,11 +112,13 @@ async def _load_async() -> dict:
                         try:
                             # Pydantic validation is extremely fast in RAM
                             validated[name] = ProfileConfig.model_validate(
-                                profile
+                                profile,
                             ).model_dump(exclude_none=True)
                         except ValidationError as exc:
                             logger.warning(
-                                "[profile] invalid profile %s: %s", name, exc
+                                "[profile] invalid profile %s: %s",
+                                name,
+                                exc,
                             )
                     return validated
         except json.JSONDecodeError as exc:
@@ -141,8 +144,7 @@ async def list_profiles_async() -> list[str]:
 
 
 async def get_profile_async(name: str) -> dict | None:
-    """
-    Carica un profilo per nome.
+    """Carica un profilo per nome.
     Returns None se il profilo non esiste.
     """
     profiles = await _load_async()
@@ -150,8 +152,7 @@ async def get_profile_async(name: str) -> dict | None:
 
 
 async def save_profile_async(name: str, cfg: dict) -> None:
-    """
-    Salva l'intera configurazione come profilo nominato, escludendo i dati di runtime.
+    """Salva l'intera configurazione come profilo nominato, escludendo i dati di runtime.
     Sovrascrive eventuali profili preesistenti con lo stesso nome.
     """
     profiles = await _load_async()
@@ -165,8 +166,7 @@ async def save_profile_async(name: str, cfg: dict) -> None:
 
 
 async def delete_profile_async(name: str) -> bool:
-    """
-    Elimina un profilo per nome.
+    """Elimina un profilo per nome.
     Returns True se il profilo esisteva, False altrimenti.
     """
     profiles = await _load_async()

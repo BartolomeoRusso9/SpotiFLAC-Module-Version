@@ -1,5 +1,4 @@
-"""
-Metadata Enrichment — Phase 2 asyncio migration.
+"""Metadata Enrichment — Phase 2 asyncio migration.
 
 Adds `enrich_metadata_async` that uses `asyncio.gather` with a global timeout instead of `ThreadPoolExecutor`. The original sync version is retained for backward compatibility.
 """
@@ -7,11 +6,12 @@ Adds `enrich_metadata_async` that uses `asyncio.gather` with a global timeout in
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import functools
 import logging
 import re
 import threading
 import time
-import functools
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -80,7 +80,7 @@ class EnrichedMetadata:
             tags["ITUNESADVISORY"] = "1"
         return tags
 
-    def merge(self, other: "EnrichedMetadata", source: str) -> None:
+    def merge(self, other: EnrichedMetadata, source: str) -> None:
         for attr in ("genre", "label", "bpm", "upc", "isrc", "cover_url_hd"):
             if not getattr(self, attr) and getattr(other, attr):
                 setattr(self, attr, getattr(other, attr))
@@ -119,10 +119,8 @@ def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
         _enrichment_cache[key] = (data, time.time())
         if len(_enrichment_cache) > _ENRICHMENT_CACHE_MAX:
             oldest_key = min(_enrichment_cache.items(), key=lambda kv: kv[1][1])[0]
-            try:
+            with contextlib.suppress(Exception):
                 _enrichment_cache.pop(oldest_key, None)
-            except Exception:
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +183,10 @@ class _AppleMusicMeta:
         self._client = None
 
     def fetch(
-        self, track_name: str, artist_name: str, isrc: str = ""
+        self,
+        track_name: str,
+        artist_name: str,
+        isrc: str = "",
     ) -> EnrichedMetadata:
         return _run_async_sync(self.fetch_async(track_name, artist_name, isrc))
 
@@ -193,7 +194,10 @@ class _AppleMusicMeta:
         return _run_async_sync(self._search_async(title, artist, isrc))
 
     async def _search_async(
-        self, title: str, artist: str, isrc: str
+        self,
+        title: str,
+        artist: str,
+        isrc: str,
     ) -> dict[str, Any] | None:
         try:
             client = await NetworkManager.get_async_client_safe()
@@ -241,7 +245,10 @@ class _AppleMusicMeta:
             return None
 
     async def fetch_async(
-        self, track_name: str, artist_name: str, isrc: str = ""
+        self,
+        track_name: str,
+        artist_name: str,
+        isrc: str = "",
     ) -> EnrichedMetadata:
         out = EnrichedMetadata()
         item = await self._search_async(track_name, artist_name, isrc)
@@ -267,7 +274,7 @@ class _TidalMeta:
 
     def _load_apis_from_cache(self) -> None:
         try:
-            from ..providers.tidal import get_tidal_api_list
+            from SpotiFLAC.providers.tidal import get_tidal_api_list
 
             apis = get_tidal_api_list()
             if apis:
@@ -282,7 +289,7 @@ class _TidalMeta:
 
     def _refresh_bg(self) -> None:
         try:
-            from ..providers.tidal import refresh_tidal_api_list
+            from SpotiFLAC.providers.tidal import refresh_tidal_api_list
 
             apis = refresh_tidal_api_list(force=False)
             if apis:
@@ -309,7 +316,9 @@ class _TidalMeta:
         ):
             try:
                 r = await client.get(
-                    endpoint, timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA}
+                    endpoint,
+                    timeout=_HTTP_TIMEOUT,
+                    headers={"User-Agent": _UA},
                 )
                 if not r.is_success:
                     continue
@@ -329,7 +338,7 @@ class _TidalMeta:
         from urllib.parse import quote
 
         clean = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", title).strip() or title
-        first = artist.split(",")[0].strip()
+        first = artist.split(",", maxsplit=1)[0].strip()
         query = quote(f"{first} {clean}")
 
         with self._apis_lock:
@@ -377,7 +386,7 @@ class _QobuzMeta:
     def _get_provider(self) -> Any:
         if self._provider is None:
             try:
-                from ..providers.qobuz import QobuzProvider
+                from SpotiFLAC.providers.qobuz import QobuzProvider
 
                 self._provider = QobuzProvider(qobuz_token=self._qobuz_token)
             except Exception as exc:
@@ -432,7 +441,7 @@ class _SoundCloudMeta:
             return self._provider
         self._init_attempted = True
         try:
-            from ..providers.soundcloud import SoundCloudProvider
+            from SpotiFLAC.providers.soundcloud import SoundCloudProvider
 
             self._provider = SoundCloudProvider()
         except Exception as exc:
@@ -521,7 +530,9 @@ async def _deezer_fetch_async(isrc: str) -> EnrichedMetadata:
 
 
 async def _apple_fetch_async(
-    track_name: str, artist_name: str, isrc: str
+    track_name: str,
+    artist_name: str,
+    isrc: str,
 ) -> EnrichedMetadata:
     return await _get_apple().fetch_async(track_name, artist_name, isrc)
 
@@ -535,7 +546,8 @@ async def _qobuz_fetch_async(isrc: str, qobuz_token: str | None) -> EnrichedMeta
 
 
 async def _soundcloud_fetch_async(
-    track_name: str, artist_name: str
+    track_name: str,
+    artist_name: str,
 ) -> EnrichedMetadata:
     return await _get_sc().fetch_async(track_name, artist_name)
 
@@ -553,8 +565,7 @@ async def enrich_metadata_async(
     timeout_s: float = _GLOBAL_TIMEOUT,
     qobuz_token: str | None = None,
 ) -> EnrichedMetadata:
-    """
-    Queries providers in parallel with asyncio.gather + global timeout.
+    """Queries providers in parallel with asyncio.gather + global timeout.
     Replaces the sync version's ThreadPoolExecutor.
     """
     if providers is None:
@@ -569,17 +580,16 @@ async def enrich_metadata_async(
         try:
             if name == "deezer":
                 return name, await _deezer_fetch_async(isrc)
-            elif name == "apple":
+            if name == "apple":
                 return name, await _apple_fetch_async(track_name, artist_name, isrc)
-            elif name == "tidal":
+            if name == "tidal":
                 return name, await _tidal_fetch_async(track_name, artist_name)
-            elif name == "qobuz":
+            if name == "qobuz":
                 return name, await _qobuz_fetch_async(isrc, qobuz_token)
-            elif name == "soundcloud":
+            if name == "soundcloud":
                 return name, await _soundcloud_fetch_async(track_name, artist_name)
-            else:
-                logger.warning("[meta/enrich] provider sconosciuto: %s", name)
-                return name, EnrichedMetadata()
+            logger.warning("[meta/enrich] provider sconosciuto: %s", name)
+            return name, EnrichedMetadata()
         except Exception as exc:
             logger.debug("[meta/enrich] %s failed: %s", name, exc)
             return name, EnrichedMetadata()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import hmac
 import json
@@ -23,11 +24,11 @@ logger = logging.getLogger(__name__)
 
 
 def is_docker() -> bool:
-    """
-    Determine whether the process is running inside a Docker container.
+    """Determine whether the process is running inside a Docker container.
 
     Returns:
         bool: `True` if Docker container indicators are detected, `False` otherwise.
+
     """
     cgroup_path = "/proc/1/cgroup"
     if os.path.exists("/.dockerenv"):
@@ -120,8 +121,7 @@ class SignedSessionClient:
         self._load()
 
     def set_cf_clearance(self, cf_clearance: str) -> None:
-        """
-        Inietta il cookie `cf_clearance` di Cloudflare nel client httpx.
+        """Inietta il cookie `cf_clearance` di Cloudflare nel client httpx.
 
         This cookie is the one that appears in the DevTools screenshot in the
         browser's successful request to /challenge/verify — it is tied to the
@@ -142,20 +142,15 @@ class SignedSessionClient:
         if self._client is None:
             self._ensure_client()
         self._client.cookies.set(
-            "cf_clearance", cf_clearance, domain=urlparse(self.base_url).hostname
+            "cf_clearance",
+            cf_clearance,
+            domain=urlparse(self.base_url).hostname,
         )
 
     # ─────────────────────── persistence ──────────────────────
 
     def _session_path(self) -> Path:
-        scope = "\n".join(
-            [
-                self.namespace,
-                self.base_url.lower(),
-                self.app_version.lower(),
-                self.platform.lower(),
-            ]
-        )
+        scope = f"{self.namespace}\n{self.base_url.lower()}\n{self.app_version.lower()}\n{self.platform.lower()}"
         h = hashlib.sha256(scope.encode()).hexdigest()[:16]
         return self.data_dir / f"{self.namespace}-{h}.json"
 
@@ -227,9 +222,7 @@ class SignedSessionClient:
         if not self.session_id or not self.session_secret:
             return False
         exp = self._parse_time(self.expires_at)
-        if exp and datetime.now(timezone.utc) > exp:
-            return False
-        return True
+        return not (exp and datetime.now(timezone.utc) > exp)
 
     @staticmethod
     def _parse_time(value):
@@ -245,7 +238,8 @@ class SignedSessionClient:
     async def bootstrap(self):
         """Starts (or resumes) the verification flow. Returns True if a
         session was obtained directly, or an auth URL string if a
-        challenge (e.g. Turnstile) needs to be solved first."""
+        challenge (e.g. Turnstile) needs to be solved first.
+        """
         if self.pending_auth_url:
             return self.pending_auth_url
 
@@ -328,10 +322,11 @@ class SignedSessionClient:
         return urlunparse(parts)
 
     def _build_challenge_url_with_callback(
-        self, challenge_id: str, callback_url: str
+        self,
+        challenge_id: str,
+        callback_url: str,
     ) -> str:
-        """
-        Replica ESATTAMENTE buildSignedSessionChallengeURL() del backend Go
+        """Replica ESATTAMENTE buildSignedSessionChallengeURL() del backend Go
         (extension_signed_session.go):
 
           1. il callback riceve, nella propria query string, cb_version=v2grant
@@ -363,12 +358,11 @@ class SignedSessionClient:
 
     async def authenticate_with_manual_grant(
         self,
-        on_verification_url: "Callable[[str], None] | None" = None,
-        grant_input: "Callable[[], str] | None" = None,
+        on_verification_url: Callable[[str], None] | None = None,
+        grant_input: Callable[[], str] | None = None,
         timeout: float = _MANUAL_GRANT_TIMEOUT_S,
     ) -> None:
-        """
-        Fallback completamente manuale, senza Playwright: nessun browser viene
+        """Fallback completamente manuale, senza Playwright: nessun browser viene
         aperto o automatizzato da qui.
 
         Usage:
@@ -386,7 +380,8 @@ class SignedSessionClient:
         The grant has a short lifespan (~60s from the verify response): copy and
         paste it as quickly as possible.
 
-        Parameters:
+        Parameters
+        ----------
           on_verification_url – callback to display the URL (otherwise
               printed to stdout and logged as WARNING).
           grant_input – function with no arguments that returns the grant as
@@ -401,6 +396,7 @@ class SignedSessionClient:
               waiting in background until you press Enter, but the
               function still returns with the timeout error as soon as
               it triggers, without waiting for it.
+
         """
         boot_result = await self.bootstrap()
         if boot_result is True:
@@ -409,14 +405,18 @@ class SignedSessionClient:
         if not self.pending_challenge_id:
             if boot_result:
                 self._emit_verification_url(boot_result, on_verification_url)
-            raise RuntimeError(
+            msg = (
                 "The server provided an auth_url without challenge_id: "
                 "unable to build the challenge URL."
+            )
+            raise RuntimeError(
+                msg,
             )
 
         dummy_callback = f"http://{_LOCAL_CALLBACK_HOST}:1{_LOCAL_CALLBACK_PATH}"
         challenge_url = self._build_challenge_url_with_callback(
-            self.pending_challenge_id, dummy_callback
+            self.pending_challenge_id,
+            dummy_callback,
         )
         self._emit_verification_url(challenge_url, on_verification_url)
 
@@ -432,11 +432,13 @@ class SignedSessionClient:
         try:
             grant = await asyncio.wait_for(grant_awaitable, timeout=timeout)
         except asyncio.TimeoutError as exc:
-            raise RuntimeError(f"Timeout ({timeout}s) waiting for grant entry") from exc
+            msg = f"Timeout ({timeout}s) waiting for grant entry"
+            raise RuntimeError(msg) from exc
 
         grant = grant.strip()
         if not grant:
-            raise RuntimeError("No grant provided.")
+            msg = "No grant provided."
+            raise RuntimeError(msg)
 
         await self.exchange_grant(grant)
 
@@ -445,8 +447,7 @@ class SignedSessionClient:
         timeout: float = 60,
         hold_open_seconds: float = 3.0,
     ) -> None:
-        """
-        Autenticazione automatica tramite browser reale (core.turnstile),
+        """Autenticazione automatica tramite browser reale (core.turnstile),
         alternativa non-interattiva a authenticate_with_manual_grant().
 
         AGGIORNAMENTO: turnstile.py ora cattura il grant direttamente dal
@@ -474,19 +475,23 @@ class SignedSessionClient:
             return  # sessione già ottenuta, nessuna verifica necessaria
 
         if not self.pending_challenge_id or not self.pending_sitekey:
-            raise RuntimeError(
+            msg = (
                 "bootstrap() non ha restituito challenge_id/sitekey: "
                 "impossibile guidare Turnstile automaticamente."
+            )
+            raise RuntimeError(
+                msg,
             )
 
         dummy_callback = f"http://{_LOCAL_CALLBACK_HOST}:1{_LOCAL_CALLBACK_PATH}"
         challenge_url = self._build_challenge_url_with_callback(
-            self.pending_challenge_id, dummy_callback
+            self.pending_challenge_id,
+            dummy_callback,
         )
 
         from .solver import solve_with_callback
 
-        token, grant = await asyncio.to_thread(
+        _token, grant = await asyncio.to_thread(
             solve_with_callback,
             self.pending_sitekey,
             challenge_url,
@@ -495,21 +500,24 @@ class SignedSessionClient:
         )
 
         if not grant:
-            raise RuntimeError(
+            msg = (
                 "Turnstile risolto (token ottenuto) ma nessun 'grant' catturato "
                 "né dalla rete né dal redirect di callback. Prova ad aumentare "
                 "hold_open_seconds per dare tempo alla pagina di completare "
                 "la verify() interna."
+            )
+            raise RuntimeError(
+                msg,
             )
 
         await self.exchange_grant(grant)
 
     @staticmethod
     def _emit_verification_url(
-        url: str, callback: "Callable[[str], None] | None"
+        url: str,
+        callback: Callable[[str], None] | None,
     ) -> None:
-        """
-        Rende disponibile l'URL di verifica al chiamante, senza mai aprirlo
+        """Rende disponibile l'URL di verifica al chiamante, senza mai aprirlo
         automaticamente in un browser.
 
         - If `callback` is provided, the URL is passed to it (the caller
@@ -522,13 +530,9 @@ class SignedSessionClient:
             callback(url)
             return
         logger.warning("[signed_session] Verification required: %s", url)
-        print(
-            f"\n[SpotiFLAC] Verification required — open this link in the browser:\n  {url}\n"
-        )
 
     async def verify_challenge(self, challenge_id: str, turnstile_token: str) -> str:
-        """
-        NON CHIAMARLO DIRETTAMENTE da Python — lasciato solo per riferimento.
+        """NON CHIAMARLO DIRETTAMENTE da Python — lasciato solo per riferimento.
 
         This endpoint DOES exist and is exactly this: POST
         {base_url}{endpoints.challenge}/verify with
@@ -558,13 +562,15 @@ class SignedSessionClient:
         data = resp.json()
         grant = data.get("grant")
         if not grant:
-            raise RuntimeError(f"challenge verify did not return a grant: {data}")
+            msg = f"challenge verify did not return a grant: {data}"
+            raise RuntimeError(msg)
         return grant
 
     async def exchange_grant(self, grant: str) -> None:
         resolved_grant = (grant or "").strip()
         if not resolved_grant:
-            raise RuntimeError("exchange_grant called without a grant")
+            msg = "exchange_grant called without a grant"
+            raise RuntimeError(msg)
 
         payload = {
             "grant": resolved_grant,
@@ -614,8 +620,9 @@ class SignedSessionClient:
 
     async def ensure_session(self) -> None:
         if not self.session_id or not self.session_secret:
+            msg = "not authenticated: call bootstrap()/exchange_grant() first"
             raise RuntimeError(
-                "not authenticated: call bootstrap()/exchange_grant() first"
+                msg,
             )
 
         exp = self._parse_time(self.expires_at)
@@ -623,7 +630,8 @@ class SignedSessionClient:
             now = datetime.now(timezone.utc)
             if now > exp:
                 self.clear()
-                raise RuntimeError("session expired")
+                msg = "session expired"
+                raise RuntimeError(msg)
 
             # Prefer "refresh_after" (absolute timestamp given by the server,
             # verified via real network capture: e.g., 2h before expires_at,
@@ -659,20 +667,7 @@ class SignedSessionClient:
         full_url = f"{self.base_url}{path}"
         parsed_path = urlparse(full_url).path
 
-        signing_input = "\n".join(
-            [
-                self.scheme_label,
-                method,
-                parsed_path,
-                "",
-                body_hash,
-                ts,
-                nonce,
-                self.session_id,
-                self.app_version,
-                self.platform,
-            ]
-        )
+        signing_input = f"{self.scheme_label}\n{method}\n{parsed_path}\n\n{body_hash}\n{ts}\n{nonce}\n{self.session_id}\n{self.app_version}\n{self.platform}"
 
         sig = (
             base64.urlsafe_b64encode(
@@ -680,7 +675,7 @@ class SignedSessionClient:
                     rk_string.encode("utf-8"),
                     signing_input.encode("utf-8"),
                     hashlib.sha256,
-                ).digest()
+                ).digest(),
             )
             .rstrip(b"=")
             .decode("utf-8")
@@ -704,17 +699,19 @@ class SignedSessionClient:
         json_body: Any = None,
         extra_headers: dict | None = None,
     ) -> httpx.Response:
-        """
-        Send a signed HTTP request to the specified API path.
+        """Send a signed HTTP request to the specified API path.
 
-        Parameters:
+        Parameters
+        ----------
                 method (str): HTTP method to use.
                 path (str): Relative API path.
                 json_body (Any): JSON-serializable request body.
                 extra_headers (dict | None): Additional headers to include or override.
 
-        Returns:
+        Returns
+        -------
                 httpx.Response: The server response.
+
         """
         await self.ensure_session()
         body = (
@@ -753,7 +750,7 @@ class SignedSessionClient:
             headers=headers,
             timeout=30,
         )
-        try:
+        with contextlib.suppress(Exception):
             logger.info(
                 'HTTP Request: %s %s "HTTP/1.1 %s %s"',
                 method,
@@ -761,8 +758,6 @@ class SignedSessionClient:
                 resp.status_code,
                 getattr(resp, "reason_phrase", ""),
             )
-        except Exception:
-            pass
         if resp.status_code in (401, 428):
             self.clear()
         return resp
@@ -781,10 +776,11 @@ class SignedSessionClient:
 
     @staticmethod
     def compute_resource_hash(
-        provider: str, resource_id: str, resource_type: str = "track"
+        provider: str,
+        resource_id: str,
+        resource_type: str = "track",
     ) -> str:
-        """
-        Calcola il resource_hash richiesto da POST /tickets, ESATTAMENTE come
+        """Calcola il resource_hash richiesto da POST /tickets, ESATTAMENTE come
         the JS of official extensions does (e.g., tidal-web/index.js,
         signedTicket()):
 
@@ -819,7 +815,8 @@ class SignedSessionClient:
 
         ticket_id = str(data.get("ticket_id") or data.get("ticket") or "").strip()
         if not ticket_id:
-            raise RuntimeError(f"ticket response missing ticket_id: {data}")
+            msg = f"ticket response missing ticket_id: {data}"
+            raise RuntimeError(msg)
 
         return ticket_id
 
@@ -832,8 +829,7 @@ class SignedSessionClient:
         resource_type: str = "track",
         tickets_path: str = "/tickets",
     ) -> httpx.Response:
-        """
-        Ottiene un ticket per (provider, resource_id) e lo usa immediatamente
+        """Ottiene un ticket per (provider, resource_id) e lo usa immediatamente
         for a signed POST to `dl_path`, adding the header
         "X-Zarz-Ticket: <ticket_id>" like the JS does (postDownloadAPI()):
 
@@ -848,7 +844,10 @@ class SignedSessionClient:
         "ticket + header" level, not the parsing of the result.
         """
         ticket_id = await self.get_download_ticket(
-            provider, resource_id, resource_type, tickets_path=tickets_path
+            provider,
+            resource_id,
+            resource_type,
+            tickets_path=tickets_path,
         )
         return await self.request(
             "POST",
@@ -899,15 +898,15 @@ async def perform_signed_fetch(
     path: str,
     body: Any,
     headers: dict | None,
-    on_verification_url: "Callable[[str], None] | None" = None,
-    grant_input: "Callable[[], str] | None" = None,
+    on_verification_url: Callable[[str], None] | None = None,
+    grant_input: Callable[[], str] | None = None,
     timeout: float = _MANUAL_GRANT_TIMEOUT_S,
     use_turnstile_browser: bool = True,
 ) -> dict:
-    """
-    Perform an authenticated signed request with automatic session recovery.
+    """Perform an authenticated signed request with automatic session recovery.
 
-    Parameters:
+    Parameters
+    ----------
         client (SignedSessionClient): Client used to authenticate and send the request.
         method (str): HTTP method.
         path (str): Request path.
@@ -918,8 +917,10 @@ async def perform_signed_fetch(
         timeout (float): Maximum authentication time in seconds.
         use_turnstile_browser (bool): Whether to attempt automated Turnstile authentication.
 
-    Returns:
+    Returns
+    -------
         dict: Response details, a verification URL when reauthentication is required, or an error message.
+
     """
     try:
         # Se non siamo autenticati, richiediamo il Lock asincrono
@@ -935,17 +936,21 @@ async def perform_signed_fetch(
                     running_in_docker = is_docker()
                     try:
                         if running_in_docker:
-                            raise RuntimeError(
+                            msg = (
                                 "ambiente Docker rilevato: skip diretto al flusso "
                                 "manuale (authenticate_with_turnstile richiede un "
                                 "browser reale non disponibile/affidabile in container)"
                             )
-                        elif use_turnstile_browser:
+                            raise RuntimeError(
+                                msg,
+                            )
+                        if use_turnstile_browser:
                             await client.authenticate_with_turnstile(
-                                timeout=min(timeout, 90)
+                                timeout=min(timeout, 90),
                             )
                         else:
-                            raise RuntimeError("turnstile automation disabled")
+                            msg = "turnstile automation disabled"
+                            raise RuntimeError(msg)
                     except Exception as exc:
                         if running_in_docker:
                             logger.info(
@@ -999,13 +1004,16 @@ async def perform_signed_fetch(
         }
     except Exception as exc:
         logger.debug(
-            "[signed_session:%s] signedFetch failed: %s", client.namespace, exc
+            "[signed_session:%s] signedFetch failed: %s",
+            client.namespace,
+            exc,
         )
         return {"error": str(exc)}
 
 
 def client_from_manifest(
-    manifest_block: dict, data_dir: str = "~/.spotiflac/signed_sessions"
+    manifest_block: dict,
+    data_dir: str = "~/.spotiflac/signed_sessions",
 ) -> SignedSessionClient:
     """Builds a SignedSessionClient from an extension manifest's `signedSession` block."""
     return SignedSessionClient(

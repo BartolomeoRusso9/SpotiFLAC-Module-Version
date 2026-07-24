@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 
 _ISRC_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}\d{7}$")
@@ -27,8 +29,7 @@ async def confirm_isrc_with_qobuz_async(
     duration_ms: int = 0,
     qobuz_token: str | None = None,
 ) -> tuple[bool, dict | None]:
-    """
-    Confirm an ISRC by querying Qobuz: search the track by ISRC and compare
+    """Confirm an ISRC by querying Qobuz: search the track by ISRC and compare
     duration (if available). Returns (True, track_dict) if the found track
     matches (duration within tolerance), otherwise (False, None).
 
@@ -39,7 +40,7 @@ async def confirm_isrc_with_qobuz_async(
         return False, None
     try:
         # import dinamico per evitare circular import durante il caricamento
-        from ..providers.qobuz import QobuzProvider
+        from SpotiFLAC.providers.qobuz import QobuzProvider
     except Exception:
         return False, None
 
@@ -67,7 +68,7 @@ async def confirm_isrc_with_qobuz_async(
         if diff <= 10000:
             # se titolo/artista coerenti, accettiamo anche 10s
             tnorm = re.sub(r"\s+", " ", (title or "").strip().lower())
-            pname = str((track.get("title") or track.get("name") or "")).strip().lower()
+            pname = str(track.get("title") or track.get("name") or "").strip().lower()
             performer = (
                 str((track.get("performer") or {}).get("name", "") or "")
                 .strip()

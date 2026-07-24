@@ -1,11 +1,15 @@
-import json
-import hashlib
+from __future__ import annotations
+
 import base64
+import hashlib
+import json
+import logging
 import os
 import time
-from ..core.http import httpx
-import logging
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from SpotiFLAC.core.http import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +23,6 @@ _CACHE_FILE = os.path.join(os.path.dirname(__file__), ".endpoints_cache.txt")
 
 def _decrypt_base64_payload(b64_string: str) -> dict:
     """Decrypt the unified string from GitHub."""
-
     # 1. Remove all spaces, newlines and carriage returns (not just at the edges)
     clean_b64 = "".join(b64_string.split())
 
@@ -53,18 +56,20 @@ def _decrypt_base64_payload(b64_string: str) -> dict:
 
 
 def _load_registry() -> dict:
-    """
-    Load the encrypted registry from the remote source, using the local cache as a fallback.
+    """Load the encrypted registry from the remote source, using the local cache as a fallback.
 
     Returns:
         dict: The decrypted registry, or an empty dictionary when both sources are unavailable.
+
     """
     try:
         cache_buster = int(time.time())
         fresh_url = f"{_CLOUD_URL}?t={cache_buster}"
 
         req = httpx.get(
-            fresh_url, headers={"User-Agent": "SpotiFLAC-Agent"}, timeout=5.0
+            fresh_url,
+            headers={"User-Agent": "SpotiFLAC-Agent"},
+            timeout=5.0,
         )
         req.raise_for_status()
         cloud_string = req.text
@@ -81,16 +86,16 @@ def _load_registry() -> dict:
 
     except Exception as e:
         logger.warning(
-            f"Unable to contact Cloud servers ({e}). Falling back to local cache..."
+            f"Unable to contact Cloud servers ({e}). Falling back to local cache...",
         )
 
         try:
             if os.path.exists(_CACHE_FILE):
-                with open(_CACHE_FILE, "r") as f:
+                with open(_CACHE_FILE) as f:
                     cached_string = f.read()
                 return _decrypt_base64_payload(cached_string)
         except Exception as cache_e:
-            logger.error(f"Unable to read local cache: {cache_e}")
+            logger.exception(f"Unable to read local cache: {cache_e}")
 
         return {}
 
@@ -119,46 +124,47 @@ def get_qobuz_endpoints(category: str) -> list[str]:
 
 
 def get_tidal_endpoints(category: str) -> list[str]:
-    """Ottiene gli endpoint per Tidal in base alla categoria ('stream', 'post', ecc.)"""
+    """Ottiene gli endpoint per Tidal in base alla categoria ('stream', 'post', ecc.)."""
     return _get_registry().get("tidal", {}).get(category, [])
 
 
 def get_tidal_post_endpoints() -> list[str]:
-    """Maintained for backward compatibility"""
+    """Maintained for backward compatibility."""
     return _get_registry().get("tidal", {}).get("post", [])
 
 
 def get_deezer_endpoint(key: str) -> str:
-    """
-    Retrieve a Deezer endpoint by key.
+    """Retrieve a Deezer endpoint by key.
 
-    Parameters:
+    Parameters
+    ----------
         key (str): Endpoint key, such as `antra`, `s_deezer`, `flacdownloader_prepare`, or `flacdownloader_asset`.
 
-    Returns:
+    Returns
+    -------
         str: The configured endpoint, or an empty string if the key is unavailable.
+
     """
     return _get_registry().get("deezer", {}).get(key, "")
 
 
 def get_amazon_endpoint(key: str) -> str:
-    """
-    Valid keys:
+    """Valid keys:
     - Download: 'musicdl', 'spotbye1', 'spotbye2', 'zarz', 'zarz_media', 'community', 'antra'
     - S: 's', 's_home', 's_challenge', 's_verify', 's_stream', 's_queue'
     - Resolver: 'resolver_songstats', 'resolver_songlink_api', 'resolver_songlink_html', 'resolver_spotify', 'resolver_deezer'
-    - Base: 'amazon_music_base'
+    - Base: 'amazon_music_base'.
     """
     return _get_registry().get("amazon", {}).get(key, "")
 
 
 def get_apple_music_endpoint(key: str) -> str:
-    """Keys: 'proxy_direct', 'proxy_queued'"""
+    """Keys: 'proxy_direct', 'proxy_queued'."""
     return _get_registry().get("apple_music", {}).get(key, "")
 
 
 def get_asian_provider_endpoint(provider: str, key: str) -> str:
-    """For joox, kuwo, migu, netease"""
+    """For joox, kuwo, migu, netease."""
     return _get_registry().get(provider, {}).get(key, "")
 
 
@@ -167,7 +173,7 @@ def get_soundcloud_cobalt() -> str:
 
 
 def get_youtube_endpoints(key: str) -> list[str] | str:
-    """Keys: 'cobalt', 'zarz_clean', 'zarz_dl'"""
+    """Keys: 'cobalt', 'zarz_clean', 'zarz_dl'."""
     return _get_registry().get("youtube", {}).get(key, [])
 
 
@@ -186,8 +192,7 @@ def get_community_url(provider: str) -> str:
 
 
 def _jwt_payload(token: str) -> dict:
-    """
-    Decode (without verifying the signature) the payload of a JWT
+    """Decode (without verifying the signature) the payload of a JWT
     'Bearer <header>.<payload>.<signature>'. Used only to read
     informational fields like 'exp', not to validate authenticity.
     """
@@ -206,11 +211,11 @@ def _jwt_payload(token: str) -> dict:
 
 
 def get_monochrome_token() -> str:
-    """
-    Retrieve the Monochrome authentication token from the registry.
+    """Retrieve the Monochrome authentication token from the registry.
 
     Returns:
         str: The stored token, including its `Bearer ` prefix, or an empty string when unavailable.
+
     """
     import time
 

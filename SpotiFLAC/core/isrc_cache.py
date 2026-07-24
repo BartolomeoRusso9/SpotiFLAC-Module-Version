@@ -1,11 +1,11 @@
 # backend/core/isrc_cache.py
-"""
-Persistent ISRC cache — port of isrc_cache.go.
+"""Persistent ISRC cache — port of isrc_cache.go.
 Avoids redundant Songlink/Soundplate calls for already-resolved ISRCs.
 Async version with aiofiles for non-blocking I/O.
 """
 
 from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -47,12 +47,11 @@ async def _load_async() -> dict[str, dict]:
                     _cache = json.loads(content)
             else:
                 _cache = {}
+        # Fallback to sync if aiofiles not available
+        elif _CACHE_FILE.exists():
+            _cache = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
         else:
-            # Fallback to sync if aiofiles not available
-            if _CACHE_FILE.exists():
-                _cache = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
-            else:
-                _cache = {}
+            _cache = {}
     except Exception as exc:
         logger.warning("[isrc_cache] Load failed: %s", exc)
         _cache = {}
@@ -109,13 +108,17 @@ def get_cached_isrc(track_id: str) -> str:
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             return executor.submit(
-                asyncio.run, get_cached_isrc_async(track_id)
+                asyncio.run,
+                get_cached_isrc_async(track_id),
             ).result()
     else:
         # Inside async context, can't use asyncio.run()
-        raise RuntimeError(
+        msg = (
             "get_cached_isrc() called from async context. "
             "Use get_cached_isrc_async() instead."
+        )
+        raise RuntimeError(
+            msg,
         )
 
 
@@ -131,7 +134,10 @@ def put_cached_isrc(track_id: str, isrc: str) -> None:
             executor.submit(asyncio.run, put_cached_isrc_async(track_id, isrc)).result()
     else:
         # Inside async context, can't use asyncio.run()
-        raise RuntimeError(
+        msg = (
             "put_cached_isrc() called from async context. "
             "Use put_cached_isrc_async() instead."
+        )
+        raise RuntimeError(
+            msg,
         )

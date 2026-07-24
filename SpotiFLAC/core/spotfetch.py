@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 # Utilizza il path relativo corretto in base a dove hai saved spotfetch.py
-from ..core.spotify_totp import generate_spotify_totp
+from SpotiFLAC.core.spotify_totp import generate_spotify_totp
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,8 @@ class SpotifyWebClient:
         self._session = httpx.Client(limits=limits, timeout=15.0)
         self._session.headers.update(
             {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-            }
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+            },
         )
         self.access_token = ""
         self.client_token = ""
@@ -39,7 +39,7 @@ class SpotifyWebClient:
         match = re.search(
             r'<script[^>]+id=["\']appServerConfig["\'][^>]*>([^<]+)</script>',
             resp.text,
-            re.I,
+            re.IGNORECASE,
         )
         if match:
             try:
@@ -54,7 +54,7 @@ class SpotifyWebClient:
             if fallback:
                 self.client_version = fallback.group(1)
                 logger.debug(
-                    f"[spotfetch] clientVersion fallback extracted: {self.client_version}"
+                    f"[spotfetch] clientVersion fallback extracted: {self.client_version}",
                 )
 
         self.device_id = self._session.cookies.get("sp_t", "")
@@ -96,7 +96,7 @@ class SpotifyWebClient:
             self.access_token = data.get("accessToken", "")
             self.client_id = data.get("clientId", "")
             logger.debug(
-                f"[spotfetch] Access token acquired: {self.access_token[:20] if self.access_token else 'empty'}..."
+                f"[spotfetch] Access token acquired: {self.access_token[:20] if self.access_token else 'empty'}...",
             )
 
             # Extract sp_t cookie
@@ -104,7 +104,7 @@ class SpotifyWebClient:
                 self.device_id = self._session.cookies.get("sp_t", "")
 
         except Exception as e:
-            logger.error(f"[spotfetch] Failed to get access token: {e}")
+            logger.exception(f"[spotfetch] Failed to get access token: {e}")
             raise
 
     def _get_client_token(self) -> None:
@@ -125,7 +125,7 @@ class SpotifyWebClient:
                     "device_id": self.device_id,
                     "device_type": "computer",
                 },
-            }
+            },
         }
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
@@ -141,8 +141,9 @@ class SpotifyWebClient:
             self.client_token = data.get("granted_token", {}).get("token", "")
         else:
             logger.error(f"[spotfetch] Unexpected clienttoken response: {data}")
+            msg = "Spotify client token request did not return a granted token"
             raise RuntimeError(
-                "Spotify client token request did not return a granted token"
+                msg,
             )
 
     def initialize(self, force: bool = False) -> None:
@@ -155,8 +156,8 @@ class SpotifyWebClient:
             self._session = httpx.Client(limits=limits, timeout=15.0)
             self._session.headers.update(
                 {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-                }
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+                },
             )
 
         if force or not self.client_version or not self.device_id:
@@ -270,7 +271,7 @@ class SpotifyWebClient:
                 width = source.get("width") or source.get("maxWidth") or 0
                 height = source.get("height") or source.get("maxHeight") or 0
 
-                if width == 640 or width == 300:
+                if width in {640, 300}:
                     return url
                 if width >= 300 and height >= 300 and not preferred:
                     preferred = url
@@ -282,7 +283,7 @@ class SpotifyWebClient:
         return ""
 
     def get_home_feed(self, time_zone: str = "Europe/Rome") -> dict:
-        """Retrieves l'Home Feed di Spotify (Daily Mix, Nuove uscite, ecc.)"""
+        """Retrieves l'Home Feed di Spotify (Daily Mix, Nuove uscite, ecc.)."""
         payload = {
             "operationName": "home",
             "variables": {"timeZone": time_zone},
@@ -290,13 +291,13 @@ class SpotifyWebClient:
                 "persistedQuery": {
                     "version": 1,
                     "sha256Hash": "3a67ee0ea6abad2ebad2e588a9aa130fc98d6b553f5b05ac6467503d02133bdc",
-                }
+                },
             },
         }
         return self.query(payload)
 
     def get_browse_categories(self) -> dict:
-        """Retrieves le categorie e i generi esplorabili"""
+        """Retrieves le categorie e i generi esplorabili."""
         payload = {
             "operationName": "browseAll",
             "variables": {},
@@ -304,7 +305,7 @@ class SpotifyWebClient:
                 "persistedQuery": {
                     "version": 1,
                     "sha256Hash": "864fdecccb9bb893141df3776d0207886c7fa781d9e586b9d4eb3afa387eea42",
-                }
+                },
             },
         }
         return self.query(payload)
@@ -322,7 +323,7 @@ class SpotifyWebClient:
                 "persistedQuery": {
                     "version": 1,
                     "sha256Hash": "e2ca40d46cf1fde36562261ccec754f23fb31b561877252e9fe0d6834aabb84b",
-                }
+                },
             },
         }
         try:
@@ -343,7 +344,7 @@ class SpotifyWebClient:
             return ", ".join(composers)
         except Exception as exc:
             logger.debug(
-                f"[spotfetch] Error recupero compositori per {track_id}: {exc}"
+                f"[spotfetch] Error recupero compositori per {track_id}: {exc}",
             )
             return ""
 
@@ -355,7 +356,8 @@ class SpotifyWebClient:
             if resp.status_code != 200:
                 return ""
             match = re.search(
-                r"https://p\.scdn\.co/mp3-preview/[a-zA-Z0-9]+", resp.text
+                r"https://p\.scdn\.co/mp3-preview/[a-zA-Z0-9]+",
+                resp.text,
             )
             return match.group(0) if match else ""
         except Exception as exc:
@@ -374,7 +376,7 @@ class SpotifyWebClient:
             "Content-Type": "application/json",
         }
         logger.debug(
-            f"[spotfetch] Sending GraphQL query: {payload.get('operationName', 'unknown')}"
+            f"[spotfetch] Sending GraphQL query: {payload.get('operationName', 'unknown')}",
         )
         # Allineato a Go: endpoint query V2
         resp = self._session.post(
@@ -391,7 +393,7 @@ class SpotifyWebClient:
 
         if resp.status_code != 200:
             logger.error(
-                f"[spotfetch] GraphQL query failed: HTTP {resp.status_code} | {resp.text[:500]}"
+                f"[spotfetch] GraphQL query failed: HTTP {resp.status_code} | {resp.text[:500]}",
             )
             # Alcune risposte (es. 412 Invalid query hash) contengono un body JSON
             # che i chiamanti possono interpretare per fare un fallback; non
@@ -409,9 +411,7 @@ class SpotifyWebClient:
         return result
 
     def get_track_stats(self, track_id: str) -> dict:
-        """
-        Retrieves il playcount di una singola track tramite API GraphQL interna Spotify.
-        """
+        """Retrieves il playcount di una singola track tramite API GraphQL interna Spotify."""
         payload = {
             "operationName": "getTrack",
             "variables": {"uri": f"spotify:track:{track_id}"},
@@ -419,14 +419,14 @@ class SpotifyWebClient:
                 "persistedQuery": {
                     "version": 1,
                     "sha256Hash": "612585ae06ba435ad26369870deaae23b5c8800a256cd8a57e08eddc25a37294",
-                }
+                },
             },
         }
 
         try:
             data = self.query(payload)
             logger.debug(
-                f"[spotfetch] Full response for track {track_id}: {json.dumps(data)[:500]}"
+                f"[spotfetch] Full response for track {track_id}: {json.dumps(data)[:500]}",
             )
 
             # Estrazione diretta in stile Go
@@ -445,10 +445,12 @@ class SpotifyWebClient:
             return {"playcount": "", "rank": "", "status": ""}
 
     def get_playlist_stats(
-        self, playlist_id: str, offset: int = 0, limit: int = 100
+        self,
+        playlist_id: str,
+        offset: int = 0,
+        limit: int = 100,
     ) -> dict:
-        """
-        Retrieves playcount, rank e status per le tracks all'interno di una playlist.
+        """Retrieves playcount, rank e status per le tracks all'interno di una playlist.
         Returns un dizionario con track_id come chiave.
         """
         payload = {
@@ -463,7 +465,7 @@ class SpotifyWebClient:
                 "persistedQuery": {
                     "version": 1,
                     "sha256Hash": "bb67e0af06e8d6f52b531f97468ee4acd44cd0f82b988e15c2ea47b1148efc77",
-                }
+                },
             },
         }
 
@@ -516,19 +518,18 @@ class SpotifyWebClient:
                     continue
 
             logger.debug(
-                f"[spotfetch] Successfully extracted {len(stats_map)} tracks with stats"
+                f"[spotfetch] Successfully extracted {len(stats_map)} tracks with stats",
             )
             return stats_map
 
         except Exception as exc:
             logger.debug(
-                f"[spotfetch] Error recupero stats playlist {playlist_id}: {exc}"
+                f"[spotfetch] Error recupero stats playlist {playlist_id}: {exc}",
             )
             return {}
 
     def get_album_stats(self, album_id: str, offset: int = 0, limit: int = 100) -> dict:
-        """
-        Retrieves il playcount di tutte le tracks di un album in un'unica richiesta GraphQL.
+        """Retrieves il playcount di tutte le tracks di un album in un'unica richiesta GraphQL.
         Returns un dizionario con track_id come chiave.
         """
         payload = {
@@ -543,7 +544,7 @@ class SpotifyWebClient:
                 "persistedQuery": {
                     "version": 1,
                     "sha256Hash": "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10",
-                }
+                },
             },
         }
 
@@ -580,7 +581,7 @@ class SpotifyWebClient:
                     }
                 except Exception as item_err:
                     logger.debug(
-                        f"[spotfetch] Error processing album item {idx}: {item_err}"
+                        f"[spotfetch] Error processing album item {idx}: {item_err}",
                     )
                     continue
 
@@ -591,10 +592,11 @@ class SpotifyWebClient:
             return {}
 
     def get_artist_discography(
-        self, artist_id: str, order: str = "DATE_DESC"
+        self,
+        artist_id: str,
+        order: str = "DATE_DESC",
     ) -> list[dict[str, Any]]:
-        """
-        Retrieves the list of releases in an artist's discography via GraphQL.
+        """Retrieves the list of releases in an artist's discography via GraphQL.
         Returns the elements of `data.artistUnion.discography.all.items`.
         """
         all_items: list[dict[str, Any]] = []
@@ -614,7 +616,7 @@ class SpotifyWebClient:
                     "persistedQuery": {
                         "version": 1,
                         "sha256Hash": "5e07d323febb57b4a56a42abbf781490e58764aa45feb6e3dc0591564fc56599",
-                    }
+                    },
                 },
             }
 
@@ -622,7 +624,7 @@ class SpotifyWebClient:
                 data = self.query(payload)
             except Exception as exc:
                 logger.debug(
-                    f"[spotfetch] Error recupero discografia artista {artist_id}: {exc}"
+                    f"[spotfetch] Error recupero discografia artista {artist_id}: {exc}",
                 )
                 break
 
@@ -701,7 +703,8 @@ class SpotifyWebClient:
             # a match like "INTERNATIONA" (12 letters, zero
             # digits) is never a valid ISRC.
             for match in re.finditer(
-                rb"isrc[\x00-\x1f]+([A-Za-z0-9]{12})", resp.content
+                rb"isrc[\x00-\x1f]+([A-Za-z0-9]{12})",
+                resp.content,
             ):
                 candidate = match.group(1).decode(errors="ignore").upper()
                 if is_valid_isrc(candidate):

@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..core.endpoints import get_health_zarz_url
+from SpotiFLAC.core.endpoints import get_health_zarz_url
 
 # ---------------------------------------------------------------------------
 # Helper for payload validation
@@ -50,22 +50,22 @@ _TIDAL_MAX_MIRRORS = 8
 
 
 def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
-    """
-    Build the provider endpoint map used for health checks.
+    """Build the provider endpoint map used for health checks.
 
     The centralized extensions service is excluded from provider endpoints and checked separately.
 
     Returns:
         dict[str, list[tuple[str, str]]]: A mapping of provider names to method and URL pairs.
+
     """
-    from ..core.endpoints import (
-        get_qobuz_endpoints,
-        get_tidal_post_endpoints,
-        get_deezer_endpoint,
+    from SpotiFLAC.core.endpoints import (
         get_amazon_endpoint,
         get_asian_provider_endpoint,
-        get_soundcloud_cobalt,
+        get_deezer_endpoint,
         get_pandora_base_and_path,
+        get_qobuz_endpoints,
+        get_soundcloud_cobalt,
+        get_tidal_post_endpoints,
     )
 
     endpoints: dict[str, list[tuple[str, str]]] = {}
@@ -73,11 +73,11 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     # ── Tidal ──────────────────────────────────────────────────────────────
     tidal_eps = []
     try:
-        from ..providers.tidal import get_tidal_api_list
+        from SpotiFLAC.providers.tidal import get_tidal_api_list
 
         for url in get_tidal_api_list()[:_TIDAL_MAX_MIRRORS]:
             tidal_eps.append(
-                ("GET", f"{url.rstrip('/')}/track/?id=251380837&quality=LOSSLESS")
+                ("GET", f"{url.rstrip('/')}/track/?id=251380837&quality=LOSSLESS"),
             )
     except Exception:
         pass
@@ -154,7 +154,8 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
             prov_eps.append(("GET", gd_url))
 
         wjhe_url = get_asian_provider_endpoint(
-            provider, "wjhe"
+            provider,
+            "wjhe",
         ) or get_asian_provider_endpoint("joox", "wjhe")
         if wjhe_url:
             if "?" not in wjhe_url:
@@ -183,8 +184,7 @@ _ENDPOINTS: dict[str, list[tuple[str, str]]] = _load_endpoints()
 
 
 def _make_async_client() -> httpx.AsyncClient:
-    """
-    Crea un AsyncClient con i limiti di connessione appropriati.
+    """Crea un AsyncClient con i limiti di connessione appropriati.
     Usato como context manager in run_health_check per garantire cleanup corretto.
     Una nuova istanza per ogni chiamata evita problemi di binding all'event loop.
     """
@@ -223,17 +223,19 @@ async def _check_one(
     method: str,
     url: str,
 ) -> HealthResult:
-    """
-    Probe an endpoint and classify its health based on the response.
+    """Probe an endpoint and classify its health based on the response.
 
-    Parameters:
+    Parameters
+    ----------
         client (httpx.AsyncClient): HTTP client used to send the request.
         provider (str): Provider associated with the endpoint.
         method (str): HTTP method to use.
         url (str): Endpoint URL to probe.
 
-    Returns:
+    Returns
+    -------
         HealthResult: The provider, endpoint, request method, health status, latency in milliseconds, and response detail.
+
     """
     try:
         t0 = time.perf_counter()
@@ -254,7 +256,7 @@ async def _check_one(
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
                     "Accept": "application/json",
                     "Referer": f"{origin}/it/download" if origin else "",
-                }
+                },
             )
 
         # Payload standard per l'API di Deezer
@@ -287,7 +289,7 @@ async def _check_one(
                         ):
                             ok = False
                             detail = str(
-                                data.get("message") or data.get("error") or "API Error"
+                                data.get("message") or data.get("error") or "API Error",
                             )[:10]
                         else:
                             ok, detail = True, "HTTP 200 OK"
@@ -303,7 +305,9 @@ async def _check_one(
                     data = json.loads(resp.text)
                     if isinstance(data, dict):
                         detail = str(
-                            data.get("detail") or data.get("message") or "Auth required"
+                            data.get("detail")
+                            or data.get("message")
+                            or "Auth required",
                         )[:10]
                 except ValueError:
                     pass
@@ -355,11 +359,10 @@ async def _check_one(
                     detail = "Bad JSON"
 
             # ── Apple / SoundCloud / YouTube / default ─────────────────────
+            elif body.strip():
+                ok = True
             else:
-                if body.strip():
-                    ok = True
-                else:
-                    detail = "Empty Body"
+                detail = "Empty Body"
 
         elif resp.status_code in (404, 400):
             if provider in ("tidal", "qobuz", "qbz"):
@@ -371,7 +374,9 @@ async def _check_one(
                 parsed = json.loads(resp.text)
                 if isinstance(parsed, dict):
                     detail = str(
-                        parsed.get("detail") or parsed.get("message") or "Auth required"
+                        parsed.get("detail")
+                        or parsed.get("message")
+                        or "Auth required",
                     )[:20]
             except ValueError:
                 pass
@@ -395,17 +400,19 @@ async def _check_one_gated(
     method: str,
     url: str,
 ) -> HealthResult:
-    """
-    Checks an endpoint while respecting the shared concurrency limit.
+    """Checks an endpoint while respecting the shared concurrency limit.
 
-    Parameters:
+    Parameters
+    ----------
         sem (asyncio.Semaphore): Semaphore controlling concurrent checks.
         provider (str): Provider associated with the endpoint.
         method (str): HTTP method used for the request.
         url (str): Endpoint URL to check.
 
-    Returns:
+    Returns
+    -------
         HealthResult: Result of the endpoint health check.
+
     """
     async with sem:
         return await _check_one(client, provider, method, url)
@@ -414,14 +421,16 @@ async def _check_one_gated(
 async def check_extensions_health(
     client: httpx.AsyncClient | None = None,
 ) -> HealthResult:
-    """
-    Check the health of the centralized extensions service.
+    """Check the health of the centralized extensions service.
 
-    Parameters:
+    Parameters
+    ----------
         client (httpx.AsyncClient | None): Optional HTTP client to use for the request.
 
-    Returns:
+    Returns
+    -------
         HealthResult: The extensions service health result, marked successful for an HTTP 200 response.
+
     """
     own_client = client is None
     if own_client:
@@ -434,13 +443,23 @@ async def check_extensions_health(
         if resp.status_code == 200:
             return HealthResult("extensions", _ZARZ_HEALTH_URL, "GET", True, ms, "ok")
         return HealthResult(
-            "extensions", _ZARZ_HEALTH_URL, "GET", False, ms, f"HTTP {resp.status_code}"
+            "extensions",
+            _ZARZ_HEALTH_URL,
+            "GET",
+            False,
+            ms,
+            f"HTTP {resp.status_code}",
         )
     except httpx.TimeoutException:
         return HealthResult("extensions", _ZARZ_HEALTH_URL, "GET", False, -1, "timeout")
     except httpx.RequestError as exc:
         return HealthResult(
-            "extensions", _ZARZ_HEALTH_URL, "GET", False, -1, str(exc)[:40]
+            "extensions",
+            _ZARZ_HEALTH_URL,
+            "GET",
+            False,
+            -1,
+            str(exc)[:40],
         )
     finally:
         if own_client:
@@ -457,15 +476,17 @@ async def run_health_check(
     *,
     include_all_endpoints: bool = True,
 ) -> list[HealthResult]:
-    """
-    Check the reachability of the requested providers and their configured endpoints.
+    """Check the reachability of the requested providers and their configured endpoints.
 
-    Parameters:
+    Parameters
+    ----------
         services (list[str]): Provider names to check.
         include_all_endpoints (bool): Whether to check every configured endpoint or only the first endpoint for each provider.
 
-    Returns:
+    Returns
+    -------
         list[HealthResult]: Endpoint health results, including a local success result for YouTube.
+
     """
     results: list[HealthResult] = []
     task_list: list[tuple[str, str, str]] = []
@@ -474,8 +495,13 @@ async def run_health_check(
         if svc == "youtube":
             results.append(
                 HealthResult(
-                    "youtube", "yt-dlp (local binary)", "CLI", True, 0.0, "local"
-                )
+                    "youtube",
+                    "yt-dlp (local binary)",
+                    "CLI",
+                    True,
+                    0.0,
+                    "local",
+                ),
             )
 
     remaining = [s for s in services if s != "youtube"]
@@ -548,15 +574,17 @@ async def run_health_check_with_extensions(
     *,
     include_all_endpoints: bool = True,
 ) -> tuple[list[HealthResult], HealthResult]:
-    """
-    Run provider endpoint checks and the extensions service health check concurrently.
+    """Run provider endpoint checks and the extensions service health check concurrently.
 
-    Parameters:
+    Parameters
+    ----------
         services (list[str]): Providers whose endpoints should be checked.
         include_all_endpoints (bool): Whether to check every configured endpoint for each provider.
 
-    Returns:
+    Returns
+    -------
         tuple[list[HealthResult], HealthResult]: Provider check results and the extensions service result.
+
     """
     provider_results, ext_result = await asyncio.gather(
         run_health_check(services, include_all_endpoints=include_all_endpoints),
@@ -578,35 +606,31 @@ def print_health_report(
     show_urls: bool = True,
     extensions: HealthResult | None = None,
 ) -> None:
-    """
-    Print a table-formatted health report for provider endpoints.
+    """Print a table-formatted health report for provider endpoints.
 
-    Parameters:
+    Parameters
+    ----------
         results (list[HealthResult]): Endpoint health-check results to display.
         show_urls (bool): Whether to include endpoint URLs in the report.
         extensions (HealthResult | None): Optional health result for the extensions service.
+
     """
     if not results:
-        print("  Nessun provider da verificare.")
         return
 
     url_col = _URL_MAX if show_urls else 0
-    header_top = "┬".join(
+    "┬".join(
         ["─" * 14, "─" * 6, "─" * 12, "─" * 9]
-        + (["─" * (url_col + 2)] if show_urls else [])
+        + (["─" * (url_col + 2)] if show_urls else []),
     )
-    header_bot = "┼".join(
+    "┼".join(
         ["─" * 14, "─" * 6, "─" * 12, "─" * 9]
-        + (["─" * (url_col + 2)] if show_urls else [])
+        + (["─" * (url_col + 2)] if show_urls else []),
     )
 
-    print()
-    print(f"  ┌{header_top}┐")
     hdr = f"  │ {'Provider':<12} │ {'M':<4} │ {'Status':<10} │ {'Latency':>7} │"
     if show_urls:
         hdr += f" {'Endpoint':<{url_col}} │"
-    print(hdr)
-    print(f"  ├{header_bot}┤")
 
     prev_provider = None
     for r in results:
@@ -621,41 +645,23 @@ def print_health_report(
         if show_urls:
             short_url = r.url[-url_col:] if len(r.url) > url_col else r.url
             row += f" {short_url:<{url_col}} │"
-        print(row)
 
-    footer = "┴".join(
+    "┴".join(
         ["─" * 14, "─" * 6, "─" * 12, "─" * 9]
-        + (["─" * (url_col + 2)] if show_urls else [])
+        + (["─" * (url_col + 2)] if show_urls else []),
     )
-    print(f"  └{footer}┘")
 
-    ok_count = sum(1 for r in results if r.ok)
-    prov_ok = len({r.provider for r in results if r.ok})
-    prov_total = len({r.provider for r in results})
-    print(
-        f"\n  {ok_count}/{len(results)} endpoints reachable "
-        f"({prov_ok}/{prov_total} providers with at least one working endpoint).\n"
-    )
+    sum(1 for r in results if r.ok)
+    len({r.provider for r in results if r.ok})
+    len({r.provider for r in results})
 
     if extensions is not None:
         _print_extensions_section(extensions)
 
 
 def _print_extensions_section(extensions: HealthResult) -> None:
-    """
-    Print the health status of the extensions service.
-    """
-    symbol = "✅" if extensions.ok else "❌"
-    lat_str = f"{extensions.latency:>5.0f} ms" if extensions.latency >= 0 else "timeout"
-
-    width = 14 + 3 + 6 + 3 + 12 + 3 + 9 + 6
-    print(f"  ┌{'─' * width}┐")
-    print(f"  │ Estensioni{' ' * (width - 11)}│")
-    print(f"  ├{'─' * width}┤")
-    row = f"  │ {symbol} {extensions.detail:<10} {lat_str:>10}"
-    print(f"{row}{' ' * max(0, width - len(row) + 4)}│")
-    print(f"  └{'─' * width}┘")
-    print(f"      {extensions.url}\n")
+    """Print the health status of the extensions service."""
+    14 + 3 + 6 + 3 + 12 + 3 + 9 + 6
 
 
 # ---------------------------------------------------------------------------

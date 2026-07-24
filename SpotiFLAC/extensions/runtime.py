@@ -1,5 +1,4 @@
-"""
-extensions/runtime.py — JSRuntime
+"""extensions/runtime.py — JSRuntime.
 
 Starts the Node.js _bridge.js process and provides a Python API
 to call JavaScript extension methods synchronously.
@@ -19,7 +18,12 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+from typing_extensions import Self
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +35,7 @@ class ExtensionRuntimeError(RuntimeError):
 
 
 class JSRuntime:
-    """
-    Manages a Node.js process that runs _bridge.js with a loaded extension.
+    """Manages a Node.js process that runs _bridge.js with a loaded extension.
 
     Usage:
         rt = JSRuntime(ext_path, settings={"token": "..."})
@@ -59,7 +62,7 @@ class JSRuntime:
         settings: dict | None = None,
         node_executable: str = "node",
         startup_timeout: float = 20.0,
-        session_handler: "Callable[[str, str, Any, dict], Awaitable[dict]] | None" = None,
+        session_handler: Callable[[str, str, Any, dict], Awaitable[dict]] | None = None,
     ) -> None:
         self.ext_path = Path(ext_path)
         self.settings = settings or {}
@@ -74,20 +77,25 @@ class JSRuntime:
         self._lock = threading.Lock()
         self._reader: threading.Thread | None = None
         self._ready_event = threading.Event()
-        self._loop: "asyncio.AbstractEventLoop | None" = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     # ─────────────────────── lifecycle ────────────────────────
 
     def start(self) -> None:
         if not shutil.which(self.node_executable):
-            raise ExtensionRuntimeError(
+            msg = (
                 f"Node.js not found ('{self.node_executable}'). "
                 "Install Node.js ≥ 16 to use JS extensions."
             )
+            raise ExtensionRuntimeError(
+                msg,
+            )
         if not _BRIDGE_JS.exists():
-            raise ExtensionRuntimeError(f"Bridge JS not found: {_BRIDGE_JS}")
+            msg = f"Bridge JS not found: {_BRIDGE_JS}"
+            raise ExtensionRuntimeError(msg)
         if not self.ext_path.exists():
-            raise ExtensionRuntimeError(f"Extension not found: {self.ext_path}")
+            msg = f"Extension not found: {self.ext_path}"
+            raise ExtensionRuntimeError(msg)
 
         cmd = [
             self.node_executable,
@@ -130,9 +138,12 @@ class JSRuntime:
         # Waits for "ready" signal from the extension
         if not self._ready_event.wait(timeout=self.startup_timeout):
             self.stop()
-            raise ExtensionRuntimeError(
+            msg = (
                 f"Extension did not respond within {self.startup_timeout}s. "
                 "Verify that the JS file is valid."
+            )
+            raise ExtensionRuntimeError(
+                msg,
             )
         logger.debug("[JSRuntime] extension ready: %s", self.ext_path.name)
 
@@ -145,7 +156,7 @@ class JSRuntime:
                 self._proc.kill()
         self._proc = None
 
-    def __enter__(self) -> "JSRuntime":
+    def __enter__(self) -> Self:
         self.start()
         return self
 
@@ -161,14 +172,14 @@ class JSRuntime:
         progress_cb: Callable[[float], None] | None = None,
         timeout: float = 120.0,
     ) -> Any:
-        """
-        Calls a JavaScript extension method and returns the result.
+        """Calls a JavaScript extension method and returns the result.
 
         For methods with onProgress (e.g. download), pass progress_cb;
         the placeholder '__progress__' will be replaced by the JS function.
         """
         if not self._proc or self._proc.poll() is not None:
-            raise ExtensionRuntimeError("JSRuntime not started or already terminated.")
+            msg = "JSRuntime not started or already terminated."
+            raise ExtensionRuntimeError(msg)
 
         with self._lock:
             self._seq += 1
@@ -189,19 +200,22 @@ class JSRuntime:
             self._proc.stdin.flush()
         except OSError as e:
             self._pending.pop(seq, None)
-            raise ExtensionRuntimeError(f"Error writing to Node stdin: {e}") from e
+            msg_0 = f"Error writing to Node stdin: {e}"
+            raise ExtensionRuntimeError(msg_0) from e
 
         try:
             resp = result_q.get(timeout=timeout)
         except queue.Empty:
             self._pending.pop(seq, None)
             self._progress_cbs.pop(seq, None)
-            raise ExtensionRuntimeError(f"Timeout ({timeout}s) calling {method}")
+            msg_0 = f"Timeout ({timeout}s) calling {method}"
+            raise ExtensionRuntimeError(msg_0)
         finally:
             self._progress_cbs.pop(seq, None)
 
         if "error" in resp:
-            raise ExtensionRuntimeError(f"[JS] {resp['error']}")
+            msg_0 = f"[JS] {resp['error']}"
+            raise ExtensionRuntimeError(msg_0)
         return resp.get("result")
 
     # ─────────────────────── internals ────────────────────────
@@ -285,8 +299,7 @@ class JSRuntime:
             q.put(msg)
 
     def _handle_session_signed_fetch(self, msg: dict) -> None:
-        """
-        Handles a `session.signedFetch(...)` request made from the JS
+        """Handles a `session.signedFetch(...)` request made from the JS
         extension. Called from _read_loop (a separate thread).
 
         IMPORTANT: runs session_handler in a NEW AND ISOLATED asyncio event loop
@@ -314,7 +327,7 @@ class JSRuntime:
                             "type": "session_signed_fetch_response",
                             "requestId": request_id,
                             "result": result,
-                        }
+                        },
                     )
                     + "\n"
                 )
@@ -322,7 +335,8 @@ class JSRuntime:
                 self._proc.stdin.flush()
             except Exception as e:
                 logger.debug(
-                    "[JSRuntime] unable to respond to session.signedFetch: %s", e
+                    "[JSRuntime] unable to respond to session.signedFetch: %s",
+                    e,
                 )
 
         if self.session_handler is None:

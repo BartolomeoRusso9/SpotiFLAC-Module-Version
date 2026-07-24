@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import concurrent.futures
+import contextlib
 import hashlib
 import json
 import logging
@@ -10,7 +12,6 @@ import os
 import re
 import threading
 import time
-import concurrent.futures
 from urllib.parse import urlparse
 
 import aiofiles
@@ -20,26 +21,27 @@ from mutagen.flac import FLAC, Picture
 from mutagen.id3 import PictureType
 from mutagen.mp4 import MP4, MP4Cover
 
-from ..core.console import print_source_banner
-from ..core.endpoints import get_amazon_endpoint
-from ..core.errors import ErrorKind, SpotiflacError
-from ..core.flac_validation import validate_and_repair_if_needed
-from ..core.isrc_utils import normalize_isrc
-from ..core.models import DownloadResult, TrackMetadata
-from ..core.musicbrainz import mb_result_to_tags, AsyncMBFetch
-from ..core.tagger import EmbedOptions, embed_metadata_async
-from ..core.quality import map_amazon_community_quality
-from .base import BaseProvider
-from .tidal import _find_isrc_via_qobuz
+from SpotiFLAC.core.console import print_source_banner
+from SpotiFLAC.core.endpoints import get_amazon_endpoint
+from SpotiFLAC.core.errors import ErrorKind, SpotiflacError
+from SpotiFLAC.core.flac_validation import validate_and_repair_if_needed
+from SpotiFLAC.core.isrc_utils import normalize_isrc
+from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from SpotiFLAC.core.musicbrainz import AsyncMBFetch, mb_result_to_tags
+from SpotiFLAC.core.quality import map_amazon_community_quality
 
 # Importiamo la logica di firma e validazione sessione per la Community
-from ..core.signed_session_desktop import (
+from SpotiFLAC.core.signed_session_desktop import (
     ensure_community_session,
     sign_community_request,
 )
 
 # Importiamo la logica di sessione Turnstile per Monochrome (amz.geeked.wtf)
-from ..core.signed_session_mono import fetch_mono_track_via_browser
+from SpotiFLAC.core.signed_session_mono import fetch_mono_track_via_browser
+from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
+
+from .base import BaseProvider
+from .tidal import _find_isrc_via_qobuz
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,7 @@ class _APIEndpointsProxy(dict):
 
     def get(self, key: str, default=None):
         val = get_amazon_endpoint(key)
-        return val if val else default
+        return val or default
 
 
 API_ENDPOINTS = _APIEndpointsProxy()
@@ -102,7 +104,7 @@ _AMAZON_DEBUG_KEY_AAD = bytes(
         0x7C,
         0x76,
         0x31,
-    ]
+    ],
 )
 _AMAZON_DEBUG_KEY_NONCE = bytes(
     [
@@ -118,7 +120,7 @@ _AMAZON_DEBUG_KEY_NONCE = bytes(
         0x44,
         0x90,
         0x6D,
-    ]
+    ],
 )
 _AMAZON_DEBUG_KEY_CIPHERTEXT_TAG = bytes(
     [
@@ -162,7 +164,7 @@ _AMAZON_DEBUG_KEY_CIPHERTEXT_TAG = bytes(
         0x7F,
         0xFB,
         0xA1,
-    ]
+    ],
 )
 
 _amazon_debug_key: str | None = None
@@ -186,7 +188,7 @@ def _get_amazon_debug_key() -> str:
 def _first_artist(artist_str: str) -> str:
     if not artist_str:
         return "Unknown"
-    return artist_str.split(",")[0].strip()
+    return artist_str.split(",", maxsplit=1)[0].strip()
 
 
 def _safe_int(value) -> int:
@@ -218,7 +220,7 @@ def _is_running_in_docker() -> bool:
     if os.path.exists("/.dockerenv"):
         return True
     try:
-        with open("/proc/1/cgroup", "rt") as f:
+        with open("/proc/1/cgroup") as f:
             content = f.read()
             if "docker" in content or "lxc" in content:
                 return True
@@ -251,7 +253,8 @@ class AmazonProvider(BaseProvider):
     ) -> httpx.Response:
         base_url = get_amazon_endpoint(provider_key)
         if not base_url:
-            raise ValueError(f"Endpoint not found for provider: {provider_key}")
+            msg = f"Endpoint not found for provider: {provider_key}"
+            raise ValueError(msg)
 
         url = f"{base_url}{endpoint}"
 
@@ -264,7 +267,10 @@ class AmazonProvider(BaseProvider):
             req_kwargs["json"] = payload
 
         return await self._do_request_with_retry(
-            method, url, max_retries=1, **req_kwargs
+            method,
+            url,
+            max_retries=1,
+            **req_kwargs,
         )
 
     async def _do_request_with_retry(
@@ -277,7 +283,7 @@ class AmazonProvider(BaseProvider):
         **kwargs,
     ) -> httpx.Response:
 
-        from ..core.endpoints import get_community_url
+        from SpotiFLAC.core.endpoints import get_community_url
 
         comm_url = get_community_url("amazon")
         is_community = bool(comm_url) and url.startswith(comm_url.rstrip("/"))
@@ -305,7 +311,8 @@ class AmazonProvider(BaseProvider):
                     body_bytes = b""
                     if "json" in current_kwargs and current_kwargs["json"] is not None:
                         body_bytes = json.dumps(
-                            current_kwargs["json"], separators=(",", ":")
+                            current_kwargs["json"],
+                            separators=(",", ":"),
                         ).encode("utf-8")
                         current_kwargs["content"] = body_bytes
                         current_kwargs["headers"]["Content-Type"] = "application/json"
@@ -324,12 +331,16 @@ class AmazonProvider(BaseProvider):
                             body_bytes = current_kwargs["data"]
 
                     sig_headers = await asyncio.to_thread(
-                        sign_community_request, method, url, body_bytes, record
+                        sign_community_request,
+                        method,
+                        url,
+                        body_bytes,
+                        record,
                     )
 
                     current_kwargs["headers"].update(sig_headers)
                 except Exception as e:
-                    logger.error(
+                    logger.exception(
                         "[amazon] Fallimento nella firma della richiesta community: %s",
                         e,
                     )
@@ -387,7 +398,8 @@ class AmazonProvider(BaseProvider):
     def _format_amazon_url(self, raw_url: str) -> str:
         asin_match = re.search(r"([A-Z0-9]{10})", raw_url.upper())
         if not asin_match:
-            raise RuntimeError(f"Failed to extract ASIN from resolved URL: {raw_url}")
+            msg = f"Failed to extract ASIN from resolved URL: {raw_url}"
+            raise RuntimeError(msg)
         asin = asin_match.group(1)
         base = base64.b64decode("aHR0cHM6Ly9tdXNpYy5hbWF6b24uY29tL3RyYWNrcy8=").decode()
         return f"{base}{asin}?musicTerritory=US"
@@ -415,10 +427,13 @@ class AmazonProvider(BaseProvider):
         url = f"https://songstats.com/{isrc.upper().strip()}?ref=ISRCFinder"
         try:
             resp = await self._async_http.get(
-                url, headers={"Accept": "text/html"}, timeout=15
+                url,
+                headers={"Accept": "text/html"},
+                timeout=15,
             )
             for match in re.finditer(
-                r'<script type="application/ld\+json">([\s\S]*?)</script>', resp.text
+                r'<script type="application/ld\+json">([\s\S]*?)</script>',
+                resp.text,
             ):
                 try:
                     data = json.loads(match.group(1))
@@ -436,7 +451,7 @@ class AmazonProvider(BaseProvider):
         if metadata.id and re.match(r"^B[0-9A-Z]{9}$", metadata.id.upper()):
             logger.info(f"[amazon] ID {metadata.id} is already an ASIN.")
             return self._format_amazon_url(
-                f"https://music.amazon.com/tracks/{metadata.id}"
+                f"https://music.amazon.com/tracks/{metadata.id}",
             )
 
         track_id = metadata.id
@@ -463,7 +478,8 @@ class AmazonProvider(BaseProvider):
             asin_match = re.search(r"trackAsin=([A-Z0-9]{10})", resp.text)
             if not asin_match:
                 asin_match = re.search(
-                    r"https://music\.amazon\.com/tracks/([A-Z0-9]{10})", resp.text
+                    r"https://music\.amazon\.com/tracks/([A-Z0-9]{10})",
+                    resp.text,
                 )
             if asin_match:
                 logger.info("[amazon] Resolved via Songlink HTML Scraping")
@@ -503,8 +519,9 @@ class AmazonProvider(BaseProvider):
             if amz_url:
                 return self._format_amazon_url(amz_url)
 
+        msg = f"Could not resolve Amazon URL for {track_id} via any method."
         raise RuntimeError(
-            f"Could not resolve Amazon URL for {track_id} via any method."
+            msg,
         )
 
     # ------------------------------------------------------------------
@@ -564,7 +581,8 @@ class AmazonProvider(BaseProvider):
         s_verify_url = get_amazon_endpoint("s_verify")
 
         if not all([s_home_url, s_challenge_url, s_verify_url]):
-            raise RuntimeError("[amazon] s endpoints not fully configured in registry")
+            msg = "[amazon] s endpoints not fully configured in registry"
+            raise RuntimeError(msg)
 
         parsed = urlparse(s_home_url)
         origin = (
@@ -605,7 +623,9 @@ class AmazonProvider(BaseProvider):
 
         try:
             resp_home = await self._async_http.get(
-                s_home_url, headers=headers_nav, timeout=15
+                s_home_url,
+                headers=headers_nav,
+                timeout=15,
             )
 
             web_nonce = None
@@ -623,13 +643,16 @@ class AmazonProvider(BaseProvider):
                     web_nonce = match_fallback.group(1)
 
             if not web_nonce:
-                raise RuntimeError("Missing webNonce in HTML")
+                msg = "Missing webNonce in HTML"
+                raise RuntimeError(msg)
 
             h_challenge = headers_api.copy()
             h_challenge.pop("content-type", None)
 
             resp_challenge = await self._async_http.get(
-                s_challenge_url, headers=h_challenge, timeout=15
+                s_challenge_url,
+                headers=h_challenge,
+                timeout=15,
             )
             challenge = resp_challenge.json()
 
@@ -638,13 +661,13 @@ class AmazonProvider(BaseProvider):
                 json.dumps(
                     {"challenge": challenge, "solution": solution},
                     separators=(",", ":"),
-                ).encode()
+                ).encode(),
             ).decode()
 
             verify_payload = {"payload": encoded, "webNonce": web_nonce}
 
             payload_bytes = json.dumps(verify_payload, separators=(",", ":")).encode(
-                "utf-8"
+                "utf-8",
             )
 
             resp = await self._async_http.post(
@@ -665,7 +688,8 @@ class AmazonProvider(BaseProvider):
             return self._s_token
 
         except Exception as exc:
-            raise RuntimeError(f"[amazon] s captcha failed: {exc}") from exc
+            msg = f"[amazon] s captcha failed: {exc}"
+            raise RuntimeError(msg) from exc
 
     async def _prefetch_s_token(self) -> None:
         try:
@@ -678,18 +702,21 @@ class AmazonProvider(BaseProvider):
         t = self.__class__._prefetch_task
         if t is None or t.done():
             self.__class__._prefetch_task = asyncio.create_task(
-                self._prefetch_s_token()
+                self._prefetch_s_token(),
             )
 
     async def _download_from_s_api(
-        self, asin: str, output_dir: str, requested_quality: str
+        self,
+        asin: str,
+        output_dir: str,
+        requested_quality: str,
     ) -> tuple[str, dict] | None:
         logger.info("[amazon] Trying s API (ASIN: %s)", asin)
 
         s_stream_url = get_amazon_endpoint("s_stream")
         if not s_stream_url:
             logger.warning(
-                "[amazon] s stream endpoint not configured; skipping s fallback."
+                "[amazon] s stream endpoint not configured; skipping s fallback.",
             )
             return None
 
@@ -727,10 +754,8 @@ class AmazonProvider(BaseProvider):
 
         def _cleanup() -> None:
             if os.path.exists(temp_file):
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(temp_file)
-                except OSError:
-                    pass
 
         max_attempts = 2
         base_delay_s = 1.0
@@ -755,7 +780,6 @@ class AmazonProvider(BaseProvider):
                     headers=h_stream,
                     timeout=120,
                 ) as resp:
-
                     if resp.status_code in (401, 403) and attempt < max_attempts - 1:
                         logger.info("[amazon] s token rejected, refreshing…")
                         self._s_token = None
@@ -775,7 +799,8 @@ class AmazonProvider(BaseProvider):
 
                     if resp.status_code != 200:
                         logger.warning(
-                            "[amazon] s API returned HTTP %d", resp.status_code
+                            "[amazon] s API returned HTTP %d",
+                            resp.status_code,
                         )
                         return None
 
@@ -792,7 +817,7 @@ class AmazonProvider(BaseProvider):
                                 elif len(chunk) >= 8 and chunk[4:8] == b"ftyp":
                                     detected_ext = ".m4a"
                                     logger.info(
-                                        "[amazon] s stream is M4A container (will demux if FLAC inside)"
+                                        "[amazon] s stream is M4A container (will demux if FLAC inside)",
                                     )
                                 else:
                                     logger.warning(
@@ -823,7 +848,7 @@ class AmazonProvider(BaseProvider):
                             os.remove(final_file)
                             final_file = flac_out
                             logger.info(
-                                "[amazon] s: remuxed/converted FLAC stream from M4A container"
+                                "[amazon] s: remuxed/converted FLAC stream from M4A container",
                             )
                         else:
                             logger.warning("[amazon] s: FLAC demux failed, keeping M4A")
@@ -836,11 +861,13 @@ class AmazonProvider(BaseProvider):
 
                 if final_file.lower().endswith(".flac"):
                     success, repair_msg = await asyncio.to_thread(
-                        validate_and_repair_if_needed, final_file
+                        validate_and_repair_if_needed,
+                        final_file,
                     )
                     if not success:
                         logger.error(
-                            "[amazon] FLAC file validation failed: %s", repair_msg
+                            "[amazon] FLAC file validation failed: %s",
+                            repair_msg,
                         )
                         _cleanup()
                         return None
@@ -882,7 +909,9 @@ class AmazonProvider(BaseProvider):
                 filepath,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
             stdout, _ = await proc.communicate()
             return stdout.decode().strip()
@@ -890,7 +919,10 @@ class AmazonProvider(BaseProvider):
             return "m4a"
 
     async def _remux_to_flac(
-        self, input_path: str, output_path: str, decryption_key: str | None = None
+        self,
+        input_path: str,
+        output_path: str,
+        decryption_key: str | None = None,
     ) -> bool:
         try:
             cmd = [_ffmpeg_path(), "-y"]
@@ -915,9 +947,12 @@ class AmazonProvider(BaseProvider):
             return False
 
     async def _download_from_community_api(
-        self, asin: str, output_dir: str, quality: str
+        self,
+        asin: str,
+        output_dir: str,
+        quality: str,
     ) -> tuple[str, dict]:
-        from ..core.endpoints import get_community_url
+        from SpotiFLAC.core.endpoints import get_community_url
 
         community_url = get_community_url("amazon")
         if not community_url:
@@ -957,15 +992,15 @@ class AmazonProvider(BaseProvider):
             )
         except (httpx.RequestError, httpx.ConnectError) as exc:
             raise SpotiflacError(
-                ErrorKind.UNAVAILABLE, f"Community API request failed: {exc}", self.name
+                ErrorKind.UNAVAILABLE,
+                f"Community API request failed: {exc}",
+                self.name,
             ) from exc
 
         if resp.status_code != 200:
             err_msg = resp.text
-            try:
+            with contextlib.suppress(Exception):
                 err_msg = resp.json()
-            except Exception:
-                pass
             raise SpotiflacError(
                 ErrorKind.UNAVAILABLE,
                 f"community API returned {resp.status_code}: {err_msg}",
@@ -1077,7 +1112,8 @@ class AmazonProvider(BaseProvider):
 
             if target_ext == ".flac":
                 success, repair_msg = await asyncio.to_thread(
-                    validate_and_repair_if_needed, out
+                    validate_and_repair_if_needed,
+                    out,
                 )
                 if not success:
                     logger.error("[amazon] FLAC file validation failed: %s", repair_msg)
@@ -1100,7 +1136,8 @@ class AmazonProvider(BaseProvider):
 
         if target_ext == ".flac":
             success, repair_msg = await asyncio.to_thread(
-                validate_and_repair_if_needed, final
+                validate_and_repair_if_needed,
+                final,
             )
             if not success:
                 logger.error("[amazon] FLAC file validation failed: %s", repair_msg)
@@ -1117,7 +1154,10 @@ class AmazonProvider(BaseProvider):
         return final, api_meta
 
     async def _download_from_musicdl_api(
-        self, amazon_url: str, asin: str, output_dir: str
+        self,
+        amazon_url: str,
+        asin: str,
+        output_dir: str,
     ) -> tuple[str, dict]:
         logger.info("[amazon] Trying MusicDL API (ASIN: %s)", asin)
 
@@ -1127,7 +1167,9 @@ class AmazonProvider(BaseProvider):
             _musicdl_url = get_amazon_endpoint("musicdl")
             if not _musicdl_url:
                 raise SpotiflacError(
-                    ErrorKind.UNAVAILABLE, "MusicDL endpoint not configured", self.name
+                    ErrorKind.UNAVAILABLE,
+                    "MusicDL endpoint not configured",
+                    self.name,
                 )
             resp = await self._do_request_with_retry(
                 "POST",
@@ -1138,7 +1180,9 @@ class AmazonProvider(BaseProvider):
             )
         except (httpx.RequestError, httpx.ConnectError) as exc:
             raise SpotiflacError(
-                ErrorKind.UNAVAILABLE, f"MusicDL API request failed: {exc}", self.name
+                ErrorKind.UNAVAILABLE,
+                f"MusicDL API request failed: {exc}",
+                self.name,
             ) from exc
 
         if resp.status_code != 200:
@@ -1203,10 +1247,11 @@ class AmazonProvider(BaseProvider):
         return final, api_meta
 
     async def _download_from_mono_api(
-        self, metadata: TrackMetadata, output_dir: str
+        self,
+        metadata: TrackMetadata,
+        output_dir: str,
     ) -> tuple[str, dict]:
-        """
-        Monochrome (amz.geeked.wtf). A differenza degli altri fallback non
+        """Monochrome (amz.geeked.wtf). A differenza degli altri fallback non
         lavora per ASIN ma per titolo/artista/album/durata (vedi HAR):
         GET /api/track/?track=...&duration=...&album=...&artist=...&quality=UHD
         con header X-Turnstile-JWT. Risposta: stream_url + decryption_key,
@@ -1215,20 +1260,21 @@ class AmazonProvider(BaseProvider):
         mono_url = get_amazon_endpoint("mono")
         if not mono_url:
             raise SpotiflacError(
-                ErrorKind.UNAVAILABLE, "mono endpoint not configured", self.name
+                ErrorKind.UNAVAILABLE,
+                "mono endpoint not configured",
+                self.name,
             )
 
         logger.info(
-            "[amazon] Trying mono API (Monochrome) — %s", getattr(metadata, "title", "")
+            "[amazon] Trying mono API (Monochrome) — %s",
+            getattr(metadata, "title", ""),
         )
 
         try:
-            duration_s = int(
-                round(
-                    getattr(metadata, "duration", 0)
-                    or (getattr(metadata, "duration_ms", 0) / 1000)
-                    or 0
-                )
+            duration_s = round(
+                getattr(metadata, "duration", 0)
+                or (getattr(metadata, "duration_ms", 0) / 1000)
+                or 0,
             )
         except Exception:
             duration_s = 0
@@ -1255,7 +1301,9 @@ class AmazonProvider(BaseProvider):
 
         if not stream_url:
             raise SpotiflacError(
-                ErrorKind.UNAVAILABLE, "No stream URL in mono response", self.name
+                ErrorKind.UNAVAILABLE,
+                "No stream URL in mono response",
+                self.name,
             )
 
         temp_file = os.path.join(output_dir, f"{asin}_mono.enc")
@@ -1309,7 +1357,9 @@ class AmazonProvider(BaseProvider):
 
                 if proc.returncode != 0:
                     raise SpotiflacError(
-                        ErrorKind.FILE_IO, "mono decryption failed", self.name
+                        ErrorKind.FILE_IO,
+                        "mono decryption failed",
+                        self.name,
                     )
         else:
             if os.path.exists(out):
@@ -1318,7 +1368,8 @@ class AmazonProvider(BaseProvider):
 
         if ext == ".flac":
             success, repair_msg = await asyncio.to_thread(
-                validate_and_repair_if_needed, out
+                validate_and_repair_if_needed,
+                out,
             )
             if not success:
                 logger.error("[amazon] FLAC file validation failed: %s", repair_msg)
@@ -1343,12 +1394,13 @@ class AmazonProvider(BaseProvider):
     ) -> tuple[str, dict]:
         asin_match = re.search(r"(B[0-9A-Z]{9})", amazon_url)
         if not asin_match:
-            raise RuntimeError(f"Cannot extract ASIN from: {amazon_url}")
+            msg = f"Cannot extract ASIN from: {amazon_url}"
+            raise RuntimeError(msg)
         asin = asin_match.group(1)
 
         fallback_quality = str(quality).upper()
 
-        from ..core.endpoints import get_community_url
+        from SpotiFLAC.core.endpoints import get_community_url
 
         _community_ep = get_community_url("amazon")
         _antra_ep = get_amazon_endpoint("antra")
@@ -1368,7 +1420,9 @@ class AmazonProvider(BaseProvider):
             print_source_banner("amazon", "", fallback_quality)
             try:
                 return await self._download_from_community_api(
-                    asin, output_dir, quality
+                    asin,
+                    output_dir,
+                    quality,
                 )
             except Exception as exc:
                 logger.warning("[amazon] Community failed: %s", exc)
@@ -1376,7 +1430,8 @@ class AmazonProvider(BaseProvider):
         # ── 2. Antra ─────────────────────────────────────────────────────
         if _antra_ep:
             logger.info(
-                "[amazon] Attempting direct download via Antra server (ASIN: %s)", asin
+                "[amazon] Attempting direct download via Antra server (ASIN: %s)",
+                asin,
             )
             try:
                 antra_headers = {
@@ -1388,7 +1443,9 @@ class AmazonProvider(BaseProvider):
 
                 client = await self._async_http._client()
                 resp = await client.get(
-                    antra_api_url, headers=antra_headers, timeout=20
+                    antra_api_url,
+                    headers=antra_headers,
+                    timeout=20,
                 )
 
                 if resp.status_code == 200:
@@ -1414,12 +1471,15 @@ class AmazonProvider(BaseProvider):
                             logger.info("[amazon] Decrypting Antra stream...")
                             if ext == ".flac":
                                 if await self._remux_to_flac(
-                                    temp_file, out, decryption_key
+                                    temp_file,
+                                    out,
+                                    decryption_key,
                                 ):
                                     if os.path.exists(temp_file):
                                         os.remove(temp_file)
                                     success, repair_msg = await asyncio.to_thread(
-                                        validate_and_repair_if_needed, out
+                                        validate_and_repair_if_needed,
+                                        out,
                                     )
                                     if success:
                                         return out, {}
@@ -1464,13 +1524,14 @@ class AmazonProvider(BaseProvider):
         if _mono_ep and metadata is not None:
             if _is_running_in_docker():
                 logger.info(
-                    "[amazon] Docker: skip  mono (requires non headless browser)."
+                    "[amazon] Docker: skip  mono (requires non headless browser).",
                 )
             else:
                 logger.info("[amazon] Attempting mono API (ASIN: %s)", asin)
                 try:
                     mono_result = await self._download_from_mono_api(
-                        metadata, output_dir
+                        metadata,
+                        output_dir,
                     )
                     if mono_result and os.path.exists(mono_result[0]):
                         return mono_result
@@ -1491,7 +1552,9 @@ class AmazonProvider(BaseProvider):
 
         # ── 5. MusicDL (ultima risorsa) ──────────────────────────────────
         print_source_banner(
-            "amazon", "", "BEST QUALITY AVAILABLE (MOSTLY 16 bit 44.1 Hz)"
+            "amazon",
+            "",
+            "BEST QUALITY AVAILABLE (MOSTLY 16 bit 44.1 Hz)",
         )
         try:
             return await self._download_from_musicdl_api(amazon_url, asin, output_dir)
@@ -1552,7 +1615,7 @@ class AmazonProvider(BaseProvider):
         t_copy = api_meta.get("copyright") or copyright
         t_label = api_meta.get("label") or publisher
 
-        def _sync_write_tags():
+        def _sync_write_tags() -> None:
             try:
                 if filepath.endswith(".flac"):
                     audio = FLAC(filepath)
@@ -1622,12 +1685,13 @@ class AmazonProvider(BaseProvider):
 
                     if cover_data:
                         audio["covr"] = [
-                            MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)
+                            MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG),
                         ]
                     audio.save()
 
                 logger.info(
-                    "[amazon] Metadata embedded: %s", os.path.basename(filepath)
+                    "[amazon] Metadata embedded: %s",
+                    os.path.basename(filepath),
                 )
             except Exception as exc:
                 logger.warning("[amazon] embed_metadata failed: %s", exc)
@@ -1673,7 +1737,7 @@ class AmazonProvider(BaseProvider):
             try:
                 duration_ms = int(
                     getattr(metadata, "duration_ms", 0)
-                    or (int(getattr(metadata, "duration", 0)) * 1000)
+                    or (int(getattr(metadata, "duration", 0)) * 1000),
                 )
             except Exception:
                 duration_ms = 0
@@ -1684,7 +1748,7 @@ class AmazonProvider(BaseProvider):
                         getattr(metadata, "title", ""),
                         getattr(metadata, "artists", ""),
                         duration_ms,
-                    )
+                    ),
                 )
             except Exception:
                 qobuz_task = None
@@ -1721,7 +1785,10 @@ class AmazonProvider(BaseProvider):
                     )
                 try:
                     downloaded, api_metadata = await self._download_from_api(
-                        amazon_url, output_dir, q_tier, metadata=metadata
+                        amazon_url,
+                        output_dir,
+                        q_tier,
+                        metadata=metadata,
                     )
                     if downloaded:
                         break
@@ -1753,7 +1820,8 @@ class AmazonProvider(BaseProvider):
                     normalized = normalize_isrc(qobuz_isrc)
                     if normalized:
                         logger.info(
-                            "[amazon] ISRC from Qobuz (preferred): %s", normalized
+                            "[amazon] ISRC from Qobuz (preferred): %s",
+                            normalized,
                         )
                         metadata.isrc = normalized
                         if api_metadata is None:
@@ -1761,7 +1829,8 @@ class AmazonProvider(BaseProvider):
                         api_metadata["isrc"] = normalized
                 except Exception:
                     logger.debug(
-                        "[amazon] Failed to normalize Qobuz ISRC: %s", qobuz_isrc
+                        "[amazon] Failed to normalize Qobuz ISRC: %s",
+                        qobuz_isrc,
                     )
             elif (
                 api_metadata
@@ -1769,7 +1838,7 @@ class AmazonProvider(BaseProvider):
                 and api_metadata["isrc"] != metadata.isrc
             ):
                 try:
-                    from ..core.isrc_utils import confirm_isrc_with_qobuz_async
+                    from SpotiFLAC.core.isrc_utils import confirm_isrc_with_qobuz_async
 
                     isrc_val = normalize_isrc(api_metadata["isrc"])
                     if isrc_val:
@@ -1800,7 +1869,10 @@ class AmazonProvider(BaseProvider):
                             )
                             api_metadata["isrc"] = metadata.isrc
                 except Exception as e:
-                    logger.error("[amazon] Error during Qobuz ISRC validation: %s", e)
+                    logger.exception(
+                        "[amazon] Error during Qobuz ISRC validation: %s",
+                        e,
+                    )
 
             _isrc_for_mb = normalize_isrc(getattr(metadata, "isrc", None) or "")
             logger.debug("[amazon] ISRC at MB lookup: %r", _isrc_for_mb)
@@ -1822,11 +1894,11 @@ class AmazonProvider(BaseProvider):
             if mb_fetcher:
                 try:
                     res = await asyncio.to_thread(
-                        lambda: mb_fetcher.future.result(timeout=12)
+                        lambda: mb_fetcher.future.result(timeout=12),
                     )
                 except concurrent.futures.TimeoutError:
                     logger.warning(
-                        "[amazon] MusicBrainz timed out after 12s, skipping MB tags"
+                        "[amazon] MusicBrainz timed out after 12s, skipping MB tags",
                     )
                     res = {}
                 except Exception as exc:
@@ -1857,7 +1929,7 @@ class AmazonProvider(BaseProvider):
                 opts = EmbedOptions(
                     first_artist_only=first_artist_only,
                     cover_url=_fix_image_url(
-                        api_metadata.get("cover_url", metadata.cover_url)
+                        api_metadata.get("cover_url", metadata.cover_url),
                     ),
                     embed_lyrics=embed_lyrics,
                     lyrics_providers=lyrics_providers or [],
@@ -1901,7 +1973,7 @@ class AmazonProvider(BaseProvider):
             return DownloadResult.ok(self.name, dest_ext, fmt=fmt)
 
         except SpotiflacError as exc:
-            logger.error("[amazon] %s", exc)
+            logger.exception("[amazon] %s", exc)
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
             logger.exception("[amazon] Unexpected error")

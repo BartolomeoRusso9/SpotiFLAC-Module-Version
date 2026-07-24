@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
-import asyncio
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -70,7 +70,7 @@ class _ProviderStats:
         return float(base)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "_ProviderStats":
+    def from_dict(cls, data: dict) -> _ProviderStats:
         return cls(
             successes=int(data.get("successes", 0)),
             failures=int(data.get("failures", 0)),
@@ -85,8 +85,7 @@ class _ProviderStats:
 
 
 class ProviderScorer:
-    """
-    Gestore thread-safe asincrono che traccia successi/fallimenti per API URL.
+    """Gestore thread-safe asincrono che traccia successi/fallimenti per API URL.
     Usa l'inizializzazione lazy per supportare operazioni asyncio.
     """
 
@@ -114,7 +113,10 @@ class ProviderScorer:
         await asyncio.to_thread(_save_cache_sync, cache)
 
     async def _record_async(
-        self, provider_type: str, api_url: str, success: bool
+        self,
+        provider_type: str,
+        api_url: str,
+        success: bool,
     ) -> None:
         await self._ensure_initialized()
         key = f"{provider_type}:{api_url}"
@@ -142,7 +144,9 @@ class ProviderScorer:
         await self._record_async(provider_type, api_url, False)
 
     async def prioritize_async(
-        self, provider_type: str, api_urls: list[str]
+        self,
+        provider_type: str,
+        api_urls: list[str],
     ) -> list[str]:
         await self._ensure_initialized()
 

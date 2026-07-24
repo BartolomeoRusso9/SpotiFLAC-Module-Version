@@ -1,6 +1,7 @@
 from __future__ import annotations
-import subprocess
+
 import logging
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -8,9 +9,8 @@ _DOWNLOAD_URL = "https://ffmpeg.org/download.html"
 
 
 def check_ffmpeg() -> dict:
-    """
-    Returns dict con chiavi:
-      available (bool), version (str), error (str)
+    """Returns dict con chiavi:
+    available (bool), version (str), error (str).
     """
     result = {"available": False, "version": "", "error": ""}
     try:
@@ -46,11 +46,9 @@ def print_ffmpeg_warning(result: dict | None = None) -> dict:
         result = check_ffmpeg()
 
     if result["available"]:
-        short = result["version"][:60]
-        print(f"  ✓  ffmpeg: {short}")
+        result["version"][:60]
         return result
 
-    w = 62
     lines = [
         "⚠  ffmpeg NOT FOUND — some providers will fail",
         "   · Tidal FLAC muxing / Dolby Atmos",
@@ -59,9 +57,7 @@ def print_ffmpeg_warning(result: dict | None = None) -> dict:
         f"   Error:    {result['error']}",
         f"   Download: {_DOWNLOAD_URL}",
     ]
-    print(f"\n ╭{'─' * w}╮")
-    for line in lines:
-        print(f" │ {line:<{w}} │")
-    print(f" ╰{'─' * w}╯\n")
+    for _line in lines:
+        pass
 
     return result

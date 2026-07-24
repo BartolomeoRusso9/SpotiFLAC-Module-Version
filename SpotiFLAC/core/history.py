@@ -1,18 +1,18 @@
 import json
 import time
 from pathlib import Path
-from typing import List
+
 from .models import TrackMetadata
 
 
 class HistoryManager:
     """Gestisce la cronologia delle ricerche (recent-fetches)."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.path = Path.home() / ".cache" / "spotiflac" / "recent-fetches.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def add(self, metadata: TrackMetadata):
+    def add(self, metadata: TrackMetadata) -> None:
         history = self.get_all()
         history = [h for h in history if h["id"] != metadata.id]
 
@@ -23,7 +23,7 @@ class HistoryManager:
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(history[:50], f, indent=2)
 
-    def get_all(self) -> List[dict]:
+    def get_all(self) -> list[dict]:
         if not self.path.exists():
             return []
         try:
@@ -36,7 +36,7 @@ class HistoryManager:
             json.dump([], f, indent=2)
 
 
-def get_recent_fetches() -> List[dict]:
+def get_recent_fetches() -> list[dict]:
     return HistoryManager().get_all()
 
 

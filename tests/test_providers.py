@@ -1,9 +1,13 @@
-import sys
-import os
+from __future__ import annotations
+
 import asyncio
+import contextlib
 import logging
+import os
 import shutil
+import sys
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 # --- RELATIVE IMPORT HACK ---
 # We add the "parent" folder to the path, so that Python
@@ -15,9 +19,11 @@ if parent_dir not in sys.path:
 # --------------------------------
 
 # Import core components via "SpotiFLAC."
-from SpotiFLAC.core.models import TrackMetadata  # noqa: E402
-from SpotiFLAC.providers.spotify_metadata import SpotifyMetadataClient  # noqa: E402
 from SpotiFLAC.core.http import NetworkManager  # noqa: E402
+from SpotiFLAC.providers.spotify_metadata import SpotifyMetadataClient  # noqa: E402
+
+if TYPE_CHECKING:
+    from SpotiFLAC.core.models import TrackMetadata
 
 # Base configuration
 TEST_TRACK_ID = "0VjIjW4GlUZAMYd2vXMi3b"  # The Weeknd - Blinding Lights
@@ -61,7 +67,8 @@ for provider_key, module_candidates, class_candidates in _PROVIDER_IMPORT_SPECS:
             tried_combinations.append(f"{module_name}.{class_name}")
             try:
                 module = __import__(
-                    f"SpotiFLAC.providers.{module_name}", fromlist=[class_name]
+                    f"SpotiFLAC.providers.{module_name}",
+                    fromlist=[class_name],
                 )
                 provider_cls = getattr(module, class_name)
                 PROVIDER_CLASSES[provider_key] = provider_cls
@@ -74,12 +81,7 @@ for provider_key, module_candidates, class_candidates in _PROVIDER_IMPORT_SPECS:
             break
 
     if not imported:
-        print(
-            f"⚠️  Could not import provider '{provider_key}' "
-            f"(tried: {', '.join(tried_combinations)}). Details: {last_error}\n"
-            f"   -> Check the exact module/class name in SpotiFLAC/providers/ "
-            f"and update _PROVIDER_IMPORT_SPECS in this script."
-        )
+        pass
 
 DOWNLOAD_ONLY_PROVIDERS = {"joox", "netease", "migu", "kuwo"}
 
@@ -87,23 +89,23 @@ DOWNLOAD_ONLY_PROVIDERS = {"joox", "netease", "migu", "kuwo"}
 class DownloadSuccessfullyStarted(BaseException):
     """Extends BaseException (not Exception) so that no provider's `except Exception`
     block can swallow it. It will always propagate up to test_single_provider,
-    stopping the download immediately once real audio data has been received."""
-
-    pass
+    stopping the download immediately once real audio data has been received.
+    """
 
 
 def create_aborting_progress_cb():
     """Creates a callback that aborts the download as soon as it receives real audio data."""
 
-    def cb(downloaded_bytes: int, total_bytes: int):
+    def cb(downloaded_bytes: int, total_bytes: int) -> None:
         # Wait for 16 KB to be sure it's audio and not an error JSON
         if downloaded_bytes > 16384:
-            raise DownloadSuccessfullyStarted("The download started successfully!")
+            msg = "The download started successfully!"
+            raise DownloadSuccessfullyStarted(msg)
 
     return cb
 
 
-def log_result(provider_name: str, status: str, details: str = ""):
+def log_result(provider_name: str, status: str, details: str = "") -> None:
     """Writes the result to screen and to the log file."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if status == "SUCCESS":
@@ -111,16 +113,12 @@ def log_result(provider_name: str, status: str, details: str = ""):
     else:
         msg = f"[❌ ERROR] {provider_name.upper()} -> Details: {details}"
 
-    print(msg)
-
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(f"[{timestamp}] {msg}\n")
 
 
-async def _test_single_provider(provider, metadata: TrackMetadata):
+async def _test_single_provider(provider, metadata: TrackMetadata) -> None:
     """Tests a single provider and captures its result."""
-    print(f"\n⏳ Testing provider: {provider.name.upper()}...")
-
     provider.set_progress_callback(create_aborting_progress_cb())
 
     try:
@@ -135,7 +133,9 @@ async def _test_single_provider(provider, metadata: TrackMetadata):
         # Reached only if the download completed (or failed) before the 16 KB threshold
         if result.success:
             log_result(
-                provider.name, "SUCCESS", "Download completed before interruption."
+                provider.name,
+                "SUCCESS",
+                "Download completed before interruption.",
             )
         else:
             log_result(provider.name, "FAIL", str(result.error))
@@ -147,8 +147,7 @@ async def _test_single_provider(provider, metadata: TrackMetadata):
         log_result(provider.name, "FAIL", str(e))
 
 
-async def main():
-    print("=== STARTING PROVIDER TEST (DIRECT MODE) ===")
+async def main() -> None:
 
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         f.write("=== SPOTIFLAC PROVIDER TEST REPORT ===\n")
@@ -156,13 +155,10 @@ async def main():
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    print("Fetching test track metadata from Spotify...")
     spotify_client = SpotifyMetadataClient()
     try:
         test_metadata = await spotify_client.get_track_async(TEST_TRACK_ID)
-        print(f"Track found: {test_metadata.title} - {test_metadata.artists}")
-    except Exception as e:
-        print(f"Fatal error: Could not fetch metadata from Spotify ({e})")
+    except Exception:
         return
 
     providers_to_test = []
@@ -176,29 +172,19 @@ async def main():
         try:
             providers_to_test.append(provider_cls())
             seen_classes.add(provider_cls)
-        except Exception as e:
-            note = (
-                " (download-only service)"
-                if provider_key in DOWNLOAD_ONLY_PROVIDERS
-                else ""
-            )
-            print(f"⚠️  Could not instantiate '{provider_key}'{note}: {e}")
+        except Exception:
+            pass
 
     if not providers_to_test:
-        print("No providers available to test. Check the imports above.")
         return
 
     for provider in providers_to_test:
         await _test_single_provider(provider, test_metadata)
 
-    print("\n🧹 Cleaning up temporary downloads folder...")
-    try:
+    with contextlib.suppress(Exception):
         shutil.rmtree(OUTPUT_DIR)
-    except Exception as e:
-        print(f"Could not delete {OUTPUT_DIR}: {e}")
 
     await NetworkManager.aclose_loop_client()
-    print(f"\n✅ Test finished! Summary saved to '{LOG_FILE}'.")
 
 
 if __name__ == "__main__":

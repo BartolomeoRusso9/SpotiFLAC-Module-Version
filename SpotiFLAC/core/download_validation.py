@@ -1,9 +1,10 @@
 # backend/core/download_validation.py
 from __future__ import annotations
-import logging
-import os
+
 import asyncio
 import json
+import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +50,7 @@ async def validate_downloaded_track_async(
     filepath: str,
     expected_seconds: int,
 ) -> tuple[bool, str]:
-    """
-    Check che il file sloaded non sia una preview da 30s.
+    """Check che il file sloaded non sia una preview da 30s.
     Returns (valido, messaggio_errore).
     Equivalent a ValidateDownloadedTrackDuration() del Go.
     """

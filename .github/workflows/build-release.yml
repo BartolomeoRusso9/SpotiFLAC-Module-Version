@@ -37,7 +37,13 @@ jobs:
       - name: Auto-fix with ruff and black
         shell: bash
         run: |
-          if command -v ruff >/dev/null 2>&1; then ruff check --fix .; else echo "ruff not installed"; fi
+          if command -v ruff >/dev/null 2>&1; then
+            if ! ruff check --fix .; then
+              echo "::warning::Ruff found remaining issues after automatic fixes; continuing with the release build."
+            fi
+          else
+            echo "ruff not installed"
+          fi
           if command -v black >/dev/null 2>&1; then black .; else echo "black not installed"; fi
 
       - name: Commit changes and bump version

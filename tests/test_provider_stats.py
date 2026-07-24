@@ -1,7 +1,7 @@
+import asyncio
 import os
 import tempfile
 import unittest
-import asyncio
 from unittest.mock import patch
 
 from SpotiFLAC.core import provider_stats
@@ -9,25 +9,26 @@ from SpotiFLAC.core.provider_stats import ProviderScorer
 
 
 class ProviderStatsTests(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.environ_patcher = patch.dict(
-            os.environ, {"XDG_CACHE_HOME": self.tempdir.name}
+            os.environ,
+            {"XDG_CACHE_HOME": self.tempdir.name},
         )
         self.environ_patcher.start()
         ProviderScorer._instance = None
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         self.environ_patcher.stop()
         ProviderScorer._instance = None
         self.tempdir.cleanup()
 
-    def test_cache_path_uses_xdg_cache_home(self):
+    def test_cache_path_uses_xdg_cache_home(self) -> None:
         cache_path = provider_stats.get_cache_path()
-        self.assertTrue(str(cache_path).startswith(self.tempdir.name))
-        self.assertTrue(cache_path.name.endswith("provider_priority.json"))
+        assert str(cache_path).startswith(self.tempdir.name)
+        assert cache_path.name.endswith("provider_priority.json")
 
-    def test_record_success_and_prioritize(self):
+    def test_record_success_and_prioritize(self) -> None:
         scorer = ProviderScorer()
         asyncio.run(scorer.reset_async())
 
@@ -42,12 +43,12 @@ class ProviderStatsTests(unittest.TestCase):
                     "http://api.example.com/good",
                     "http://api.example.com/new",
                 ],
-            )
+            ),
         )
-        self.assertEqual(ordering[0], "http://api.example.com/good")
-        self.assertIn("http://api.example.com/new", ordering)
+        assert ordering[0] == "http://api.example.com/good"
+        assert "http://api.example.com/new" in ordering
 
-    def test_persistence_survives_new_instance(self):
+    def test_persistence_survives_new_instance(self) -> None:
         scorer = ProviderScorer()
         asyncio.run(scorer.reset_async())
         asyncio.run(scorer.record_success_async("test", "http://api.example.com/good"))
@@ -56,10 +57,11 @@ class ProviderStatsTests(unittest.TestCase):
         new_scorer = ProviderScorer()
         ordering = asyncio.run(
             new_scorer.prioritize_async(
-                "test", ["http://api.example.com/good", "http://api.example.com/bad"]
-            )
+                "test",
+                ["http://api.example.com/good", "http://api.example.com/bad"],
+            ),
         )
-        self.assertEqual(ordering[0], "http://api.example.com/good")
+        assert ordering[0] == "http://api.example.com/good"
 
 
 if __name__ == "__main__":

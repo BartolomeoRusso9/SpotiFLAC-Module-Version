@@ -1,9 +1,9 @@
-"""
-Gerarchia di errori tipati per SpotiFLAC.
+"""Gerarchia di errori tipati per SpotiFLAC.
 Ispirato al pattern Go: sentinel errors + errors.As/Is.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
@@ -37,12 +37,17 @@ class SpotiflacError(Exception):
 
 
 class AuthError(SpotiflacError):
-    def __init__(self, provider: str, msg: str, cause: BaseException | None = None):
+    def __init__(
+        self,
+        provider: str,
+        msg: str,
+        cause: BaseException | None = None,
+    ) -> None:
         super().__init__(ErrorKind.AUTH_FAILED, msg, provider, cause)
 
 
 class TrackNotFoundError(SpotiflacError):
-    def __init__(self, provider: str, identifier: str):
+    def __init__(self, provider: str, identifier: str) -> None:
         super().__init__(
             ErrorKind.TRACK_NOT_FOUND,
             f"Track not found for: {identifier}",
@@ -51,7 +56,7 @@ class TrackNotFoundError(SpotiflacError):
 
 
 class RateLimitedError(SpotiflacError):
-    def __init__(self, provider: str, retry_after: int = 5):
+    def __init__(self, provider: str, retry_after: int = 5) -> None:
         super().__init__(
             ErrorKind.RATE_LIMITED,
             f"Rate limited — retry after {retry_after}s",
@@ -61,15 +66,25 @@ class RateLimitedError(SpotiflacError):
 
 
 class NetworkError(SpotiflacError):
-    def __init__(self, provider: str, msg: str, cause: BaseException | None = None):
+    def __init__(
+        self,
+        provider: str,
+        msg: str,
+        cause: BaseException | None = None,
+    ) -> None:
         super().__init__(ErrorKind.NETWORK_ERROR, msg, provider, cause)
 
 
 class ParseError(SpotiflacError):
-    def __init__(self, provider: str, msg: str, cause: BaseException | None = None):
+    def __init__(
+        self,
+        provider: str,
+        msg: str,
+        cause: BaseException | None = None,
+    ) -> None:
         super().__init__(ErrorKind.PARSE_ERROR, msg, provider, cause)
 
 
 class InvalidUrlError(SpotiflacError):
-    def __init__(self, url: str):
+    def __init__(self, url: str) -> None:
         super().__init__(ErrorKind.INVALID_URL, f"Unsupported or invalid URL: {url}")

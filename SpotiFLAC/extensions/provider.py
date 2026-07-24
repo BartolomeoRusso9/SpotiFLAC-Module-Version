@@ -1,5 +1,4 @@
-"""
-extensions/provider.py — JSExtensionProvider
+"""extensions/provider.py — JSExtensionProvider.
 
 Adapts a JavaScript extension to the SpotiFLAC BaseProvider contract.
 
@@ -28,23 +27,25 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from ..core.models import TrackMetadata, DownloadResult
-from ..core.errors import SpotiflacError, ErrorKind
-from ..providers.base import BaseProvider
-from .manager import ExtensionManager, InstalledExtension
-from .runtime import JSRuntime, ExtensionRuntimeError
-from ..core.signed_session_mobile import (
+from typing_extensions import Self
+
+from SpotiFLAC.core.errors import ErrorKind, SpotiflacError
+from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from SpotiFLAC.core.signed_session_mobile import (
     SignedSessionClient,
-    perform_signed_fetch,
     client_from_manifest,
+    perform_signed_fetch,
 )
+from SpotiFLAC.providers.base import BaseProvider
+
+from .manager import ExtensionManager, InstalledExtension
+from .runtime import ExtensionRuntimeError, JSRuntime
 
 logger = logging.getLogger(__name__)
 
 
 class JSExtensionProvider(BaseProvider):
-    """
-    Provider that delegates downloads and metadata to a JavaScript extension.
+    """Provider that delegates downloads and metadata to a JavaScript extension.
 
     Supports PARALLEL DOWNLOADS thanks to a Process Pool of JSRuntime.
     Instead of a single blocking Node.js process, creates up to `max_runtimes`
@@ -119,14 +120,21 @@ class JSExtensionProvider(BaseProvider):
     def _load_extension(self, ext_id: str) -> InstalledExtension:
         ext = self._mgr.get_installed(ext_id)
         if ext is None:
-            raise ValueError(
+            msg = (
                 f"Extension '{ext_id}' not installed. "
                 f"Use ExtensionManager().install('{ext_id}') first."
+            )
+            raise ValueError(
+                msg,
             )
         return ext
 
     async def _session_signed_fetch_handler(
-        self, method: str, path: str, body: Any, headers: dict
+        self,
+        method: str,
+        path: str,
+        body: Any,
+        headers: dict,
     ) -> dict:
         ss_manifest = self._ext.manifest.get("signedSession")
         if not ss_manifest:
@@ -136,10 +144,8 @@ class JSExtensionProvider(BaseProvider):
         try:
             return await perform_signed_fetch(client, method, path, body, headers)
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 await client.aclose()
-            except Exception:
-                pass
 
     def _create_runtime(self) -> JSRuntime:
         """Creates a new isolated instance of the Node.js process."""
@@ -205,10 +211,8 @@ class JSExtensionProvider(BaseProvider):
         """Forcefully closes all Node.js processes in the Pool."""
         with self._runtime_lock:
             for rt in self._all_runtimes:
-                try:
+                with contextlib.suppress(Exception):
                     rt.stop()
-                except Exception:
-                    pass
             self._all_runtimes.clear()
             self._runtimes_created = 0
 
@@ -226,7 +230,7 @@ class JSExtensionProvider(BaseProvider):
             except RuntimeError:
                 asyncio.run(self._signed_session.aclose())
 
-    def __enter__(self) -> "JSExtensionProvider":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_) -> None:
@@ -356,7 +360,8 @@ class JSExtensionProvider(BaseProvider):
         track_id = avail.get("track_id", "")
         if not track_id:
             return DownloadResult.fail(
-                self.name, "checkAvailability returned no track_id"
+                self.name,
+                "checkAvailability returned no track_id",
             )
 
         ext_hint = _quality_to_ext(quality)
@@ -414,7 +419,7 @@ class JSExtensionProvider(BaseProvider):
         # _bridge.js), this fallback is simply redundant and harmless.
         poll_stop = asyncio.Event()
         poll_task = asyncio.create_task(
-            self._poll_file_progress_async(output_path, poll_stop)
+            self._poll_file_progress_async(output_path, poll_stop),
         )
 
         try:
@@ -441,7 +446,8 @@ class JSExtensionProvider(BaseProvider):
         actual_path = await self._finalize_segments_async(dl_result, output_path)
         if actual_path is None:
             return DownloadResult.fail(
-                self.name, "Download returned no usable audio (segments unmergeable)"
+                self.name,
+                "Download returned no usable audio (segments unmergeable)",
             )
 
         if Path(actual_path).suffix.lower() in [".m4a", ".mp4"]:
@@ -454,19 +460,18 @@ class JSExtensionProvider(BaseProvider):
                 flac_path = str(Path(actual_path).with_suffix(".flac"))
 
                 d_key = dl_result.get("decryption_key") or dl_result.get(
-                    "decryptionKey"
+                    "decryptionKey",
                 )
 
                 if await _remux_to_flac_async(actual_path, flac_path, d_key):
                     import os
 
-                    try:
+                    with contextlib.suppress(OSError):
                         os.remove(actual_path)
-                    except OSError:
-                        pass
                     actual_path = flac_path
                     logger.info(
-                        "[%s] Estrazione FLAC completata con successo.", self.name
+                        "[%s] Estrazione FLAC completata con successo.",
+                        self.name,
                     )
                 else:
                     logger.warning(
@@ -480,11 +485,11 @@ class JSExtensionProvider(BaseProvider):
         mb_tags: dict[str, str] = {}
         if enrich_metadata and metadata.isrc:
             try:
-                from ..core.musicbrainz import (
+                from SpotiFLAC.core.isrc_utils import normalize_isrc
+                from SpotiFLAC.core.musicbrainz import (
                     fetch_mb_metadata_async,
                     mb_result_to_tags,
                 )
-                from ..core.isrc_utils import normalize_isrc
 
                 isrc_clean = normalize_isrc(metadata.isrc)
                 if isrc_clean:
@@ -492,16 +497,21 @@ class JSExtensionProvider(BaseProvider):
                     mb_tags = mb_result_to_tags(mb_data)
             except Exception as e:
                 logger.debug(
-                    "[%s] MusicBrainz lookup failed (non-fatal): %s", self.name, e
+                    "[%s] MusicBrainz lookup failed (non-fatal): %s",
+                    self.name,
+                    e,
                 )
 
         try:
-            from ..core.tagger import embed_metadata_async, EmbedOptions
-            from ..core.download_validation import validate_downloaded_track_async
+            from SpotiFLAC.core.download_validation import (
+                validate_downloaded_track_async,
+            )
+            from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
 
             expected_s = metadata.duration_ms // 1000
             valid, err_msg = await validate_downloaded_track_async(
-                actual_path, expected_s
+                actual_path,
+                expected_s,
             )
             if not valid:
                 logger.warning("[%s] Validation failed: %s", self.name, err_msg)
@@ -547,10 +557,11 @@ class JSExtensionProvider(BaseProvider):
     # ─────────────────────── Segment reassembly ────────────────────────
 
     async def _finalize_segments_async(
-        self, dl_result: dict, output_path: Path
+        self,
+        dl_result: dict,
+        output_path: Path,
     ) -> str | None:
-        """
-        Some extensions (e.g., tidal-web, which downloads via DASH/fMP4) may
+        """Some extensions (e.g., tidal-web, which downloads via DASH/fMP4) may
         return downloaded segments instead of a single ready audio file.
         Expected contract, in order of priority:
 
@@ -589,7 +600,7 @@ class JSExtensionProvider(BaseProvider):
             "[%s] bridge-provided segments (count=%d): %s",
             self.name,
             len(segments),
-            segments[:3] + ["..."] if len(segments) > 3 else segments,
+            [*segments[:3], "..."] if len(segments) > 3 else segments,
         )
 
         if not segments:
@@ -638,7 +649,7 @@ class JSExtensionProvider(BaseProvider):
                     with open(seg_path, "rb") as seg_f:
                         out_f.write(seg_f.read())
         except Exception as e:
-            logger.error("[%s] Segment concatenation failed: %s", self.name, e)
+            logger.exception("[%s] Segment concatenation failed: %s", self.name, e)
             if raw_concat.exists():
                 raw_concat.unlink(missing_ok=True)
             return None
@@ -667,7 +678,8 @@ class JSExtensionProvider(BaseProvider):
                 )
         except Exception:
             logger.warning(
-                "[%s] ffprobe failed to detect codec after reassembly", self.name
+                "[%s] ffprobe failed to detect codec after reassembly",
+                self.name,
             )
 
         is_lossy = codec not in ("flac", "alac")
@@ -687,10 +699,8 @@ class JSExtensionProvider(BaseProvider):
             if raw_concat.exists():
                 raw_concat.unlink(missing_ok=True)
             for seg_path in segments:
-                try:
+                with contextlib.suppress(Exception):
                     Path(seg_path).unlink(missing_ok=True)
-                except Exception:
-                    pass
 
         if rc != 0:
             logger.error("[%s] ffmpeg mux failed: %s", self.name, stderr[:15000])
@@ -704,10 +714,11 @@ class JSExtensionProvider(BaseProvider):
     # ─────────────────────── Progress polling fallback ─────────────────
 
     async def _poll_file_progress_async(
-        self, output_path: Path, stop_event: asyncio.Event
+        self,
+        output_path: Path,
+        stop_event: asyncio.Event,
     ) -> None:
-        """
-        Monitors the growth of output_path (or its common temporary variants:
+        """Monitors the growth of output_path (or its common temporary variants:
         .part, .tmp, .download) and feeds self._progress_cb with an estimated
         percentage when no real "progress" events arrive from the JS bridge
         (e.g., extensions that write their own files without passing through
@@ -795,7 +806,9 @@ async def _get_codec_async(filepath: str) -> str:
             filepath,
         ]
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, _ = await proc.communicate()
         return stdout.decode().strip().lower()
@@ -804,7 +817,9 @@ async def _get_codec_async(filepath: str) -> str:
 
 
 async def _remux_to_flac_async(
-    input_path: str, output_path: str, decryption_key: str = None
+    input_path: str,
+    output_path: str,
+    decryption_key: str | None = None,
 ) -> bool:
     import logging
 
@@ -817,7 +832,9 @@ async def _remux_to_flac_async(
         cmd.extend(["-i", input_path, "-map", "0:a:0", "-c:a", "flac", output_path])
 
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
         from pathlib import Path

@@ -1,5 +1,4 @@
-"""
-Centralized Tagger — support for FLAC and MP3.
+"""Centralized Tagger — support for FLAC and MP3.
 
 FLAC → Vorbis Comment tags via mutagen.flac
 MP3  → ID3v2 tags via mutagen.id3
@@ -15,43 +14,46 @@ Both formats share the same pipeline:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mutagen.flac import FLAC
 from mutagen.flac import Picture as FlacPicture
 from mutagen.id3 import (
+    APIC,
+    COMM,
     ID3,
-    ID3NoHeaderError,
+    TALB,
+    TBPM,
+    TCOM,
+    TCON,
+    TCOP,
+    TDOR,
+    TDRC,
     TIT2,
     TPE1,
-    TALB,
     TPE2,
-    TDRC,
-    TRCK,
     TPOS,
-    APIC,
     TPUB,
-    TCOM,
-    TCOP,
-    TCON,
-    TBPM,
-    TSRC,
-    TDOR,
-    TSOP,
+    TRCK,
     TSO2,
-    WXXX,
-    COMM,
-    USLT,
+    TSOP,
+    TSRC,
     TXXX,
+    USLT,
+    WXXX,
+    ID3NoHeaderError,
+    PictureType,
 )
-from mutagen.id3 import PictureType
 from mutagen.id3 import PictureType as ID3PictureType
 
-from .errors import SpotiflacError, ErrorKind
-from .models import TrackMetadata
+from .errors import ErrorKind, SpotiflacError
+
+if TYPE_CHECKING:
+    from .models import TrackMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +173,7 @@ def _print_mb_summary(mb_tags: dict) -> None:
         parts.append(f"MusicBrainz ID ({len(mb_ids)} fields)")
 
     if parts:
-        print(f"  ✦ MusicBrainz: {', '.join(parts)}")
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -265,8 +267,6 @@ def _embed_id3(
     # ── lyrics ─────────────────────────────────────────────────────────────
     if lyrics and lyrics.strip():
         audio.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
-        prov_str = lyrics_prov if lyrics_prov else "unknown"
-        print(f"  ✦ Lyrics: added via {prov_str}")
         logger.debug("[tagger/mp3] lyrics embedded (%d chars)", len(lyrics))
 
     # ── cover art ──────────────────────────────────────────────────────────
@@ -278,7 +278,7 @@ def _embed_id3(
                 type=ID3PictureType.COVER_FRONT,
                 desc="Cover",
                 data=cover_data,
-            )
+            ),
         )
 
     audio.save(str(path), v2_version=3)
@@ -304,8 +304,6 @@ def _embed_flac(
 
     if lyrics and lyrics.strip():
         tags["LYRICS"] = lyrics
-        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
-        print(f"  ✦ Lyrics: added with {prov_str}")
         logger.debug("[tagger/flac] lyrics embedded (%d chars)", len(lyrics))
 
     for key, val in tags.items():
@@ -340,7 +338,13 @@ async def _write_tags_async(
 ) -> None:
     if is_flac:
         await asyncio.to_thread(
-            _embed_flac, path, tags, cover_data, lyrics, lyrics_prov, multi_artist
+            _embed_flac,
+            path,
+            tags,
+            cover_data,
+            lyrics,
+            lyrics_prov,
+            multi_artist,
         )
     elif is_mp3:
         await asyncio.to_thread(_embed_id3, path, tags, cover_data, lyrics, lyrics_prov)
@@ -397,10 +401,8 @@ def _embed_m4a(
             continue
         m4a_key = _M4A_MAP.get(key_up)
         if m4a_key == "tmpo":
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 audio[m4a_key] = [int(val)]
-            except (ValueError, TypeError):
-                pass
         elif m4a_key and m4a_key.startswith("----"):
             audio[m4a_key] = [str(val).encode("utf-8")]
         elif m4a_key:
@@ -411,8 +413,6 @@ def _embed_m4a(
 
     if lyrics and lyrics.strip():
         audio["\xa9lyr"] = [lyrics]
-        prov_str = lyrics_prov if lyrics_prov else "sconosciuto"
-        print(f"  ✦ Lyrics: added with {prov_str}")
         logger.debug("[tagger/m4a] lyrics embedded (%d chars)", len(lyrics))
 
     if cover_data:
@@ -484,11 +484,10 @@ async def embed_metadata_async(
             enriched_cover_url = enriched.cover_url_hd
             if enriched._sources:
                 field_names = {"cover_url_hd": "cover", "explicit": "advisory"}
-                details = ", ".join(
+                ", ".join(
                     f"{field_names.get(field, field)} ({provider})"
                     for field, provider in enriched._sources.items()
                 )
-                print(f"  ✦ Enriched with: {details}")
             logger.debug("[tagger] enriched: %s", list(enriched_tags.keys()))
         except Exception as exc:
             logger.warning("[tagger] enrichment failed: %s", exc)
@@ -603,7 +602,9 @@ async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | No
             if resp.status_code == 200:
                 return resp.content
             logger.warning(
-                "[tagger] cover HTTP %s (attempt %d)", resp.status_code, attempt + 1
+                "[tagger] cover HTTP %s (attempt %d)",
+                resp.status_code,
+                attempt + 1,
             )
         except Exception as exc:
             logger.warning("[tagger] cover attempt %d failed: %s", attempt + 1, exc)

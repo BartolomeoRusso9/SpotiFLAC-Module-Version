@@ -1,19 +1,20 @@
-"""
-SpotiFLAC — Interactive Mode.
+"""SpotiFLAC — Interactive Mode.
 New features compared to previous version:
   - Automatic health check at startup
   - URL history with quick selection
   - Last output folder as default
   - Profile management (load / save)
   - Per-track retry section
-  - Post-download actions section
+  - Post-download actions section.
 """
 
 from __future__ import annotations
-from urllib.parse import urlparse
+
+import asyncio
+import contextlib
 import os
 import sys
-import asyncio
+from urllib.parse import urlparse
 
 from .core.health_check import run_health_check_with_extensions
 from .core.quality import normalize_quality
@@ -64,9 +65,8 @@ def _ask(prompt: str, default: str = "") -> str:
     try:
         val = input(f"  {prompt}{default_hint}: ").strip()
     except (EOFError, KeyboardInterrupt):
-        print()
         sys.exit(0)
-    return val if val else default
+    return val or default
 
 
 def _ask_bool(prompt: str, default: bool = False) -> bool:
@@ -74,7 +74,6 @@ def _ask_bool(prompt: str, default: bool = False) -> bool:
     try:
         val = input(f"  {prompt} [{hint}]: ").strip().lower()
     except (EOFError, KeyboardInterrupt):
-        print()
         sys.exit(0)
     if not val:
         return default
@@ -82,15 +81,11 @@ def _ask_bool(prompt: str, default: bool = False) -> bool:
 
 
 def _ask_choice(prompt: str, options: list[str], default: str) -> str:
-    print(f"\n  {BOLD(prompt)}")
-    for i, opt in enumerate(options, 1):
-        marker = GREEN("▶") if opt == default else " "
-        print(f"    {marker} {DIM(f'[{i}]')} {opt}")
-    print(f"    {DIM('Enter = default')}")
+    for _i, opt in enumerate(options, 1):
+        GREEN("▶") if opt == default else " "
     try:
         val = input("  → ").strip()
     except (EOFError, KeyboardInterrupt):
-        print()
         sys.exit(0)
     if not val:
         return default
@@ -107,18 +102,12 @@ def _ask_multi(
     defaults: list[str],
     ordered: bool = False,
 ) -> list[str]:
-    print(f"\n  {BOLD(prompt)}")
-    for i, opt in enumerate(options, 1):
-        marker = GREEN("●") if opt in defaults else DIM("○")
-        default_label = DIM(" (default)") if opt in defaults else ""
-        print(f"    {DIM(f'[{i}]')} {marker} {opt}{default_label}")
-    print(
-        f"    {DIM('Enter numbers separated by space (e.g., 1 3 2) — Enter = default')}"
-    )
+    for _i, opt in enumerate(options, 1):
+        GREEN("●") if opt in defaults else DIM("○")
+        DIM(" (default)") if opt in defaults else ""
     try:
         val = input("  → ").strip()
     except (EOFError, KeyboardInterrupt):
-        print()
         sys.exit(0)
 
     if not val:
@@ -134,29 +123,21 @@ def _ask_multi(
                 if opt not in seen:
                     result.append(opt)
                     seen.add(opt)
-        return result if result else list(defaults)
-    else:
-        result = [
-            options[int(t) - 1]
-            for t in tokens
-            if t.isdigit() and 1 <= int(t) <= len(options)
-        ]
-        return result if result else list(defaults)
+        return result or list(defaults)
+    result = [
+        options[int(t) - 1]
+        for t in tokens
+        if t.isdigit() and 1 <= int(t) <= len(options)
+    ]
+    return result or list(defaults)
 
 
 def _section(title: str) -> None:
-    width = 50
-    print(f"\n{CYAN('─' * width)}")
-    print(f"{BOLD(CYAN(f'  {title}'))}")
-    print(f"{CYAN('─' * width)}")
+    pass
 
 
 def _header() -> None:
-    print()
-    print(CYAN(BOLD("  ╔══════════════════════════════════════════════╗")))
-    print(CYAN(BOLD("  ║        SpotiFLAC  —  Download Wizard         ║")))
-    print(CYAN(BOLD("  ╚══════════════════════════════════════════════╝")))
-    print(f"  {DIM('Press Ctrl+C at any time to exit')}")
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -180,31 +161,27 @@ _ALL_SERVICES = [
 
 
 async def _display_health_check() -> dict[str, bool]:
-    """
-    Display the reachability status of supported services and extensions.
+    """Display the reachability status of supported services and extensions.
 
     Returns:
         dict[str, bool]: A mapping of service and, when available, extension names to their reachability status.
+
     """
     _section("Service Availability Check")
-    print(f"  {DIM('Probing endpoints...')} ", end="", flush=True)
 
     try:
         results, ext_result = await run_health_check_with_extensions(
-            _ALL_SERVICES, include_all_endpoints=True
+            _ALL_SERVICES,
+            include_all_endpoints=True,
         )
-    except Exception as e:
-        print(f"\r  {RED(f'Health check error: {e}')}" + " " * 20)
+    except Exception:
         results, ext_result = [], None
 
-    print("\r" + " " * 40 + "\r", end="")
-
     if not results:
-        print(f"  {YELLOW('⚠  Health check skipped (import error or no network)')}")
         return {}
 
     # Organizza i risultati: ci basta sapere se il provider ha almeno un endpoint OK
-    status = {svc: False for svc in _ALL_SERVICES}
+    status = dict.fromkeys(_ALL_SERVICES, False)
     for r in results:
         if r.ok:
             status[r.provider] = True
@@ -212,30 +189,21 @@ async def _display_health_check() -> dict[str, bool]:
     # Stampa i provider in verticale con lo stato testuale
     for svc in _ALL_SERVICES:
         ok = status[svc]
-        icon = GREEN("✅") if ok else RED("❌")
-        print(f"  {icon} {BOLD(svc)}")
+        GREEN("✅") if ok else RED("❌")
 
         if ok:
-            print(f"      {DIM('↳')} {GREEN('reachable')}")
+            pass
         else:
-            print(f"      {DIM('↳')} {RED('no reachable endpoints')}")
+            pass
 
     working_count = sum(status.values())
-    total = len(_ALL_SERVICES)
-    summary_color = (
-        GREEN if working_count == total else (YELLOW if working_count > 0 else RED)
-    )
-    print(f"\n  {summary_color(f'{working_count}/{total} providers reachable')}")
+    len(_ALL_SERVICES)
 
     if working_count == 0:
-        print(
-            f"\n  {RED('✗  No providers reachable — check your internet connection.')}"
-        )
+        pass
 
     if ext_result is not None:
-        icon = GREEN("✅") if ext_result.ok else RED("❌")
-        print(f"\n  {BOLD('Extensions')}")
-        print(f"  {icon} {ext_result.detail}")
+        GREEN("✅") if ext_result.ok else RED("❌")
         status["extensions"] = ext_result.ok
 
     return status
@@ -248,12 +216,12 @@ async def _display_health_check() -> dict[str, bool]:
 
 async def _pick_from_history() -> str | None:
     try:
+        from .core.history import clear_recent_fetches
         from .core.session_memory import (
+            clear_url_history_async,
             get_url_history_async,
             remove_url_from_history_async,
-            clear_url_history_async,
         )
-        from .core.history import clear_recent_fetches
     except Exception:
         return None
 
@@ -264,25 +232,16 @@ async def _pick_from_history() -> str | None:
             return None
 
         _section("Recent URLs  (optional)")
-        print(f"  {DIM('Press Enter to type a new URL, or choose a recent one:')}")
-        print()
 
-        for i, entry in enumerate(history[:8], 1):
+        for _i, entry in enumerate(history[:8], 1):
             label = entry.get("label", entry.get("url", ""))[:55]
             url_short = entry.get("url", "")[:60]
-            print(f"    {DIM(f'[{i}]')} {label}")
             if label != url_short:
-                print(f"         {DIM(url_short)}")
-
-        print(f"\n    {DIM('[Enter]')} Type a new URL to create a queue")
-        print(f"    {DIM('[d + num]')} Delete an entry (e.g., d2, d5)")
-        print(f"    {DIM('[c]')} Clear URL history")
-        print(f"    {DIM('[r]')} Clear recent fetches")
+                pass
 
         try:
             val = input("  → ").strip()
         except (EOFError, KeyboardInterrupt):
-            print()
             sys.exit(0)
 
         if not val:
@@ -294,13 +253,10 @@ async def _pick_from_history() -> str | None:
             if _ask_bool("Are you sure you want to clear URL history?", False):
                 try:
                     await clear_url_history_async()
-                    print(f"\n  {GREEN('✓')} URL history cleared.\n")
                     continue
-                except Exception as e:
-                    print(f"\n  {RED('✗')} Could not clear URL history: {e}\n")
+                except Exception:
                     continue
             else:
-                print()
                 continue
 
         if val_lower in ("r", "recent", "clear recent"):
@@ -308,13 +264,10 @@ async def _pick_from_history() -> str | None:
                 try:
                     # Delegate blocking sync core/history I/O to to_thread for safety
                     await asyncio.to_thread(clear_recent_fetches)
-                    print(f"\n  {GREEN('✓')} Recent fetches cleared.\n")
                     continue
-                except Exception as e:
-                    print(f"\n  {RED('✗')} Could not clear recent fetches: {e}\n")
+                except Exception:
                     continue
             else:
-                print()
                 continue
 
         if val_lower.startswith("d") and len(val_lower) > 1:
@@ -325,16 +278,14 @@ async def _pick_from_history() -> str | None:
                     url_to_remove = history[idx].get("url")
                     try:
                         await remove_url_from_history_async(url_to_remove)
-                        print(f"\n  {GREEN('✓')} Entry deleted. Refreshing list...\n")
                         continue
-                    except Exception as e:
-                        print(f"\n  {RED('✗')} Could not delete: {e}\n")
+                    except Exception:
                         continue
 
         if val.isdigit() and 1 <= int(val) <= len(history[:8]):
             return history[int(val) - 1]["url"]
 
-        return val if val else None
+        return val or None
 
 
 # ---------------------------------------------------------------------------
@@ -345,9 +296,9 @@ async def _pick_from_history() -> str | None:
 async def _profile_load_section(cfg: dict) -> dict:
     try:
         from .core.profiles import (
-            list_profiles_async,
-            get_profile_async,
             delete_profile_async,
+            get_profile_async,
+            list_profiles_async,
         )
     except Exception:
         return cfg
@@ -358,17 +309,12 @@ async def _profile_load_section(cfg: dict) -> dict:
             return cfg
 
         _section("Load Profile  (optional)")
-        print(f"  {DIM('Saved profiles:')}")
-        for i, name in enumerate(profiles, 1):
-            print(f"    {DIM(f'[{i}]')} {name}")
-
-        print(f"\n    {DIM('[Enter]')} Start fresh")
-        print(f"    {DIM('[d + num]')} Delete a profile (e.g., d1, d2)")
+        for _i, _name in enumerate(profiles, 1):
+            pass
 
         try:
             val = input("  → ").strip()
         except (EOFError, KeyboardInterrupt):
-            print()
             sys.exit(0)
 
         if not val:
@@ -384,9 +330,6 @@ async def _profile_load_section(cfg: dict) -> dict:
                     prof_to_delete = profiles[idx]
                     if _ask_bool(f"Delete profile '{prof_to_delete}'?", False):
                         await delete_profile_async(prof_to_delete)
-                        print(
-                            f"\n  {GREEN('✓')} Profile {BOLD(prof_to_delete)} deleted.\n"
-                        )
                     continue
 
         chosen_name: str | None = None
@@ -399,9 +342,8 @@ async def _profile_load_section(cfg: dict) -> dict:
             profile_data = await get_profile_async(chosen_name)
             if profile_data:
                 cfg.update(
-                    {k: v for k, v in profile_data.items() if not k.startswith("_")}
+                    {k: v for k, v in profile_data.items() if not k.startswith("_")},
                 )
-                print(f"\n  {GREEN('✓')} Profile {BOLD(chosen_name)} loaded.")
             return cfg
 
 
@@ -409,24 +351,20 @@ async def _profile_save_section(cfg: dict) -> None:
     if not _ask_bool("Save this configuration as a profile?", False):
         return
     try:
-        from .core.profiles import save_profile_async, list_profiles_async
+        from .core.profiles import list_profiles_async, save_profile_async
     except Exception:
-        print(f"  {RED('✗  Profile save unavailable.')}")
         return
 
     existing = await list_profiles_async()
     if existing:
-        print(f"  {DIM('Existing profiles: ' + ', '.join(existing))}")
+        pass
 
     name = _ask("Profile name", "default").strip()
     if not name:
         return
 
-    try:
+    with contextlib.suppress(Exception):
         await save_profile_async(name, cfg)
-        print(f"  {GREEN('✓')} Profile {BOLD(name)} saved.")
-    except Exception as exc:
-        print(f"  {RED(f'✗  Save failed: {exc}')}")
 
 
 # ---------------------------------------------------------------------------
@@ -438,7 +376,7 @@ def _summary(cfg: dict) -> None:
     _section("Configuration Summary")
 
     def row(label: str, value: str) -> None:
-        print(f"  {BOLD(label + ':'): <30} {GREEN(value)}")
+        pass
 
     row("URL", cfg["url"][:65])
     row("Output Dir", cfg["output_dir"])
@@ -520,7 +458,6 @@ async def run_interactive() -> dict:
         if working_count == total_services:
             break
 
-        print()
         if not _ask_bool("Some providers are unreachable. Retry health check?", False):
             break
 
@@ -531,10 +468,6 @@ async def run_interactive() -> dict:
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
-    print(
-        f"  {DIM('Accepted: Spotify, Apple Music, Tidal, SoundCloud, YouTube, Pandora.')}"
-    )
-    print(f"  {DIM('Modes: Track, Album, Playlist, Artist Discography.')}")
 
     prefill = await _pick_from_history()
 
@@ -547,7 +480,6 @@ async def run_interactive() -> dict:
             url = _ask("URL")
 
         if not url:
-            print(f"  {RED('⚠  URL is required.')}")
             continue
 
         lower_url = url.lower()
@@ -560,18 +492,12 @@ async def run_interactive() -> dict:
             or "/@" in lower_url
             or "/browse/" in lower_url
         ):
-            print(f"  {RED('⚠  Discographies are not supported for YouTube.')}")
-            print(f"     {DIM('Please provide a Video or Playlist link.')}")
             is_blocked = True
 
         elif "soundcloud.com" in lower_url:
             path = urlparse(url).path.strip("/")
             parts = [p for p in path.split("/") if p]
             if len(parts) == 1 and parts[0] not in ("discover", "stream", "upload"):
-                print(
-                    f"  {RED('⚠  Artist profiles are not supported for SoundCloud.')}"
-                )
-                print(f"     {DIM('Please provide a Track or Set link.')}")
                 is_blocked = True
 
         if not is_blocked:
@@ -617,15 +543,15 @@ async def run_interactive() -> dict:
     )
     if is_single_track:
         _section("2.5 · Custom Output Path")
-        print(f"  {DIM('Specify an exact filename for this single track (optional).')}")
-        print(f"  {DIM('Example: my_files/favorite_song.flac')}")
 
         use_custom = _ask_bool(
-            "Set a custom output path?", bool(cfg.get("output_path"))
+            "Set a custom output path?",
+            bool(cfg.get("output_path")),
         )
         if use_custom:
             cfg["output_path"] = _ask(
-                "Full file path including extension", cfg.get("output_path", "")
+                "Full file path including extension",
+                cfg.get("output_path", ""),
             )
         else:
             cfg["output_path"] = None
@@ -638,7 +564,7 @@ async def run_interactive() -> dict:
     if health_status:
         unavailable = [s for s in _ALL_SERVICES if not health_status.get(s, True)]
         if unavailable:
-            print(f"  {YELLOW('⚠  Currently unreachable:')} {', '.join(unavailable)}")
+            pass
 
     is_soundcloud_url = (
         "soundcloud.com" in cfg["url"] or "on.soundcloud.com" in cfg["url"]
@@ -653,10 +579,8 @@ async def run_interactive() -> dict:
 
     if is_soundcloud_url:
         cfg["services"] = ["soundcloud"]
-        print(f"  {GREEN('✓')} Provider {BOLD('soundcloud')} automatically selected.")
     elif is_youtube_url:
         cfg["services"] = ["youtube"]
-        print(f"  {GREEN('✓')} Provider {BOLD('youtube')} automatically selected.")
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
@@ -665,10 +589,9 @@ async def run_interactive() -> dict:
                 defaults=["tidal"],
                 ordered=True,
             )
-            cfg["services"] = ["youtube"] + fallbacks
+            cfg["services"] = ["youtube", *fallbacks]
     elif is_apple_url:
         cfg["services"] = ["apple"]
-        print(f"  {GREEN('✓')} Provider {BOLD('apple')} automatically selected.")
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
@@ -677,13 +600,9 @@ async def run_interactive() -> dict:
                 defaults=["tidal"],
                 ordered=True,
             )
-            cfg["services"] = ["apple"] + fallbacks
+            cfg["services"] = ["apple", *fallbacks]
     elif is_pandora_url:
         cfg["services"] = ["pandora"]
-        print(f"  {GREEN('✓')} Provider {BOLD('pandora')} automatically selected.")
-        print(
-            f"  {DIM('Note: Pandora delivers MP3 (192kbps default). No lossless streams available.')}"
-        )
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
@@ -692,11 +611,8 @@ async def run_interactive() -> dict:
                 defaults=["tidal"],
                 ordered=True,
             )
-            cfg["services"] = ["pandora"] + fallbacks
+            cfg["services"] = ["pandora", *fallbacks]
     else:
-        print(
-            f"  {DIM('Choose services and their priority order (first = highest priority).')}"
-        )
         cfg["services"] = _ask_multi(
             "Services (order = priority):",
             options=[
@@ -719,12 +635,6 @@ async def run_interactive() -> dict:
 
     # ── 3.5. Extensions Fallback ─────────────────────────────────────────────
     _section("3.5 · Extensions Fallback")
-    print(
-        f"  {DIM('When a native provider fails, SpotiFLAC can automatically fall back')}"
-    )
-    print(
-        f"  {DIM('to a matching installed JavaScript extension (e.g. ext:tidal-web).')}"
-    )
     cfg["use_extensions_fallback"] = _ask_bool(
         "Use installed extensions as automatic fallback?",
         cfg.get("use_extensions_fallback", True),
@@ -736,7 +646,6 @@ async def run_interactive() -> dict:
     if is_soundcloud_url:
         cfg["quality"] = "LOSSLESS"
         cfg["allow_fallback"] = True
-        print(f"  {YELLOW('⏭  Skipped:')} {DIM('Only MP3 available')}")
     elif is_pandora_url or (
         len(cfg["services"]) == 1 and cfg["services"][0] == "pandora"
     ):
@@ -748,20 +657,12 @@ async def run_interactive() -> dict:
         )
         # Pandora uses provider-specific tokens directly
         cfg["quality"] = q_choice.split(" ")[0]
-        print(
-            f"  {DIM('Note: Output will be MP3 or M4A depending on selected quality.')}"
-        )
     elif is_youtube_url or (
         len(cfg["services"]) == 1 and cfg["services"][0] == "youtube"
     ):
         cfg["quality"] = "BEST"
         cfg["allow_fallback"] = True
-        print(f"  {YELLOW('⏭  Skipped:')} {DIM('Default Best Audio (Opus/M4A/MP3)')}")
     else:
-        print(
-            f"  {DIM('Automatic fallback applies if the requested quality is unavailable.')}"
-        )
-
         has_qobuz = "qobuz" in cfg["services"]
         has_tidal = "tidal" in cfg["services"]
         has_deezer = "deezer" in cfg["services"]
@@ -837,19 +738,20 @@ async def run_interactive() -> dict:
             ]
             if has_apple:
                 combined_options.append(
-                    "ATMOS (Spatial Audio on Apple, HI_RES elsewhere)"
+                    "ATMOS (Spatial Audio on Apple, HI_RES elsewhere)",
                 )
                 combined_options.append("AC3 (Dolby Digital on Apple, HIGH elsewhere)")
             if has_tidal:
                 combined_options.insert(
-                    1, "DOLBY_ATMOS (Dolby Atmos on Tidal, HI_RES elsewhere)"
+                    1,
+                    "DOLBY_ATMOS (Dolby Atmos on Tidal, HI_RES elsewhere)",
                 )
             if has_qobuz:
                 combined_options.append("7 (Hi-Res mid on Qobuz only)")
             combined_options.append("HIGH (MP3 320 / AAC on Apple)")
             if has_apple:
                 combined_options.append(
-                    "AAC-LEGACY (Legacy iTunes on Apple, HIGH elsewhere)"
+                    "AAC-LEGACY (Legacy iTunes on Apple, HIGH elsewhere)",
                 )
 
             quality_key = str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper()
@@ -889,16 +791,15 @@ async def run_interactive() -> dict:
             cfg["quality"] = normalize_quality(q)
 
         cfg["allow_fallback"] = _ask_bool(
-            "Allow automatic quality fallback?", cfg.get("allow_fallback", True)
+            "Allow automatic quality fallback?",
+            cfg.get("allow_fallback", True),
         )
 
     # ── 5. Filename format ─────────────────────────────────────────────────
     _section("5 · Filename Format")
-    print(
-        f"  {DIM('Placeholders: {title} {artist} {album} {album_artist} {year} {date} {track} {disc} {isrc} {position}')}"
-    )
     cfg["filename_format"] = _ask(
-        "Format", cfg.get("filename_format", "{title} - {artist}")
+        "Format",
+        cfg.get("filename_format", "{title} - {artist}"),
     )
 
     # ── 6. Organization Options ───────────────────────────────────────────
@@ -911,12 +812,14 @@ async def run_interactive() -> dict:
     cfg["first_artist_only"] = cfg.get("first_artist_only", False)
 
     cfg["use_track_numbers"] = _ask_bool(
-        "Add track number to filename?", cfg["use_track_numbers"]
+        "Add track number to filename?",
+        cfg["use_track_numbers"],
     )
 
     if cfg["use_track_numbers"]:
         cfg["use_album_track_numbers"] = _ask_bool(
-            "Use original album track number?", cfg["use_album_track_numbers"]
+            "Use original album track number?",
+            cfg["use_album_track_numbers"],
         )
         cfg["use_artist_subfolders"] = False
         cfg["use_album_subfolders"] = False
@@ -924,19 +827,23 @@ async def run_interactive() -> dict:
     else:
         cfg["use_album_track_numbers"] = False
         cfg["use_artist_subfolders"] = _ask_bool(
-            "Create artist subfolders?", cfg["use_artist_subfolders"]
+            "Create artist subfolders?",
+            cfg["use_artist_subfolders"],
         )
         cfg["use_album_subfolders"] = _ask_bool(
-            "Create album subfolders?", cfg["use_album_subfolders"]
+            "Create album subfolders?",
+            cfg["use_album_subfolders"],
         )
         cfg["first_artist_only"] = _ask_bool(
-            "Use only the first artist in tags and filename?", cfg["first_artist_only"]
+            "Use only the first artist in tags and filename?",
+            cfg["first_artist_only"],
         )
 
     # ── 7. Lyrics ────────────────────────────────────────────────────────────
     _section("7 · Lyrics")
     cfg["embed_lyrics"] = _ask_bool(
-        "Embed synchronized lyrics?", cfg.get("embed_lyrics", True)
+        "Embed synchronized lyrics?",
+        cfg.get("embed_lyrics", True),
     )
 
     if cfg["embed_lyrics"]:
@@ -955,9 +862,9 @@ async def run_interactive() -> dict:
 
     # ── 8. Metadata enrichment ──────────────────────────────────────────────
     _section("8 · Metadata Enrichment")
-    print(f"  {DIM('Adds genre, BPM, label, HD cover, MusicBrainz IDs, and more.')}")
     cfg["enrich_metadata"] = _ask_bool(
-        "Enable metadata enrichment?", cfg.get("enrich_metadata", True)
+        "Enable metadata enrichment?",
+        cfg.get("enrich_metadata", True),
     )
 
     if cfg["enrich_metadata"]:
@@ -979,10 +886,6 @@ async def run_interactive() -> dict:
 
     # ── 9. Retry ────────────────────────────────────────────────────────────
     _section("9 · Retry on Failure")
-    print(
-        f"  {DIM('Extra download attempts per track if all providers fail on first try.')}"
-    )
-    print(f"  {DIM('Each retry waits exponentially longer (2s, 4s, 8s…).')}")
     default_retries = cfg.get("track_max_retries", 0)
     retry_str = _ask("Extra retries per track (0 = no retry)", str(default_retries))
     try:
@@ -992,11 +895,10 @@ async def run_interactive() -> dict:
 
     # ── 9.5. Timeout ───────────────────────────────────────────────────
     _section("9.5 · Download Timeout")
-    print(f"  {DIM('Maximum time allowed for a single track download attempt.')}")
-    print(f"  {DIM('Useful to prevent hanging if a provider gets stuck.')}")
     default_timeout = cfg.get("timeout_s", 0)
     timeout_str = _ask(
-        "Timeout per track in seconds (0 = disabled)", str(default_timeout)
+        "Timeout per track in seconds (0 = disabled)",
+        str(default_timeout),
     )
     try:
         cfg["timeout_s"] = max(0, int(timeout_str))
@@ -1005,7 +907,6 @@ async def run_interactive() -> dict:
 
     # ── 10. Post-download Action ─────────────────────────────────────────────
     _section("10 · Post-Download Action")
-    print(f"  {DIM('Action to perform automatically when all downloads finish.')}")
 
     action_options = ["none", "open_folder", "notify", "command"]
     default_action = cfg.get("post_download_action", "none")
@@ -1017,11 +918,11 @@ async def run_interactive() -> dict:
     cfg["post_download_action"] = action_choice
 
     if action_choice == "command":
-        print(f"  {DIM('Placeholders: {folder} {succeeded} {failed}')}")
         cfg["post_download_command"] = _ask(
             "Shell command",
             cfg.get(
-                "post_download_command", "echo 'Done: {succeeded} tracks in {folder}'"
+                "post_download_command",
+                "echo 'Done: {succeeded} tracks in {folder}'",
             ),
         )
     else:
@@ -1029,12 +930,6 @@ async def run_interactive() -> dict:
 
     # ── 11. Optional Qobuz Local API ───────────────────────────────────────────────
     _section("11 · Optional Qobuz Local API")
-    print(
-        f"  {DIM('Self-host your own qobuz-api instance for guaranteed availability.')}"
-    )
-    print(
-        f"  {DIM('For a self-hosted Qobuz API, visit: https://github.com/BartolomeoRusso9/qobuz-api')}"
-    )
     cfg["qobuz_local_api_url"] = (
         _ask(
             "Qobuz local API URL (leave blank to skip)",
@@ -1044,10 +939,6 @@ async def run_interactive() -> dict:
     )
 
     # ── 11.5. Custom Tidal API ───────────────────────────────────────────────
-    print(
-        f"  {DIM('Self-host your own hifi-api instance for guaranteed availability.')}"
-    )
-    print(f"  {DIM('Create one at: https://github.com/binimum/hifi-api')}")
     cfg["tidal_custom_api"] = (
         _ask(
             "Custom Tidal API URL (leave blank to skip)",
@@ -1058,7 +949,8 @@ async def run_interactive() -> dict:
 
     # ── 12. Loop ─────────────────────────────────────────────────────────────
     loop_str = _ask(
-        "Repeat every N minutes (leave blank to disable)", str(cfg.get("loop", ""))
+        "Repeat every N minutes (leave blank to disable)",
+        str(cfg.get("loop", "")),
     )
     cfg["loop"] = int(loop_str) if loop_str.isdigit() else None
 
@@ -1067,9 +959,7 @@ async def run_interactive() -> dict:
 
     # ── Summary + confirmation ───────────────────────────────────────────────
     _summary(cfg)
-    print()
     if not _ask_bool(BOLD("Start download with this configuration?"), True):
-        print(f"\n  {YELLOW('Operation cancelled.')}\n")
         sys.exit(0)
 
     _section("Equivalent CLI command")
@@ -1079,20 +969,21 @@ async def run_interactive() -> dict:
 
 
 def _print_cli_command(cfg: dict) -> None:
-    """
-    Display the equivalent command-line invocation for a configuration.
+    """Display the equivalent command-line invocation for a configuration.
 
-    Parameters:
+    Parameters
+    ----------
         cfg (dict): Configuration values used to construct the command.
+
     """
     parts = [f'spotiflac "{cfg["url"]}" "{cfg["output_dir"]}"']
     if cfg.get("output_path"):
         parts.append(f'-o "{cfg["output_path"]}"')
-    parts.append(f'-s {" ".join(cfg["services"])}')
+    parts.append(f"-s {' '.join(cfg['services'])}")
     if not cfg.get("use_extensions_fallback", True):
         parts.append("--no-extensions-fallback")
     if cfg["quality"] not in ("LOSSLESS", "BEST"):
-        parts.append(f'-q {cfg["quality"]}')
+        parts.append(f"-q {cfg['quality']}")
     if cfg["filename_format"] != "{title} - {artist}":
         parts.append(f'--filename-format "{cfg["filename_format"]}"')
     if cfg["use_track_numbers"]:
@@ -1108,19 +999,19 @@ def _print_cli_command(cfg: dict) -> None:
     if not cfg["embed_lyrics"]:
         parts.append("--no-lyrics")
     else:
-        parts.append(f'--lyrics-providers {" ".join(cfg["lyrics_providers"])}')
+        parts.append(f"--lyrics-providers {' '.join(cfg['lyrics_providers'])}")
     if not cfg["enrich_metadata"]:
         parts.append("--no-enrich")
     else:
-        parts.append(f'--enrich-providers {" ".join(cfg["enrich_providers"])}')
+        parts.append(f"--enrich-providers {' '.join(cfg['enrich_providers'])}")
     if cfg.get("track_max_retries"):
-        parts.append(f'--retries {cfg["track_max_retries"]}')
+        parts.append(f"--retries {cfg['track_max_retries']}")
     if cfg.get("timeout_s"):
-        parts.append(f'--timeout {cfg["timeout_s"]}')
+        parts.append(f"--timeout {cfg['timeout_s']}")
     if cfg.get("post_download_action") and cfg["post_download_action"] != "none":
-        parts.append(f'--post-action {cfg["post_download_action"]}')
+        parts.append(f"--post-action {cfg['post_download_action']}")
         if cfg["post_download_action"] == "command" and cfg.get(
-            "post_download_command"
+            "post_download_command",
         ):
             parts.append(f'--post-command "{cfg["post_download_command"]}"')
     if cfg.get("qobuz_local_api_url"):
@@ -1128,7 +1019,6 @@ def _print_cli_command(cfg: dict) -> None:
     if cfg.get("tidal_custom_api"):
         parts.append(f'--tidal-api "{cfg["tidal_custom_api"]}"')
     if cfg.get("loop"):
-        parts.append(f'--loop {cfg["loop"]}')
+        parts.append(f"--loop {cfg['loop']}")
 
-    cmd = " \\\n    ".join(parts)
-    print(f"\n  {DIM(cmd)}\n")
+    " \\\n    ".join(parts)

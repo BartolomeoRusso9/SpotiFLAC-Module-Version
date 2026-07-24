@@ -1,5 +1,6 @@
 import os
 import subprocess
+
 from google import genai
 
 # 1. Client Gemini (nuovo SDK unificato)
@@ -11,7 +12,8 @@ try:
     commits = subprocess.check_output(log_cmd, shell=True).decode("utf-8")
 except Exception:
     commits = subprocess.check_output(
-        "git log -10 --pretty=format:'- %s'", shell=True
+        "git log -10 --pretty=format:'- %s'",
+        shell=True,
     ).decode("utf-8")
 
 if not commits.strip():
@@ -35,5 +37,3 @@ response = client.models.generate_content(
 changelog = response.text
 
 # 5. Output
-print("=== NEW RELEASE NOTES ===")
-print(changelog)

@@ -1,5 +1,4 @@
-"""
-PandoraProvider — full port of index.js to Python.
+"""PandoraProvider — full port of index.js to Python.
 
 Supports:
   - Pandora web URLs (www.pandora.com/artist/...)
@@ -14,6 +13,7 @@ Supports:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import re
@@ -23,15 +23,16 @@ from urllib.parse import quote, unquote, urlencode, urlparse
 
 import httpx
 
-from ..core.console import print_source_banner
-from ..core.download_validation import validate_downloaded_track_async
-from ..core.endpoints import get_pandora_base_and_path
-from ..core.errors import ErrorKind, SpotiflacError, TrackNotFoundError
-from ..core.http import RetryConfig, async_songlink_rate_limiter
-from ..core.models import DownloadResult, TrackMetadata
-from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
-from ..core.quality import normalize_quality
-from ..core.tagger import EmbedOptions, _print_mb_summary, embed_metadata_async
+from SpotiFLAC.core.console import print_source_banner
+from SpotiFLAC.core.download_validation import validate_downloaded_track_async
+from SpotiFLAC.core.endpoints import get_pandora_base_and_path
+from SpotiFLAC.core.errors import ErrorKind, SpotiflacError, TrackNotFoundError
+from SpotiFLAC.core.http import RetryConfig, async_songlink_rate_limiter
+from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from SpotiFLAC.core.musicbrainz import AsyncMBFetch, mb_result_to_tags
+from SpotiFLAC.core.quality import normalize_quality
+from SpotiFLAC.core.tagger import EmbedOptions, _print_mb_summary, embed_metadata_async
+
 from .base import BaseProvider
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,8 @@ _QUALITY_MAP = {
 # Pre-compiled Regex Patterns for performance
 _PANDORA_ID_RE = re.compile(r"\b(TR|AL|AR|PL|ST):([A-Za-z0-9]+)\b", re.IGNORECASE)
 _PANDORA_PRETTY_RE = re.compile(
-    r"(?:^|[/?=&])((TR|AL|AR|PL|ST)(\d[A-Za-z0-9]*))(?=[/?&#]|$)", re.IGNORECASE
+    r"(?:^|[/?=&])((TR|AL|AR|PL|ST)(\d[A-Za-z0-9]*))(?=[/?&#]|$)",
+    re.IGNORECASE,
 )
 _HTTP_RE = re.compile(r"^http://", re.IGNORECASE)
 _STRIP_QUERY_RE = re.compile(r"[?#].*$")
@@ -69,11 +71,13 @@ _DASH_UNDERSCORE_RE = re.compile(r"[-_]+")
 _WHITESPACE_RE = re.compile(r"\s+")
 _FALLBACK_URL_RE = re.compile(r"^https?://([^/]+)(/[^?#]*)?", re.IGNORECASE)
 _PANDORA_LINK_RE = re.compile(
-    r'https?://(?:www\.)?pandora\.com/[^"\'<>\\\s]+', re.IGNORECASE
+    r'https?://(?:www\.)?pandora\.com/[^"\'<>\\\s]+',
+    re.IGNORECASE,
 )
 _PANDORA_ID_PARAM_RE = re.compile(r'pandoraId=([^"\'&<>\s]+)', re.IGNORECASE)
 _DEEZER_TRACK_URL_RE = re.compile(
-    r"deezer\.com/(?:[a-z]{2}/)?track/(\d+)", re.IGNORECASE
+    r"deezer\.com/(?:[a-z]{2}/)?track/(\d+)",
+    re.IGNORECASE,
 )
 
 # ID Check Regexes
@@ -137,10 +141,8 @@ def _normalize_pandora_id(value: str | None) -> str:
     if not raw:
         return ""
 
-    try:
+    with contextlib.suppress(Exception):
         raw = unquote(raw)
-    except Exception:
-        pass
 
     m = _PANDORA_ID_RE.search(raw)
     if m:
@@ -198,7 +200,7 @@ def _normalize_pandora_canonical_url(input_url: str | None, pandora_id: str) -> 
 
     if "pandora.com/" in normalized:
         if _extract_pandora_track_id(normalized) or _extract_pandora_album_id(
-            normalized
+            normalized,
         ):
             return _normalize_pandora_web_url(normalized)
 
@@ -226,10 +228,8 @@ def _extract_pandora_url_from_html(html: str | None) -> str:
     m = _PANDORA_ID_PARAM_RE.search(body)
     if m:
         decoded = m.group(1)
-        try:
+        with contextlib.suppress(Exception):
             decoded = unquote(decoded)
-        except Exception:
-            pass
         pid = _normalize_pandora_id(decoded)
         if pid:
             return _build_pandora_url(pid)
@@ -273,7 +273,7 @@ def _parse_pandora_pretty_url(url: str | None) -> dict[str, str] | None:
         return {
             "type": "playlist",
             "playlistName": _title_case_from_slug(
-                segments[1] if len(segments) > 1 else "Pandora Playlist"
+                segments[1] if len(segments) > 1 else "Pandora Playlist",
             ),
         }
 
@@ -281,7 +281,8 @@ def _parse_pandora_pretty_url(url: str | None) -> dict[str, str] | None:
 
 
 def _select_quality_link(
-    cdn_links: dict[str, Any], quality: str
+    cdn_links: dict[str, Any],
+    quality: str,
 ) -> dict[str, Any] | None:
     requested = (quality or "mp3_192").lower()
 
@@ -342,7 +343,7 @@ class PandoraProvider(BaseProvider):
             {
                 "Accept": "application/json",
                 "User-Agent": _MOBILE_UA,
-            }
+            },
         )
         self._limiter = async_songlink_rate_limiter
 
@@ -351,7 +352,9 @@ class PandoraProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     async def _get_json_async(
-        self, url: str, headers: dict[str, str] | None = None
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         merged = {
             "Accept": "application/json",
@@ -367,7 +370,10 @@ class PandoraProvider(BaseProvider):
         return resp.json()
 
     def _post_json(
-        self, url: str, body: dict[str, Any], headers: dict[str, str] | None = None
+        self,
+        url: str,
+        body: dict[str, Any],
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         merged = {
             "Content-Type": "application/json",
@@ -382,12 +388,17 @@ class PandoraProvider(BaseProvider):
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as e:
-            raise RuntimeError(f"HTTP {e.response.status_code} for {url}") from e
+            msg = f"HTTP {e.response.status_code} for {url}"
+            raise RuntimeError(msg) from e
         except (httpx.RequestError, ValueError) as e:
-            raise RuntimeError(f"Request failed for {url}: {e}") from e
+            msg = f"Request failed for {url}: {e}"
+            raise RuntimeError(msg) from e
 
     async def _post_json_async(
-        self, url: str, body: dict[str, Any], headers: dict[str, str] | None = None
+        self,
+        url: str,
+        body: dict[str, Any],
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         merged = {
             "Content-Type": "application/json",
@@ -402,14 +413,19 @@ class PandoraProvider(BaseProvider):
 
         try:
             resp = await self._async_http.post(
-                url, json=body, headers=merged, timeout=30.0
+                url,
+                json=body,
+                headers=merged,
+                timeout=30.0,
             )
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as e:
-            raise RuntimeError(f"HTTP {e.response.status_code} for {url}") from e
+            msg = f"HTTP {e.response.status_code} for {url}"
+            raise RuntimeError(msg) from e
         except (httpx.RequestError, ValueError) as e:
-            raise RuntimeError(f"Request failed for {url}: {e}") from e
+            msg = f"Request failed for {url}: {e}"
+            raise RuntimeError(msg) from e
 
     # ------------------------------------------------------------------
     # App link resolution
@@ -481,7 +497,8 @@ class PandoraProvider(BaseProvider):
             )
             resp.raise_for_status()
         except httpx.RequestError as e:
-            raise RuntimeError(f"Pandora app link request failed: {e}") from e
+            msg = f"Pandora app link request failed: {e}"
+            raise RuntimeError(msg) from e
 
         resp_url = str(resp.url)
         if "pandora.com/" in resp_url and "pandora.app.link" not in resp_url:
@@ -489,7 +506,8 @@ class PandoraProvider(BaseProvider):
 
         resolved = _extract_pandora_url_from_html(resp.text)
         if not resolved:
-            raise RuntimeError("Could not resolve Pandora app link")
+            msg = "Could not resolve Pandora app link"
+            raise RuntimeError(msg)
 
         return resolved
 
@@ -505,7 +523,8 @@ class PandoraProvider(BaseProvider):
                 follow_redirects=True,
             )
         except httpx.RequestError as e:
-            raise RuntimeError(f"Pandora app link request failed: {e}") from e
+            msg = f"Pandora app link request failed: {e}"
+            raise RuntimeError(msg) from e
 
         resp_url = str(resp.url)
         if "pandora.com/" in resp_url and "pandora.app.link" not in resp_url:
@@ -513,7 +532,8 @@ class PandoraProvider(BaseProvider):
 
         resolved = _extract_pandora_url_from_html(resp.text)
         if not resolved:
-            raise RuntimeError("Could not resolve Pandora app link")
+            msg = "Could not resolve Pandora app link"
+            raise RuntimeError(msg)
 
         return resolved
 
@@ -530,7 +550,7 @@ class PandoraProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def _resolve_song_link(self, url: str) -> dict[str, Any]:
-        from ..core.http import songlink_rate_limiter
+        from SpotiFLAC.core.http import songlink_rate_limiter
 
         params = {"url": url, "userCountry": _USER_COUNTRY}
         full_url = f"{_SONGLINK_URL}?{urlencode(params)}"
@@ -543,7 +563,8 @@ class PandoraProvider(BaseProvider):
         return _normalize_secure_url(url) if url else ""
 
     def _extract_entity_from_songlink(
-        self, data: dict[str, Any] | None
+        self,
+        data: dict[str, Any] | None,
     ) -> dict[str, Any]:
         if not data:
             return {}
@@ -553,7 +574,8 @@ class PandoraProvider(BaseProvider):
         return {}
 
     def _extract_deezer_track_id_from_songlink(
-        self, data: dict[str, Any] | None
+        self,
+        data: dict[str, Any] | None,
     ) -> str:
         url = (data or {}).get("linksByPlatform", {}).get("deezer", {}).get("url")
         if url:
@@ -597,7 +619,8 @@ class PandoraProvider(BaseProvider):
 
     @staticmethod
     def _normalize_album_artist_from_deezer(
-        album: dict[str, Any], track: dict[str, Any]
+        album: dict[str, Any],
+        track: dict[str, Any],
     ) -> str:
         if album and album.get("artist", {}).get("name"):
             return str(album["artist"]["name"])
@@ -649,7 +672,8 @@ class PandoraProvider(BaseProvider):
             resolved_pandora_url = self._extract_pandora_url_from_songlink(songlink)
             if resolved_pandora_url:
                 pandora_url = _normalize_pandora_canonical_url(
-                    resolved_pandora_url, pandora_id
+                    resolved_pandora_url,
+                    pandora_id,
                 )
 
             resolved_id = _extract_pandora_track_id(pandora_url)
@@ -657,7 +681,8 @@ class PandoraProvider(BaseProvider):
                 pandora_id = resolved_id
 
             if entity and entity.get("type") not in ("song", ""):
-                raise RuntimeError("Resolved entity is not a Pandora track")
+                msg = "Resolved entity is not a Pandora track"
+                raise RuntimeError(msg)
 
             deezer_track_id = self._extract_deezer_track_id_from_songlink(songlink)
             deezer_track = self._fetch_deezer_track(deezer_track_id)
@@ -687,7 +712,9 @@ class PandoraProvider(BaseProvider):
 
         if not pandora_id:
             raise SpotiflacError(
-                ErrorKind.INVALID_URL, "Could not resolve Pandora album ID", self.name
+                ErrorKind.INVALID_URL,
+                "Could not resolve Pandora album ID",
+                self.name,
             )
 
         source_url = input_url.strip()
@@ -705,7 +732,8 @@ class PandoraProvider(BaseProvider):
             resolved_pandora_url = self._extract_pandora_url_from_songlink(songlink)
             if resolved_pandora_url:
                 pandora_url = _normalize_pandora_canonical_url(
-                    resolved_pandora_url, pandora_id
+                    resolved_pandora_url,
+                    pandora_id,
                 )
 
             resolved_id = _extract_pandora_album_id(pandora_url)
@@ -713,7 +741,8 @@ class PandoraProvider(BaseProvider):
                 pandora_id = resolved_id
 
             if entity and entity.get("type") not in ("album", ""):
-                raise RuntimeError("Resolved entity is not a Pandora album")
+                msg = "Resolved entity is not a Pandora album"
+                raise RuntimeError(msg)
 
         except Exception:
             if not pretty:
@@ -826,7 +855,9 @@ class PandoraProvider(BaseProvider):
 
         if "pandora.com" not in input_url:
             raise SpotiflacError(
-                ErrorKind.INVALID_URL, f"Not a Pandora URL: {url}", self.name
+                ErrorKind.INVALID_URL,
+                f"Not a Pandora URL: {url}",
+                self.name,
             )
 
         pretty = _parse_pandora_pretty_url(input_url)
@@ -953,11 +984,12 @@ class PandoraProvider(BaseProvider):
                     else pandora_track_id
                 )
                 download_url = _normalize_secure_url(
-                    await self._normalize_pandora_track_url_async(resolve_input)
+                    await self._normalize_pandora_track_url_async(resolve_input),
                 )
             else:
                 return DownloadResult.fail(
-                    self.name, "No Pandora track ID or URL available"
+                    self.name,
+                    "No Pandora track ID or URL available",
                 )
 
             dest_mp3 = Path(
@@ -970,7 +1002,7 @@ class PandoraProvider(BaseProvider):
                     use_album_track_num,
                     first_artist_only,
                     extension=".mp3",
-                )
+                ),
             )
             dest_m4a = dest_mp3.with_suffix(".m4a")
 
@@ -978,11 +1010,14 @@ class PandoraProvider(BaseProvider):
                 if self._file_exists(candidate):
                     fmt = "mp3" if candidate.suffix == ".mp3" else "m4a"
                     return DownloadResult.skipped_result(
-                        self.name, str(candidate), fmt=fmt
+                        self.name,
+                        str(candidate),
+                        fmt=fmt,
                     )
 
             import concurrent.futures
-            from ..core.isrc_utils import normalize_isrc
+
+            from SpotiFLAC.core.isrc_utils import normalize_isrc
 
             _isrc_for_mb = normalize_isrc(getattr(metadata, "isrc", None) or "")
             logger.debug("[pandora] ISRC at MB lookup: %r", _isrc_for_mb)
@@ -1036,7 +1071,8 @@ class PandoraProvider(BaseProvider):
                                 break
                 if not selected or not selected.get("url"):
                     return DownloadResult.fail(
-                        self.name, "No downloadable Pandora stream available"
+                        self.name,
+                        "No downloadable Pandora stream available",
                     )
 
             stream_url = _normalize_secure_url(selected["url"])
@@ -1054,7 +1090,8 @@ class PandoraProvider(BaseProvider):
 
             expected_s = metadata.duration_ms // 1000
             valid, err_msg = await validate_downloaded_track_async(
-                str(dest), expected_s
+                str(dest),
+                expected_s,
             )
             if not valid:
                 raise SpotiflacError(ErrorKind.UNAVAILABLE, err_msg, self.name)
@@ -1063,12 +1100,13 @@ class PandoraProvider(BaseProvider):
             if mb_fetcher:
                 try:
                     mb_result = await asyncio.to_thread(
-                        lambda: mb_fetcher.future.result(timeout=12)
+                        lambda: mb_fetcher.future.result(timeout=12),
                     )
                     mb_tags = mb_result_to_tags(mb_result)
                     if mb_tags:
                         logger.info(
-                            "[pandora] MusicBrainz tags found: %s", list(mb_tags.keys())
+                            "[pandora] MusicBrainz tags found: %s",
+                            list(mb_tags.keys()),
                         )
                         _print_mb_summary(mb_tags)
                     else:
@@ -1078,7 +1116,7 @@ class PandoraProvider(BaseProvider):
                         )
                 except concurrent.futures.TimeoutError:
                     logger.warning(
-                        "[pandora] MusicBrainz timed out after 12s, skipping MB tags"
+                        "[pandora] MusicBrainz timed out after 12s, skipping MB tags",
                     )
                 except Exception as exc:
                     logger.warning("[pandora] MusicBrainz error: %s", exc)
@@ -1099,7 +1137,7 @@ class PandoraProvider(BaseProvider):
             return DownloadResult.ok(self.name, str(dest), fmt=fmt_str)
 
         except SpotiflacError as exc:
-            logger.error("[pandora] %s", exc)
+            logger.exception("[pandora] %s", exc)
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
             logger.exception("[pandora] Unexpected error")
