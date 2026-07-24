@@ -508,10 +508,20 @@ class DownloadWorker:
 
                 ProgressManager.increment_master()
 
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(consume_results())
-            for i, track in enumerate(self._tracks):
-                tg.create_task(download_worker(i, track))
+        consumer_task = asyncio.create_task(consume_results())
+        worker_tasks = [
+            asyncio.create_task(download_worker(i, track))
+            for i, track in enumerate(self._tracks)
+        ]
+
+        try:
+            await asyncio.gather(consumer_task, *worker_tasks)
+        except Exception:
+            consumer_task.cancel()
+            for t in worker_tasks:
+                if not t.done():
+                    t.cancel()
+            raise
 
         elapsed = time.perf_counter() - start
         self._print_summary(elapsed)
