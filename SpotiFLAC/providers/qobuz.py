@@ -100,9 +100,7 @@ _flacdownloader_raw = get_qobuz_endpoints("flacdownloader")
 _FLACDOWNLOADER_APIS: list[str] = (
     [_flacdownloader_raw]
     if isinstance(_flacdownloader_raw, str) and _flacdownloader_raw
-    else list(_flacdownloader_raw)
-    if isinstance(_flacdownloader_raw, list)
-    else []
+    else list(_flacdownloader_raw) if isinstance(_flacdownloader_raw, list) else []
 )
 
 _COMMUNITY_APIS: list[str] = []
@@ -697,9 +695,7 @@ class QobuzProvider(BaseProvider):
                     br = (
                         "999"
                         if quality in ("27", "7")
-                        else "740"
-                        if quality in ("", "6")
-                        else "320"
+                        else "740" if quality in ("", "6") else "320"
                     )
                     payload = {
                         "types": "url",

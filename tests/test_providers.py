@@ -19,8 +19,8 @@ if parent_dir not in sys.path:
 # --------------------------------
 
 # Import core components via "SpotiFLAC."
-from SpotiFLAC.core.http import NetworkManager  # noqa: E402
-from SpotiFLAC.providers.spotify_metadata import SpotifyMetadataClient  # noqa: E402
+from SpotiFLAC.core.http import NetworkManager
+from SpotiFLAC.providers.spotify_metadata import SpotifyMetadataClient
 
 if TYPE_CHECKING:
     from SpotiFLAC.core.models import TrackMetadata
