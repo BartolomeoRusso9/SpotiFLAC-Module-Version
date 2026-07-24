@@ -11,6 +11,8 @@ from .tidal import TidalProvider
 from .youtube import YouTubeProvider
 
 __all__ = [
+    "NATIVE_TO_EXTENSION_ID",
+    "PROVIDER_REGISTRY",
     "AmazonProvider",
     "AppleMusicProvider",
     "BaseProvider",
@@ -26,8 +28,6 @@ __all__ = [
     "TidalProvider",
     "YouTubeProvider",
     "parse_spotify_url",
-    "PROVIDER_REGISTRY",
-    "NATIVE_TO_EXTENSION_ID",
 ]
 
 PROVIDER_REGISTRY: dict[str, type] = {
@@ -60,8 +60,7 @@ NATIVE_TO_EXTENSION_ID: dict[str, str] = {
 
 
 def _build_ext_provider(name: str, **kwargs) -> "BaseProvider | None":
-    """
-    Factory for providers with 'ext:' prefix.
+    """Factory for providers with 'ext:' prefix.
     Example: name='ext:soundcloud' creates JSExtensionProvider('soundcloud').
 
     Optional parameters passable via kwargs:
@@ -71,11 +70,14 @@ def _build_ext_provider(name: str, **kwargs) -> "BaseProvider | None":
         timeout_s       – timeout for JS calls (default 120)
     """
     try:
-        from ..extensions.provider import JSExtensionProvider
+        from SpotiFLAC.extensions.provider import JSExtensionProvider
     except ImportError as e:
         import logging
 
-        logging.getLogger(__name__).error("Failed to import extensions module: %s", e)
+        logging.getLogger(__name__).exception(
+            "Failed to import extensions module: %s",
+            e,
+        )
         return None
 
     ext_id = name.removeprefix("ext:")

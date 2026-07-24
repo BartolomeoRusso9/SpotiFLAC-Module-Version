@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import time
 from pathlib import Path
-import asyncio
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -71,21 +71,19 @@ async def set_last_folder_async(folder: str) -> None:
 
 
 async def get_url_history_async() -> list[dict]:
-    """
-    Returns the URL history ordered from most recent to oldest.
+    """Returns the URL history ordered from most recent to oldest.
     Each entry is: {"url": str, "label": str, "cover": str, "track_count": int,
-                   "url_type": str, "artist": str, "at": int (unix timestamp)}
+                   "url_type": str, "artist": str, "at": int (unix timestamp)}.
     """
     data = await _load_async()
     return data.get("url_history", [])
 
 
 def _normalize_history_url(url: str) -> str:
-    """
-    Normalizes URLs saved in history (fast string-based operation, remains sync).
+    """Normalizes URLs saved in history (fast string-based operation, remains sync).
     - spotify:track:ID -> https://open.spotify.com/track/ID
     - open.spotify.com/... -> https://open.spotify.com/...
-    - leaves http(s) unchanged
+    - leaves http(s) unchanged.
     """
     if not url:
         return ""
@@ -97,9 +95,9 @@ def _normalize_history_url(url: str) -> str:
                 typ = parts[1]
                 id_part = ":".join(parts[2:])
                 return f"https://open.spotify.com/{typ}/{id_part}"
-        if s.startswith("http://") or s.startswith("https://"):
+        if s.startswith(("http://", "https://")):
             return s
-        if s.startswith("open.spotify.com") or s.startswith("play.spotify.com"):
+        if s.startswith(("open.spotify.com", "play.spotify.com")):
             return f"https://{s}"
         return s
     except Exception:
@@ -114,9 +112,7 @@ async def add_url_to_history_async(
     url_type: str = "",
     artist: str = "",
 ) -> None:
-    """
-    Adds a URL to history (or moves it to the top if already present).
-    """
+    """Adds a URL to history (or moves it to the top if already present)."""
     if not url:
         return
     nurl = _normalize_history_url(url)

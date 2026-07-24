@@ -1,28 +1,33 @@
+from __future__ import annotations
+
 import asyncio
-import webview
-import threading
-import json
-import os
-import sys
-import subprocess
-import logging
-import httpx
-import aiofiles
-import re
+import contextlib
 import importlib.metadata
-from pathlib import Path
+import json
+import logging
+import os
+import re
+import subprocess
+import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+import aiofiles
+import httpx
+import webview
+
 from .core.http import AsyncHttpClient
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
 
 
 class UILogHandler(logging.Handler):
-    def __init__(self, api):
+    def __init__(self, api) -> None:
         super().__init__()
         self.api = api
 
-    def emit(self, record):
+    def emit(self, record) -> None:
         try:
             level = record.levelname
             msg = self.format(record)
@@ -33,7 +38,7 @@ class UILogHandler(logging.Handler):
 
 
 class SpotiFLAC_API:
-    def __init__(self):
+    def __init__(self) -> None:
         self._window = None
         self.download_dir = DEFAULT_DOWNLOAD_DIR
         self.current_tracks = []
@@ -64,10 +69,10 @@ class SpotiFLAC_API:
                 pass
         self.app_version = v
 
-    def set_window(self, window):
+    def set_window(self, window) -> None:
         self._window = window
 
-    def _on_loaded(self):
+    def _on_loaded(self) -> None:
         """Initializes the frontend after the webview finishes loading.
 
         Starts extension initialization and updates the frontend with stored history, profiles, and the application version when a window is available.
@@ -90,10 +95,10 @@ class SpotiFLAC_API:
             if self._window:
                 self._window.evaluate_js("window.loadHistoryAndProfiles();")
                 self._window.evaluate_js(
-                    f"document.getElementById('tb-version').innerText = '{app_version}';"
+                    f"document.getElementById('tb-version').innerText = '{app_version}';",
                 )
                 self._window.evaluate_js(
-                    f"document.getElementById('hero-version').innerText = 'v{app_version}';"
+                    f"document.getElementById('hero-version').innerText = 'v{app_version}';",
                 )
         except Exception:
             pass
@@ -147,7 +152,7 @@ class SpotiFLAC_API:
                         import json
 
                         self._window.evaluate_js(
-                            f"window.showFfmpegWarning({json.dumps(result)});"
+                            f"window.showFfmpegWarning({json.dumps(result)});",
                         )
                 except Exception:
                     pass
@@ -166,7 +171,7 @@ class SpotiFLAC_API:
 
     # ── UI communication ──────────────────────────────────────────────────────
 
-    def log(self, message, type=""):
+    def log(self, message, type="") -> None:
         safe = json.dumps(str(message))
         safe_type = json.dumps(type)
         try:
@@ -175,7 +180,7 @@ class SpotiFLAC_API:
         except Exception:
             pass
 
-    def set_progress(self, label=""):
+    def set_progress(self, label="") -> None:
         safe_label = json.dumps(label)
         try:
             if self._window:
@@ -200,7 +205,7 @@ class SpotiFLAC_API:
         artist_biography=None,
         release_date=None,
         track_count=None,
-    ):
+    ) -> None:
         payload = {
             "title": title,
             "artist": artist,
@@ -238,7 +243,9 @@ class SpotiFLAC_API:
             pass
 
     def _fetch_track_playcounts(
-        self, sp_client, track_ids: list[str]
+        self,
+        sp_client,
+        track_ids: list[str],
     ) -> dict[str, dict]:
         """Retrieves playcount per track in parallel using get_track_stats."""
         stats_map: dict[str, dict] = {}
@@ -264,7 +271,7 @@ class SpotiFLAC_API:
 
     # ── Profile & History API ─────────────────────────────────────────────────
 
-    def save_settings(self, cfg: dict):
+    def save_settings(self, cfg: dict) -> None:
         try:
             settings_file = Path.home() / ".cache" / "spotiflac" / "gui-settings.json"
             settings_file.parent.mkdir(parents=True, exist_ok=True)
@@ -316,12 +323,11 @@ class SpotiFLAC_API:
 
             client = SpotifyWebClient()
             raw_data = client.get_home_feed()
-            formatted_data = parse_home_feed(raw_data)
-            return formatted_data
+            return parse_home_feed(raw_data)
         except Exception as e:
             import logging
 
-            logging.error(f"Error retrieving Home Feed: {e}")
+            logging.exception(f"Error retrieving Home Feed: {e}")
             return {"success": False, "error": str(e)}
 
     def search_provider(self, query, limit=50):
@@ -361,7 +367,7 @@ class SpotiFLAC_API:
                         "explicit": getattr(t, "is_explicit", False),
                         "isrc": getattr(t, "isrc", ""),
                         "provider": "spotify",
-                    }
+                    },
                 )
 
             # --- Albums ---
@@ -380,7 +386,7 @@ class SpotiFLAC_API:
                         "external_urls": a.get("external_url", ""),
                         "external_url": a.get("external_url", ""),
                         "provider": "spotify",
-                    }
+                    },
                 )
 
             # --- Artists ---
@@ -396,7 +402,7 @@ class SpotiFLAC_API:
                         "external_urls": art.get("external_url", ""),
                         "external_url": art.get("external_url", ""),
                         "provider": "spotify",
-                    }
+                    },
                 )
 
             # --- Playlists ---
@@ -413,7 +419,7 @@ class SpotiFLAC_API:
                         "external_urls": p.get("external_url", ""),
                         "external_url": p.get("external_url", ""),
                         "provider": "spotify",
-                    }
+                    },
                 )
 
             return out
@@ -421,7 +427,7 @@ class SpotiFLAC_API:
             self.log(f"search_provider error: {e}", "error")
             return {"tracks": [], "albums": [], "artists": [], "playlists": []}
 
-    def _search_provider_thread(self, query, limit):
+    def _search_provider_thread(self, query, limit) -> None:
         try:
             from .providers.spotify_metadata import SpotifyMetadataClient
 
@@ -453,7 +459,7 @@ class SpotiFLAC_API:
                         "explicit": getattr(t, "is_explicit", False),
                         "isrc": getattr(t, "isrc", ""),
                         "provider": "spotify",
-                    }
+                    },
                 )
 
             # --- Albums ---
@@ -472,7 +478,7 @@ class SpotiFLAC_API:
                         "external_urls": a.get("external_url", ""),
                         "external_url": a.get("external_url", ""),
                         "provider": "spotify",
-                    }
+                    },
                 )
 
             # --- Artists ---
@@ -488,7 +494,7 @@ class SpotiFLAC_API:
                         "external_urls": art.get("external_url", ""),
                         "external_url": art.get("external_url", ""),
                         "provider": "spotify",
-                    }
+                    },
                 )
 
             # --- Playlists ---
@@ -505,27 +511,29 @@ class SpotiFLAC_API:
                         "external_urls": p.get("external_url", ""),
                         "external_url": p.get("external_url", ""),
                         "provider": "spotify",
-                    }
+                    },
                 )
 
             payload = json.dumps(out)
             if self._window:
                 # The JS will now receive a complete object as in the Go version
                 self._window.evaluate_js(
-                    f"window.app_handle_provider_search_results({payload});"
+                    f"window.app_handle_provider_search_results({payload});",
                 )
         except Exception as e:
             msg = json.dumps(str(e))
             if self._window:
                 self._window.evaluate_js(
-                    f"window.app_handle_provider_search_error({msg});"
+                    f"window.app_handle_provider_search_error({msg});",
                 )
 
     def search_provider_async(self, query, limit=50):  # Limite di default updated a 50
         if not query:
             return {"status": "empty"}
         threading.Thread(
-            target=self._search_provider_thread, args=(query, limit), daemon=True
+            target=self._search_provider_thread,
+            args=(query, limit),
+            daemon=True,
         ).start()
         return {"status": "started"}
 
@@ -537,13 +545,12 @@ class SpotiFLAC_API:
         try:
             from .core.code_search import search_code
 
-            results = search_code(query, path=path or ".", limit=limit or 200)
-            return results
+            return search_code(query, path=path or ".", limit=limit or 200)
         except Exception as e:
             self.log(f"search_code error: {e}", "error")
             return []
 
-    def remove_history_item(self, url):
+    def remove_history_item(self, url) -> None:
         try:
             from .core.session_memory import remove_url_from_history_async
 
@@ -571,7 +578,7 @@ class SpotiFLAC_API:
 
         return asyncio.run(_inner())
 
-    def save_profile_data(self, name, cfg):
+    def save_profile_data(self, name, cfg) -> bool | None:
         try:
             from .core.profiles import save_profile_async
 
@@ -588,7 +595,8 @@ class SpotiFLAC_API:
 
             deleted = asyncio.run(delete_profile_async(name))
             self.log(
-                f"Profile '{name}' deleted: {deleted}.", "ok" if deleted else "warn"
+                f"Profile '{name}' deleted: {deleted}.",
+                "ok" if deleted else "warn",
             )
             return deleted
         except Exception as e:
@@ -605,10 +613,12 @@ class SpotiFLAC_API:
         async def _inner():
             try:
                 if not url or not isinstance(url, str) or not url.strip():
-                    raise ValueError("URL must be a non-empty string")
+                    msg = "URL must be a non-empty string"
+                    raise ValueError(msg)
                 normalized = url.strip()
                 if not normalized.lower().startswith("http"):
-                    raise ValueError("URL must start with http or https")
+                    msg = "URL must start with http or https"
+                    raise ValueError(msg)
                 client = AsyncHttpClient("api-check", timeout_s=10)
                 resp = await client.get(normalized, follow_redirects=True, timeout=10.0)
                 return {
@@ -623,86 +633,85 @@ class SpotiFLAC_API:
 
     # ── Window controls ───────────────────────────────────────────────────────
 
-    def WindowMinimise(self):
+    def WindowMinimise(self) -> None:
         if self._window:
             self._window.minimize()
 
-    def WindowToggleMaximise(self):
+    def WindowToggleMaximise(self) -> None:
         if not self._window:
             return
         if getattr(self, "_is_maximized", False):
             self._window.restore()
             self._is_maximized = False
-        else:
-            if sys.platform == "win32":
-                try:
-                    import ctypes
-
-                    # Get monitor work area (excluding taskbar)
-                    work_area = ctypes.wintypes.RECT()
-                    # SPI_GETWORKAREA = 48
-                    result = ctypes.windll.user32.SystemParametersInfoW(
-                        48, 0, ctypes.byref(work_area), 0
-                    )
-                    if result:
-                        width = work_area.right - work_area.left
-                        height = work_area.bottom - work_area.top
-                        # Use SetWindowPos API for more reliable positioning
-                        hwnd = ctypes.windll.user32.FindWindowW(
-                            None, self._window.title
-                        )
-                        if hwnd:
-                            # SWP_NOZORDER = 4, SWP_FRAMECHANGED = 0x20
-                            ctypes.windll.user32.SetWindowPos(
-                                hwnd,
-                                None,
-                                work_area.left,
-                                work_area.top,
-                                width,
-                                height,
-                                4 | 0x20,
-                            )
-                        else:
-                            self._window.move(work_area.left, work_area.top)
-                            self._window.resize(width, height)
-                        self._is_maximized = True
-                    else:
-                        # Fallback - use maximize but with adjustment
-                        self._window.maximize()
-                        self._is_maximized = True
-                except Exception as e:
-                    self.log(f"Maximize error: {e}", "warn")
-                    try:
-                        self._window.maximize()
-                        self._is_maximized = True
-                    except Exception:
-                        pass
-            else:
-                self._window.maximize()
-                self._is_maximized = True
-
-    def Quit(self):
-        if self._window:
+        elif sys.platform == "win32":
             try:
+                import ctypes
+
+                # Get monitor work area (excluding taskbar)
+                work_area = ctypes.wintypes.RECT()
+                # SPI_GETWORKAREA = 48
+                result = ctypes.windll.user32.SystemParametersInfoW(
+                    48,
+                    0,
+                    ctypes.byref(work_area),
+                    0,
+                )
+                if result:
+                    width = work_area.right - work_area.left
+                    height = work_area.bottom - work_area.top
+                    # Use SetWindowPos API for more reliable positioning
+                    hwnd = ctypes.windll.user32.FindWindowW(
+                        None,
+                        self._window.title,
+                    )
+                    if hwnd:
+                        # SWP_NOZORDER = 4, SWP_FRAMECHANGED = 0x20
+                        ctypes.windll.user32.SetWindowPos(
+                            hwnd,
+                            None,
+                            work_area.left,
+                            work_area.top,
+                            width,
+                            height,
+                            4 | 0x20,
+                        )
+                    else:
+                        self._window.move(work_area.left, work_area.top)
+                        self._window.resize(width, height)
+                    self._is_maximized = True
+                else:
+                    # Fallback - use maximize but with adjustment
+                    self._window.maximize()
+                    self._is_maximized = True
+            except Exception as e:
+                self.log(f"Maximize error: {e}", "warn")
+                try:
+                    self._window.maximize()
+                    self._is_maximized = True
+                except Exception:
+                    pass
+        else:
+            self._window.maximize()
+            self._is_maximized = True
+
+    def Quit(self) -> None:
+        if self._window:
+            with contextlib.suppress(Exception):
                 self._window.destroy()
-            except Exception:
-                pass
         os._exit(0)
 
-    def choose_folder(self):
+    def choose_folder(self) -> None:
         if self._window:
             result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
             if result and len(result) > 0:
                 self.download_dir = result[0]
                 self.log(f"Download folder changed: {self.download_dir}", "ok")
-                try:
+                with contextlib.suppress(Exception):
                     self._window.evaluate_js(
-                        f"window.updateFolderLabel({json.dumps(self.download_dir)});"
+                        f"window.updateFolderLabel({json.dumps(self.download_dir)});",
                     )
-                except Exception:
-                    pass
 
-    def open_config_folder(self):
+    def open_config_folder(self) -> None:
         config_dir = os.path.join(os.path.expanduser("~"), ".cache", "spotiflac")
         try:
             os.makedirs(config_dir, exist_ok=True)
@@ -716,14 +725,14 @@ class SpotiFLAC_API:
         except Exception as e:
             self.log(f"Failed opening config folder: {e}", "error")
 
-    def open_url(self, url):
+    def open_url(self, url) -> None:
         import webbrowser
 
         webbrowser.open(url)
 
     # ── Lyrics download (separate .lrc file) ──────────────────────────────────
 
-    def download_track_lyrics(self, track_data):
+    def download_track_lyrics(self, track_data) -> None:
         """Download and save lyrics as a separate .lrc file for a single track."""
         threading.Thread(
             target=self._download_lyrics_task,
@@ -731,10 +740,10 @@ class SpotiFLAC_API:
             daemon=True,
         ).start()
 
-    def _download_lyrics_task(self, track_data):
+    def _download_lyrics_task(self, track_data) -> None:
         asyncio.run(self._download_lyrics_task_async(track_data))
 
-    async def _download_lyrics_task_async(self, track_data):
+    async def _download_lyrics_task_async(self, track_data) -> None:
         try:
             title = track_data.get("title", "Unknown")
             artist = track_data.get("artist", "")
@@ -776,7 +785,7 @@ class SpotiFLAC_API:
 
     # ── Cover download (separate .jpg file) ───────────────────────────────────
 
-    def download_track_cover(self, track_data):
+    def download_track_cover(self, track_data) -> None:
         """Download and save album cover as a separate .jpg file."""
         threading.Thread(
             target=self._download_cover_task,
@@ -784,10 +793,10 @@ class SpotiFLAC_API:
             daemon=True,
         ).start()
 
-    def _download_cover_task(self, track_data):
+    def _download_cover_task(self, track_data) -> None:
         asyncio.run(self._download_cover_task_async(track_data))
 
-    async def _download_cover_task_async(self, track_data):
+    async def _download_cover_task_async(self, track_data) -> None:
         try:
             title = track_data.get("title", "Unknown")
             artist = track_data.get("artist", "")
@@ -820,7 +829,7 @@ class SpotiFLAC_API:
         except Exception as e:
             self.log(f"Cover download error: {e}", "error")
 
-    def download_cover(self, cover_data):
+    def download_cover(self, cover_data) -> None:
         """Download and save cover with appropriate folder structure based on type."""
         threading.Thread(
             target=self._download_cover_task_typed,
@@ -828,10 +837,10 @@ class SpotiFLAC_API:
             daemon=True,
         ).start()
 
-    def _download_cover_task_typed(self, cover_data):
+    def _download_cover_task_typed(self, cover_data) -> None:
         asyncio.run(self._download_cover_task_typed_async(cover_data))
 
-    async def _download_cover_task_typed_async(self, cover_data):
+    async def _download_cover_task_typed_async(self, cover_data) -> None:
         try:
             title = cover_data.get("title", "Unknown")
             artist = cover_data.get("artist", "")
@@ -875,7 +884,7 @@ class SpotiFLAC_API:
         except Exception as e:
             self.log(f"Cover download error: {e}", "error")
 
-    def download_album_cover(self, album_data):
+    def download_album_cover(self, album_data) -> None:
         """Download and save album cover with Artist/Album folder structure."""
         threading.Thread(
             target=self._download_album_cover_task,
@@ -883,10 +892,10 @@ class SpotiFLAC_API:
             daemon=True,
         ).start()
 
-    def _download_album_cover_task(self, album_data):
+    def _download_album_cover_task(self, album_data) -> None:
         asyncio.run(self._download_album_cover_task_async(album_data))
 
-    async def _download_album_cover_task_async(self, album_data):
+    async def _download_album_cover_task_async(self, album_data) -> None:
         try:
             title = album_data.get("title", "Unknown")
             artist = album_data.get("artist", "Unknown Artist")
@@ -920,10 +929,10 @@ class SpotiFLAC_API:
 
     # ── Bulk: cover di tutte le tracks ───────────────────────────────────────────
 
-    def _download_all_covers_task(self, tracks_data):
+    def _download_all_covers_task(self, tracks_data) -> None:
         asyncio.run(self._async_download_all_covers(tracks_data))
 
-    async def _download_all_covers_task_async(self, tracks_data):
+    async def _download_all_covers_task_async(self, tracks_data) -> None:
         total = len(tracks_data)
         success = 0
         skipped = 0
@@ -967,22 +976,24 @@ class SpotiFLAC_API:
         self.log(f"All covers done — {success} saved, {skipped} skipped.", "ok")
 
     # ── Bulk: cover di tutte le tracks (VERSION ASINCRONA ULTRA-VELOCE) ──
-    def download_all_covers(self, tracks_data):
+    def download_all_covers(self, tracks_data) -> None:
         threading.Thread(
-            target=self._run_async_covers, args=(tracks_data,), daemon=True
+            target=self._run_async_covers,
+            args=(tracks_data,),
+            daemon=True,
         ).start()
 
-    def _run_async_covers(self, tracks_data):
+    def _run_async_covers(self, tracks_data) -> None:
         asyncio.run(self._async_download_all_covers(tracks_data))
 
-    async def _async_download_all_covers(self, tracks_data):
+    async def _async_download_all_covers(self, tracks_data) -> None:
         total = len(tracks_data)
         success, skipped = 0, 0
 
         self.log(f"Saving covers for {total} tracks at warp speed…", "info")
         os.makedirs(self.download_dir, exist_ok=True)
 
-        async def fetch_and_save(client, track_data, idx):
+        async def fetch_and_save(client, track_data, idx) -> None:
             nonlocal success, skipped
             title = track_data.get("title", "Unknown")
             artist = track_data.get("artist", "")
@@ -1024,16 +1035,19 @@ class SpotiFLAC_API:
         self.log(f"All covers done — {success} saved, {skipped} skipped.", "ok")
 
     # ── Bulk: lyrics di tutte le tracks (VERSION ASINCRONA) ──
-    def download_all_lyrics(self, tracks_data):
+    def download_all_lyrics(self, tracks_data) -> None:
         threading.Thread(
-            target=self._run_async_lyrics, args=(tracks_data,), daemon=True
+            target=self._run_async_lyrics,
+            args=(tracks_data,),
+            daemon=True,
         ).start()
 
-    def _run_async_lyrics(self, tracks_data):
+    def _run_async_lyrics(self, tracks_data) -> None:
         asyncio.run(self._async_download_all_lyrics(tracks_data))
 
-    async def _async_download_all_lyrics(self, tracks_data):
+    async def _async_download_all_lyrics(self, tracks_data) -> None:
         import aiofiles
+
         from .core.lyrics import fetch_lyrics_async
 
         total = len(tracks_data)
@@ -1042,7 +1056,7 @@ class SpotiFLAC_API:
         self.log(f"Fetching lyrics for {total} tracks concurrently…", "info")
         os.makedirs(self.download_dir, exist_ok=True)
 
-        async def fetch_and_save_lyric(track_data, idx):
+        async def fetch_and_save_lyric(track_data, idx) -> None:
             nonlocal success, skipped
             title = track_data.get("title", "Unknown")
             artist = track_data.get("artist", "")
@@ -1077,7 +1091,8 @@ class SpotiFLAC_API:
 
                 success += 1
                 self.log(
-                    f"[{idx}/{total}] Lyrics saved: {filename} (via {provider})", "ok"
+                    f"[{idx}/{total}] Lyrics saved: {filename} (via {provider})",
+                    "ok",
                 )
             except Exception as e:
                 self.log(f"[{idx}/{total}] Lyrics error for '{title}': {e}", "error")
@@ -1103,6 +1118,7 @@ class SpotiFLAC_API:
 
         Returns:
             MP3 preview URL (empty string if unavailable)
+
         """
         try:
             from .providers.spotify_metadata import SpotifyMetadataClient
@@ -1116,21 +1132,21 @@ class SpotiFLAC_API:
 
     # ── Phase 1: Metadata fetch ───────────────────────────────────────────────
 
-    def fetch_metadata(self, url):
+    def fetch_metadata(self, url) -> None:
         self.current_url = url
         threading.Thread(
             target=lambda: asyncio.run(self._fetch_metadata_task(url)),
             daemon=True,
         ).start()
 
-    async def _fetch_metadata_task(self, url):
+    async def _fetch_metadata_task(self, url) -> None:
         try:
             self.set_progress("Recupero metadati…")
             self.log(f"Analisi input: {url}", "info")
 
             # ── Detection: is it a URL or a search query? ──────────────────
             stripped = url.strip()
-            is_url = stripped.startswith("http") or stripped.startswith("spotify:")
+            is_url = stripped.startswith(("http", "spotify:"))
 
             if is_url:
                 # ── Scelta client in base al dominio ───────────────────────────
@@ -1172,9 +1188,8 @@ class SpotiFLAC_API:
             )
             is_artist = "/artist/" in lower_url or "spotify:artist:" in lower_url
 
-            if not cover:
-                if not is_playlist and not is_artist and tracks:
-                    cover = getattr(tracks[0], "cover_url", "") or ""
+            if not cover and not is_playlist and not is_artist and tracks:
+                cover = getattr(tracks[0], "cover_url", "") or ""
 
             if not tracks:
                 self.log("No tracks found at this URL.", "error")
@@ -1228,7 +1243,8 @@ class SpotiFLAC_API:
                             pass
                     except Exception as auth_err:
                         self.log(
-                            f"Playcount unavailable: {type(auth_err).__name__}", "info"
+                            f"Playcount unavailable: {type(auth_err).__name__}",
+                            "info",
                         )
 
                 except Exception:
@@ -1239,7 +1255,7 @@ class SpotiFLAC_API:
                 track_id = getattr(t, "id", "")
 
                 # Try to retrieve data dynamically
-                title = getattr(t, "title", getattr(t, "name", f"Track {i+1}"))
+                title = getattr(t, "title", getattr(t, "name", f"Track {i + 1}"))
                 # Handles both cases where 'artists' is a string or a list
                 raw_art = getattr(t, "artists", getattr(t, "artist", "Unknown"))
                 artist = (
@@ -1279,7 +1295,7 @@ class SpotiFLAC_API:
                         "playcount": playcount,
                         "release_date": getattr(t, "release_date", ""),
                         "copyright": getattr(t, "copyright", ""),
-                    }
+                    },
                 )
 
             badge = f"FLAC — {len(tracks)} tracks" if len(tracks) > 1 else "FLAC"
@@ -1369,23 +1385,25 @@ class SpotiFLAC_API:
             try:
                 if self._window:
                     self._window.evaluate_js(
-                        f"window.showTracklist({json.dumps(track_data)});"
+                        f"window.showTracklist({json.dumps(track_data)});",
                     )
             except Exception:
                 pass
 
         except Exception as e:
-            self.log(f"Error fetching metadata: {str(e)}", "error")
+            self.log(f"Error fetching metadata: {e!s}", "error")
             self.set_progress("Error.")
 
     # ── Phase 2: Download ─────────────────────────────────────────────────────
 
-    def download_tracks(self, selected_indices, config):
+    def download_tracks(self, selected_indices, config) -> None:
         threading.Thread(
-            target=self._download_task, args=(selected_indices, config), daemon=True
+            target=self._download_task,
+            args=(selected_indices, config),
+            daemon=True,
         ).start()
 
-    def _download_task(self, selected_indices, config):
+    def _download_task(self, selected_indices, config) -> None:
         sf_logger = logging.getLogger("SpotiFLAC")
         handler = UILogHandler(self)
         handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
@@ -1460,7 +1478,8 @@ class SpotiFLAC_API:
                         urls_to_download.append(t_url)
                     else:
                         self.log(
-                            f"Could not resolve URL for '{t.title}'. Skipping.", "error"
+                            f"Could not resolve URL for '{t.title}'. Skipping.",
+                            "error",
                         )
 
             if not urls_to_download:
@@ -1470,7 +1489,9 @@ class SpotiFLAC_API:
             self.set_progress(f"Downloading ({quality})…")
             monitor_stop = threading.Event()
             monitor_thread = threading.Thread(
-                target=self._download_stats_monitor, args=(monitor_stop,), daemon=True
+                target=self._download_stats_monitor,
+                args=(monitor_stop,),
+                daemon=True,
             )
             monitor_thread.start()
 
@@ -1512,7 +1533,7 @@ class SpotiFLAC_API:
                 pass
 
         except Exception as e:
-            self.log(f"Download error: {str(e)}", "error")
+            self.log(f"Download error: {e!s}", "error")
             self.set_progress("Error.")
             self._push_download_stats()
             try:
@@ -1532,14 +1553,14 @@ class SpotiFLAC_API:
 
     # ── Health Check ──────────────────────────────────────────────────────────
 
-    def run_health_check(self, services):
+    def run_health_check(self, services) -> None:
         threading.Thread(
             target=self._health_check_task,
             args=(services,),
             daemon=True,
         ).start()
 
-    def _download_stats_monitor(self, stop_event):
+    def _download_stats_monitor(self, stop_event) -> None:
         try:
             from .core.progress import DownloadManager
 
@@ -1551,7 +1572,7 @@ class SpotiFLAC_API:
         finally:
             self._push_download_stats()
 
-    def _push_download_stats(self, stats=None):
+    def _push_download_stats(self, stats=None) -> None:
         try:
             if stats is None:
                 from .core.progress import DownloadManager
@@ -1563,18 +1584,16 @@ class SpotiFLAC_API:
         except Exception:
             pass
 
-    def _health_check_task(self, services):
-        """
-        Run provider and extension health checks and update the frontend with their results.
-        """
+    def _health_check_task(self, services) -> None:
+        """Run provider and extension health checks and update the frontend with their results."""
         try:
             from .core.health_check import run_health_check_with_extensions
 
             self.log(f"Health check started for: {', '.join(services)}", "info")
             results, ext_result = asyncio.run(
-                run_health_check_with_extensions(services)
+                run_health_check_with_extensions(services),
             )
-            all_results = list(results) + [ext_result]
+            all_results = [*list(results), ext_result]
             data = [
                 {
                     "provider": r.provider,
@@ -1598,17 +1617,17 @@ class SpotiFLAC_API:
             try:
                 if self._window:
                     self._window.evaluate_js(
-                        f"window.updateHealthResults({json.dumps(data)});"
+                        f"window.updateHealthResults({json.dumps(data)});",
                     )
             except Exception:
                 pass
         except ImportError:
             self.log("health_check module not found.", "error")
         except Exception as e:
-            self.log(f"Health check error: {str(e)}", "error")
+            self.log(f"Health check error: {e!s}", "error")
 
 
-def run_gui():
+def run_gui() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
     logging.getLogger("pywebview").setLevel(logging.WARNING)
     api = SpotiFLAC_API()
@@ -1618,7 +1637,9 @@ def run_gui():
 
     # 1) frontend next to the installed module file (site-packages/frontend)
     site_packages_frontend = os.path.join(
-        os.path.dirname(__file__), "frontend", "index.html"
+        os.path.dirname(__file__),
+        "frontend",
+        "index.html",
     )
     candidates.append(site_packages_frontend)
 
@@ -1627,7 +1648,9 @@ def run_gui():
         import SpotiFLAC as _sp_pkg
 
         pkg_frontend = os.path.join(
-            os.path.dirname(_sp_pkg.__file__), "frontend", "index.html"
+            os.path.dirname(_sp_pkg.__file__),
+            "frontend",
+            "index.html",
         )
         candidates.append(pkg_frontend)
     except Exception:
@@ -1635,7 +1658,7 @@ def run_gui():
 
     # 3) original heuristic (parent of site-packages, e.g. lib/pythonX.Y/frontend)
     original_frontend = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html")
+        os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html"),
     )
     candidates.append(original_frontend)
 
@@ -1657,7 +1680,8 @@ def run_gui():
             break
 
     if not html_path:
-        raise FileNotFoundError(f"index.html not found. Tried: {candidates}")
+        msg = f"index.html not found. Tried: {candidates}"
+        raise FileNotFoundError(msg)
 
     window = webview.create_window(
         "SpotiFLAC",

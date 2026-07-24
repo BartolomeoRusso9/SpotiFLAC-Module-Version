@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 import random
-import urllib.parse
 import re
-from typing import Dict, Optional
+import urllib.parse
 
 import httpx
 
@@ -32,13 +33,14 @@ class LinkResolver:
         "soundcloud",
     )
 
-    def __init__(self, http_client: AsyncHttpClient | None = None):
+    def __init__(self, http_client: AsyncHttpClient | None = None) -> None:
         self.http = http_client or AsyncHttpClient(
-            "songlink", rate_limiter=async_songlink_rate_limiter
+            "songlink",
+            rate_limiter=async_songlink_rate_limiter,
         )
         self._deezer_async_cache = {}
 
-    async def _safe_get_json(self, url: str, params: Optional[dict] = None) -> dict:
+    async def _safe_get_json(self, url: str, params: dict | None = None) -> dict:
         """Robust helper that adds User-Agent and Accept to avoid Varnish/WAF 406 blocking."""
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -49,7 +51,7 @@ class LinkResolver:
             "Referer": "https://song.link/",
         }
         return await self._request_with_retry(
-            lambda: self.http.get_json_async(url, params=params, headers=headers)
+            lambda: self.http.get_json_async(url, params=params, headers=headers),
         )
 
     async def _safe_get_html(self, url: str):
@@ -64,11 +66,11 @@ class LinkResolver:
         # Prefer async http client method if available (tests mock get_async).
         if hasattr(self.http, "get_async"):
             return await self._request_with_retry(
-                lambda: self.http.get_async(url, headers=headers)
+                lambda: self.http.get_async(url, headers=headers),
             )
         # fallback to synchronous get wrapped for retry (kept for real client compatibility)
         return await self._request_with_retry(
-            lambda: self.http.get(url, headers=headers)
+            lambda: self.http.get(url, headers=headers),
         )
 
     async def _request_with_retry(self, request_callable):
@@ -81,7 +83,7 @@ class LinkResolver:
                 delay = min(self.BASE_DELAY_S * 2 ** (attempt - 1), self.MAX_DELAY_S)
                 delay += random.random() * 0.2
                 logger.debug(
-                    f"[link_resolver] HTTP request failed (attempt {attempt}/{self.MAX_RETRIES}): {exc}. Retrying in {delay:.2f}s"
+                    f"[link_resolver] HTTP request failed (attempt {attempt}/{self.MAX_RETRIES}): {exc}. Retrying in {delay:.2f}s",
                 )
                 await asyncio.sleep(delay)
             except Exception as exc:
@@ -90,13 +92,14 @@ class LinkResolver:
                 break
         if last_error is not None:
             raise last_error
-        raise RuntimeError("Unexpected error in _request_with_retry")
+        msg = "Unexpected error in _request_with_retry"
+        raise RuntimeError(msg)
 
     def identify_provider(self, url: str) -> str:
         url = url.lower()
         if "soundcloud.com" in url or "on.soundcloud.com" in url:
             return "soundcloud"
-        elif "spotify.com" in url:
+        if "spotify.com" in url:
             return "spotify"
         return "unknown"
 
@@ -112,7 +115,9 @@ class LinkResolver:
                     return f"https://music.amazon.com/tracks/{track_asin}?musicTerritory=US"
 
         amazon_album_track = re.search(
-            r"/albums/[A-Z0-9]{10}/(B[0-9A-Z]{9})", url, re.IGNORECASE
+            r"/albums/[A-Z0-9]{10}/(B[0-9A-Z]{9})",
+            url,
+            re.IGNORECASE,
         )
         if amazon_album_track:
             return f"https://music.amazon.com/tracks/{amazon_album_track.group(1)}?musicTerritory=US"
@@ -138,7 +143,7 @@ class LinkResolver:
             return f"https://www.deezer.com/track/{track_id}"
         return raw_url.strip()
 
-    def _process_songlink_response(self, data: dict) -> Dict[str, str]:
+    def _process_songlink_response(self, data: dict) -> dict[str, str]:
         links: dict[str, str] = {}
         entities = data.get("linksByPlatform", {})
 
@@ -162,13 +167,15 @@ class LinkResolver:
         return url
 
     def _merge_links(
-        self, final_links: dict[str, str], new_links: dict[str, str]
+        self,
+        final_links: dict[str, str],
+        new_links: dict[str, str],
     ) -> None:
         for platform, url in new_links.items():
             if platform not in final_links and url:
                 final_links[platform] = url
 
-    def _process_songstats_links(self, html: str) -> Dict[str, str]:
+    def _process_songstats_links(self, html: str) -> dict[str, str]:
         links = {"amazonMusic": "", "tidal": "", "deezer": ""}
         matches = re.finditer(
             r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
@@ -219,7 +226,7 @@ class LinkResolver:
                 return isrc.upper().strip()
         except Exception as e:
             logger.debug(
-                f"[link_resolver] Error during ISRC reverse lookup on Deezer async: {e}"
+                f"[link_resolver] Error during ISRC reverse lookup on Deezer async: {e}",
             )
         return ""
 
@@ -233,7 +240,7 @@ class LinkResolver:
             data = await self._safe_get_json(url)
 
             res = ""
-            if "link" in data and data["link"]:
+            if data.get("link"):
                 res = self._normalize_deezer_url(data["link"])
             elif "id" in data and data["id"] > 0:
                 res = f"https://www.deezer.com/track/{data['id']}"
@@ -256,13 +263,15 @@ class LinkResolver:
         return await self._get_songlink_links_async({"url": url, "userCountry": "US"})
 
     async def _get_songlink_links_by_id_async(
-        self, raw_id: str, platform: str
+        self,
+        raw_id: str,
+        platform: str,
     ) -> dict[str, str]:
         return await self._get_songlink_links_async(
-            {"id": raw_id, "platform": platform, "userCountry": "US", "type": "song"}
+            {"id": raw_id, "platform": platform, "userCountry": "US", "type": "song"},
         )
 
-    async def _get_songlink_html_links_async(self, raw_id: str) -> Dict[str, str]:
+    async def _get_songlink_html_links_async(self, raw_id: str) -> dict[str, str]:
         links: dict[str, str] = {}
         try:
             url = f"https://song.link/s/{urllib.parse.quote(raw_id, safe='')}?userCountry=US"
@@ -276,7 +285,7 @@ class LinkResolver:
             amazon_match = re.search(r"trackAsin=([A-Z0-9]{10})", html)
             if amazon_match:
                 links["amazonMusic"] = self._normalize_amazon_url(
-                    f"https://music.amazon.com/tracks/{amazon_match.group(1)}?musicTerritory=US"
+                    f"https://music.amazon.com/tracks/{amazon_match.group(1)}?musicTerritory=US",
                 )
             tidal_match = re.search(r"https?://listen\.tidal\.com/track/[0-9]+", html)
             if tidal_match:
@@ -285,7 +294,7 @@ class LinkResolver:
             logger.debug(f"[link_resolver] Song.link HTML fallback async failed: {e}")
         return links
 
-    async def _get_songlink_isrc_links_async(self, isrc: str) -> Dict[str, str]:
+    async def _get_songlink_isrc_links_async(self, isrc: str) -> dict[str, str]:
         try:
             params = {"isrc": isrc.upper().strip(), "userCountry": "US"}
             data = await self._safe_get_json(self.SONGLINK_API_URL, params=params)
@@ -294,7 +303,7 @@ class LinkResolver:
             logger.debug(f"[link_resolver] Songlink ISRC lookup async failed: {e}")
         return {}
 
-    async def _get_songstats_links_async(self, identifier: str) -> Dict[str, str]:
+    async def _get_songstats_links_async(self, identifier: str) -> dict[str, str]:
         try:
             url = (
                 f"https://songstats.com/{urllib.parse.quote(identifier)}?ref=ISRCFinder"
@@ -306,8 +315,10 @@ class LinkResolver:
         return {}
 
     async def resolve_all_async(
-        self, track_id: str, isrc: Optional[str] = None
-    ) -> Dict[str, str]:
+        self,
+        track_id: str,
+        isrc: str | None = None,
+    ) -> dict[str, str]:
         platform = "spotify"
         raw_id = track_id
 
@@ -327,18 +338,19 @@ class LinkResolver:
             if deezer_url:
                 links["deezer"] = deezer_url
                 logger.debug(
-                    f"[link_resolver] Found Deezer URL via ISRC async: {deezer_url}"
+                    f"[link_resolver] Found Deezer URL via ISRC async: {deezer_url}",
                 )
 
         try:
             songlink_links = {}
             if links.get("deezer"):
                 songlink_links = await self._get_songlink_links_by_url_async(
-                    links["deezer"]
+                    links["deezer"],
                 )
             else:
                 songlink_links = await self._get_songlink_links_by_id_async(
-                    raw_id, platform
+                    raw_id,
+                    platform,
                 )
 
             self._merge_links(links, songlink_links)
@@ -348,7 +360,7 @@ class LinkResolver:
         if not isrc and links.get("deezer"):
             isrc = await self._get_isrc_from_deezer_async(links["deezer"])
             logger.debug(
-                f"[link_resolver] ISRC retrieved via reverse lookup async: {isrc}"
+                f"[link_resolver] ISRC retrieved via reverse lookup async: {isrc}",
             )
 
         if isrc and (
@@ -365,7 +377,8 @@ class LinkResolver:
 
             if not links.get("tidal") or not links.get("amazonMusic"):
                 self._merge_links(
-                    links, await self._get_songlink_isrc_links_async(isrc)
+                    links,
+                    await self._get_songlink_isrc_links_async(isrc),
                 )
 
             if not links.get("tidal") or not links.get("amazonMusic"):

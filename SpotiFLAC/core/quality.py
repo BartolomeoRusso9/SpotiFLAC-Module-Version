@@ -1,6 +1,4 @@
-"""
-Centralized quality normalization and provider mappings.
-"""
+"""Centralized quality normalization and provider mappings."""
 
 from __future__ import annotations
 

@@ -6,34 +6,34 @@ import pytest
 from SpotiFLAC.core.isrc_finder import IsrcFinder, _normalize_isrc, spotify_id_to_gid
 
 
-def test_spotify_id_to_gid_accepts_spotify_url():
+def test_spotify_id_to_gid_accepts_spotify_url() -> None:
     assert (
         spotify_id_to_gid("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT")
         == "4cOdK2wGLETKBW3PvgPWqT"
     )
 
 
-def test_spotify_id_to_gid_accepts_spotify_uri():
+def test_spotify_id_to_gid_accepts_spotify_uri() -> None:
     assert (
         spotify_id_to_gid("spotify:track:4cOdK2wGLETKBW3PvgPWqT")
         == "4cOdK2wGLETKBW3PvgPWqT"
     )
 
 
-def test_spotify_id_to_gid_rejects_invalid_id():
+def test_spotify_id_to_gid_rejects_invalid_id() -> None:
     with pytest.raises(ValueError):
         spotify_id_to_gid("not-a-track")
 
 
-def test_normalize_isrc_returns_uppercase_valid_isrc():
+def test_normalize_isrc_returns_uppercase_valid_isrc() -> None:
     assert _normalize_isrc("us-rc1-23-12345") == "USRC12312345"
 
 
-def test_normalize_isrc_returns_none_for_invalid_isrc():
+def test_normalize_isrc_returns_none_for_invalid_isrc() -> None:
     assert _normalize_isrc("invalid-isrc") is None
 
 
-def test_find_isrc_async_returns_none_when_access_tokens_missing():
+def test_find_isrc_async_returns_none_when_access_tokens_missing() -> None:
     finder = IsrcFinder(http_client=None)
     mock_client = MagicMock(
         access_token=None,
@@ -45,14 +45,14 @@ def test_find_isrc_async_returns_none_when_access_tokens_missing():
     with patch("SpotiFLAC.core.spotfetch.SpotifyWebClient", return_value=mock_client):
         result = asyncio.run(
             finder.find_isrc_async(
-                "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
-            )
+                "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
+            ),
         )
 
     assert result is None
 
 
-def test_find_isrc_async_normalizes_isrc_from_spotify_metadata():
+def test_find_isrc_async_normalizes_isrc_from_spotify_metadata() -> None:
     finder = IsrcFinder(http_client=None)
     mock_client = MagicMock(
         access_token="token",
@@ -64,7 +64,7 @@ def test_find_isrc_async_normalizes_isrc_from_spotify_metadata():
     with patch("SpotiFLAC.core.spotfetch.SpotifyWebClient", return_value=mock_client):
         result = asyncio.run(
             finder.find_isrc_async(
-                "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
-            )
+                "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
+            ),
         )
     assert result == "USRC12312345"

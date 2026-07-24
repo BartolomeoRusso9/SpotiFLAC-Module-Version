@@ -1,5 +1,4 @@
-"""
-test_integration_scenarios.py
+"""test_integration_scenarios.py
 End-to-end scenario tests for common SpotiFLAC usage patterns (v1.2.8).
 
 All network calls are mocked — these tests exercise parameter composition
@@ -7,17 +6,16 @@ and the shape of the call rather than actual downloads.
 """
 
 from tests.conftest import (
-    SPOTIFY_TRACK,
     SPOTIFY_ALBUM,
-    SPOTIFY_PLAYLIST,
     SPOTIFY_ARTIST,
+    SPOTIFY_PLAYLIST,
+    SPOTIFY_TRACK,
     TIDAL_ALBUM,
 )
 
 
 class TestSimpleDownloadScenarios:
-
-    def test_single_track_tidal(self, tmp_output_dir, mock_spotiflac):
+    def test_single_track_tidal(self, tmp_output_dir, mock_spotiflac) -> None:
         """Basic single-track download from Tidal."""
         mock_cls, _ = mock_spotiflac
         mock_cls(
@@ -26,7 +24,7 @@ class TestSimpleDownloadScenarios:
         )
         mock_cls.assert_called_once()
 
-    def test_album_with_album_subfolders(self, tmp_output_dir, mock_spotiflac):
+    def test_album_with_album_subfolders(self, tmp_output_dir, mock_spotiflac) -> None:
         """Download a full album and organize into subfolders."""
         mock_cls, _ = mock_spotiflac
         mock_cls(
@@ -39,7 +37,7 @@ class TestSimpleDownloadScenarios:
         assert kwargs["use_album_subfolders"] is True
         assert "tidal" in kwargs["services"]
 
-    def test_playlist_download(self, tmp_output_dir, mock_spotiflac):
+    def test_playlist_download(self, tmp_output_dir, mock_spotiflac) -> None:
         """Download an entire Spotify playlist."""
         mock_cls, _ = mock_spotiflac
         mock_cls(
@@ -50,7 +48,7 @@ class TestSimpleDownloadScenarios:
         kwargs = mock_cls.call_args.kwargs
         assert "playlist" in kwargs["url"]
 
-    def test_mixed_url_list(self, tmp_output_dir, mock_spotiflac):
+    def test_mixed_url_list(self, tmp_output_dir, mock_spotiflac) -> None:
         """Multiple URLs (album + playlist + Tidal album) in one call."""
         mock_cls, _ = mock_spotiflac
         urls = [SPOTIFY_ALBUM, SPOTIFY_PLAYLIST, TIDAL_ALBUM]
@@ -65,10 +63,8 @@ class TestSimpleDownloadScenarios:
 
 
 class TestHighResilienceScenarios:
-
-    def test_maximum_resilience_config(self, tmp_output_dir, mock_spotiflac):
-        """
-        Combine all three resilience parameters:
+    def test_maximum_resilience_config(self, tmp_output_dir, mock_spotiflac) -> None:
+        """Combine all three resilience parameters:
         services × retries × loop × timeout.
         """
         mock_cls, _ = mock_spotiflac
@@ -86,9 +82,12 @@ class TestHighResilienceScenarios:
         assert kwargs["loop"] == 60
         assert kwargs["timeout_s"] == 120
 
-    def test_fallback_provider_order_matters(self, tmp_output_dir, mock_spotiflac):
-        """
-        SpotiFLAC tries providers in list order.
+    def test_fallback_provider_order_matters(
+        self,
+        tmp_output_dir,
+        mock_spotiflac,
+    ) -> None:
+        """SpotiFLAC tries providers in list order.
         Tidal first, then Qobuz, then Deezer.
         """
         mock_cls, _ = mock_spotiflac
@@ -104,12 +103,11 @@ class TestHighResilienceScenarios:
 
 
 class TestTelegramBotPattern:
-    """
-    Common use-case: Telegram bot queues individual tracks.
+    """Common use-case: Telegram bot queues individual tracks.
     Uses the module API without CLI.
     """
 
-    def test_single_track_for_bot(self, tmp_output_dir, mock_spotiflac):
+    def test_single_track_for_bot(self, tmp_output_dir, mock_spotiflac) -> None:
         mock_cls, _ = mock_spotiflac
         # Simulate a bot handling a user request
         user_url = SPOTIFY_TRACK
@@ -125,8 +123,10 @@ class TestTelegramBotPattern:
         assert kwargs["track_max_retries"] == 2
 
     def test_bot_processes_multiple_tracks_sequentially(
-        self, tmp_output_dir, mock_spotiflac
-    ):
+        self,
+        tmp_output_dir,
+        mock_spotiflac,
+    ) -> None:
         """A bot might call SpotiFLAC once per URL received."""
         mock_cls, _ = mock_spotiflac
         user_urls = [SPOTIFY_TRACK, SPOTIFY_ALBUM]
@@ -138,11 +138,13 @@ class TestTelegramBotPattern:
 
 
 class TestJellyfinAutomationPattern:
-    """
-    Common use-case: automated bulk download for a Jellyfin library.
-    """
+    """Common use-case: automated bulk download for a Jellyfin library."""
 
-    def test_bulk_download_with_subfolders(self, tmp_output_dir, mock_spotiflac):
+    def test_bulk_download_with_subfolders(
+        self,
+        tmp_output_dir,
+        mock_spotiflac,
+    ) -> None:
         mock_cls, _ = mock_spotiflac
         mock_cls(
             url=[SPOTIFY_ALBUM, TIDAL_ALBUM],
@@ -156,7 +158,7 @@ class TestJellyfinAutomationPattern:
         assert kwargs["use_album_subfolders"] is True
         assert kwargs["quality"] == "HI_RES_LOSSLESS"
 
-    def test_artist_url_download(self, tmp_output_dir, mock_spotiflac):
+    def test_artist_url_download(self, tmp_output_dir, mock_spotiflac) -> None:
         """Downloading all tracks from an artist page."""
         mock_cls, _ = mock_spotiflac
         mock_cls(
@@ -170,8 +172,11 @@ class TestJellyfinAutomationPattern:
 
 
 class TestQualityPreferenceScenarios:
-
-    def test_hi_res_preference_with_fallback(self, tmp_output_dir, mock_spotiflac):
+    def test_hi_res_preference_with_fallback(
+        self,
+        tmp_output_dir,
+        mock_spotiflac,
+    ) -> None:
         """Prefer Hi-Res but fall back gracefully."""
         mock_cls, _ = mock_spotiflac
         mock_cls(
@@ -185,7 +190,7 @@ class TestQualityPreferenceScenarios:
         assert kwargs["quality"] == "HI_RES_LOSSLESS"
         assert kwargs.get("quality_fallback") is True
 
-    def test_lossless_minimum_quality(self, tmp_output_dir, mock_spotiflac):
+    def test_lossless_minimum_quality(self, tmp_output_dir, mock_spotiflac) -> None:
         mock_cls, _ = mock_spotiflac
         mock_cls(
             url=SPOTIFY_TRACK,
@@ -196,7 +201,7 @@ class TestQualityPreferenceScenarios:
         kwargs = mock_cls.call_args.kwargs
         assert kwargs["quality"] == "LOSSLESS"
 
-    def test_dolby_atmos_tidal_only(self, tmp_output_dir, mock_spotiflac):
+    def test_dolby_atmos_tidal_only(self, tmp_output_dir, mock_spotiflac) -> None:
         """Dolby Atmos is Tidal-specific."""
         mock_cls, _ = mock_spotiflac
         mock_cls(
@@ -211,23 +216,22 @@ class TestQualityPreferenceScenarios:
 
 
 class TestDownloadResultHandling:
-
-    def test_success_result_structure(self, mock_download_success):
-        mock_cls, instance = mock_download_success
+    def test_success_result_structure(self, mock_download_success) -> None:
+        _mock_cls, instance = mock_download_success
         result = instance.download()
         assert result["success"] is True
         assert result["downloaded"] >= 1
         assert result["failed"] == 0
 
-    def test_failure_result_structure(self, mock_download_failure):
-        mock_cls, instance = mock_download_failure
+    def test_failure_result_structure(self, mock_download_failure) -> None:
+        _mock_cls, instance = mock_download_failure
         result = instance.download()
         assert result["success"] is False
         assert result["failed"] >= 1
 
-    def test_partial_download_scenario(self, mock_spotiflac):
+    def test_partial_download_scenario(self, mock_spotiflac) -> None:
         """Some tracks download, some fail."""
-        mock_cls, instance = mock_spotiflac
+        _mock_cls, instance = mock_spotiflac
         instance.download.return_value = {
             "success": False,
             "downloaded": 8,

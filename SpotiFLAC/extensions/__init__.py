@@ -1,5 +1,4 @@
-"""
-SpotiFLAC — Extension System
+"""SpotiFLAC — Extension System.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Allows installing and running JS extensions (.spotiflac-ext)
@@ -27,20 +26,20 @@ Requirements:
     - Extension installed via ExtensionManager
 """
 
-from .manager import ExtensionManager, InstalledExtension, RegistryEntry, REGISTRY_URL
-from .runtime import JSRuntime, ExtensionRuntimeError
+from .manager import REGISTRY_URL, ExtensionManager, InstalledExtension, RegistryEntry
 from .provider import JSExtensionProvider, make_extension_provider
+from .runtime import ExtensionRuntimeError, JSRuntime
 
 __all__ = [
+    "REGISTRY_URL",
     # Manager
     "ExtensionManager",
-    "InstalledExtension",
-    "RegistryEntry",
-    "REGISTRY_URL",
-    # Runtime
-    "JSRuntime",
     "ExtensionRuntimeError",
+    "InstalledExtension",
     # Provider
     "JSExtensionProvider",
+    # Runtime
+    "JSRuntime",
+    "RegistryEntry",
     "make_extension_provider",
 ]

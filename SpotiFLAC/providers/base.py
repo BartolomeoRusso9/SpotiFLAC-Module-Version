@@ -5,18 +5,20 @@ import asyncio.subprocess as _subproc
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import TYPE_CHECKING, Callable
 
-from ..core.flac_validation import validate_flac_file
-from ..core.http import AsyncHttpClient, AsyncRateLimiter, RetryConfig
-from ..core.models import DownloadResult, TrackMetadata, build_filename
+from SpotiFLAC.core.flac_validation import validate_flac_file
+from SpotiFLAC.core.http import AsyncHttpClient, AsyncRateLimiter, RetryConfig
+from SpotiFLAC.core.models import DownloadResult, TrackMetadata, build_filename
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 logger = logging.getLogger(__name__)
 
 
 class BaseProvider(ABC):
-    """
-    Contratto che ogni provider DEVE rispettare.
+    """Contratto che ogni provider DEVE rispettare.
     I metodi concreti (stream_download, build_path) evitano
     la duplicazione presente nei file originali.
     """
@@ -41,7 +43,8 @@ class BaseProvider(ABC):
         self._progress_cb: Callable[[int, int], Awaitable[None] | None] | None = None
 
     def set_progress_callback(
-        self, cb: Callable[[int, int], Awaitable[None] | None]
+        self,
+        cb: Callable[[int, int], Awaitable[None] | None],
     ) -> None:
         """Imposta il callback di progresso in modo sicuro (Thread-Safe e Async-Safe)."""
         if cb is None:
@@ -75,7 +78,7 @@ class BaseProvider(ABC):
         try:
             self._stop_event = ev
             if hasattr(self, "_async_http") and self._async_http is not None:
-                setattr(self._async_http, "_stop_event", ev)
+                self._async_http._stop_event = ev
         except Exception:
             pass
 
@@ -149,11 +152,12 @@ class BaseProvider(ABC):
                     path.unlink()
                 except OSError as exc:
                     logger.warning(
-                        "Failed to remove corrupted file %s: %s", path.name, exc
+                        "Failed to remove corrupted file %s: %s",
+                        path.name,
+                        exc,
                     )
                 return False
 
-        print(f"Skip (already existing): {path.name}")
         size_mb = path.stat().st_size / (1024 * 1024)
         logger.debug("File already exists: %s (%.2f MB)", path.name, size_mb)
         return True

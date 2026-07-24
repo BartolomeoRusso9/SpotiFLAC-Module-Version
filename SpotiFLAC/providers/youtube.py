@@ -2,23 +2,28 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, quote, urlparse
 
 import httpx
 import yt_dlp
 
-from ..core.download_validation import validate_downloaded_track_async
-from ..core.endpoints import get_youtube_endpoints
-from ..core.errors import SpotiflacError
-from ..core.models import DownloadResult, TrackMetadata
-from ..core.musicbrainz import AsyncMBFetch, mb_result_to_tags
-from ..core.tagger import EmbedOptions, embed_metadata_async
+from SpotiFLAC.core.download_validation import validate_downloaded_track_async
+from SpotiFLAC.core.endpoints import get_youtube_endpoints
+from SpotiFLAC.core.errors import SpotiflacError
+from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from SpotiFLAC.core.musicbrainz import AsyncMBFetch, mb_result_to_tags
+from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
+
 from .base import BaseProvider
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +76,8 @@ class YouTubeProvider(BaseProvider):
             meta = await self._get_single_track_metadata_async(video_id)
             return meta.title, [meta]
 
-        raise ValueError(f"URL YouTube non supportato o non riconosciuto: {url}")
+        msg = f"URL YouTube non supportato o non riconosciuto: {url}"
+        raise ValueError(msg)
 
     async def _get_single_track_metadata_async(self, video_id: str) -> TrackMetadata:
         url = "https://music.youtube.com/youtubei/v1/player?alt=json"
@@ -80,7 +86,7 @@ class YouTubeProvider(BaseProvider):
                 "client": {
                     "clientName": "WEB_REMIX",
                     "clientVersion": INNERTUBE_CLIENT_VERSION,
-                }
+                },
             },
             "videoId": video_id,
         }
@@ -110,7 +116,8 @@ class YouTubeProvider(BaseProvider):
         )
 
     async def _fetch_container_async(
-        self, browse_id: str
+        self,
+        browse_id: str,
     ) -> tuple[str, list[TrackMetadata]]:
         logger.info("[youtube] Fetching container: %s", browse_id)
 
@@ -120,7 +127,7 @@ class YouTubeProvider(BaseProvider):
                 "client": {
                     "clientName": "WEB_REMIX",
                     "clientVersion": INNERTUBE_CLIENT_VERSION,
-                }
+                },
             },
             "browseId": browse_id,
         }
@@ -157,7 +164,9 @@ class YouTubeProvider(BaseProvider):
         return title, tracks
 
     def _parse_tracks_from_data(
-        self, data: dict, track_list: list[TrackMetadata]
+        self,
+        data: dict,
+        track_list: list[TrackMetadata],
     ) -> int:
         count_before = len(track_list)
         items = self._find_key_recursive(data, "musicResponsiveListItemRenderer")
@@ -176,7 +185,8 @@ class YouTubeProvider(BaseProvider):
 
             if columns and isinstance(columns, list):
                 first_col = columns[0].get(
-                    "musicResponsiveListItemFlexColumnRenderer", {}
+                    "musicResponsiveListItemFlexColumnRenderer",
+                    {},
                 )
                 runs = first_col.get("text", {}).get("runs", [])
                 if runs:
@@ -184,7 +194,8 @@ class YouTubeProvider(BaseProvider):
 
                 if len(columns) > 1:
                     second_col = columns[1].get(
-                        "musicResponsiveListItemFlexColumnRenderer", {}
+                        "musicResponsiveListItemFlexColumnRenderer",
+                        {},
                     )
                     artist_runs = second_col.get("text", {}).get("runs", [])
                     artist_parts = [
@@ -215,7 +226,7 @@ class YouTubeProvider(BaseProvider):
                     cover_url=cover,
                     external_url=f"https://music.youtube.com/watch?v={v_id}",
                     extra_info={"provider": "youtube"},
-                )
+                ),
             )
 
         return len(track_list) - count_before
@@ -234,8 +245,8 @@ class YouTubeProvider(BaseProvider):
                         "client": {
                             "clientName": "WEB_REMIX",
                             "clientVersion": INNERTUBE_CLIENT_VERSION,
-                        }
-                    }
+                        },
+                    },
                 },
                 timeout=10,
             )
@@ -256,7 +267,9 @@ class YouTubeProvider(BaseProvider):
                 yield from self._find_key_recursive(item, key)
 
     async def _enrich_metadata_with_odesli_async(
-        self, metadata: TrackMetadata, platform_url: str
+        self,
+        metadata: TrackMetadata,
+        platform_url: str,
     ) -> str | None:
         api_url = f"https://api.song.link/v1-alpha.1/links?url={quote(platform_url)}"
         try:
@@ -269,12 +282,12 @@ class YouTubeProvider(BaseProvider):
                 for entity_data in entities.values():
                     if not metadata.isrc and entity_data.get("isrc"):
                         try:
-                            from ..core.isrc_utils import normalize_isrc
+                            from SpotiFLAC.core.isrc_utils import normalize_isrc
 
                             isrc_val = normalize_isrc(entity_data.get("isrc"))
                             if isrc_val:
                                 try:
-                                    from ..core.isrc_utils import (
+                                    from SpotiFLAC.core.isrc_utils import (
                                         confirm_isrc_with_qobuz_async,
                                     )
 
@@ -299,28 +312,32 @@ class YouTubeProvider(BaseProvider):
                         deezer_id = match.group(1)
                         try:
                             dz_resp = await self._async_http.get(
-                                f"https://api.deezer.com/track/{deezer_id}", timeout=10
+                                f"https://api.deezer.com/track/{deezer_id}",
+                                timeout=10,
                             )
                             if dz_resp.status_code == 200:
                                 dz_data = dz_resp.json()
                                 if dz_data.get("isrc"):
                                     try:
-                                        from ..core.isrc_utils import normalize_isrc
+                                        from SpotiFLAC.core.isrc_utils import (
+                                            normalize_isrc,
+                                        )
 
                                         isrc_val = normalize_isrc(dz_data.get("isrc"))
                                         if isrc_val:
                                             try:
-                                                from ..core.isrc_utils import (
+                                                from SpotiFLAC.core.isrc_utils import (
                                                     confirm_isrc_with_qobuz_async,
                                                 )
 
-                                                ok, _ = (
-                                                    await confirm_isrc_with_qobuz_async(
-                                                        isrc_val,
-                                                        metadata.title or "",
-                                                        metadata.artists or "",
-                                                        metadata.duration_ms or 0,
-                                                    )
+                                                (
+                                                    ok,
+                                                    _,
+                                                ) = await confirm_isrc_with_qobuz_async(
+                                                    isrc_val,
+                                                    metadata.title or "",
+                                                    metadata.artists or "",
+                                                    metadata.duration_ms or 0,
                                                 )
                                                 if ok:
                                                     metadata.isrc = isrc_val
@@ -330,7 +347,7 @@ class YouTubeProvider(BaseProvider):
                                         pass
                         except httpx.RequestError as e:
                             logger.warning(
-                                f"[youtube] Deezer API fallback network error: {e}"
+                                f"[youtube] Deezer API fallback network error: {e}",
                             )
 
                 yt_info = links.get("youtubeMusic") or links.get("youtube")
@@ -361,15 +378,19 @@ class YouTubeProvider(BaseProvider):
 
         if metadata.title and metadata.artists:
             yt_url = await self._search_youtube_direct_async(
-                metadata.title, metadata.artists
+                metadata.title,
+                metadata.artists,
             )
             if yt_url:
                 return yt_url
 
-        raise RuntimeError("Failed to resolve YouTube URL")
+        msg = "Failed to resolve YouTube URL"
+        raise RuntimeError(msg)
 
     async def _search_youtube_direct_async(
-        self, track_name: str, artist_name: str
+        self,
+        track_name: str,
+        artist_name: str,
     ) -> str | None:
         query = f"{track_name} {artist_name}"
         url = "https://music.youtube.com/youtubei/v1/search?alt=json"
@@ -379,7 +400,7 @@ class YouTubeProvider(BaseProvider):
                 "client": {
                     "clientName": "WEB_REMIX",
                     "clientVersion": INNERTUBE_CLIENT_VERSION,
-                }
+                },
             },
             "query": query,
             "params": YT_SEARCH_PARAMS_TRACKS,
@@ -387,7 +408,10 @@ class YouTubeProvider(BaseProvider):
 
         try:
             resp = await self._async_http.post(
-                url, json=payload, headers={"User-Agent": _DEFAULT_UA}, timeout=10
+                url,
+                json=payload,
+                headers={"User-Agent": _DEFAULT_UA},
+                timeout=10,
             )
             resp.raise_for_status()
 
@@ -440,7 +464,7 @@ class YouTubeProvider(BaseProvider):
                 "youtube": [
                     "player_client=android,mweb,ios",
                     "player_skip=webpage,configs,js",
-                ]
+                ],
             },
             "updatetime": False,
             "postprocessors": [
@@ -448,7 +472,7 @@ class YouTubeProvider(BaseProvider):
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "m4a",
                     "preferredquality": "256",
-                }
+                },
             ],
             "progress_hooks": [_yt_dlp_progress],
         }
@@ -468,7 +492,7 @@ class YouTubeProvider(BaseProvider):
             # The DownloadSuccessfullyStarted exception will bubble up here from the thread
             # Let it propagate to the upper block if it is ours!
             if "DownloadSuccessfullyStarted" in str(e):
-                raise e
+                raise
             logger.warning(f"[youtube] yt-dlp error: {e}")
 
         return False
@@ -499,7 +523,10 @@ class YouTubeProvider(BaseProvider):
                 )
 
                 resp = await self._async_http.post(
-                    api_url, json=payload_v10, headers=headers, timeout=10
+                    api_url,
+                    json=payload_v10,
+                    headers=headers,
+                    timeout=10,
                 )
 
                 if resp.status_code == 404:
@@ -510,7 +537,10 @@ class YouTubeProvider(BaseProvider):
                     }
                     api_url = f"{base_url.rstrip('/')}/api/json"
                     resp = await self._async_http.post(
-                        api_url, json=payload_v7, headers=headers, timeout=10
+                        api_url,
+                        json=payload_v7,
+                        headers=headers,
+                        timeout=10,
                     )
 
                 if resp.status_code in (200, 202):
@@ -522,7 +552,7 @@ class YouTubeProvider(BaseProvider):
                         return dl_url
             except Exception as exc:
                 logger.debug(
-                    f"[youtube] Fallimento Cobalt su {_shorten_api_url(base_url)}: {exc}"
+                    f"[youtube] Fallimento Cobalt su {_shorten_api_url(base_url)}: {exc}",
                 )
 
         return None
@@ -614,7 +644,7 @@ class YouTubeProvider(BaseProvider):
 
             is_native_yt = metadata.extra_info.get("provider") == "youtube"
             looks_like_yt_id = len(metadata.id) == 11 and not metadata.id.startswith(
-                "spotify:"
+                "spotify:",
             )
 
             if is_native_yt or looks_like_yt_id:
@@ -630,7 +660,8 @@ class YouTubeProvider(BaseProvider):
                 return DownloadResult.fail(self.name, "Could not extract video ID")
 
             import concurrent.futures
-            from ..core.isrc_utils import normalize_isrc
+
+            from SpotiFLAC.core.isrc_utils import normalize_isrc
 
             _isrc_for_mb = normalize_isrc(getattr(metadata, "isrc", None) or "")
             logger.debug("[youtube] ISRC at MB lookup: %r", _isrc_for_mb)
@@ -639,7 +670,7 @@ class YouTubeProvider(BaseProvider):
                 logger.warning("[youtube] MusicBrainz skipped: no valid ISRC available")
 
             try:
-                from ..core.console import print_source_banner
+                from SpotiFLAC.core.console import print_source_banner
 
                 print_source_banner("youtube", "music.youtube.com", "M4A 256kbps")
             except ImportError:
@@ -649,13 +680,15 @@ class YouTubeProvider(BaseProvider):
 
             try:
                 if await asyncio.to_thread(
-                    self._download_direct_innertube, video_id, str(dest)
+                    self._download_direct_innertube,
+                    video_id,
+                    str(dest),
                 ):
                     download_success = True
             except Exception as e:
                 if "DownloadSuccessfullyStarted" in str(e):
                     # Ripropaghiamo l'errore fittizio allo script di test esterno!
-                    raise e
+                    raise
                 logger.warning(f"[youtube] yt-dlp fallito in thread: {e}")
 
             if not download_success:
@@ -681,24 +714,24 @@ class YouTubeProvider(BaseProvider):
                     except Exception as e:
                         # If it is our exception, re-raise it.
                         if "DownloadSuccessfullyStarted" in str(e):
-                            raise e
+                            raise
                         logger.warning(
-                            f"[youtube] Download via {source_name} failed: {e}"
+                            f"[youtube] Download via {source_name} failed: {e}",
                         )
                         if os.path.exists(str(dest)):
-                            try:
+                            with contextlib.suppress(OSError):
                                 os.remove(str(dest))
-                            except OSError:
-                                pass
 
             if not download_success:
                 return DownloadResult.fail(
-                    self.name, "All YouTube download sources failed"
+                    self.name,
+                    "All YouTube download sources failed",
                 )
 
             expected_s = metadata.duration_ms // 1000
             valid, err_msg = await validate_downloaded_track_async(
-                str(dest), expected_s
+                str(dest),
+                expected_s,
             )
             if not valid:
                 return DownloadResult.fail(self.name, f"Validazione fallita: {err_msg}")
@@ -707,12 +740,13 @@ class YouTubeProvider(BaseProvider):
             if mb_fetcher:
                 try:
                     res = await asyncio.to_thread(
-                        lambda: mb_fetcher.future.result(timeout=12)
+                        lambda: mb_fetcher.future.result(timeout=12),
                     )
                     mb_tags = mb_result_to_tags(res)
                     if mb_tags:
                         logger.info(
-                            "[youtube] MusicBrainz tags found: %s", list(mb_tags.keys())
+                            "[youtube] MusicBrainz tags found: %s",
+                            list(mb_tags.keys()),
                         )
                     else:
                         logger.warning(
@@ -749,7 +783,7 @@ class YouTubeProvider(BaseProvider):
                             mb_tags["CATALOGNUMBER"] = res["catalognumber"]
                 except concurrent.futures.TimeoutError:
                     logger.warning(
-                        "[youtube] MusicBrainz timed out after 12s, skipping MB tags"
+                        "[youtube] MusicBrainz timed out after 12s, skipping MB tags",
                     )
                 except Exception as exc:
                     logger.warning("[youtube] MusicBrainz error: %s", exc)
@@ -770,10 +804,10 @@ class YouTubeProvider(BaseProvider):
             return DownloadResult.ok(self.name, str(dest), fmt="m4a")
 
         except SpotiflacError as exc:
-            logger.error(f"[youtube] {exc}")
+            logger.exception(f"[youtube] {exc}")
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
             if "DownloadSuccessfullyStarted" in str(exc):
-                raise exc
+                raise
             logger.exception("[youtube] Unexpected error")
             return DownloadResult.fail(self.name, f"Unexpected: {exc}")

@@ -1,7 +1,9 @@
-import sys
+import asyncio
+import contextlib
 import os
 import re
-import asyncio
+import sys
+
 import httpx
 
 
@@ -16,7 +18,7 @@ def is_docker():
 # Base command:
 # - Use launcher.py when running from source.
 # - Use "spotiflac" if installed via pip.
-cmd = ["spotiflac"] + sys.argv[1:]
+cmd = ["spotiflac", *sys.argv[1:]]
 
 if not is_docker():
     os.execvp("spotiflac", cmd)
@@ -27,12 +29,6 @@ chat_id = os.environ.get("TG_CHAT_ID")
 # If the bot is not configured, run normally anyway.
 if not bot_token or not chat_id:
     os.execvp("spotiflac", cmd)
-
-print("🤖 [Docker Wrapper] Docker environment detected: Starting Telegram listener...")
-print("Wrapper avviato")
-print("BOT:", bool(bot_token))
-print("CHAT:", chat_id)
-print("CMD:", cmd)
 
 
 async def main():
@@ -46,7 +42,7 @@ async def main():
 
     # Regex aggiornata: cattura sia le challenge di Zarz che quelle della nuova Community
     url_regex = re.compile(
-        r"(https://(?:api\.zarz\.moe|verify\.spotbye\.qzz\.io)\S*challenge\S+)"
+        r"(https://(?:api\.zarz\.moe|verify\.spotbye\.qzz\.io)\S*challenge\S+)",
     )
     offset = -1
 
@@ -73,7 +69,7 @@ async def main():
                     f"{challenge_url}"
                 )
 
-                try:
+                with contextlib.suppress(Exception):
                     await client.post(
                         f"https://api.telegram.org/bot{bot_token}/sendMessage",
                         json={
@@ -81,13 +77,6 @@ async def main():
                             "text": msg,
                             "parse_mode": "HTML",
                         },
-                    )
-                    print(
-                        "🤖 [Docker Wrapper] Telegram notification sent! Waiting for your reply..."
-                    )
-                except Exception as e:
-                    print(
-                        f"🤖 [Docker Wrapper] Failed to send Telegram notification: {e}"
                     )
 
                 # Polling asincrono su Telegram
@@ -108,10 +97,9 @@ async def main():
                                 offset = update["update_id"] + 1
 
                                 if "message" in update and "text" in update["message"]:
-
                                     # Ignora messaggi provenienti da altre chat
                                     if str(update["message"]["chat"]["id"]) != str(
-                                        chat_id
+                                        chat_id,
                                     ):
                                         continue
 
@@ -128,7 +116,7 @@ async def main():
 
                                         # Inietta asincronamente il grant nello stdin del terminale virtuale
                                         process.stdin.write(
-                                            text.encode("utf-8") + b"\n"
+                                            text.encode("utf-8") + b"\n",
                                         )
                                         await process.stdin.drain()
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-CLI entry point for SpotiFLAC.
+"""CLI entry point for SpotiFLAC.
 
 === Migrazione async ===
 The entire entry point now runs on a single shared event loop instead of
@@ -11,15 +10,18 @@ and `run_interactive()` can now be awaited in the same loop instead of
 opening a new one each time.
 """
 
+from __future__ import annotations
+
 import argparse
-import logging
-import sys
-import json
-import os
 import asyncio
+import contextlib
+import json
+import logging
+import os
+import sys
 
 from .check_update import check_for_updates_async
-from .downloader import SpotiflacDownloader, DownloadOptions
+from .downloader import DownloadOptions, SpotiflacDownloader
 from .interactive import run_interactive
 
 
@@ -27,15 +29,15 @@ def load_config() -> dict:
     config_path = "config.json"
     if os.path.exists(config_path):
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 raw = json.load(f)
             from .core.profiles import ProfileConfig
 
             return ProfileConfig.model_validate(raw).model_dump(exclude_none=True)
-        except json.JSONDecodeError as e:
-            print(f"Error loading config.json: invalid JSON: {e}")
-        except Exception as e:
-            print(f"Error loading config.json: {e}")
+        except json.JSONDecodeError:
+            pass
+        except Exception:
+            pass
     return {}
 
 
@@ -46,11 +48,9 @@ async def _load_profile_into_defaults(profile_name: str) -> dict:
 
         data = await get_profile_async(profile_name)
         if data:
-            print(f"[profile] Loaded: {profile_name}")
             return data
-        print(f"[profile] Not found: {profile_name}")
-    except Exception as exc:
-        print(f"[profile] Load error: {exc}")
+    except Exception:
+        pass
     return {}
 
 
@@ -87,8 +87,9 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         }
         if value in native_services or value.startswith("ext:"):
             return value
+        msg = f"invalid service: '{value}'. ``--service`` accepts native providers or ext:<name> extensions."
         raise argparse.ArgumentTypeError(
-            f"invalid service: '{value}'. ``--service`` accepts native providers or ext:<name> extensions."
+            msg,
         )
 
     parser.add_argument(
@@ -185,7 +186,10 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--loop", "-l", type=int, default=pd.get("loop", None))
     parser.add_argument(
-        "--verbose", "-v", action="store_true", default=pd.get("verbose", False)
+        "--verbose",
+        "-v",
+        action="store_true",
+        default=pd.get("verbose", False),
     )
     parser.add_argument(
         "--interactive",
@@ -246,7 +250,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "--enrich-providers",
         nargs="+",
         default=pd.get(
-            "enrich_providers", ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
+            "enrich_providers",
+            ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         ),
         dest="enrich_providers",
         choices=["deezer", "apple", "qobuz", "tidal", "soundcloud"],
@@ -326,8 +331,7 @@ async def _run_download_async(
     timeout_s: int | None,
     use_extensions_fallback: bool = True,
 ) -> None:
-    """
-    Bridge async verso SpotiflacDownloader, senza passare per il wrapper
+    """Bridge async verso SpotiflacDownloader, senza passare per il wrapper
     sincrono `SpotiFLAC()` (che farebbe un `asyncio.run()` annidato e
     fallirebbe).
     """
@@ -367,30 +371,30 @@ async def _run_download_async(
         downloader = SpotiflacDownloader(opts)
         await downloader.run_async(url, loop_minutes=loop)
     except KeyboardInterrupt:
-        print("\n\n[!] Operation interrupted by user.")
+        pass
     except Exception as e:
-        logging.getLogger("SpotiFLAC").error("Critical error during execution: %s", e)
+        logging.getLogger("SpotiFLAC").exception(
+            "Critical error during execution: %s",
+            e,
+        )
 
 
 async def amain() -> None:
-    """
-    Coordinate GUI, interactive, and command-line execution for SpotiFLAC.
+    """Coordinate GUI, interactive, and command-line execution for SpotiFLAC.
 
     Handles startup checks, extension installation, configuration loading, profile management, argument parsing, and download execution across the supported application modes.
     """
     from .core.ffmpeg_check import print_ffmpeg_warning
 
-    try:
+    with contextlib.suppress(Exception):
         await check_for_updates_async()
-    except Exception:
-        pass
 
     try:
         from .extensions.manager import ExtensionManager
 
         await asyncio.to_thread(ExtensionManager, auto_install_downloads=True)
-    except Exception as e:
-        print(f"  ⚠️ Impossibile verificare le estensioni: {e}")
+    except Exception:
+        pass
 
     if "--gui" in sys.argv:
         from .app import run_gui
@@ -445,7 +449,9 @@ async def amain() -> None:
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
         parser.add_argument(
-            "--gui", action="store_true", help="Launch graphical user interface (GUI)"
+            "--gui",
+            action="store_true",
+            help="Launch graphical user interface (GUI)",
         )
         parser.add_argument(
             "--interactive",
@@ -474,7 +480,9 @@ async def amain() -> None:
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
         parser.add_argument(
-            "--gui", action="store_true", help="Launch graphical user interface (GUI)"
+            "--gui",
+            action="store_true",
+            help="Launch graphical user interface (GUI)",
         )
         parser.add_argument(
             "--interactive",
@@ -486,7 +494,7 @@ async def amain() -> None:
 
     quality = args.quality or merged_defaults.get("quality", "LOSSLESS")
     qobuz_local_api_url = args.qobuz_local_api_url or merged_defaults.get(
-        "qobuz_local_api_url"
+        "qobuz_local_api_url",
     )
     tidal_custom_api = args.tidal_custom_api or merged_defaults.get("tidal_custom_api")
     timeout_s = (
@@ -565,16 +573,13 @@ async def amain() -> None:
                 "loop": args.loop,
             }
             await save_profile_async(args.save_profile, profile_cfg)
-            print(f"[profile] Saved as: {args.save_profile}")
-        except Exception as exc:
-            print(f"[profile] Save error: {exc}")
+        except Exception:
+            pass
 
 
 def main() -> None:
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(amain())
-    except KeyboardInterrupt:
-        print("\n\n[!] Operation interrupted by user.")
 
 
 if __name__ == "__main__":

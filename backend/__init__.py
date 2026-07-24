@@ -1,5 +1,4 @@
-"""
-Compatibility shim used by the test-suite.
+"""Compatibility shim used by the test-suite.
 Some tests import `backend.SpotiFLAC`; expose the main factory
 from the real package so tests run without modifying test code.
 """

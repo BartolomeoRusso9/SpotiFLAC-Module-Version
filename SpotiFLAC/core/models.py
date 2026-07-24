@@ -1,12 +1,13 @@
-"""
-Pydantic models for SpotiFLAC.
+"""Pydantic models for SpotiFLAC.
 Replace raw dicts to guarantee validation, coercion, and zero KeyError.
 """
 
 from __future__ import annotations
+
 import re
-from typing import Literal, Any
-from pydantic import BaseModel, field_validator, model_validator, ValidationInfo, Field
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Track / Metadata
@@ -110,9 +111,8 @@ class TrackMetadata(BaseModel):
                 tags[key] = val
         return tags
 
-    def with_enrichment(self, extra: Any) -> "TrackMetadata":
-        """
-        Returns una nuova istanza aggiornata con i dati dell'enrichment.
+    def with_enrichment(self, extra: Any) -> TrackMetadata:
+        """Returns una nuova istanza aggiornata con i dati dell'enrichment.
 
         FIX: previously used direct assignment (self.field = value),
         which is an anti-pattern for Pydantic v2. Now uses model_copy(update={})
@@ -161,16 +161,20 @@ class DownloadResult(BaseModel):
     skipped: bool = False
 
     @model_validator(mode="after")
-    def _check_consistency(self) -> "DownloadResult":
+    def _check_consistency(self) -> DownloadResult:
         """Validates that if the download succeeded, the path is present."""
         if self.success and not self.file_path:
-            raise ValueError("success=True richiede un file_path")
+            msg = "success=True richiede un file_path"
+            raise ValueError(msg)
         return self
 
     @classmethod
     def ok(
-        cls, provider: str, file_path: str, fmt: Literal["flac", "mp3", "m4a"] = "flac"
-    ) -> "DownloadResult":
+        cls,
+        provider: str,
+        file_path: str,
+        fmt: Literal["flac", "mp3", "m4a"] = "flac",
+    ) -> DownloadResult:
         return cls(success=True, provider=provider, file_path=file_path, format=fmt)
 
     @classmethod
@@ -179,7 +183,7 @@ class DownloadResult(BaseModel):
         provider: str,
         file_path: str,
         fmt: Literal["flac", "mp3", "m4a"] | None = None,
-    ) -> "DownloadResult":
+    ) -> DownloadResult:
         return cls(
             success=True,
             provider=provider,
@@ -189,7 +193,7 @@ class DownloadResult(BaseModel):
         )
 
     @classmethod
-    def fail(cls, provider: str, error: str) -> "DownloadResult":
+    def fail(cls, provider: str, error: str) -> DownloadResult:
         return cls(success=False, provider=provider, error=error)
 
 
@@ -219,13 +223,12 @@ def build_filename(
     first_artist_only: bool = False,
     extension: str = ".flac",
 ) -> str:
-    """
-    Costruisce il filename finale applicando i placeholder o i formati legacy.
-    Placeholder supportati: {title}, {artist}, {album}, {album_artist}, {year}, {date}, {disc}, {isrc}, {track}
+    """Costruisce il filename finale applicando i placeholder o i formati legacy.
+    Placeholder supportati: {title}, {artist}, {album}, {album_artist}, {year}, {date}, {disc}, {isrc}, {track}.
     """
     artist = sanitize(metadata.first_artist if first_artist_only else metadata.artists)
     album_artist = sanitize(
-        metadata.first_artist if first_artist_only else metadata.album_artist
+        metadata.first_artist if first_artist_only else metadata.album_artist,
     )
     title = sanitize(metadata.title)
     album = sanitize(metadata.album)

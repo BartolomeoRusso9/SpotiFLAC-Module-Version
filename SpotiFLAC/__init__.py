@@ -1,5 +1,4 @@
-"""
-SpotiFLAC — Python module for downloading high quality music
+"""SpotiFLAC — Python module for downloading high quality music.
 
 Minimum use:
     from SpotiFLAC import SpotiFLAC
@@ -11,25 +10,25 @@ Advanced use:
 """
 
 from __future__ import annotations
+
 import importlib.metadata
 
 # Unica implementazione canonica del client (sia sincrono che asincrono)
-from .client import SpotiFLAC, AsyncSpotiFLAC
-
-from .downloader import SpotiflacDownloader, DownloadOptions
+from .client import AsyncSpotiFLAC, SpotiFLAC
+from .core import DownloadResult, TrackMetadata
+from .downloader import DownloadOptions, SpotiflacDownloader
 from .providers import (
-    DeezerProvider,
-    QobuzProvider,
-    TidalProvider,
     AmazonProvider,
     AppleMusicProvider,
+    DeezerProvider,
     JooxProvider,
-    NeteaseProvider,
-    MiguProvider,
     KuwoProvider,
+    MiguProvider,
+    NeteaseProvider,
+    QobuzProvider,
     SpotifyMetadataClient,
+    TidalProvider,
 )
-from .core import TrackMetadata, DownloadResult
 
 try:
     __version__ = importlib.metadata.version("SpotiFLAC")
@@ -37,20 +36,20 @@ except importlib.metadata.PackageNotFoundError:
     __version__ = "unknown"
 
 __all__ = [
-    "AsyncSpotiFLAC",
-    "SpotiFLAC",
-    "SpotiflacDownloader",
-    "DownloadOptions",
-    "DeezerProvider",
-    "QobuzProvider",
-    "TidalProvider",
     "AmazonProvider",
     "AppleMusicProvider",
-    "JooxProvider",
-    "NeteaseProvider",
-    "MiguProvider",
-    "KuwoProvider",
-    "SpotifyMetadataClient",
-    "TrackMetadata",
+    "AsyncSpotiFLAC",
+    "DeezerProvider",
+    "DownloadOptions",
     "DownloadResult",
+    "JooxProvider",
+    "KuwoProvider",
+    "MiguProvider",
+    "NeteaseProvider",
+    "QobuzProvider",
+    "SpotiFLAC",
+    "SpotiflacDownloader",
+    "SpotifyMetadataClient",
+    "TidalProvider",
+    "TrackMetadata",
 ]

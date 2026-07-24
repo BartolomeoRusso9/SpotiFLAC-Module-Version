@@ -1,5 +1,4 @@
-"""
-HTTP client centralizzato con Connection Pooling globale.
+"""HTTP client centralizzato con Connection Pooling globale.
 
 === FASE 3 — Migrazione async completata ===
 Rimosso tutto il codice sync (RateLimiter, HttpClient, NetworkManager.get_sync_client,
@@ -10,21 +9,22 @@ from __future__ import annotations
 
 import asyncio
 import atexit as _atexit
+import contextlib
 import logging
 import os
+import re
 import threading
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
-import re
 
 from .errors import (
     AuthError,
-    RateLimitedError,
     NetworkError,
     ParseError,
+    RateLimitedError,
     TrackNotFoundError,
 )
 
@@ -50,8 +50,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONNECTION POOL MANAGER ---
 class NetworkManager:
-    """
-    Mantiene vive le connessioni (Keep-Alive) per azzerare i tempi di handshake SSL.
+    """Mantiene vive le connessioni (Keep-Alive) per azzerare i tempi di handshake SSL.
     Ogni event loop ottiene la propria istanza di httpx.AsyncClient (loop-safe).
     """
 
@@ -60,8 +59,7 @@ class NetworkManager:
 
     @classmethod
     async def get_async_client_safe(cls) -> httpx.AsyncClient:
-        """
-        Returns an AsyncClient tied to the current loop.
+        """Returns an AsyncClient tied to the current loop.
         Creates a new client if the loop does not already have one.
         """
         loop = asyncio.get_running_loop()
@@ -91,15 +89,12 @@ class NetworkManager:
         with cls._async_clients_lock:
             client = cls._async_clients.pop(loop_id, None)
         if client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await client.aclose()
-            except Exception:
-                pass
 
     @classmethod
     def close(cls) -> None:
-        """
-        Best-effort cleanup of async clients at process exit (called by atexit).
+        """Best-effort cleanup of async clients at process exit (called by atexit).
         Loops may already be closed: we limit ourselves to clearing the registry.
         """
         try:
@@ -111,14 +106,13 @@ class NetworkManager:
 
 # --- RATE LIMITER ASINCRONO ---
 class AsyncRateLimiter:
-    """
-    Rate limiter asyncio-safe.
+    """Rate limiter asyncio-safe.
     Uses asyncio.Lock and asyncio.sleep so it does not block the event loop.
     The asyncio.Lock is created lazily (on the first wait_for_slot())
     because it cannot be instantiated outside of an active event loop.
     """
 
-    def __init__(self, max_requests: int, window_seconds: float):
+    def __init__(self, max_requests: int, window_seconds: float) -> None:
         self.max_requests = max_requests
         self.window = window_seconds
         self.timestamps: deque = deque()
@@ -163,8 +157,7 @@ class RetryConfig:
 
 # --- HTTP CLIENT ASINCRONO ---
 class AsyncHttpClient:
-    """
-    Unico client HTTP usato da tutti i provider.
+    """Unico client HTTP usato da tutti i provider.
     Usa NetworkManager.get_async_client_safe() per sicurezza multi-loop.
     """
 
@@ -227,7 +220,8 @@ class AsyncHttpClient:
             raise TrackNotFoundError(self._provider, str(resp.url))
         if sc == 429:
             raise RateLimitedError(
-                self._provider, int(resp.headers.get("Retry-After", 5))
+                self._provider,
+                int(resp.headers.get("Retry-After", 5)),
             )
         if not resp.is_success:
             raise NetworkError(self._provider, f"HTTP {sc} from {resp.url}")
@@ -239,12 +233,15 @@ class AsyncHttpClient:
         progress_cb: Any = None,
         chunk_size: int = 256 * 1024,
         extra_headers: dict | None = None,
-        stop_event: "asyncio.Event | None" = None,
+        stop_event: asyncio.Event | None = None,
     ) -> None:
         if aiofiles is None:
-            raise RuntimeError(
+            msg = (
                 "aiofiles non installato — richiesto da AsyncHttpClient.stream_to_file(). "
                 "Eseguire: pip install aiofiles"
+            )
+            raise RuntimeError(
+                msg,
             )
 
         temp = dest_path + ".part"
@@ -256,7 +253,10 @@ class AsyncHttpClient:
 
         try:
             async with client.stream(
-                "GET", url, headers=headers, timeout=self._timeout
+                "GET",
+                url,
+                headers=headers,
+                timeout=self._timeout,
             ) as resp:
                 self._raise_for_status(resp)
                 total = int(resp.headers.get("Content-Length") or 0)
@@ -269,7 +269,8 @@ class AsyncHttpClient:
                     async for chunk in resp.aiter_bytes(chunk_size):
                         if evt is not None and evt.is_set():
                             raise NetworkError(
-                                self._provider, "Stream cancelled by stop_event"
+                                self._provider,
+                                "Stream cancelled by stop_event",
                             )
                         if not chunk:
                             continue

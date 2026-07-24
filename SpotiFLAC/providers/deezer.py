@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import difflib
 import hashlib
 import logging
@@ -10,17 +11,18 @@ import threading
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
-from ..core.endpoints import get_deezer_endpoint
-from ..core.errors import ErrorKind, SpotiflacError
-from ..core.http import NetworkManager
-from ..core.models import DownloadResult, TrackMetadata
-from ..core.musicbrainz import fetch_mb_metadata_async, mb_result_to_tags
-from ..core.quality import normalize_quality
-from ..core.tagger import EmbedOptions, embed_metadata_async
+from SpotiFLAC.core.endpoints import get_deezer_endpoint
+from SpotiFLAC.core.errors import ErrorKind, SpotiflacError
+from SpotiFLAC.core.http import NetworkManager
+from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from SpotiFLAC.core.musicbrainz import fetch_mb_metadata_async, mb_result_to_tags
+from SpotiFLAC.core.quality import normalize_quality
+from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
+
 from .base import BaseProvider
 
 try:
@@ -81,15 +83,15 @@ class DeezerProvider(BaseProvider):
         super().__init__(timeout_s=timeout_s)
         self._async_http._headers.update({"User-Agent": _DEFAULT_UA})
 
-        self._track_cache: Dict[str, _CacheEntry] = {}
-        self._search_cache: Dict[str, _CacheEntry] = {}
+        self._track_cache: dict[str, _CacheEntry] = {}
+        self._search_cache: dict[str, _CacheEntry] = {}
         self._cache_mu = threading.Lock()
-        self._url_locks: Dict[str, threading.Lock] = {}
+        self._url_locks: dict[str, threading.Lock] = {}
         self._last_cache_cleanup = 0.0
 
         if not HAS_CRYPTO:
             logger.warning(
-                "[deezer] pycryptodome not found. File decryption will fail. Execute 'pip install pycryptodome'."
+                "[deezer] pycryptodome not found. File decryption will fail. Execute 'pip install pycryptodome'.",
             )
 
     # ------------------------------------------------------------------
@@ -111,7 +113,7 @@ class DeezerProvider(BaseProvider):
         self._trim_cache(self._search_cache, _MAX_SEARCH_CACHE)
 
     @staticmethod
-    def _trim_cache(cache: Dict[str, _CacheEntry], max_entries: int) -> None:
+    def _trim_cache(cache: dict[str, _CacheEntry], max_entries: int) -> None:
         if len(cache) <= max_entries:
             return
         sorted_keys = sorted(cache, key=lambda k: cache[k].expires_at)
@@ -123,7 +125,7 @@ class DeezerProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _best_cover(album: Dict[str, Any]) -> str:
+    def _best_cover(album: dict[str, Any]) -> str:
         return (
             album.get("cover_xl")
             or album.get("cover_big")
@@ -133,13 +135,13 @@ class DeezerProvider(BaseProvider):
         )
 
     @staticmethod
-    def _track_artist_display(track_data: Dict[str, Any]) -> str:
+    def _track_artist_display(track_data: dict[str, Any]) -> str:
         contributors = track_data.get("contributors", [])
         if contributors:
             return ", ".join(c["name"] for c in contributors if c.get("name"))
         return track_data.get("artist", {}).get("name", "")
 
-    def _extract_metadata(self, track_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_metadata(self, track_data: dict[str, Any]) -> dict[str, Any]:
         album = track_data.get("album", {})
         return {
             "title": track_data.get("title", ""),
@@ -166,11 +168,15 @@ class DeezerProvider(BaseProvider):
         return bytes(key)
 
     def _decrypt_file(
-        self, encrypted_path: Path, output_path: Path, track_id: str
+        self,
+        encrypted_path: Path,
+        output_path: Path,
+        track_id: str,
     ) -> bool:
         if not HAS_CRYPTO:
             raise SpotiflacError(
-                ErrorKind.FILE_IO, "Missing pycryptodome, unable to decrypt the track."
+                ErrorKind.FILE_IO,
+                "Missing pycryptodome, unable to decrypt the track.",
             )
 
         key = self._generate_blowfish_key(track_id)
@@ -194,30 +200,35 @@ class DeezerProvider(BaseProvider):
                     chunk_index += 1
             return True
         except Exception as exc:
-            logger.error("[deezer] Decryption failed: %s", exc)
+            logger.exception("[deezer] Decryption failed: %s", exc)
             return False
 
     async def _request_json_async(
-        self, method: str, url: str, payload: Optional[Dict] = None
-    ) -> Dict[str, Any]:
-        """
-        Send a JSON request to the Deezer API with retry handling for transient failures.
+        self,
+        method: str,
+        url: str,
+        payload: dict | None = None,
+    ) -> dict[str, Any]:
+        """Send a JSON request to the Deezer API with retry handling for transient failures.
 
-        Parameters:
+        Parameters
+        ----------
                 method (str): HTTP method to use.
                 url (str): Request URL.
                 payload (Optional[Dict]): JSON payload to include in the request.
 
-        Returns:
+        Returns
+        -------
                 Dict[str, Any]: Parsed JSON response.
+
         """
-        headers: Dict[str, str] = {
+        headers: dict[str, str] = {
             "User-Agent": _DEFAULT_UA,
         }
         if method.upper() == "POST":
             headers["Content-Type"] = "application/json"
 
-        last_err: Optional[Exception] = None
+        last_err: Exception | None = None
         delay = _RETRY_DELAY_S
 
         # Bypass AsyncHttpClient wrapper to handle 429/5xx manually
@@ -229,8 +240,7 @@ class DeezerProvider(BaseProvider):
                 delay *= 2
 
             try:
-
-                req_kwargs: Dict[str, Any] = {
+                req_kwargs: dict[str, Any] = {
                     "headers": headers,
                     "timeout": _API_TIMEOUT_S,
                 }
@@ -243,7 +253,9 @@ class DeezerProvider(BaseProvider):
                     delay = max(delay, 2.0)
                     host = urllib.parse.urlparse(url).netloc or url
                     logger.warning(
-                        "[deezer] HTTP 429 on %s, retry in %.1fs...", host, delay
+                        "[deezer] HTTP 429 on %s, retry in %.1fs...",
+                        host,
+                        delay,
                     )
                     last_err = RuntimeError("rate limited (429)")
                     continue
@@ -262,19 +274,23 @@ class DeezerProvider(BaseProvider):
                 if any(s in str(exc) for s in _RETRYABLE_SUBSTRINGS):
                     last_err = exc
                     continue
-                raise RuntimeError(f"Deezer request failed: {exc}") from exc
+                msg = f"Deezer request failed: {exc}"
+                raise RuntimeError(msg) from exc
 
-        raise RuntimeError(f"All {_MAX_RETRIES + 1} attempts failed: {last_err}")
+        msg = f"All {_MAX_RETRIES + 1} attempts failed: {last_err}"
+        raise RuntimeError(msg)
 
-    async def _get_json_async(self, url: str) -> Dict[str, Any]:
+    async def _get_json_async(self, url: str) -> dict[str, Any]:
         return await self._request_json_async("GET", url)
 
     async def _post_json_async(
-        self, url: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self,
+        url: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
         return await self._request_json_async("POST", url, payload)
 
-    async def _get_json_cached_async(self, url: str) -> Dict[str, Any]:
+    async def _get_json_cached_async(self, url: str) -> dict[str, Any]:
         """Async cache lookup — simple check + fetch, no per-URL lock needed in async context."""
         with self._cache_mu:
             entry = self._search_cache.get(url)
@@ -292,18 +308,19 @@ class DeezerProvider(BaseProvider):
     # Async Deezer API
     # ------------------------------------------------------------------
 
-    async def _get_track_by_isrc_async(self, isrc: str) -> Optional[Dict[str, Any]]:
+    async def _get_track_by_isrc_async(self, isrc: str) -> dict[str, Any] | None:
         with self._cache_mu:
             entry = self._track_cache.get(isrc)
             if entry and not entry.is_expired():
                 return entry.data
         try:
             data = await self._get_json_async(
-                f"https://api.deezer.com/2.0/track/isrc:{isrc}"
+                f"https://api.deezer.com/2.0/track/isrc:{isrc}",
             )
             if "error" in data:
                 logger.warning(
-                    "[deezer] API error: %s", data["error"].get("message", "?")
+                    "[deezer] API error: %s",
+                    data["error"].get("message", "?"),
                 )
                 return None
             with self._cache_mu:
@@ -315,9 +332,11 @@ class DeezerProvider(BaseProvider):
             return None
 
     async def _search_track_text_async(
-        self, title: str, artist: str
-    ) -> Optional[Dict[str, Any]]:
-        first_artist = artist.split(",")[0].strip()
+        self,
+        title: str,
+        artist: str,
+    ) -> dict[str, Any] | None:
+        first_artist = artist.split(",", maxsplit=1)[0].strip()
         query = f'track:"{title}" artist:"{first_artist}"'
         url = f"https://api.deezer.com/search?q={urllib.parse.quote(query)}&limit=10"
 
@@ -348,10 +367,11 @@ class DeezerProvider(BaseProvider):
                     track_id = best_match.get("id")
                     if track_id:
                         logger.debug(
-                            "[deezer] Found text match with score %.2f", best_score
+                            "[deezer] Found text match with score %.2f",
+                            best_score,
                         )
                         return await self._get_json_async(
-                            f"https://api.deezer.com/track/{track_id}"
+                            f"https://api.deezer.com/track/{track_id}",
                         )
                 else:
                     logger.debug(
@@ -369,8 +389,12 @@ class DeezerProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     async def _download_via_flacdownloader_async(
-        self, track_id: str, title: str, artist: str, output_dir: str
-    ) -> Optional[Dict[str, Any]]:
+        self,
+        track_id: str,
+        title: str,
+        artist: str,
+        output_dir: str,
+    ) -> dict[str, Any] | None:
         prepare_url = get_deezer_endpoint("flacdownloader_prepare")
         parsed = urllib.parse.urlparse(prepare_url)
         origin = (
@@ -389,14 +413,16 @@ class DeezerProvider(BaseProvider):
             client = await NetworkManager.get_async_client_safe()
 
             resp_prepare = await client.get(
-                prepare_url, headers=headers, timeout=_API_TIMEOUT_S
+                prepare_url,
+                headers=headers,
+                timeout=_API_TIMEOUT_S,
             )
             resp_prepare.raise_for_status()
 
             token = resp_prepare.json().get("t")
             if not token:
                 logger.warning(
-                    "[flacdownloader] 't' field missing in /prepare response."
+                    "[flacdownloader] 't' field missing in /prepare response.",
                 )
                 return None
 
@@ -411,7 +437,10 @@ class DeezerProvider(BaseProvider):
             }
 
             resp_dl = await client.post(
-                asset_url, json=payload, headers=headers, timeout=_API_TIMEOUT_S
+                asset_url,
+                json=payload,
+                headers=headers,
+                timeout=_API_TIMEOUT_S,
             )
             resp_dl.raise_for_status()
 
@@ -429,7 +458,9 @@ class DeezerProvider(BaseProvider):
             file_path = out_dir_path / filename
 
             await self._async_http.stream_to_file(
-                link, str(file_path), self._progress_cb
+                link,
+                str(file_path),
+                self._progress_cb,
             )
             return {"file_path": str(file_path), "extension": file_extension}
 
@@ -442,17 +473,21 @@ class DeezerProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     async def _download_flac_raw_async(
-        self, isrc: str, output_dir: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Download a FLAC track using Deezer metadata and available fallback services.
+        self,
+        isrc: str,
+        output_dir: str,
+    ) -> dict[str, Any] | None:
+        """Download a FLAC track using Deezer metadata and available fallback services.
 
-        Parameters:
+        Parameters
+        ----------
                 isrc (str): ISRC used to locate the Deezer track.
                 output_dir (str): Directory where the downloaded file is stored.
 
-        Returns:
+        Returns
+        -------
                 Optional[Dict[str, Any]]: Download details containing `file_path` and `extension`, or `None` if the track cannot be found or all download methods fail.
+
         """
         track_data = await self._get_track_by_isrc_async(isrc)
         if not track_data:
@@ -464,7 +499,10 @@ class DeezerProvider(BaseProvider):
             return None
 
         logger.info(
-            "[deezer] Found: %s - %s (ID: %s)", meta["artists"], meta["title"], track_id
+            "[deezer] Found: %s - %s (ID: %s)",
+            meta["artists"],
+            meta["title"],
+            track_id,
         )
 
         # 1. Fallback: Antra Server
@@ -494,10 +532,13 @@ class DeezerProvider(BaseProvider):
                 )
 
                 logger.info(
-                    "[deezer] Antra stream downloaded. Starting Blowfish decryption..."
+                    "[deezer] Antra stream downloaded. Starting Blowfish decryption...",
                 )
                 success = await asyncio.to_thread(
-                    self._decrypt_file, temp_path, file_path, str(track_id)
+                    self._decrypt_file,
+                    temp_path,
+                    file_path,
+                    str(track_id),
                 )
 
                 if temp_path.exists():
@@ -505,12 +546,11 @@ class DeezerProvider(BaseProvider):
 
                 if success:
                     return {"file_path": str(file_path), "extension": file_extension}
-                else:
-                    if file_path.exists():
-                        file_path.unlink()
-                    logger.warning(
-                        "[deezer] Decryption failed for Antra. Falling back..."
-                    )
+                if file_path.exists():
+                    file_path.unlink()
+                logger.warning(
+                    "[deezer] Decryption failed for Antra. Falling back...",
+                )
 
             except Exception as exc:
                 logger.warning(
@@ -522,7 +562,6 @@ class DeezerProvider(BaseProvider):
 
         # 2. Fallback: s_deezer Server (Deemix API)
         s_deezer_url = get_deezer_endpoint("s_deezer")
-        print(f"[deezer] s_deezer endpoint: {s_deezer_url}")
         if s_deezer_url:
             logger.info("[deezer] Attempting direct download via s_deezer server...")
             try:
@@ -535,19 +574,20 @@ class DeezerProvider(BaseProvider):
                 file_path = out_dir_path / filename
 
                 await self._async_http.stream_to_file(
-                    stream_url, str(file_path), self._progress_cb
+                    stream_url,
+                    str(file_path),
+                    self._progress_cb,
                 )
 
                 # Verifica rapida che il file sia stato scaricato e non sia vuoto
                 if file_path.exists() and file_path.stat().st_size > 0:
                     logger.info("[deezer] s_deezer stream downloaded successfully.")
                     return {"file_path": str(file_path), "extension": file_extension}
-                else:
-                    logger.warning(
-                        "[deezer] s_deezer returned an empty file. Falling back to FlacDownloader..."
-                    )
-                    if file_path.exists():
-                        file_path.unlink()
+                logger.warning(
+                    "[deezer] s_deezer returned an empty file. Falling back to FlacDownloader...",
+                )
+                if file_path.exists():
+                    file_path.unlink()
 
             except Exception as exc:
                 logger.warning(
@@ -560,7 +600,10 @@ class DeezerProvider(BaseProvider):
         # 3. Fallback finale: FlacDownloader
         logger.info("[deezer] Trying FlacDownloader as final fallback...")
         return await self._download_via_flacdownloader_async(
-            str(track_id), meta["title"], meta["artist"], output_dir
+            str(track_id),
+            meta["title"],
+            meta["artist"],
+            output_dir,
         )
 
     # ------------------------------------------------------------------
@@ -580,10 +623,10 @@ class DeezerProvider(BaseProvider):
         first_artist_only: bool = False,
         allow_fallback: bool = True,
         embed_lyrics: bool = False,
-        lyrics_providers: Optional[List[str]] = None,
+        lyrics_providers: list[str] | None = None,
         enrich_metadata: bool = False,
-        enrich_providers: Optional[List[str]] = None,
-        qobuz_token: Optional[str] = None,
+        enrich_providers: list[str] | None = None,
+        qobuz_token: str | None = None,
         is_album: bool = False,
         **kwargs,
     ) -> DownloadResult:
@@ -601,7 +644,8 @@ class DeezerProvider(BaseProvider):
                 metadata.artists,
             )
             track = await self._search_track_text_async(
-                metadata.title, metadata.artists
+                metadata.title,
+                metadata.artists,
             )
 
         if not track:
@@ -613,7 +657,7 @@ class DeezerProvider(BaseProvider):
         isrc_to_use = track.get("isrc") or metadata.isrc
         if track.get("isrc") and track["isrc"] != metadata.isrc:
             try:
-                from ..core.isrc_utils import (
+                from SpotiFLAC.core.isrc_utils import (
                     confirm_isrc_with_qobuz_async,
                     normalize_isrc,
                 )
@@ -658,7 +702,7 @@ class DeezerProvider(BaseProvider):
             )
 
             try:
-                from ..core.console import print_source_banner
+                from SpotiFLAC.core.console import print_source_banner
 
                 print_source_banner("Deezer", "", "FLAC Best Available")
             except ImportError:
@@ -682,24 +726,25 @@ class DeezerProvider(BaseProvider):
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 await asyncio.to_thread(shutil.move, str(downloaded_path), str(dest))
 
-            from ..core.download_validation import validate_downloaded_track_async
+            from SpotiFLAC.core.download_validation import (
+                validate_downloaded_track_async,
+            )
 
             expected_s = metadata.duration_ms // 1000
             valid, err_msg = await validate_downloaded_track_async(
-                str(dest), expected_s
+                str(dest),
+                expected_s,
             )
             if not valid:
                 if mb_task and not mb_task.done():
                     mb_task.cancel()
                 if dest.exists():
-                    try:
+                    with contextlib.suppress(OSError):
                         dest.unlink()
-                    except OSError:
-                        pass
                 return DownloadResult.fail(self.name, f"Validation failed: {err_msg}")
 
             # Collect MusicBrainz result (should be ready by now)
-            mb_tags: Dict[str, str] = {}
+            mb_tags: dict[str, str] = {}
             if mb_task:
                 try:
                     res = await mb_task
@@ -723,18 +768,14 @@ class DeezerProvider(BaseProvider):
             return DownloadResult.ok(self.name, str(dest))
 
         except SpotiflacError as exc:
-            logger.error("[deezer] %s", exc)
+            logger.exception("[deezer] %s", exc)
             if "dest" in locals() and dest.exists():
-                try:
+                with contextlib.suppress(OSError):
                     dest.unlink()
-                except OSError:
-                    pass
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
             logger.exception("[deezer] Unexpected error in async download")
             if "dest" in locals() and dest.exists():
-                try:
+                with contextlib.suppress(OSError):
                     dest.unlink()
-                except OSError:
-                    pass
             return DownloadResult.fail(self.name, f"Unexpected: {exc}")

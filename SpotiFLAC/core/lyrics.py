@@ -7,11 +7,11 @@ import logging
 import re
 import unicodedata
 import urllib.parse
-
 from dataclasses import dataclass
 
+from SpotiFLAC.providers.amazon import get_amazon_endpoint
+
 from .http import NetworkManager
-from ..providers.amazon import get_amazon_endpoint
 
 
 @dataclass(slots=True)
@@ -100,7 +100,7 @@ _SPOTIFY_LYRICS = "https://spclient.wg.spotify.com/color-lyrics/v2/track"
 _PAXSENIX_APPLE = "https://lyrics.paxsenix.org/apple-music"
 _PAXSENIX_MXM = "https://lyrics.paxsenix.org/musixmatch"
 
-_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " "Chrome/145.0.0.0 Safari/537.36"
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0 Safari/537.36"
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +285,10 @@ def _score_apple_result(res: dict, t_name: str, a_name: str, duration_s: int) ->
 
 
 async def _fetch_apple_async(
-    track_name: str, artist_name: str, duration_s: int, timeout: int = 7
+    track_name: str,
+    artist_name: str,
+    duration_s: int,
+    timeout: int = 7,
 ) -> str:
     query = urllib.parse.quote(f"{track_name} {artist_name}")
     search_url = f"{_PAXSENIX_APPLE}/search?q={query}"
@@ -339,7 +342,10 @@ async def _fetch_apple_async(
 
 
 async def _fetch_musixmatch_async(
-    track_name: str, artist_name: str, duration_s: int, timeout: int = 7
+    track_name: str,
+    artist_name: str,
+    duration_s: int,
+    timeout: int = 7,
 ) -> str:
     import json as _json
 
@@ -436,7 +442,7 @@ async def _fetch_lrclib_async(
             artist_name,
             album_name,
             duration_s,
-        )
+        ),
     ]
 
     if album_name:
@@ -446,7 +452,7 @@ async def _fetch_lrclib_async(
                 artist_name,
                 "",
                 duration_s,
-            )
+            ),
         )
 
     results = await asyncio.gather(
@@ -570,7 +576,6 @@ async def fetch_lyrics_async(
 
     try:
         for task in asyncio.as_completed(tasks):
-
             lyrics, provider = await task
 
             if not lyrics:

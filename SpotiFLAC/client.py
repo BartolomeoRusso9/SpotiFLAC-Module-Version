@@ -1,18 +1,21 @@
-"""
-SpotiFLAC/client.py
-"""
+"""SpotiFLAC/client.py."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from types import TracebackType
-from typing import Optional, Type
+from typing import TYPE_CHECKING
+
+from typing_extensions import Self
 
 from .core.http import NetworkManager
-from .core.models import TrackMetadata
 from .downloader import DownloadOptions, SpotiflacDownloader
 from .providers.spotify_metadata import SpotifyMetadataClient, parse_spotify_url
+
+if TYPE_CHECKING:
+    from types import TracebackType
+
+    from .core.models import TrackMetadata
 
 logger = logging.getLogger("SpotiFLAC")
 
@@ -27,8 +30,7 @@ def _setup_logger(level: int) -> logging.Logger:
 
 
 class AsyncSpotiFLAC:
-    """
-    Client asincrono nativo per SpotiFLAC.
+    """Client asincrono nativo per SpotiFLAC.
 
     Uso consigliato (garantisce chiusura pulita delle risorse HTTP):
 
@@ -110,7 +112,7 @@ class AsyncSpotiFLAC:
     # Async context manager
     # ------------------------------------------------------------------
 
-    async def __aenter__(self) -> "AsyncSpotiFLAC":
+    async def __aenter__(self) -> Self:
         await NetworkManager.get_async_client_safe()
 
         if self._sync_extensions_on_enter:
@@ -126,9 +128,9 @@ class AsyncSpotiFLAC:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
     ) -> None:
         await self.aclose()
 
@@ -141,13 +143,19 @@ class AsyncSpotiFLAC:
     # ------------------------------------------------------------------
 
     async def download_track(
-        self, url: str, *, loop_minutes: int | None = None
+        self,
+        url: str,
+        *,
+        loop_minutes: int | None = None,
     ) -> list[TrackMetadata]:
         self._ensure_entered()
         return await self._downloader._run_once_async(url)
 
     async def download_batch(
-        self, urls: list[str], *, loop_minutes: int | None = None
+        self,
+        urls: list[str],
+        *,
+        loop_minutes: int | None = None,
     ) -> None:
         self._ensure_entered()
         await self._downloader.run_async(urls, loop_minutes=loop_minutes)
@@ -155,14 +163,14 @@ class AsyncSpotiFLAC:
     async def get_playlist(self, url: str) -> tuple[dict, list[TrackMetadata]]:
         self._ensure_entered()
         collection_name, tracks, info = await self._downloader._resolve_metadata_async(
-            url
+            url,
         )
         return {"name": collection_name, **info}, tracks
 
     async def get_track_metadata(self, url_or_id: str) -> TrackMetadata:
         self._ensure_entered()
         client = self._get_metadata_client()
-        if url_or_id.startswith("http") or url_or_id.startswith("spotify:"):
+        if url_or_id.startswith(("http", "spotify:")):
             info = parse_spotify_url(url_or_id)
             return await client.get_track_async(info["id"])
         return await client.get_track_async(url_or_id)
@@ -185,7 +193,7 @@ class AsyncSpotiFLAC:
         if not self._entered:
             self._logger.debug(
                 "[client] AsyncSpotiFLAC used outside of 'async with' — "
-                "resources will not be closed automatically."
+                "resources will not be closed automatically.",
             )
 
 
@@ -225,8 +233,7 @@ def SpotiFLAC(
     sync_extensions: bool = True,
     use_extensions_fallback: bool = True,
 ) -> None:
-    """
-    Wrapper SINCRONO retrocompatibile.
+    """Wrapper SINCRONO retrocompatibile.
 
     Firma e comportamento osservabile identici alla vecchia `SpotiFLAC()`:
     chi la chiama da codice sincrono non deve cambiare nulla. Internamente
@@ -272,9 +279,9 @@ def SpotiFLAC(
     try:
         asyncio.run(_run())
     except KeyboardInterrupt:
-        print("\n\n[!] Operation interrupted by user.")
+        pass
     except Exception as e:
-        logger.error("Critical error during execution: %s", e)
+        logger.exception("Critical error during execution: %s", e)
 
 
 __all__ = ["AsyncSpotiFLAC", "SpotiFLAC"]

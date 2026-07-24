@@ -1,21 +1,23 @@
-import os
-import re
-import json
-import time
-import hmac
-import hashlib
-import secrets
 import base64
-import threading
-import urllib.parse
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone, timedelta
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import queue
-import requests
+import contextlib
+import hashlib
+import hmac
+import json
 import logging
+import os
+import queue
+import re
+import secrets
+import threading
+import time
+import urllib.parse
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from ..core.endpoints import get_community_url
+import requests
+
+from SpotiFLAC.core.endpoints import get_community_url
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +84,7 @@ def ensure_app_dir() -> str:
     return app_dir
 
 
-def set_community_verification_handlers(open_browser_func, foreground_func):
+def set_community_verification_handlers(open_browser_func, foreground_func) -> None:
     global community_browser_open, community_window_foreground
     with community_browser_mu:
         community_browser_open = open_browser_func
@@ -106,7 +108,7 @@ def load_community_session() -> CommunitySessionRecord:
 
     if os.path.exists(path):
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
                 record = CommunitySessionRecord(**data)
         except Exception:
@@ -119,7 +121,7 @@ def load_community_session() -> CommunitySessionRecord:
     return record
 
 
-def save_community_session(record: CommunitySessionRecord):
+def save_community_session(record: CommunitySessionRecord) -> None:
     path = community_session_path()
     data = json.dumps(asdict(record), indent=2)
     temp_path = path + ".tmp"
@@ -162,7 +164,7 @@ def ensure_community_session() -> CommunitySessionRecord:
         return record
 
 
-def clear_community_session_credentials():
+def clear_community_session_credentials() -> None:
     with community_session_mu:
         try:
             record = load_community_session()
@@ -175,23 +177,21 @@ def clear_community_session_credentials():
 
 
 def _run_manual_terminal_verification(challenge_url: str) -> str:
-    """
-    Fallback da terminale (o Docker/Telegram).
+    """Fallback da terminale (o Docker/Telegram).
     Mostra l'URL e attende l'input dell'utente su sys.stdin.
     """
-    print(
-        f"\n[SpotiFLAC] Verification required — open this link in the browser:\n  {challenge_url}\n"
-    )
     try:
         grant = input(
-            "Incolla qui il grant (da DevTools → Network → verify → Preview → field 'grant'): "
+            "Incolla qui il grant (da DevTools → Network → verify → Preview → field 'grant'): ",
         )
         grant = grant.strip()
         if not grant:
-            raise RuntimeError("No grant provided.")
+            msg = "No grant provided."
+            raise RuntimeError(msg)
         return grant
     except EOFError:
-        raise Exception("verification cancelled (EOF)")
+        msg = "verification cancelled (EOF)"
+        raise Exception(msg)
 
 
 def run_community_verification(record: CommunitySessionRecord) -> str:
@@ -199,7 +199,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
     callback_state = community_random_hex(16)
 
     class CallbackHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def do_GET(self) -> None:
             parsed_path = urllib.parse.urlparse(self.path)
             if parsed_path.path != "/session-grant":
                 self.send_error(404)
@@ -226,17 +226,15 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verified</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:#000;background-image:radial-gradient(circle,rgba(255,255,255,.2) 1.5px,transparent 1.5px);background-size:30px 30px;color:#f5f5f5;font:14px/1.5 Inter,sans-serif}main{text-align:center}.icon{width:48px;height:48px;margin:0 auto 20px;display:grid;place-items:center;border-radius:50%;background:#fff;color:#000;font-size:22px}h1{margin:0 0 6px;font-size:24px;letter-spacing:-.035em}p{margin:0;color:#888}</style></head><body><main><div class="icon">&#10003;</div><h1>Verified</h1><p>Returning to SpotiFLAC...</p></main><script>setTimeout(()=>window.close(),700)</script></body></html>'
             self.wfile.write(html.encode("utf-8"))
 
-            try:
+            with contextlib.suppress(queue.Full):
                 grant_queue.put_nowait(grant)
-            except queue.Full:
-                pass
 
             with community_browser_mu:
                 foreground = community_window_foreground
             if foreground:
                 foreground()
 
-        def log_message(self, format, *args):
+        def log_message(self, format, *args) -> None:
             pass  # Disabilita i log standard del server HTTP
 
     # Avvia il server su una porta casuale libera
@@ -250,7 +248,8 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
     try:
         verify_base_url = get_community_url("verify")
         if not verify_base_url:
-            raise Exception("verification endpoint is unavailable")
+            msg = "verification endpoint is unavailable"
+            raise Exception(msg)
 
         # 1. Bootstrap
         bootstrap_url = f"{verify_base_url}/bootstrap"
@@ -262,13 +261,15 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
 
         resp = requests.get(bootstrap_url, params=params, timeout=15)
         if resp.status_code != 200:
-            raise Exception(f"verification bootstrap returned HTTP {resp.status_code}")
+            msg = f"verification bootstrap returned HTTP {resp.status_code}"
+            raise Exception(msg)
 
         result = resp.json()
         challenge_url_str = result.get("challenge_url")
 
         if not challenge_url_str or not challenge_url_str.startswith("https://"):
-            raise Exception("verification service returned an invalid challenge URL")
+            msg = "verification service returned an invalid challenge URL"
+            raise Exception(msg)
 
         # Aggiungiamo il callback URL al challenge URL
         parsed_challenge = urllib.parse.urlparse(challenge_url_str)
@@ -277,7 +278,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
 
         new_query = urllib.parse.urlencode(challenge_qs, doseq=True)
         final_challenge_url = urllib.parse.urlunparse(
-            parsed_challenge._replace(query=new_query)
+            parsed_challenge._replace(query=new_query),
         )
 
         # === MODO 1: GUI Integrata (Se configurata tramite la UI di SpotiFLAC) ===
@@ -287,16 +288,16 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
         if open_browser:
             open_browser(final_challenge_url)
             try:
-                grant = grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
-                return grant
+                return grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
             except queue.Empty:
-                raise Exception("verification timed out (GUI browser)")
+                msg = "verification timed out (GUI browser)"
+                raise Exception(msg)
 
         # === MODO 2: Automazione via solver.py (Playwright/Selenium) ===
         if not is_docker():
             logger.info("Attempting automated verification via solver.py...")
             try:
-                from ..core.solver import solve_with_callback
+                from SpotiFLAC.core.solver import solve_with_callback
 
                 # Prova ad estrarre la sitekey se esposta nella pagina HTML
                 sitekey = ""
@@ -314,16 +315,18 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                     pass
 
                 # Invoca il solver (sincrono)
-                token, grant = solve_with_callback(
-                    sitekey, final_challenge_url, 60, 3.0
+                _token, grant = solve_with_callback(
+                    sitekey,
+                    final_challenge_url,
+                    60,
+                    3.0,
                 )
                 if grant:
                     logger.info("Automated verification successful!")
                     return grant
-                else:
-                    logger.warning(
-                        "Solver finished but no grant was found in network traffic."
-                    )
+                logger.warning(
+                    "Solver finished but no grant was found in network traffic.",
+                )
 
             except ImportError:
                 logger.info("solver.py not found or Playwright dependencies missing.")
@@ -341,7 +344,8 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
 
 
 def exchange_community_grant(
-    record: CommunitySessionRecord, grant: str
+    record: CommunitySessionRecord,
+    grant: str,
 ) -> CommunitySessionExchange:
     payload = {
         "grant": grant,
@@ -352,13 +356,15 @@ def exchange_community_grant(
 
     verify_base_url = get_community_url("verify")
     if not verify_base_url:
-        raise Exception("verification endpoint is unavailable")
+        msg = "verification endpoint is unavailable"
+        raise Exception(msg)
 
     url = f"{verify_base_url}/session/exchange"
     resp = requests.post(url, json=payload, timeout=15)
 
     if resp.status_code != 200:
-        raise Exception(f"session exchange returned HTTP {resp.status_code}")
+        msg = f"session exchange returned HTTP {resp.status_code}"
+        raise Exception(msg)
 
     data = resp.json()
     if (
@@ -366,28 +372,31 @@ def exchange_community_grant(
         or not data.get("session_secret")
         or not data.get("expires_at")
     ):
-        raise Exception("session exchange response is incomplete")
+        msg = "session exchange response is incomplete"
+        raise Exception(msg)
 
     return CommunitySessionExchange(**data)
 
 
 def sign_community_request(
-    method: str, url: str, body: bytes, record: CommunitySessionRecord
+    method: str,
+    url: str,
+    body: bytes,
+    record: CommunitySessionRecord,
 ) -> dict:
-    """
-    Ritorna un dizionario di header da aggiungere alla richiesta.
+    """Ritorna un dizionario di header da aggiungere alla richiesta.
     (Non modifica un oggetto http.Request in-place come in Go, ma restituisce gli header).
     """
-    body_hash = hashlib.sha256(body if body else b"").hexdigest()
+    body_hash = hashlib.sha256(body or b"").hexdigest()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     nonce = community_random_hex(12)
 
     parsed_timestamp = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%S.000Z").replace(
-        tzinfo=timezone.utc
+        tzinfo=timezone.utc,
     )
     window = int(parsed_timestamp.timestamp()) // 300
 
-    rolling_input = f"{window}:{record.session_id}".encode("utf-8")
+    rolling_input = f"{window}:{record.session_id}".encode()
     rolling_key = community_hmac(record.session_secret.encode("utf-8"), rolling_input)
 
     parsed_url = urllib.parse.urlparse(url)

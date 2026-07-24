@@ -1,12 +1,12 @@
 # flac_validation.py
-"""
-FLAC file validation and repair utilities.
+"""FLAC file validation and repair utilities.
 Detects and fixes corrupted FLAC files, especially those from Amazon provider
 with FLAC__STREAM_DECODER_ERROR_STATUS_LOST_SYNC issues.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import shutil
@@ -24,8 +24,7 @@ def _ffprobe_path() -> str:
 
 
 def validate_flac_file(filepath: str) -> tuple[bool, str]:
-    """
-    Validates a FLAC file by checking its integrity.
+    """Validates a FLAC file by checking its integrity.
     Returns (is_valid, error_message).
 
     Uses ffmpeg to validate the FLAC stream can be decoded.
@@ -76,9 +75,11 @@ def validate_flac_file(filepath: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
-def repair_flac_file(input_path: str, output_path: str = None) -> tuple[bool, str]:
-    """
-    Attempts to repair a corrupted FLAC file by re-encoding it with ffmpeg.
+def repair_flac_file(
+    input_path: str,
+    output_path: str | None = None,
+) -> tuple[bool, str]:
+    """Attempts to repair a corrupted FLAC file by re-encoding it with ffmpeg.
 
     Args:
         input_path: Path to corrupted FLAC file
@@ -86,6 +87,7 @@ def repair_flac_file(input_path: str, output_path: str = None) -> tuple[bool, st
 
     Returns:
         (success, message)
+
     """
     if not os.path.exists(input_path):
         return False, "Input file does not exist"
@@ -145,7 +147,8 @@ def repair_flac_file(input_path: str, output_path: str = None) -> tuple[bool, st
                 os.remove(input_path)
                 os.rename(output_path, input_path)
                 logger.info(
-                    "[flac_validation] FLAC file successfully repaired: %s", input_path
+                    "[flac_validation] FLAC file successfully repaired: %s",
+                    input_path,
                 )
                 return True, "File repaired successfully"
             except OSError as exc:
@@ -153,7 +156,8 @@ def repair_flac_file(input_path: str, output_path: str = None) -> tuple[bool, st
                 return False, f"Failed to replace original: {exc}"
 
         logger.info(
-            "[flac_validation] FLAC file successfully repaired: %s", output_path
+            "[flac_validation] FLAC file successfully repaired: %s",
+            output_path,
         )
         return True, "File repaired successfully"
 
@@ -164,19 +168,17 @@ def repair_flac_file(input_path: str, output_path: str = None) -> tuple[bool, st
     except Exception as exc:
         logger.warning("[flac_validation] Repair error: %s", exc)
         if os.path.exists(output_path):
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(output_path)
-            except OSError:
-                pass
         return False, str(exc)
 
 
 def validate_and_repair_if_needed(filepath: str) -> tuple[bool, str]:
-    """
-    Validates a FLAC file and automatically repairs it if corrupted.
+    """Validates a FLAC file and automatically repairs it if corrupted.
 
     Returns:
         (success, message)
+
     """
     if not filepath.lower().endswith(".flac"):
         return True, ""
@@ -187,7 +189,8 @@ def validate_and_repair_if_needed(filepath: str) -> tuple[bool, str]:
         return True, ""
 
     logger.warning(
-        "[flac_validation] FLAC file is corrupted, attempting repair: %s", error_msg
+        "[flac_validation] FLAC file is corrupted, attempting repair: %s",
+        error_msg,
     )
 
     # Try to repair

@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from ..core.endpoints import get_soundcloud_cobalt
-from ..core.errors import AuthError
-from ..core.http import AsyncHttpClient
-from ..core.link_resolver import LinkResolver
-from ..core.models import DownloadResult, TrackMetadata, build_filename
-from ..core.tagger import EmbedOptions, embed_metadata_async
+from SpotiFLAC.core.endpoints import get_soundcloud_cobalt
+from SpotiFLAC.core.errors import AuthError
+from SpotiFLAC.core.http import AsyncHttpClient
+from SpotiFLAC.core.link_resolver import LinkResolver
+from SpotiFLAC.core.models import DownloadResult, TrackMetadata, build_filename
+from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
+
 from .base import BaseProvider
 
 logger = logging.getLogger(__name__)
@@ -34,17 +35,18 @@ class SoundCloudProvider(BaseProvider):
     _REGEX_CLIENT_ID = re.compile(r'client_id[:=]["\']([a-zA-Z0-9]{32})["\']')
     _REGEX_CLIENT_ID_INLINE = re.compile(r'\("client_id=([a-zA-Z0-9]{32})"\)')
     _REGEX_JS_BUNDLE = re.compile(
-        r'src=["\'](https://[^"\']*sndcdn\.com[^"\']*\.js)["\']'
+        r'src=["\'](https://[^"\']*sndcdn\.com[^"\']*\.js)["\']',
     )
     _REGEX_OG_URL = re.compile(
         r'<meta[^>]*property=["\']og:url["\'][^>]*content=["\']([^"\']+)["\']',
         re.IGNORECASE,
     )
     _REGEX_CANONICAL_URL = re.compile(
-        r'<link[^>]*rel=["\']canonical["\'][^>]*href=["\']([^"\']+)["\']', re.IGNORECASE
+        r'<link[^>]*rel=["\']canonical["\'][^>]*href=["\']([^"\']+)["\']',
+        re.IGNORECASE,
     )
 
-    def __init__(self, timeout_s: int = 120):
+    def __init__(self, timeout_s: int = 120) -> None:
         super().__init__(timeout_s=timeout_s)
         self.provider_id = "soundcloud"
         self.api_url = "https://api-v2.soundcloud.com"
@@ -57,7 +59,7 @@ class SoundCloudProvider(BaseProvider):
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/120.0.0.0 Safari/537.36"
-            )
+            ),
         }
         self._async_http._headers.update(self._headers)
 
@@ -76,8 +78,9 @@ class SoundCloudProvider(BaseProvider):
                 timeout=15.0,
             )
         except Exception as exc:
+            msg = f"Network/HTTP error fetching soundcloud.com: {exc}"
             raise ValueError(
-                f"Network/HTTP error fetching soundcloud.com: {exc}"
+                msg,
             ) from exc
 
         body = resp.text
@@ -100,7 +103,7 @@ class SoundCloudProvider(BaseProvider):
                 js_resp = await self._async_http.get(url, headers=headers, timeout=5.0)
                 js_body = js_resp.text
                 cm = self._REGEX_CLIENT_ID.search(
-                    js_body
+                    js_body,
                 ) or self._REGEX_CLIENT_ID_INLINE.search(js_body)
                 if not cm:
                     idx = js_body.find("client_id=")
@@ -113,7 +116,8 @@ class SoundCloudProvider(BaseProvider):
             except Exception as e:
                 logger.debug("[SC] Bundle fetch failed for %s: %s", url, e)
 
-        raise ValueError("Could not find SoundCloud client_id")
+        msg = "Could not find SoundCloud client_id"
+        raise ValueError(msg)
 
     async def _ensure_client_id_async(self) -> None:
         loop_time = asyncio.get_event_loop().time()
@@ -122,10 +126,11 @@ class SoundCloudProvider(BaseProvider):
             self.client_id_expiry = asyncio.get_event_loop().time() + self.CLIENT_ID_TTL
 
     async def _api_get_async(
-        self, endpoint: str, params: dict[str, Any] | None = None
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
     ) -> Any:
-        """
-        GET su un endpoint nominale (es. "tracks/123"), client_id iniettato
+        """GET su un endpoint nominale (es. "tracks/123"), client_id iniettato
         automaticamente.  Gestisce il refresh del client_id su AuthError (401/403).
         """
         await self._ensure_client_id_async()
@@ -135,7 +140,10 @@ class SoundCloudProvider(BaseProvider):
 
         try:
             resp = await self._async_http.get(
-                url, params=params, headers=headers, timeout=15.0
+                url,
+                params=params,
+                headers=headers,
+                timeout=15.0,
             )
         except AuthError:
             # _raise_for_status converte 401/403 → AuthError; qui lo gestiamo con refresh
@@ -144,14 +152,16 @@ class SoundCloudProvider(BaseProvider):
             await self._ensure_client_id_async()
             params["client_id"] = self.client_id
             resp = await self._async_http.get(
-                url, params=params, headers=headers, timeout=15.0
+                url,
+                params=params,
+                headers=headers,
+                timeout=15.0,
             )
 
         return resp.json()
 
     async def _api_get_url_async(self, full_url: str) -> Any:
-        """
-        GET on a full URL (e.g. pagination next_href).
+        """GET on a full URL (e.g. pagination next_href).
         Injects client_id if missing and handles refresh on AuthError.
         """
         await self._ensure_client_id_async()
@@ -169,7 +179,9 @@ class SoundCloudProvider(BaseProvider):
             self.client_id = None
             await self._ensure_client_id_async()
             full_url = re.sub(
-                r"client_id=[^&]+", f"client_id={self.client_id}", full_url
+                r"client_id=[^&]+",
+                f"client_id={self.client_id}",
+                full_url,
             )
             resp = await self._async_http.get(full_url, headers=headers, timeout=15.0)
 
@@ -193,7 +205,7 @@ class SoundCloudProvider(BaseProvider):
             pub.get("artist") or data.get("metadata_artist") or user.get("username", "")
         )
         cover_url = self._get_hires_artwork(
-            data.get("artwork_url")
+            data.get("artwork_url"),
         ) or self._get_hires_artwork(user.get("avatar_url"))
         return {
             "id": str(data["id"]),
@@ -209,15 +221,19 @@ class SoundCloudProvider(BaseProvider):
 
     def _clean_url(self, url: str) -> str:
         url = re.sub(
-            r"^https?://m\.soundcloud\.com", "https://soundcloud.com", url.strip()
+            r"^https?://m\.soundcloud\.com",
+            "https://soundcloud.com",
+            url.strip(),
         )
         parsed = urlsplit(url)
         return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")).rstrip(
-            "/"
+            "/",
         )
 
     def _pick_best_transcoding(
-        self, transcodings: list[dict[str, Any]], prefer_format: str
+        self,
+        transcodings: list[dict[str, Any]],
+        prefer_format: str,
     ) -> dict[str, Any] | None:
         best, best_score = None, -1
         for t in transcodings:
@@ -230,9 +246,9 @@ class SoundCloudProvider(BaseProvider):
                 score += 50
             elif protocol == "hls":
                 score += 10
-            if prefer_format == "mp3" and ("mpeg" in mime or "mp3" in mime):
-                score += 30
-            elif prefer_format == "opus" and "opus" in mime:
+            if (prefer_format == "mp3" and ("mpeg" in mime or "mp3" in mime)) or (
+                prefer_format == "opus" and "opus" in mime
+            ):
                 score += 30
             elif prefer_format == "ogg" and "ogg" in mime:
                 score += 20
@@ -306,9 +322,10 @@ class SoundCloudProvider(BaseProvider):
             return False
         size = await asyncio.to_thread(lambda: path.stat().st_size)
         if size > 0:
-            print(f"Skip (already existing): {path.name}")
             logger.debug(
-                "File already exists: %s (%.2f MB)", path.name, size / (1024 * 1024)
+                "File already exists: %s (%.2f MB)",
+                path.name,
+                size / (1024 * 1024),
             )
             return True
         return False
@@ -348,7 +365,8 @@ class SoundCloudProvider(BaseProvider):
 
     async def get_playlist_or_album_async(self, playlist_id: str) -> dict[str, Any]:
         data = await self._api_get_async(
-            f"playlists/{playlist_id}", {"representation": "full"}
+            f"playlists/{playlist_id}",
+            {"representation": "full"},
         )
         tracks, need_full_fetch = [], []
 
@@ -385,10 +403,14 @@ class SoundCloudProvider(BaseProvider):
         }
 
     async def search_async(
-        self, query: str, search_type: str = "tracks", limit: int = 20
+        self,
+        query: str,
+        search_type: str = "tracks",
+        limit: int = 20,
     ) -> list[dict[str, Any]]:
         data = await self._api_get_async(
-            f"search/{search_type}", {"q": query, "limit": limit, "access": "playable"}
+            f"search/{search_type}",
+            {"q": query, "limit": limit, "access": "playable"},
         )
         items = (
             data.get("collection", [])
@@ -407,7 +429,9 @@ class SoundCloudProvider(BaseProvider):
     # ==========================================
 
     def _track_data_to_metadata(
-        self, data: dict[str, Any], external_url: str = ""
+        self,
+        data: dict[str, Any],
+        external_url: str = "",
     ) -> TrackMetadata:
         user = data.get("user") or {}
         pub = data.get("publisher_metadata") or {}
@@ -439,7 +463,8 @@ class SoundCloudProvider(BaseProvider):
         )
 
     async def _fetch_full_tracks_async(
-        self, track_ids: list[str]
+        self,
+        track_ids: list[str],
     ) -> list[dict[str, Any]]:
         results = []
         for i in range(0, len(track_ids), self.BATCH_SIZE):
@@ -453,7 +478,8 @@ class SoundCloudProvider(BaseProvider):
         return results
 
     async def _playlist_data_to_metadata_list_async(
-        self, data: dict[str, Any]
+        self,
+        data: dict[str, Any],
     ) -> list[TrackMetadata]:
         tracks_raw = data.get("tracks", [])
         playlist_cover = self._get_hires_artwork(data.get("artwork_url", ""))
@@ -486,8 +512,7 @@ class SoundCloudProvider(BaseProvider):
         return ordered
 
     async def _get_user_tracks_list_async(self, user_id: int) -> list[TrackMetadata]:
-        """
-        Pagina i brani di un utente usando _api_get_async per la prima pagina
+        """Pagina i brani di un utente usando _api_get_async per la prima pagina
         e _api_get_url_async per le successive (next_href), garantendo auth
         refresh e rate-limiting uniformi su tutto il ciclo.
         """
@@ -534,19 +559,23 @@ class SoundCloudProvider(BaseProvider):
             return meta.title, [meta]
         if kind == "playlist":
             return data.get(
-                "title", "Unknown Playlist"
+                "title",
+                "Unknown Playlist",
             ), await self._playlist_data_to_metadata_list_async(data)
         if kind == "user":
             return data.get(
-                "username", "Unknown Artist"
+                "username",
+                "Unknown Artist",
             ), await self._get_user_tracks_list_async(data.get("id"))
 
-        raise ValueError(f"SoundCloud URL type not supported: {kind}")
+        msg = f"SoundCloud URL type not supported: {kind}"
+        raise ValueError(msg)
 
     async def get_metadata_from_url_async(self, url: str) -> TrackMetadata:
         _, tracks = await self.get_url_async(url)
         if not tracks:
-            raise ValueError(f"No tracks found for: {url}")
+            msg = f"No tracks found for: {url}"
+            raise ValueError(msg)
         return tracks[0]
 
     # ==========================================
@@ -577,7 +606,7 @@ class SoundCloudProvider(BaseProvider):
                                     "track_authorization": track_auth,
                                 },
                                 headers={
-                                    "User-Agent": self._headers.get("User-Agent", "")
+                                    "User-Agent": self._headers.get("User-Agent", ""),
                                 },
                                 timeout=15.0,
                             )
@@ -603,7 +632,8 @@ class SoundCloudProvider(BaseProvider):
                     headers={
                         "Accept": "application/json",
                         "User-Agent": self._headers.get(
-                            "User-Agent", "SpotiFLAC-Mobile/4.5.0"
+                            "User-Agent",
+                            "SpotiFLAC-Mobile/4.5.0",
                         ),
                     },
                     timeout=15.0,
@@ -688,7 +718,7 @@ class SoundCloudProvider(BaseProvider):
                         )
                     else:
                         logger.warning(
-                            "[SC] No suitable fallback track found matching criteria."
+                            "[SC] No suitable fallback track found matching criteria.",
                         )
                 except Exception as e:
                     logger.warning("[SC] Fallback search failed: %s", e)
@@ -720,14 +750,15 @@ class SoundCloudProvider(BaseProvider):
         except Exception as e:
             if "DownloadSuccessfullyStarted" in str(e):
                 raise
-            logger.error("[SC] Download failed: %s", e)
+            logger.exception("[SC] Download failed: %s", e)
             if await asyncio.to_thread(dest.exists):
                 await asyncio.to_thread(dest.unlink, missing_ok=True)
             return DownloadResult.fail(self.name, str(e))
 
         try:
             qobuz_token = kwargs.get("qobuz_token", "") or os.environ.get(
-                "QOBUZ_AUTH_TOKEN", ""
+                "QOBUZ_AUTH_TOKEN",
+                "",
             )
             effective_providers = [
                 p for p in (lyrics_providers or []) if p != "spotify"
@@ -745,7 +776,8 @@ class SoundCloudProvider(BaseProvider):
             await embed_metadata_async(str(dest), metadata, opts)
         except Exception as exc:
             logger.warning(
-                "[SC] embed_metadata failed (file salvato senza tag): %s", exc
+                "[SC] embed_metadata failed (file salvato senza tag): %s",
+                exc,
             )
 
         logger.info("[SC] Completed: %s", dest.name)

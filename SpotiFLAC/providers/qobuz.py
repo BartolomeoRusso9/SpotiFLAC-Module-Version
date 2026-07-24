@@ -16,37 +16,34 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
-from ..core.console import print_api_failure, print_source_banner
-from ..core.download_validation import validate_downloaded_track_async
-from ..core.endpoints import get_qobuz_endpoints
-from ..core.errors import (
+from SpotiFLAC.core.console import print_api_failure, print_source_banner
+from SpotiFLAC.core.download_validation import validate_downloaded_track_async
+from SpotiFLAC.core.endpoints import get_qobuz_endpoints
+from SpotiFLAC.core.errors import (
     ErrorKind,
     NetworkError,
     ParseError,
     SpotiflacError,
     TrackNotFoundError,
 )
-from ..core.http import (
-    AsyncHttpClient,
-    NetworkManager,
-    RetryConfig,
-)
-from ..core.models import DownloadResult, TrackMetadata
-from ..core.musicbrainz import fetch_mb_metadata_async, mb_result_to_tags
-from ..core.provider_stats import (
+from SpotiFLAC.core.http import AsyncHttpClient, NetworkManager, RetryConfig
+from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from SpotiFLAC.core.musicbrainz import fetch_mb_metadata_async, mb_result_to_tags
+from SpotiFLAC.core.provider_stats import (
     prioritize_providers_async,
     record_failure_async,
     record_success_async,
 )
-from ..core.quality import map_musicdl_quality
-from ..core.tagger import EmbedOptions, _print_mb_summary, embed_metadata_async
-from .base import BaseProvider
+from SpotiFLAC.core.quality import map_musicdl_quality
 
 # Importiamo la logica di firma e validazione sessione per la Community
-from ..core.signed_session_desktop import (
+from SpotiFLAC.core.signed_session_desktop import (
     ensure_community_session,
     sign_community_request,
 )
+from SpotiFLAC.core.tagger import EmbedOptions, _print_mb_summary, embed_metadata_async
+
+from .base import BaseProvider
 
 logger = logging.getLogger(__name__)
 
@@ -80,14 +77,17 @@ _CREDS_TTL = 24 * 3600
 _PROBE_ISRC = "USUM71703861"
 _OPEN_URL = "https://open.qobuz.com/track/"
 _CREDS_CACHE_FILE = os.path.join(
-    os.path.expanduser("~"), ".cache", "spotiflac", "qobuz-credentials.json"
+    os.path.expanduser("~"),
+    ".cache",
+    "spotiflac",
+    "qobuz-credentials.json",
 )
 
 _BUNDLE_RE = re.compile(
-    r'<script[^>]+src="([^"]+/js/main\.js|/resources/[^"]+/js/main\.js)"'
+    r'<script[^>]+src="([^"]+/js/main\.js|/resources/[^"]+/js/main\.js)"',
 )
 _API_CONFIG_RE = re.compile(
-    r'app_id:"(?P<app_id>\d{9})",app_secret:"(?P<app_secret>[a-f0-9]{32})"'
+    r'app_id:"(?P<app_id>\d{9})",app_secret:"(?P<app_secret>[a-f0-9]{32})"',
 )
 _IMAGE_SIZE_RE = re.compile(r"_\d+\.jpg$")
 
@@ -100,7 +100,9 @@ _flacdownloader_raw = get_qobuz_endpoints("flacdownloader")
 _FLACDOWNLOADER_APIS: list[str] = (
     [_flacdownloader_raw]
     if isinstance(_flacdownloader_raw, str) and _flacdownloader_raw
-    else list(_flacdownloader_raw) if isinstance(_flacdownloader_raw, list) else []
+    else list(_flacdownloader_raw)
+    if isinstance(_flacdownloader_raw, list)
+    else []
 )
 
 _COMMUNITY_APIS: list[str] = []
@@ -191,7 +193,7 @@ def _score_track_candidate(query: str, track: dict) -> int:
 
     score = 0
 
-    if query_norm == title_norm or query_norm == display_norm:
+    if query_norm in (title_norm, display_norm):
         score += 1200
     elif (title_norm and query_norm in title_norm) or (
         display_norm and query_norm in display_norm
@@ -241,7 +243,7 @@ class QobuzCredentials:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "QobuzCredentials":
+    def from_dict(cls, d: dict) -> QobuzCredentials:
         token = d.get("user_auth_token") or os.environ.get("QOBUZ_AUTH_TOKEN")
         return cls(
             app_id=d.get("app_id", ""),
@@ -252,7 +254,7 @@ class QobuzCredentials:
         )
 
     @classmethod
-    def default(cls) -> "QobuzCredentials":
+    def default(cls) -> QobuzCredentials:
         return cls(
             app_id=_DEFAULT_APP_ID,
             app_secret=_DEFAULT_APP_SECRET,
@@ -263,7 +265,7 @@ class QobuzCredentials:
 
 def _load_cached_credentials() -> QobuzCredentials | None:
     try:
-        with open(_CREDS_CACHE_FILE, "r", encoding="utf-8") as f:
+        with open(_CREDS_CACHE_FILE, encoding="utf-8") as f:
             return QobuzCredentials.from_dict(json.load(f))
     except FileNotFoundError:
         return None
@@ -302,7 +304,8 @@ async def _scrape_credentials_async() -> QobuzCredentials:
 
     m = _BUNDLE_RE.search(resp.text)
     if not m:
-        raise RuntimeError("Qobuz bundle URL not found in HTML")
+        msg = "Qobuz bundle URL not found in HTML"
+        raise RuntimeError(msg)
 
     bundle_url = m.group(1)
     if bundle_url.startswith("/"):
@@ -313,7 +316,8 @@ async def _scrape_credentials_async() -> QobuzCredentials:
 
     cm = _API_CONFIG_RE.search(bundle.text)
     if not cm:
-        raise RuntimeError("app_id/app_secret not found in Qobuz bundle")
+        msg = "app_id/app_secret not found in Qobuz bundle"
+        raise RuntimeError(msg)
 
     return QobuzCredentials(
         app_id=cm.group("app_id"),
@@ -355,9 +359,9 @@ def _map_musicdl_quality(quality: str) -> str:
 def _map_local_api_quality(quality: str) -> str:
     if quality in ("27", "DOLBY_ATMOS", "HI_RES_LOSSLESS", "DEFAULT"):
         return "hi96"
-    elif quality in ("7", "HI_RES"):
+    if quality in ("7", "HI_RES"):
         return "hi24"
-    elif quality == "5":
+    if quality == "5":
         return "mp3"
     return "flac"
 
@@ -460,7 +464,10 @@ class QobuzProvider(BaseProvider):
         self._local_api_url = local_api_url or os.environ.get("QOBUZ_LOCAL_API_URL")
 
     async def _async_raw_request(
-        self, method: str, url: str, **kwargs: Any
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
     ) -> httpx.Response:
         client = await self._async_http._client()
         # Extract user-provided headers and timeout to avoid duplicates
@@ -476,7 +483,8 @@ class QobuzProvider(BaseProvider):
         )
 
     async def _get_credentials_async(
-        self, force_refresh: bool = False
+        self,
+        force_refresh: bool = False,
     ) -> QobuzCredentials:
         async with self._creds_lock:
             if not force_refresh and self._creds and self._creds.is_fresh():
@@ -551,7 +559,10 @@ class QobuzProvider(BaseProvider):
             headers["X-User-Auth-Token"] = creds.user_auth_token
 
         resp = await self._async_raw_request(
-            "GET", url, params=req_params, headers=headers
+            "GET",
+            url,
+            params=req_params,
+            headers=headers,
         )
 
         if resp.status_code in (400, 401) and _depth < 2:
@@ -601,13 +612,16 @@ class QobuzProvider(BaseProvider):
 
         resp = await client.get(f"{origin}/prepare", headers=headers, timeout=timeout_s)
         if resp.status_code == 429:
-            raise RuntimeError("rate limited (HTTP 429) su /prepare")
+            msg = "rate limited (HTTP 429) su /prepare"
+            raise RuntimeError(msg)
         if resp.status_code != 200:
-            raise RuntimeError(f"HTTP {resp.status_code} su /prepare (fd)")
+            msg = f"HTTP {resp.status_code} su /prepare (fd)"
+            raise RuntimeError(msg)
 
         t_token = resp.json().get("t")
         if not t_token:
-            raise RuntimeError("fd /prepare: nessun token 't'")
+            msg = "fd /prepare: nessun token 't'"
+            raise RuntimeError(msg)
 
         with _fd_token_lock:
             _fd_token_cache[origin] = (t_token, now)
@@ -683,7 +697,9 @@ class QobuzProvider(BaseProvider):
                     br = (
                         "999"
                         if quality in ("27", "7")
-                        else "740" if quality in ("", "6") else "320"
+                        else "740"
+                        if quality in ("", "6")
+                        else "320"
                     )
                     payload = {
                         "types": "url",
@@ -712,7 +728,10 @@ class QobuzProvider(BaseProvider):
                     wjhe_f = "flac"
                     url = f"{api_base}?ID={track_id}&quality={wjhe_q}&format={wjhe_f}"
                     resp = await client.get(
-                        url, headers=headers, timeout=timeout_s, follow_redirects=False
+                        url,
+                        headers=headers,
+                        timeout=timeout_s,
+                        follow_redirects=False,
                     )
                     if resp.status_code in (301, 302, 303, 307, 308):
                         loc = resp.headers.get("Location")
@@ -732,7 +751,10 @@ class QobuzProvider(BaseProvider):
                     }
                     # Fetch token using the prepare headers
                     t_token = await self._get_fd_token_async(
-                        client, base_origin, prepare_headers, timeout_s
+                        client,
+                        base_origin,
+                        prepare_headers,
+                        timeout_s,
                     )
                     fd_headers = {
                         "Accept": "application/json",
@@ -765,7 +787,10 @@ class QobuzProvider(BaseProvider):
                     # The endpoint only allows GET/OPTIONS/HEAD (HTTP 405 on POST):
                     # send the payload as query params via GET, not a JSON body.
                     resp = await client.get(
-                        fd_url, params=params_fd, headers=fd_headers, timeout=timeout_s
+                        fd_url,
+                        params=params_fd,
+                        headers=fd_headers,
+                        timeout=timeout_s,
                     )
 
                 elif is_squid:
@@ -797,8 +822,9 @@ class QobuzProvider(BaseProvider):
                     cost = params.get("cost", 1)
                     key_length = params.get("keyLength", 32)
                     if algorithm != "SHA-256":
+                        msg = f"Algoritmo ALTCHA non supportato: {algorithm}"
                         raise ValueError(
-                            f"Algoritmo ALTCHA non supportato: {algorithm}"
+                            msg,
                         )
                     bytes.fromhex(salt_hex) if salt_hex else b""
                     nonce_bytes = bytes.fromhex(nonce_hex)
@@ -808,7 +834,7 @@ class QobuzProvider(BaseProvider):
                     while True:
                         password = nonce_bytes + struct.pack(">I", counter)
                         data = password
-                        for i in range(cost):
+                        for _i in range(cost):
                             data = hashlib.sha256(data).digest()
                         derived = data[:key_length]
                         hex_digest = derived.hex()
@@ -885,7 +911,8 @@ class QobuzProvider(BaseProvider):
                         try:
                             record = await asyncio.to_thread(ensure_community_session)
                             body_bytes = json.dumps(
-                                payload, separators=(",", ":")
+                                payload,
+                                separators=(",", ":"),
                             ).encode("utf-8")
                             sig_headers = await asyncio.to_thread(
                                 sign_community_request,
@@ -896,7 +923,7 @@ class QobuzProvider(BaseProvider):
                             )
                             post_headers.update(sig_headers)
                         except Exception as e:
-                            logger.error(
+                            logger.exception(
                                 "[qobuz] Fallimento nella firma della richiesta community: %s",
                                 e,
                             )
@@ -904,7 +931,10 @@ class QobuzProvider(BaseProvider):
 
                     # Attempt request, refresh credentials and retry once on 400/401
                     resp = await client.post(
-                        api_base, json=payload, headers=post_headers, timeout=timeout_s
+                        api_base,
+                        json=payload,
+                        headers=post_headers,
+                        timeout=timeout_s,
                     )
                     if resp.status_code in (400, 401):
                         try:
@@ -922,10 +952,11 @@ class QobuzProvider(BaseProvider):
                             if api_base in _COMMUNITY_APIS:
                                 try:
                                     record = await asyncio.to_thread(
-                                        ensure_community_session
+                                        ensure_community_session,
                                     )
                                     body_bytes = json.dumps(
-                                        payload, separators=(",", ":")
+                                        payload,
+                                        separators=(",", ":"),
                                     ).encode("utf-8")
                                     sig_headers = await asyncio.to_thread(
                                         sign_community_request,
@@ -977,14 +1008,16 @@ class QobuzProvider(BaseProvider):
                     last_err = RuntimeError(f"HTTP {resp.status_code}")
                     continue
                 if resp.status_code != 200:
-                    raise RuntimeError(f"HTTP {resp.status_code}")
+                    msg = f"HTTP {resp.status_code}"
+                    raise RuntimeError(msg)
 
                 text = resp.text.strip()
                 if not text:
                     last_err = RuntimeError("empty response body")
                     continue
                 if text.startswith("<"):
-                    raise RuntimeError("received HTML instead of JSON")
+                    msg = "received HTML instead of JSON"
+                    raise RuntimeError(msg)
 
                 try:
                     data = resp.json()
@@ -1009,7 +1042,8 @@ class QobuzProvider(BaseProvider):
             except (httpx.TimeoutException, httpx.ConnectError) as exc:
                 last_err = exc
                 if isinstance(
-                    exc, httpx.ConnectError
+                    exc,
+                    httpx.ConnectError,
                 ) and "nodename nor servname" in str(exc):
                     host = urlparse(api_base).netloc
                     with _dns_failed_hosts_lock:
@@ -1037,7 +1071,9 @@ class QobuzProvider(BaseProvider):
     ) -> tuple[str, str, str]:
         if not apis:
             raise SpotiflacError(
-                ErrorKind.UNAVAILABLE, "no stream APIs configured", "qobuz"
+                ErrorKind.UNAVAILABLE,
+                "no stream APIs configured",
+                "qobuz",
             )
 
         start = time.time()
@@ -1050,8 +1086,13 @@ class QobuzProvider(BaseProvider):
         tasks = {
             asyncio.create_task(
                 self._fetch_stream_url_once_async(
-                    client, api, track_id, quality, timeout_s, local_api_url
-                )
+                    client,
+                    api,
+                    track_id,
+                    quality,
+                    timeout_s,
+                    local_api_url,
+                ),
             ): api
             for api in available_apis
         }
@@ -1065,7 +1106,9 @@ class QobuzProvider(BaseProvider):
                     break
 
                 done, pending = await asyncio.wait(
-                    tasks.keys(), return_when=asyncio.FIRST_COMPLETED, timeout=timeout
+                    tasks.keys(),
+                    return_when=asyncio.FIRST_COMPLETED,
+                    timeout=timeout,
                 )
                 if not done:
                     break
@@ -1093,7 +1136,7 @@ class QobuzProvider(BaseProvider):
                         print_api_failure("qobuz", api, err_msg)
                         continue
 
-            raise TimeoutError()
+            raise TimeoutError
         except TimeoutError:
             errors.append("global timeout exceeded")
         finally:
@@ -1108,14 +1151,16 @@ class QobuzProvider(BaseProvider):
             if isrc.startswith("qobuz_"):
                 track_id = isrc.removeprefix("qobuz_")
                 resp = await self._do_signed_get_async(
-                    "track/get", {"track_id": track_id}
+                    "track/get",
+                    {"track_id": track_id},
                 )
                 if resp.status_code != 200:
                     self._raise_api_error(resp, "track/get")
                 return resp.json()
 
             resp = await self._do_signed_get_async(
-                "track/search", {"query": isrc, "limit": "1"}
+                "track/search",
+                {"query": isrc, "limit": "1"},
             )
             if resp.status_code != 200:
                 self._raise_api_error(resp, "track/search")
@@ -1136,7 +1181,8 @@ class QobuzProvider(BaseProvider):
         query = f"{title} {artist}".strip()
         try:
             resp = await self._do_signed_get_async(
-                "track/search", {"query": query, "limit": "10"}
+                "track/search",
+                {"query": query, "limit": "10"},
             )
             if resp.status_code != 200:
                 return None
@@ -1155,7 +1201,8 @@ class QobuzProvider(BaseProvider):
 
             if not best_match or best_score < 400:
                 album_resp = await self._do_signed_get_async(
-                    "album/search", {"query": query, "limit": "5"}
+                    "album/search",
+                    {"query": query, "limit": "5"},
                 )
                 if album_resp.status_code == 200:
                     albums = album_resp.json().get("albums", {}).get("items", [])
@@ -1164,7 +1211,8 @@ class QobuzProvider(BaseProvider):
                         if not album_id:
                             continue
                         track_resp = await self._do_signed_get_async(
-                            "album/get", {"album_id": album_id}
+                            "album/get",
+                            {"album_id": album_id},
                         )
                         if track_resp.status_code != 200:
                             continue
@@ -1183,12 +1231,16 @@ class QobuzProvider(BaseProvider):
             return None
 
     async def _search_by_text_with_duration_async(
-        self, title: str, artist: str, target_duration_s: int
+        self,
+        title: str,
+        artist: str,
+        target_duration_s: int,
     ) -> dict | None:
         query = f"{title} {artist}".strip()
         try:
             resp = await self._do_signed_get_async(
-                "track/search", {"query": query, "limit": "20"}
+                "track/search",
+                {"query": query, "limit": "20"},
             )
             if resp.status_code != 200:
                 return None
@@ -1250,7 +1302,7 @@ class QobuzProvider(BaseProvider):
 
     async def _get_audio_duration_seconds_async(self, file_path: str) -> int:
         try:
-            rc, stdout, _ = await self._run_ffprobe(
+            _rc, stdout, _ = await self._run_ffprobe(
                 "-v",
                 "quiet",
                 "-show_entries",
@@ -1269,7 +1321,8 @@ class QobuzProvider(BaseProvider):
             msg = resp.json().get("message", f"HTTP {resp.status_code}")
         except Exception:
             msg = f"HTTP {resp.status_code}"
-        raise NetworkError("qobuz", f"{endpoint} → {msg}")
+        msg_0 = "qobuz"
+        raise NetworkError(msg_0, f"{endpoint} → {msg}")
 
     async def download_track_async(
         self,
@@ -1307,7 +1360,8 @@ class QobuzProvider(BaseProvider):
                     metadata.artists,
                 )
                 track = await self._search_by_text_async(
-                    metadata.title, metadata.artists
+                    metadata.title,
+                    metadata.artists,
                 )
 
             if not track:
@@ -1319,7 +1373,8 @@ class QobuzProvider(BaseProvider):
             track_id = track.get("id")
             if not track_id:
                 raise TrackNotFoundError(
-                    self.name, "Missing track ID in Qobuz response"
+                    self.name,
+                    "Missing track ID in Qobuz response",
                 )
 
             if metadata.duration_ms > 0:
@@ -1333,12 +1388,14 @@ class QobuzProvider(BaseProvider):
                         expected_s,
                     )
                     alt_track = await self._search_by_text_with_duration_async(
-                        metadata.title, metadata.artists, expected_s
+                        metadata.title,
+                        metadata.artists,
+                        expected_s,
                     )
                     if alt_track:
                         alt_duration = alt_track.get("duration", 0)
                         if abs(alt_duration - expected_s) < abs(
-                            qobuz_duration_s - expected_s
+                            qobuz_duration_s - expected_s,
                         ):
                             logger.info(
                                 "[qobuz] found alternative version: track_id=%s duration=%ds",
@@ -1397,12 +1454,14 @@ class QobuzProvider(BaseProvider):
                 qobuz_extra_tags["URL"] = album_data["url"]
             if track.get("isrc"):
                 try:
-                    from ..core.isrc_utils import normalize_isrc
+                    from SpotiFLAC.core.isrc_utils import normalize_isrc
 
                     isrc_val = normalize_isrc(track["isrc"])
                     if isrc_val:
                         try:
-                            from ..core.isrc_utils import confirm_isrc_with_qobuz_async
+                            from SpotiFLAC.core.isrc_utils import (
+                                confirm_isrc_with_qobuz_async,
+                            )
 
                             ok, _ = await confirm_isrc_with_qobuz_async(
                                 isrc_val,
@@ -1441,7 +1500,7 @@ class QobuzProvider(BaseProvider):
             mb_tags: dict[str, str] = {}
             if metadata.isrc:
                 mb_tags = mb_result_to_tags(
-                    await fetch_mb_metadata_async(metadata.isrc)
+                    await fetch_mb_metadata_async(metadata.isrc),
                 )
 
             mb_tags.update(qobuz_extra_tags)
@@ -1449,28 +1508,30 @@ class QobuzProvider(BaseProvider):
 
             while not valid:
                 try:
-                    winner_api, stream_url, used_quality = (
-                        await self._get_stream_url_async(
-                            track_id,
-                            quality,
-                            allow_fallback,
-                            exclude_apis=excluded_apis,
-                        )
+                    (
+                        winner_api,
+                        stream_url,
+                        _used_quality,
+                    ) = await self._get_stream_url_async(
+                        track_id,
+                        quality,
+                        allow_fallback,
+                        exclude_apis=excluded_apis,
                     )
-                except SpotiflacError as exc:
+                except SpotiflacError:
                     if last_err:
                         raise SpotiflacError(
                             ErrorKind.UNAVAILABLE,
                             f"All APIs failed (errors or previews). Last reason: {last_err}",
                             self.name,
                         )
-                    raise exc
+                    raise
 
                 with _bad_stream_urls_lock:
                     is_bad_url = stream_url in _bad_stream_urls
                 if is_bad_url:
                     logger.warning(
-                        "[qobuz] stream URL already known-bad, blacklisting API and skipping download"
+                        "[qobuz] stream URL already known-bad, blacklisting API and skipping download",
                     )
                     await record_failure_async("qobuz", winner_api)
                     excluded_apis.add(winner_api)
@@ -1500,11 +1561,12 @@ class QobuzProvider(BaseProvider):
                     extra_headers=headers_dl,
                 )
                 valid, err = await validate_downloaded_track_async(
-                    str(dest), expected_s
+                    str(dest),
+                    expected_s,
                 )
                 if not valid:
                     actual_duration = await self._get_audio_duration_seconds_async(
-                        str(dest)
+                        str(dest),
                     )
                     if (
                         actual_duration > 0
@@ -1528,7 +1590,10 @@ class QobuzProvider(BaseProvider):
                             os.remove(dest)
                             logger.debug("[qobuz] Cleaned up invalid file: %s", dest)
                         except OSError as e:
-                            logger.error("[qobuz] Failed to remove invalid file: %s", e)
+                            logger.exception(
+                                "[qobuz] Failed to remove invalid file: %s",
+                                e,
+                            )
                     continue
 
                 try:
@@ -1561,8 +1626,9 @@ class QobuzProvider(BaseProvider):
                             try:
                                 os.remove(dest)
                             except OSError as e:
-                                logger.error(
-                                    "[qobuz] Failed to remove invalid file: %s", e
+                                logger.exception(
+                                    "[qobuz] Failed to remove invalid file: %s",
+                                    e,
                                 )
                         continue
                     raise
@@ -1572,7 +1638,7 @@ class QobuzProvider(BaseProvider):
             return DownloadResult.ok(self.name, str(dest))
 
         except SpotiflacError as exc:
-            logger.error("[qobuz] %s", exc)
+            logger.exception("[qobuz] %s", exc)
             return DownloadResult.fail(self.name, str(exc))
         except Exception as exc:
             logger.exception("[qobuz] unexpected error")

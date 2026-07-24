@@ -1,10 +1,9 @@
-"""
-progress.py — Async-native progress tracking
-"""
+"""progress.py — Async-native progress tracking."""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import logging
 import sys
@@ -14,6 +13,7 @@ from enum import Enum
 from typing import Any
 
 from tqdm import tqdm
+from typing_extensions import Self
 
 # tqdm.get_lock() rimane come lock nativo di tqdm (non è un nostro accrocchio,
 # è la sincronizzazione interna della libreria per la scrittura su stderr).
@@ -76,10 +76,8 @@ class _TqdmTextIOProxy(io.TextIOBase):
             if self._buf:
                 tqdm.write(self._buf, file=self._original)
                 self._buf = ""
-            try:
+            with contextlib.suppress(Exception):
                 self._original.flush()
-            except Exception:
-                pass
 
     @property
     def encoding(self) -> str:
@@ -151,16 +149,15 @@ class DownloadItem:
 
 
 class DownloadBroadcaster:
-    """
-    Singleton per lo streaming degli eventi di progresso verso eventuali
+    """Singleton per lo streaming degli eventi di progresso verso eventuali
     listener esterni (es. la GUI webview). Prima usava _CrossLoopLock per
     proteggere l'accesso a self._listeners da più thread/loop paralleli.
     Con un unico event loop, asyncio.Lock() è sufficiente e corretto.
     """
 
-    _instance: "DownloadBroadcaster | None" = None
+    _instance: DownloadBroadcaster | None = None
 
-    def __new__(cls) -> "DownloadBroadcaster":
+    def __new__(cls) -> Self:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._listeners = set()
@@ -189,22 +186,19 @@ class DownloadBroadcaster:
     async def _send_to_all(self, event_data: dict) -> None:
         async with self._lock:
             for q in list(self._listeners):
-                try:
+                with contextlib.suppress(Exception):
                     q.put_nowait(event_data)
-                except Exception:
-                    pass
 
 
 class DownloadManager:
-    """
-    Singleton che tiene lo stato della coda di download.
+    """Singleton che tiene lo stato della coda di download.
     _CrossLoopLock -> asyncio.Lock(): valido perché non esistono più event
     loop multipli concorrenti (nessun thread fa più il proprio asyncio.run()).
     """
 
-    _instance: "DownloadManager | None" = None
+    _instance: DownloadManager | None = None
 
-    def __new__(cls) -> "DownloadManager":
+    def __new__(cls) -> Self:
         if cls._instance is None:
             inst = super().__new__(cls)
             inst._init_state()
@@ -247,7 +241,7 @@ class DownloadManager:
                     artist_name=artist_name,
                     album_name=album_name,
                     spotify_id=spotify_id,
-                )
+                ),
             )
             if self.session_start == 0.0:
                 self.session_start = time.time()
@@ -271,7 +265,11 @@ class DownloadManager:
         await DownloadBroadcaster().broadcast_immediate(stats)
 
     async def update_progress(
-        self, item_id: str, progress_mb: float, total_mb: float, speed_mbps: float
+        self,
+        item_id: str,
+        progress_mb: float,
+        total_mb: float,
+        speed_mbps: float,
     ) -> None:
         async with self._lock:
             for item in self._queue:
@@ -286,7 +284,10 @@ class DownloadManager:
         await DownloadBroadcaster().broadcast_progress(stats)
 
     async def complete_download(
-        self, item_id: str, filepath: str, final_size_mb: float
+        self,
+        item_id: str,
+        filepath: str,
+        final_size_mb: float,
     ) -> None:
         async with self._lock:
             for item in self._queue:
@@ -404,8 +405,7 @@ class DownloadManager:
 
 
 class ProgressManager:
-    """
-    Gestisce le barre tqdm per-track.
+    """Gestisce le barre tqdm per-track.
 
     Prima: queue.Queue (thread-safe nativa) + threading.Thread consumer,
     necessari perché ogni download girava nel proprio thread/event loop.
@@ -421,8 +421,8 @@ class ProgressManager:
     _master_bar: tqdm | None = None
     _master_enabled: bool = False
 
-    _event_queue: "asyncio.Queue | None" = None
-    _worker_task: "asyncio.Task | None" = None
+    _event_queue: asyncio.Queue | None = None
+    _worker_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Worker lifecycle
@@ -430,8 +430,7 @@ class ProgressManager:
 
     @classmethod
     def start_worker(cls) -> None:
-        """
-        Avvia il task consumer in modo idempotente. Deve essere chiamato da
+        """Avvia il task consumer in modo idempotente. Deve essere chiamato da
         dentro l'event loop attivo (create_task lo richiede).
         """
         if cls._event_queue is None:
@@ -485,26 +484,27 @@ class ProgressManager:
                         cls.release_bar(item_id)
             except Exception:
                 logging.getLogger(__name__).exception(
-                    "ProgressManager consumer crashed"
+                    "ProgressManager consumer crashed",
                 )
 
     @classmethod
     def enqueue_progress(
-        cls, item_id: str, track_name: str, current_bytes: int, total_bytes: int | None
+        cls,
+        item_id: str,
+        track_name: str,
+        current_bytes: int,
+        total_bytes: int | None,
     ) -> None:
-        """
-        Chiamata da coroutine/callback dentro il loop principale. Va avviato
+        """Chiamata da coroutine/callback dentro il loop principale. Va avviato
         il worker lazy la prima volta (idempotente) e poi si fa una semplice
         put_nowait() — nessuna primitiva thread-safe necessaria.
         """
         cls.start_worker()
         if cls._event_queue is not None:
-            try:
+            with contextlib.suppress(Exception):
                 cls._event_queue.put_nowait(
-                    (item_id, track_name, current_bytes, total_bytes)
+                    (item_id, track_name, current_bytes, total_bytes),
                 )
-            except Exception:
-                pass
 
     # ------------------------------------------------------------------
     # Bar management (sync, invariato — protetto da tqdm.get_lock())
@@ -581,11 +581,15 @@ class ProgressManager:
 
     @classmethod
     def initialize_master_bar(
-        cls, total_items: int, description: str = "Progress", at_top: bool = True
+        cls,
+        total_items: int,
+        description: str = "Progress",
+        at_top: bool = True,
     ) -> None:
         if not at_top:
+            msg = "Only top-aligned master bar is supported by ProgressManager at this time."
             raise ValueError(
-                "Only top-aligned master bar is supported by ProgressManager at this time."
+                msg,
             )
         with tqdm.get_lock():
             cls.clear_master_bar()
@@ -632,8 +636,7 @@ class ProgressManager:
 
 
 class ProgressCallback:
-    """
-    Callback di progresso passato ai provider. Invariato nella logica di
+    """Callback di progresso passato ai provider. Invariato nella logica di
     throttling; enqueue_progress() ora è thread-agnostic per costruzione
     (asyncio.Queue), quindi resta sincrona e non-bloccante come prima.
     """
@@ -659,7 +662,10 @@ class ProgressCallback:
         total_bytes = total_bytes if total_bytes > 0 else None
 
         ProgressManager.enqueue_progress(
-            self._item_id, self._track_name, current_bytes, total_bytes
+            self._item_id,
+            self._track_name,
+            current_bytes,
+            total_bytes,
         )
         current_mb = current_bytes / (1024 * 1024)
         total_mb = total_bytes / (1024 * 1024) if total_bytes else 0.0
@@ -677,8 +683,11 @@ class ProgressCallback:
 
         asyncio.create_task(
             DownloadManager().update_progress(
-                self._item_id, current_mb, total_mb, speed_mbps
-            )
+                self._item_id,
+                current_mb,
+                total_mb,
+                speed_mbps,
+            ),
         )
 
     @classmethod

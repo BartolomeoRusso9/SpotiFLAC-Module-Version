@@ -1,52 +1,54 @@
 from .errors import (
-    SpotiflacError,
-    ErrorKind,
     AuthError,
-    TrackNotFoundError,
-    RateLimitedError,
+    ErrorKind,
+    InvalidUrlError,
     NetworkError,
     ParseError,
-    InvalidUrlError,
+    RateLimitedError,
+    SpotiflacError,
+    TrackNotFoundError,
 )
-from .models import TrackMetadata, DownloadResult, build_filename, sanitize
-from .http import RetryConfig, AsyncHttpClient, AsyncRateLimiter, NetworkManager
-from .tagger import embed_metadata_async, max_resolution_spotify_cover
+from .health_check import run_health_check
+from .http import AsyncHttpClient, AsyncRateLimiter, NetworkManager, RetryConfig
 from .lyrics import fetch_lyrics_async
 from .metadata_enrichment import enrich_metadata_async
-from .health_check import run_health_check
+from .models import DownloadResult, TrackMetadata, build_filename, sanitize
 from .progress import DownloadManager, ProgressCallback, RichProgressCallback
 from .provider_stats import (
-    record_success_async,
-    record_failure_async,
     prioritize_async as prioritize_providers_async,
 )
+from .provider_stats import (
+    record_failure_async,
+    record_success_async,
+)
+from .tagger import embed_metadata_async, max_resolution_spotify_cover
 
 __all__ = [
-    "SpotiflacError",
-    "ErrorKind",
-    "AuthError",
-    "TrackNotFoundError",
-    "RateLimitedError",
-    "NetworkError",
-    "ParseError",
-    "InvalidUrlError",
-    "TrackMetadata",
-    "DownloadResult",
-    "build_filename",
-    "sanitize",
-    "RetryConfig",
     "AsyncHttpClient",
     "AsyncRateLimiter",
-    "NetworkManager",
-    "embed_metadata_async",
-    "fetch_lyrics_async",
-    "enrich_metadata_async",
-    "run_health_check",
-    "max_resolution_spotify_cover",
+    "AuthError",
     "DownloadManager",
+    "DownloadResult",
+    "ErrorKind",
+    "InvalidUrlError",
+    "NetworkError",
+    "NetworkManager",
+    "ParseError",
     "ProgressCallback",
+    "RateLimitedError",
+    "RetryConfig",
     "RichProgressCallback",
-    "record_success_async",
-    "record_failure_async",
+    "SpotiflacError",
+    "TrackMetadata",
+    "TrackNotFoundError",
+    "build_filename",
+    "embed_metadata_async",
+    "enrich_metadata_async",
+    "fetch_lyrics_async",
+    "max_resolution_spotify_cover",
     "prioritize_providers_async",
+    "record_failure_async",
+    "record_success_async",
+    "run_health_check",
+    "sanitize",
 ]

@@ -8,10 +8,10 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from ..core.errors import ErrorKind, InvalidUrlError, SpotiflacError
-from ..core.http import AsyncHttpClient
-from ..core.models import TrackMetadata
-from ..core.spotfetch import SpotifyWebClient
+from SpotiFLAC.core.errors import ErrorKind, InvalidUrlError, SpotiflacError
+from SpotiFLAC.core.http import AsyncHttpClient
+from SpotiFLAC.core.models import TrackMetadata
+from SpotiFLAC.core.spotfetch import SpotifyWebClient
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def _run_async_sync(func, *args, **kwargs):
 
 _FEATURING_GROUPS = frozenset({"appears_on", "compilation"})
 _DISCOGRAPHY_SUBTYPES = frozenset(
-    {"all", "album", "single", "compilation", "appears_on"}
+    {"all", "album", "single", "compilation", "appears_on"},
 )
 
 
@@ -338,11 +338,15 @@ class SpotifyMetadataClient:
         return _run_async_sync(self.search_async, query, limit=limit)
 
     def get_url(
-        self, url: str, include_featuring: bool = False
+        self,
+        url: str,
+        include_featuring: bool = False,
     ) -> tuple[str, list[TrackMetadata], str, dict]:
         """Synchronous wrapper used by GUI metadata fetch and downloader."""
         return _run_async_sync(
-            self.get_url_async, url, include_featuring=include_featuring
+            self.get_url_async,
+            url,
+            include_featuring=include_featuring,
         )
 
     # ------------------------------------------------------------------
@@ -363,7 +367,7 @@ class SpotifyMetadataClient:
                 "persistedQuery": {
                     "version": 1,
                     "sha256Hash": "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10",
-                }
+                },
             },
         }
         try:
@@ -383,7 +387,7 @@ class SpotifyMetadataClient:
                 "persistedQuery": {
                     "version": 1,
                     "sha256Hash": "612585ae06ba435ad26369870deaae23b5c8800a256cd8a57e08eddc25a37294",
-                }
+                },
             },
         }
         data = await asyncio.to_thread(self.web_client.query, payload)
@@ -436,7 +440,8 @@ class SpotifyMetadataClient:
         # ------------------------------------------------------------------
 
         composer_str = await asyncio.to_thread(
-            self.web_client.get_track_composer, track_id
+            self.web_client.get_track_composer,
+            track_id,
         )
 
         c_items = album_data.get("copyright", {}).get("items", [])
@@ -481,7 +486,8 @@ class SpotifyMetadataClient:
         """
         try:
             preview_url = await asyncio.to_thread(
-                self.web_client.get_preview_url, track_id
+                self.web_client.get_preview_url,
+                track_id,
             )
             return preview_url or ""
         except Exception as e:
@@ -493,7 +499,8 @@ class SpotifyMetadataClient:
     # ------------------------------------------------------------------
 
     async def get_album_tracks_async(
-        self, album_id: str
+        self,
+        album_id: str,
     ) -> tuple[dict, list[TrackMetadata]]:
         """Retrieves all tracks of an album with complete pagination."""
         limit = 1000
@@ -514,7 +521,7 @@ class SpotifyMetadataClient:
                     "persistedQuery": {
                         "version": 1,
                         "sha256Hash": "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10",
-                    }
+                    },
                 },
             }
             data = await asyncio.to_thread(self.web_client.query, payload)
@@ -587,7 +594,7 @@ class SpotifyMetadataClient:
                     is_explicit=(
                         track_node.get("contentRating", {}).get("label") == "EXPLICIT"
                     ),
-                )
+                ),
             )
 
         return {
@@ -601,7 +608,8 @@ class SpotifyMetadataClient:
     # ------------------------------------------------------------------
 
     async def get_playlist_tracks_async(
-        self, playlist_id: str
+        self,
+        playlist_id: str,
     ) -> tuple[dict, list[TrackMetadata], str]:
         limit = 1000
         offset = 0
@@ -623,7 +631,7 @@ class SpotifyMetadataClient:
                     "persistedQuery": {
                         "version": 1,
                         "sha256Hash": "bb67e0af06e8d6f52b531f97468ee4acd44cd0f82b988e15c2ea47b1148efc77",
-                    }
+                    },
                 },
             }
             response = await asyncio.to_thread(self.web_client.query, payload)
@@ -640,7 +648,7 @@ class SpotifyMetadataClient:
                 )
                 playlist_owner = _extract_playlist_owner(playlist_v2)
                 playlist_cover = self.web_client.extract_cover_url(
-                    playlist_v2.get("images", {})
+                    playlist_v2.get("images", {}),
                 ) or _extract_playlist_cover(playlist_v2)
                 playlist_owner_avatar = _extract_playlist_owner_avatar(playlist_v2)
 
@@ -669,7 +677,7 @@ class SpotifyMetadataClient:
             artists_list = _extract_artist_names(track_data.get("artists", {}))
             if not artists_list:
                 artists_list = _extract_artist_names(album_data.get("artists", {})) or [
-                    "Unknown Artist"
+                    "Unknown Artist",
                 ]
 
             cover = self.web_client.extract_cover_url(album_data.get("coverArt", {}))
@@ -706,7 +714,7 @@ class SpotifyMetadataClient:
                     is_explicit=(
                         track_data.get("contentRating", {}).get("label") == "EXPLICIT"
                     ),
-                )
+                ),
             )
 
         info = {
@@ -741,7 +749,7 @@ class SpotifyMetadataClient:
                 "includeAuthors": False,
             },
             "extensions": {
-                "persistedQuery": {"version": 1, "sha256Hash": self._SEARCH_HASH}
+                "persistedQuery": {"version": 1, "sha256Hash": self._SEARCH_HASH},
             },
         }
 
@@ -749,7 +757,8 @@ class SpotifyMetadataClient:
         """Unified search: returns tracks, albums, artists, and playlists."""
         try:
             data = await asyncio.to_thread(
-                self.web_client.query, self._search_payload(query, limit)
+                self.web_client.query,
+                self._search_payload(query, limit),
             )
             search_v2 = data.get("data", {}).get("searchV2", {})
         except Exception as e:
@@ -769,7 +778,7 @@ class SpotifyMetadataClient:
                 )
 
                 cover = self.web_client.extract_cover_url(
-                    album_node.get("coverArt", {})
+                    album_node.get("coverArt", {}),
                 )
                 results.append(
                     TrackMetadata(
@@ -793,7 +802,7 @@ class SpotifyMetadataClient:
                         is_explicit=(
                             t.get("contentRating", {}).get("label") == "EXPLICIT"
                         ),
-                    )
+                    ),
                 )
             return results
 
@@ -824,11 +833,11 @@ class SpotifyMetadataClient:
                     entry["artists"] = _join_artists(node.get("artists", {}))
                     entry["release_date"] = node.get("date", {}).get("isoString", "")
                     entry["cover_url"] = self.web_client.extract_cover_url(
-                        node.get("coverArt", {})
+                        node.get("coverArt", {}),
                     )
                 elif kind == "artist":
                     cover_url = self.web_client.extract_cover_url(
-                        node.get("visualIdentity", {})
+                        node.get("visualIdentity", {}),
                     )
                     if not cover_url:
                         alt_cover_data = node.get("visuals", {}).get("avatarImage", {})
@@ -842,7 +851,7 @@ class SpotifyMetadataClient:
                             owner = owner_v2.get("data") or {}
                     entry["owner"] = owner.get("displayName") or owner.get("name") or ""
                     entry["cover_url"] = self.web_client.extract_cover_url(
-                        node.get("images", {})
+                        node.get("images", {}),
                     ) or _extract_playlist_cover(node)
                 results.append(entry)
             return results
@@ -870,11 +879,13 @@ class SpotifyMetadataClient:
     ) -> list:
         """Filtered search for a single type: track | album | artist | playlist."""
         if kind not in ("track", "album", "artist", "playlist"):
+            msg = f"Invalid type: {kind!r}. Valori ammessi: track, album, artist, playlist"
             raise ValueError(
-                f"Invalid type: {kind!r}. Valori ammessi: track, album, artist, playlist"
+                msg,
             )
         data = await asyncio.to_thread(
-            self.web_client.query, self._search_payload(query, limit, offset)
+            self.web_client.query,
+            self._search_payload(query, limit, offset),
         )
         data.get("data", {}).get("searchV2", {})
         results = await self.search_async(query, limit=limit)
@@ -882,7 +893,9 @@ class SpotifyMetadataClient:
         return results.get(key, [])[offset:]
 
     async def search_tracks_async(
-        self, query: str, limit: int = 20
+        self,
+        query: str,
+        limit: int = 20,
     ) -> list[TrackMetadata]:
         res = await self.search_async(query, limit=limit)
         return res["tracks"]
@@ -899,7 +912,7 @@ class SpotifyMetadataClient:
                 "persistedQuery": {
                     "version": 1,
                     "sha256Hash": "446130b4a0aa6522a686aafccddb0ae849165b5e0436fd802f96e0243617b5d8",
-                }
+                },
             },
         }
         try:
@@ -919,7 +932,8 @@ class SpotifyMetadataClient:
 
             h_node = artist_data.get("headerImage", {})
             h_sources = h_node.get("sources", []) or (h_node.get("data") or {}).get(
-                "sources", []
+                "sources",
+                [],
             )
             header_url = h_sources[0].get("url") if h_sources else None
 
@@ -947,7 +961,7 @@ class SpotifyMetadataClient:
                 "header": header_url,
                 "discography_total": int(
                     artist_data.get("discography", {}).get("all", {}).get("totalCount")
-                    or 0
+                    or 0,
                 ),
             }
         except Exception as e:
@@ -963,7 +977,8 @@ class SpotifyMetadataClient:
         artist_info = await self.get_artist_profile_async(artist_id)
 
         items = await asyncio.to_thread(
-            self.web_client.get_artist_discography, artist_id
+            self.web_client.get_artist_discography,
+            artist_id,
         )
         allowed_groups = (
             {"album", "single", "appears_on", "compilation"}
@@ -1041,10 +1056,11 @@ class SpotifyMetadataClient:
                             (card.get("artwork") or {}).get("sources") or [{}]
                         )[0].get("url", ""),
                         "background_color": (card.get("backgroundColor") or {}).get(
-                            "hex", ""
+                            "hex",
+                            "",
                         ),
                         "section": section_title,
-                    }
+                    },
                 )
         return {"success": True, "categories": categories}
 
@@ -1055,7 +1071,8 @@ class SpotifyMetadataClient:
 
         # 1. ISRC da Spotify
         isrc = track.isrc or await asyncio.to_thread(
-            self.web_client.get_isrc_from_metadata, track.id
+            self.web_client.get_isrc_from_metadata,
+            track.id,
         )
 
         # 2. Deezer per label/copyright/genre
@@ -1068,14 +1085,15 @@ class SpotifyMetadataClient:
                     "label": deezer.get("label", ""),
                     "copyright": deezer.get("copyright", track.copyright),
                     "genre": deezer.get("genre", ""),
-                }
+                },
             )
         return TrackMetadata(**{**track.__dict__, "isrc": isrc})
 
     async def _fetch_deezer_by_isrc_async(self, isrc: str) -> dict:
         try:
             resp = await self._async_http.get(
-                f"https://api.deezer.com/track/isrc:{isrc}", timeout=8
+                f"https://api.deezer.com/track/isrc:{isrc}",
+                timeout=8,
             )
             if resp.status_code != 200:
                 return {}
@@ -1086,7 +1104,8 @@ class SpotifyMetadataClient:
             album_id = (data.get("album") or {}).get("id")
             if album_id:
                 album_resp = await self._async_http.get(
-                    f"https://api.deezer.com/album/{album_id}", timeout=8
+                    f"https://api.deezer.com/album/{album_id}",
+                    timeout=8,
                 )
                 if album_resp.status_code == 200:
                     album = album_resp.json()
@@ -1149,7 +1168,9 @@ class SpotifyMetadataClient:
             # Respect the discography sub-type if present in the URL
             group = info.get("group", "album,single")
             artist, tracks = await self.get_artist_albums_async(
-                info["id"], include_groups=group, include_featuring=include_featuring
+                info["id"],
+                include_groups=group,
+                include_featuring=include_featuring,
             )
             artist_meta = {
                 "name": artist.get("profile", {}).get("name", "Unknown Artist"),
@@ -1176,7 +1197,8 @@ class SpotifyMetadataClient:
     async def get_metadata_from_url_async(self, url: str) -> TrackMetadata:
         _, tracks, _, _ = await self.get_url_async(url)
         if not tracks:
-            raise ValueError(f"No tracks found for: {url}")
+            msg = f"No tracks found for: {url}"
+            raise ValueError(msg)
         return tracks[0]
 
 
@@ -1193,10 +1215,7 @@ def _extract_explore_artists(content: dict[str, Any]) -> str:
         if not isinstance(artist, dict):
             continue
         profile = artist.get("profile")
-        if isinstance(profile, dict):
-            name = profile.get("name")
-        else:
-            name = artist.get("name")
+        name = profile.get("name") if isinstance(profile, dict) else artist.get("name")
         if isinstance(name, str) and name:
             names.append(name)
 
@@ -1322,7 +1341,7 @@ def parse_home_feed(raw_data: dict) -> dict:
                     "album_name": album_name,
                     "duration_ms": duration_ms,
                     "provider_id": "spotify-web",
-                }
+                },
             )
         if items:
             sections.append({"title": title, "uri": sec_uri, "items": items})

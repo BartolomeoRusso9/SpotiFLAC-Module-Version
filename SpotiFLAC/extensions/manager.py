@@ -1,5 +1,4 @@
-"""
-extensions/manager.py — ExtensionManager
+"""extensions/manager.py — ExtensionManager.
 
 Manages the lifecycle of locally installed extensions:
   - Fetch of remote registry
@@ -98,8 +97,7 @@ class InstalledExtension:
 
 
 class ExtensionManager:
-    """
-    Central point for managing SpotiFLAC JS extensions.
+    """Central point for managing SpotiFLAC JS extensions.
 
     Quick example:
         em = ExtensionManager(auto_install_downloads=True)
@@ -122,8 +120,7 @@ class ExtensionManager:
     # ── Auto Setup ───────────────────────────────────────────
 
     def ensure_download_providers(self, registry_url: str = REGISTRY_URL) -> None:
-        """
-        Checks the remote registry and automatically installs (or updates)
+        """Checks the remote registry and automatically installs (or updates)
         all extensions classified as download providers.
         """
         logger.info("[ExtMgr] Automatic check for download extensions on startup...")
@@ -158,13 +155,19 @@ class ExtensionManager:
             # Otherwise, installs or updates
             action = "Update" if existing else "Installation"
             logger.info(
-                "[ExtMgr] %s of '%s' to version %s...", action, entry.id, entry.version
+                "[ExtMgr] %s of '%s' to version %s...",
+                action,
+                entry.id,
+                entry.version,
             )
             try:
                 self.install_from_url(entry.download_url)
             except Exception as e:
-                logger.error(
-                    "[ExtMgr] Error during %s of '%s': %s", action.lower(), entry.id, e
+                logger.exception(
+                    "[ExtMgr] Error during %s of '%s': %s",
+                    action.lower(),
+                    entry.id,
+                    e,
                 )
 
     # ── Remote Registry ──────────────────────────────────────
@@ -177,7 +180,8 @@ class ExtensionManager:
             r.raise_for_status()
             data = r.json()
         except Exception as e:
-            raise RuntimeError(f"Failed to download registry: {e}") from e
+            msg = f"Failed to download registry: {e}"
+            raise RuntimeError(msg) from e
 
         entries = []
         for item in data.get("extensions", []):
@@ -193,7 +197,7 @@ class ExtensionManager:
                     min_app_version=item.get("min_app_version", "0.0.0"),
                     icon_url=item.get("icon_url"),
                     updated_at=item.get("updated_at", ""),
-                )
+                ),
             )
         return entries
 
@@ -205,16 +209,16 @@ class ExtensionManager:
         registry_url: str = REGISTRY_URL,
         settings: dict | None = None,
     ) -> InstalledExtension:
-        """
-        Installs an extension by ID from the official registry.
+        """Installs an extension by ID from the official registry.
         If already installed, updates only if the remote version is newer.
         """
         entries = self.fetch_registry(registry_url)
         entry = next((e for e in entries if e.id == ext_id), None)
         if entry is None:
             available = ", ".join(e.id for e in entries)
+            msg = f"Extension '{ext_id}' not found in registry. Available: {available}"
             raise ValueError(
-                f"Extension '{ext_id}' not found in registry. Available: {available}"
+                msg,
             )
 
         # Check if already installed and up-to-date
@@ -230,8 +234,7 @@ class ExtensionManager:
         url: str,
         settings: dict | None = None,
     ) -> InstalledExtension:
-        """
-        Downloads a .spotiflac-ext file (ZIP) from `url` and installs it.
+        """Downloads a .spotiflac-ext file (ZIP) from `url` and installs it.
         The extension name is read from `manifest.json` inside the ZIP.
         """
         logger.debug("[ExtMgr] Downloading extension from %s", url)
@@ -240,7 +243,8 @@ class ExtensionManager:
             r.raise_for_status()
             raw = r.content
         except Exception as e:
-            raise RuntimeError(f"Error downloading extension: {e}") from e
+            msg = f"Error downloading extension: {e}"
+            raise RuntimeError(msg) from e
 
         return self._install_from_bytes(raw, settings=settings)
 
@@ -261,19 +265,24 @@ class ExtensionManager:
         try:
             zf = zipfile.ZipFile(io.BytesIO(raw))
         except zipfile.BadZipFile as e:
-            raise ValueError(f"File is not a valid .spotiflac-ext (ZIP): {e}") from e
+            msg = f"File is not a valid .spotiflac-ext (ZIP): {e}"
+            raise ValueError(msg) from e
 
         names = zf.namelist()
         if "manifest.json" not in names or "index.js" not in names:
-            raise ValueError(
+            msg = (
                 f"The .spotiflac-ext must contain manifest.json and index.js. "
                 f"Found: {names}"
+            )
+            raise ValueError(
+                msg,
             )
 
         manifest = json.loads(zf.read("manifest.json"))
         ext_name = manifest.get("name")
         if not ext_name:
-            raise ValueError("manifest.json must have the 'name' field.")
+            msg = "manifest.json must have the 'name' field."
+            raise ValueError(msg)
 
         target = self.ext_dir / ext_name
         target.mkdir(parents=True, exist_ok=True)
@@ -286,11 +295,14 @@ class ExtensionManager:
         # Save custom settings if provided
         if settings:
             (target / "settings.json").write_text(
-                json.dumps(settings, indent=2), encoding="utf-8"
+                json.dumps(settings, indent=2),
+                encoding="utf-8",
             )
 
         logger.info(
-            "[ExtMgr] Success: '%s' v%s installed.", ext_name, manifest.get("version")
+            "[ExtMgr] Success: '%s' v%s installed.",
+            ext_name,
+            manifest.get("version"),
         )
         return self._load_installed(target)
 
@@ -350,16 +362,17 @@ class ExtensionManager:
         """Saves custom settings for an extension."""
         ext = self.get_installed(ext_id)
         if not ext:
-            raise ValueError(f"Extension '{ext_id}' not installed.")
+            msg = f"Extension '{ext_id}' not installed."
+            raise ValueError(msg)
         (ext.ext_dir / "settings.json").write_text(
-            json.dumps(settings, indent=2), encoding="utf-8"
+            json.dumps(settings, indent=2),
+            encoding="utf-8",
         )
 
     # ── URL Resolution ──────────────────────────────────────
 
     def find_extension_for_url(self, url: str) -> InstalledExtension | None:
-        """
-        Returns the first installed extension whose urlHandler
+        """Returns the first installed extension whose urlHandler
         matches the provided URL.
         """
         url_lower = url.lower()
@@ -385,8 +398,7 @@ class ExtensionManager:
     # ── Batch update ──────────────────────────────────────
 
     def update_all(self, registry_url: str = REGISTRY_URL) -> dict[str, str]:
-        """
-        Updates all installed extensions that have a newer version
+        """Updates all installed extensions that have a newer version
         in the registry.
         Returns dict {ext_id: 'updated'|'already_up_to_date'|'not_in_registry'}.
         """

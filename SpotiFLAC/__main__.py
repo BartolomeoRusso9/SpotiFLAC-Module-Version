@@ -1,5 +1,4 @@
-"""
-SpotiFLAC/__main__.py
+"""SpotiFLAC/__main__.py.
 
 Alias per `python -m SpotiFLAC`: delega interamente a launcher.py in modo che
 `python -m SpotiFLAC ...` e il comando `spotiflac ...` (console_script)

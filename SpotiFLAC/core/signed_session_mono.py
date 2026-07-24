@@ -1,5 +1,4 @@
-"""
-Gestione della sessione "Monochrome" (amz.geeked.wtf).
+"""Gestione della sessione "Monochrome" (amz.geeked.wtf).
 
 Poiché il backend verifica il JWT associandolo all'impronta TLS/di rete del browser
 (claim 'fp'), il semplice passaggio degli header a httpx fallisce con un 401.
@@ -8,23 +7,26 @@ instrada la richiesta GET /api/track/ direttamente tramite la funzione fetch()
 nel contesto della pagina, garantendo il perfetto allineamento del fingerprint.
 """
 
-import os
-import json
-import time
+from __future__ import annotations
+
 import asyncio
-import base64
-import dataclasses
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone, timedelta
-import logging
-from urllib.parse import urlencode
 import atexit
+import base64
+import contextlib
+import dataclasses
+import json
+import logging
+import os
+import time
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
-from nodriver import cdp
 import nodriver as uc
+from nodriver import cdp
 
-from ..core.endpoints import get_amazon_endpoint
-from ..core.solver import (
+from SpotiFLAC.core.endpoints import get_amazon_endpoint
+from SpotiFLAC.core.solver import (
     _ensure_xvfb,
     _find_chrome,
     _get_profile_dir,
@@ -69,7 +71,7 @@ def load_monochrome_session() -> MonochromeSessionRecord:
 
     if os.path.exists(path):
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
                 valid_keys = {
                     f.name for f in dataclasses.fields(MonochromeSessionRecord)
@@ -82,7 +84,7 @@ def load_monochrome_session() -> MonochromeSessionRecord:
     return record
 
 
-def save_monochrome_session(record: MonochromeSessionRecord):
+def save_monochrome_session(record: MonochromeSessionRecord) -> None:
     path = monochrome_session_path()
     data = json.dumps(asdict(record), indent=2)
     temp_path = path + ".tmp"
@@ -123,8 +125,7 @@ def monochrome_session_valid(record: MonochromeSessionRecord) -> bool:
 
 
 class _MonochromeBrowserSession:
-    """
-    Mantiene un browser CDP persistente per instradare le richieste
+    """Mantiene un browser CDP persistente per instradare le richieste
     all'API mono (amz.geeked.wtf) DENTRO la sessione TLS/fingerprint reale
     del browser, aggirando le restrizioni WAF di Cloudflare.
     """
@@ -175,7 +176,7 @@ class _MonochromeBrowserSession:
                 if "json" not in mime:
                     return
                 body, is_base64 = await self._page.send(
-                    cdp.network.get_response_body(event.request_id)
+                    cdp.network.get_response_body(event.request_id),
                 )
                 if is_base64:
                     try:
@@ -208,7 +209,6 @@ class _MonochromeBrowserSession:
         reload_count = 0
 
         while "access_token" not in result and time.monotonic() < deadline:
-
             chunk_deadline = min(time.monotonic() + 10.0, deadline)
 
             while "access_token" not in result and time.monotonic() < chunk_deadline:
@@ -218,7 +218,7 @@ class _MonochromeBrowserSession:
                 if reload_count < 2:
                     reload_count += 1
                     logger.info(
-                        f"[mono] No token received. Refreshing the page (attempt {reload_count}/2)..."
+                        f"[mono] No token received. Refreshing the page (attempt {reload_count}/2)...",
                     )
                     try:
                         await self._page.reload()
@@ -230,8 +230,9 @@ class _MonochromeBrowserSession:
                     break
 
         if "access_token" not in result:
+            msg = f"Timeout: nessun access_token JWT catturato entro {timeout:.0f}s"
             raise Exception(
-                f"Timeout: nessun access_token JWT catturato entro {timeout:.0f}s"
+                msg,
             )
 
         self._ever_solved = True
@@ -276,7 +277,10 @@ class _MonochromeBrowserSession:
             return await self._fetch_track_with_restart(params, allow_restart=True)
 
     async def _fetch_track_with_restart(
-        self, params: dict, *, allow_restart: bool
+        self,
+        params: dict,
+        *,
+        allow_restart: bool,
     ) -> dict:
         await self._ensure_browser()
         token = await self._ensure_token()
@@ -290,15 +294,17 @@ class _MonochromeBrowserSession:
 
         try:
             outer = await asyncio.wait_for(
-                self._do_fetch(full_url, token), timeout=10.0
+                self._do_fetch(full_url, token),
+                timeout=10.0,
             )
         except asyncio.TimeoutError:
             logger.warning(
-                "[monochrome] track request timed out after 10s — restarting browser…"
+                "[monochrome] track request timed out after 10s — restarting browser…",
             )
             await self._hard_reset()
             if not allow_restart:
-                raise RuntimeError("mono API request timed out after browser restart")
+                msg = "mono API request timed out after browser restart"
+                raise RuntimeError(msg)
             return await self._fetch_track_with_restart(params, allow_restart=False)
 
         if not outer.get("ok") and outer.get("status") == 401:
@@ -307,37 +313,41 @@ class _MonochromeBrowserSession:
             token = await self._ensure_token()
             try:
                 outer = await asyncio.wait_for(
-                    self._do_fetch(full_url, token), timeout=10.0
+                    self._do_fetch(full_url, token),
+                    timeout=10.0,
                 )
             except asyncio.TimeoutError:
                 logger.warning(
-                    "[monochrome] retry after 401 also timed out — restarting browser…"
+                    "[monochrome] retry after 401 also timed out — restarting browser…",
                 )
                 await self._hard_reset()
                 if not allow_restart:
+                    msg = "mono API request timed out after browser restart"
                     raise RuntimeError(
-                        "mono API request timed out after browser restart"
+                        msg,
                     )
                 return await self._fetch_track_with_restart(params, allow_restart=False)
 
         if not outer.get("ok"):
-            raise RuntimeError(
+            msg = (
                 f"mono API (in-browser) returned {outer.get('status')}: "
                 f"{outer.get('body', '')[:200]}"
+            )
+            raise RuntimeError(
+                msg,
             )
 
         try:
             return json.loads(outer["body"])
         except Exception as exc:
-            raise RuntimeError(f"mono API returned invalid JSON: {exc}") from exc
+            msg = f"mono API returned invalid JSON: {exc}"
+            raise RuntimeError(msg) from exc
 
     async def _hard_reset(self) -> None:
         """Chiude il browser e resetta il token: forza un browser nuovo di zecca al prossimo tentativo."""
         if self._browser is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._browser.stop()
-            except Exception:
-                pass
         self._browser = None
         self._page = None
         self._ever_solved = False
@@ -346,10 +356,8 @@ class _MonochromeBrowserSession:
     async def close(self) -> None:
         async with self._lock:
             if self._browser is not None:
-                try:
+                with contextlib.suppress(Exception):
                     self._browser.stop()
-                except Exception:
-                    pass
             self._browser = None
             self._page = None
 
@@ -367,10 +375,8 @@ async def close_mono_browser_session() -> None:
 
 
 def _close_mono_browser_sync() -> None:
-    try:
+    with contextlib.suppress(Exception):
         asyncio.run(close_mono_browser_session())
-    except Exception:
-        pass
 
 
 atexit.register(_close_mono_browser_sync)

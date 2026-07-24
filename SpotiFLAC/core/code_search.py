@@ -2,20 +2,21 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import List, Dict
 
 
 def _has_rg() -> bool:
     try:
         subprocess.run(
-            ["rg", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            ["rg", "--version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         return True
     except Exception:
         return False
 
 
-def _run_rg(query: str, path: str = ".", limit: int = 200) -> List[Dict]:
+def _run_rg(query: str, path: str = ".", limit: int = 200) -> list[dict]:
     # Use fixed-string, case-insensitive search for substring match
     cmd = [
         "rg",
@@ -38,7 +39,7 @@ def _run_rg(query: str, path: str = ".", limit: int = 200) -> List[Dict]:
             check=False,
         )
         out = proc.stdout.splitlines()
-        results: List[Dict] = []
+        results: list[dict] = []
         for line in out:
             # format: path:line:content
             parts = line.split(":", 2)
@@ -46,7 +47,7 @@ def _run_rg(query: str, path: str = ".", limit: int = 200) -> List[Dict]:
                 continue
             fpath, lineno, content = parts[0], parts[1], parts[2]
             results.append(
-                {"path": fpath, "line": int(lineno), "snippet": content.strip()}
+                {"path": fpath, "line": int(lineno), "snippet": content.strip()},
             )
             if len(results) >= limit:
                 break
@@ -55,8 +56,8 @@ def _run_rg(query: str, path: str = ".", limit: int = 200) -> List[Dict]:
         return []
 
 
-def _fallback_search(query: str, path: str = ".", limit: int = 200) -> List[Dict]:
-    results: List[Dict] = []
+def _fallback_search(query: str, path: str = ".", limit: int = 200) -> list[dict]:
+    results: list[dict] = []
     q = query.lower()
     for root, dirs, files in os.walk(path):
         # skip hidden dirs like .git
@@ -68,11 +69,11 @@ def _fallback_search(query: str, path: str = ".", limit: int = 200) -> List[Dict
             try:
                 if os.path.getsize(fpath) > 2_000_000:  # skip very large files
                     continue
-                with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
+                with open(fpath, encoding="utf-8", errors="replace") as fh:
                     for i, line in enumerate(fh, start=1):
                         if q in line.lower():
                             results.append(
-                                {"path": fpath, "line": i, "snippet": line.strip()}
+                                {"path": fpath, "line": i, "snippet": line.strip()},
                             )
                             if len(results) >= limit:
                                 return results
@@ -81,7 +82,7 @@ def _fallback_search(query: str, path: str = ".", limit: int = 200) -> List[Dict
     return results
 
 
-def search_code(query: str, path: str = ".", limit: int = 200) -> List[Dict]:
+def search_code(query: str, path: str = ".", limit: int = 200) -> list[dict]:
     """Search the repository for case-insensitive substring matches.
 
     Uses ripgrep (`rg`) when available for speed, otherwise falls back to a

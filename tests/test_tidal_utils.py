@@ -3,7 +3,7 @@ import base64
 from SpotiFLAC.providers import tidal
 
 
-def test_parse_manifest_json():
+def test_parse_manifest_json() -> None:
     # parse_manifest expects a JSON object (starts with '{'), not a list
     b = b'{"urls": ["https://example.com/track.flac"], "mimeType": "audio/flac"}'
     encoded = base64.b64encode(b).decode()
@@ -12,7 +12,7 @@ def test_parse_manifest_json():
     assert result.mime_type == "audio/flac"
 
 
-def test_parse_dash_manifest():
+def test_parse_dash_manifest() -> None:
     # simple DASH MPD with initialization and one segment
     mpd = """<?xml version="1.0"?>
     <MPD>
@@ -33,7 +33,7 @@ def test_parse_dash_manifest():
     assert len(res.media_urls) == 1
 
 
-def test_clean_title_removes_parentheses_and_accents():
+def test_clean_title_removes_parentheses_and_accents() -> None:
     s = "Song (Remastered) [Deluxe]"
     cleaned = tidal._clean_title(s)
     assert "remastered" not in cleaned
