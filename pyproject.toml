@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "1.5.4"
+version = "1.5.5"
 description = "Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -44,7 +44,8 @@ dependencies = [
     "pywebview>=5.0.0",
     "aiofiles>=23.2.1",
     "tenacity>=8.3.0",
-    "python-dotenv>=1.0.0"
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0"
 ]
 
 [project.urls]
