@@ -458,9 +458,9 @@ def _rotate_tidal_api_urls(urls: list[str], last_used_url: str) -> list[str]:
     return normalized[last_index + 1 :] + normalized[: last_index + 1]
 
 
-def prime_tidal_api_list() -> None:
+async def prime_tidal_api_list() -> None:
     try:
-        refresh_tidal_api_list(force=True)
+        await refresh_tidal_api_list_async(force=True)
     except Exception as exc:
         logger.warning("[tidal] failed to refresh API list: %s", exc)
         with _tidal_api_list_mu:
@@ -470,36 +470,6 @@ def prime_tidal_api_list() -> None:
                 state["updated_at"] = int(time.time())
                 state["source"] = "builtin-fallback"
                 _save_tidal_api_list_state_locked(state)
-
-
-def refresh_tidal_api_list(force: bool = False) -> list[str]:
-    with _tidal_api_list_mu:
-        state = _load_tidal_api_list_state_locked()
-        if not force and state["urls"]:
-            return list(state["urls"])
-        try:
-            gist_urls = _fetch_tidal_api_urls_from_gist()
-        except Exception as exc:
-            logger.warning("[tidal] gist fetch failed: %s", exc)
-            gist_urls = []
-
-        get_urls = _normalize_tidal_api_urls(_TIDAL_APIS_GET + gist_urls)
-        post_urls = _normalize_tidal_api_urls(_TIDAL_API_POST)
-        merged = get_urls + [u for u in post_urls if u not in set(get_urls)]
-
-        if not merged:
-            if state["urls"]:
-                return list(state["urls"])
-            msg = "No Tidal API URLs available from any source"
-            raise RuntimeError(msg)
-
-        state["urls"] = merged
-        state["updated_at"] = int(time.time())
-        state["source"] = "builtin+gist"
-        if state["last_used_url"] not in state["urls"]:
-            state["last_used_url"] = ""
-        _save_tidal_api_list_state_locked(state)
-        return list(state["urls"])
 
 
 def get_tidal_api_list() -> list[str]:
