@@ -24,6 +24,12 @@ _TURNSTILE_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
 _RELOAD_CHECK_SECONDS = 10.0
 _MAX_RELOAD_ATTEMPTS = 3
 
+# Se impostata a "1", la finestra del browser resta visibile e non viene
+# spostata fuori schermo né minimizzata. Utile per il debug via VNC in
+# Docker (vedi docker-entrypoint.sh + x11vnc). In produzione va lasciata
+# non impostata (o "0"), così il comportamento resta quello nascosto.
+_DEBUG_VISIBLE = os.environ.get("TS_DEBUG_VISIBLE", "").strip() == "1"
+
 
 _docker_flags = []
 if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
@@ -332,7 +338,17 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
     Exposed (not prefixed with ``_``) so other modules that need to spin up
     a pydoll browser with the same persistent profile/flags (e.g.
     ``signed_session_mono``) don't have to duplicate this setup.
+
+    Stealth configuration follows pydoll's own recommendations
+    (https://pydoll.tech/docs/features/advanced/behavioral-captcha-bypass/):
+    ``--disable-blink-features=AutomationControlled`` plus realistic
+    ``browser_preferences`` that make the profile look like it's been used
+    for a while, instead of a freshly-created automation profile.
     """
+    # TS_DEBUG_VISIBLE=1 overrides `hidden`: keep the window on-screen and
+    # normally positioned so it can be watched live via VNC.
+    debug_visible = _DEBUG_VISIBLE
+
     options = ChromiumOptions()
     options.binary_location = _find_chrome()
     options.headless = False
@@ -341,13 +357,30 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
     # same as nodriver did internally.
     options.add_argument(f"--user-data-dir={_get_profile_dir()}")
     options.add_argument("--window-size=1280,900")
-    if hidden:
+    if hidden and not debug_visible:
         # Push the (non-headless) window off-screen instead of using
         # --headless: a fully headless browser is more likely to be
         # challenged by Cloudflare than a real, visible-but-offscreen one.
         options.add_argument("--window-position=-32000,-32000")
     for flag in _docker_flags:
         options.add_argument(flag)
+
+    # --- Stealth: remove the most obvious automation signals ---------
+    options.add_argument("--disable-blink-features=AutomationControlled")
+
+    # A freshly-created profile (first launch, expires_at unset, etc.)
+    # looks suspicious to fingerprinting. Pretend the profile has already
+    # been used for a few hours and exited normally.
+    current_time = int(time.time())
+    options.browser_preferences = {
+        "profile": {
+            "last_engagement_time": str(current_time - (3 * 60 * 60)),
+            "exited_cleanly": True,
+            "exit_type": "Normal",
+        },
+        "safebrowsing": {"enabled": True},
+    }
+
     return options
 
 
@@ -386,6 +419,26 @@ def _extract_grant_from_callback_url(callback_url: str) -> str | None:
     return None
 
 
+async def _try_minimize_window(browser: Chrome) -> None:
+    """Best-effort: minimize the browser window to taskbar/dock.
+
+    Combined with the off-screen ``--window-position`` flag, this keeps the
+    solver browser fully out of the way even on systems/window managers
+    where the off-screen trick alone isn't enough (e.g. some tiling WMs
+    snap windows back on-screen). Failures are ignored: minimizing is a
+    cosmetic nicety, not something the solve should fail over.
+
+    Skipped entirely when TS_DEBUG_VISIBLE=1, so the window stays visible
+    for VNC-based debugging.
+    """
+    if _DEBUG_VISIBLE:
+        return
+    try:
+        await browser.set_window_minimized()
+    except Exception as exc:
+        logger.debug("[solver] could not minimize browser window: %s", exc)
+
+
 async def _solve_impl(
     sitekey: str,
     siteurl: str,
@@ -396,6 +449,7 @@ async def _solve_impl(
     options = build_chromium_options(hidden=True)
     browser = Chrome(options=options)
     tab = await browser.start()
+    await _try_minimize_window(browser)
 
     callback_grant = _extract_grant_from_callback_url(siteurl)
     network_grant: dict[str, str | None] = {"value": None}
@@ -439,45 +493,45 @@ async def _solve_impl(
         except Exception:
             pass
 
-    async def _inject_widget() -> None:
-        await tab.execute_script(
-            f"""
-            return (function () {{
-                if (document.getElementById('_ts_box')) return;
-                window._tsToken = null;
-                const wrap = document.createElement('div');
-                wrap.id = '_ts_box';
-                wrap.style = 'position:fixed;top:20px;left:20px;z-index:2147483647;';
-                document.body.appendChild(wrap);
-                window._tsLoad = function () {{
-                    turnstile.render('#_ts_box', {{
-                        sitekey: '{sitekey}',
-                        callback: function(token) {{ window._tsToken = token; }}
-                    }});
-                }};
-                const s = document.createElement('script');
-                s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=_tsLoad&render=explicit';
-                s.async = true;
-                document.head.appendChild(s);
-            }})();
-        """)
+    async def _navigate_with_turnstile_bypass() -> None:
+        """Navigate to ``siteurl`` letting pydoll's native Turnstile helper
+        handle the click for us (shadow-DOM traversal + realistic click),
+        instead of our old manual click loop. Falls back silently if the
+        helper isn't available or raises (e.g. captcha never appeared) --
+        the rest of the flow (get_token/capture_callback_grant polling)
+        still runs afterwards regardless.
+        """
+        # A short "read the page" pause before interacting mirrors real
+        # user behavior and is recommended by pydoll's own docs.
+        try:
+            async with tab.expect_and_bypass_cloudflare_captcha(
+                time_before_click=random.uniform(1.5, 3.0),
+                time_to_wait_captcha=10,
+            ):
+                await tab.go_to(siteurl)
+        except AttributeError:
+            # Older pydoll version without this helper: plain navigation,
+            # the manual click fallback below will handle the rest.
+            await tab.go_to(siteurl)
+        except Exception as exc:
+            logger.debug(
+                "[solver] expect_and_bypass_cloudflare_captcha failed/skipped: %s",
+                exc,
+            )
+
+        await _enable_network_capture()
+        await _try_minimize_window(browser)
 
     async def _open_fresh_page() -> None:
-        """Ricarica siteurl da zero — usato per il retry con reload.
-
-        ``tab.go_to()`` in pydoll already refreshes when the URL matches the
-        currently loaded page, so there's no need to close/reopen a tab like
-        the old nodriver-based implementation did.
-        """
-        await tab.go_to(siteurl)
-        await _enable_network_capture()
+        """Ricarica siteurl da zero — usato per il retry con reload."""
+        await _navigate_with_turnstile_bypass()
 
     async def get_token() -> str | None:
         response = await tab.execute_script(
             """
             return (function () {
                 if (window._tsToken) return window._tsToken;
-                const inp = document.querySelector('#_ts_box [name="cf-turnstile-response"]');
+                const inp = document.querySelector('#_ts_box [name="cf-turnstile-response"], [name="cf-turnstile-response"]');
                 return (inp && inp.value) ? inp.value : null;
             })();
         """,
@@ -534,29 +588,11 @@ async def _solve_impl(
             return json.loads(raw)
         return None
 
-    async def _has_native_widget() -> bool:
-        rect = await get_cf_iframe_rect()
-        return rect is not None
-
-    async def _wait_for_native_widget(
-        min_wait: float = 6.0,
-        poll_interval: float = 0.5,
-    ) -> bool:
-        """Aspetta fino a `min_wait` secondi che compaia il widget Turnstile
-        NATIVO della pagina (quello che nel browser reale appare dopo ~5s
-        di countdown), invece di iniettarne subito uno nostro. Ritorna True
-        se il widget nativo è comparso, False se bisogna ricorrere al
-        fallback di _inject_widget().
-        """
-        elapsed = 0.0
-        while elapsed < min_wait:
-            if await _has_native_widget():
-                return True
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-        return await _has_native_widget()
-
     async def do_click(rect: dict | None) -> None:
+        """Manual click fallback, kept for pydoll versions without native
+        Turnstile support, or in case the native helper's single click
+        wasn't enough (e.g. a second challenge appeared after reload).
+        """
         if rect:
             cx = rect["x"] + 28 + random.uniform(-3, 3)
             cy = rect["y"] + rect["h"] / 2 + random.uniform(-3, 3)
@@ -570,10 +606,12 @@ async def _solve_impl(
         await tab.mouse.click(cx, cy)
 
     async def _try_solve_within(window_seconds: float) -> str | None:
-        """Tenta di ottenere il token entro `window_seconds`, cliccando la
-        checkbox se necessario. In modalità capture_callback, considera
-        "risolto" anche il solo ottenimento del grant di rete, anche senza
-        un token esplicito (la pagina a volte non lo espone mai nel DOM).
+        """Tenta di ottenere il token entro `window_seconds`.
+
+        The native Turnstile click already happened (if available) during
+        `_navigate_with_turnstile_bypass()`/`_open_fresh_page()`, so this
+        mostly polls for the resulting token/grant, and only falls back to
+        manual clicking if nothing showed up yet.
         """
         token = await get_token()
         if token:
@@ -629,21 +667,11 @@ async def _solve_impl(
     max_attempts = _MAX_RELOAD_ATTEMPTS
 
     try:
-        await tab.go_to(siteurl)
-        await _enable_network_capture()
-
-        native_ready = await _wait_for_native_widget(min_wait=6.0)
-        if not native_ready:
-            await _inject_widget()
-            await asyncio.sleep(2.0)
+        await _navigate_with_turnstile_bypass()
 
         for attempt in range(1, max_attempts + 1):
             if attempt > 1:
                 await _open_fresh_page()
-                native_ready = await _wait_for_native_widget(min_wait=6.0)
-                if not native_ready:
-                    await _inject_widget()
-                    await asyncio.sleep(2.0)
 
             token = await _try_solve_within(per_attempt_seconds)
 

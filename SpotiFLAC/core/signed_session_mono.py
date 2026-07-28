@@ -2,9 +2,11 @@
 
 Poiché il backend verifica il JWT associandolo all'impronta TLS/di rete del browser
 (claim 'fp'), il semplice passaggio degli header a httpx fallisce con un 401.
-La soluzione implementata qui mantiene un browser CDP persistente in background e
-instrada la richiesta GET /api/track/ direttamente tramite la funzione fetch()
-nel contesto della pagina, garantendo il perfetto allineamento del fingerprint.
+La soluzione implementata qui mantiene un browser CDP persistente (pydoll) in
+background e instrada la richiesta GET /api/track/ tramite `tab.request`, che
+esegue la fetch nel contesto JavaScript reale della pagina — garantendo il
+perfetto allineamento del fingerprint, esattamente come una fetch() lanciata
+a mano dalla pagina, ma senza dover gestire noi la (de)serializzazione JSON.
 """
 
 from __future__ import annotations
@@ -20,26 +22,18 @@ import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
 
-import nodriver as uc
-from nodriver import cdp
+from pydoll.browser.chromium import Chrome
+from pydoll.protocol.network.events import NetworkEvent
 
 from SpotiFLAC.core.endpoints import get_amazon_endpoint
-from SpotiFLAC.core.solver import (
-    _ensure_xvfb,
-    _find_chrome,
-    _get_profile_dir,
-    _patch_nodriver_unknown_cdp_events,
-)
+from SpotiFLAC.core.solver import _ensure_xvfb, _try_minimize_window, build_chromium_options
 
 logger = logging.getLogger(__name__)
 
 MONOCHROME_SESSION_SKEW = timedelta(minutes=2)
 MONOCHROME_VERIFY_TIMEOUT = 60.0
 MONOCHROME_PAGE_URL = "https://monochrome.tf/"
-
-_patch_nodriver_unknown_cdp_events()
 
 
 @dataclass
@@ -125,64 +119,52 @@ def monochrome_session_valid(record: MonochromeSessionRecord) -> bool:
 
 
 class _MonochromeBrowserSession:
-    """Mantiene un browser CDP persistente per instradare le richieste
-    all'API mono (amz.geeked.wtf) DENTRO la sessione TLS/fingerprint reale
-    del browser, aggirando le restrizioni WAF di Cloudflare.
+    """Mantiene un browser CDP persistente (pydoll) per instradare le
+    richieste all'API mono (amz.geeked.wtf) DENTRO la sessione TLS/fingerprint
+    reale del browser, aggirando le restrizioni WAF di Cloudflare.
     """
 
     def __init__(self) -> None:
-        self._browser = None
-        self._page = None
+        self._browser: Chrome | None = None
+        self._tab = None
         self._lock = asyncio.Lock()
         self._record = load_monochrome_session()
         self._ever_solved = False
 
     async def _ensure_browser(self) -> None:
-        if self._browser is not None and self._page is not None:
+        if self._browser is not None and self._tab is not None:
             return
         _ensure_xvfb()
 
-        self._browser = await uc.start(
-            browser_executable_path=_find_chrome(),
-            headless=False,
-            user_data_dir=_get_profile_dir(),
-            browser_args=[
-                "--incognito",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding",
-                "--window-size=1280,900",
-            ],
-        )
-        self._page = await self._browser.get(MONOCHROME_PAGE_URL)
+        options = build_chromium_options(hidden=False)
+        options.add_argument("--incognito")
+        options.add_argument("--disable-background-timer-throttling")
+        options.add_argument("--disable-backgrounding-occluded-windows")
+        options.add_argument("--disable-renderer-backgrounding")
 
-        try:
-            if hasattr(self._page, "minimize"):
-                await self._page.minimize()
-        except Exception:
-            pass
+        self._browser = Chrome(options=options)
+        self._tab = await self._browser.start()
+        await self._tab.go_to(MONOCHROME_PAGE_URL)
+        await _try_minimize_window(self._browser)
 
     async def _solve_turnstile_on_page(self, timeout: float) -> str:
         result: dict = {}
 
-        async def _on_response(event) -> None:
+        async def _on_response(event: dict) -> None:
             if "access_token" in result:
                 return
             try:
-                resp = event.response
-                if "auth/turnstile" not in resp.url:
+                params = event.get("params", {})
+                response = params.get("response", {})
+                if "auth/turnstile" not in (response.get("url") or ""):
                     return
-                mime = (getattr(resp, "mime_type", "") or "").lower()
+                mime = (response.get("mimeType") or "").lower()
                 if "json" not in mime:
                     return
-                body, is_base64 = await self._page.send(
-                    cdp.network.get_response_body(event.request_id),
-                )
-                if is_base64:
-                    try:
-                        body = base64.b64decode(body).decode("utf-8", errors="ignore")
-                    except Exception:
-                        return
+                request_id = params.get("requestId")
+                body = await self._tab.get_network_response_body(request_id)
+                if not body:
+                    return
                 data = json.loads(body)
                 if not isinstance(data, dict):
                     return
@@ -193,14 +175,14 @@ class _MonochromeBrowserSession:
                 pass
 
         try:
-            await self._page.send(cdp.network.enable())
-            self._page.add_handler(cdp.network.ResponseReceived, _on_response)
+            await self._tab.enable_network_events()
+            await self._tab.on(NetworkEvent.RESPONSE_RECEIVED, _on_response)
         except Exception as exc:
             logger.debug("[monochrome] network capture unavailable: %s", exc)
 
         if self._ever_solved:
             try:
-                await self._page.reload()
+                await self._tab.refresh()
                 await asyncio.sleep(1.0)
             except Exception:
                 pass
@@ -221,7 +203,7 @@ class _MonochromeBrowserSession:
                         f"[mono] No token received. Refreshing the page (attempt {reload_count}/2)...",
                     )
                     try:
-                        await self._page.reload()
+                        await self._tab.refresh()
                         await asyncio.sleep(2.0)
                     except Exception:
                         pass
@@ -254,23 +236,22 @@ class _MonochromeBrowserSession:
         return token
 
     async def _do_fetch(self, full_url: str, token: str) -> dict:
-        raw = await self._page.evaluate(
-            f"""
-            (async () => {{
-                try {{
-                    const r = await fetch({json.dumps(full_url)}, {{
-                        headers: {{ "X-Turnstile-JWT": {json.dumps(token)} }}
-                    }});
-                    const text = await r.text();
-                    return JSON.stringify({{ok: r.ok, status: r.status, body: text}});
-                }} catch (e) {{
-                    return JSON.stringify({{ok: false, status: 0, body: String(e)}});
-                }}
-            }})()
-            """,
-            await_promise=True,
+        """Esegue la GET instradata dentro il contesto JS del tab pydoll.
+
+        `tab.request` esegue le chiamate HTTP direttamente nel contesto
+        JavaScript del browser (stesso principio della fetch() manuale usata
+        in precedenza con nodriver), quindi eredita automaticamente
+        cookie/TLS/fingerprint del tab — che è esattamente ciò che serve qui.
+        """
+        response = await self._tab.request.get(
+            full_url,
+            headers=[{"name": "X-Turnstile-JWT", "value": token}],
         )
-        return json.loads(raw)
+        return {
+            "ok": response.ok,
+            "status": response.status_code,
+            "body": response.text,
+        }
 
     async def fetch_track(self, params: dict) -> dict:
         async with self._lock:
@@ -286,6 +267,8 @@ class _MonochromeBrowserSession:
         token = await self._ensure_token()
 
         mono_url = get_amazon_endpoint("mono")
+        from urllib.parse import urlencode
+
         qs = urlencode(params)
         sep = "&" if "?" in mono_url else "?"
         full_url = (
@@ -331,7 +314,7 @@ class _MonochromeBrowserSession:
         if not outer.get("ok"):
             msg = (
                 f"mono API (in-browser) returned {outer.get('status')}: "
-                f"{outer.get('body', '')[:200]}"
+                f"{str(outer.get('body', ''))[:200]}"
             )
             raise RuntimeError(
                 msg,
@@ -347,9 +330,9 @@ class _MonochromeBrowserSession:
         """Chiude il browser e resetta il token: forza un browser nuovo di zecca al prossimo tentativo."""
         if self._browser is not None:
             with contextlib.suppress(Exception):
-                self._browser.stop()
+                await self._browser.stop()
         self._browser = None
-        self._page = None
+        self._tab = None
         self._ever_solved = False
         self._record = MonochromeSessionRecord()
 
@@ -357,9 +340,9 @@ class _MonochromeBrowserSession:
         async with self._lock:
             if self._browser is not None:
                 with contextlib.suppress(Exception):
-                    self._browser.stop()
+                    await self._browser.stop()
             self._browser = None
-            self._page = None
+            self._tab = None
 
 
 _mono_browser_session = _MonochromeBrowserSession()
