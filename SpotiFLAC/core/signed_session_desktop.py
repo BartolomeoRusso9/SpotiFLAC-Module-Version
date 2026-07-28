@@ -328,10 +328,17 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                     # Chiudiamo Chromium per liberare le risorse e fermare il loop di pydoll
                     with contextlib.suppress(Exception):
                         import subprocess
-                        subprocess.run(["pkill", "-f", "chromium"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                        subprocess.run(
+                            ["pkill", "-f", "chromium"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
                     return grant
             except queue.Empty:
-                logger.warning("Automated verification timed out (nessun grant ricevuto in tempo).")
+                logger.warning(
+                    "Automated verification timed out (nessun grant ricevuto in tempo)."
+                )
 
         except ImportError:
             logger.info("solver.py not found or Playwright dependencies missing.")

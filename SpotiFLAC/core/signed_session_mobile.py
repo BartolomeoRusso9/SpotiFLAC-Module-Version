@@ -51,10 +51,12 @@ _BROWSER_FINGERPRINT_HEADERS = {
 _LOCAL_CALLBACK_HOST = "127.0.0.1"
 _LOCAL_CALLBACK_PATH = "/callback"
 _MANUAL_GRANT_TIMEOUT_S = 300  # 5 minutes to paste the grant
-_SOLVER_GRANT_TIMEOUT_S = 45    # solver timeout per attempt
+_SOLVER_GRANT_TIMEOUT_S = 45  # solver timeout per attempt
 
 
-async def _solver_grant_async(challenge_url: str, timeout: float = _SOLVER_GRANT_TIMEOUT_S) -> str:
+async def _solver_grant_async(
+    challenge_url: str, timeout: float = _SOLVER_GRANT_TIMEOUT_S
+) -> str:
     """Call the external solver (turnstile-solver) to obtain a grant token.
 
     Used when stdin is not a TTY (Docker container without stdin_open).

@@ -27,7 +27,11 @@ from pydoll.browser.chromium import Chrome
 from pydoll.protocol.network.events import NetworkEvent
 
 from SpotiFLAC.core.endpoints import get_amazon_endpoint
-from SpotiFLAC.core.solver import _ensure_xvfb, _try_minimize_window, build_chromium_options
+from SpotiFLAC.core.solver import (
+    _ensure_xvfb,
+    _try_minimize_window,
+    build_chromium_options,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -125,12 +125,16 @@ def _default_browser_path_macos() -> str | None:
         if not bundle_id:
             return None
 
-        app_path = subprocess.run(
-            ["mdfind", f"kMDItemCFBundleIdentifier == '{bundle_id}'"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        ).stdout.strip().splitlines()
+        app_path = (
+            subprocess.run(
+                ["mdfind", f"kMDItemCFBundleIdentifier == '{bundle_id}'"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            .stdout.strip()
+            .splitlines()
+        )
         if not app_path:
             return None
 
@@ -175,7 +179,7 @@ def _default_browser_path_linux() -> str | None:
         with open(desktop_file, encoding="utf-8") as f:
             for line in f:
                 if line.startswith("Exec="):
-                    exec_line = line[len("Exec="):].strip()
+                    exec_line = line[len("Exec=") :].strip()
                     # Strip %u/%U/%f/%F/etc. placeholders and quoting.
                     import shlex
 
@@ -285,7 +289,6 @@ def _find_chrome() -> str:
     raise FileNotFoundError(
         msg,
     )
-
 
 
 def _get_profile_dir() -> str:
