@@ -1,23 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-import base64 as _b64
 import contextlib
-import inspect
 import json
 import logging
-import logging as _logging
 import os
-import os as _os
 import platform
 import random
+import shutil
 import subprocess
 import threading
 import time
 from urllib.parse import parse_qsl, urlparse
 
-import nodriver as uc
-from nodriver import cdp
+from pydoll.browser.chromium import Chrome
+from pydoll.browser.options import ChromiumOptions
+from pydoll.protocol.network.events import NetworkEvent
 
 logger = logging.getLogger(__name__)
 
@@ -28,69 +26,37 @@ _MAX_RELOAD_ATTEMPTS = 3
 
 
 _docker_flags = []
-if _os.name != "nt" and hasattr(_os, "geteuid") and _os.geteuid() == 0:
+if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
     _docker_flags = ["--no-sandbox", "--disable-dev-shm-usage"]
 
 
 def _patch_nodriver_unknown_cdp_events() -> None:
-    from nodriver.core import connection as _nd_connection
+    """No-op kept only for backward compatibility.
 
-    if getattr(_nd_connection, "_spotiflac_unknown_event_patch", False):
-        return
-
-    _original = _nd_connection.Connection.process_event
-
-    if inspect.iscoroutinefunction(_original):
-
-        async def _patched(self, *args, **kwargs):
-            try:
-                return await _original(self, *args, **kwargs)
-            except KeyError as exc:
-                import logging
-
-                logging.getLogger(__name__).debug(
-                    "[turnstile] ignoring unknown CDP event: %s",
-                    exc,
-                )
-                return None
-
-    else:
-
-        def _patched(self, *args, **kwargs):
-            try:
-                return _original(self, *args, **kwargs)
-            except KeyError as exc:
-                import logging
-
-                logging.getLogger(__name__).debug(
-                    "[turnstile] ignoring unknown CDP event: %s",
-                    exc,
-                )
-                return None
-
-    _nd_connection.Connection.process_event = _patched
-    _nd_connection._spotiflac_unknown_event_patch = True
+    This used to monkeypatch a nodriver bug where unknown/unrecognised CDP
+    events raised a bare ``KeyError`` deep inside its connection loop.
+    pydoll's connection layer does not have that issue, so there is nothing
+    to patch anymore. The function is kept (as a no-op) purely because
+    ``SpotiFLAC.core.signed_session_mono`` imports and calls it; removing it
+    outright would break that import. New code should not call this.
+    """
+    return
 
 
-_patch_nodriver_unknown_cdp_events()
-
-_logging.getLogger("nodriver.core.connection").setLevel(_logging.CRITICAL)
-_logging.getLogger("asyncio").setLevel(_logging.ERROR)
+logging.getLogger("asyncio").setLevel(logging.ERROR)
 
 
 def _find_chrome() -> str:
-    """Return the Chrome executable path, checking common locations per OS, including macOS and alternative Chromium browsers."""
-    import os
-    import platform
-    import shutil
-
+    """Return the Chrome executable path, checking common locations per OS,
+    including macOS and alternative Chromium-based browsers.
+    """
     if os.environ.get("CHROME_PATH"):
         return os.environ["CHROME_PATH"]
     if os.environ.get("BRAVE_PATH"):
         return os.environ["BRAVE_PATH"]
 
     system = platform.system()
-    candidates = []
+    candidates: list[str] = []
 
     if system == "Windows":
         candidates = [
@@ -172,6 +138,84 @@ def _start_xvfb_if_needed() -> subprocess.Popen | None:
     return proc
 
 
+_xvfb_lock = threading.Lock()
+_xvfb_started = False
+
+
+def _ensure_xvfb() -> None:
+    """Starts a virtual display on headless Linux servers if one isn't already
+    running. Idempotent and safe to call from multiple threads.
+    """
+    global _xvfb_started
+    if _xvfb_started or platform.system() != "Linux" or os.environ.get("DISPLAY"):
+        return
+    with _xvfb_lock:
+        if _xvfb_started or os.environ.get("DISPLAY"):
+            return
+        _start_xvfb_if_needed()
+        _xvfb_started = True
+
+
+def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
+    """Build the ChromiumOptions used to launch the solver browser.
+
+    Exposed (not prefixed with ``_``) so other modules that need to spin up
+    a pydoll browser with the same persistent profile/flags (e.g.
+    ``signed_session_mono``) don't have to duplicate this setup.
+    """
+    options = ChromiumOptions()
+    options.binary_location = _find_chrome()
+    options.headless = False
+    # A persistent profile dir. pydoll doesn't have a first-class
+    # `user_data_dir` option (yet), so it's passed as a raw Chromium flag,
+    # same as nodriver did internally.
+    options.add_argument(f"--user-data-dir={_get_profile_dir()}")
+    options.add_argument("--window-size=1280,900")
+    if hidden:
+        # Push the (non-headless) window off-screen instead of using
+        # --headless: a fully headless browser is more likely to be
+        # challenged by Cloudflare than a real, visible-but-offscreen one.
+        options.add_argument("--window-position=-32000,-32000")
+    for flag in _docker_flags:
+        options.add_argument(flag)
+    return options
+
+
+def _js_value(evaluate_response: dict):
+    """Unwrap pydoll's raw CDP ``Runtime.evaluate`` response into the plain
+    JS value.
+
+    Unlike nodriver's ``page.evaluate()`` (which already returned the plain
+    Python value), pydoll's ``tab.execute_script()`` returns the raw
+    ``{"result": {"result": {"value": ...}}}`` CDP payload, so every call
+    site needs to unwrap it. Always pair this with
+    ``execute_script(..., return_by_value=True)`` so primitives/JSON come
+    back as plain values instead of remote-object handles.
+    """
+    try:
+        return evaluate_response["result"]["result"].get("value")
+    except Exception:
+        return None
+
+
+def _extract_grant_from_callback_url(callback_url: str) -> str | None:
+    if not callback_url:
+        return None
+    try:
+        parsed = urlparse(callback_url)
+    except Exception:
+        return None
+
+    for source in (parsed.query, parsed.fragment):
+        if not source:
+            continue
+        query = dict(parse_qsl(source, keep_blank_values=True))
+        grant = query.get("grant") or query.get("token") or query.get("code")
+        if grant and grant.strip():
+            return grant.strip()
+    return None
+
+
 async def _solve_impl(
     sitekey: str,
     siteurl: str,
@@ -179,37 +223,26 @@ async def _solve_impl(
     capture_callback: bool = False,
     hold_open_seconds: float = 0.0,
 ) -> str | tuple[str, str | None]:
-    browser = await uc.start(
-        browser_executable_path=_find_chrome(),
-        headless=False,
-        user_data_dir=_get_profile_dir(),
-        browser_args=[
-            "--window-position=-32000,-32000",
-            "--window-size=1280,900",
-            *_docker_flags,
-        ],
-    )
+    options = build_chromium_options(hidden=True)
+    browser = Chrome(options=options)
+    tab = await browser.start()
 
-    page = None
     callback_grant = _extract_grant_from_callback_url(siteurl)
     network_grant: dict[str, str | None] = {"value": None}
 
-    async def _on_response(event) -> None:
-        if not capture_callback or page is None:
+    async def _on_response(event: dict) -> None:
+        if not capture_callback:
             return
         try:
-            resp = event.response
-            mime = (getattr(resp, "mime_type", "") or "").lower()
+            params = event.get("params", {})
+            response = params.get("response", {})
+            mime = (response.get("mimeType") or "").lower()
             if "json" not in mime:
                 return
-            body, is_base64 = await page.send(
-                cdp.network.get_response_body(event.request_id),
-            )
-            if is_base64:
-                try:
-                    body = _b64.b64decode(body).decode("utf-8", errors="ignore")
-                except Exception:
-                    return
+            request_id = params.get("requestId")
+            body = await tab.get_network_response_body(request_id)
+            if not body:
+                return
             data = json.loads(body)
             if not isinstance(data, dict):
                 return
@@ -231,14 +264,15 @@ async def _solve_impl(
         if not capture_callback:
             return
         try:
-            await page.send(cdp.network.enable())
-            page.add_handler(cdp.network.ResponseReceived, _on_response)
+            await tab.enable_network_events()
+            await tab.on(NetworkEvent.RESPONSE_RECEIVED, _on_response)
         except Exception:
             pass
 
     async def _inject_widget() -> None:
-        await page.evaluate(f"""
-            (() => {{
+        await tab.execute_script(
+            f"""
+            return (function () {{
                 if (document.getElementById('_ts_box')) return;
                 window._tsToken = null;
                 const wrap = document.createElement('div');
@@ -259,40 +293,39 @@ async def _solve_impl(
         """)
 
     async def _open_fresh_page() -> None:
-        """Chiude la pagina corrente (se presente) e ne apre una nuova
-        sullo stesso siteurl — usato per il retry con reload.
+        """Ricarica siteurl da zero — usato per il retry con reload.
+
+        ``tab.go_to()`` in pydoll already refreshes when the URL matches the
+        currently loaded page, so there's no need to close/reopen a tab like
+        the old nodriver-based implementation did.
         """
-        nonlocal page
-        if page is not None:
-            with contextlib.suppress(Exception):
-                await page.close()
-        page = await browser.get(siteurl)
-        await _try_hide_window()
+        await tab.go_to(siteurl)
         await _enable_network_capture()
 
-    async def _try_hide_window() -> None:
-        try:
-            if hasattr(page, "minimize"):
-                await page.minimize()
-        except Exception:
-            pass
-
     async def get_token() -> str | None:
-        return await page.evaluate("""
-            (() => {
+        response = await tab.execute_script(
+            """
+            return (function () {
                 if (window._tsToken) return window._tsToken;
                 const inp = document.querySelector('#_ts_box [name="cf-turnstile-response"]');
                 return (inp && inp.value) ? inp.value : null;
-            })()
-        """)
+            })();
+        """,
+            return_by_value=True,
+        )
+        return _js_value(response)
 
     async def get_current_url() -> str:
-        return await page.evaluate("""
-            (() => {
+        response = await tab.execute_script(
+            """
+            return (function () {
                 try { return window.location.href || document.location.href || ''; }
-                catch { return ''; }
-            })()
-        """)
+                catch (e) { return ''; }
+            })();
+        """,
+            return_by_value=True,
+        )
+        return _js_value(response) or ""
 
     async def capture_callback_grant(
         current_url: str | None = None,
@@ -312,8 +345,9 @@ async def _solve_impl(
         return callback_grant
 
     async def get_cf_iframe_rect() -> dict | None:
-        raw = await page.evaluate("""
-            JSON.stringify((() => {
+        response = await tab.execute_script(
+            """
+            return JSON.stringify((function () {
                 for (const f of document.querySelectorAll('iframe')) {
                     const src = f.src || f.getAttribute('src') || '';
                     if (!src.includes('challenges.cloudflare.com')) continue;
@@ -321,8 +355,11 @@ async def _solve_impl(
                     if (r.width > 50 && r.height > 20) return {x:r.x, y:r.y, w:r.width, h:r.height};
                 }
                 return null;
-            })())
-        """)
+            })());
+        """,
+            return_by_value=True,
+        )
+        raw = _js_value(response)
         if raw and raw != "null":
             return json.loads(raw)
         return None
@@ -356,11 +393,11 @@ async def _solve_impl(
         else:
             cx = 20 + 28 + random.uniform(-3, 3)
             cy = 20 + 32 + random.uniform(-3, 3)
-        await page.mouse_move(cx - 80, cy - 20)
+        await tab.mouse.move(cx - 80, cy - 20, humanize=True)
         await asyncio.sleep(random.uniform(0.15, 0.25))
-        await page.mouse_move(cx, cy)
+        await tab.mouse.move(cx, cy, humanize=True)
         await asyncio.sleep(random.uniform(0.08, 0.15))
-        await page.mouse_click(cx, cy)
+        await tab.mouse.click(cx, cy)
 
     async def _try_solve_within(window_seconds: float) -> str | None:
         """Tenta di ottenere il token entro `window_seconds`, cliccando la
@@ -422,8 +459,7 @@ async def _solve_impl(
     max_attempts = _MAX_RELOAD_ATTEMPTS
 
     try:
-        page = await browser.get(siteurl)
-        await _try_hide_window()
+        await tab.go_to(siteurl)
         await _enable_network_capture()
 
         native_ready = await _wait_for_native_widget(min_wait=6.0)
@@ -455,7 +491,8 @@ async def _solve_impl(
                 await capture_callback_grant()
 
     finally:
-        browser.stop()
+        with contextlib.suppress(Exception):
+            await browser.stop()
 
     if not token and not (capture_callback and callback_grant):
         msg = (
@@ -467,45 +504,6 @@ async def _solve_impl(
         )
 
     return (token, callback_grant) if capture_callback else token
-
-
-def _extract_grant_from_callback_url(callback_url: str) -> str | None:
-    if not callback_url:
-        return None
-    try:
-        parsed = urlparse(callback_url)
-    except Exception:
-        return None
-
-    for source in (parsed.query, parsed.fragment):
-        if not source:
-            continue
-        query = dict(parse_qsl(source, keep_blank_values=True))
-        grant = query.get("grant") or query.get("token") or query.get("code")
-        if grant and grant.strip():
-            return grant.strip()
-    return None
-
-
-_xvfb_lock = threading.Lock()
-_xvfb_started = False
-
-
-def _ensure_xvfb() -> None:
-    """Starts a virtual display on headless Linux servers if one isn't already
-    running. Previously this only happened in the __main__ CLI entry point,
-    so any caller using solve()/solve_with_callback() as a library (e.g. the
-    signed-session bridge) on a headless box without a DISPLAY would fail to
-    launch Chrome. Idempotent and safe to call from multiple threads.
-    """
-    global _xvfb_started
-    if _xvfb_started or platform.system() != "Linux" or os.environ.get("DISPLAY"):
-        return
-    with _xvfb_lock:
-        if _xvfb_started or os.environ.get("DISPLAY"):
-            return
-        _start_xvfb_if_needed()
-        _xvfb_started = True
 
 
 def clear_solver_cache() -> None:
