@@ -216,19 +216,6 @@ def _ffprobe_path() -> str:
     return "ffprobe"
 
 
-def _is_running_in_docker() -> bool:
-    if os.path.exists("/.dockerenv"):
-        return True
-    try:
-        with open("/proc/1/cgroup") as f:
-            content = f.read()
-            if "docker" in content or "lxc" in content:
-                return True
-    except Exception:
-        pass
-    return False
-
-
 # ---------------------------------------------------------------------------
 # AmazonProvider
 # ---------------------------------------------------------------------------
