@@ -46,9 +46,159 @@ def _patch_nodriver_unknown_cdp_events() -> None:
 logging.getLogger("asyncio").setLevel(logging.ERROR)
 
 
+def _is_chromium_like(path: str) -> bool:
+    """Heuristic: does this executable look like a Chromium-based browser?
+
+    pydoll drives the browser over the Chrome DevTools Protocol, so only
+    Chromium-based browsers (Chrome, Edge, Brave, Chromium, Opera, Vivaldi,
+    Arc, ...) actually work. A system default browser that isn't
+    Chromium-based (Firefox, Safari, ...) can't be used here.
+    """
+    name = os.path.basename(path).lower()
+    keywords = (
+        "chrome",
+        "chromium",
+        "msedge",
+        "edge",
+        "brave",
+        "opera",
+        "vivaldi",
+        "arc",
+    )
+    return any(keyword in name for keyword in keywords)
+
+
+def _default_browser_path_windows() -> str | None:
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice",
+        ) as key:
+            prog_id = winreg.QueryValueEx(key, "ProgId")[0]
+
+        with winreg.OpenKey(
+            winreg.HKEY_CLASSES_ROOT,
+            rf"{prog_id}\shell\open\command",
+        ) as key:
+            command = winreg.QueryValueEx(key, "")[0]
+
+        # command looks like: "C:\Path\To\browser.exe" -- %1
+        import shlex
+
+        parts = shlex.split(command, posix=False)
+        if parts:
+            return parts[0].strip('"')
+    except Exception:
+        return None
+    return None
+
+
+def _default_browser_path_macos() -> str | None:
+    try:
+        import plistlib
+
+        ls_prefs_path = os.path.expanduser(
+            "~/Library/Preferences/com.apple.LaunchServices/"
+            "com.apple.launchservices.secure.plist",
+        )
+        if not os.path.exists(ls_prefs_path):
+            return None
+
+        with open(ls_prefs_path, "rb") as f:
+            prefs = plistlib.load(f)
+
+        bundle_id = None
+        for handler in prefs.get("LSHandlers", []):
+            if handler.get("LSHandlerURLScheme") == "http" and handler.get(
+                "LSHandlerRoleAll",
+            ):
+                bundle_id = handler["LSHandlerRoleAll"]
+                break
+        if not bundle_id:
+            return None
+
+        app_path = subprocess.run(
+            ["mdfind", f"kMDItemCFBundleIdentifier == '{bundle_id}'"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip().splitlines()
+        if not app_path:
+            return None
+
+        app_bundle = app_path[0]
+        macos_dir = os.path.join(app_bundle, "Contents", "MacOS")
+        if not os.path.isdir(macos_dir):
+            return None
+        for entry in os.listdir(macos_dir):
+            candidate = os.path.join(macos_dir, entry)
+            if os.access(candidate, os.X_OK) and not os.path.isdir(candidate):
+                return candidate
+    except Exception:
+        return None
+    return None
+
+
+def _default_browser_path_linux() -> str | None:
+    try:
+        desktop_name = subprocess.run(
+            ["xdg-settings", "get", "default-web-browser"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        if not desktop_name:
+            return None
+
+        search_dirs = [
+            os.path.expanduser("~/.local/share/applications"),
+            "/usr/local/share/applications",
+            "/usr/share/applications",
+        ]
+        desktop_file = None
+        for directory in search_dirs:
+            candidate = os.path.join(directory, desktop_name)
+            if os.path.exists(candidate):
+                desktop_file = candidate
+                break
+        if not desktop_file:
+            return None
+
+        with open(desktop_file, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("Exec="):
+                    exec_line = line[len("Exec="):].strip()
+                    # Strip %u/%U/%f/%F/etc. placeholders and quoting.
+                    import shlex
+
+                    bin_name = shlex.split(exec_line)[0]
+                    return shutil.which(bin_name) or bin_name
+    except Exception:
+        return None
+    return None
+
+
+def _get_default_browser_path() -> str | None:
+    """Best-effort cross-platform lookup of the user's default web browser."""
+    system = platform.system()
+    if system == "Windows":
+        return _default_browser_path_windows()
+    if system == "Darwin":
+        return _default_browser_path_macos()
+    return _default_browser_path_linux()
+
+
 def _find_chrome() -> str:
     """Return the Chrome executable path, checking common locations per OS,
     including macOS and alternative Chromium-based browsers.
+
+    As a last resort, before giving up, this also checks the system's
+    configured *default* browser: if the user's default browser happens to
+    be Chromium-based (Chrome, Edge, Brave, Chromium, Opera, Vivaldi, Arc,
+    ...) it's used, since pydoll can only drive Chromium-based browsers over
+    the DevTools Protocol regardless of which one is "default".
     """
     if os.environ.get("CHROME_PATH"):
         return os.environ["CHROME_PATH"]
@@ -103,13 +253,33 @@ def _find_chrome() -> str:
         if path:
             return path
 
+    # 3. Fallback: usa il browser predefinito del sistema, se è
+    # Chromium-based (altrimenti pydoll non potrebbe comunque pilotarlo
+    # via CDP).
+    default_path = _get_default_browser_path()
+    if default_path and os.path.exists(default_path):
+        if _is_chromium_like(default_path):
+            logger.info(
+                "[solver] Nessun Chrome/Chromium standard trovato: uso il "
+                "browser predefinito del sistema (%s).",
+                default_path,
+            )
+            return default_path
+        logger.debug(
+            "[solver] Il browser predefinito del sistema (%s) non è "
+            "basato su Chromium: ignorato.",
+            default_path,
+        )
+
     msg = (
-        "No Chromium-based browser (Chrome, Edge, Brave, Arc) found on system. "
+        "No Chromium-based browser (Chrome, Edge, Brave, Arc) found on system, "
+        "and the system's default browser is not Chromium-based either. "
         "Install one of these browsers or set the CHROME_PATH environment variable."
     )
     raise FileNotFoundError(
         msg,
     )
+
 
 
 def _get_profile_dir() -> str:
