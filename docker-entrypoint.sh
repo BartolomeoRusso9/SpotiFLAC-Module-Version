@@ -12,6 +12,16 @@ sleep 1
 # 2. Uncomment the 3 commands below.
 # 3. Run Docker with the port flag mapped: -p 6080:6080
 # 4. Open your browser at: http://localhost:6080/vnc.html
+#
+# Example Command:
+# docker run --rm -it \
+#   -p 6080:6080 \
+#   -v "$(pwd)/downloads:/app/downloads" \
+#   -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
+#   -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
+#   --shm-size=1g \
+#   spotiflac "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" \
+#   /app/downloads -s amazon -v
 # ==============================================================================
 
 # 2. Start Fluxbox window manager to keep Chromium windows organized
@@ -27,10 +37,15 @@ export TS_DEBUG_VISIBLE=1
 
 if [ "$#" -eq 0 ]; then
   echo "SpotiFLAC Docker image: pass a URL and output directory as arguments."
-  echo "Example: docker run -it --rm \\"
-  echo "    -v \$(pwd)/downloads:/app/downloads \\"
-  echo "    -v \$(pwd)/sessions:/root/.spotiflac/signed_sessions \\"
-  echo "    spotiflac https://open.spotify.com/track/... /app/downloads -s tidal -q LOSSLESS"
+  echo "Example:"
+  echo "  docker run --rm -it \\"
+  echo "    -p 6080:6080 \\"
+  echo "    -v \"\$(pwd)/downloads:/app/downloads\" \\"
+  echo "    -v \"\$(pwd)/.spotiflac_docker:/root/.spotiflac\" \\"
+  echo "    -v \"\$(pwd)/.cache_docker:/root/.cache/spotiflac\" \\"
+  echo "    --shm-size=1g \\"
+  echo "    spotiflac \"https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT\" \\"
+  echo "    /app/downloads -s amazon -v"
   echo
   exec spotiflac --help
 fi
