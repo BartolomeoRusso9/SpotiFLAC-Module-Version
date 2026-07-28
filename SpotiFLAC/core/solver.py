@@ -1,23 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-import base64 as _b64
 import contextlib
-import inspect
 import json
 import logging
-import logging as _logging
 import os
-import os as _os
 import platform
 import random
+import shutil
 import subprocess
 import threading
 import time
 from urllib.parse import parse_qsl, urlparse
 
-import nodriver as uc
-from nodriver import cdp
+from pydoll.browser.chromium import Chrome
+from pydoll.browser.options import ChromiumOptions
+from pydoll.protocol.network.events import NetworkEvent
 
 logger = logging.getLogger(__name__)
 
@@ -26,71 +24,199 @@ _TURNSTILE_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
 _RELOAD_CHECK_SECONDS = 10.0
 _MAX_RELOAD_ATTEMPTS = 3
 
+# Se impostata a "1", la finestra del browser resta visibile e non viene
+# spostata fuori schermo né minimizzata. Utile per il debug via VNC in
+# Docker (vedi docker-entrypoint.sh + x11vnc). In produzione va lasciata
+# non impostata (o "0"), così il comportamento resta quello nascosto.
+_DEBUG_VISIBLE = os.environ.get("TS_DEBUG_VISIBLE", "").strip() == "1"
+
 
 _docker_flags = []
-if _os.name != "nt" and hasattr(_os, "geteuid") and _os.geteuid() == 0:
+if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
     _docker_flags = ["--no-sandbox", "--disable-dev-shm-usage"]
 
 
 def _patch_nodriver_unknown_cdp_events() -> None:
-    from nodriver.core import connection as _nd_connection
+    """No-op kept only for backward compatibility.
 
-    if getattr(_nd_connection, "_spotiflac_unknown_event_patch", False):
-        return
-
-    _original = _nd_connection.Connection.process_event
-
-    if inspect.iscoroutinefunction(_original):
-
-        async def _patched(self, *args, **kwargs):
-            try:
-                return await _original(self, *args, **kwargs)
-            except KeyError as exc:
-                import logging
-
-                logging.getLogger(__name__).debug(
-                    "[turnstile] ignoring unknown CDP event: %s",
-                    exc,
-                )
-                return None
-
-    else:
-
-        def _patched(self, *args, **kwargs):
-            try:
-                return _original(self, *args, **kwargs)
-            except KeyError as exc:
-                import logging
-
-                logging.getLogger(__name__).debug(
-                    "[turnstile] ignoring unknown CDP event: %s",
-                    exc,
-                )
-                return None
-
-    _nd_connection.Connection.process_event = _patched
-    _nd_connection._spotiflac_unknown_event_patch = True
+    This used to monkeypatch a nodriver bug where unknown/unrecognised CDP
+    events raised a bare ``KeyError`` deep inside its connection loop.
+    pydoll's connection layer does not have that issue, so there is nothing
+    to patch anymore. The function is kept (as a no-op) purely because
+    ``SpotiFLAC.core.signed_session_mono`` imports and calls it; removing it
+    outright would break that import. New code should not call this.
+    """
+    return
 
 
-_patch_nodriver_unknown_cdp_events()
+logging.getLogger("asyncio").setLevel(logging.ERROR)
 
-_logging.getLogger("nodriver.core.connection").setLevel(_logging.CRITICAL)
-_logging.getLogger("asyncio").setLevel(_logging.ERROR)
+
+def _is_chromium_like(path: str) -> bool:
+    """Heuristic: does this executable look like a Chromium-based browser?
+
+    pydoll drives the browser over the Chrome DevTools Protocol, so only
+    Chromium-based browsers (Chrome, Edge, Brave, Chromium, Opera, Vivaldi,
+    Arc, ...) actually work. A system default browser that isn't
+    Chromium-based (Firefox, Safari, ...) can't be used here.
+    """
+    name = os.path.basename(path).lower()
+    keywords = (
+        "chrome",
+        "chromium",
+        "msedge",
+        "edge",
+        "brave",
+        "opera",
+        "vivaldi",
+        "arc",
+    )
+    return any(keyword in name for keyword in keywords)
+
+
+def _default_browser_path_windows() -> str | None:
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice",
+        ) as key:
+            prog_id = winreg.QueryValueEx(key, "ProgId")[0]
+
+        with winreg.OpenKey(
+            winreg.HKEY_CLASSES_ROOT,
+            rf"{prog_id}\shell\open\command",
+        ) as key:
+            command = winreg.QueryValueEx(key, "")[0]
+
+        # command looks like: "C:\Path\To\browser.exe" -- %1
+        import shlex
+
+        parts = shlex.split(command, posix=False)
+        if parts:
+            return parts[0].strip('"')
+    except Exception:
+        return None
+    return None
+
+
+def _default_browser_path_macos() -> str | None:
+    try:
+        import plistlib
+
+        ls_prefs_path = os.path.expanduser(
+            "~/Library/Preferences/com.apple.LaunchServices/"
+            "com.apple.launchservices.secure.plist",
+        )
+        if not os.path.exists(ls_prefs_path):
+            return None
+
+        with open(ls_prefs_path, "rb") as f:
+            prefs = plistlib.load(f)
+
+        bundle_id = None
+        for handler in prefs.get("LSHandlers", []):
+            if handler.get("LSHandlerURLScheme") == "http" and handler.get(
+                "LSHandlerRoleAll",
+            ):
+                bundle_id = handler["LSHandlerRoleAll"]
+                break
+        if not bundle_id:
+            return None
+
+        app_path = (
+            subprocess.run(
+                ["mdfind", f"kMDItemCFBundleIdentifier == '{bundle_id}'"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            .stdout.strip()
+            .splitlines()
+        )
+        if not app_path:
+            return None
+
+        app_bundle = app_path[0]
+        macos_dir = os.path.join(app_bundle, "Contents", "MacOS")
+        if not os.path.isdir(macos_dir):
+            return None
+        for entry in os.listdir(macos_dir):
+            candidate = os.path.join(macos_dir, entry)
+            if os.access(candidate, os.X_OK) and not os.path.isdir(candidate):
+                return candidate
+    except Exception:
+        return None
+    return None
+
+
+def _default_browser_path_linux() -> str | None:
+    try:
+        desktop_name = subprocess.run(
+            ["xdg-settings", "get", "default-web-browser"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        if not desktop_name:
+            return None
+
+        search_dirs = [
+            os.path.expanduser("~/.local/share/applications"),
+            "/usr/local/share/applications",
+            "/usr/share/applications",
+        ]
+        desktop_file = None
+        for directory in search_dirs:
+            candidate = os.path.join(directory, desktop_name)
+            if os.path.exists(candidate):
+                desktop_file = candidate
+                break
+        if not desktop_file:
+            return None
+
+        with open(desktop_file, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("Exec="):
+                    exec_line = line[len("Exec=") :].strip()
+                    # Strip %u/%U/%f/%F/etc. placeholders and quoting.
+                    import shlex
+
+                    bin_name = shlex.split(exec_line)[0]
+                    return shutil.which(bin_name) or bin_name
+    except Exception:
+        return None
+    return None
+
+
+def _get_default_browser_path() -> str | None:
+    """Best-effort cross-platform lookup of the user's default web browser."""
+    system = platform.system()
+    if system == "Windows":
+        return _default_browser_path_windows()
+    if system == "Darwin":
+        return _default_browser_path_macos()
+    return _default_browser_path_linux()
 
 
 def _find_chrome() -> str:
-    """Return the Chrome executable path, checking common locations per OS, including macOS and alternative Chromium browsers."""
-    import os
-    import platform
-    import shutil
+    """Return the Chrome executable path, checking common locations per OS,
+    including macOS and alternative Chromium-based browsers.
 
+    As a last resort, before giving up, this also checks the system's
+    configured *default* browser: if the user's default browser happens to
+    be Chromium-based (Chrome, Edge, Brave, Chromium, Opera, Vivaldi, Arc,
+    ...) it's used, since pydoll can only drive Chromium-based browsers over
+    the DevTools Protocol regardless of which one is "default".
+    """
     if os.environ.get("CHROME_PATH"):
         return os.environ["CHROME_PATH"]
     if os.environ.get("BRAVE_PATH"):
         return os.environ["BRAVE_PATH"]
 
     system = platform.system()
-    candidates = []
+    candidates: list[str] = []
 
     if system == "Windows":
         candidates = [
@@ -137,8 +263,27 @@ def _find_chrome() -> str:
         if path:
             return path
 
+    # 3. Fallback: usa il browser predefinito del sistema, se è
+    # Chromium-based (altrimenti pydoll non potrebbe comunque pilotarlo
+    # via CDP).
+    default_path = _get_default_browser_path()
+    if default_path and os.path.exists(default_path):
+        if _is_chromium_like(default_path):
+            logger.info(
+                "[solver] Nessun Chrome/Chromium standard trovato: uso il "
+                "browser predefinito del sistema (%s).",
+                default_path,
+            )
+            return default_path
+        logger.debug(
+            "[solver] Il browser predefinito del sistema (%s) non è "
+            "basato su Chromium: ignorato.",
+            default_path,
+        )
+
     msg = (
-        "No Chromium-based browser (Chrome, Edge, Brave, Arc) found on system. "
+        "No Chromium-based browser (Chrome, Edge, Brave, Arc) found on system, "
+        "and the system's default browser is not Chromium-based either. "
         "Install one of these browsers or set the CHROME_PATH environment variable."
     )
     raise FileNotFoundError(
@@ -172,6 +317,131 @@ def _start_xvfb_if_needed() -> subprocess.Popen | None:
     return proc
 
 
+_xvfb_lock = threading.Lock()
+_xvfb_started = False
+
+
+def _ensure_xvfb() -> None:
+    """Starts a virtual display on headless Linux servers if one isn't already
+    running. Idempotent and safe to call from multiple threads.
+    """
+    global _xvfb_started
+    if _xvfb_started or platform.system() != "Linux" or os.environ.get("DISPLAY"):
+        return
+    with _xvfb_lock:
+        if _xvfb_started or os.environ.get("DISPLAY"):
+            return
+        _start_xvfb_if_needed()
+        _xvfb_started = True
+
+
+def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
+    """Build the ChromiumOptions used to launch the solver browser.
+
+    Exposed (not prefixed with ``_``) so other modules that need to spin up
+    a pydoll browser with the same persistent profile/flags (e.g.
+    ``signed_session_mono``) don't have to duplicate this setup.
+
+    Stealth configuration follows pydoll's own recommendations
+    (https://pydoll.tech/docs/features/advanced/behavioral-captcha-bypass/):
+    ``--disable-blink-features=AutomationControlled`` plus realistic
+    ``browser_preferences`` that make the profile look like it's been used
+    for a while, instead of a freshly-created automation profile.
+    """
+    # TS_DEBUG_VISIBLE=1 overrides `hidden`: keep the window on-screen and
+    # normally positioned so it can be watched live via VNC.
+    debug_visible = _DEBUG_VISIBLE
+
+    options = ChromiumOptions()
+    options.binary_location = _find_chrome()
+    options.headless = False
+    # A persistent profile dir. pydoll doesn't have a first-class
+    # `user_data_dir` option (yet), so it's passed as a raw Chromium flag,
+    # same as nodriver did internally.
+    options.add_argument(f"--user-data-dir={_get_profile_dir()}")
+    options.add_argument("--window-size=1280,900")
+    if hidden and not debug_visible:
+        # Push the (non-headless) window off-screen instead of using
+        # --headless: a fully headless browser is more likely to be
+        # challenged by Cloudflare than a real, visible-but-offscreen one.
+        options.add_argument("--window-position=-32000,-32000")
+    for flag in _docker_flags:
+        options.add_argument(flag)
+
+    # --- Stealth: remove the most obvious automation signals ---------
+    options.add_argument("--disable-blink-features=AutomationControlled")
+
+    # A freshly-created profile (first launch, expires_at unset, etc.)
+    # looks suspicious to fingerprinting. Pretend the profile has already
+    # been used for a few hours and exited normally.
+    current_time = int(time.time())
+    options.browser_preferences = {
+        "profile": {
+            "last_engagement_time": str(current_time - (3 * 60 * 60)),
+            "exited_cleanly": True,
+            "exit_type": "Normal",
+        },
+        "safebrowsing": {"enabled": True},
+    }
+
+    return options
+
+
+def _js_value(evaluate_response: dict):
+    """Unwrap pydoll's raw CDP ``Runtime.evaluate`` response into the plain
+    JS value.
+
+    Unlike nodriver's ``page.evaluate()`` (which already returned the plain
+    Python value), pydoll's ``tab.execute_script()`` returns the raw
+    ``{"result": {"result": {"value": ...}}}`` CDP payload, so every call
+    site needs to unwrap it. Always pair this with
+    ``execute_script(..., return_by_value=True)`` so primitives/JSON come
+    back as plain values instead of remote-object handles.
+    """
+    try:
+        return evaluate_response["result"]["result"].get("value")
+    except Exception:
+        return None
+
+
+def _extract_grant_from_callback_url(callback_url: str) -> str | None:
+    if not callback_url:
+        return None
+    try:
+        parsed = urlparse(callback_url)
+    except Exception:
+        return None
+
+    for source in (parsed.query, parsed.fragment):
+        if not source:
+            continue
+        query = dict(parse_qsl(source, keep_blank_values=True))
+        grant = query.get("grant") or query.get("token") or query.get("code")
+        if grant and grant.strip():
+            return grant.strip()
+    return None
+
+
+async def _try_minimize_window(browser: Chrome) -> None:
+    """Best-effort: minimize the browser window to taskbar/dock.
+
+    Combined with the off-screen ``--window-position`` flag, this keeps the
+    solver browser fully out of the way even on systems/window managers
+    where the off-screen trick alone isn't enough (e.g. some tiling WMs
+    snap windows back on-screen). Failures are ignored: minimizing is a
+    cosmetic nicety, not something the solve should fail over.
+
+    Skipped entirely when TS_DEBUG_VISIBLE=1, so the window stays visible
+    for VNC-based debugging.
+    """
+    if _DEBUG_VISIBLE:
+        return
+    try:
+        await browser.set_window_minimized()
+    except Exception as exc:
+        logger.debug("[solver] could not minimize browser window: %s", exc)
+
+
 async def _solve_impl(
     sitekey: str,
     siteurl: str,
@@ -179,37 +449,27 @@ async def _solve_impl(
     capture_callback: bool = False,
     hold_open_seconds: float = 0.0,
 ) -> str | tuple[str, str | None]:
-    browser = await uc.start(
-        browser_executable_path=_find_chrome(),
-        headless=False,
-        user_data_dir=_get_profile_dir(),
-        browser_args=[
-            "--window-position=-32000,-32000",
-            "--window-size=1280,900",
-            *_docker_flags,
-        ],
-    )
+    options = build_chromium_options(hidden=True)
+    browser = Chrome(options=options)
+    tab = await browser.start()
+    await _try_minimize_window(browser)
 
-    page = None
     callback_grant = _extract_grant_from_callback_url(siteurl)
     network_grant: dict[str, str | None] = {"value": None}
 
-    async def _on_response(event) -> None:
-        if not capture_callback or page is None:
+    async def _on_response(event: dict) -> None:
+        if not capture_callback:
             return
         try:
-            resp = event.response
-            mime = (getattr(resp, "mime_type", "") or "").lower()
+            params = event.get("params", {})
+            response = params.get("response", {})
+            mime = (response.get("mimeType") or "").lower()
             if "json" not in mime:
                 return
-            body, is_base64 = await page.send(
-                cdp.network.get_response_body(event.request_id),
-            )
-            if is_base64:
-                try:
-                    body = _b64.b64decode(body).decode("utf-8", errors="ignore")
-                except Exception:
-                    return
+            request_id = params.get("requestId")
+            body = await tab.get_network_response_body(request_id)
+            if not body:
+                return
             data = json.loads(body)
             if not isinstance(data, dict):
                 return
@@ -231,68 +491,68 @@ async def _solve_impl(
         if not capture_callback:
             return
         try:
-            await page.send(cdp.network.enable())
-            page.add_handler(cdp.network.ResponseReceived, _on_response)
+            await tab.enable_network_events()
+            await tab.on(NetworkEvent.RESPONSE_RECEIVED, _on_response)
         except Exception:
             pass
 
-    async def _inject_widget() -> None:
-        await page.evaluate(f"""
-            (() => {{
-                if (document.getElementById('_ts_box')) return;
-                window._tsToken = null;
-                const wrap = document.createElement('div');
-                wrap.id = '_ts_box';
-                wrap.style = 'position:fixed;top:20px;left:20px;z-index:2147483647;';
-                document.body.appendChild(wrap);
-                window._tsLoad = function () {{
-                    turnstile.render('#_ts_box', {{
-                        sitekey: '{sitekey}',
-                        callback: function(token) {{ window._tsToken = token; }}
-                    }});
-                }};
-                const s = document.createElement('script');
-                s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=_tsLoad&render=explicit';
-                s.async = true;
-                document.head.appendChild(s);
-            }})();
-        """)
+    async def _navigate_with_turnstile_bypass() -> None:
+        """Navigate to ``siteurl`` letting pydoll's native Turnstile helper
+        handle the click for us (shadow-DOM traversal + realistic click),
+        instead of our old manual click loop. Falls back silently if the
+        helper isn't available or raises (e.g. captcha never appeared) --
+        the rest of the flow (get_token/capture_callback_grant polling)
+        still runs afterwards regardless.
+        """
+        # A short "read the page" pause before interacting mirrors real
+        # user behavior and is recommended by pydoll's own docs.
+        try:
+            async with tab.expect_and_bypass_cloudflare_captcha(
+                time_before_click=random.uniform(1.5, 3.0),
+                time_to_wait_captcha=10,
+            ):
+                await tab.go_to(siteurl)
+        except AttributeError:
+            # Older pydoll version without this helper: plain navigation,
+            # the manual click fallback below will handle the rest.
+            await tab.go_to(siteurl)
+        except Exception as exc:
+            logger.debug(
+                "[solver] expect_and_bypass_cloudflare_captcha failed/skipped: %s",
+                exc,
+            )
+
+        await _enable_network_capture()
+        await _try_minimize_window(browser)
 
     async def _open_fresh_page() -> None:
-        """Chiude la pagina corrente (se presente) e ne apre una nuova
-        sullo stesso siteurl — usato per il retry con reload.
-        """
-        nonlocal page
-        if page is not None:
-            with contextlib.suppress(Exception):
-                await page.close()
-        page = await browser.get(siteurl)
-        await _try_hide_window()
-        await _enable_network_capture()
-
-    async def _try_hide_window() -> None:
-        try:
-            if hasattr(page, "minimize"):
-                await page.minimize()
-        except Exception:
-            pass
+        """Ricarica siteurl da zero — usato per il retry con reload."""
+        await _navigate_with_turnstile_bypass()
 
     async def get_token() -> str | None:
-        return await page.evaluate("""
-            (() => {
+        response = await tab.execute_script(
+            """
+            return (function () {
                 if (window._tsToken) return window._tsToken;
-                const inp = document.querySelector('#_ts_box [name="cf-turnstile-response"]');
+                const inp = document.querySelector('#_ts_box [name="cf-turnstile-response"], [name="cf-turnstile-response"]');
                 return (inp && inp.value) ? inp.value : null;
-            })()
-        """)
+            })();
+        """,
+            return_by_value=True,
+        )
+        return _js_value(response)
 
     async def get_current_url() -> str:
-        return await page.evaluate("""
-            (() => {
+        response = await tab.execute_script(
+            """
+            return (function () {
                 try { return window.location.href || document.location.href || ''; }
-                catch { return ''; }
-            })()
-        """)
+                catch (e) { return ''; }
+            })();
+        """,
+            return_by_value=True,
+        )
+        return _js_value(response) or ""
 
     async def capture_callback_grant(
         current_url: str | None = None,
@@ -312,8 +572,9 @@ async def _solve_impl(
         return callback_grant
 
     async def get_cf_iframe_rect() -> dict | None:
-        raw = await page.evaluate("""
-            JSON.stringify((() => {
+        response = await tab.execute_script(
+            """
+            return JSON.stringify((function () {
                 for (const f of document.querySelectorAll('iframe')) {
                     const src = f.src || f.getAttribute('src') || '';
                     if (!src.includes('challenges.cloudflare.com')) continue;
@@ -321,52 +582,39 @@ async def _solve_impl(
                     if (r.width > 50 && r.height > 20) return {x:r.x, y:r.y, w:r.width, h:r.height};
                 }
                 return null;
-            })())
-        """)
+            })());
+        """,
+            return_by_value=True,
+        )
+        raw = _js_value(response)
         if raw and raw != "null":
             return json.loads(raw)
         return None
 
-    async def _has_native_widget() -> bool:
-        rect = await get_cf_iframe_rect()
-        return rect is not None
-
-    async def _wait_for_native_widget(
-        min_wait: float = 6.0,
-        poll_interval: float = 0.5,
-    ) -> bool:
-        """Aspetta fino a `min_wait` secondi che compaia il widget Turnstile
-        NATIVO della pagina (quello che nel browser reale appare dopo ~5s
-        di countdown), invece di iniettarne subito uno nostro. Ritorna True
-        se il widget nativo è comparso, False se bisogna ricorrere al
-        fallback di _inject_widget().
-        """
-        elapsed = 0.0
-        while elapsed < min_wait:
-            if await _has_native_widget():
-                return True
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-        return await _has_native_widget()
-
     async def do_click(rect: dict | None) -> None:
+        """Manual click fallback, kept for pydoll versions without native
+        Turnstile support, or in case the native helper's single click
+        wasn't enough (e.g. a second challenge appeared after reload).
+        """
         if rect:
             cx = rect["x"] + 28 + random.uniform(-3, 3)
             cy = rect["y"] + rect["h"] / 2 + random.uniform(-3, 3)
         else:
             cx = 20 + 28 + random.uniform(-3, 3)
             cy = 20 + 32 + random.uniform(-3, 3)
-        await page.mouse_move(cx - 80, cy - 20)
+        await tab.mouse.move(cx - 80, cy - 20, humanize=True)
         await asyncio.sleep(random.uniform(0.15, 0.25))
-        await page.mouse_move(cx, cy)
+        await tab.mouse.move(cx, cy, humanize=True)
         await asyncio.sleep(random.uniform(0.08, 0.15))
-        await page.mouse_click(cx, cy)
+        await tab.mouse.click(cx, cy)
 
     async def _try_solve_within(window_seconds: float) -> str | None:
-        """Tenta di ottenere il token entro `window_seconds`, cliccando la
-        checkbox se necessario. In modalità capture_callback, considera
-        "risolto" anche il solo ottenimento del grant di rete, anche senza
-        un token esplicito (la pagina a volte non lo espone mai nel DOM).
+        """Tenta di ottenere il token entro `window_seconds`.
+
+        The native Turnstile click already happened (if available) during
+        `_navigate_with_turnstile_bypass()`/`_open_fresh_page()`, so this
+        mostly polls for the resulting token/grant, and only falls back to
+        manual clicking if nothing showed up yet.
         """
         token = await get_token()
         if token:
@@ -422,22 +670,11 @@ async def _solve_impl(
     max_attempts = _MAX_RELOAD_ATTEMPTS
 
     try:
-        page = await browser.get(siteurl)
-        await _try_hide_window()
-        await _enable_network_capture()
-
-        native_ready = await _wait_for_native_widget(min_wait=6.0)
-        if not native_ready:
-            await _inject_widget()
-            await asyncio.sleep(2.0)
+        await _navigate_with_turnstile_bypass()
 
         for attempt in range(1, max_attempts + 1):
             if attempt > 1:
                 await _open_fresh_page()
-                native_ready = await _wait_for_native_widget(min_wait=6.0)
-                if not native_ready:
-                    await _inject_widget()
-                    await asyncio.sleep(2.0)
 
             token = await _try_solve_within(per_attempt_seconds)
 
@@ -455,7 +692,8 @@ async def _solve_impl(
                 await capture_callback_grant()
 
     finally:
-        browser.stop()
+        with contextlib.suppress(Exception):
+            await browser.stop()
 
     if not token and not (capture_callback and callback_grant):
         msg = (
@@ -467,45 +705,6 @@ async def _solve_impl(
         )
 
     return (token, callback_grant) if capture_callback else token
-
-
-def _extract_grant_from_callback_url(callback_url: str) -> str | None:
-    if not callback_url:
-        return None
-    try:
-        parsed = urlparse(callback_url)
-    except Exception:
-        return None
-
-    for source in (parsed.query, parsed.fragment):
-        if not source:
-            continue
-        query = dict(parse_qsl(source, keep_blank_values=True))
-        grant = query.get("grant") or query.get("token") or query.get("code")
-        if grant and grant.strip():
-            return grant.strip()
-    return None
-
-
-_xvfb_lock = threading.Lock()
-_xvfb_started = False
-
-
-def _ensure_xvfb() -> None:
-    """Starts a virtual display on headless Linux servers if one isn't already
-    running. Previously this only happened in the __main__ CLI entry point,
-    so any caller using solve()/solve_with_callback() as a library (e.g. the
-    signed-session bridge) on a headless box without a DISPLAY would fail to
-    launch Chrome. Idempotent and safe to call from multiple threads.
-    """
-    global _xvfb_started
-    if _xvfb_started or platform.system() != "Linux" or os.environ.get("DISPLAY"):
-        return
-    with _xvfb_lock:
-        if _xvfb_started or os.environ.get("DISPLAY"):
-            return
-        _start_xvfb_if_needed()
-        _xvfb_started = True
 
 
 def clear_solver_cache() -> None:

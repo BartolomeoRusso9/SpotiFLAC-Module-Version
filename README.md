@@ -218,50 +218,6 @@ docker run --rm -it \
   /app/downloads -s deezer -q LOSSLESS
 ```
 
-### Advanced Headless Setup (Telegram Bot Integration)
-
-When running in a headless environment, SpotiFLAC may occasionally encounter a Cloudflare challenge. Normally this requires opening a browser and manually completing the CAPTCHA.
-
-To make the entire workflow fully headless, SpotiFLAC can integrate with a Telegram bot. Whenever a challenge occurs, the bot will send you the challenge URL. Simply complete the CAPTCHA from your phone or browser, reply with the generated grant code (DevTools → Network → verify → Preview → field `grant`, or if you can't open DevTools wait a few seconds and the grant will appear on the site) and the download will resume automatically.
-
-**1. Create a Telegram Bot**
-
-Start a conversation with `@BotFather` on Telegram and run:
-
-```
-/newbot
-```
-
-Follow the instructions to create your bot and copy the generated Bot Token.
-
-**2. Get Your Chat ID**
-
-Start a conversation with `@userinfobot` and copy your personal Chat ID. Your Chat ID is used to ensure that only you can provide grant codes to the running container.
-
-**3. Create a `.env` File**
-
-Store your credentials in a `.env` file:
-
-```
-TG_BOT_TOKEN=your_bot_token_here
-TG_CHAT_ID=your_chat_id_here
-```
-
-**4. Run the Container**
-
-Pass the environment file to Docker:
-
-```bash
-docker run --rm -it \
-  --env-file .env \
-  -v "$(pwd)/downloads:/app/downloads" \
-  -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
-  -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
-  spotiflac "URL" /app/downloads -s deezer
-```
-
-If a challenge appears, you will receive a Telegram notification containing the challenge URL. Complete the challenge, send the generated grant code back to the bot, and SpotiFLAC will automatically inject it into the running process and continue the download without requiring any interaction with the container.
-
 ### Published Image (GHCR)
 
 Official Docker images are published on GitHub Container Registry (GHCR), allowing you to run the latest version without building locally.

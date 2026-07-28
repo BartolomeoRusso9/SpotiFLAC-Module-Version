@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import secrets
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,25 +22,6 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import httpx
 
 logger = logging.getLogger(__name__)
-
-
-def is_docker() -> bool:
-    """Determine whether the process is running inside a Docker container.
-
-    Returns:
-        bool: `True` if Docker container indicators are detected, `False` otherwise.
-
-    """
-    cgroup_path = "/proc/1/cgroup"
-    if os.path.exists("/.dockerenv"):
-        return True
-    if os.path.isfile(cgroup_path):
-        try:
-            with open(cgroup_path) as f:
-                return any("docker" in line for line in f)
-        except OSError:
-            return False
-    return False
 
 
 _DEFAULT_ENDPOINTS = {
@@ -69,6 +51,35 @@ _BROWSER_FINGERPRINT_HEADERS = {
 _LOCAL_CALLBACK_HOST = "127.0.0.1"
 _LOCAL_CALLBACK_PATH = "/callback"
 _MANUAL_GRANT_TIMEOUT_S = 300  # 5 minutes to paste the grant
+_SOLVER_GRANT_TIMEOUT_S = 45  # solver timeout per attempt
+
+
+async def _solver_grant_async(
+    challenge_url: str, timeout: float = _SOLVER_GRANT_TIMEOUT_S
+) -> str:
+    """Call the external solver (turnstile-solver) to obtain a grant token.
+
+    Used when stdin is not a TTY (Docker container without stdin_open).
+    Reads TURNSTILE_SOLVER_URL from the environment.
+    """
+    solver_url = os.environ.get("TURNSTILE_SOLVER_URL", "").rstrip("/")
+    if not solver_url:
+        raise RuntimeError(
+            "TURNSTILE_SOLVER_URL is not set, cannot auto-solve challenge"
+        )
+    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
+        resp = await client.post(
+            f"{solver_url}/grant",
+            json={"challenge_url": challenge_url},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        grant = (data.get("grant") or "").strip()
+        if not grant:
+            raise RuntimeError(
+                f"solver returned no grant: {data.get('error', 'unknown')}"
+            )
+        return grant
 
 
 class SignedSessionClient:
@@ -422,6 +433,8 @@ class SignedSessionClient:
 
         if grant_input is not None:
             grant_awaitable = asyncio.to_thread(grant_input)
+        elif not sys.stdin.isatty():
+            grant_awaitable = _solver_grant_async(challenge_url)
         else:
             grant_awaitable = asyncio.to_thread(
                 input,
@@ -933,17 +946,7 @@ async def perform_signed_fetch(
                 client._load()
 
                 if not client.authenticated:
-                    running_in_docker = is_docker()
                     try:
-                        if running_in_docker:
-                            msg = (
-                                "ambiente Docker rilevato: skip diretto al flusso "
-                                "manuale (authenticate_with_turnstile richiede un "
-                                "browser reale non disponibile/affidabile in container)"
-                            )
-                            raise RuntimeError(
-                                msg,
-                            )
                         if use_turnstile_browser:
                             await client.authenticate_with_turnstile(
                                 timeout=min(timeout, 90),
@@ -952,20 +955,12 @@ async def perform_signed_fetch(
                             msg = "turnstile automation disabled"
                             raise RuntimeError(msg)
                     except Exception as exc:
-                        if running_in_docker:
-                            logger.info(
-                                "[signed_session:%s] Docker rilevato, uso il flusso "
-                                "manuale (%s).",
-                                client.namespace,
-                                exc,
-                            )
-                        else:
-                            logger.info(
-                                "[signed_session:%s] Turnstile automatico fallito (%s), "
-                                "fallback al flusso manuale.",
-                                client.namespace,
-                                exc,
-                            )
+                        logger.info(
+                            "[signed_session:%s] Turnstile automatico fallito (%s), "
+                            "fallback al flusso manuale.",
+                            client.namespace,
+                            exc,
+                        )
                         try:
                             await client.authenticate_with_manual_grant(
                                 on_verification_url=on_verification_url,

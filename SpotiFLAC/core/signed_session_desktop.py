@@ -26,20 +26,6 @@ COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
 COMMUNITY_VERIFY_TIMEOUT = 300  # secondi (5 minuti)
 
 
-def is_docker() -> bool:
-    """Rileva se il codice è in esecuzione dentro un container Docker."""
-    cgroup_path = "/proc/1/cgroup"
-    if os.path.exists("/.dockerenv"):
-        return True
-    if os.path.isfile(cgroup_path):
-        try:
-            with open(cgroup_path) as f:
-                return any("docker" in line for line in f)
-        except OSError:
-            return False
-    return False
-
-
 def fetch_latest_version() -> str:
     url = "https://api.github.com/repos/spotbye/SpotiFLAC/releases/latest"
     try:
@@ -293,45 +279,71 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 msg = "verification timed out (GUI browser)"
                 raise Exception(msg)
 
-        # === MODO 2: Automazione via solver.py (Playwright/Selenium) ===
-        if not is_docker():
-            logger.info("Attempting automated verification via solver.py...")
+        # === MODO 2: Automazione via solver.py (pydoll) ===
+        logger.info("Attempting automated verification via solver.py...")
+        try:
+            from SpotiFLAC.core.solver import solve_with_callback
+
+            # Prova ad estrarre la sitekey se esposta nella pagina HTML
+            sitekey = ""
             try:
-                from SpotiFLAC.core.solver import solve_with_callback
+                html_resp = requests.get(final_challenge_url, timeout=10)
+                for pattern in (
+                    r'data-sitekey=["\']([0-9A-Za-z_-]{10,})["\']',
+                    r"sitekey=([0-9A-Za-z_-]{10,})",
+                ):
+                    match = re.search(pattern, html_resp.text)
+                    if match:
+                        sitekey = match.group(1)
+                        break
+            except Exception:
+                pass
 
-                # Prova ad estrarre la sitekey se esposta nella pagina HTML
-                sitekey = ""
+            # =========================================================================
+            # FIX: Eseguiamo il solver in un thread separato (daemon) in modo che
+            # il thread principale possa ascoltare la coda grant_queue senza bloccarsi!
+            # =========================================================================
+            def _run_solver_thread():
                 try:
-                    html_resp = requests.get(final_challenge_url, timeout=10)
-                    for pattern in (
-                        r'data-sitekey=["\']([0-9A-Za-z_-]{10,})["\']',
-                        r"sitekey=([0-9A-Za-z_-]{10,})",
-                    ):
-                        match = re.search(pattern, html_resp.text)
-                        if match:
-                            sitekey = match.group(1)
-                            break
-                except Exception:
-                    pass
+                    _token, grant_res = solve_with_callback(
+                        sitekey,
+                        final_challenge_url,
+                        60,
+                        3.0,
+                    )
+                    if grant_res:
+                        with contextlib.suppress(queue.Full):
+                            grant_queue.put_nowait(grant_res)
+                except Exception as e:
+                    logger.debug(f"Solver thread terminato o interrotto: {e}")
 
-                # Invoca il solver (sincrono)
-                _token, grant = solve_with_callback(
-                    sitekey,
-                    final_challenge_url,
-                    60,
-                    3.0,
-                )
+            solver_thread = threading.Thread(target=_run_solver_thread, daemon=True)
+            solver_thread.start()
+
+            # Il thread principale attende che arrivi il grant dal server locale
+            try:
+                grant = grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
                 if grant:
-                    logger.info("Automated verification successful!")
+                    logger.info("Automated verification successful! Grant ricevuto.")
+                    # Chiudiamo Chromium per liberare le risorse e fermare il loop di pydoll
+                    with contextlib.suppress(Exception):
+                        import subprocess
+
+                        subprocess.run(
+                            ["pkill", "-f", "chromium"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
                     return grant
+            except queue.Empty:
                 logger.warning(
-                    "Solver finished but no grant was found in network traffic.",
+                    "Automated verification timed out (nessun grant ricevuto in tempo)."
                 )
 
-            except ImportError:
-                logger.info("solver.py not found or Playwright dependencies missing.")
-            except Exception as e:
-                logger.warning(f"Automated verification failed: {e}")
+        except ImportError:
+            logger.info("solver.py not found or Playwright dependencies missing.")
+        except Exception as e:
+            logger.warning(f"Automated verification failed: {e}")
 
         # === MODO 3: Fallback Manuale via Terminale (Es. Bot Telegram / Docker) ===
         logger.info("Falling back to manual terminal input.")
