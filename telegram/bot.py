@@ -51,7 +51,7 @@ from SpotiFLAC import AsyncSpotiFLAC
 def _require_env(key: str) -> str:
     val = os.getenv(key)
     if not val:
-        raise EnvironmentError(f"Missing required environment variable: {key}")
+        raise OSError(f"Missing required environment variable: {key}")
     return val
 
 
@@ -80,11 +80,17 @@ LYRICS_PROVIDERS = ["spotify", "apple", "musixmatch", "lrclib", "amazon"]
 ENRICH_PROVIDERS = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
 
 SUPPORTED_DOMAINS = [
-    "spotify.com", "open.spotify.com",
-    "tidal.com", "listen.tidal.com",
-    "music.apple.com", "apple.com",
-    "soundcloud.com", "on.soundcloud.com",
-    "youtube.com", "youtu.be", "music.youtube.com",
+    "spotify.com",
+    "open.spotify.com",
+    "tidal.com",
+    "listen.tidal.com",
+    "music.apple.com",
+    "apple.com",
+    "soundcloud.com",
+    "on.soundcloud.com",
+    "youtube.com",
+    "youtu.be",
+    "music.youtube.com",
 ]
 
 FILENAME_FORMAT_PRESETS = {
@@ -123,16 +129,17 @@ def is_authorized(user_id: int) -> bool:
 
 # ─── UTILITIES ─────────────────────────────────────────────────────────
 
+
 def sanitize(name: str) -> str:
     if not name:
         return "Unknown"
-    n = name.replace('/', '_').replace('\\', '_')
-    n = n.replace(':', ' -').replace('?', '').replace('*', '')
-    n = n.replace('"', "'").replace('<', '(').replace('>', ')')
-    n = n.replace('|', '-')
-    n = re.sub(r'[\x00-\x1f]', '', n)
-    n = re.sub(r'\s+', ' ', n).strip()
-    if not n or re.fullmatch(r'[\s\-_.]+', n):
+    n = name.replace("/", "_").replace("\\", "_")
+    n = n.replace(":", " -").replace("?", "").replace("*", "")
+    n = n.replace('"', "'").replace("<", "(").replace(">", ")")
+    n = n.replace("|", "-")
+    n = re.sub(r"[\x00-\x1f]", "", n)
+    n = re.sub(r"\s+", " ", n).strip()
+    if not n or re.fullmatch(r"[\s\-_.]+", n):
         return "Unknown"
     return n
 
@@ -144,7 +151,7 @@ def normalize(name: str) -> str:
 def format_artists(s: str) -> str:
     if not s:
         return ""
-    artists = [a.strip() for a in re.split(r'[;,]\s*', s)]
+    artists = [a.strip() for a in re.split(r"[;,]\s*", s)]
     seen, unique = set(), []
     for a in artists:
         if a.lower() not in seen and a:
@@ -215,6 +222,7 @@ def collect_new_files(snapshot_before: set[str]) -> set[str]:
 
 # ─── DATABASE (sync, called via asyncio.to_thread) ─────────────────────
 
+
 def db_connect():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -246,7 +254,8 @@ def db_init():
 def db_upsert_track(tags, fmt, bitrate, filepath):
     try:
         with closing(db_connect()) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO tracks
                 (title, artist, album, albumartist, genre, date, format, bitrate, filepath)
                 VALUES (:title,:artist,:album,:albumartist,:genre,:date,:format,:bitrate,:filepath)
@@ -254,12 +263,19 @@ def db_upsert_track(tags, fmt, bitrate, filepath):
                     title=excluded.title, artist=excluded.artist, album=excluded.album,
                     albumartist=excluded.albumartist, genre=excluded.genre, date=excluded.date,
                     format=excluded.format, bitrate=excluded.bitrate
-            """, {
-                "title": tags.get("title", ""), "artist": tags.get("artist", ""),
-                "album": tags.get("album", ""), "albumartist": tags.get("albumartist", ""),
-                "genre": tags.get("genre", ""), "date": tags.get("date", ""),
-                "format": fmt, "bitrate": bitrate, "filepath": filepath,
-            })
+            """,
+                {
+                    "title": tags.get("title", ""),
+                    "artist": tags.get("artist", ""),
+                    "album": tags.get("album", ""),
+                    "albumartist": tags.get("albumartist", ""),
+                    "genre": tags.get("genre", ""),
+                    "date": tags.get("date", ""),
+                    "format": fmt,
+                    "bitrate": bitrate,
+                    "filepath": filepath,
+                },
+            )
             conn.commit()
     except Exception as e:
         print(f"[!] DB upsert error ({filepath}): {e}")
@@ -269,17 +285,21 @@ def db_search(query: str, limit: int = 15):
     q = f"%{query.lower()}%"
     try:
         with closing(db_connect()) as conn:
-            return conn.execute("""
+            return conn.execute(
+                """
                 SELECT * FROM tracks
                 WHERE lower(title) LIKE ? OR lower(artist) LIKE ? OR lower(album) LIKE ?
                 LIMIT ?
-            """, (q, q, q, limit)).fetchall()
+            """,
+                (q, q, q, limit),
+            ).fetchall()
     except Exception as e:
         print(f"[!] DB search error: {e}")
         return []
 
 
 # ─── TAG READING / FILE ORGANIZATION (sync) ────────────────────────────
+
 
 def get_file_info(filepath):
     ext = os.path.splitext(filepath)[1].lower()
@@ -288,16 +308,19 @@ def get_file_info(filepath):
     try:
         if ext == ".flac":
             from mutagen.flac import FLAC
+
             a = FLAC(filepath)
             if a.info.bits_per_sample and a.info.sample_rate:
                 bitrate = f"{a.info.bits_per_sample}bit/{a.info.sample_rate // 1000}kHz"
         elif ext in (".m4a", ".aac"):
             from mutagen.mp4 import MP4
+
             a = MP4(filepath)
             if a.info.bitrate:
                 bitrate = f"{a.info.bitrate // 1000}kbps"
         elif ext == ".mp3":
             from mutagen.mp3 import MP3
+
             a = MP3(filepath)
             if a.info.bitrate:
                 bitrate = f"{a.info.bitrate // 1000}kbps"
@@ -307,12 +330,20 @@ def get_file_info(filepath):
 
 
 def read_tags(filepath):
-    t = {"title": "", "artist": "", "album": "", "albumartist": "", "genre": "",
-         "date": "", "track": ""}
+    t = {
+        "title": "",
+        "artist": "",
+        "album": "",
+        "albumartist": "",
+        "genre": "",
+        "date": "",
+        "track": "",
+    }
     ext = os.path.splitext(filepath)[1].lower()
     try:
         if ext == ".flac":
             from mutagen.flac import FLAC
+
             a = FLAC(filepath)
             t["title"] = a.get("title", [""])[0]
             t["artist"] = a.get("artist", [""])[0]
@@ -323,6 +354,7 @@ def read_tags(filepath):
             t["track"] = a.get("tracknumber", [""])[0]
         elif ext in (".m4a", ".aac"):
             from mutagen.mp4 import MP4
+
             a = MP4(filepath)
             t["title"] = str(a.get("\xa9nam", [""])[0]) if a.get("\xa9nam") else ""
             t["artist"] = str(a.get("\xa9ART", [""])[0]) if a.get("\xa9ART") else ""
@@ -334,13 +366,18 @@ def read_tags(filepath):
                 t["track"] = str(a.get("trkn")[0][0])
         elif ext == ".mp3":
             from mutagen.id3 import ID3
+
             try:
                 a = ID3(filepath)
             except Exception:
                 a = ID3()
 
             def g(frame):
-                return str(frame.text[0]) if frame and hasattr(frame, 'text') and frame.text else ""
+                return (
+                    str(frame.text[0])
+                    if frame and hasattr(frame, "text") and frame.text
+                    else ""
+                )
 
             t["title"] = g(a.get("TIT2"))
             t["artist"] = g(a.get("TPE1"))
@@ -388,7 +425,10 @@ def build_filename(tags: dict, job_cfg: dict, fallback_name: str) -> str:
 
     fmt = job_cfg.get("filename_format") or FILENAME_FORMAT_PRESETS["default"]
     name = fmt.format(
-        title=title, artist=artist, album=album, album_artist=album_artist,
+        title=title,
+        artist=artist,
+        album=album,
+        album_artist=album_artist,
         track=track_num or "00",
     )
 
@@ -415,12 +455,16 @@ def organize_file(filepath: str, job_cfg: dict):
 
     base_dir = DOWNLOAD_DIR
     if job_cfg.get("use_artist_subfolders", True):
-        artist_dir = find_existing_folder(base_dir, folder_artist) or os.path.join(base_dir, folder_artist)
+        artist_dir = find_existing_folder(base_dir, folder_artist) or os.path.join(
+            base_dir, folder_artist
+        )
     else:
         artist_dir = base_dir
 
     if job_cfg.get("use_album_subfolders", True):
-        album_dir = find_existing_folder(artist_dir, album) or os.path.join(artist_dir, album)
+        album_dir = find_existing_folder(artist_dir, album) or os.path.join(
+            artist_dir, album
+        )
     else:
         album_dir = artist_dir
 
@@ -499,6 +543,7 @@ def process_new_files(files_before: set[str], job_cfg: dict):
 
 # ─── DOWNLOAD ENGINE (AsyncSpotiFLAC as a library) ─────────────────────
 
+
 async def run_spotiflac_once(url: str, job_cfg: dict) -> None:
     qobuz_token = os.getenv("QOBUZ_AUTH_TOKEN") or None
     qobuz_local_api = os.getenv("QOBUZ_LOCAL_API_URL") or None
@@ -553,7 +598,9 @@ async def run_spotiflac(url: str, job_cfg: dict) -> None:
     for attempt in range(1, attempts + 1):
         try:
             if timeout_s:
-                await asyncio.wait_for(run_spotiflac_once(url, job_cfg), timeout=timeout_s)
+                await asyncio.wait_for(
+                    run_spotiflac_once(url, job_cfg), timeout=timeout_s
+                )
             else:
                 await run_spotiflac_once(url, job_cfg)
             return
@@ -632,23 +679,35 @@ async def download_worker():
         current_task = job
 
         try:
-            await safe_edit(job["chat_id"], job["message_id"], "⏳ <b>Starting download...</b>")
+            await safe_edit(
+                job["chat_id"], job["message_id"], "⏳ <b>Starting download...</b>"
+            )
             files_before = await asyncio.to_thread(snapshot_audio_files)
 
             await run_spotiflac(job["url"], job)
 
             organized, duplicates, errors = await asyncio.to_thread(
-                process_new_files, files_before, job,
+                process_new_files,
+                files_before,
+                job,
             )
 
             if not organized and not duplicates:
-                await safe_edit(job["chat_id"], job["message_id"], "❌ <b>Download failed:</b> no file was downloaded.")
+                await safe_edit(
+                    job["chat_id"],
+                    job["message_id"],
+                    "❌ <b>Download failed:</b> no file was downloaded.",
+                )
             else:
-                await send_result(job["chat_id"], job["message_id"], organized, duplicates, errors)
+                await send_result(
+                    job["chat_id"], job["message_id"], organized, duplicates, errors
+                )
 
         except Exception as e:
             print(f"[!] Download error: {e}")
-            await safe_edit(job["chat_id"], job["message_id"], f"❌ Error: {he(str(e))}")
+            await safe_edit(
+                job["chat_id"], job["message_id"], f"❌ Error: {he(str(e))}"
+            )
         finally:
             current_task = None
             download_queue.task_done()
@@ -661,11 +720,14 @@ async def enqueue_job(chat_id: int, message_id: int, job_cfg: dict) -> int:
     await download_queue.put(job)
     position = download_queue.qsize()
     if current_task is not None or position > 1:
-        await safe_edit(chat_id, message_id, f"⏳ Added to queue (position #{position}, ID {qid}).")
+        await safe_edit(
+            chat_id, message_id, f"⏳ Added to queue (position #{position}, ID {qid})."
+        )
     return qid
 
 
 # ─── QUICK TEXT FLAGS (shortcut, skips the wizard) ─────────────────────
+
 
 def parse_quick_flags(args: list[str]) -> dict:
     """E.g. ['--service', 'qobuz', '--quality', 'LOSSLESS', '--no-lyrics']"""
@@ -721,13 +783,26 @@ user_sessions: dict[str, dict] = {}
 
 
 def yn_keyboard(prefix: str, task_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Yes", callback_data=f"{prefix}|{task_id}|yes"),
-        InlineKeyboardButton(text="❌ No", callback_data=f"{prefix}|{task_id}|no"),
-    ]])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Yes", callback_data=f"{prefix}|{task_id}|yes"
+                ),
+                InlineKeyboardButton(
+                    text="❌ No", callback_data=f"{prefix}|{task_id}|no"
+                ),
+            ]
+        ]
+    )
 
 
-SERVICE_LABELS = {"tidal": "🌊 Tidal", "qobuz": "💽 Qobuz", "deezer": "🎵 Deezer", "amazon": "📦 Amazon"}
+SERVICE_LABELS = {
+    "tidal": "🌊 Tidal",
+    "qobuz": "💽 Qobuz",
+    "deezer": "🎵 Deezer",
+    "amazon": "📦 Amazon",
+}
 
 
 def service_keyboard(task_id: str, selected: list[str]) -> InlineKeyboardMarkup:
@@ -735,50 +810,125 @@ def service_keyboard(task_id: str, selected: list[str]) -> InlineKeyboardMarkup:
     for svc in VALID_SERVICES:
         mark = f" ({selected.index(svc) + 1})" if svc in selected else ""
         label = ("✅ " if svc in selected else "") + SERVICE_LABELS[svc] + mark
-        rows.append([InlineKeyboardButton(text=label, callback_data=f"svc_toggle|{task_id}|{svc}")])
-    rows.append([InlineKeyboardButton(text="🌐 Select all 4", callback_data=f"svc_all|{task_id}")])
-    rows.append([InlineKeyboardButton(text="➡️ Done", callback_data=f"svc_done|{task_id}")])
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=label, callback_data=f"svc_toggle|{task_id}|{svc}"
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="🌐 Select all 4", callback_data=f"svc_all|{task_id}"
+            )
+        ]
+    )
+    rows.append(
+        [InlineKeyboardButton(text="➡️ Done", callback_data=f"svc_done|{task_id}")]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def quality_keyboard(task_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💎 LOSSLESS (FLAC 16-bit)", callback_data=f"qual|{task_id}|LOSSLESS")],
-        [InlineKeyboardButton(text="✨ HI-RES (FLAC 24-bit)", callback_data=f"qual|{task_id}|HI_RES")],
-        [InlineKeyboardButton(text="🎧 HIGH (MP3 320 / AAC)", callback_data=f"qual|{task_id}|HIGH")],
-        [InlineKeyboardButton(text="🔊 DOLBY ATMOS (Tidal only)", callback_data=f"qual|{task_id}|DOLBY_ATMOS")],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💎 LOSSLESS (FLAC 16-bit)",
+                    callback_data=f"qual|{task_id}|LOSSLESS",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✨ HI-RES (FLAC 24-bit)",
+                    callback_data=f"qual|{task_id}|HI_RES",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎧 HIGH (MP3 320 / AAC)", callback_data=f"qual|{task_id}|HIGH"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔊 DOLBY ATMOS (Tidal only)",
+                    callback_data=f"qual|{task_id}|DOLBY_ATMOS",
+                )
+            ],
+        ]
+    )
 
 
-def multi_provider_keyboard(prefix: str, task_id: str, options: list[str], selected: list[str]) -> InlineKeyboardMarkup:
+def multi_provider_keyboard(
+    prefix: str, task_id: str, options: list[str], selected: list[str]
+) -> InlineKeyboardMarkup:
     rows = []
     for opt in options:
         mark = f" ({selected.index(opt) + 1})" if opt in selected else ""
         label = ("✅ " if opt in selected else "") + opt.capitalize() + mark
-        rows.append([InlineKeyboardButton(text=label, callback_data=f"{prefix}_toggle|{task_id}|{opt}")])
-    rows.append([InlineKeyboardButton(text="➡️ Done", callback_data=f"{prefix}_done|{task_id}")])
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=label, callback_data=f"{prefix}_toggle|{task_id}|{opt}"
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(text="➡️ Done", callback_data=f"{prefix}_done|{task_id}")]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def retries_keyboard(task_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=str(n), callback_data=f"retries|{task_id}|{n}") for n in RETRY_PRESETS],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=str(n), callback_data=f"retries|{task_id}|{n}"
+                )
+                for n in RETRY_PRESETS
+            ],
+        ]
+    )
 
 
 def timeout_keyboard(task_id: str) -> InlineKeyboardMarkup:
     labels = {0: "Disabled", 60: "60s", 120: "120s", 300: "300s"}
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=labels[n], callback_data=f"timeout|{task_id}|{n}") for n in TIMEOUT_PRESETS],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=labels[n], callback_data=f"timeout|{task_id}|{n}"
+                )
+                for n in TIMEOUT_PRESETS
+            ],
+        ]
+    )
 
 
 def filename_keyboard(task_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="{title} - {artist}", callback_data=f"fmt|{task_id}|default")],
-        [InlineKeyboardButton(text="{artist} - {title}", callback_data=f"fmt|{task_id}|artist_first")],
-        [InlineKeyboardButton(text="{track}. {title} - {artist}", callback_data=f"fmt|{task_id}|with_track")],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="{title} - {artist}", callback_data=f"fmt|{task_id}|default"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="{artist} - {title}",
+                    callback_data=f"fmt|{task_id}|artist_first",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="{track}. {title} - {artist}",
+                    callback_data=f"fmt|{task_id}|with_track",
+                )
+            ],
+        ]
+    )
 
 
 def services_label(services: list[str]) -> str:
@@ -788,6 +938,7 @@ def services_label(services: list[str]) -> str:
 # ─── WIZARD STEP TRANSITIONS ────────────────────────────────────────────
 # Each step edits the current message text + keyboard to move to the
 # next question. Sessions are keyed by a short random task_id.
+
 
 async def goto_extensions_fallback(call: types.CallbackQuery, task_id: str):
     session = user_sessions[task_id]
@@ -852,8 +1003,8 @@ async def goto_album_subfolders(call: types.CallbackQuery, task_id: str):
 
 async def goto_first_artist_only(call: types.CallbackQuery, task_id: str):
     await call.message.edit_text(
-        "👤 <b>5d. Use only the first artist</b> in tags and filename (e.g. \"Artist A\" "
-        "instead of \"Artist A, Artist B\")?",
+        '👤 <b>5d. Use only the first artist</b> in tags and filename (e.g. "Artist A" '
+        'instead of "Artist A, Artist B")?',
         reply_markup=yn_keyboard("firstartist", task_id),
     )
 
@@ -869,7 +1020,9 @@ async def goto_lyrics_providers(call: types.CallbackQuery, task_id: str):
     session = user_sessions[task_id]
     await call.message.edit_text(
         "📝 <b>6b. Lyrics providers</b> (tap in priority order, then Done):",
-        reply_markup=multi_provider_keyboard("lyrp", task_id, LYRICS_PROVIDERS, session["lyrics_providers"]),
+        reply_markup=multi_provider_keyboard(
+            "lyrp", task_id, LYRICS_PROVIDERS, session["lyrics_providers"]
+        ),
     )
 
 
@@ -884,7 +1037,9 @@ async def goto_enrich_providers(call: types.CallbackQuery, task_id: str):
     session = user_sessions[task_id]
     await call.message.edit_text(
         "🧬 <b>7b. Enrichment providers</b> (tap in priority order, then Done):",
-        reply_markup=multi_provider_keyboard("enrp", task_id, ENRICH_PROVIDERS, session["enrich_providers"]),
+        reply_markup=multi_provider_keyboard(
+            "enrp", task_id, ENRICH_PROVIDERS, session["enrich_providers"]
+        ),
     )
 
 
@@ -913,31 +1068,58 @@ def summary_text(session: dict) -> str:
     lines = ["📋 <b>Ready to download</b>\n"]
     lines.append(f"🔗 URL: <code>{he(session['url'])}</code>")
     lines.append(f"Services: {services_label(session['services'])}")
-    lines.append(f"Extensions fallback: {'Yes' if session['use_extensions_fallback'] else 'No'}")
-    lines.append(f"Quality: <code>{session['quality']}</code> (fallback: {'Yes' if session['allow_fallback'] else 'No'})")
+    lines.append(
+        f"Extensions fallback: {'Yes' if session['use_extensions_fallback'] else 'No'}"
+    )
+    lines.append(
+        f"Quality: <code>{session['quality']}</code> (fallback: {'Yes' if session['allow_fallback'] else 'No'})"
+    )
     if session["use_track_numbers"]:
-        lines.append(f"Track numbers: Yes (album numbers: {'Yes' if session['use_album_track_numbers'] else 'No'})")
+        lines.append(
+            f"Track numbers: Yes (album numbers: {'Yes' if session['use_album_track_numbers'] else 'No'})"
+        )
     else:
-        lines.append(f"Artist subfolder: {'Yes' if session['use_artist_subfolders'] else 'No'}")
-        lines.append(f"Album subfolder: {'Yes' if session['use_album_subfolders'] else 'No'}")
-        lines.append(f"First artist only: {'Yes' if session['first_artist_only'] else 'No'}")
-    lines.append(f"Lyrics: {'Yes (' + ', '.join(session['lyrics_providers']) + ')' if session['embed_lyrics'] else 'No'}")
-    lines.append(f"Enrichment: {'Yes (' + ', '.join(session['enrich_providers']) + ')' if session['enrich_metadata'] else 'No'}")
-    lines.append(f"Retries: {session['track_max_retries']} | Timeout: {session['timeout_s'] or 'disabled'}")
+        lines.append(
+            f"Artist subfolder: {'Yes' if session['use_artist_subfolders'] else 'No'}"
+        )
+        lines.append(
+            f"Album subfolder: {'Yes' if session['use_album_subfolders'] else 'No'}"
+        )
+        lines.append(
+            f"First artist only: {'Yes' if session['first_artist_only'] else 'No'}"
+        )
+    lines.append(
+        f"Lyrics: {'Yes (' + ', '.join(session['lyrics_providers']) + ')' if session['embed_lyrics'] else 'No'}"
+    )
+    lines.append(
+        f"Enrichment: {'Yes (' + ', '.join(session['enrich_providers']) + ')' if session['enrich_metadata'] else 'No'}"
+    )
+    lines.append(
+        f"Retries: {session['track_max_retries']} | Timeout: {session['timeout_s'] or 'disabled'}"
+    )
     lines.append(f"Filename format: <code>{he(session['filename_format'])}</code>")
     return "\n".join(lines)
 
 
 async def goto_confirm(call: types.CallbackQuery, task_id: str):
     session = user_sessions[task_id]
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🚀 Start download", callback_data=f"confirm|{task_id}|yes"),
-        InlineKeyboardButton(text="❌ Cancel", callback_data=f"confirm|{task_id}|no"),
-    ]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🚀 Start download", callback_data=f"confirm|{task_id}|yes"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Cancel", callback_data=f"confirm|{task_id}|no"
+                ),
+            ]
+        ]
+    )
     await call.message.edit_text(summary_text(session), reply_markup=kb)
 
 
 # ─── COMMANDS ────────────────────────────────────────────────────────────
+
 
 @dp.message(Command("start", "help"))
 async def cmd_start(message: types.Message):
@@ -971,14 +1153,16 @@ async def cmd_search(message: types.Message):
     if not rows:
         await message.answer(f"❌ No results for: <b>{he(query)}</b>")
         return
-    lines = [f"🔍 <b>Results for \"{he(query)}\"</b> ({len(rows)}):\n"]
+    lines = [f'🔍 <b>Results for "{he(query)}"</b> ({len(rows)}):\n']
     for i, row in enumerate(rows[:25], 1):
         title = row["title"] or "?"
         artist = (row["artist"] or "").split(",")[0].strip()
         album = row["album"] or "Single/Unknown"
         fmt = row["format"] or "?"
         br = row["bitrate"] or ""
-        lines.append(f"{i}. <b>{he(title)}</b> — {he(artist)}\n   💿 <i>{he(album)}</i> [{fmt} {br}]")
+        lines.append(
+            f"{i}. <b>{he(title)}</b> — {he(artist)}\n   💿 <i>{he(album)}</i> [{fmt} {br}]"
+        )
     await message.answer("\n\n".join(lines))
 
 
@@ -1024,13 +1208,18 @@ async def cmd_stop(message: types.Message):
     if not is_authorized(message.from_user.id):
         return
     if current_task is None:
-        await message.answer("Nothing is downloading right now (note: a running job can't be interrupted mid-way, only queued ones).")
+        await message.answer(
+            "Nothing is downloading right now (note: a running job can't be interrupted mid-way, only queued ones)."
+        )
         return
     _queue_list.clear()
-    await message.answer("🛑 Queue cleared. The current download will finish normally (it can't be interrupted mid-way).")
+    await message.answer(
+        "🛑 Queue cleared. The current download will finish normally (it can't be interrupted mid-way)."
+    )
 
 
 # ─── MESSAGES (links + wizard) ──────────────────────────────────────────
+
 
 @dp.message()
 async def handle_message(message: types.Message):
@@ -1051,7 +1240,9 @@ async def handle_message(message: types.Message):
 
     url = next((a for a in args if a.startswith("http")), "")
     if not url or not any(d in url.lower() for d in SUPPORTED_DOMAINS):
-        await message.answer("❌ Send me a valid music link (Spotify, Tidal, Apple Music, etc.).")
+        await message.answer(
+            "❌ Send me a valid music link (Spotify, Tidal, Apple Music, etc.)."
+        )
         return
 
     flags = [a for a in args if a != url]
@@ -1060,9 +1251,15 @@ async def handle_message(message: types.Message):
 
     if quick_cfg:
         job_cfg = default_job_cfg(url)
-        job_cfg["services"] = [quick_cfg.get("service", saved_cfg.get("default_service", "tidal"))]
-        job_cfg["quality"] = quick_cfg.get("quality", saved_cfg.get("default_quality", "LOSSLESS"))
-        job_cfg["embed_lyrics"] = quick_cfg.get("embed_lyrics", saved_cfg.get("embed_lyrics", True))
+        job_cfg["services"] = [
+            quick_cfg.get("service", saved_cfg.get("default_service", "tidal"))
+        ]
+        job_cfg["quality"] = quick_cfg.get(
+            "quality", saved_cfg.get("default_quality", "LOSSLESS")
+        )
+        job_cfg["embed_lyrics"] = quick_cfg.get(
+            "embed_lyrics", saved_cfg.get("embed_lyrics", True)
+        )
         msg = await message.answer("⚡ Quick start with the given flags...")
         await enqueue_job(message.chat.id, msg.message_id, job_cfg)
         return
@@ -1082,6 +1279,7 @@ async def handle_message(message: types.Message):
 
 # ─── CALLBACK HANDLERS ───────────────────────────────────────────────────
 
+
 def _session_or_expired(call_data: str) -> tuple[str, list[str], str] | None:
     return None  # placeholder, not used
 
@@ -1100,7 +1298,9 @@ async def cb_svc_toggle(call: types.CallbackQuery):
         session["services"].remove(svc)
     else:
         session["services"].append(svc)
-    await call.message.edit_reply_markup(reply_markup=service_keyboard(task_id, session["services"]))
+    await call.message.edit_reply_markup(
+        reply_markup=service_keyboard(task_id, session["services"])
+    )
     await call.answer()
 
 
@@ -1115,7 +1315,9 @@ async def cb_svc_all(call: types.CallbackQuery):
         await call.answer("Session expired.", show_alert=True)
         return
     session["services"] = list(VALID_SERVICES)
-    await call.message.edit_reply_markup(reply_markup=service_keyboard(task_id, session["services"]))
+    await call.message.edit_reply_markup(
+        reply_markup=service_keyboard(task_id, session["services"])
+    )
     await call.answer()
 
 
@@ -1143,7 +1345,7 @@ async def cb_ext(call: types.CallbackQuery):
     if session is None:
         await call.answer("Session expired.", show_alert=True)
         return
-    session["use_extensions_fallback"] = (val == "yes")
+    session["use_extensions_fallback"] = val == "yes"
     await goto_quality(call, task_id)
     await call.answer()
 
@@ -1167,7 +1369,7 @@ async def cb_quality_fallback(call: types.CallbackQuery):
     if session is None:
         await call.answer("Session expired.", show_alert=True)
         return
-    session["allow_fallback"] = (val == "yes")
+    session["allow_fallback"] = val == "yes"
     await goto_track_numbers(call, task_id)
     await call.answer()
 
@@ -1179,7 +1381,7 @@ async def cb_track_numbers(call: types.CallbackQuery):
     if session is None:
         await call.answer("Session expired.", show_alert=True)
         return
-    session["use_track_numbers"] = (val == "yes")
+    session["use_track_numbers"] = val == "yes"
     if session["use_track_numbers"]:
         session["use_artist_subfolders"] = False
         session["use_album_subfolders"] = False
@@ -1198,7 +1400,7 @@ async def cb_album_track_numbers(call: types.CallbackQuery):
     if session is None:
         await call.answer("Session expired.", show_alert=True)
         return
-    session["use_album_track_numbers"] = (val == "yes")
+    session["use_album_track_numbers"] = val == "yes"
     await goto_lyrics(call, task_id)
     await call.answer()
 
@@ -1210,7 +1412,7 @@ async def cb_artist_subfolders(call: types.CallbackQuery):
     if session is None:
         await call.answer("Session expired.", show_alert=True)
         return
-    session["use_artist_subfolders"] = (val == "yes")
+    session["use_artist_subfolders"] = val == "yes"
     await goto_album_subfolders(call, task_id)
     await call.answer()
 
@@ -1222,7 +1424,7 @@ async def cb_album_subfolders(call: types.CallbackQuery):
     if session is None:
         await call.answer("Session expired.", show_alert=True)
         return
-    session["use_album_subfolders"] = (val == "yes")
+    session["use_album_subfolders"] = val == "yes"
     await goto_first_artist_only(call, task_id)
     await call.answer()
 
@@ -1234,7 +1436,7 @@ async def cb_first_artist_only(call: types.CallbackQuery):
     if session is None:
         await call.answer("Session expired.", show_alert=True)
         return
-    session["first_artist_only"] = (val == "yes")
+    session["first_artist_only"] = val == "yes"
     await goto_lyrics(call, task_id)
     await call.answer()
 
@@ -1246,7 +1448,7 @@ async def cb_lyrics(call: types.CallbackQuery):
     if session is None:
         await call.answer("Session expired.", show_alert=True)
         return
-    session["embed_lyrics"] = (val == "yes")
+    session["embed_lyrics"] = val == "yes"
     if session["embed_lyrics"]:
         await goto_lyrics_providers(call, task_id)
     else:
@@ -1292,7 +1494,7 @@ async def cb_enrichment(call: types.CallbackQuery):
     if session is None:
         await call.answer("Session expired.", show_alert=True)
         return
-    session["enrich_metadata"] = (val == "yes")
+    session["enrich_metadata"] = val == "yes"
     if session["enrich_metadata"]:
         await goto_enrich_providers(call, task_id)
     else:
@@ -1362,7 +1564,9 @@ async def cb_filename_format(call: types.CallbackQuery):
     if session is None:
         await call.answer("Session expired.", show_alert=True)
         return
-    session["filename_format"] = FILENAME_FORMAT_PRESETS.get(preset, FILENAME_FORMAT_PRESETS["default"])
+    session["filename_format"] = FILENAME_FORMAT_PRESETS.get(
+        preset, FILENAME_FORMAT_PRESETS["default"]
+    )
     await goto_confirm(call, task_id)
     await call.answer()
 
@@ -1385,6 +1589,7 @@ async def cb_confirm(call: types.CallbackQuery):
 
 
 # ─── STARTUP ─────────────────────────────────────────────────────────────
+
 
 async def main():
     db_init()
