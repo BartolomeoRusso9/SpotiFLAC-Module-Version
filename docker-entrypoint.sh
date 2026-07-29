@@ -35,6 +35,21 @@ sleep 1
 
 export TS_DEBUG_VISIBLE=1
 
+# ==============================================================================
+# [TELEGRAM BOT MODE]:
+# If the first argument is "bot", run the Telegram bot instead of the
+# SpotiFLAC CLI. Xvfb is already running above, so any Chromium/pydoll-based
+# provider features the bot triggers still work.
+#
+# Set this as the container's command, e.g. in docker-compose.yml:
+#   command: ["bot"]
+# or in Portainer's "Command" field: bot
+# ==============================================================================
+if [ "$1" = "bot" ]; then
+  shift
+  exec python3 /app/bot.py "$@"
+fi
+
 if [ "$#" -eq 0 ]; then
   echo "SpotiFLAC Docker image: pass a URL and output directory as arguments."
   echo "Example:"
@@ -46,6 +61,8 @@ if [ "$#" -eq 0 ]; then
   echo "    --shm-size=1g \\"
   echo "    spotiflac \"https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT\" \\"
   echo "    /app/downloads -s amazon -v"
+  echo
+  echo "Or run the Telegram bot instead: pass \"bot\" as the command."
   echo
   exec spotiflac --help
 fi
