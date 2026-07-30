@@ -55,7 +55,7 @@ This guide covers everything you need to **run** it with Docker.
 ```yaml
 services:
   spotiflac-bot:
-    image: ghcr.io/<your-username>/<your-repo>:latest
+    image: ghcr.io/bartolomeorusso9/spotiflac-module-version:latest
     container_name: spotiflac-bot
     restart: unless-stopped
     command: ["bot"]
@@ -66,8 +66,13 @@ services:
       # QOBUZ_AUTH_TOKEN: "your_token_here"
     volumes:
       - ./data:/app/data
-      - ./downloads:/app/downloads   # or point this at your Jellyfin/Navidrome music folder
+      - ./downloads:/app/downloads   # or point the host side at your Jellyfin/Navidrome music folder
 ```
+
+> ⚠️ The container-side path (right of the `:`) must always be
+> `/app/downloads` — that's where the bot actually saves files. Only
+> change the **host** side (left of the `:`), e.g.:
+> `/mnt/jellyfin_music:/app/downloads`.
 
 Start it:
 ```bash
