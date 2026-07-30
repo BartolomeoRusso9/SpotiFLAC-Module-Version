@@ -1,0 +1,16 @@
+services:
+  spotiflac-bot:
+    image: ghcr.io/bartolomeorusso9/spotiflac-module-version:latest
+    container_name: spotiflac-bot
+    privileged: true
+    restart: unless-stopped
+    command: ["bot"]
+    shm_size: "1gb"
+    environment:
+      TELEGRAM_BOT_TOKEN: "123456789:AAFQcbdZmBgZGHXBtspiLAbem-yuFualgvw"
+      ALLOWED_USER_IDS: "123456789"
+      # QOBUZ_AUTH_TOKEN: "your_token_here"
+    volumes:
+      - ./.spotiflac_docker:/root/.spotiflac
+      - ./.cache_docker:/root/.cache/spotiflac
+      - ./downloads:/app/downloads   # or point the host side at your Jellyfin/Navidrome music folder
