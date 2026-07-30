@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 set -e
-
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
 # 1. Start Xvfb virtual screen (MANDATORY: required by Chromium to prevent crashing)
 Xvfb :99 -screen 0 1280x900x24 -ac +extension GLX +render -noreset &
 sleep 1
@@ -47,7 +47,7 @@ export TS_DEBUG_VISIBLE=1
 # ==============================================================================
 if [ "$1" = "bot" ]; then
   shift
-  exec python3 /app/bot.py "$@"
+  exec python3 /app/telegram/bot.py "$@"
 fi
 
 if [ "$#" -eq 0 ]; then
