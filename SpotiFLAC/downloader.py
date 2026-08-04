@@ -424,6 +424,15 @@ class DownloadWorker:
             raise ValueError(msg)
         return result
 
+    def _close_providers(self) -> None:
+        """Release resources held by this run's providers (e.g. pooled
+        Node.js extension runtimes), so nothing outlives a single batch."""
+        for provider in self._providers:
+            close = getattr(provider, "close", None)
+            if callable(close):
+                with contextlib.suppress(Exception):
+                    close()
+
     async def run_async(self) -> list[tuple[str, str, str]]:
         manager = DownloadManager()
         await manager.reset()
@@ -440,6 +449,7 @@ class DownloadWorker:
         finally:
             await ProgressManager.clear_all()
             uninstall_console_interception()
+            self._close_providers()
 
     async def _run_downloads_async(
         self,
