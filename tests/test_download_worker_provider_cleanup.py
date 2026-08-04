@@ -35,9 +35,7 @@ def test_run_async_closes_providers_on_exception(tmp_path) -> None:
 
     worker._run_downloads_async = boom
 
-    try:
+    with pytest.raises(RuntimeError, match="boom"):
         asyncio.run(worker.run_async())
-    except RuntimeError:
-        pass
 
     assert dummy.closed
