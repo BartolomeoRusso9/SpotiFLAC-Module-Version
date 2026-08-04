@@ -424,22 +424,32 @@ class DownloadWorker:
             raise ValueError(msg)
         return result
 
+    def _close_providers(self) -> None:
+        for provider in self._providers:
+            close = getattr(provider, "close", None)
+            if callable(close):
+                with contextlib.suppress(Exception):
+                    close()
+
     async def run_async(self) -> list[tuple[str, str, str]]:
-        manager = DownloadManager()
-        await manager.reset()
-        total = len(self._tracks)
-        start = time.perf_counter()
-
-        # Native async folder I/O delegation
-        base_out = await self._resolve_output_dir_async()
-
-        install_console_interception()
-        ProgressManager.initialize_master_bar(total, description="Progress")
         try:
-            return await self._run_downloads_async(manager, total, base_out, start)
+            manager = DownloadManager()
+            await manager.reset()
+            total = len(self._tracks)
+            start = time.perf_counter()
+
+            # Native async folder I/O delegation
+            base_out = await self._resolve_output_dir_async()
+
+            install_console_interception()
+            ProgressManager.initialize_master_bar(total, description="Progress")
+            try:
+                return await self._run_downloads_async(manager, total, base_out, start)
+            finally:
+                await ProgressManager.clear_all()
+                uninstall_console_interception()
         finally:
-            await ProgressManager.clear_all()
-            uninstall_console_interception()
+            self._close_providers()
 
     async def _run_downloads_async(
         self,
@@ -547,6 +557,7 @@ class DownloadWorker:
             for t in worker_tasks:
                 if not t.done():
                     t.cancel()
+            await asyncio.gather(consumer_task, *worker_tasks, return_exceptions=True)
             raise
 
         elapsed = time.perf_counter() - start
