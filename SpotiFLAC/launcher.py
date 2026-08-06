@@ -70,6 +70,30 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     )
     parser.add_argument("output_dir", nargs="?", help="Destination directory")
 
+    # ── Multi-playlist ──────────────────────────────────────────────────────
+    playlists_grp = parser.add_argument_group("Multi-Playlist")
+    playlists_grp.add_argument(
+        "--playlist",
+        "-p",
+        action="append",
+        dest="playlists",
+        metavar="URL",
+        help="Playlist to sync; repeat the flag for each one "
+        "(spotiflac -p URL1 -p URL2 DEST). Every track lands in a single "
+        "destination folder: tracks shared by several playlists are downloaded "
+        "once, tracks already in the folder are never downloaded again, and "
+        "each playlist gets an M3U file listing its own tracks in order.",
+    )
+    playlists_grp.add_argument(
+        "--m3u",
+        choices=["m3u8", "m3u", "none"],
+        default=pd.get("m3u_format", "m3u8"),
+        dest="m3u_format",
+        help="Playlist file written for each --playlist, in the destination "
+        "folder with paths relative to it (default: m3u8). It is rewritten "
+        "only when its content changed. 'none' disables it.",
+    )
+
     def _service_type(value: str) -> str:
         native_services = {
             "deezer",
@@ -367,6 +391,8 @@ async def _run_download_async(
     transcode_to: str | None = None,
     transcode_bitrate: str = "320k",
     transcode_keep_original: bool = False,
+    playlist_urls: list[str] | None = None,
+    m3u_format: str = "m3u8",
 ) -> None:
     """Bridge async verso SpotiflacDownloader, senza passare per il wrapper
     sincrono `SpotiFLAC()` (che farebbe un `asyncio.run()` annidato e
@@ -409,7 +435,15 @@ async def _run_download_async(
 
     try:
         downloader = SpotiflacDownloader(opts)
-        await downloader.run_async(url, loop_minutes=loop)
+        if playlist_urls:
+            if loop:
+                logger.warning(
+                    "--loop is ignored with --playlist: run the command again "
+                    "to sync the playlists.",
+                )
+            await downloader.run_playlists_async(playlist_urls, m3u_format=m3u_format)
+        else:
+            await downloader.run_async(url, loop_minutes=loop)
     except KeyboardInterrupt:
         pass
     except Exception as e:
@@ -417,6 +451,23 @@ async def _run_download_async(
             "Critical error during execution: %s",
             e,
         )
+
+
+def _split_positionals(args: argparse.Namespace) -> tuple[list[str], str | None]:
+    """Splits the positional arguments between playlist URLs and destination.
+
+    Without ``--playlist`` nothing changes: ``URL DEST``. With it the
+    destination is the only positional the user has to give
+    (``spotiflac -p URL1 -p URL2 DEST``), while a first playlist passed
+    positionally (``spotiflac URL DEST -p URL2``) still works.
+    """
+    playlists = list(args.playlists or [])
+    if not playlists:
+        return [], args.output_dir
+    if args.url and args.output_dir:
+        playlists.insert(0, args.url)
+        return playlists, args.output_dir
+    return playlists, args.output_dir or args.url
 
 
 async def amain() -> None:
@@ -515,8 +566,9 @@ async def amain() -> None:
     merged_defaults = {**file_cfg, **profile_defaults}
 
     args = parse_args(profile_defaults=merged_defaults)
+    playlist_urls, output_dir = _split_positionals(args)
 
-    if not args.url or not args.output_dir:
+    if not (args.url or playlist_urls) or not output_dir:
         parser = argparse.ArgumentParser(
             prog="spotiflac",
             description="Download tracks in true FLAC/MP3 via Deezer, Tidal, Qobuz, SoundCloud, YouTube, Pandora and more.",
@@ -560,8 +612,8 @@ async def amain() -> None:
     logging.basicConfig(level=log_level, format=log_format)
 
     await _run_download_async(
-        args.url,
-        output_dir=args.output_dir,
+        args.url or "",
+        output_dir=output_dir,
         services=args.service,
         filename_format=args.filename_format,
         use_track_numbers=args.use_track_numbers,
@@ -589,6 +641,8 @@ async def amain() -> None:
         transcode_to=args.transcode_to,
         transcode_bitrate=args.transcode_bitrate,
         transcode_keep_original=args.transcode_keep_original,
+        playlist_urls=playlist_urls,
+        m3u_format=args.m3u_format,
     )
 
     if args.save_profile:
@@ -613,6 +667,7 @@ async def amain() -> None:
                 "transcode_to": args.transcode_to,
                 "transcode_bitrate": args.transcode_bitrate,
                 "transcode_keep_original": args.transcode_keep_original,
+                "m3u_format": args.m3u_format,
                 "track_max_retries": track_max_retries,
                 "post_download_action": args.post_action,
                 "post_download_command": args.post_command,

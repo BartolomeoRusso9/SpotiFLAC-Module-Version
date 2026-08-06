@@ -442,6 +442,35 @@ SpotiFLAC(
 
 The conversion is a no-op for providers that already deliver MP3 (e.g. SoundCloud), which are passed through untouched.
 
+### Multiple Playlists in One Folder
+
+Pass `--playlist` (`-p`) once per playlist to sync several of them into a **single destination folder**. Repeat the flag as many times as you need — the last positional argument is the destination:
+
+```bash
+spotiflac -p https://open.spotify.com/playlist/AAA \
+          -p https://open.spotify.com/playlist/BBB \
+          -p https://open.spotify.com/playlist/CCC \
+          ./Music --service tidal
+```
+
+- **One copy per track.** A song that appears in three of those playlists is downloaded once. Tracks are matched by ISRC (resolved automatically when the metadata lacks it), falling back to artist + title, so the same recording pulled from different playlists is recognised even when the catalogue ids differ.
+- **Nothing already on disk is downloaded again.** The destination folder is indexed before any provider is contacted, in *any* audio format — a track already there as `.m4a` is not re-fetched just because this run would produce a `.flac`.
+- **One M3U per playlist.** Each playlist gets a `<Playlist Name>.m3u8` file in the destination folder listing its own tracks, in playlist order, with paths relative to the folder — so the whole directory stays portable and can be copied to a phone or a USB stick as is. Two playlists sharing a name get `Name.m3u8` and `Name (2).m3u8`.
+- **Cheap to re-run.** Playlist files are rewritten only when their content actually changed. Running the same command again after a playlist gained a track downloads that one track and touches that one M3U file.
+
+Tracks that failed to download are left out of the playlist file, so it always lists files that really exist; they are picked up on the next run.
+
+Everything else keeps working as usual — `--mp3`, `--filename-format`, `--service`, `--retries` and friends all apply:
+
+```bash
+# Sync three playlists as 320 kbps MP3, writing classic .m3u files
+spotiflac -p URL1 -p URL2 -p URL3 ./Music --mp3 --m3u m3u
+```
+
+With `--mp3` a playlist entry points at the converted file, and a track already present as MP3 is skipped without any network request. Use `--m3u none` to merge the playlists into one folder without writing playlist files at all.
+
+> **Note:** avoid `--use-track-numbers` (and `{position}` in `--filename-format`) here: the number depends on the merged playlist order, so filenames would change whenever any playlist does — and previously downloaded tracks would be fetched again under the new name. SpotiFLAC warns when you do.
+
 ### Post-Download Actions
 
 | Action | Description |
@@ -721,6 +750,8 @@ When customizing the `filename_format` string, you can use the following dynamic
  `--no-extensions-fallback` | | `False` | Disable automatic fallback to installed JS extensions when a native provider fails (fallback is enabled by default). |
 | `--loop` | `-l` | `None` | Keep retrying permanently failed tracks every N minutes. |
 | `--retries` | | `0` | Extra per-track download attempts on failure. Cycles through all providers with exponential backoff. |
+| `--playlist` | `-p` | `None` | Playlist URL to sync; repeat once per playlist. All tracks go to a single destination folder, shared tracks are downloaded once, and each playlist gets its own M3U file (see [Multiple Playlists in One Folder](#multiple-playlists-in-one-folder)). |
+| `--m3u` | | `m3u8` | Playlist file written for each `--playlist`: `m3u8`, `m3u` or `none`. Rewritten only when its content changed. |
 | `--transcode` | | `none` | Convert every downloaded track to this format: `none` or `mp3`. Requires `ffmpeg`. |
 | `--mp3` | | | Shorthand for `--transcode mp3`. |
 | `--transcode-bitrate` | | `320k` | Bitrate used by `--transcode`, e.g. `320k`, `256k`, `192k`. |

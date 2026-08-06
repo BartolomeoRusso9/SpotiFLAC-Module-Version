@@ -18,15 +18,25 @@ import shutil
 import sys
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .core.console import print_summary, print_track_header
+from .core.console import print_playlist_summary, print_summary, print_track_header
 from .core.errors import ErrorKind, SpotiflacError
 from .core.http import AsyncHttpClient
 from .core.isrc_helper import IsrcHelper
 from .core.models import DownloadResult, TrackMetadata, build_filename
+from .core.playlist_sync import (
+    PlaylistSource,
+    SyncPlan,
+    build_plan,
+    entry_for,
+    index_audio_files,
+    mark_existing,
+    render_m3u,
+    write_if_changed_async,
+)
 from .core.progress import (
     DownloadManager,
     ProgressCallback,
@@ -516,14 +526,32 @@ class DownloadWorker:
         collection_name: str = "",
         is_album: bool = False,
         is_playlist: bool = False,
+        positions: list[int] | None = None,
     ) -> None:
         self._tracks = tracks
         self._opts = opts
         self._collection_name = collection_name
         self._is_album = is_album
         self._is_playlist = is_playlist
+        # Numero di traccia usato per il filename. Di default è la posizione
+        # nella lista; un chiamante che scarica solo un sottoinsieme (es. il
+        # sync multi-playlist, che salta i brani già presenti) passa le
+        # posizioni originali per non cambiare i nomi dei file tra un run e
+        # l'altro.
+        self._positions = positions or list(range(1, len(tracks) + 1))
         self._failed: list[tuple[str, str, str, str]] = []
+        self._completed: dict[str, str] = {}
         self._providers: list[BaseProvider] = self._build_providers()
+
+    @property
+    def completed_paths(self) -> dict[str, str]:
+        """Track id → final file path, for every track available on disk.
+
+        Includes the tracks that were skipped because they were already
+        downloaded: from the caller's point of view the file is there either
+        way.
+        """
+        return dict(self._completed)
 
     def _build_providers(self) -> list[BaseProvider]:
         result = []
@@ -601,10 +629,10 @@ class DownloadWorker:
         )
 
         async def download_worker(i: int, track: TrackMetadata) -> None:
-            position = i + 1
+            position = self._positions[i]
             async with semaphore:
                 print_track_header(
-                    position,
+                    i + 1,
                     total,
                     track.title,
                     track.artists,
@@ -634,6 +662,9 @@ class DownloadWorker:
         async def consume_results() -> None:
             for _ in range(total):
                 track, result = await results_queue.get()
+
+                if result.success and result.file_path:
+                    self._completed[track.id] = result.file_path
 
                 if result.success and result.skipped:
                     await manager.skip_download(track.id)
@@ -798,6 +829,191 @@ class SpotiflacDownloader:
                 if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
                     break
                 await asyncio.sleep(loop_minutes * 60)
+
+    # ------------------------------------------------------------------
+    # Multi-playlist sync
+    # ------------------------------------------------------------------
+
+    async def run_playlists_async(
+        self,
+        urls: list[str],
+        m3u_format: str = "m3u8",
+    ) -> None:
+        """Downloads several playlists into one folder, one M3U file each.
+
+        A track shared by two playlists is downloaded once, tracks already in
+        the output directory are never fetched again, and each playlist gets an
+        M3U file rewritten only when its content changed — so running this
+        again after a playlist gained a track only downloads that track.
+        """
+        opts = self._playlist_opts()
+        sources = await self._resolve_playlists_async(urls)
+        if not sources:
+            logger.warning("[playlists] No playlist could be resolved")
+            return
+
+        plan = build_plan(sources, m3u_format=m3u_format)
+        output_dir = Path(opts.output_dir)
+        await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
+        index = await asyncio.to_thread(index_audio_files, output_dir)
+        plan = mark_existing(plan, index, opts)
+
+        located: dict[str, Path] = {
+            planned.key: planned.existing_path for planned in plan.present
+        }
+        located.update(await self._download_pending_async(plan, opts))
+        await self._write_playlist_files_async(plan, located, output_dir, m3u_format)
+
+    def _playlist_opts(self) -> DownloadOptions:
+        """Options adjusted for a flat, multi-playlist run."""
+        opts = self._opts
+        if opts.output_path:
+            logger.warning(
+                "[playlists] --output-path ignored: every track is saved in the "
+                "output directory with standard renaming.",
+            )
+            opts = replace(opts, output_path=None)
+
+        if opts.use_track_numbers or "{position}" in opts.filename_format:
+            logger.warning(
+                "[playlists] track numbers depend on the merged playlist order: "
+                "filenames will change whenever a playlist does, and already "
+                "downloaded tracks are then fetched again under the new name.",
+            )
+        return opts
+
+    async def _resolve_playlists_async(self, urls: list[str]) -> list[PlaylistSource]:
+        """Fetches every playlist, keeping the run alive when one fails."""
+        sources: list[PlaylistSource] = []
+        for url in urls:
+            try:
+                collection_name, tracks, info = await self._resolve_metadata_async(url)
+            except SpotiflacError as exc:
+                # Una playlist irraggiungibile non deve far saltare le altre.
+                logger.error("[playlists] %s: %s", url, exc)
+                continue
+
+            if not tracks:
+                logger.warning("[playlists] No track found: %s", url)
+                continue
+
+            # SoundCloud e Pandora non espongono ISRC: la risoluzione bulk
+            # sarebbe solo tempo perso (come in _run_once_async).
+            lowered = url.lower()
+            if not any(
+                host in lowered
+                for host in ("soundcloud.com", "pandora.com", "pandora.app.link")
+            ):
+                tracks = await self._resolve_isrc_bulk_async(tracks)
+
+            await self._record_history_async(url, collection_name, tracks, info)
+            sources.append(
+                PlaylistSource(
+                    url=url,
+                    name=collection_name or "Playlist",
+                    tracks=tuple(tracks),
+                ),
+            )
+        return sources
+
+    async def _download_pending_async(
+        self,
+        plan: SyncPlan,
+        opts: DownloadOptions,
+    ) -> dict[str, Path]:
+        """Downloads the tracks not already on disk. Returns key → file path."""
+        pending = plan.pending
+        if not pending:
+            logger.info("[playlists] Every track is already in the output directory")
+            return {}
+
+        tracks = await self._register_queue_async([p.track for p in pending])
+        worker = DownloadWorker(
+            tracks=tracks,
+            opts=opts,
+            # Cartella unica: nessun sottolivello per playlist.
+            collection_name="",
+            is_album=False,
+            is_playlist=False,
+            positions=[p.position for p in pending],
+        )
+        await worker.run_async()
+
+        completed = worker.completed_paths
+        return {
+            planned.key: Path(completed[track.id])
+            for planned, track in zip(pending, tracks)
+            if track.id in completed
+        }
+
+    async def _write_playlist_files_async(
+        self,
+        plan: SyncPlan,
+        located: dict[str, Path],
+        output_dir: Path,
+        m3u_format: str,
+    ) -> None:
+        """Refreshes one M3U file per playlist, skipping the unchanged ones."""
+        planned_by_key = plan.track_by_key()
+        rows: list[tuple[str, str, int, int]] = []
+
+        for playlist in plan.playlists:
+            entries = [
+                entry_for(planned_by_key[key].track, located[key])
+                for key in playlist.keys
+                if key in located
+            ]
+            missing = len(playlist.keys) - len(entries)
+
+            if m3u_format == "none":
+                rows.append(
+                    (playlist.source.name, "no playlist file", len(entries), missing)
+                )
+                continue
+
+            target = output_dir / playlist.file_name
+            content = render_m3u(entries, target)
+            existed = await asyncio.to_thread(target.is_file)
+            changed = await write_if_changed_async(target, content)
+
+            if changed:
+                status = "updated" if existed else "created"
+            else:
+                status = "unchanged"
+            rows.append((playlist.file_name, status, len(entries), missing))
+
+        print_playlist_summary(rows, len(plan.tracks), len(plan.present))
+
+    async def _record_history_async(
+        self,
+        url: str,
+        collection_name: str,
+        tracks: list[TrackMetadata],
+        info: dict,
+    ) -> None:
+        """Adds the resolved URL to the recent-links history. Never fatal."""
+        try:
+            from .core.session_memory import add_url_to_history_async
+
+            cover_url = (
+                tracks[0].cover_url
+                if tracks and getattr(tracks[0], "cover_url", "")
+                else ""
+            )
+            url_type = info.get("type", "")
+            if url_type == "artist_discography":
+                url_type = "artist"
+            artist = tracks[0].artists if tracks and url_type == "track" else ""
+            await add_url_to_history_async(
+                url,
+                label=collection_name,
+                cover=cover_url,
+                track_count=len(tracks),
+                url_type=url_type,
+                artist=artist,
+            )
+        except Exception as exc:
+            logger.debug("[downloader] Failed operation: %s", exc)
 
     async def _resolve_metadata_async(
         self,
@@ -983,16 +1199,15 @@ class SpotiflacDownloader:
 
         return tracks
 
-    async def _run_worker_async(
+    async def _register_queue_async(
         self,
         tracks: list[TrackMetadata],
-        collection_name: str,
-        info: dict,
-        is_album: bool,
-        is_playlist: bool,
-        opts: DownloadOptions | None = None,
     ) -> list[TrackMetadata]:
-        effective = opts if opts is not None else self._opts
+        """Adds the tracks to the download queue, giving an id to those without.
+
+        Returns the tracks with their final ids: everything downstream (progress
+        updates, per-track results) is keyed on them.
+        """
         manager = DownloadManager()
         updated_tracks = []
         for i, t in enumerate(tracks):
@@ -1008,6 +1223,19 @@ class SpotiflacDownloader:
             if not t.id:
                 t = t.model_copy(update={"id": track_item_id})
             updated_tracks.append(t)
+        return updated_tracks
+
+    async def _run_worker_async(
+        self,
+        tracks: list[TrackMetadata],
+        collection_name: str,
+        info: dict,
+        is_album: bool,
+        is_playlist: bool,
+        opts: DownloadOptions | None = None,
+    ) -> list[TrackMetadata]:
+        effective = opts if opts is not None else self._opts
+        updated_tracks = await self._register_queue_async(tracks)
 
         worker = DownloadWorker(
             tracks=updated_tracks,
@@ -1054,8 +1282,6 @@ class SpotiflacDownloader:
 
         effective_opts = self._opts
         if self._opts.is_album != is_album:
-            from dataclasses import replace
-
             effective_opts = replace(self._opts, is_album=is_album)
 
         if (is_album or is_playlist or is_discography) and self._opts.output_path:
@@ -1064,8 +1290,6 @@ class SpotiflacDownloader:
                 "files will be saved with standard renaming.",
                 info.get("type"),
             )
-            from dataclasses import replace
-
             effective_opts = replace(effective_opts, output_path=None)
 
         is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
@@ -1074,28 +1298,7 @@ class SpotiflacDownloader:
         if not is_soundcloud and not is_pandora:
             tracks = await self._resolve_isrc_bulk_async(tracks)
 
-        try:
-            from .core.session_memory import add_url_to_history_async
-
-            cover_url = (
-                tracks[0].cover_url
-                if tracks and getattr(tracks[0], "cover_url", "")
-                else ""
-            )
-            _url_type = info.get("type", "")
-            if _url_type == "artist_discography":
-                _url_type = "artist"
-            _artist = tracks[0].artists if tracks and _url_type == "track" else ""
-            await add_url_to_history_async(
-                url,
-                label=collection_name,
-                cover=cover_url,
-                track_count=len(tracks),
-                url_type=_url_type,
-                artist=_artist,
-            )
-        except Exception as exc:
-            logger.debug("[downloader] Failed operation: %s", exc)
+        await self._record_history_async(url, collection_name, tracks, info)
 
         return await self._run_worker_async(
             tracks,

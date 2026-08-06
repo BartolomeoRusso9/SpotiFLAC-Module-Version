@@ -110,6 +110,34 @@ def print_summary(
         tqdm.write(summary, file=sys.stderr)
 
 
+def print_playlist_summary(
+    rows: list[tuple[str, str, int, int]],
+    unique_tracks: int,
+    already_present: int,
+) -> None:
+    """Prints the per-playlist outcome of a multi-playlist sync.
+
+    Each row is (playlist name, M3U status, tracks listed, tracks missing).
+    """
+    bar = "═" * _BANNER_WIDTH
+    summary = f"\n╔{bar}╗\n"
+    summary += f"║  PLAYLIST SYNC{'':<45}║\n"
+    summary += f"╠{bar}╣\n"
+    summary += f"║  Unique Tracks : {unique_tracks:<42}║\n"
+    summary += f"║  Already There : {already_present:<42}║"
+
+    for name, status, listed, missing in rows:
+        summary += f"\n╠{bar}╣\n"
+        summary += f"║  {name[:56]:<58}║\n"
+        detail = f"{status} · {listed} track(s)"
+        if missing:
+            detail += f" · {missing} missing"
+        summary += f"║    {detail[:56]:<56}║"
+    summary += f"\n╚{bar}╝"
+    with tqdm.get_lock():
+        tqdm.write(summary, file=sys.stderr)
+
+
 def print_api_failure(provider: str, api: str, reason: str) -> None:
     with tqdm.get_lock():
         tqdm.write(
