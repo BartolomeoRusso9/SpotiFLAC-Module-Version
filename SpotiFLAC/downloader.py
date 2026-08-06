@@ -19,13 +19,14 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .core.console import print_summary, print_track_header
 from .core.errors import ErrorKind, SpotiflacError
 from .core.http import AsyncHttpClient
 from .core.isrc_helper import IsrcHelper
-from .core.models import DownloadResult, TrackMetadata
+from .core.models import DownloadResult, TrackMetadata, build_filename
 from .core.progress import (
     DownloadManager,
     ProgressCallback,
@@ -35,6 +36,14 @@ from .core.progress import (
     uninstall_console_interception,
 )
 from .core.quality import normalize_quality
+from .core.transcode import (
+    DEFAULT_MP3_BITRATE,
+    ensure_ffmpeg_available,
+    normalize_bitrate,
+    normalize_transcode_format,
+    transcode_file_async,
+    transcoded_file_exists,
+)
 from .providers.spotify_metadata import SpotifyMetadataClient
 
 if TYPE_CHECKING:
@@ -86,6 +95,15 @@ class DownloadOptions:
     qobuz_token: str | None = None
     qobuz_local_api_url: str | None = None
 
+    # Conversione post-download: None = tieni il formato del provider,
+    # "mp3" = converti ogni traccia in MP3 a `transcode_bitrate`.
+    # Il file convertito prende lo stesso nome con estensione diversa, così
+    # lo skip dei brani già scaricati continua a funzionare (viene cercato
+    # direttamente il file convertito, prima di contattare i provider).
+    transcode_to: str | None = None
+    transcode_bitrate: str = DEFAULT_MP3_BITRATE
+    transcode_keep_original: bool = False
+
     track_max_retries: int = 0
     post_download_action: str = "none"
     post_download_command: str = ""
@@ -98,6 +116,13 @@ class DownloadOptions:
     # una costante hardcoded (MAX_CONCURRENT_DOWNLOADS = 2) — ora è
     # configurabile dal chiamante (CLI/API), mantenendo lo stesso default.
     max_concurrent_downloads: int = 2
+
+    def __post_init__(self) -> None:
+        # Normalizza subito così il resto del codice può fare `if opts.transcode_to`
+        # e un formato non supportato fallisce dove viene configurato, non a metà
+        # di un batch di download.
+        self.transcode_to = normalize_transcode_format(self.transcode_to)
+        self.transcode_bitrate = normalize_bitrate(self.transcode_bitrate)
 
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
@@ -221,6 +246,70 @@ async def _get_file_size_mb_async(path: str) -> float:
     return await asyncio.to_thread(_do_get)
 
 
+def transcode_target_path(
+    metadata: TrackMetadata,
+    output_dir: str,
+    opts: DownloadOptions,
+    position: int = 1,
+) -> Path | None:
+    """Final path a track will have once transcoded, or None if transcoding is off.
+
+    Mirrors the naming used by `BaseProvider._build_output_path()` — same
+    template, same options, only a different extension — so the file can be
+    looked up before any provider is contacted.
+    """
+    if not opts.transcode_to:
+        return None
+
+    extension = f".{opts.transcode_to}"
+    if opts.output_path:
+        base, _ = os.path.splitext(opts.output_path)
+        return Path(base + extension)
+
+    filename = build_filename(
+        metadata,
+        fmt=opts.filename_format,
+        position=position,
+        include_track_number=opts.use_track_numbers,
+        use_album_track_number=opts.use_album_track_numbers,
+        first_artist_only=opts.first_artist_only,
+        extension=extension,
+    )
+    return Path(output_dir) / filename
+
+
+async def _transcode_result_async(
+    result: DownloadResult,
+    opts: DownloadOptions,
+) -> DownloadResult:
+    """Converts a finished download to `opts.transcode_to`.
+
+    A result whose file is already in the target format is returned untouched,
+    which also covers providers that natively deliver MP3.
+    """
+    source = Path(result.file_path or "")
+    if not result.file_path or source.suffix.lower() == f".{opts.transcode_to}":
+        return result
+
+    try:
+        dest = await transcode_file_async(
+            source,
+            fmt=opts.transcode_to,
+            bitrate=opts.transcode_bitrate,
+            keep_original=opts.transcode_keep_original,
+        )
+    except Exception as exc:
+        logger.warning("[transcode] %s: %s", source.name, exc)
+        return DownloadResult.fail(
+            result.provider,
+            f"Downloaded, but transcode to {opts.transcode_to.upper()} failed: {exc}",
+        )
+
+    # Anche un risultato "skipped" (file preesistente in un altro formato) è
+    # stato riscritto: va riportato come download riuscito, non come skip.
+    return DownloadResult.ok(result.provider, str(dest), opts.transcode_to)
+
+
 async def download_one_async(
     metadata: TrackMetadata,
     output_dir: str,
@@ -236,6 +325,20 @@ async def download_one_async(
     DownloadManager()
     errors: dict[str, str] = {}
     started_at = time.monotonic()
+
+    transcode_target = transcode_target_path(metadata, output_dir, opts, position)
+    if transcode_target and transcoded_file_exists(transcode_target):
+        logger.info(
+            "[transcode] ⏭ already downloaded as %s: %s — %s",
+            opts.transcode_to.upper(),
+            metadata.artists,
+            metadata.title,
+        )
+        return DownloadResult.skipped_result(
+            providers[0].name if providers else "none",
+            str(transcode_target),
+            fmt=opts.transcode_to,
+        )
 
     for attempt in range(opts.track_max_retries + 1):
         if stop_event.is_set() or (
@@ -321,6 +424,13 @@ async def download_one_async(
                 )
 
             if result.success:
+                if opts.transcode_to:
+                    # Un file preesistente in un altro formato viene convertito
+                    # anch'esso: al giro successivo lo skip lo troverà già in MP3.
+                    result = await _transcode_result_async(result, opts)
+                    if not result.success:
+                        return result
+
                 if result.skipped:
                     logger.info(
                         "[%s] ⏭ %s — %s",
@@ -433,6 +543,14 @@ class DownloadWorker:
 
     async def run_async(self) -> list[tuple[str, str, str]]:
         try:
+            if self._opts.transcode_to:
+                # Meglio fermarsi subito che scaricare un intero album e
+                # scoprire solo alla fine che la conversione non è possibile.
+                await asyncio.to_thread(
+                    ensure_ffmpeg_available,
+                    self._opts.transcode_to,
+                )
+
             manager = DownloadManager()
             await manager.reset()
             total = len(self._tracks)

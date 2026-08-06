@@ -1446,6 +1446,12 @@ class SpotiFLAC_API:
                 "tidal",
                 "soundcloud",
             ]
+            from .core.transcode import normalize_transcode_format
+
+            # La GUI invia "none" quando la conversione è disattivata
+            transcode_to = normalize_transcode_format(config.get("transcode_to"))
+            transcode_bitrate = config.get("transcode_bitrate") or "320k"
+            transcode_keep_original = config.get("transcode_keep_original", False)
             track_max_retries = int(config.get("track_max_retries", 0))
             post_download_action = config.get("post_download_action", "none")
             post_download_command = config.get("post_download_command", "")
@@ -1486,6 +1492,14 @@ class SpotiFLAC_API:
                 self.log("No valid URLs to download.", "error")
                 return
 
+            if transcode_to:
+                self.log(
+                    f"Transcoding enabled — tracks will be saved as "
+                    f"{transcode_to.upper()} {transcode_bitrate}"
+                    + ("" if transcode_keep_original else " (originals removed)"),
+                    "info",
+                )
+
             self.set_progress(f"Downloading ({quality})…")
             monitor_stop = threading.Event()
             monitor_thread = threading.Thread(
@@ -1516,6 +1530,9 @@ class SpotiFLAC_API:
                     enrich_providers=enrich_providers,
                     qobuz_local_api_url=qobuz_local_api_url,
                     tidal_custom_api=tidal_custom_api,
+                    transcode_to=transcode_to,
+                    transcode_bitrate=transcode_bitrate,
+                    transcode_keep_original=transcode_keep_original,
                     track_max_retries=track_max_retries,
                     post_download_action=post_download_action,
                     post_download_command=post_download_command,

@@ -221,6 +221,9 @@ function applySettings(settings = {}) {
   if ($('config-artist-sub')) $('config-artist-sub').checked = cfg.use_artist_subfolders;
   if ($('config-album-sub')) $('config-album-sub').checked = cfg.use_album_subfolders;
   if ($('config-first-artist')) $('config-first-artist').checked = cfg.first_artist_only;
+  if ($('config-transcode')) { $('config-transcode').value = cfg.transcode_to || 'none'; onTranscodeChange(); }
+  if ($('config-transcode-bitrate')) $('config-transcode-bitrate').value = cfg.transcode_bitrate || '320k';
+  if ($('config-transcode-keep')) $('config-transcode-keep').checked = cfg.transcode_keep_original;
   if ($('config-retries')) $('config-retries').value = cfg.track_max_retries;
   if ($('config-post-action')) { $('config-post-action').value = cfg.post_download_action; onPostChange(); }
   if ($('config-post-cmd')) $('config-post-cmd').value = cfg.post_download_command;
@@ -337,6 +340,12 @@ function onEnrichChange() {
 function onPostChange() {
   $('post-cmd-row').style.display = $('config-post-action').value === 'command' ? 'flex' : 'none';
 }
+function onTranscodeChange() {
+  const on = $('config-transcode') && $('config-transcode').value !== 'none';
+  document.querySelectorAll('.transcode-opt').forEach(row => {
+    row.style.display = on ? 'flex' : 'none';
+  });
+}
 
 // ── Sortable lists ───────────────────────────────────────────────────────────
 function makeSortable(el) {
@@ -417,6 +426,9 @@ const DEFAULT_SETTINGS = {
   track_max_retries: 0,
   post_download_action: 'none',
   post_download_command: '',
+  transcode_to: 'none',
+  transcode_bitrate: '320k',
+  transcode_keep_original: false,
   qobuz_local_api_url: '',
   tidal_custom_api: '',
   loop: 0,
@@ -3027,6 +3039,9 @@ function buildConfig() {
     use_artist_subfolders:  $('config-artist-sub').checked,
     use_album_subfolders:   $('config-album-sub').checked,
     first_artist_only:       $('config-first-artist').checked,
+    transcode_to:           $('config-transcode')?.value || 'none',
+    transcode_bitrate:      $('config-transcode-bitrate')?.value || '320k',
+    transcode_keep_original: $('config-transcode-keep')?.checked || false,
     track_max_retries:      parseInt($('config-retries').value) || 0,
     post_download_action:   $('config-post-action').value,
     post_download_command:  $('config-post-cmd')?.value?.trim() || '',

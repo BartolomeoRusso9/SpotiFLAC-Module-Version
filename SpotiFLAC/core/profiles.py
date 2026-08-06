@@ -42,6 +42,9 @@ class ProfileConfig(BaseModel):
     enrich_providers: list[str] = Field(
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
     )
+    transcode_to: str | None = None
+    transcode_bitrate: str = "320k"
+    transcode_keep_original: bool = False
     track_max_retries: int = 0
     post_download_action: str = "none"
     post_download_command: str = ""

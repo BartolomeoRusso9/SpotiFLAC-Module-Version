@@ -33,6 +33,7 @@
 - Configuration Profiles
 - MusicBrainz metadata enrichment
 - Embedded synchronized lyrics
+- Optional MP3 320 kbps transcoding
 
 ---
 
@@ -411,6 +412,36 @@ SpotiFLAC(
 
 > **Tip:** Pair `--timeout` with `--retries` so that a stalled track is automatically re-attempted against the next provider instead of blocking the entire queue indefinitely.
 
+### MP3 Transcoding
+
+Downloads always fetch the best source a provider offers (FLAC, ALAC/M4A, …). Set `transcode_to="mp3"` (Python) or `--mp3` / `--transcode mp3` (CLI) to convert every finished track to MP3 — 320 kbps by default — for players or car stereos that cannot handle lossless files. Tags, cover art and lyrics are carried over to the MP3, and the original file is deleted once the conversion succeeds unless `transcode_keep_original` / `--keep-original` is set.
+
+Requires `ffmpeg` on your `PATH`: the run stops immediately with a clear error if it is missing, so you never download a whole album only to fail at the conversion step.
+
+```bash
+# CLI — every track ends up as a 320 kbps MP3
+spotiflac https://open.spotify.com/album/... ./out --service tidal --mp3
+
+# Keep the FLAC too, and use 192 kbps instead
+spotiflac https://open.spotify.com/album/... ./out --mp3 --transcode-bitrate 192k --keep-original
+```
+
+```python
+# Python API
+from SpotiFLAC import SpotiFLAC
+SpotiFLAC(
+    url="https://open.spotify.com/album/...",
+    output_dir="./downloads",
+    services=["tidal", "qobuz"],
+    transcode_to="mp3",
+    transcode_bitrate="320k",
+)
+```
+
+**Skipping already-downloaded tracks still works.** The converted file keeps the exact name the provider would have used, only with an `.mp3` extension, so SpotiFLAC looks for that file *before* contacting any provider and skips the track when it is already there — no network request, no re-encode. Running the same album twice therefore costs nothing the second time. A leftover file from an earlier lossless run is converted in place instead of being re-downloaded, so an existing library converges to MP3 in a single pass.
+
+The conversion is a no-op for providers that already deliver MP3 (e.g. SoundCloud), which are passed through untouched.
+
 ### Post-Download Actions
 
 | Action | Description |
@@ -648,6 +679,9 @@ chmod +x SpotiFLAC-Linux-arm64
 | `enrich_providers` | `list` | `["deezer", "apple", "qobuz", "tidal", "soundcloud"]` | Priority order of metadata providers to attempt. |
 | `qobuz_local_api_url` | `str` | `None` | Optional local Qobuz stream API URL. When set, the provider uses this endpoint for Qobuz stream requests. |
 | `use_extensions_fallback` | `bool` | `True` | Whether to automatically pair a matching installed [JavaScript extension](#-javascript-extensions) as a fallback provider when a native provider fails. Set to `False` to use only the providers explicitly listed in `services`. |
+| `transcode_to` | `str` | `None` | Converts every finished track to this format. Currently only `"mp3"` (see [MP3 Transcoding](#mp3-transcoding)). `None` keeps the provider's original format. Requires `ffmpeg`. |
+| `transcode_bitrate` | `str` | `"320k"` | Bitrate used by `transcode_to`, e.g. `"320k"`, `"256k"`, `"192k"`. |
+| `transcode_keep_original` | `bool` | `False` | Keeps the original lossless file next to the converted one. By default the source is deleted once the conversion succeeds. |
 | `post_download_action` | `str` | `"none"` | Action after all downloads finish: `"none"`, `"open_folder"`, `"notify"`, `"command"`. |
 | `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 
@@ -687,6 +721,10 @@ When customizing the `filename_format` string, you can use the following dynamic
  `--no-extensions-fallback` | | `False` | Disable automatic fallback to installed JS extensions when a native provider fails (fallback is enabled by default). |
 | `--loop` | `-l` | `None` | Keep retrying permanently failed tracks every N minutes. |
 | `--retries` | | `0` | Extra per-track download attempts on failure. Cycles through all providers with exponential backoff. |
+| `--transcode` | | `none` | Convert every downloaded track to this format: `none` or `mp3`. Requires `ffmpeg`. |
+| `--mp3` | | | Shorthand for `--transcode mp3`. |
+| `--transcode-bitrate` | | `320k` | Bitrate used by `--transcode`, e.g. `320k`, `256k`, `192k`. |
+| `--keep-original` | | `False` | Keep the original lossless file alongside the transcoded one. |
 | `--verbose` | `-v` | `False` | Enable debug logging. |
 | `--no-lyrics` | | `False` | Disable lyrics embedding (lyrics are embedded by default). |
 | `--lyrics-providers` | | `spotify apple musixmatch lrclib amazon` | Lyrics provider priority order. |

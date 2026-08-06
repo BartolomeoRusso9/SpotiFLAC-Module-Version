@@ -90,6 +90,23 @@ _FLAC_TO_ID3: dict[str, tuple | None] = {
     # Tutto il resto → TXXX
 }
 
+# Vorbis tag  →  chiave MP4/M4A (usata sia in scrittura che in lettura)
+_M4A_MAP: dict[str, str] = {
+    "TITLE": "\xa9nam",
+    "ARTIST": "\xa9ART",
+    "ALBUM": "\xa9alb",
+    "ALBUMARTIST": "aART",
+    "DATE": "\xa9day",
+    "GENRE": "\xa9gen",
+    "COMPOSER": "\xa9wrt",
+    "COPYRIGHT": "cprt",
+    "DESCRIPTION": "\xa9cmt",
+    "ISRC": "----:com.apple.iTunes:ISRC",
+    "ORGANIZATION": "----:com.apple.iTunes:LABEL",
+    "LABEL": "----:com.apple.iTunes:LABEL",
+    "BPM": "tmpo",
+}
+
 # Tag che finiscono in TXXX con la chiave come desc
 _TXXX_TAGS = {
     "MUSICBRAINZ_TRACKID",
@@ -187,6 +204,7 @@ def _embed_id3(
     cover_data: bytes | None,
     lyrics: str | None,
     lyrics_prov: str,
+    cover_mime: str = "image/jpeg",
 ) -> None:
     """Scrive tutti i tag ID3 su un file MP3."""
     try:
@@ -274,7 +292,7 @@ def _embed_id3(
         audio.add(
             APIC(
                 encoding=3,
-                mime="image/jpeg",
+                mime=cover_mime or "image/jpeg",
                 type=ID3PictureType.COVER_FRONT,
                 desc="Cover",
                 data=cover_data,
@@ -367,22 +385,6 @@ def _embed_m4a(
     audio = MP4(str(path))
     audio.delete()
 
-    _M4A_MAP = {
-        "TITLE": "\xa9nam",
-        "ARTIST": "\xa9ART",
-        "ALBUM": "\xa9alb",
-        "ALBUMARTIST": "aART",
-        "DATE": "\xa9day",
-        "GENRE": "\xa9gen",
-        "COMPOSER": "\xa9wrt",
-        "COPYRIGHT": "cprt",
-        "DESCRIPTION": "\xa9cmt",
-        "ISRC": "----:com.apple.iTunes:ISRC",
-        "ORGANIZATION": "----:com.apple.iTunes:LABEL",
-        "LABEL": "----:com.apple.iTunes:LABEL",
-        "BPM": "tmpo",
-    }
-
     track_num = int(tags.get("TRACKNUMBER", "0") or 0)
     track_total = int(tags.get("TRACKTOTAL", "0") or 0)
     disc_num = int(tags.get("DISCNUMBER", "1") or 1)
@@ -420,6 +422,150 @@ def _embed_m4a(
 
     audio.save()
     logger.debug("[tagger/m4a] tags written: %s", path.name)
+
+
+# ---------------------------------------------------------------------------
+# Reading tags back out of a file (used when transcoding)
+# ---------------------------------------------------------------------------
+
+_MULTI_VALUE_TAGS = {"ARTIST", "ALBUMARTIST", "ARTISTS", "ALBUMARTISTS"}
+_LYRICS_TAGS = {"LYRICS", "UNSYNCEDLYRICS"}
+
+
+@dataclass
+class EmbeddedTags:
+    """Tags, cover art and lyrics already written into an audio file."""
+
+    tags: dict[str, str] = field(default_factory=dict)
+    cover_data: bytes | None = None
+    cover_mime: str = "image/jpeg"
+    lyrics: str | None = None
+
+    def __bool__(self) -> bool:
+        return bool(self.tags or self.cover_data or self.lyrics)
+
+
+def _read_flac_tags(path: Path) -> EmbeddedTags:
+    audio = FLAC(str(path))
+    result = EmbeddedTags()
+
+    for key in audio:
+        values = [v for v in audio[key] if v]
+        if not values:
+            continue
+        key_up = key.upper()
+        if key_up in _LYRICS_TAGS:
+            result.lyrics = values[0]
+        elif key_up in _MULTI_VALUE_TAGS:
+            result.tags[key_up] = ", ".join(values)
+        else:
+            result.tags[key_up] = values[0]
+
+    if audio.pictures:
+        picture = next(
+            (p for p in audio.pictures if p.type == PictureType.COVER_FRONT),
+            audio.pictures[0],
+        )
+        result.cover_data = picture.data
+        result.cover_mime = picture.mime or "image/jpeg"
+
+    return result
+
+
+def _read_m4a_tags(path: Path) -> EmbeddedTags:
+    from mutagen.mp4 import MP4, MP4Cover
+
+    audio = MP4(str(path))
+    result = EmbeddedTags()
+    # LABEL e ORGANIZATION condividono lo stesso atom: in lettura vince ORGANIZATION
+    reverse_map = {v: k for k, v in _M4A_MAP.items() if k != "LABEL"}
+
+    for key, value in (audio.tags or {}).items():
+        if not value:
+            continue
+
+        if key == "covr":
+            cover = value[0]
+            result.cover_data = bytes(cover)
+            result.cover_mime = (
+                "image/png"
+                if getattr(cover, "imageformat", None) == MP4Cover.FORMAT_PNG
+                else "image/jpeg"
+            )
+            continue
+
+        if key == "\xa9lyr":
+            result.lyrics = str(value[0])
+            continue
+
+        if key in ("trkn", "disk"):
+            number, total = (list(value[0]) + [0, 0])[:2]
+            prefix = "TRACK" if key == "trkn" else "DISC"
+            if number:
+                result.tags[f"{prefix}NUMBER"] = str(number)
+            if total:
+                result.tags[f"{prefix}TOTAL"] = str(total)
+            continue
+
+        name = reverse_map.get(key)
+        if name is None and key.startswith("----:"):
+            name = key.rsplit(":", 1)[-1].upper()
+        if name is None:
+            continue  # atom applicativo (encoder, purchase date, …)
+
+        raw = value[0]
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="ignore")
+        result.tags[name] = str(raw)
+
+    return result
+
+
+def read_embedded_tags(filepath: str | Path) -> EmbeddedTags:
+    """Reads back the tags a provider embedded into a downloaded file.
+
+    Returns an empty `EmbeddedTags` for formats we do not need to read
+    (the caller then keeps whatever tags the converter carried over).
+    """
+    path = Path(filepath)
+    suffix = path.suffix.lower()
+
+    try:
+        if suffix == ".flac":
+            return _read_flac_tags(path)
+        if suffix in (".m4a", ".aac", ".mp4"):
+            return _read_m4a_tags(path)
+    except Exception as exc:
+        logger.warning("[tagger] could not read tags from %s: %s", path.name, exc)
+        return EmbeddedTags()
+
+    logger.debug("[tagger] no tag reader for %s — skipping transfer", suffix)
+    return EmbeddedTags()
+
+
+async def transfer_tags_to_mp3_async(
+    source: str | Path,
+    dest: str | Path,
+) -> bool:
+    """Copies tags, cover art and lyrics from `source` onto an MP3 at `dest`.
+
+    Returns True when tags were written, False when the source carried nothing
+    worth transferring.
+    """
+    embedded = await asyncio.to_thread(read_embedded_tags, source)
+    if not embedded:
+        return False
+
+    await asyncio.to_thread(
+        _embed_id3,
+        Path(dest),
+        dict(embedded.tags),
+        embedded.cover_data,
+        embedded.lyrics,
+        "",
+        embedded.cover_mime,
+    )
+    return True
 
 
 @dataclass

@@ -55,6 +55,13 @@ def _require_env(key: str) -> str:
     return val
 
 
+def _env_bool(key: str, default: bool = False) -> bool:
+    val = os.getenv(key)
+    if val is None:
+        return default
+    return val.strip().lower() in {"1", "true", "yes", "on"}
+
+
 BOT_TOKEN = _require_env("TELEGRAM_BOT_TOKEN")
 
 DATA_DIR = Path(os.getenv("BOT_DATA_DIR", "/app/data"))
@@ -564,6 +571,12 @@ async def run_spotiflac_once(url: str, job_cfg: dict) -> None:
         kwargs["enrich_providers"] = job_cfg["enrich_providers"]
     if "use_extensions_fallback" in job_cfg:
         kwargs["use_extensions_fallback"] = job_cfg["use_extensions_fallback"]
+    if job_cfg.get("transcode_to"):
+        kwargs["transcode_to"] = job_cfg["transcode_to"]
+        kwargs["transcode_bitrate"] = job_cfg.get("transcode_bitrate", "320k")
+        kwargs["transcode_keep_original"] = job_cfg.get(
+            "transcode_keep_original", False
+        )
     if qobuz_local_api:
         kwargs["qobuz_local_api_url"] = qobuz_local_api
     if tidal_custom_api:
@@ -748,6 +761,15 @@ def parse_quick_flags(args: list[str]) -> dict:
         elif a == "--no-lyrics":
             cfg["embed_lyrics"] = False
             i += 1
+        elif a == "--mp3":
+            cfg["transcode_to"] = "mp3"
+            i += 1
+        elif a == "--transcode-bitrate" and i + 1 < len(args):
+            cfg["transcode_bitrate"] = args[i + 1].lower()
+            i += 2
+        elif a == "--keep-original":
+            cfg["transcode_keep_original"] = True
+            i += 1
         else:
             i += 1
     return cfg
@@ -773,6 +795,9 @@ def default_job_cfg(url: str) -> dict:
         "enrich_providers": ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         "track_max_retries": 0,
         "timeout_s": 0,
+        "transcode_to": os.getenv("TRANSCODE_TO") or None,
+        "transcode_bitrate": os.getenv("TRANSCODE_BITRATE") or "320k",
+        "transcode_keep_original": _env_bool("TRANSCODE_KEEP_ORIGINAL"),
         "filename_format": FILENAME_FORMAT_PRESETS["default"],
     }
 

@@ -257,6 +257,40 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         choices=["deezer", "apple", "qobuz", "tidal", "soundcloud"],
     )
 
+    # ── Transcoding ──────────────────────────────────────────────────────────
+    transcode_grp = parser.add_argument_group("Transcoding")
+    transcode_grp.add_argument(
+        "--transcode",
+        choices=["none", "mp3"],
+        default=pd.get("transcode_to") or "none",
+        dest="transcode_to",
+        help="Convert every downloaded track to this format (default: none — "
+        "keep the provider's original format). Requires ffmpeg. Tracks already "
+        "present in the target format are skipped without contacting a provider.",
+    )
+    transcode_grp.add_argument(
+        "--mp3",
+        action="store_const",
+        const="mp3",
+        dest="transcode_to",
+        help="Shorthand for --transcode mp3 (320 kbps unless --transcode-bitrate is given)",
+    )
+    transcode_grp.add_argument(
+        "--transcode-bitrate",
+        default=pd.get("transcode_bitrate", "320k"),
+        dest="transcode_bitrate",
+        metavar="RATE",
+        help="Bitrate for --transcode (default: 320k)",
+    )
+    transcode_grp.add_argument(
+        "--keep-original",
+        action="store_true",
+        dest="transcode_keep_original",
+        default=pd.get("transcode_keep_original", False),
+        help="Keep the original lossless file next to the transcoded one "
+        "(default: the source is deleted after a successful conversion)",
+    )
+
     # ── Retry ────────────────────────────────────────────────────────────────
     retry_grp = parser.add_argument_group("Retry")
     retry_grp.add_argument(
@@ -330,6 +364,9 @@ async def _run_download_async(
     post_download_command: str,
     timeout_s: int | None,
     use_extensions_fallback: bool = True,
+    transcode_to: str | None = None,
+    transcode_bitrate: str = "320k",
+    transcode_keep_original: bool = False,
 ) -> None:
     """Bridge async verso SpotiflacDownloader, senza passare per il wrapper
     sincrono `SpotiFLAC()` (che farebbe un `asyncio.run()` annidato e
@@ -365,6 +402,9 @@ async def _run_download_async(
         tidal_custom_api=tidal_custom_api,
         timeout_s=timeout_s,
         auto_pair_extensions=use_extensions_fallback,
+        transcode_to=transcode_to,
+        transcode_bitrate=transcode_bitrate,
+        transcode_keep_original=transcode_keep_original,
     )
 
     try:
@@ -439,6 +479,9 @@ async def amain() -> None:
             post_download_command=cfg.get("post_download_command", ""),
             timeout_s=cfg.get("timeout_s"),
             use_extensions_fallback=cfg.get("use_extensions_fallback", True),
+            transcode_to=cfg.get("transcode_to"),
+            transcode_bitrate=cfg.get("transcode_bitrate", "320k"),
+            transcode_keep_original=cfg.get("transcode_keep_original", False),
         )
         return
 
@@ -543,6 +586,9 @@ async def amain() -> None:
         post_download_command=args.post_command,
         timeout_s=timeout_s,
         use_extensions_fallback=args.use_extensions_fallback,
+        transcode_to=args.transcode_to,
+        transcode_bitrate=args.transcode_bitrate,
+        transcode_keep_original=args.transcode_keep_original,
     )
 
     if args.save_profile:
@@ -564,6 +610,9 @@ async def amain() -> None:
                 "lyrics_providers": args.lyrics_providers,
                 "enrich_metadata": args.enrich,
                 "enrich_providers": args.enrich_providers,
+                "transcode_to": args.transcode_to,
+                "transcode_bitrate": args.transcode_bitrate,
+                "transcode_keep_original": args.transcode_keep_original,
                 "track_max_retries": track_max_retries,
                 "post_download_action": args.post_action,
                 "post_download_command": args.post_command,
