@@ -22,7 +22,16 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .core.console import print_playlist_summary, print_summary, print_track_header
+from .core.console import (
+    print_playlist_resolved,
+    print_playlist_summary,
+    print_run_header,
+    print_summary,
+    print_sync_plan,
+    print_track_done,
+    print_track_header,
+    print_track_skipped,
+)
 from .core.errors import ErrorKind, SpotiflacError
 from .core.http import AsyncHttpClient
 from .core.isrc_helper import IsrcHelper
@@ -338,6 +347,10 @@ async def download_one_async(
 
     transcode_target = transcode_target_path(metadata, output_dir, opts, position)
     if transcode_target and transcoded_file_exists(transcode_target):
+        print_track_skipped(
+            metadata.title,
+            f"already downloaded as {opts.transcode_to.upper()}",
+        )
         logger.info(
             "[transcode] ⏭ already downloaded as %s: %s — %s",
             opts.transcode_to.upper(),
@@ -442,6 +455,7 @@ async def download_one_async(
                         return result
 
                 if result.skipped:
+                    print_track_skipped(metadata.title, "already in the output folder")
                     logger.info(
                         "[%s] ⏭ %s — %s",
                         provider.name,
@@ -461,6 +475,13 @@ async def download_one_async(
                         result.format or "flac",
                     )
 
+                print_track_done(
+                    result.provider or provider.name,
+                    metadata.title,
+                    result.format or "flac",
+                    await _get_file_size_mb_async(result.file_path) * 1024 * 1024,
+                    time.monotonic() - started_at,
+                )
                 logger.info(
                     "[%s] ✓ %s — %s",
                     provider.name,
@@ -586,6 +607,14 @@ class DownloadWorker:
 
             # Native async folder I/O delegation
             base_out = await self._resolve_output_dir_async()
+
+            print_run_header(
+                total,
+                self._opts.services,
+                normalize_quality(self._opts.quality),
+                base_out,
+                max(1, self._opts.max_concurrent_downloads),
+            )
 
             install_console_interception()
             ProgressManager.initialize_master_bar(total, description="Progress")
@@ -857,6 +886,7 @@ class SpotiflacDownloader:
         await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
         index = await asyncio.to_thread(index_audio_files, output_dir)
         plan = mark_existing(plan, index, opts)
+        print_sync_plan(len(plan.tracks), len(plan.present), len(plan.pending))
 
         located: dict[str, Path] = {
             planned.key: planned.existing_path for planned in plan.present
@@ -897,6 +927,11 @@ class SpotiflacDownloader:
                 logger.warning("[playlists] No track found: %s", url)
                 continue
 
+            name = collection_name or "Playlist"
+            # Prima della risoluzione ISRC: quella può durare a lungo, e
+            # sapere quale playlist si sta elaborando serve proprio lì.
+            print_playlist_resolved(name, len(tracks), url)
+
             # SoundCloud e Pandora non espongono ISRC: la risoluzione bulk
             # sarebbe solo tempo perso (come in _run_once_async).
             lowered = url.lower()
@@ -908,11 +943,7 @@ class SpotiflacDownloader:
 
             await self._record_history_async(url, collection_name, tracks, info)
             sources.append(
-                PlaylistSource(
-                    url=url,
-                    name=collection_name or "Playlist",
-                    tracks=tuple(tracks),
-                ),
+                PlaylistSource(url=url, name=name, tracks=tuple(tracks)),
             )
         return sources
 

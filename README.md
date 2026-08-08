@@ -227,6 +227,28 @@ Official Docker images are published on GitHub Container Registry (GHCR), allowi
 docker pull ghcr.io/bartolomeorusso9/spotiflac-module-version:latest
 ```
 
+### Logs in Headless Environments
+
+A progress bar is a stream of carriage returns: readable on a terminal, unreadable in a log file. `docker logs` collapses each refresh into a `[285B blob data]` line, which buries everything worth reading.
+
+SpotiFLAC therefore draws animated bars only when stderr is an interactive terminal. Everywhere else — Docker, cron, a redirected file — it prints the same information as plain lines instead:
+
+```
+[RUN] 24 track(s) · tidal, qobuz · LOSSLESS · 2 in parallel → /app/downloads
+Track [3/24] Nightcall — Kavinsky (OutRun)
+  ⬇  Nightcall  ·  47%  ·  13.4 MB / 28.4 MB
+  ✓  Nightcall  ·  TIDAL  ·  FLAC  ·  28.4 MB  ·  12s
+```
+
+Progress lines are throttled to at most one per 25% and per 10 seconds, so a track costs a handful of lines rather than one per received chunk.
+
+Set `SPOTIFLAC_PROGRESS_BARS` to override the detection in either direction:
+
+```bash
+export SPOTIFLAC_PROGRESS_BARS=0   # never draw bars, even on a terminal
+export SPOTIFLAC_PROGRESS_BARS=1   # always draw bars
+```
+
 ---
 
 ## Supported URL Types
