@@ -112,7 +112,7 @@ class SpotiFLAC_API:
             try:
                 client = AsyncHttpClient("github", timeout_s=10)
                 resp = await client.get(
-                    "https://api.github.com/repos/ShuShuzinhuu/SpotiFLAC-Module-Version/releases/latest",
+                    "https://api.github.com/repos/BartolomeoRusso9/SpotiFLAC-Module-Version/releases/latest",
                     headers={
                         "Accept": "application/vnd.github.v3+json",
                         "User-Agent": "SpotiFLAC-Desktop",
