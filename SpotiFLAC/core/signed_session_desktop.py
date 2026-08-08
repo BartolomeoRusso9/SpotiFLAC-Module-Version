@@ -136,7 +136,7 @@ def ensure_community_session() -> CommunitySessionRecord:
     # Usiamo acquire con timeout al posto di "with community_session_mu:"
     if not community_session_mu.acquire(timeout=30):
         raise RuntimeError("Lock community_session_mu occupato da troppo tempo, salto.")
-    
+
     try:
         record = load_community_session()
 
@@ -333,8 +333,10 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             logger.info("solver.py not found or Playwright dependencies missing.")
         except Exception as e:
             logger.warning(f"Automated verification failed: {e}")
-        raise RuntimeError(f"Verifica manuale disabilitata per evitare blocchi del server (challenge: {final_challenge_url})")
-    
+        raise RuntimeError(
+            f"Verifica manuale disabilitata per evitare blocchi del server (challenge: {final_challenge_url})"
+        )
+
     finally:
         server.shutdown()
         server.server_close()
