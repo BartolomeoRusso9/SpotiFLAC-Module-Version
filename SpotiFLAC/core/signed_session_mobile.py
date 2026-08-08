@@ -12,7 +12,6 @@ import logging
 import os
 import re
 import secrets
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,7 +49,6 @@ _BROWSER_FINGERPRINT_HEADERS = {
 
 _LOCAL_CALLBACK_HOST = "127.0.0.1"
 _LOCAL_CALLBACK_PATH = "/callback"
-_MANUAL_GRANT_TIMEOUT_S = 300  # 5 minutes to paste the grant
 _SOLVER_GRANT_TIMEOUT_S = 45  # solver timeout per attempt
 
 
@@ -367,101 +365,12 @@ class SignedSessionClient:
         parts[4] = urlencode(query)
         return urlunparse(parts)
 
-    async def authenticate_with_manual_grant(
-        self,
-        on_verification_url: Callable[[str], None] | None = None,
-        grant_input: Callable[[], str] | None = None,
-        timeout: float = _MANUAL_GRANT_TIMEOUT_S,
-    ) -> None:
-        """Fallback completamente manuale, senza Playwright: nessun browser viene
-        aperto o automatizzato da qui.
-
-        Usage:
-          1. bootstrap() obtains a challenge_id.
-          2. The challenge page URL is displayed (via
-             on_verification_url, or printed/logged by default).
-          3. YOU open that URL in any browser and solve the Turnstile.
-          4. Open DevTools → Network tab → find the "verify" request (POST
-             to .../challenge/verify) → Preview tab: there you find
-             {"grant": "gr_...", "expires_in": 60}.
-          5. Copy that "grant" value (without quotes) and paste it
-             when requested (or pass it via `grant_input`).
-          6. exchange_grant(grant) exchanges the grant for a real session.
-
-        The grant has a short lifespan (~60s from the verify response): copy and
-        paste it as quickly as possible.
-
-        Parameters
-        ----------
-          on_verification_url – callback to display the URL (otherwise
-              printed to stdout and logged as WARNING).
-          grant_input – function with no arguments that returns the grant as
-              string (useful for non-interactive/GUI integrations). If not
-              provided, asks for the grant via terminal input().
-          timeout – maximum seconds to wait for grant entry
-              (default 5 minutes). Raises RuntimeError if it expires before
-              you (or grant_input) provide a value. NOTE: if the wait is on
-              terminal input(), the thread blocked on that call
-              is not interrupted when the timeout expires (Python limitation:
-              you can't cancel a blocking input()) — it remains
-              waiting in background until you press Enter, but the
-              function still returns with the timeout error as soon as
-              it triggers, without waiting for it.
-
-        """
-        boot_result = await self.bootstrap()
-        if boot_result is True:
-            return  # session obtained directly, no verification needed
-
-        if not self.pending_challenge_id:
-            if boot_result:
-                self._emit_verification_url(boot_result, on_verification_url)
-            msg = (
-                "The server provided an auth_url without challenge_id: "
-                "unable to build the challenge URL."
-            )
-            raise RuntimeError(
-                msg,
-            )
-
-        dummy_callback = f"http://{_LOCAL_CALLBACK_HOST}:1{_LOCAL_CALLBACK_PATH}"
-        challenge_url = self._build_challenge_url_with_callback(
-            self.pending_challenge_id,
-            dummy_callback,
-        )
-        self._emit_verification_url(challenge_url, on_verification_url)
-
-        if grant_input is not None:
-            grant_awaitable = asyncio.to_thread(grant_input)
-        elif not sys.stdin.isatty():
-            grant_awaitable = _solver_grant_async(challenge_url)
-        else:
-            grant_awaitable = asyncio.to_thread(
-                input,
-                "\nIncolla qui il grant (da DevTools → Network → verify → "
-                "Preview → field 'grant'): ",
-            )
-
-        try:
-            grant = await asyncio.wait_for(grant_awaitable, timeout=timeout)
-        except asyncio.TimeoutError as exc:
-            msg = f"Timeout ({timeout}s) waiting for grant entry"
-            raise RuntimeError(msg) from exc
-
-        grant = grant.strip()
-        if not grant:
-            msg = "No grant provided."
-            raise RuntimeError(msg)
-
-        await self.exchange_grant(grant)
-
     async def authenticate_with_turnstile(
         self,
         timeout: float = 60,
         hold_open_seconds: float = 3.0,
     ) -> None:
-        """Autenticazione automatica tramite browser reale (core.turnstile),
-        alternativa non-interattiva a authenticate_with_manual_grant().
+        """Autenticazione automatica tramite browser reale (core.turnstile).
 
         AGGIORNAMENTO: turnstile.py ora cattura il grant direttamente dal
         traffico di rete via CDP (stessa tecnica di grant_token.py /
@@ -913,7 +822,7 @@ async def perform_signed_fetch(
     headers: dict | None,
     on_verification_url: Callable[[str], None] | None = None,
     grant_input: Callable[[], str] | None = None,
-    timeout: float = _MANUAL_GRANT_TIMEOUT_S,
+    timeout: float = 300,
     use_turnstile_browser: bool = True,
 ) -> dict:
     """Perform an authenticated signed request with automatic session recovery.
@@ -956,24 +865,11 @@ async def perform_signed_fetch(
                             raise RuntimeError(msg)
                     except Exception as exc:
                         logger.info(
-                            "[signed_session:%s] Turnstile automatico fallito (%s), "
-                            "fallback al flusso manuale.",
+                            "[signed_session:%s] Turnstile automatico fallito (%s)",
                             client.namespace,
                             exc,
                         )
-                        try:
-                            await client.authenticate_with_manual_grant(
-                                on_verification_url=on_verification_url,
-                                grant_input=grant_input,
-                                timeout=timeout,
-                            )
-                        except Exception as exc2:
-                            logger.warning(
-                                "[signed_session:%s] Autenticazione manuale fallita: %s",
-                                client.namespace,
-                                exc2,
-                            )
-                            return {"error": str(exc2)}
+                        return {"error": str(exc)}
 
         # A questo punto la sessione è garantita per tutte le tracce parallele
         resp = await client.request(method, path, json_body=body, extra_headers=headers)

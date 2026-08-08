@@ -133,7 +133,11 @@ def community_session_valid(record: CommunitySessionRecord) -> bool:
 
 
 def ensure_community_session() -> CommunitySessionRecord:
-    with community_session_mu:
+    # Usiamo acquire con timeout al posto di "with community_session_mu:"
+    if not community_session_mu.acquire(timeout=30):
+        raise RuntimeError("Lock community_session_mu occupato da troppo tempo, salto.")
+    
+    try:
         record = load_community_session()
 
         if community_session_valid(record):
@@ -148,6 +152,9 @@ def ensure_community_session() -> CommunitySessionRecord:
 
         save_community_session(record)
         return record
+    finally:
+        # Importante: rilasciare sempre il lucchetto alla fine
+        community_session_mu.release()
 
 
 def clear_community_session_credentials() -> None:
@@ -160,24 +167,6 @@ def clear_community_session_credentials() -> None:
             save_community_session(record)
         except Exception:
             pass
-
-
-def _run_manual_terminal_verification(challenge_url: str) -> str:
-    """Fallback da terminale (o Docker/Telegram).
-    Mostra l'URL e attende l'input dell'utente su sys.stdin.
-    """
-    try:
-        grant = input(
-            "Incolla qui il grant (da DevTools → Network → verify → Preview → field 'grant'): ",
-        )
-        grant = grant.strip()
-        if not grant:
-            msg = "No grant provided."
-            raise RuntimeError(msg)
-        return grant
-    except EOFError:
-        msg = "verification cancelled (EOF)"
-        raise Exception(msg)
 
 
 def run_community_verification(record: CommunitySessionRecord) -> str:
@@ -344,11 +333,8 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             logger.info("solver.py not found or Playwright dependencies missing.")
         except Exception as e:
             logger.warning(f"Automated verification failed: {e}")
-
-        # === MODO 3: Fallback Manuale via Terminale (Es. Bot Telegram / Docker) ===
-        logger.info("Falling back to manual terminal input.")
-        return _run_manual_terminal_verification(final_challenge_url)
-
+        raise RuntimeError(f"Verifica manuale disabilitata per evitare blocchi del server (challenge: {final_challenge_url})")
+    
     finally:
         server.shutdown()
         server.server_close()
