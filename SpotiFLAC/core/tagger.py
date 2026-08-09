@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SOURCE_TAG = "https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version"
+SOURCE_TAG = "https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version"
 
 # ---------------------------------------------------------------------------
 # FLAC tag → ID3 frame mapping

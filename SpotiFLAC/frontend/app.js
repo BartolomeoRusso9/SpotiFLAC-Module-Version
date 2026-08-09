@@ -462,7 +462,7 @@ async function fetchVersionWithRetry(retries = 10, delayMs = 200) {
 
 document.addEventListener('DOMContentLoaded', () => fetchVersionWithRetry(20, 200));
 
-const UPDATE_RELEASE_URL = 'https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version/releases';
+const UPDATE_RELEASE_URL = 'https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases';
 
 function normalizeVersionString(version) {
   return String(version || '').trim().replace(/^v/i, '');
