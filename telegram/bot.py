@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import shlex
@@ -48,11 +49,33 @@ from SpotiFLAC import AsyncSpotiFLAC
 # ─── CONFIGURATION ───────────────────────────────────────────────────
 
 
+# Timestamped lines, because the bot's log is read long after the fact —
+# usually to find out when a download started and how long it took.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+# One line per polled update, per HTTP request, per browser command: true, and
+# useless. Everything these emit that matters is a warning or worse.
+for _noisy in ("aiogram.event", "aiogram.dispatcher", "httpx", "httpcore", "pydoll"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+log = logging.getLogger("spotiflac.bot")
+
+
 def _require_env(key: str) -> str:
     val = os.getenv(key)
     if not val:
         raise OSError(f"Missing required environment variable: {key}")
     return val
+
+
+def _env_bool(key: str, default: bool = False) -> bool:
+    val = os.getenv(key)
+    if val is None:
+        return default
+    return val.strip().lower() in {"1", "true", "yes", "on"}
 
 
 BOT_TOKEN = _require_env("TELEGRAM_BOT_TOKEN")
@@ -198,7 +221,7 @@ def save_chat_id(chat_id: int) -> None:
         with open(CHATIDS_PATH, "w") as f:
             json.dump(list(ids), f)
     except Exception as e:
-        print(f"[!] Error saving chat_id: {e}")
+        log.warning("Could not persist chat id %s: %s", chat_id, e)
 
 
 def snapshot_audio_files() -> set[str]:
@@ -212,7 +235,7 @@ def snapshot_audio_files() -> set[str]:
                 if f.lower().endswith(extensions):
                     files.add(os.path.join(root, f))
     except Exception as e:
-        print(f"[!] Snapshot error: {e}")
+        log.warning("Could not scan %s for audio files: %s", DOWNLOAD_DIR, e)
     return files
 
 
@@ -278,7 +301,7 @@ def db_upsert_track(tags, fmt, bitrate, filepath):
             )
             conn.commit()
     except Exception as e:
-        print(f"[!] DB upsert error ({filepath}): {e}")
+        log.warning("Library insert failed for %s: %s", filepath, e)
 
 
 def db_search(query: str, limit: int = 15):
@@ -294,7 +317,7 @@ def db_search(query: str, limit: int = 15):
                 (q, q, q, limit),
             ).fetchall()
     except Exception as e:
-        print(f"[!] DB search error: {e}")
+        log.warning("Library search failed for %r: %s", query, e)
         return []
 
 
@@ -325,7 +348,7 @@ def get_file_info(filepath):
             if a.info.bitrate:
                 bitrate = f"{a.info.bitrate // 1000}kbps"
     except Exception as e:
-        print(f"[!] get_file_info error ({filepath}): {e}")
+        log.warning("Could not read audio properties of %s: %s", filepath, e)
     return fmt, bitrate
 
 
@@ -387,7 +410,7 @@ def read_tags(filepath):
             t["date"] = g(a.get("TDRC"))
             t["track"] = g(a.get("TRCK")).split("/")[0]
     except Exception as e:
-        print(f"[!] read_tags error ({filepath}): {e}")
+        log.warning("Could not read tags of %s: %s", filepath, e)
     return t
 
 
@@ -402,7 +425,7 @@ def find_existing_folder(base_dir, folder_name):
             if entry.is_dir() and normalize(entry.name) == target:
                 return entry.path
     except Exception as e:
-        print(f"[!] find_existing_folder error: {e}")
+        log.warning("Could not list %s: %s", base_dir, e)
     return None
 
 
@@ -564,6 +587,12 @@ async def run_spotiflac_once(url: str, job_cfg: dict) -> None:
         kwargs["enrich_providers"] = job_cfg["enrich_providers"]
     if "use_extensions_fallback" in job_cfg:
         kwargs["use_extensions_fallback"] = job_cfg["use_extensions_fallback"]
+    if job_cfg.get("transcode_to"):
+        kwargs["transcode_to"] = job_cfg["transcode_to"]
+        kwargs["transcode_bitrate"] = job_cfg.get("transcode_bitrate", "320k")
+        kwargs["transcode_keep_original"] = job_cfg.get(
+            "transcode_keep_original", False
+        )
     if qobuz_local_api:
         kwargs["qobuz_local_api_url"] = qobuz_local_api
     if tidal_custom_api:
@@ -631,7 +660,9 @@ async def safe_edit(chat_id: int, message_id: int, text: str):
         await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
     except Exception as e:
         if "message is not modified" not in str(e).lower():
-            print(f"[!] edit_message error: {e}")
+            log.warning(
+                "Could not edit message %s in chat %s: %s", message_id, chat_id, e
+            )
 
 
 async def send_result(chat_id: int, message_id: int, organized, duplicates, errors):
@@ -678,6 +709,16 @@ async def download_worker():
         _queue_list[:] = [x for x in _queue_list if x["id"] != job["id"]]
         current_task = job
 
+        started = time.monotonic()
+        log.info(
+            "Job %s started: %s (%s, %s, %s left in queue)",
+            job["id"],
+            job["url"],
+            "/".join(job.get("services") or ["?"]),
+            job.get("quality", "?"),
+            download_queue.qsize(),
+        )
+
         try:
             await safe_edit(
                 job["chat_id"], job["message_id"], "⏳ <b>Starting download...</b>"
@@ -692,7 +733,25 @@ async def download_worker():
                 job,
             )
 
+            log.info(
+                "Job %s finished in %.1fs: %s new, %s already in library, %s error(s)",
+                job["id"],
+                time.monotonic() - started,
+                len(organized),
+                len(duplicates),
+                len(errors),
+            )
+            for _name, dest in organized:
+                log.info("Job %s stored %s", job["id"], dest)
+            for name in errors:
+                log.warning("Job %s could not organize %s", job["id"], name)
+
             if not organized and not duplicates:
+                log.warning(
+                    "Job %s produced no file — check the provider logs above for %s",
+                    job["id"],
+                    job["url"],
+                )
                 await safe_edit(
                     job["chat_id"],
                     job["message_id"],
@@ -704,13 +763,17 @@ async def download_worker():
                 )
 
         except Exception as e:
-            print(f"[!] Download error: {e}")
+            log.exception(
+                "Job %s failed after %.1fs", job["id"], time.monotonic() - started
+            )
             await safe_edit(
                 job["chat_id"], job["message_id"], f"❌ Error: {he(str(e))}"
             )
         finally:
             current_task = None
             download_queue.task_done()
+            if download_queue.empty():
+                log.info("Queue empty, waiting for new jobs")
 
 
 async def enqueue_job(chat_id: int, message_id: int, job_cfg: dict) -> int:
@@ -719,6 +782,13 @@ async def enqueue_job(chat_id: int, message_id: int, job_cfg: dict) -> int:
     _queue_list.append(job)
     await download_queue.put(job)
     position = download_queue.qsize()
+    log.info(
+        "Job %s queued at position %s by chat %s: %s",
+        qid,
+        position,
+        chat_id,
+        job_cfg.get("url", "?"),
+    )
     if current_task is not None or position > 1:
         await safe_edit(
             chat_id, message_id, f"⏳ Added to queue (position #{position}, ID {qid})."
@@ -748,6 +818,15 @@ def parse_quick_flags(args: list[str]) -> dict:
         elif a == "--no-lyrics":
             cfg["embed_lyrics"] = False
             i += 1
+        elif a == "--mp3":
+            cfg["transcode_to"] = "mp3"
+            i += 1
+        elif a == "--transcode-bitrate" and i + 1 < len(args):
+            cfg["transcode_bitrate"] = args[i + 1].lower()
+            i += 2
+        elif a == "--keep-original":
+            cfg["transcode_keep_original"] = True
+            i += 1
         else:
             i += 1
     return cfg
@@ -773,6 +852,9 @@ def default_job_cfg(url: str) -> dict:
         "enrich_providers": ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         "track_max_retries": 0,
         "timeout_s": 0,
+        "transcode_to": os.getenv("TRANSCODE_TO") or None,
+        "transcode_bitrate": os.getenv("TRANSCODE_BITRATE") or "320k",
+        "transcode_keep_original": _env_bool("TRANSCODE_KEEP_ORIGINAL"),
         "filename_format": FILENAME_FORMAT_PRESETS["default"],
     }
 
@@ -1594,7 +1676,16 @@ async def cb_confirm(call: types.CallbackQuery):
 async def main():
     db_init()
     asyncio.create_task(download_worker())
-    print("🤖 SpotiFLAC Bot started and listening...")
+    me = await bot.get_me()
+    log.info("SpotiFLAC bot started as @%s", me.username)
+    log.info(
+        "Downloads → %s · library → %s · access: %s",
+        DOWNLOAD_DIR,
+        DB_PATH,
+        f"{len(ALLOWED_USER_IDS)} allowed user(s)"
+        if ALLOWED_USER_IDS
+        else "open to anyone (ALLOWED_USER_IDS unset)",
+    )
     await dp.start_polling(bot)
 
 

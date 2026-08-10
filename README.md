@@ -33,6 +33,7 @@
 - Configuration Profiles
 - MusicBrainz metadata enrichment
 - Embedded synchronized lyrics
+- Optional MP3 320 kbps transcoding
 
 ---
 
@@ -226,6 +227,28 @@ Official Docker images are published on GitHub Container Registry (GHCR), allowi
 docker pull ghcr.io/bartolomeorusso9/spotiflac-module-version:latest
 ```
 
+### Logs in Headless Environments
+
+A progress bar is a stream of carriage returns: readable on a terminal, unreadable in a log file. `docker logs` collapses each refresh into a `[285B blob data]` line, which buries everything worth reading.
+
+SpotiFLAC therefore draws animated bars only when stderr is an interactive terminal. Everywhere else — Docker, cron, a redirected file — it prints the same information as plain lines instead:
+
+```
+[RUN] 24 track(s) · tidal, qobuz · LOSSLESS · 2 in parallel → /app/downloads
+Track [3/24] Nightcall — Kavinsky (OutRun)
+  ⬇  Nightcall  ·  47%  ·  13.4 MB / 28.4 MB
+  ✓  Nightcall  ·  TIDAL  ·  FLAC  ·  28.4 MB  ·  12s
+```
+
+Progress lines are throttled to at most one per 25% and per 10 seconds, so a track costs a handful of lines rather than one per received chunk.
+
+Set `SPOTIFLAC_PROGRESS_BARS` to override the detection in either direction:
+
+```bash
+export SPOTIFLAC_PROGRESS_BARS=0   # never draw bars, even on a terminal
+export SPOTIFLAC_PROGRESS_BARS=1   # always draw bars
+```
+
 ---
 
 ## Supported URL Types
@@ -410,6 +433,65 @@ SpotiFLAC(
 ```
 
 > **Tip:** Pair `--timeout` with `--retries` so that a stalled track is automatically re-attempted against the next provider instead of blocking the entire queue indefinitely.
+
+### MP3 Transcoding
+
+Downloads always fetch the best source a provider offers (FLAC, ALAC/M4A, …). Set `transcode_to="mp3"` (Python) or `--mp3` / `--transcode mp3` (CLI) to convert every finished track to MP3 — 320 kbps by default — for players or car stereos that cannot handle lossless files. Tags, cover art and lyrics are carried over to the MP3, and the original file is deleted once the conversion succeeds unless `transcode_keep_original` / `--keep-original` is set.
+
+Requires `ffmpeg` on your `PATH`: the run stops immediately with a clear error if it is missing, so you never download a whole album only to fail at the conversion step.
+
+```bash
+# CLI — every track ends up as a 320 kbps MP3
+spotiflac https://open.spotify.com/album/... ./out --service tidal --mp3
+
+# Keep the FLAC too, and use 192 kbps instead
+spotiflac https://open.spotify.com/album/... ./out --mp3 --transcode-bitrate 192k --keep-original
+```
+
+```python
+# Python API
+from SpotiFLAC import SpotiFLAC
+SpotiFLAC(
+    url="https://open.spotify.com/album/...",
+    output_dir="./downloads",
+    services=["tidal", "qobuz"],
+    transcode_to="mp3",
+    transcode_bitrate="320k",
+)
+```
+
+**Skipping already-downloaded tracks still works.** The converted file keeps the exact name the provider would have used, only with an `.mp3` extension, so SpotiFLAC looks for that file *before* contacting any provider and skips the track when it is already there — no network request, no re-encode. Running the same album twice therefore costs nothing the second time. A leftover file from an earlier lossless run is converted in place instead of being re-downloaded, so an existing library converges to MP3 in a single pass.
+
+The conversion is a no-op for providers that already deliver MP3 (e.g. SoundCloud), which are passed through untouched.
+
+### Multiple Playlists in One Folder
+
+Pass `--playlist` (`-p`) once per playlist to sync several of them into a **single destination folder**. Repeat the flag as many times as you need — the last positional argument is the destination:
+
+```bash
+spotiflac -p https://open.spotify.com/playlist/AAA \
+          -p https://open.spotify.com/playlist/BBB \
+          -p https://open.spotify.com/playlist/CCC \
+          ./Music --service tidal
+```
+
+- **One copy per track.** A song that appears in three of those playlists is downloaded once. Tracks are matched by ISRC (resolved automatically when the metadata lacks it), falling back to artist + title, so the same recording pulled from different playlists is recognised even when the catalogue ids differ.
+- **Nothing already on disk is downloaded again.** The destination folder is indexed before any provider is contacted, in *any* audio format — a track already there as `.m4a` is not re-fetched just because this run would produce a `.flac`.
+- **One M3U per playlist.** Each playlist gets a `<Playlist Name>.m3u8` file in the destination folder listing its own tracks, in playlist order, with paths relative to the folder — so the whole directory stays portable and can be copied to a phone or a USB stick as is. Two playlists sharing a name get `Name.m3u8` and `Name (2).m3u8`.
+- **Cheap to re-run.** Playlist files are rewritten only when their content actually changed. Running the same command again after a playlist gained a track downloads that one track and touches that one M3U file.
+
+Tracks that failed to download are left out of the playlist file, so it always lists files that really exist; they are picked up on the next run.
+
+Everything else keeps working as usual — `--mp3`, `--filename-format`, `--service`, `--retries` and friends all apply:
+
+```bash
+# Sync three playlists as 320 kbps MP3, writing classic .m3u files
+spotiflac -p URL1 -p URL2 -p URL3 ./Music --mp3 --m3u m3u
+```
+
+With `--mp3` a playlist entry points at the converted file, and a track already present as MP3 is skipped without any network request. Use `--m3u none` to merge the playlists into one folder without writing playlist files at all.
+
+> **Note:** avoid `--use-track-numbers` (and `{position}` in `--filename-format`) here: the number depends on the merged playlist order, so filenames would change whenever any playlist does — and previously downloaded tracks would be fetched again under the new name. SpotiFLAC warns when you do.
 
 ### Post-Download Actions
 
@@ -648,6 +730,9 @@ chmod +x SpotiFLAC-Linux-arm64
 | `enrich_providers` | `list` | `["deezer", "apple", "qobuz", "tidal", "soundcloud"]` | Priority order of metadata providers to attempt. |
 | `qobuz_local_api_url` | `str` | `None` | Optional local Qobuz stream API URL. When set, the provider uses this endpoint for Qobuz stream requests. |
 | `use_extensions_fallback` | `bool` | `True` | Whether to automatically pair a matching installed [JavaScript extension](#-javascript-extensions) as a fallback provider when a native provider fails. Set to `False` to use only the providers explicitly listed in `services`. |
+| `transcode_to` | `str` | `None` | Converts every finished track to this format. Currently only `"mp3"` (see [MP3 Transcoding](#mp3-transcoding)). `None` keeps the provider's original format. Requires `ffmpeg`. |
+| `transcode_bitrate` | `str` | `"320k"` | Bitrate used by `transcode_to`, e.g. `"320k"`, `"256k"`, `"192k"`. |
+| `transcode_keep_original` | `bool` | `False` | Keeps the original lossless file next to the converted one. By default the source is deleted once the conversion succeeds. |
 | `post_download_action` | `str` | `"none"` | Action after all downloads finish: `"none"`, `"open_folder"`, `"notify"`, `"command"`. |
 | `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 
@@ -687,6 +772,12 @@ When customizing the `filename_format` string, you can use the following dynamic
  `--no-extensions-fallback` | | `False` | Disable automatic fallback to installed JS extensions when a native provider fails (fallback is enabled by default). |
 | `--loop` | `-l` | `None` | Keep retrying permanently failed tracks every N minutes. |
 | `--retries` | | `0` | Extra per-track download attempts on failure. Cycles through all providers with exponential backoff. |
+| `--playlist` | `-p` | `None` | Playlist URL to sync; repeat once per playlist. All tracks go to a single destination folder, shared tracks are downloaded once, and each playlist gets its own M3U file (see [Multiple Playlists in One Folder](#multiple-playlists-in-one-folder)). |
+| `--m3u` | | `m3u8` | Playlist file written for each `--playlist`: `m3u8`, `m3u` or `none`. Rewritten only when its content changed. |
+| `--transcode` | | `none` | Convert every downloaded track to this format: `none` or `mp3`. Requires `ffmpeg`. |
+| `--mp3` | | | Shorthand for `--transcode mp3`. |
+| `--transcode-bitrate` | | `320k` | Bitrate used by `--transcode`, e.g. `320k`, `256k`, `192k`. |
+| `--keep-original` | | `False` | Keep the original lossless file alongside the transcoded one. |
 | `--verbose` | `-v` | `False` | Enable debug logging. |
 | `--no-lyrics` | | `False` | Disable lyrics embedding (lyrics are embedded by default). |
 | `--lyrics-providers` | | `spotify apple musixmatch lrclib amazon` | Lyrics provider priority order. |

@@ -385,6 +385,12 @@ def _summary(cfg: dict) -> None:
         row("Exact File Path", cfg["output_path"])
     row("Services", " → ".join(cfg["services"]))
     row("Quality", cfg["quality"])
+    if cfg.get("transcode_to"):
+        kept = " (original kept)" if cfg.get("transcode_keep_original") else ""
+        row(
+            "Transcode",
+            f"{cfg['transcode_to'].upper()} {cfg.get('transcode_bitrate', '320k')}{kept}",
+        )
     row("Filename format", cfg["filename_format"])
 
     if not cfg.get("use_extensions_fallback", True):
@@ -794,6 +800,27 @@ async def run_interactive() -> dict:
             "Allow automatic quality fallback?",
             cfg.get("allow_fallback", True),
         )
+
+    # ── 4.5. Transcoding ───────────────────────────────────────────────────
+    _section("4.5 · Transcoding")
+    if _ask_bool(
+        "Convert every track to MP3 after download? (requires ffmpeg)",
+        bool(cfg.get("transcode_to")),
+    ):
+        cfg["transcode_to"] = "mp3"
+        cfg["transcode_bitrate"] = _ask_choice(
+            "MP3 bitrate:",
+            options=["320k", "256k", "192k", "128k"],
+            default=cfg.get("transcode_bitrate", "320k"),
+        )
+        cfg["transcode_keep_original"] = _ask_bool(
+            "Keep the original lossless file as well?",
+            cfg.get("transcode_keep_original", False),
+        )
+    else:
+        cfg["transcode_to"] = None
+        cfg["transcode_bitrate"] = cfg.get("transcode_bitrate", "320k")
+        cfg["transcode_keep_original"] = cfg.get("transcode_keep_original", False)
 
     # ── 5. Filename format ─────────────────────────────────────────────────
     _section("5 · Filename Format")

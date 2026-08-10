@@ -18,3 +18,4 @@ SpotiFLAC/provider_test_report.txt
 .env
 test_mono_download.py
 *.flac
+CLAUDE.local.md

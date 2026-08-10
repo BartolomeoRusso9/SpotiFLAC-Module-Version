@@ -370,6 +370,32 @@
             <div id="services-list" class="sort-list"></div>
           </div>
           <div class="s-section">
+            <div class="s-title">Transcoding</div>
+            <div class="s-row">
+              <span class="s-label">Output format<small>Converted after download — requires ffmpeg</small></span>
+              <select id="config-transcode" onchange="onTranscodeChange()">
+                <option value="none">Original (FLAC/M4A)</option>
+                <option value="mp3">MP3</option>
+              </select>
+            </div>
+            <div class="s-row transcode-opt" style="display:none;padding-left:16px;border-left:2px solid var(--border2);margin-left:4px;">
+              <span class="s-label">Bitrate</span>
+              <select id="config-transcode-bitrate">
+                <option value="320k">320 kbps</option>
+                <option value="256k">256 kbps</option>
+                <option value="192k">192 kbps</option>
+                <option value="128k">128 kbps</option>
+              </select>
+            </div>
+            <div class="s-row transcode-opt" style="display:none;padding-left:16px;border-left:2px solid var(--border2);margin-left:4px;">
+              <span class="s-label">Keep original file<small>Off = the lossless source is deleted after conversion</small></span>
+              <label class="toggle">
+                <input type="checkbox" id="config-transcode-keep">
+                <span class="toggle-sl"></span>
+              </label>
+            </div>
+          </div>
+          <div class="s-section">
             <div class="s-title">Retry & Loop</div>
             <div class="s-row">
               <span class="s-label">Extra retries per track<small>Cycles through all providers</small></span>
