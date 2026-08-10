@@ -128,7 +128,7 @@ def _default_browser_path_macos() -> str | None:
                 ["mdfind", f"kMDItemCFBundleIdentifier == '{bundle_id}'"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=30,
             )
             .stdout.strip()
             .splitlines()
@@ -155,7 +155,7 @@ def _default_browser_path_linux() -> str | None:
             ["xdg-settings", "get", "default-web-browser"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=30,
         ).stdout.strip()
         if not desktop_name:
             return None
