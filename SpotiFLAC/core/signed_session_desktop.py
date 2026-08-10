@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Costanti
 COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
-COMMUNITY_VERIFY_TIMEOUT = 45  # secondi (5 minuti)
+COMMUNITY_VERIFY_TIMEOUT = 45  # seconds
 
 
 def fetch_latest_version() -> str:
