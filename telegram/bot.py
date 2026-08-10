@@ -1682,9 +1682,11 @@ async def main():
         "Downloads → %s · library → %s · access: %s",
         DOWNLOAD_DIR,
         DB_PATH,
-        f"{len(ALLOWED_USER_IDS)} allowed user(s)"
-        if ALLOWED_USER_IDS
-        else "open to anyone (ALLOWED_USER_IDS unset)",
+        (
+            f"{len(ALLOWED_USER_IDS)} allowed user(s)"
+            if ALLOWED_USER_IDS
+            else "open to anyone (ALLOWED_USER_IDS unset)"
+        ),
     )
     await dp.start_polling(bot)
 
