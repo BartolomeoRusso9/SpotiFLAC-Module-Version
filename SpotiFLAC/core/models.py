@@ -84,7 +84,6 @@ class TrackMetadata(BaseModel):
         return self.artists.split(",")[0].strip()
 
     def as_flac_tags(self, *, first_artist_only: bool = False) -> dict[str, str]:
-        """Formatta i metadati come tag standard per file FLAC/Vorbis."""
         artist = self.first_artist if first_artist_only else self.artists
         album_artist = self.first_artist if first_artist_only else self.album_artist
 
@@ -109,8 +108,12 @@ class TrackMetadata(BaseModel):
         ]:
             if val:
                 tags[key] = val
-        return tags
 
+        if self.is_explicit:
+            tags["ITUNESADVISORY"] = "1"
+
+        return tags
+    
     def with_enrichment(self, extra: Any) -> TrackMetadata:
         """Returns una nuova istanza aggiornata con i dati dell'enrichment.
 
