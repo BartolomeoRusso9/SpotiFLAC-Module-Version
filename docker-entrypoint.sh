@@ -25,13 +25,13 @@ sleep 1
 # ==============================================================================
 
 # 2. Start Fluxbox window manager to keep Chromium windows organized
-# fluxbox -display :99 >/dev/null 2>&1 &
+fluxbox -display :99 >/dev/null 2>&1 &
 
 # 3. Start VNC server on port 5900 (no password, for local access)
-# x11vnc -display :99 -forever -nopw -shared -bg -quiet
+x11vnc -display :99 -forever -nopw -shared -bg -quiet
 
 # 4. Start noVNC bridge to view the screen from a web browser on port 6080
-# websockify --web=/usr/share/novnc --daemon 6080 localhost:5900 >/dev/null 2>&1
+websockify --web=/usr/share/novnc --daemon 6080 localhost:5900 >/dev/null 2>&1
 
 export TS_DEBUG_VISIBLE=1
 
