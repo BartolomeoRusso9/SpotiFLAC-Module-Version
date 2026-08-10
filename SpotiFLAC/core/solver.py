@@ -480,7 +480,9 @@ def _describe_browser_start_error(exc: Exception, options: ChromiumOptions) -> s
         binary_exists = os.path.exists(binary)
     except Exception:
         binary_exists = False
-    env_binary = os.environ.get("CHROME_PATH") or os.environ.get("BRAVE_PATH") or "<unset>"
+    env_binary = (
+        os.environ.get("CHROME_PATH") or os.environ.get("BRAVE_PATH") or "<unset>"
+    )
     display = os.environ.get("DISPLAY") or "<unset>"
     profile_dir = _get_profile_dir()
     return (

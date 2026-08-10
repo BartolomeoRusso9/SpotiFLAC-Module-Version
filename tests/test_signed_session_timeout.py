@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from pydoll.exceptions import FailedToStartBrowser
 
-import SpotiFLAC.core.solver as solver
+from SpotiFLAC.core import solver
 from SpotiFLAC.core.signed_session_mobile import perform_signed_fetch
 
 
@@ -44,7 +44,9 @@ def test_perform_signed_fetch_forwards_timeout_to_manual_grant() -> None:
     asyncio.run(run_test())
 
 
-def test_solver_wraps_browser_start_failure_with_clear_runtime_error(monkeypatch) -> None:
+def test_solver_wraps_browser_start_failure_with_clear_runtime_error(
+    monkeypatch,
+) -> None:
     class FakeBrowser:
         def __init__(self, options) -> None:
             self.options = options

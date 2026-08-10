@@ -113,7 +113,7 @@ class TrackMetadata(BaseModel):
             tags["ITUNESADVISORY"] = "1"
 
         return tags
-    
+
     def with_enrichment(self, extra: Any) -> TrackMetadata:
         """Returns una nuova istanza aggiornata con i dati dell'enrichment.
 
