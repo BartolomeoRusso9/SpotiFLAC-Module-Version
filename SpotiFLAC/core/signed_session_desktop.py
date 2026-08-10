@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Costanti
 COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
-COMMUNITY_VERIFY_TIMEOUT = 300  # secondi (5 minuti)
+COMMUNITY_VERIFY_TIMEOUT = 45  # secondi (5 minuti)
 
 
 def fetch_latest_version() -> str:
@@ -314,16 +314,19 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 grant = grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
                 if grant:
                     logger.info("Automated verification successful! Grant ricevuto.")
-                    # Chiudiamo Chromium per liberare le risorse e fermare il loop di pydoll
                     with contextlib.suppress(Exception):
                         import subprocess
-
-                        subprocess.run(
-                            ["pkill", "-f", "chromium"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
+                        import platform
+                        
+                        if platform.system() != "Windows":
+                            subprocess.run(
+                                ["pkill", "-f", "remote-debugging-port"],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
+                    
                     return grant
+                    
             except queue.Empty:
                 logger.warning(
                     "Automated verification timed out (nessun grant ricevuto in tempo)."
