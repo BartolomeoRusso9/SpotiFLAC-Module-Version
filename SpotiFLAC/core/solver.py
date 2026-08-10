@@ -501,15 +501,31 @@ async def _solve_impl(
             pass
 
     async def _navigate_with_turnstile_bypass() -> None:
-        """Navigate to siteurl and let our own get_token()/network-grant
-        polling handle verification. pydoll's native
-        expect_and_bypass_cloudflare_captcha() is skipped: it loops forever
-        looking for a checkbox to click, but when Cloudflare auto-solves
-        (no click needed — common on residential/trusted IPs) that checkbox
-        never appears in the form it expects, so its retry loop never exits
-        even though the token/grant already succeeded server-side.
+        """Navigate to ``siteurl`` letting pydoll's native Turnstile helper
+        handle the click for us (shadow-DOM traversal + realistic click),
+        instead of our old manual click loop. Falls back silently if the
+        helper isn't available or raises (e.g. captcha never appeared) --
+        the rest of the flow (get_token/capture_callback_grant polling)
+        still runs afterwards regardless.
         """
-        await tab.go_to(siteurl)
+        # A short "read the page" pause before interacting mirrors real
+        # user behavior and is recommended by pydoll's own docs.
+        try:
+            async with tab.expect_and_bypass_cloudflare_captcha(
+                time_before_click=random.uniform(1.5, 3.0),
+                time_to_wait_captcha=10,
+            ):
+                await tab.go_to(siteurl)
+        except AttributeError:
+            # Older pydoll version without this helper: plain navigation,
+            # the manual click fallback below will handle the rest.
+            await tab.go_to(siteurl)
+        except Exception as exc:
+            logger.debug(
+                "[solver] expect_and_bypass_cloudflare_captcha failed/skipped: %s",
+                exc,
+            )
+
         await _enable_network_capture()
         await _try_minimize_window(browser)
 
@@ -768,3 +784,4 @@ if __name__ == "__main__":
         sys.exit(1)
 
     token = solve(sys.argv[1], sys.argv[2])
+
