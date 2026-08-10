@@ -315,18 +315,18 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 if grant:
                     logger.info("Automated verification successful! Grant ricevuto.")
                     with contextlib.suppress(Exception):
-                        import subprocess
                         import platform
-                        
+                        import subprocess
+
                         if platform.system() != "Windows":
                             subprocess.run(
                                 ["pkill", "-f", "remote-debugging-port"],
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
                             )
-                    
+
                     return grant
-                    
+
             except queue.Empty:
                 logger.warning(
                     "Automated verification timed out (nessun grant ricevuto in tempo)."
