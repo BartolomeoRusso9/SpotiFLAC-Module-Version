@@ -25,10 +25,10 @@ RUN apt-get update \
         flac \
         nodejs \
         xvfb \
-        # fluxbox \
-        # x11vnc \
-        # novnc \
-        # websockify \
+        fluxbox \
+        x11vnc \
+        novnc \
+        websockify \
         chromium \
         fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
@@ -54,7 +54,7 @@ VOLUME ["/app/downloads", "/root/.spotiflac", "/root/.cache/spotiflac"]
 # - 6080: Web Browser access (noVNC) -> http://localhost:6080/vnc.html
 # - 5900: Classic VNC client access (e.g., RealVNC, TigerVNC)
 # ==============================================================================
-# EXPOSE 6080 5900
+EXPOSE 6080 5900
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
