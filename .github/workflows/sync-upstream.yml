@@ -2,8 +2,8 @@ name: Sync with upstream
 
 on:
   schedule:
-    # Daily at 04:17 UTC (off the hour to avoid GitHub's cron rush)
-    - cron: "17 4 * * *"
+    # Daily at 02:17 UTC (off the hour to avoid GitHub's cron rush)
+    - cron: "17 2 * * *"
   workflow_dispatch:
 
 permissions:
