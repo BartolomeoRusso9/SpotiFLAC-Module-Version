@@ -25,7 +25,7 @@ RUN apt-get update \
         flac \
         nodejs \
         xvfb \
-        luxbox \
+        fluxbox \
         x11vnc \
         novnc \
         websockify \
