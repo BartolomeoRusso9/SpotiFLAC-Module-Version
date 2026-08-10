@@ -42,6 +42,7 @@ This guide covers everything you need to **run** it with Docker.
 | `QOBUZ_AUTH_TOKEN` | No | — | Optional Qobuz account token, improves metadata reliability. |
 | `QOBUZ_LOCAL_API_URL` | No | — | Optional self-hosted Qobuz API URL, if you run one. |
 | `TIDAL_CUSTOM_API` | No | — | Optional self-hosted Tidal API URL for guaranteed availability. |
+| `LOG_LEVEL` | No | `INFO` | Verbosity of the container log: `DEBUG`, `INFO`, `WARNING`, `ERROR`. `DEBUG` also surfaces per-provider attempts. |
 
 > ⚠️ **Security note:** without `ALLOWED_USER_IDS`, anyone who finds your bot
 > on Telegram can use it — it will consume your server's bandwidth/disk and
@@ -174,3 +175,4 @@ volumes, not inside the container.
 | Downloaded files disappear after updating the image | `/app/downloads` wasn't mounted as a volume |
 | `PermissionError` when moving files | Host folder permissions don't allow the container's user to write — `chmod -R 775` the host folder or match the UID |
 | "Conflict: terminated by other getUpdates request" | The same bot token is running in polling mode somewhere else too (e.g. locally on your PC) — stop the other instance |
+| Log full of `[285B blob data]` lines | An old image: progress bars used to be drawn even without a terminal, and `docker logs` renders them as that. Pull the current image — progress is printed as plain lines there |

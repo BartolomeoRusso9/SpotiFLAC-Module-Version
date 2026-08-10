@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import io
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -15,8 +16,37 @@ from typing import Any
 from tqdm import tqdm
 from typing_extensions import Self
 
+from .console import print_track_progress
+
 # tqdm.get_lock() rimane come lock nativo di tqdm (non è un nostro accrocchio,
 # è la sincronizzazione interna della libreria per la scrittura su stderr).
+
+
+# A tqdm bar is a stream of carriage returns: on a terminal that draws a
+# moving bar, but in a log it is unreadable escape soup — `docker logs` and
+# most log viewers collapse each refresh into a "[285B blob data]" line, which
+# buries the messages that actually say what happened. Bars are therefore
+# drawn only on a real terminal; everywhere else they are replaced by the
+# throttled textual progress below.
+_PROGRESS_LOG_PERCENT_STEP = 25
+_PROGRESS_LOG_MIN_INTERVAL_S = 10.0
+
+
+def progress_bars_enabled() -> bool:
+    """Whether animated tqdm bars may be drawn.
+
+    ``SPOTIFLAC_PROGRESS_BARS`` forces the answer either way (useful to keep
+    the bars when piping to a terminal-aware pager, or to drop them while
+    debugging locally); otherwise bars are drawn only when stderr is an
+    interactive terminal.
+    """
+    forced = os.getenv("SPOTIFLAC_PROGRESS_BARS")
+    if forced is not None:
+        return forced.strip().lower() in {"1", "true", "yes", "on"}
+    try:
+        return bool(sys.__stderr__) and sys.__stderr__.isatty()
+    except Exception:
+        return False
 
 
 def safe_print(*args: object, **kwargs: Any) -> None:
@@ -90,37 +120,78 @@ class _TqdmTextIOProxy(io.TextIOBase):
         return getattr(self._original, "isatty", lambda: False)()
 
 
+# Handlers taken out by install_console_interception(), so uninstall can put
+# them back: a long-lived host (the Telegram bot, the GUI) runs a download per
+# job, and without this its own logging setup would be swallowed by the first
+# one and a fresh tqdm handler stacked on top by every one after it.
+_suspended_handlers: list[tuple[logging.Logger, logging.Handler, bool]] = []
+_tqdm_handler: TqdmLoggingHandler | None = None
+
+_DEFAULT_LOG_FORMAT = "[%(levelname)s] %(name)s: %(message)s"
+
+
 def install_console_interception() -> None:
+    """Routes every log record through tqdm.write so bars stay intact.
+
+    Idempotent: calling it while already installed does nothing, instead of
+    adding a second handler that would double every line.
+    """
+    global _tqdm_handler
+
     if not isinstance(sys.stdout, _TqdmTextIOProxy):
         sys.stdout = _TqdmTextIOProxy(sys.__stdout__)
     if not isinstance(sys.stderr, _TqdmTextIOProxy):
         sys.stderr = _TqdmTextIOProxy(sys.__stderr__)
 
-    root = logging.getLogger()
-    for handler in list(root.handlers):
-        if isinstance(handler, logging.StreamHandler):
-            root.removeHandler(handler)
+    if _tqdm_handler is not None:
+        return
 
-    for name, logger_obj in list(logging.Logger.manager.loggerDict.items()):
-        if isinstance(logger_obj, logging.Logger) and (
-            name == "SpotiFLAC" or name.startswith("SpotiFLAC.")
-        ):
-            for handler in list(logger_obj.handlers):
-                if isinstance(handler, logging.StreamHandler):
-                    logger_obj.removeHandler(handler)
+    root = logging.getLogger()
+    targets: list[logging.Logger] = [root]
+    targets.extend(
+        logger_obj
+        for name, logger_obj in list(logging.Logger.manager.loggerDict.items())
+        if isinstance(logger_obj, logging.Logger)
+        and (name == "SpotiFLAC" or name.startswith("SpotiFLAC."))
+    )
+
+    for logger_obj in targets:
+        propagate = logger_obj.propagate
+        for handler in list(logger_obj.handlers):
+            if isinstance(handler, logging.StreamHandler):
+                logger_obj.removeHandler(handler)
+                _suspended_handlers.append((logger_obj, handler, propagate))
+        if logger_obj is not root:
             logger_obj.propagate = True
 
-    new_handler = TqdmLoggingHandler()
-    new_handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
-    new_handler.setLevel(logging.getLogger().level or logging.WARNING)
-    logging.getLogger().addHandler(new_handler)
+    # Keep the host's own formatter — its timestamps are usually the only way
+    # to tell when something happened once the log is read back.
+    formatter = next(
+        (h.formatter for _, h, _ in _suspended_handlers if h.formatter is not None),
+        None,
+    )
+    _tqdm_handler = TqdmLoggingHandler()
+    _tqdm_handler.setFormatter(formatter or logging.Formatter(_DEFAULT_LOG_FORMAT))
+    _tqdm_handler.setLevel(root.level or logging.WARNING)
+    root.addHandler(_tqdm_handler)
 
 
 def uninstall_console_interception() -> None:
+    global _tqdm_handler
+
     if isinstance(sys.stdout, _TqdmTextIOProxy):
         sys.stdout = sys.__stdout__
     if isinstance(sys.stderr, _TqdmTextIOProxy):
         sys.stderr = sys.__stderr__
+
+    if _tqdm_handler is not None:
+        logging.getLogger().removeHandler(_tqdm_handler)
+        _tqdm_handler = None
+
+    for logger_obj, handler, propagate in _suspended_handlers:
+        logger_obj.addHandler(handler)
+        logger_obj.propagate = propagate
+    _suspended_handlers.clear()
 
 
 class DownloadStatus(Enum):
@@ -424,6 +495,10 @@ class ProgressManager:
     _event_queue: asyncio.Queue | None = None
     _worker_task: asyncio.Task | None = None
 
+    # item_id -> (last log time, last logged percentage), used only when the
+    # bars are off and progress is reported as text instead.
+    _progress_log_state: dict[str, tuple[float, int]] = {}
+
     # ------------------------------------------------------------------
     # Worker lifecycle
     # ------------------------------------------------------------------
@@ -463,6 +538,10 @@ class ProgressManager:
 
             item_id, track_name, current_bytes, total_bytes = event
 
+            if not progress_bars_enabled():
+                cls._log_progress(item_id, track_name, current_bytes, total_bytes)
+                continue
+
             try:
                 with tqdm.get_lock():
                     bar = cls._bars.get(item_id)
@@ -486,6 +565,39 @@ class ProgressManager:
                 logging.getLogger(__name__).exception(
                     "ProgressManager consumer crashed",
                 )
+
+    @classmethod
+    def _log_progress(
+        cls,
+        item_id: str,
+        track_name: str,
+        current_bytes: int,
+        total_bytes: int | None,
+    ) -> None:
+        """Textual stand-in for the bar, for logs that can't render one.
+
+        Throttled twice over — by percentage and by time — so a track costs a
+        handful of lines instead of one per received chunk. The 100% line is
+        left out on purpose: the result line printed once the download
+        finishes already reports it, with the provider and the final size.
+        """
+        if not total_bytes or current_bytes >= total_bytes:
+            cls._progress_log_state.pop(item_id, None)
+            return
+
+        percent = int(current_bytes * 100 / total_bytes)
+        now = time.time()
+        # Starting at 0% means the first line is only drawn one step in: that a
+        # track started is already on the track header line above it.
+        last_time, last_percent = cls._progress_log_state.get(item_id, (0.0, 0))
+        if (
+            percent - last_percent < _PROGRESS_LOG_PERCENT_STEP
+            or now - last_time < _PROGRESS_LOG_MIN_INTERVAL_S
+        ):
+            return
+
+        cls._progress_log_state[item_id] = (now, percent)
+        print_track_progress(track_name, percent, current_bytes, total_bytes)
 
     @classmethod
     def enqueue_progress(
@@ -547,6 +659,7 @@ class ProgressManager:
             miniters=1,
             smoothing=0.2,
             file=sys.__stderr__,
+            disable=not progress_bars_enabled(),
         )
 
         cls._bars[item_id] = bar
@@ -554,6 +667,7 @@ class ProgressManager:
 
     @classmethod
     def release_bar(cls, item_id: str) -> None:
+        cls._progress_log_state.pop(item_id, None)
         bar = cls._bars.pop(item_id, None)
         if bar is None:
             cls._slot_map.pop(item_id, None)
@@ -577,6 +691,7 @@ class ProgressManager:
             for item_id in list(cls._bars):
                 cls.release_bar(item_id)
             cls._slot_map.clear()
+            cls._progress_log_state.clear()
             cls.clear_master_bar()
 
     @classmethod
@@ -602,6 +717,7 @@ class ProgressManager:
                 dynamic_ncols=True,
                 miniters=1,
                 file=sys.__stderr__,
+                disable=not progress_bars_enabled(),
             )
 
     @classmethod

@@ -22,6 +22,7 @@ from .provider_stats import (
     record_success_async,
 )
 from .tagger import embed_metadata_async, max_resolution_spotify_cover
+from .transcode import transcode_file_async
 
 __all__ = [
     "AsyncHttpClient",
@@ -51,4 +52,5 @@ __all__ = [
     "record_success_async",
     "run_health_check",
     "sanitize",
+    "transcode_file_async",
 ]
