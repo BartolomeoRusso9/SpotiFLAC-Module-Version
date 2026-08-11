@@ -32,7 +32,6 @@ _DEBUG_VISIBLE = os.environ.get("TS_DEBUG_VISIBLE", "").strip() == "1"
 
 
 _docker_flags = ["--no-sandbox", "--disable-dev-shm-usage"]
-_LINUX_CONTAINER_FLAGS = ["--no-sandbox", "--disable-setuid-sandbox"]
 _BROWSER_START_TIMEOUT_ENV = "TS_BROWSER_START_TIMEOUT"
 _DEFAULT_BROWSER_START_TIMEOUT_SECONDS = 45
 
@@ -391,9 +390,6 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
         options.add_argument("--window-position=-32000,-32000")
     for flag in _docker_flags:
         options.add_argument(flag)
-    if platform.system() == "Linux":
-        for flag in _LINUX_CONTAINER_FLAGS:
-            options.add_argument(flag)
 
     # --- Stealth: remove the most obvious automation signals ---------
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -592,32 +588,54 @@ async def _solve_impl(
 
     async def _navigate_with_turnstile_bypass() -> None:
         """Navigate to ``siteurl`` letting pydoll's native Turnstile helper
-        handle the click for us (shadow-DOM traversal + realistic click),
-        instead of our old manual click loop. Falls back silently if the
-        helper isn't available or raises (e.g. captcha never appeared) --
-        the rest of the flow (get_token/capture_callback_grant polling)
-        still runs afterwards regardless.
+        handle the click for us (shadow-DOM traversal + realistic click).
         """
-        # A short "read the page" pause before interacting mirrors real
-        # user behavior and is recommended by pydoll's own docs.
-        try:
-            async with tab.expect_and_bypass_cloudflare_captcha(
-                time_before_click=random.uniform(1.5, 3.0),
-                time_to_wait_captcha=10,
-            ):
-                await tab.go_to(siteurl)
-        except AttributeError:
-            # Older pydoll version without this helper: plain navigation,
-            # the manual click fallback below will handle the rest.
-            await tab.go_to(siteurl)
-        except Exception as exc:
-            logger.debug(
-                "[solver] expect_and_bypass_cloudflare_captcha failed/skipped: %s",
-                exc,
-            )
-
+        # SPOSTATO IN CIMA: Abilita subito la cattura di rete per non perdersi l'auto-verifica!
         await _enable_network_capture()
         await _try_minimize_window(browser)
+
+        async def _do_navigate():
+            try:
+                async with tab.expect_and_bypass_cloudflare_captcha(
+                    time_before_click=random.uniform(1.0, 2.0),
+                    time_to_wait_captcha=6, # Abbassiamo il timeout a 6s per non bloccarci troppo
+                ):
+                    await tab.go_to(siteurl)
+            except AttributeError:
+                # Older pydoll version without this helper
+                await tab.go_to(siteurl)
+            except Exception as exc:
+                logger.debug(
+                    "[solver] expect_and_bypass_cloudflare_captcha failed/skipped: %s",
+                    exc,
+                )
+
+        # Eseguiamo la navigazione e la ricerca del captcha in un task separato (in background)
+        nav_task = asyncio.create_task(_do_navigate())
+
+        # Controlliamo costantemente se l'auto-verifica è andata a buon fine
+        for _ in range(100):  # max 10 secondi
+            if nav_task.done():
+                break
+            
+            # Se la rete ha già catturato il grant, possiamo smettere di aspettare il click di pydoll
+            if network_grant["value"]:
+                logger.info("[solver] Grant catturato dalla rete! Interrompo l'attesa del bypass di pydoll.")
+                break
+                
+            # Se la pagina mostra "Verified" (o lo status di successo), possiamo smettere di aspettare
+            try:
+                is_verified = await tab.execute_script(
+                    "return document.body.innerText.includes('Verified') || document.querySelector('.status.success') !== null;",
+                    return_by_value=True
+                )
+                if _js_value(is_verified):
+                    logger.info("[solver] 'Verified' trovato nella pagina! Interrompo l'attesa del bypass di pydoll.")
+                    break
+            except Exception:
+                pass
+
+            await asyncio.sleep(0.1)
 
     async def _open_fresh_page() -> None:
         """Ricarica siteurl da zero — usato per il retry con reload."""
