@@ -32,8 +32,9 @@ _DEBUG_VISIBLE = os.environ.get("TS_DEBUG_VISIBLE", "").strip() == "1"
 
 
 _docker_flags = ["--no-sandbox", "--disable-dev-shm-usage"]
+_LINUX_CONTAINER_FLAGS = ["--no-sandbox", "--disable-setuid-sandbox"]
 _BROWSER_START_TIMEOUT_ENV = "TS_BROWSER_START_TIMEOUT"
-_DEFAULT_BROWSER_START_TIMEOUT_SECONDS = 30
+_DEFAULT_BROWSER_START_TIMEOUT_SECONDS = 45
 
 
 def _patch_nodriver_unknown_cdp_events() -> None:
@@ -390,6 +391,9 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
         options.add_argument("--window-position=-32000,-32000")
     for flag in _docker_flags:
         options.add_argument(flag)
+    if platform.system() == "Linux":
+        for flag in _LINUX_CONTAINER_FLAGS:
+            options.add_argument(flag)
 
     # --- Stealth: remove the most obvious automation signals ---------
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -474,8 +478,16 @@ async def _try_minimize_window(browser: Chrome) -> None:
         logger.debug("[solver] could not minimize browser window: %s", exc)
 
 
-def _describe_browser_start_error(exc: Exception, options: ChromiumOptions) -> str:
-    binary = getattr(options, "binary_location", None) or "<unset>"
+def _describe_browser_start_error(
+    exc: Exception,
+    options: ChromiumOptions | None,
+) -> str:
+    binary = (
+        getattr(options, "binary_location", None)
+        or os.environ.get("CHROME_PATH")
+        or os.environ.get("BRAVE_PATH")
+        or "<unset>"
+    )
     try:
         binary_exists = os.path.exists(binary)
     except Exception:
@@ -485,11 +497,16 @@ def _describe_browser_start_error(exc: Exception, options: ChromiumOptions) -> s
     )
     display = os.environ.get("DISPLAY") or "<unset>"
     profile_dir = _get_profile_dir()
+    start_timeout = (
+        getattr(options, "start_timeout", "n/a")
+        if options is not None
+        else "n/a"
+    )
     return (
         "Browser failed to start inside pydoll/Chrome launch. "
         f"binary={binary!r} binary_exists={binary_exists} "
         f"configured_chrome_env={env_binary} display={display} "
-        f"profile_dir={profile_dir} start_timeout={getattr(options, 'start_timeout', 'n/a')}s "
+        f"profile_dir={profile_dir} start_timeout={start_timeout}s "
         f"OS={platform.system()} message={exc!r}"
     )
 
@@ -501,8 +518,18 @@ async def _solve_impl(
     capture_callback: bool = False,
     hold_open_seconds: float = 0.0,
 ) -> str | tuple[str, str | None]:
-    options = build_chromium_options(hidden=True)
+    options: ChromiumOptions | None = None
     browser = None
+    try:
+        options = build_chromium_options(hidden=True)
+    except Exception as exc:
+        message = _describe_browser_start_error(exc, options)
+        logger.error("[solver] %s", message)
+        raise RuntimeError(
+            "Browser failed to start. Verify the Chromium binary and Docker/host runtime; "
+            "the pydoll startup watchdog timed out or the browser process never became discoverable. "
+            "See the logs for the configured binary/profile/display details.",
+        ) from exc
     try:
         logger.info(
             "[solver] launching browser through pydoll: binary=%s start_timeout=%ss",

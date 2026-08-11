@@ -23,7 +23,12 @@ logger = logging.getLogger(__name__)
 
 # Costanti
 COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
-COMMUNITY_VERIFY_TIMEOUT = 45  # seconds
+# The callback grant is consumed by ``run_community_verification()`` from a
+# ``solve_with_callback()`` worker thread started here. That solver call is
+# configured with a 60s solve budget, so the queue-side waiter needs to stay
+# open past that budget rather than timing out at 45s and aborting the whole
+# flow while the background solver is still trying to complete.
+COMMUNITY_VERIFY_TIMEOUT = 90  # seconds
 DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS = 15
 
 

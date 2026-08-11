@@ -69,6 +69,12 @@ def test_wait_before_desktop_solver_start_uses_expected_delay(monkeypatch) -> No
     assert calls.get("seconds") == DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS
 
 
+def test_desktop_verify_queue_wait_exceeds_solver_callback_window() -> None:
+    from SpotiFLAC.core.signed_session_desktop import COMMUNITY_VERIFY_TIMEOUT
+
+    assert COMMUNITY_VERIFY_TIMEOUT >= 60
+
+
 def test_ensure_community_session_retries_after_timeout(monkeypatch) -> None:
     record = CommunitySessionRecord(install_id="install-1")
     attempts = {"count": 0}
@@ -111,6 +117,17 @@ def test_ensure_community_session_retries_after_timeout(monkeypatch) -> None:
 
     assert attempts["count"] == 2
     assert result.session_id == "sess-1"
+
+
+def test_build_chromium_options_includes_container_sandbox_flags(monkeypatch) -> None:
+    monkeypatch.setattr(solver, "_find_chrome", lambda: "/usr/bin/chromium")
+    monkeypatch.setattr(solver, "_get_profile_dir", lambda: "/tmp/ts_profile")
+
+    options = solver.build_chromium_options(hidden=True)
+
+    assert "--no-sandbox" in options.arguments
+    assert "--disable-setuid-sandbox" in options.arguments
+    assert "--disable-dev-shm-usage" in options.arguments
 
 
 def test_solver_wraps_browser_start_failure_with_clear_runtime_error(monkeypatch) -> None:
