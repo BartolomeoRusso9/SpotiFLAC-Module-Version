@@ -114,11 +114,11 @@ class DownloadOptions:
     qobuz_token: str | None = None
     qobuz_local_api_url: str | None = None
 
-    # Conversione post-download: None = tieni il formato del provider,
-    # "mp3" = converti ogni traccia in MP3 a `transcode_bitrate`.
-    # Il file convertito prende lo stesso nome con estensione diversa, così
-    # lo skip dei brani già scaricati continua a funzionare (viene cercato
-    # direttamente il file convertito, prima di contattare i provider).
+    # Post-download conversion: None = keep the provider format,
+    # "mp3" = convert every track to MP3 at `transcode_bitrate`.
+    # The converted file uses the same name with a different extension so
+    # skipping already-downloaded tracks still works (the converted file is
+    # looked for directly before contacting providers).
     transcode_to: str | None = None
     transcode_bitrate: str = DEFAULT_MP3_BITRATE
     transcode_keep_original: bool = False
@@ -190,7 +190,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
     """
     providers: list[BaseProvider] = []
 
-    # 0. Se l'utente chiede esplicitamente SOLO l'estensione (es. -s ext:qobuz-web)
+    # 0. If the user explicitly requests ONLY the extension (e.g. -s ext:qobuz-web)
     if name.startswith("ext:"):
         p = _build_provider(name, opts)
         if p:
@@ -217,7 +217,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
             except ImportError:
                 pass
 
-            # B. Aggiunge in automatico il nome base e la variante "-web" (es. qobuz, qobuz-web, tidal-web)
+            # B. Automatically add the base name and the "-web" variant (e.g. qobuz, qobuz-web, tidal-web)
             if name not in possible_ext_ids:
                 possible_ext_ids.append(name)
             if f"{name}-web" not in possible_ext_ids:

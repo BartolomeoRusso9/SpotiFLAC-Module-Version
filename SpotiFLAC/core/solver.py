@@ -24,10 +24,9 @@ _TURNSTILE_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
 _RELOAD_CHECK_SECONDS = 10.0
 _MAX_RELOAD_ATTEMPTS = 3
 
-# Se impostata a "1", la finestra del browser resta visibile e non viene
-# spostata fuori schermo né minimizzata. Utile per il debug via VNC in
-# Docker (vedi docker-entrypoint.sh + x11vnc). In produzione va lasciata
-# non impostata (o "0"), così il comportamento resta quello nascosto.
+# If set to "1", the browser window stays visible and is not moved off-screen
+# or minimized. Useful for VNC debugging in Docker (see docker-entrypoint.sh + x11vnc).
+# In production it should be left unset (or "0") so the behavior remains hidden.
 _DEBUG_VISIBLE = os.environ.get("TS_DEBUG_VISIBLE", "").strip() == "1"
 
 
