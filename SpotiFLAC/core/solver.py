@@ -565,7 +565,7 @@ async def _solve_impl(
             grant_val = data.get("grant")
             if isinstance(grant_val, str) and grant_val.strip():
                 network_grant["value"] = grant_val.strip()
-                logger.debug("[solver:net] grant catturato dalla rete")
+                logger.debug("[solver:net] grant captured from the network")
                 return
             if network_grant["value"] is None:
                 for key in ("token", "code"):
@@ -589,7 +589,7 @@ async def _solve_impl(
         """Navigate to ``siteurl`` letting pydoll's native Turnstile helper
         handle the click for us (shadow-DOM traversal + realistic click).
         """
-        # SPOSTATO IN CIMA: Abilita subito la cattura di rete per non perdersi l'auto-verifica!
+        # MOVED UP: enable network capture immediately so we don't miss auto-verification!
         await _enable_network_capture()
         await _try_minimize_window(browser)
 
@@ -597,7 +597,7 @@ async def _solve_impl(
             try:
                 async with tab.expect_and_bypass_cloudflare_captcha(
                     time_before_click=random.uniform(1.0, 2.0),
-                    time_to_wait_captcha=6, # Abbassiamo il timeout a 6s per non bloccarci troppo
+                    time_to_wait_captcha=6, # Lower the timeout to 6s so we don't block too long
                 ):
                     await tab.go_to(siteurl)
             except AttributeError:
@@ -609,27 +609,27 @@ async def _solve_impl(
                     exc,
                 )
 
-        # Eseguiamo la navigazione e la ricerca del captcha in un task separato (in background)
+        # Run navigation and captcha detection in a separate background task
         nav_task = asyncio.create_task(_do_navigate())
 
-        # Controlliamo costantemente se l'auto-verifica è andata a buon fine
-        for _ in range(100):  # max 10 secondi
+        # Poll continuously to see whether auto-verification succeeded
+        for _ in range(100):  # max 10 seconds
             if nav_task.done():
                 break
             
-            # Se la rete ha già catturato il grant, possiamo smettere di aspettare il click di pydoll
+            # If the network already captured the grant, we can stop waiting for pydoll's click
             if network_grant["value"]:
-                logger.info("[solver] Grant catturato dalla rete! Interrompo l'attesa del bypass di pydoll.")
+                logger.info("[solver] Grant captured from the network! Stopping wait for pydoll bypass.")
                 break
                 
-            # Se la pagina mostra "Verified" (o lo status di successo), possiamo smettere di aspettare
+            # If the page shows "Verified" (or success status), we can stop waiting
             try:
                 is_verified = await tab.execute_script(
                     "return document.body.innerText.includes('Verified') || document.querySelector('.status.success') !== null;",
                     return_by_value=True
                 )
                 if _js_value(is_verified):
-                    logger.info("[solver] 'Verified' trovato nella pagina! Interrompo l'attesa del bypass di pydoll.")
+                    logger.info("[solver] 'Verified' found on the page! Stopping wait for pydoll bypass.")
                     break
             except Exception:
                 pass
@@ -637,7 +637,7 @@ async def _solve_impl(
             await asyncio.sleep(0.1)
 
     async def _open_fresh_page() -> None:
-        """Ricarica siteurl da zero — usato per il retry con reload."""
+        """Reloads siteurl from scratch — used for retry with reload."""
         await _navigate_with_turnstile_bypass()
 
     async def get_token() -> str | None:

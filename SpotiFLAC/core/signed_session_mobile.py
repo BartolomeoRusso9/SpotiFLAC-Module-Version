@@ -27,15 +27,15 @@ _DEFAULT_ENDPOINTS = {
     "bootstrap": "/bootstrap",
     "challenge": "/challenge",
     "exchange": "/session/exchange",
-    # NOTE: no default for "refresh": il backend Go di riferimento
-    # (extension_signed_session.go) non ne mette uno e tenta il refresh
-    # solo se il manifest lo dichiara esplicitamente in endpoints.refresh.
-    # Un default indovinato qui rischierebbe di colpire un path
-    # inesistente quando il manifest non lo dichiara.
+    # NOTE: no default for "refresh": the reference Go backend
+    # (extension_signed_session.go) does not define one and only attempts
+    # refresh if the manifest explicitly declares it in endpoints.refresh.
+    # Guessing a default here risks hitting a nonexistent path when the
+    # manifest does not declare refresh.
 }
 
-# Headers "from real browser" observed via DevTools su una chiamata
-# on a successful POST to {base_url}/challenge/verify (Brave on macOS, Chromium 149).
+# Headers "from real browser" observed via DevTools on a call
+# to a successful POST at {base_url}/challenge/verify (Brave on macOS, Chromium 149).
 # Cloudflare/the API apply fingerprint verification on these headers:
 # without them the request returns "Invalid request" even with a valid
 # Turnstile token. Origin must be calculated per-instance (depends on base_url)
@@ -335,21 +335,21 @@ class SignedSessionClient:
         challenge_id: str,
         callback_url: str,
     ) -> str:
-        """Replica ESATTAMENTE buildSignedSessionChallengeURL() del backend Go
+        """Replicates EXACTLY buildSignedSessionChallengeURL() from the Go backend
         (extension_signed_session.go):
 
-          1. il callback riceve, nella propria query string, cb_version=v2grant
-             and state=<namespace> (in Go it's state=<extensionID>: here we use the
-             client's namespace, since a Python instance serves only one
+          1. the callback receives cb_version=v2grant in its query string
+             and state=<namespace> (in Go it's state=<extensionID>: here we use
+             the client's namespace, since a Python instance serves only one
              "logical extension" at a time);
-          2. l'URL della pagina di sfida ({base}/challenge) riceve
-             id=<challenge_id> e cb=<callback_url completo, urlencoded>.
+          2. the challenge page URL ({base}/challenge) receives
+             id=<challenge_id> and cb=<full callback_url, urlencoded>.
 
         `callback_url` here is typically the one returned by
-        _LocalGrantListener.start(), i.e., http://127.0.0.1:{port}/callback
-        al posto dello scheme mobile "spotiflac://session-grant" — la pagina
-        di sfida non fa alcuna distinzione, fa comunque un redirect al "cb"
-        fornito con ?grant=... aggiunto.
+        _LocalGrantListener.start(), i.e. http://127.0.0.1:{port}/callback
+        instead of the mobile scheme "spotiflac://session-grant" — the
+        challenge page makes no distinction and still redirects to the provided
+        "cb" with ?grant=... appended.
         """
         cb_parts = list(urlparse(callback_url))
         cb_query = dict(parse_qsl(cb_parts[4]))
@@ -372,25 +372,25 @@ class SignedSessionClient:
     ) -> None:
         """Autenticazione automatica tramite browser reale (core.turnstile).
 
-        AGGIORNAMENTO: turnstile.py ora cattura il grant direttamente dal
-        traffico di rete via CDP (stessa tecnica di grant_token.py /
-        capture_network — ascolto delle risposte JSON in cerca del campo
-        "grant"), invece di affidarsi all'URL di redirect finale. Questo
-        risolve il problema documentato in _LocalGrantListener: la pagina
-        di sfida chiama internamente {endpoints.challenge}/verify coi propri
-        cookie (cf_clearance incluso) ma NON naviga mai al "cb" fornito, quindi
-        l'estrazione da URL restava quasi sempre vuota. Ora la risposta JSON
-        di quella chiamata viene letta direttamente, senza serve replicarla
-        da Python né sperare in un redirect che non arriva.
+        UPDATE: turnstile.py now captures the grant directly from
+        network traffic via CDP (the same technique as grant_token.py /
+        capture_network — listening for JSON responses containing the
+        "grant" field), instead of relying on the final redirect URL. This
+        fixes the issue documented in _LocalGrantListener: the challenge page
+        internally calls {endpoints.challenge}/verify with its own cookies
+        (including cf_clearance) but NEVER navigates to the provided "cb",
+        so URL extraction was nearly always empty. Now the JSON response from
+        that call is read directly, without having to replicate it from Python
+        or hope for a missing redirect.
 
-        Passi:
-        1. bootstrap() per ottenere challenge_id + sitekey;
-        2. costruire l'URL di sfida con lo stesso "cb" del flusso manuale
-           (serve solo come fallback, non più come meccanismo primario);
-        3. far risolvere il widget al browser reale — il grant viene
-           catturato in tempo reale non appena la pagina riceve la risposta
-           di /verify (solve_with_callback());
-        4. scambiare il grant con exchange_grant(), come nel flusso manuale.
+        Steps:
+        1. bootstrap() to obtain challenge_id + sitekey;
+        2. build the challenge URL with the same "cb" as the manual flow
+           (used only as a fallback, not as the primary mechanism);
+        3. have the real browser solve the widget — the grant is captured in
+           real time as soon as the page receives the /verify response
+           (solve_with_callback());
+        4. exchange the grant with exchange_grant(), as in the manual flow.
         """
         boot_result = await self.bootstrap()
         if boot_result is True:
@@ -398,8 +398,8 @@ class SignedSessionClient:
 
         if not self.pending_challenge_id or not self.pending_sitekey:
             msg = (
-                "bootstrap() non ha restituito challenge_id/sitekey: "
-                "impossibile guidare Turnstile automaticamente."
+                "bootstrap() did not return challenge_id/sitekey: "
+                "unable to drive Turnstile automatically."
             )
             raise RuntimeError(
                 msg,
@@ -423,10 +423,10 @@ class SignedSessionClient:
 
         if not grant:
             msg = (
-                "Turnstile risolto (token ottenuto) ma nessun 'grant' catturato "
-                "né dalla rete né dal redirect di callback. Prova ad aumentare "
-                "hold_open_seconds per dare tempo alla pagina di completare "
-                "la verify() interna."
+                "Turnstile solved (token obtained) but no 'grant' was captured "
+                "from either the network or the callback redirect. Try increasing "
+                "hold_open_seconds to give the page more time to complete "
+                "the internal verify()."
             )
             raise RuntimeError(
                 msg,
@@ -439,8 +439,8 @@ class SignedSessionClient:
         url: str,
         callback: Callable[[str], None] | None,
     ) -> None:
-        """Rende disponibile l'URL di verifica al chiamante, senza mai aprirlo
-        automaticamente in un browser.
+        """Makes the verification URL available to the caller without ever
+        opening it automatically in a browser.
 
         - If `callback` is provided, the URL is passed to it (the caller
           decides what to do: webbrowser.open(), UI, notification, etc.).
@@ -454,7 +454,7 @@ class SignedSessionClient:
         logger.warning("[signed_session] Verification required: %s", url)
 
     async def verify_challenge(self, challenge_id: str, turnstile_token: str) -> str:
-        """NON CHIAMARLO DIRETTAMENTE da Python — lasciato solo per riferimento.
+        """DO NOT CALL THIS DIRECTLY from Python — kept only for reference.
 
         This endpoint DOES exist and is exactly this: POST
         {base_url}{endpoints.challenge}/verify with
@@ -786,27 +786,26 @@ class SignedSessionClient:
                 self._client = None
 
 
-# --- Fase 4: sincronizzazione dell'autenticazione (async-native) --------
+# --- Phase 4: authentication synchronization (async-native) --------
 #
-# PRIMA: SpotiFLAC scaricava più tracce in parallelo tramite un
-# ThreadPoolExecutor dove ogni thread eseguiva il proprio asyncio.run()
-# (quindi ogni thread aveva un event loop DIVERSO). Un asyncio.Lock keyed
-# per (loop, namespace) non basta in quel caso: due thread paralleli, ognuno
-# col proprio loop, otterrebbero ciascuno un lock "vergine" e non si
-# sincronizzerebbero affatto — da qui l'accrocchio _AsyncThreadLockCtx che
-# avvolgeva un threading.Lock con polling asincrono.
+# PREVIOUSLY: SpotiFLAC downloaded multiple tracks in parallel using a
+# ThreadPoolExecutor where each thread ran its own asyncio.run()
+# (so each thread had a DIFFERENT event loop). An asyncio.Lock keyed
+# by (loop, namespace) is not sufficient in that case: two parallel threads,
+# each with its own loop, would each get a separate fresh lock and would
+# not synchronize at all — hence the old _AsyncThreadLockCtx wrapper that
+# paired a threading.Lock with async polling.
 #
-# ORA: con un solo processo/thread e un solo event loop condiviso (nessun
-# download avvia più il proprio asyncio.run()), un dict di asyncio.Lock()
-# indicizzato per namespace è sufficiente e corretto: tutte le coroutine
-# "in gara" per autenticare lo stesso namespace girano sullo stesso loop,
-# quindi asyncio.Lock le serializza nativamente senza bisogno di polling
-# né di primitive thread-safe.
+# NOW: with a single process/thread and a single shared event loop
+# (no download starts its own asyncio.run()), a dict of asyncio.Lock()
+# indexed by namespace is sufficient and correct: all coroutines competing
+# to authenticate the same namespace run on the same loop, so asyncio.Lock
+# serializes them natively without polling or thread-safe primitives.
 _AUTH_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _get_auth_lock(namespace: str) -> asyncio.Lock:
-    """Restituisce (creandolo se assente) l'asyncio.Lock per il namespace."""
+    """Return the asyncio.Lock for the given namespace, creating it if absent."""
     lock = _AUTH_LOCKS.get(namespace)
     if lock is None:
         lock = asyncio.Lock()

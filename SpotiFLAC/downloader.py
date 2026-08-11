@@ -554,11 +554,10 @@ class DownloadWorker:
         self._collection_name = collection_name
         self._is_album = is_album
         self._is_playlist = is_playlist
-        # Numero di traccia usato per il filename. Di default è la posizione
-        # nella lista; un chiamante che scarica solo un sottoinsieme (es. il
-        # sync multi-playlist, che salta i brani già presenti) passa le
-        # posizioni originali per non cambiare i nomi dei file tra un run e
-        # l'altro.
+        # Track number used for the filename. By default it's the position in
+        # the list; a caller that downloads only a subset (e.g. multi-playlist
+        # sync that skips already-present tracks) passes original positions so
+        # file names do not change between runs.
         self._positions = positions or list(range(1, len(tracks) + 1))
         self._failed: list[tuple[str, str, str, str]] = []
         self._completed: dict[str, str] = {}
@@ -593,8 +592,8 @@ class DownloadWorker:
     async def run_async(self) -> list[tuple[str, str, str]]:
         try:
             if self._opts.transcode_to:
-                # Meglio fermarsi subito che scaricare un intero album e
-                # scoprire solo alla fine che la conversione non è possibile.
+                # It's better to fail fast than to download a whole album and
+                # discover only at the end that conversion is not possible.
                 await asyncio.to_thread(
                     ensure_ffmpeg_available,
                     self._opts.transcode_to,
@@ -962,7 +961,7 @@ class SpotiflacDownloader:
         worker = DownloadWorker(
             tracks=tracks,
             opts=opts,
-            # Cartella unica: nessun sottolivello per playlist.
+            # Single folder: no playlist subdirectory.
             collection_name="",
             is_album=False,
             is_playlist=False,
