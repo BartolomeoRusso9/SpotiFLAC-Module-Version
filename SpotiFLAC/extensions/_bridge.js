@@ -1,23 +1,23 @@
 /**
  * _bridge.js — SpotiFLAC Extension Bridge (Node.js)
  *
- * Due modalità (isMainThread):
- *   MAIN  – legge comandi JSON dal stdin di Python, li smista al Worker,
- *            gestisce le bridge-request del Worker (http/file) in modo asincrono,
- *            scrive risultati JSON su stdout.
- *   WORKER – esegue il codice dell'estensione; per ogni chiamata http/file
- *            usa Atomics.wait per bloccarsi in modo *sincrono* finché il main
- *            non ha completato la richiesta.
+ * Two modes (isMainThread):
+ *   MAIN  – reads JSON commands from Python stdin, routes them to the Worker,
+ *            handles the Worker's bridge requests (http/file) asynchronously,
+ *            and writes JSON results to stdout.
+ *   WORKER – runs the extension code; for each http/file call it uses
+ *            Atomics.wait to block *synchronously* until the main thread
+ *            has completed the request.
  *
- * Protocollo SharedArrayBuffer (layout):
- *   [0..3]  Int32  — stato: 0=idle, 1=req_pending, 2=resp_ready
- *   [4..7]  Uint32 — lunghezza payload a [8..]
- *   [8..]   Buffer — JSON UTF-8 (richiesta o risposta)
+ * SharedArrayBuffer protocol (layout):
+ *   [0..3]  Int32  — state: 0=idle, 1=req_pending, 2=resp_ready
+ *   [4..7]  Uint32 — payload length at [8..]
+ *   [8..]   Buffer — JSON UTF-8 (request or response)
  *
- * Protocollo stdin/stdout con Python (JSON-line):
+ * stdin/stdout protocol with Python (JSON-line):
  *   Python→Node  { "id": N, "call": "download"|"handleURL"|..., "args": [...] }
  *   Node→Python  { "id": N, "result": ... }  |  { "id": N, "error": "..." }
- *   Node→Python  { "type": "ready" }          (all'avvio)
+ *   Node→Python  { "type": "ready" }          (on startup)
  *   Node→Python  { "type": "progress", "callId": N, "value": 0..1 }
  */
 
@@ -43,13 +43,13 @@ if (!isMainThread) {
   const LEN    = new Uint32Array(sharedBuf, 4, 1);  // [0] lunghezza payload
   const DOFF   = 8;                                  // offset dati nel buffer
 
-  // NEW: traccia il callId della chiamata Python->Worker attualmente in
-  // esecuzione, così le bridge_request generate al suo interno (es.
-  // file.download) possono essere associate allo stesso callId per il
-  // routing dei messaggi "progress" verso il _progress_cbs[seq] giusto.
+  // NEW: tracks the callId of the currently executing Python->Worker call,
+  // so bridge_requests generated inside it (e.g. file.download) can be
+  // associated with the same callId for routing progress messages to the
+  // correct _progress_cbs[seq].
   let _currentCallId = null;
 
-  /** Chiama il main thread in modo *sincrono* via SharedArrayBuffer. */
+  /** Calls the main thread *synchronously* via SharedArrayBuffer. */
   function bridgeCall(method, args) {
     const payload = Buffer.from(
       JSON.stringify({ method, args, callId: _currentCallId }), // NEW: callId incluso
@@ -61,11 +61,11 @@ if (!isMainThread) {
     payload.copy(Buffer.from(sharedBuf), DOFF);
     LEN[0] = payload.length;
 
-    // Segnala al main: richiesta pronta
+    // Signal the main thread: request ready
     Atomics.store(STATE, 0, 1);
     parentPort.postMessage({ type: 'bridge_request' });
 
-    // Aspetta che il main scriva la risposta (stato → 2)
+    // Wait for the main thread to write the response (state → 2)
     let waited = 0;
     while (Atomics.load(STATE, 0) !== 2) {
       const r = Atomics.wait(STATE, 0, 1, 200);
@@ -98,7 +98,7 @@ if (!isMainThread) {
     download: (url, outputPath, opts) =>
       bridgeCall('file.download', { url, outputPath, opts: opts || {} }),
     
-    // Novità: Metodi sincroni per operare sui file usando fs nativo
+    // New: synchronous methods to operate on files using native fs
     getSize: (filePath) => {
       try {
         const stats = require('fs').statSync(filePath);
@@ -222,7 +222,7 @@ if (!isMainThread) {
 
   parentPort.postMessage({ type: 'ready' });
 
-  // Riceve comandi dal main e li esegue *sincrono* (siamo già in un Worker)
+  // Receives commands from the main thread and executes them *synchronously*
   parentPort.on('message', ({ id, call, args }) => {
     _currentCallId = id; // NEW: rende id disponibile a bridgeCall() durante fn(...)
     try {
@@ -231,7 +231,7 @@ if (!isMainThread) {
         parentPort.postMessage({ id, error: `No method: ${call}` });
         return;
       }
-      // Wrappa onProgress se l'arg è il placeholder "__progress__"
+      // Wraps onProgress if the arg is the placeholder "__progress__"
       const finalArgs = (args || []).map(a =>
         a === '__progress__'
           ? (v) => parentPort.postMessage({ type: 'progress', callId: id, value: v })
@@ -266,15 +266,14 @@ let _pendingPy   = new Map();   // id → {resolve, reject}
 let _progressCbs = new Map();   // callId → progressCallback (unused server-side, forwarded to stdout)
 let _cmdSeq      = 0;
 
-// Mappa dedicata per forwardToPython() (session.signedFetch): diversa da
-// _pendingPy sopra, che è per le risposte ai comandi call/args inviati DA
-// Python VERSO il Worker — qui invece è il main thread di Node che chiede
-// qualcosa a Python e aspetta una risposta, quindi serve un proprio spazio
-// di ID per non entrare in collisione.
+// Dedicated map for forwardToPython() (session.signedFetch): different from
+// _pendingPy above, which is for call/arg responses sent FROM Python TO the
+// Worker — here the Node main thread asks Python for something and waits for
+// a response, so it needs its own ID space to avoid collisions.
 let _pySessionPending = new Map();  // requestId → resolve
 let _pySessionSeq     = 0;
 
-/** Inoltra una richiesta a Python (via stdout) e aspetta la sua risposta (via stdin). */
+/** Forwards a request to Python (via stdout) and waits for its response (via stdin). */
 function forwardToPython(type, payload) {
   return new Promise((resolve) => {
     const requestId = ++_pySessionSeq;
@@ -302,11 +301,11 @@ async function handleBridgeRequest() {
     } else if (method === 'file.download') {
       result = await nodeFileDownload(args.url, args.outputPath, args.opts, callId); // NEW: passa callId
     } else if (method === 'session.signedFetch') {
-      // Non gestibile qui in Node puro: serve il vero SignedSessionClient
-      // Python (HMAC signing, ciclo bootstrap/challenge/verify/exchange,
-      // eventuale apertura browser per il Turnstile). Inoltriamo la
-      // richiesta a Python via stdout e aspettiamo la sua risposta via
-      // stdin (vedi forwardToPython più sotto).
+      // Not handled in pure Node: the real SignedSessionClient is in Python
+      // (HMAC signing, bootstrap/challenge/verify/exchange flow, and
+      // possible browser launch for Turnstile). Forward the request to Python
+      // via stdout and wait for its response via stdin (see forwardToPython
+      // below).
       result = await forwardToPython('session_signed_fetch', {
         method: args.method, path: args.path, body: args.body, headers: args.headers,
       });
@@ -375,11 +374,11 @@ function nodeHttpRequest(method, rawUrl, body, headers, _depth = 0) {
 }
 
 /**
- * Scarica un URL su disco (streaming), emettendo eventi "progress" verso
- * Python ogni volta che vengono ricevuti almeno PROGRESS_THRESHOLD byte,
- * con velocità calcolata sull'intervallo (non sulla media totale) — stesso
- * schema di ItemProgressWriter nel backend Go (progressUpdateThreshold =
- * 128 * 1024).
+ * Downloads a URL to disk (streaming), emitting "progress" events to
+ * Python each time at least PROGRESS_THRESHOLD bytes are received, with
+ * speed calculated over the interval (not the total average) — the same
+ * scheme as ItemProgressWriter in the Go backend
+ * (progressUpdateThreshold = 128 * 1024).
  */
 function nodeFileDownload(rawUrl, outputPath, opts, callId) {
   return new Promise((resolve) => {
@@ -506,7 +505,7 @@ worker.on('message', async (msg) => {
     process.stdout.write(JSON.stringify({ type: 'progress', callId: msg.callId, value: msg.value }) + '\n');
     return;
   }
-  // Risposta a un comando Python
+  // Response to a Python command
   const { id, result, error } = msg;
   const cb = _pendingPy.get(id);
   if (!cb) return;
@@ -515,7 +514,7 @@ worker.on('message', async (msg) => {
   else        cb.resolve(result);
 });
 
-/** Invia un comando al Worker e aspetta la risposta. */
+/** Sends a command to the Worker and waits for the response. */
 function callWorker(call, args) {
   return new Promise((resolve, reject) => {
     const id = ++_cmdSeq;
@@ -532,8 +531,9 @@ stdinRL.on('line', async (line) => {
   let req;
   try { req = JSON.parse(line); } catch (_) { return; }
 
-  // Risposta di Python a un forwardToPython('session_signed_fetch', ...):
-  // risolve la Promise in attesa nel Worker, non è un comando da eseguire.
+  // Response from Python to a forwardToPython('session_signed_fetch', ...):
+  // resolves the Promise waiting in the Worker; it is not a command to
+  // execute.
   if (req.type === 'session_signed_fetch_response') {
     const resolve = _pySessionPending.get(req.requestId);
     if (resolve) {

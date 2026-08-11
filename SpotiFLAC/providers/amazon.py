@@ -996,7 +996,7 @@ class AmazonProvider(BaseProvider):
 
         data = resp.json()
 
-        # Nuova struttura di risposta JSON in base al Go
+        # New JSON response structure based on the Go backend
         stream_url = data.get("stream_url") or data.get("url") or data.get("streamUrl")
         codec = str(data.get("codec", "")).lower().strip()
         captcha_token = (

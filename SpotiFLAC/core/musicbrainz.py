@@ -401,7 +401,7 @@ async def fetch_mb_metadata_async(isrc: str) -> dict:
 
 
 def mb_result_to_tags(res: dict) -> dict[str, str]:
-    """Converte il dizionario di risposta di MusicBrainz nei tag standard."""
+    """Convert the MusicBrainz response dictionary into standard tags."""
     if not res:
         return {}
 

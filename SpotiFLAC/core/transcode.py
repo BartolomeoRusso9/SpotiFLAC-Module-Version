@@ -167,7 +167,7 @@ async def transcode_file_async(
 
     dest = transcoded_path(src, fmt)
     if src.suffix.lower() == dest.suffix.lower():
-        # Il provider ha già prodotto il formato richiesto
+        # The provider already produced the requested format
         return src
 
     if not await asyncio.to_thread(src.is_file):

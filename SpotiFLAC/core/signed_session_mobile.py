@@ -394,7 +394,7 @@ class SignedSessionClient:
         """
         boot_result = await self.bootstrap()
         if boot_result is True:
-            return  # sessione già ottenuta, nessuna verifica necessaria
+            return  # session already obtained, no verification necessary
 
         if not self.pending_challenge_id or not self.pending_sitekey:
             msg = (
@@ -870,7 +870,7 @@ async def perform_signed_fetch(
                         )
                         return {"error": str(exc)}
 
-        # A questo punto la sessione è garantita per tutte le tracce parallele
+        # At this point the session is guaranteed for all parallel tracks
         resp = await client.request(method, path, json_body=body, extra_headers=headers)
 
         if resp.status_code in (401, 428):

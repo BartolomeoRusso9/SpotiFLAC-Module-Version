@@ -1,12 +1,12 @@
-"""Gestione della sessione "Monochrome" (amz.geeked.wtf).
+"""Monochrome session handling (amz.geeked.wtf).
 
-Poiché il backend verifica il JWT associandolo all'impronta TLS/di rete del browser
-(claim 'fp'), il semplice passaggio degli header a httpx fallisce con un 401.
-La soluzione implementata qui mantiene un browser CDP persistente (pydoll) in
-background e instrada la richiesta GET /api/track/ tramite `tab.request`, che
-esegue la fetch nel contesto JavaScript reale della pagina — garantendo il
-perfetto allineamento del fingerprint, esattamente come una fetch() lanciata
-a mano dalla pagina, ma senza dover gestire noi la (de)serializzazione JSON.
+Because the backend verifies the JWT by tying it to the browser's TLS/network
+fingerprint claim ('fp'), simply forwarding headers to httpx fails with 401.
+The solution here keeps a persistent CDP browser (pydoll) in the background and
+routes the GET /api/track/ request through `tab.request`, which performs the fetch
+in the page's real JavaScript context — ensuring perfect fingerprint alignment,
+just like a fetch() initiated manually from the page, but without having to
+manage JSON (de)serialization ourselves.
 """
 
 from __future__ import annotations
@@ -240,12 +240,12 @@ class _MonochromeBrowserSession:
         return token
 
     async def _do_fetch(self, full_url: str, token: str) -> dict:
-        """Esegue la GET instradata dentro il contesto JS del tab pydoll.
+        """Perform the GET routed through the tab's JS context in pydoll.
 
-        `tab.request` esegue le chiamate HTTP direttamente nel contesto
-        JavaScript del browser (stesso principio della fetch() manuale usata
-        in precedenza con nodriver), quindi eredita automaticamente
-        cookie/TLS/fingerprint del tab — che è esattamente ciò che serve qui.
+        `tab.request` performs HTTP calls directly in the browser's JavaScript
+        context (the same principle as the manual fetch() previously used with
+        nodriver), so it automatically inherits the tab's cookies/TLS/fingerprint
+        — exactly what is needed here.
         """
         response = await self._tab.request.get(
             full_url,

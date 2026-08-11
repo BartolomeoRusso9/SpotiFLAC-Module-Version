@@ -1097,7 +1097,7 @@ class SpotiFLAC_API:
             except Exception as e:
                 self.log(f"[{idx}/{total}] Lyrics error for '{title}': {e}", "error")
 
-        # Scarica tutti i testi contemporaneamente
+        # Download all lyrics concurrently
         tasks = [
             fetch_and_save_lyric(track, i) for i, track in enumerate(tracks_data, 1)
         ]
@@ -1448,7 +1448,7 @@ class SpotiFLAC_API:
             ]
             from .core.transcode import normalize_transcode_format
 
-            # La GUI invia "none" quando la conversione è disattivata
+            # The GUI sends "none" when conversion is disabled
             transcode_to = normalize_transcode_format(config.get("transcode_to"))
             transcode_bitrate = config.get("transcode_bitrate") or "320k"
             transcode_keep_original = config.get("transcode_keep_original", False)

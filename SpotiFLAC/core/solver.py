@@ -262,9 +262,8 @@ def _find_chrome() -> str:
         if path:
             return path
 
-    # 3. Fallback: usa il browser predefinito del sistema, se è
-    # Chromium-based (altrimenti pydoll non potrebbe comunque pilotarlo
-    # via CDP).
+    # 3. Fallback: use the system default browser if it is Chromium-based
+    # (otherwise pydoll would not be able to drive it via CDP).
     default_path = _get_default_browser_path()
     if default_path and os.path.exists(default_path):
         if _is_chromium_like(default_path):
@@ -275,8 +274,8 @@ def _find_chrome() -> str:
             )
             return default_path
         logger.debug(
-            "[solver] Il browser predefinito del sistema (%s) non è "
-            "basato su Chromium: ignorato.",
+            "[solver] The system default browser (%s) is not "
+            "Chromium-based: ignored.",
             default_path,
         )
 
@@ -733,7 +732,7 @@ async def _solve_impl(
         if capture_callback:
             await capture_callback_grant()
             if callback_grant:
-                return None  # grant già ottenuto, verificato dal chiamante
+                return None  # grant already obtained, verified by the caller
 
         rect = None
         for _ in range(20):
