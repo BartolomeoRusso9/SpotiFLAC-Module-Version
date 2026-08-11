@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Costanti
 COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
 COMMUNITY_VERIFY_TIMEOUT = 45  # seconds
-DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS = 10
+DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS = 15
 
 
 def wait_before_desktop_solver_start() -> None:
@@ -159,7 +159,27 @@ def ensure_community_session() -> CommunitySessionRecord:
         if community_session_valid(record):
             return record
 
-        grant = run_community_verification(record)
+        grant = None
+        for attempt in range(1, 3):
+            try:
+                grant = run_community_verification(record)
+                break
+            except Exception as exc:
+                message = str(exc)
+                if "Automated verification timed out" not in message and "verification timed out" not in message:
+                    raise
+
+                if attempt < 2:
+                    logger.warning(
+                        "[desktop verification] automated grant attempt %d/2 failed (%s); retrying once",
+                        attempt,
+                        exc,
+                    )
+                    time.sleep(2.0)
+                    continue
+
+                raise
+
         exchanged = exchange_community_grant(record, grant)
 
         record.session_id = exchanged.session_id
@@ -350,9 +370,9 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                     return grant
 
             except queue.Empty:
-                logger.warning(
-                    "Automated verification timed out (nessun grant ricevuto in tempo)."
-                )
+                msg = "Automated verification timed out (nessun grant ricevuto in tempo)."
+                logger.warning(msg)
+                raise RuntimeError(msg)
 
         except ImportError:
             logger.info("solver.py not found or Playwright dependencies missing.")

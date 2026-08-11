@@ -5,6 +5,11 @@ import pytest
 from pydoll.exceptions import FailedToStartBrowser
 
 from SpotiFLAC.core import solver
+from SpotiFLAC.core.signed_session_desktop import (
+    CommunitySessionExchange,
+    CommunitySessionRecord,
+    ensure_community_session,
+)
 from SpotiFLAC.core.signed_session_mobile import perform_signed_fetch
 
 
@@ -22,6 +27,7 @@ class DummyClient:
 
     async def authenticate_with_manual_grant(self, **kwargs) -> None:
         self.calls.append(kwargs)
+        self.authenticated = True
 
     async def request(self, method, path, json_body=None, extra_headers=None):
         return SimpleNamespace(
@@ -32,14 +38,12 @@ class DummyClient:
         )
 
 
-def test_perform_signed_fetch_forwards_timeout_to_manual_grant() -> None:
+def test_perform_signed_fetch_returns_browser_error_without_manual_grant_fallback() -> None:
     async def run_test() -> None:
         client = DummyClient()
         result = await perform_signed_fetch(client, "GET", "/x", None, None, timeout=42)
-        assert result["statusCode"] == 200
-        assert client.calls == [
-            {"on_verification_url": None, "grant_input": None, "timeout": 42},
-        ]
+        assert result == {"error": "browser unavailable"}
+        assert client.calls == []
 
     asyncio.run(run_test())
 
@@ -63,6 +67,50 @@ def test_wait_before_desktop_solver_start_uses_expected_delay(monkeypatch) -> No
     wait_before_desktop_solver_start()
 
     assert calls.get("seconds") == DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS
+
+
+def test_ensure_community_session_retries_after_timeout(monkeypatch) -> None:
+    record = CommunitySessionRecord(install_id="install-1")
+    attempts = {"count": 0}
+
+    def fake_run_community_verification(rec):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("Automated verification timed out (nessun grant ricevuto in tempo).")
+        return "grant-ok"
+
+    def fake_exchange_community_grant(rec, grant):
+        return CommunitySessionExchange(
+            session_id="sess-1",
+            session_secret="secret-1",
+            expires_at="2099-01-01T00:00:00Z",
+        )
+
+    monkeypatch.setattr(
+        "SpotiFLAC.core.signed_session_desktop.community_session_valid",
+        lambda _: False,
+    )
+    monkeypatch.setattr(
+        "SpotiFLAC.core.signed_session_desktop.load_community_session",
+        lambda: record,
+    )
+    monkeypatch.setattr(
+        "SpotiFLAC.core.signed_session_desktop.save_community_session",
+        lambda _record: None,
+    )
+    monkeypatch.setattr(
+        "SpotiFLAC.core.signed_session_desktop.run_community_verification",
+        fake_run_community_verification,
+    )
+    monkeypatch.setattr(
+        "SpotiFLAC.core.signed_session_desktop.exchange_community_grant",
+        fake_exchange_community_grant,
+    )
+
+    result = ensure_community_session()
+
+    assert attempts["count"] == 2
+    assert result.session_id == "sess-1"
 
 
 def test_solver_wraps_browser_start_failure_with_clear_runtime_error(monkeypatch) -> None:
