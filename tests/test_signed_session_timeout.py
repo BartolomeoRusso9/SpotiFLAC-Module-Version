@@ -65,7 +65,9 @@ def test_wait_before_desktop_solver_start_uses_expected_delay(monkeypatch) -> No
     assert calls.get("seconds") == DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS
 
 
-def test_solver_wraps_browser_start_failure_with_clear_runtime_error(monkeypatch) -> None:
+def test_solver_wraps_browser_start_failure_with_clear_runtime_error(
+    monkeypatch,
+) -> None:
     class FakeBrowser:
         def __init__(self, options) -> None:
             self.options = options
