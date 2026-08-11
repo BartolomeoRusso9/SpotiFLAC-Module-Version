@@ -44,11 +44,6 @@ def test_perform_signed_fetch_forwards_timeout_to_manual_grant() -> None:
     asyncio.run(run_test())
 
 
-<<<<<<< Updated upstream
-def test_solver_wraps_browser_start_failure_with_clear_runtime_error(
-    monkeypatch,
-) -> None:
-=======
 def test_wait_before_desktop_solver_start_uses_expected_delay(monkeypatch) -> None:
     calls = {}
 
@@ -71,7 +66,6 @@ def test_wait_before_desktop_solver_start_uses_expected_delay(monkeypatch) -> No
 
 
 def test_solver_wraps_browser_start_failure_with_clear_runtime_error(monkeypatch) -> None:
->>>>>>> Stashed changes
     class FakeBrowser:
         def __init__(self, options) -> None:
             self.options = options
