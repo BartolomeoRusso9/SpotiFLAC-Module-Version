@@ -171,7 +171,10 @@ def ensure_community_session() -> CommunitySessionRecord:
                 break
             except Exception as exc:
                 message = str(exc)
-                if "Automated verification timed out" not in message and "verification timed out" not in message:
+                if (
+                    "Automated verification timed out" not in message
+                    and "verification timed out" not in message
+                ):
                     raise
 
                 if attempt < 2:

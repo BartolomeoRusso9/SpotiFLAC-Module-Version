@@ -492,9 +492,7 @@ def _describe_browser_start_error(
     display = os.environ.get("DISPLAY") or "<unset>"
     profile_dir = _get_profile_dir()
     start_timeout = (
-        getattr(options, "start_timeout", "n/a")
-        if options is not None
-        else "n/a"
+        getattr(options, "start_timeout", "n/a") if options is not None else "n/a"
     )
     return (
         "Browser failed to start inside pydoll/Chrome launch. "
@@ -596,7 +594,7 @@ async def _solve_impl(
             try:
                 async with tab.expect_and_bypass_cloudflare_captcha(
                     time_before_click=random.uniform(1.0, 2.0),
-                    time_to_wait_captcha=6, # Lower the timeout to 6s so we don't block too long
+                    time_to_wait_captcha=6,  # Lower the timeout to 6s so we don't block too long
                 ):
                     await tab.go_to(siteurl)
             except AttributeError:
@@ -615,20 +613,24 @@ async def _solve_impl(
         for _ in range(100):  # max 10 seconds
             if nav_task.done():
                 break
-            
+
             # If the network already captured the grant, we can stop waiting for pydoll's click
             if network_grant["value"]:
-                logger.info("[solver] Grant captured from the network! Stopping wait for pydoll bypass.")
+                logger.info(
+                    "[solver] Grant captured from the network! Stopping wait for pydoll bypass."
+                )
                 break
-                
+
             # If the page shows "Verified" (or success status), we can stop waiting
             try:
                 is_verified = await tab.execute_script(
                     "return document.body.innerText.includes('Verified') || document.querySelector('.status.success') !== null;",
-                    return_by_value=True
+                    return_by_value=True,
                 )
                 if _js_value(is_verified):
-                    logger.info("[solver] 'Verified' found on the page! Stopping wait for pydoll bypass.")
+                    logger.info(
+                        "[solver] 'Verified' found on the page! Stopping wait for pydoll bypass."
+                    )
                     break
             except Exception:
                 pass

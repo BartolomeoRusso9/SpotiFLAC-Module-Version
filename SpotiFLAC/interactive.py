@@ -237,8 +237,12 @@ async def _pick_from_history() -> str | None:
                 print(f"     {DIM(url_short)}")
             else:
                 print(f"  {_i}. {url_short}")
-        
-        print(DIM("\n  [1-8] Select  |  c: Clear history  |  r: Clear recent  |  d<num>: Delete entry"))
+
+        print(
+            DIM(
+                "\n  [1-8] Select  |  c: Clear history  |  r: Clear recent  |  d<num>: Delete entry"
+            )
+        )
 
         try:
             val = input("  → ").strip()
@@ -311,7 +315,7 @@ async def _profile_load_section(cfg: dict) -> dict:
         _section("Load Profile  (optional)")
         for _i, _name in enumerate(profiles, 1):
             print(f"  {_i}. {_name}")
-            
+
         print(DIM("\n  [num/name] Select  |  d<num>: Delete profile"))
 
         try:
