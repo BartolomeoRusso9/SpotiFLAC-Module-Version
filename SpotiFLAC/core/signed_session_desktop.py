@@ -24,6 +24,22 @@ logger = logging.getLogger(__name__)
 # Costanti
 COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
 COMMUNITY_VERIFY_TIMEOUT = 45  # seconds
+DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS = 10
+
+
+def wait_before_desktop_solver_start() -> None:
+    """Desktop verification waits for Cloudflare/solver page to render.
+
+    Some challenge pages do not expose the Turnstile iframe immediately; the
+    browser can need a few seconds to settle before the Cloudflare helper is
+    ready to solve. We intentionally keep the delay explicit and configurable
+    rather than hardcoding it inside the solver thread launch.
+    """
+    logger.info(
+        "[desktop verification] waiting %.0f seconds before starting solver.py",
+        DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS,
+    )
+    time.sleep(DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS)
 
 
 def fetch_latest_version() -> str:
@@ -291,7 +307,13 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             # =========================================================================
             # FIX: Eseguiamo il solver in un thread separato (daemon) in modo che
             # il thread principale possa ascoltare la coda grant_queue senza bloccarsi!
+            #
+            # Desktop verification waits for the Cloudflare challenge page to render
+            # its iframe and to expose the expected quadratini after a short page load
+            # budget. The solver starts only after that stable delay.
             # =========================================================================
+            wait_before_desktop_solver_start()
+
             def _run_solver_thread():
                 try:
                     _token, grant_res = solve_with_callback(
