@@ -855,7 +855,7 @@ async def _fetch_tidal_url_parallel_async(
 
     available = [a for a in apis if not _is_api_rate_limited(a)]
     if not available:
-        logger.debug("[tidal] tutte le API sono in cooldown, uso la lista completa")
+        logger.debug("[tidal] all APIs are in cooldown, using the full list")
         available = apis
 
     start = time.time()
@@ -1167,12 +1167,12 @@ class TidalProvider(BaseProvider):
         """Native and purely asynchronous resolution via Songlink.
         Removes blocking and fixes the HTTP client AttributeError.
         """
-        # LinkResolver si aspetta un AsyncHttpClient (che espone get_json_async/get),
-        # non il raw httpx.AsyncClient restituito da NetworkManager: passare quest'ultimo
-        # causava AttributeError ("'AsyncClient' object has no attribute 'get_json_async'").
+        # LinkResolver expects an AsyncHttpClient (exposing get_json_async/get),
+        # not the raw httpx.AsyncClient returned by NetworkManager: passing the
+        # latter caused AttributeError ("'AsyncClient' object has no attribute 'get_json_async'").
         resolver = LinkResolver()
 
-        # Esegui direttamente l'await senza creare thread o sotto-loop artificiali
+        # Await directly without spawning threads or artificial subloops
         links = await resolver.resolve_all_async(spotify_track_id)
 
         tidal_url = links.get("tidal")
@@ -1310,8 +1310,8 @@ class TidalProvider(BaseProvider):
     ) -> None:
         if aiofiles is None:
             msg = (
-                "aiofiles non installato — richiesto da TidalProvider._download_segments_async(). "
-                "Eseguire: pip install aiofiles"
+                "aiofiles is not installed — required by TidalProvider._download_segments_async(). "
+                "Run: pip install aiofiles"
             )
             raise RuntimeError(
                 msg,
@@ -1526,7 +1526,7 @@ class TidalProvider(BaseProvider):
 
             # Qobuz (per ISRC) e il proxy Tidal (per releaseDate, e ISRC come
             # ultima risorsa) sono richieste di rete indipendenti tra loro:
-            # le eseguiamo in parallelo con asyncio.gather invece di awaitarle
+            # run them in parallel with asyncio.gather instead of awaiting them sequentially
             # in sequenza, per ridurre la latenza totale di questa fase.
             qobuz_isrc, details = await asyncio.gather(
                 _find_isrc_via_qobuz(
@@ -1633,7 +1633,7 @@ class TidalProvider(BaseProvider):
             # Controllo Preview derivato dal Web JS
             actual_s = await self._get_audio_duration_seconds_async(final_dest)
             if actual_s <= 35 and expected_s > 45:
-                # E' probabile che sia stato scaricato un preview limitato
+                # It is likely that a preview-only track was downloaded
                 if final_dest.exists():
                     final_dest.unlink()
                 raise SpotiflacError(

@@ -19,3 +19,6 @@ SpotiFLAC/provider_test_report.txt
 test_mono_download.py
 *.flac
 CLAUDE.local.md
+docker-compose.yml
+/.cache_docker
+/.spotiflac_docker

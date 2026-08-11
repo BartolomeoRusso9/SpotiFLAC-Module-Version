@@ -3,7 +3,7 @@
 class ToastManager {
   constructor() {
     this.toastId = 0;
-    // Check se l'utente ha disabilitato i suoni
+    // Check whether the user has disabled sounds
     this.soundEnabled = localStorage.getItem('spotiflac-sound-enabled') !== 'false';
   }
 

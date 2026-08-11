@@ -51,13 +51,13 @@ async def _save_async(data: dict) -> None:
 
 
 async def get_last_folder_async() -> str:
-    """Returns l'ultima cartella di output usata, o stringa vuota."""
+    """Returns the last used output folder, or an empty string."""
     data = await _load_async()
     return data.get("last_folder", "")
 
 
 async def set_last_folder_async(folder: str) -> None:
-    """Memorizza l'ultima cartella di output utilizzata."""
+    """Stores the last used output folder."""
     if not folder:
         return
     data = await _load_async()

@@ -81,8 +81,10 @@ def _ask_bool(prompt: str, default: bool = False) -> bool:
 
 
 def _ask_choice(prompt: str, options: list[str], default: str) -> str:
+    print(f"  {prompt}")
     for _i, opt in enumerate(options, 1):
-        GREEN("▶") if opt == default else " "
+        marker = GREEN("▶") if opt == default else " "
+        print(f"    {marker} {_i}. {opt}")
     try:
         val = input("  → ").strip()
     except (EOFError, KeyboardInterrupt):
@@ -102,9 +104,11 @@ def _ask_multi(
     defaults: list[str],
     ordered: bool = False,
 ) -> list[str]:
+    print(f"  {prompt}")
     for _i, opt in enumerate(options, 1):
-        GREEN("●") if opt in defaults else DIM("○")
-        DIM(" (default)") if opt in defaults else ""
+        marker = GREEN("●") if opt in defaults else DIM("○")
+        def_hint = DIM(" (default)") if opt in defaults else ""
+        print(f"    {marker} {_i}. {opt}{def_hint}")
     try:
         val = input("  → ").strip()
     except (EOFError, KeyboardInterrupt):
@@ -133,11 +137,13 @@ def _ask_multi(
 
 
 def _section(title: str) -> None:
-    pass
+    print(f"\n{BOLD(CYAN(title))}")
+    print(DIM("─" * 40))
 
 
 def _header() -> None:
-    pass
+    print(f"\n{BOLD(MAGENTA('SpotiFLAC — Interactive Mode'))}")
+    print(DIM("=" * 40))
 
 
 # ---------------------------------------------------------------------------
@@ -161,12 +167,6 @@ _ALL_SERVICES = [
 
 
 async def _display_health_check() -> dict[str, bool]:
-    """Display the reachability status of supported services and extensions.
-
-    Returns:
-        dict[str, bool]: A mapping of service and, when available, extension names to their reachability status.
-
-    """
     _section("Service Availability Check")
 
     try:
@@ -180,31 +180,27 @@ async def _display_health_check() -> dict[str, bool]:
     if not results:
         return {}
 
-    # Organizza i risultati: ci basta sapere se il provider ha almeno un endpoint OK
     status = dict.fromkeys(_ALL_SERVICES, False)
     for r in results:
         if r.ok:
             status[r.provider] = True
 
-    # Stampa i provider in verticale con lo stato testuale
     for svc in _ALL_SERVICES:
         ok = status[svc]
-        GREEN("✅") if ok else RED("❌")
-
-        if ok:
-            pass
-        else:
-            pass
+        icon = GREEN("✅") if ok else RED("❌")
+        print(f"  {icon} {svc.capitalize()}")
 
     working_count = sum(status.values())
-    len(_ALL_SERVICES)
+    total_services = len(_ALL_SERVICES)
+    print(f"\n  {BOLD('Total reachable:')} {working_count}/{total_services}")
 
     if working_count == 0:
-        pass
+        print(f"  {RED('Warning: All primary services are currently unreachable!')}")
 
     if ext_result is not None:
-        GREEN("✅") if ext_result.ok else RED("❌")
+        icon = GREEN("✅") if ext_result.ok else RED("❌")
         status["extensions"] = ext_result.ok
+        print(f"\n  {icon} Extensions Fallback")
 
     return status
 
@@ -237,7 +233,16 @@ async def _pick_from_history() -> str | None:
             label = entry.get("label", entry.get("url", ""))[:55]
             url_short = entry.get("url", "")[:60]
             if label != url_short:
-                pass
+                print(f"  {_i}. {label}")
+                print(f"     {DIM(url_short)}")
+            else:
+                print(f"  {_i}. {url_short}")
+
+        print(
+            DIM(
+                "\n  [1-8] Select  |  c: Clear history  |  r: Clear recent  |  d<num>: Delete entry"
+            )
+        )
 
         try:
             val = input("  → ").strip()
@@ -262,7 +267,6 @@ async def _pick_from_history() -> str | None:
         if val_lower in ("r", "recent", "clear recent"):
             if _ask_bool("Are you sure you want to clear recent fetches?", False):
                 try:
-                    # Delegate blocking sync core/history I/O to to_thread for safety
                     await asyncio.to_thread(clear_recent_fetches)
                     continue
                 except Exception:
@@ -310,7 +314,9 @@ async def _profile_load_section(cfg: dict) -> dict:
 
         _section("Load Profile  (optional)")
         for _i, _name in enumerate(profiles, 1):
-            pass
+            print(f"  {_i}. {_name}")
+
+        print(DIM("\n  [num/name] Select  |  d<num>: Delete profile"))
 
         try:
             val = input("  → ").strip()
@@ -357,7 +363,7 @@ async def _profile_save_section(cfg: dict) -> None:
 
     existing = await list_profiles_async()
     if existing:
-        pass
+        print(DIM(f"  Existing profiles: {', '.join(existing)}"))
 
     name = _ask("Profile name", "default").strip()
     if not name:
@@ -376,7 +382,8 @@ def _summary(cfg: dict) -> None:
     _section("Configuration Summary")
 
     def row(label: str, value: str) -> None:
-        pass
+        pad = " " * max(0, 22 - len(label))
+        print(f"  {BOLD(label)}{pad}: {value}")
 
     row("URL", cfg["url"][:65])
     row("Output Dir", cfg["output_dir"])
@@ -570,7 +577,7 @@ async def run_interactive() -> dict:
     if health_status:
         unavailable = [s for s in _ALL_SERVICES if not health_status.get(s, True)]
         if unavailable:
-            pass
+            print(DIM(f"  Unavailable: {', '.join(unavailable)}"))
 
     is_soundcloud_url = (
         "soundcloud.com" in cfg["url"] or "on.soundcloud.com" in cfg["url"]
@@ -1048,4 +1055,5 @@ def _print_cli_command(cfg: dict) -> None:
     if cfg.get("loop"):
         parts.append(f"--loop {cfg['loop']}")
 
-    " \\\n    ".join(parts)
+    command = " \\\n    ".join(parts)
+    print(f"\n  {command}\n")

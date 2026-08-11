@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import logging
 import os
 import shutil
@@ -19,8 +20,8 @@ if parent_dir not in sys.path:
 # --------------------------------
 
 # Import core components via "SpotiFLAC."
-from SpotiFLAC.core.http import NetworkManager
-from SpotiFLAC.providers.spotify_metadata import SpotifyMetadataClient
+NetworkManager = importlib.import_module("SpotiFLAC.core.http").NetworkManager
+SpotifyMetadataClient = importlib.import_module("SpotiFLAC.providers.spotify_metadata").SpotifyMetadataClient
 
 if TYPE_CHECKING:
     from SpotiFLAC.core.models import TrackMetadata

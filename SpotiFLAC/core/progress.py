@@ -18,8 +18,8 @@ from typing_extensions import Self
 
 from .console import print_track_progress
 
-# tqdm.get_lock() rimane come lock nativo di tqdm (non è un nostro accrocchio,
-# è la sincronizzazione interna della libreria per la scrittura su stderr).
+# tqdm.get_lock() remains the native tqdm lock (this is not our own hack;
+# it is the library's internal synchronization for writing to stderr).
 
 
 # A tqdm bar is a stream of carriage returns: on a terminal that draws a
@@ -220,10 +220,10 @@ class DownloadItem:
 
 
 class DownloadBroadcaster:
-    """Singleton per lo streaming degli eventi di progresso verso eventuali
-    listener esterni (es. la GUI webview). Prima usava _CrossLoopLock per
-    proteggere l'accesso a self._listeners da più thread/loop paralleli.
-    Con un unico event loop, asyncio.Lock() è sufficiente e corretto.
+    """Singleton for streaming progress events to external listeners
+    (e.g. a GUI webview). Previously it used _CrossLoopLock to protect
+    access to self._listeners from multiple parallel threads/loops.
+    With a single event loop, asyncio.Lock() is sufficient and correct.
     """
 
     _instance: DownloadBroadcaster | None = None
@@ -262,9 +262,9 @@ class DownloadBroadcaster:
 
 
 class DownloadManager:
-    """Singleton che tiene lo stato della coda di download.
-    _CrossLoopLock -> asyncio.Lock(): valido perché non esistono più event
-    loop multipli concorrenti (nessun thread fa più il proprio asyncio.run()).
+    """Singleton that holds the download queue state.
+    _CrossLoopLock -> asyncio.Lock(): valid because there are no longer
+    multiple concurrent event loops (no thread runs its own asyncio.run()).
     """
 
     _instance: DownloadManager | None = None
@@ -476,15 +476,15 @@ class DownloadManager:
 
 
 class ProgressManager:
-    """Gestisce le barre tqdm per-track.
+    """Manages per-track tqdm bars.
 
-    Prima: queue.Queue (thread-safe nativa) + threading.Thread consumer,
-    necessari perché ogni download girava nel proprio thread/event loop.
+    Before: queue.Queue (native thread-safe) + threading.Thread consumer,
+    required because each download ran in its own thread/event loop.
 
-    Ora: asyncio.Queue() + asyncio.Task consumer. Un solo event loop, quindi
-    niente più bisogno di primitive thread-safe: enqueue_progress() è una
-    semplice put_nowait() sulla queue asyncio (safe da qualunque coroutine
-    o callback sincrono chiamato all'interno dello stesso loop).
+    Now: asyncio.Queue() + asyncio.Task consumer. A single event loop, so
+    no more need for thread-safe primitives: enqueue_progress() is a simple
+    put_nowait() on the asyncio queue (safe from any coroutine or synchronous
+    callback called within the same loop).
     """
 
     _bars: dict[str, tqdm] = {}
@@ -607,9 +607,9 @@ class ProgressManager:
         current_bytes: int,
         total_bytes: int | None,
     ) -> None:
-        """Chiamata da coroutine/callback dentro il loop principale. Va avviato
-        il worker lazy la prima volta (idempotente) e poi si fa una semplice
-        put_nowait() — nessuna primitiva thread-safe necessaria.
+        """Called from a coroutine/callback inside the main loop. The worker
+        is started lazily the first time (idempotent) and then a simple
+        put_nowait() is used — no thread-safe primitive is required.
         """
         cls.start_worker()
         if cls._event_queue is not None:
@@ -752,9 +752,9 @@ class ProgressManager:
 
 
 class ProgressCallback:
-    """Callback di progresso passato ai provider. Invariato nella logica di
-    throttling; enqueue_progress() ora è thread-agnostic per costruzione
-    (asyncio.Queue), quindi resta sincrona e non-bloccante come prima.
+    """Progress callback passed to providers. Unchanged in throttling logic;
+    enqueue_progress() is now thread-agnostic by design (asyncio.Queue), so it
+    remains synchronous and non-blocking as before.
     """
 
     def __init__(self, item_id: str = "", track_name: str = "") -> None:

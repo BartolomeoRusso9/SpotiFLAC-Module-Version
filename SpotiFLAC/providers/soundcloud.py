@@ -512,9 +512,9 @@ class SoundCloudProvider(BaseProvider):
         return ordered
 
     async def _get_user_tracks_list_async(self, user_id: int) -> list[TrackMetadata]:
-        """Pagina i brani di un utente usando _api_get_async per la prima pagina
-        e _api_get_url_async per le successive (next_href), garantendo auth
-        refresh e rate-limiting uniformi su tutto il ciclo.
+        """Pages a user's tracks using _api_get_async for the first page
+        and _api_get_url_async for subsequent pages (next_href), ensuring
+        uniform auth refresh and rate-limiting across the entire cycle.
         """
         tracks: list[TrackMetadata] = []
 

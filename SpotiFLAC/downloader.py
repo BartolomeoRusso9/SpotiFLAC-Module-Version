@@ -114,11 +114,11 @@ class DownloadOptions:
     qobuz_token: str | None = None
     qobuz_local_api_url: str | None = None
 
-    # Conversione post-download: None = tieni il formato del provider,
-    # "mp3" = converti ogni traccia in MP3 a `transcode_bitrate`.
-    # Il file convertito prende lo stesso nome con estensione diversa, così
-    # lo skip dei brani già scaricati continua a funzionare (viene cercato
-    # direttamente il file convertito, prima di contattare i provider).
+    # Post-download conversion: None = keep the provider format,
+    # "mp3" = convert every track to MP3 at `transcode_bitrate`.
+    # The converted file uses the same name with a different extension so
+    # skipping already-downloaded tracks still works (the converted file is
+    # looked for directly before contacting providers).
     transcode_to: str | None = None
     transcode_bitrate: str = DEFAULT_MP3_BITRATE
     transcode_keep_original: bool = False
@@ -130,16 +130,16 @@ class DownloadOptions:
     timeout_s: int | None = None
     auto_pair_extensions: bool = True
     ext_dir: str | None = None
-    # Fase 2: numero massimo di download concorrenti gestiti dal semaforo
-    # asyncio.Semaphore in DownloadWorker._run_downloads_async(). Prima era
-    # una costante hardcoded (MAX_CONCURRENT_DOWNLOADS = 2) — ora è
-    # configurabile dal chiamante (CLI/API), mantenendo lo stesso default.
+    # Phase 2: maximum concurrent downloads managed by the semaphore
+    # asyncio.Semaphore in DownloadWorker._run_downloads_async(). Previously
+    # this was a hardcoded constant (MAX_CONCURRENT_DOWNLOADS = 2) — now it is
+    # configurable by the caller (CLI/API), while preserving the same default.
     max_concurrent_downloads: int = 2
 
     def __post_init__(self) -> None:
-        # Normalizza subito così il resto del codice può fare `if opts.transcode_to`
-        # e un formato non supportato fallisce dove viene configurato, non a metà
-        # di un batch di download.
+        # Normalize immediately so the rest of the code can do `if opts.transcode_to`
+        # and an unsupported format fails where it is configured, not midway
+        # through a download batch.
         self.transcode_to = normalize_transcode_format(self.transcode_to)
         self.transcode_bitrate = normalize_bitrate(self.transcode_bitrate)
 
@@ -190,7 +190,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
     """
     providers: list[BaseProvider] = []
 
-    # 0. Se l'utente chiede esplicitamente SOLO l'estensione (es. -s ext:qobuz-web)
+    # 0. If the user explicitly requests ONLY the extension (e.g. -s ext:qobuz-web)
     if name.startswith("ext:"):
         p = _build_provider(name, opts)
         if p:
@@ -217,7 +217,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
             except ImportError:
                 pass
 
-            # B. Aggiunge in automatico il nome base e la variante "-web" (es. qobuz, qobuz-web, tidal-web)
+            # B. Automatically add the base name and the "-web" variant (e.g. qobuz, qobuz-web, tidal-web)
             if name not in possible_ext_ids:
                 possible_ext_ids.append(name)
             if f"{name}-web" not in possible_ext_ids:
@@ -324,8 +324,8 @@ async def _transcode_result_async(
             f"Downloaded, but transcode to {opts.transcode_to.upper()} failed: {exc}",
         )
 
-    # Anche un risultato "skipped" (file preesistente in un altro formato) è
-    # stato riscritto: va riportato come download riuscito, non come skip.
+    # Even a "skipped" result (file already existing in another format) is
+    # rewritten: it should be reported as a successful download, not as a skip.
     return DownloadResult.ok(result.provider, str(dest), opts.transcode_to)
 
 
@@ -448,8 +448,8 @@ async def download_one_async(
 
             if result.success:
                 if opts.transcode_to:
-                    # Un file preesistente in un altro formato viene convertito
-                    # anch'esso: al giro successivo lo skip lo troverà già in MP3.
+                    # A file already existing in another format is also converted:
+                    # on the next pass the skip logic will already find it in MP3.
                     result = await _transcode_result_async(result, opts)
                     if not result.success:
                         return result
@@ -554,11 +554,10 @@ class DownloadWorker:
         self._collection_name = collection_name
         self._is_album = is_album
         self._is_playlist = is_playlist
-        # Numero di traccia usato per il filename. Di default è la posizione
-        # nella lista; un chiamante che scarica solo un sottoinsieme (es. il
-        # sync multi-playlist, che salta i brani già presenti) passa le
-        # posizioni originali per non cambiare i nomi dei file tra un run e
-        # l'altro.
+        # Track number used for the filename. By default it's the position in
+        # the list; a caller that downloads only a subset (e.g. multi-playlist
+        # sync that skips already-present tracks) passes original positions so
+        # file names do not change between runs.
         self._positions = positions or list(range(1, len(tracks) + 1))
         self._failed: list[tuple[str, str, str, str]] = []
         self._completed: dict[str, str] = {}
@@ -593,8 +592,8 @@ class DownloadWorker:
     async def run_async(self) -> list[tuple[str, str, str]]:
         try:
             if self._opts.transcode_to:
-                # Meglio fermarsi subito che scaricare un intero album e
-                # scoprire solo alla fine che la conversione non è possibile.
+                # It's better to fail fast than to download a whole album and
+                # discover only at the end that conversion is not possible.
                 await asyncio.to_thread(
                     ensure_ffmpeg_available,
                     self._opts.transcode_to,
@@ -635,20 +634,19 @@ class DownloadWorker:
     ) -> list[tuple[str, str, str]]:
         """Fase 2 — concorrenza nativa asyncio.
 
-        Prima: una lista di asyncio.Task consumata con asyncio.as_completed().
-        Funzionalmente corretto, ma senza propagazione strutturata degli
-        errori (un task che solleva un'eccezione non attesa non annullava
-        gli altri, e la cancellazione andava gestita a mano).
+        Before: a list of asyncio.Task consumed with asyncio.as_completed().
+        Functionally correct, but without structured error propagation
+        (a task raising an unexpected exception did not cancel the others,
+        and cancellation had to be handled manually).
 
-        Ora: asyncio.TaskGroup (structured concurrency, PEP 654/3.11+).
-        Il rate-limiting resta un asyncio.Semaphore(max_concurrent_downloads)
-        acquisito da ogni worker prima di fare I/O pesante (richieste di
-        rete / scrittura su disco). I risultati vengono processati man mano
-        che arrivano tramite una asyncio.Queue interna, così l'aggiornamento
-        della progress bar resta "a mano a mano" come nella versione con
-        as_completed, ma dentro un TaskGroup che garantisce: se un worker
-        solleva un'eccezione realmente inattesa, tutti gli altri task del
-        gruppo vengono cancellati in modo pulito invece di proseguire
+        Now: asyncio.TaskGroup (structured concurrency, PEP 654/3.11+).
+        Rate limiting remains an asyncio.Semaphore(max_concurrent_downloads)
+        acquired by each worker before performing heavy I/O (network requests /
+        disk writes). Results are processed as they arrive through an internal
+        asyncio.Queue, so progress bar updates remain incremental like the
+        as_completed version, but inside a TaskGroup that ensures: if a worker
+        raises an unexpected exception, all other tasks in the group are
+        cleanly cancelled instead of continuing.
         silenziosamente.
         """
         max_concurrent = max(1, getattr(self._opts, "max_concurrent_downloads", 2))
@@ -928,8 +926,8 @@ class SpotiflacDownloader:
                 continue
 
             name = collection_name or "Playlist"
-            # Prima della risoluzione ISRC: quella può durare a lungo, e
-            # sapere quale playlist si sta elaborando serve proprio lì.
+            # Before ISRC resolution: that can take a long time, and knowing
+            # which playlist is being processed is useful right there.
             print_playlist_resolved(name, len(tracks), url)
 
             # SoundCloud e Pandora non espongono ISRC: la risoluzione bulk
@@ -962,7 +960,7 @@ class SpotiflacDownloader:
         worker = DownloadWorker(
             tracks=tracks,
             opts=opts,
-            # Cartella unica: nessun sottolivello per playlist.
+            # Single folder: no playlist subdirectory.
             collection_name="",
             is_album=False,
             is_playlist=False,

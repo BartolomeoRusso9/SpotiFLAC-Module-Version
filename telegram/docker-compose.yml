@@ -1,7 +1,7 @@
 services:
   spotiflac:
     image: ghcr.io/bartolomeorusso9/spotiflac-module-version:latest
-    container_name: spotiflac
+    container_name: spotiflac-bot
     restart: unless-stopped
     privileged: true
     command: ["bot"]

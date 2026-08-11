@@ -3,7 +3,7 @@ let initialSettings = {};
 
 // ── Detect OS and apply system-specific styles ──────────────────────────────
 function detectAndApplyOSStyles() {
-  // Rileva il sistema operativo dal user agent
+  // Detect OS from the user agent
   const userAgent = navigator.userAgent.toLowerCase();
   let detectedOS = 'mac'; // Default to macOS (colorful dots)
 
@@ -23,7 +23,7 @@ function detectAndApplyOSStyles() {
   console.log(`[OS Detection] Detected OS: ${detectedOS}`);
 }
 
-// Esegui il rilevamento al caricamento della page
+// Run detection on page load
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', detectAndApplyOSStyles);
 } else {
@@ -67,7 +67,7 @@ function showSkeletonTracks(count = 5) {
   if (header) header.style.display = 'none';
 }
 
-// Inizializza lo stato dopo aver loaded le impostazioni
+// Initialize state after loaded settings
 function initSettingsTracking() {
     initialSettings = buildConfig();
     isDirty = false;
@@ -89,22 +89,22 @@ function updateSaveButtonVisual() {
 
 function clearSearchUI() {
     const container = $('text-search-results');
-    if (container) container.innerHTML = ''; // Svuota il messaggio
-    $('text-search-container')?.classList.add('hidden'); // Nasconde il contenitore
+    if (container) container.innerHTML = ''; // Clear the message
+    $('text-search-container')?.classList.add('hidden'); // Hide the container
 }
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const ts = () => new Date().toLocaleTimeString('it-IT');
-// ── Inizializzazione Globale ──────────────────────────────────────────────────
+// ── Global Initialization ──────────────────────────────────────────────────
 const toastMgr = new ToastManager();
 
 // ── View switching ───────────────────────────────────────────────────────────
 function switchView(name) {
   if (isDirty) {
         if (!confirm("You have unsaved changes. Do you want to leave this page?")) {
-            return; // Interrompe il cambio view
+            return; // Cancel view change
         }
-        isDirty = false; // Reset forzato se l'utente sceglie di abbandonare
+        isDirty = false; // Force reset when the user chooses to leave
         updateSaveButtonVisual();
     }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -270,7 +270,7 @@ async function loadSettingsFromStorage() {
   }
 }
 
-// Monitora qualsiasi modifica negli input delle impostazioni
+// Track any changes in settings input fields
 document.querySelector('.s-body').addEventListener('input', (e) => {
     const current = JSON.stringify(buildConfig());
     const initial = JSON.stringify(initialSettings);
@@ -306,8 +306,8 @@ function resetSettings() {
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
     localStorage.removeItem('spotiflac-theme-mode');
     applySettings(DEFAULT_SETTINGS);
-    isDirty = false; // Reset dello stato
-    initialSettings = buildConfig(); // Aggiorna la baseline al default
+    isDirty = false; // Reset state
+    initialSettings = buildConfig(); // Update the baseline to default
     updateSaveButtonVisual();
     logMessage('Settings reset to defaults.', 'ok');
   } catch (e) {
@@ -496,13 +496,13 @@ function compareVersionStrings(a, b) {
 function showUpdateBadge(latestVersion, publishedAt) {
   const tbBadge = document.getElementById('tb-update-badge');
   const heroBadge = document.getElementById('hero-update-badge');
-  const title = latestVersion ? `Aggiornamento disponibile: v${latestVersion}` : 'Aggiornamento disponibile';
+  const title = latestVersion ? `Update available: v${latestVersion}` : 'Update available';
   if (tbBadge) {
-    tbBadge.title = publishedAt ? `${title}\nRilasciata: ${publishedAt}` : title;
+    tbBadge.title = publishedAt ? `${title}\nReleased: ${publishedAt}` : title;
     tbBadge.classList.remove('hidden');
   }
   if (heroBadge) {
-    heroBadge.title = publishedAt ? `${title}\nRilasciata: ${publishedAt}` : title;
+    heroBadge.title = publishedAt ? `${title}\nReleased: ${publishedAt}` : title;
     heroBadge.classList.remove('hidden');
   }
 }
@@ -618,19 +618,19 @@ function copyLogs() {
 
     if (navigator.clipboard) {
         navigator.clipboard.writeText(logsText).then(() => {
-            toastMgr.success('Logs copiati negli appunti!');
+            toastMgr.success('Logs copied to clipboard!');
         }).catch(err => {
             toastMgr.error('Error copying logs.');
         });
     } else {
-        // Fallback per browser vecchi
+        // Fallback for older browsers
         const textArea = document.createElement("textarea");
         textArea.value = logsText;
         document.body.appendChild(textArea);
         textArea.select();
         document.execCommand("copy");
         document.body.removeChild(textArea);
-        toastMgr.info('Logs copiati (fallback).');
+        toastMgr.info('Logs copied (fallback).');
     }
 }
 
@@ -834,7 +834,7 @@ let queueStartTime = null;
 let queueDurationInterval = null;
 let previewAudio = null;
 let previewPlayingIndex = -1;
-// Distrugge l'audio corrente per rilasciare i tasti multimediali del Sistema Operativo
+// Destroy current audio to release OS media keys
 function stopCurrentPreview() {
   if (previewAudio) {
     previewAudio.pause();
@@ -854,7 +854,7 @@ const TRACKS_PER_PAGE = 50;
 
 // ── Logging & Python bridge ──────────────────────────────────────────────────
 function logMessage(msg, type = '') {
-  // Scrivi nel pannello log UI
+  // Write to the log UI panel
   const area = $('logArea');
   if (area) {
     const line = document.createElement('div');
@@ -1118,7 +1118,7 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
     
     artistStatsRow.innerHTML = parts.map(p => `<span>${escHtml(p)}</span>`).join('<span class="dot-sep"> · </span>');
     artistStatsRow.style.display = 'flex';
-    if (ownerRow) ownerRow.style.display = 'none'; // Nasconde la riga originale mantenendola intatta
+    if (ownerRow) ownerRow.style.display = 'none'; // Hide the original row while keeping it intact
     
     metaDetails.classList.remove('hidden');
     if (avatarEl) avatarEl.classList.add('hidden');
@@ -1219,12 +1219,12 @@ function updateAlbumMeta(trackCount) {
       const ac = albumSet.size;
       const albumTrackText = `${ac} album${ac !== 1 ? 's' : ''} · ${trackCount} track${trackCount !== 1 ? 's' : ''}`;
       
-      // Aggiunge la parte album/track in coda alla riga esistente
+      // Append the album/track part to the existing row
       artistStatsRow.innerHTML += `<span class="dot-sep"> · </span><span>${escHtml(albumTrackText)}</span>`;
     }
   }
   
-  // Per gli album, mostra artista, data e numero di tracks nel subtitle
+  // For albums, show artist, date, and track count in the subtitle
   if (badgeType === 'ALBUM') {
     const artistEl = $('album-artist');
     const artist = artistEl.textContent?.trim() || '';
@@ -1424,7 +1424,7 @@ function injectArtistTabs(tracks) {
   });
   section.appendChild(tabBar);
 
-  // ── Pannello Albums ──
+  // ── Albums Panel ──
   const albumsPanel = document.createElement('div');
   albumsPanel.id = 'artist-panel-albums';
   albumsPanel.className = 'artist-albums-grid';
@@ -1446,7 +1446,7 @@ function injectArtistTabs(tracks) {
   });
   section.appendChild(albumsPanel);
 
-  // ── Pannello Gallery ──
+  // ── Gallery Panel ──
   const galleryPanel = document.createElement('div');
   galleryPanel.id = 'artist-panel-gallery';
   galleryPanel.className = 'artist-gallery-grid';
@@ -1458,7 +1458,7 @@ function injectArtistTabs(tracks) {
   const listContainer = document.querySelector('.list-container');
   listContainer.insertBefore(section, $('track-controls'));
 
-  // Carica gallery in background
+  // Load gallery in background
   loadArtistGallery(galleryPanel);
 }
 
@@ -1512,7 +1512,7 @@ function switchArtistTab(tabName) {
 function renderTracks(tracks, page = 1) {
   stopCurrentPreview();
   
-  // Salva l'ordine di partenza per poterlo ripristinare in seguito
+  // Save original order so it can be restored later
   tracks.forEach((t, idx) => {
     if (t._originalIndex === undefined) {
       t._originalIndex = idx;
@@ -1522,7 +1522,7 @@ function renderTracks(tracks, page = 1) {
   currentTracks = tracks;
   currentPage = page;
   
-  // Calcola la pagezione
+  // Calculate pagination
   const totalPages = Math.ceil(tracks.length / TRACKS_PER_PAGE);
   const startIdx = (currentPage - 1) * TRACKS_PER_PAGE;
   const endIdx = startIdx + TRACKS_PER_PAGE;
@@ -1652,7 +1652,7 @@ function renderTracks(tracks, page = 1) {
       }
       $('recent-wrap').style.display = 'none';
       
-      // Mostra/nascondi pagezione
+      // Show/hide pagination
       updatePaginationControls(totalPages);
     }
   };
@@ -2988,7 +2988,7 @@ async function onFetch() {
     } else {
       const searchUrl = `https://open.spotify.com/search/$${encodeURIComponent(url)}`;
       window.open(searchUrl, '_blank');
-      setStatus('Demo: aperto Spotify nel browser (Python non connesso)', false);
+      setStatus('Demo: opened Spotify in browser (Python not connected)', false);
       setFetchingState('success'); // Sblocca demo
     }
     return;
@@ -3003,7 +3003,7 @@ async function onFetch() {
   if (window.pywebview?.api) {
     try {
       await window.pywebview.api.fetch_metadata(url);
-      // Non sblocchiamo l'interfaccia qui. Aspettiamo le Callback di Python!
+      // We do not unlock the UI here. Wait for Python callbacks!
     } catch (e) {
       logMessage('Fetch error: ' + e, 'error');
       setFetchingState('error'); // Sblocca in caso di crash Python
@@ -3241,8 +3241,8 @@ async function loadProfile() {
  * @param {Array<Object>} data - Health-check result rows containing provider identifiers and endpoint status.
  */
 function renderHealthResults(data) {
-  // Le righe del servizio estensioni sono mostrate a parte, non sono
-  // un "provider" musicale e non devono contare nel totale provider.
+  // Extension service rows are shown separately; they are not
+  // a music provider and should not count toward the provider total.
   const extRows  = data.filter(r => r.provider === 'extensions');
   const provRows = data.filter(r => r.provider !== 'extensions');
 
@@ -3434,14 +3434,14 @@ $('urlInput').addEventListener('input', function() {
   _searchDebounceTimer = setTimeout(() => {
     _lastSearchQuery = query;
 
-    // INIZIO MODIFICA: Invece del vecchio testo di caricamento, mostriamo gli Skeleton!
-    // Chiamiamo la funzione che hai appena creato
-    showSkeletonTracks(6); // Mostra 6 righe "fantasma" che pulsano
+    // BEGIN CHANGE: Instead of old loading text, show skeletons!
+    // Call the function you just created
+    showSkeletonTracks(6); // Show 6 pulsing placeholder rows
     
-    // Assicurati che il contenitore della tabella sia visibile
+    // Ensure the table container is visible
     $('track-table-wrap')?.classList.remove('hidden');
     $('text-search-container')?.classList.add('hidden');
-    // FINE MODIFICA
+    // END CHANGE
 
     if (window.pywebview?.api) {
       window.pywebview.api.search_provider_async(query, 50).catch(e => {

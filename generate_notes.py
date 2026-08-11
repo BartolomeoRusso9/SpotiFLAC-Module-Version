@@ -26,10 +26,10 @@ You are a technical assistant. Here are the recent commits of a software reposit
 
 Generate professional release notes in Markdown.
 Organize them into these sections: New Features, Bug Fixes, and Maintenance.
-Explain the changes in simple terms, ignoring system commits like "merge" or "bump version".
+Explain the changes in simple terms but explaining their impact and specifically the changed things, ignoring system commits like "merge" or "bump version".
 """
 
-# 4. Genera la risposta con un modello del free tier
+# 4. Generate the response with a free-tier model
 response = client.models.generate_content(
     model="gemini-2.5-flash",
     contents=prompt,

@@ -23,8 +23,13 @@ logger = logging.getLogger(__name__)
 
 # Costanti
 COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
-COMMUNITY_VERIFY_TIMEOUT = 45  # seconds
-DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS = 15
+# The callback grant is consumed by ``run_community_verification()`` from a
+# ``solve_with_callback()`` worker thread started here. That solver call is
+# configured with a 60s solve budget, so the queue-side waiter needs to stay
+# open past that budget rather than timing out at 45s and aborting the whole
+# flow while the background solver is still trying to complete.
+COMMUNITY_VERIFY_TIMEOUT = 90  # seconds
+DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS = 5
 
 
 def wait_before_desktop_solver_start() -> None:
@@ -80,7 +85,7 @@ class CommunitySessionExchange:
 
 
 def ensure_app_dir() -> str:
-    """Restituisce la cartella dell'app."""
+    """Returns the application folder."""
     app_dir = os.path.expanduser("~/.spotiflac")
     os.makedirs(app_dir, exist_ok=True)
     return app_dir
@@ -166,7 +171,10 @@ def ensure_community_session() -> CommunitySessionRecord:
                 break
             except Exception as exc:
                 message = str(exc)
-                if "Automated verification timed out" not in message and "verification timed out" not in message:
+                if (
+                    "Automated verification timed out" not in message
+                    and "verification timed out" not in message
+                ):
                     raise
 
                 if attempt < 2:
@@ -246,9 +254,9 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 foreground()
 
         def log_message(self, format, *args) -> None:
-            pass  # Disabilita i log standard del server HTTP
+            pass  # Disable the standard HTTP server logs
 
-    # Avvia il server su una porta casuale libera
+    # Start the server on a free random port
     server = HTTPServer(("127.0.0.1", 0), CallbackHandler)
     port = server.server_address[1]
     callback_url = f"http://127.0.0.1:{port}/session-grant?state={callback_state}"
@@ -282,7 +290,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             msg = "verification service returned an invalid challenge URL"
             raise Exception(msg)
 
-        # Aggiungiamo il callback URL al challenge URL
+        # Add the callback URL to the challenge URL
         parsed_challenge = urllib.parse.urlparse(challenge_url_str)
         challenge_qs = urllib.parse.parse_qs(parsed_challenge.query)
         challenge_qs["cb"] = [callback_url]
@@ -292,7 +300,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             parsed_challenge._replace(query=new_query),
         )
 
-        # === MODO 1: GUI Integrata (Se configurata tramite la UI di SpotiFLAC) ===
+        # === MODE 1: Integrated GUI (if configured via the SpotiFLAC UI) ===
         with community_browser_mu:
             open_browser = community_browser_open
 
@@ -304,12 +312,12 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 msg = "verification timed out (GUI browser)"
                 raise Exception(msg)
 
-        # === MODO 2: Automazione via solver.py (pydoll) ===
+        # === MODE 2: Automation via solver.py (pydoll) ===
         logger.info("Attempting automated verification via solver.py...")
         try:
             from SpotiFLAC.core.solver import solve_with_callback
 
-            # Prova ad estrarre la sitekey se esposta nella pagina HTML
+            # Try to extract the sitekey if it is exposed in the HTML page
             sitekey = ""
             try:
                 html_resp = requests.get(final_challenge_url, timeout=10)
@@ -325,8 +333,8 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 pass
 
             # =========================================================================
-            # FIX: Eseguiamo il solver in un thread separato (daemon) in modo che
-            # il thread principale possa ascoltare la coda grant_queue senza bloccarsi!
+            # FIX: Run the solver in a separate daemon thread so the main thread
+            # can listen to the grant_queue without blocking!
             #
             # Desktop verification waits for the Cloudflare challenge page to render
             # its iframe and to expose the expected quadratini after a short page load
@@ -346,16 +354,16 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                         with contextlib.suppress(queue.Full):
                             grant_queue.put_nowait(grant_res)
                 except Exception as e:
-                    logger.debug(f"Solver thread terminato o interrotto: {e}")
+                    logger.debug(f"Solver thread terminated or interrupted: {e}")
 
             solver_thread = threading.Thread(target=_run_solver_thread, daemon=True)
             solver_thread.start()
 
-            # Il thread principale attende che arrivi il grant dal server locale
+            # The main thread waits for the grant to arrive from the local server
             try:
                 grant = grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
                 if grant:
-                    logger.info("Automated verification successful! Grant ricevuto.")
+                    logger.info("Automated verification successful! Grant received.")
                     with contextlib.suppress(Exception):
                         import platform
                         import subprocess
@@ -370,7 +378,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                     return grant
 
             except queue.Empty:
-                msg = "Automated verification timed out (nessun grant ricevuto in tempo)."
+                msg = "Automated verification timed out (no grant received in time)."
                 logger.warning(msg)
                 raise RuntimeError(msg)
 
@@ -379,7 +387,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
         except Exception as e:
             logger.warning(f"Automated verification failed: {e}")
         raise RuntimeError(
-            f"Verifica manuale disabilitata per evitare blocchi del server (challenge: {final_challenge_url})"
+            f"Manual verification disabled to avoid blocking the server (challenge: {final_challenge_url})"
         )
 
     finally:
