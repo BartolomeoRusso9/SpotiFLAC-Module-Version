@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+
 from SpotiFLAC.launcher import main
 
 if __name__ == "__main__":
