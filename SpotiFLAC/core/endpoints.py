@@ -189,6 +189,3 @@ def get_health_zarz_url() -> str:
 def get_community_url(provider: str) -> str:
     """Return the Community URL if it exists in the registry, otherwise empty string."""
     return _get_registry().get("community", {}).get(provider, "")
-
-
-
