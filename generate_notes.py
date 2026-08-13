@@ -1,5 +1,6 @@
 import os
 import subprocess
+
 from google import genai
 
 # 1. Client Gemini (nuovo SDK unificato)
@@ -11,10 +12,14 @@ log_cmd = "git log $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev
 try:
     commits = subprocess.check_output(log_cmd, shell=True).decode("utf-8").strip()
 except Exception:
-    commits = subprocess.check_output(
-        "git log -10 --pretty=format:'- %s'",
-        shell=True,
-    ).decode("utf-8").strip()
+    commits = (
+        subprocess.check_output(
+            "git log -10 --pretty=format:'- %s'",
+            shell=True,
+        )
+        .decode("utf-8")
+        .strip()
+    )
 
 if not commits:
     commits = "- Maintenance and minor updates"
