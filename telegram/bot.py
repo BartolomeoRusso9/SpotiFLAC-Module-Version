@@ -46,6 +46,15 @@ from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarku
 
 from SpotiFLAC import AsyncSpotiFLAC
 
+# Optional: SpotiFLAC's own health-check module, the same one
+# interactive.py uses. Imported defensively -- older/newer SpotiFLAC
+# builds may not ship it, in which case health checks are silently
+# skipped everywhere below, exactly like interactive.py does.
+try:
+    from SpotiFLAC.core.health_check import run_health_check_with_extensions
+except Exception:
+    run_health_check_with_extensions = None
+
 # ─── CONFIGURATION ───────────────────────────────────────────────────
 
 
@@ -127,6 +136,35 @@ TIMEOUT_PRESETS = [0, 60, 120, 300]
 
 MAX_TELEGRAM_UPLOAD_BYTES = 50 * 1024 * 1024
 
+# Which of the 4 exposed VALID_QUALITIES actually make sense for a given
+# provider -- mirrors interactive.py's per-service quality menu (Qobuz
+# 6/7/27, Tidal Dolby Atmos/HI-RES/Lossless/High, Deezer FLAC/MP3, ...),
+# scaled down to the token set this bot's download engine accepts.
+SERVICE_QUALITIES = {
+    "tidal": ["DOLBY_ATMOS", "HI_RES", "LOSSLESS", "HIGH"],
+    "qobuz": ["HI_RES", "LOSSLESS", "HIGH"],
+    "deezer": ["LOSSLESS", "HIGH"],
+    "amazon": ["HI_RES", "LOSSLESS", "HIGH"],
+}
+
+QUALITY_LABELS = {
+    "LOSSLESS": "💎 LOSSLESS (FLAC 16-bit)",
+    "HI_RES": "✨ HI-RES (FLAC 24-bit)",
+    "HIGH": "🎧 HIGH (MP3 320 / AAC)",
+    "DOLBY_ATMOS": "🔊 DOLBY ATMOS (Tidal only)",
+}
+
+# Mirrors interactive.py's "10 · Post-Download Action" section. "command"
+# is intentionally restricted to bot admins (see ADMIN_USER_IDS) since it
+# runs a shell command on the host once a job finishes.
+POST_ACTION_LABELS = {
+    "none": "🚫 Nothing",
+    "notify": "🔔 Notify only (default)",
+    "command": "⚙️ Run a shell command (admin)",
+}
+
+HEALTH_CACHE_SECONDS = 300  # re-check provider availability at most every 5 min
+
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
@@ -148,6 +186,27 @@ ALLOWED_USER_IDS = _allowed_user_ids()
 
 def is_authorized(user_id: int) -> bool:
     return ALLOWED_USER_IDS is None or user_id in ALLOWED_USER_IDS
+
+
+# Admins may use the "run a shell command after download" post-action.
+# Falls back to ALLOWED_USER_IDS (a closed bot's owners) if unset; on an
+# open bot (ALLOWED_USER_IDS unset) this is empty by default, so nobody
+# gets shell access unless explicitly configured.
+def _admin_user_ids() -> set[int]:
+    raw = os.getenv("ADMIN_USER_IDS", "").strip()
+    if raw:
+        return {int(x.strip()) for x in raw.split(",") if x.strip()}
+    if ALLOWED_USER_IDS is not None:
+        return set(ALLOWED_USER_IDS)
+    return set()
+
+
+ADMIN_USER_IDS = _admin_user_ids()
+POST_DOWNLOAD_ALLOW_COMMANDS = _env_bool("POST_DOWNLOAD_ALLOW_COMMANDS", False)
+
+
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_USER_IDS
 
 
 # ─── UTILITIES ─────────────────────────────────────────────────────────
@@ -271,7 +330,159 @@ def db_init():
             )""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_title  ON tracks(title)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_artist ON tracks(artist)")
+
+        # Mirrors interactive.py's URL history (session_memory) -- kept
+        # per Telegram user rather than per local machine.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS url_history (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                url     TEXT NOT NULL,
+                ts      REAL NOT NULL
+            )""")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_urlhist_user ON url_history(user_id, ts)"
+        )
+
+        # Mirrors interactive.py's profile management (load/save a full
+        # wizard configuration under a name), kept per Telegram user.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS profiles (
+                user_id INTEGER NOT NULL,
+                name    TEXT NOT NULL,
+                config  TEXT NOT NULL,
+                ts      REAL NOT NULL,
+                PRIMARY KEY (user_id, name)
+            )""")
         conn.commit()
+
+
+# ─── URL HISTORY (sync, called via asyncio.to_thread) ──────────────────
+
+
+def db_add_url_history(user_id: int, url: str, keep: int = 8) -> None:
+    try:
+        with closing(db_connect()) as conn:
+            conn.execute(
+                "DELETE FROM url_history WHERE user_id = ? AND url = ?",
+                (user_id, url),
+            )
+            conn.execute(
+                "INSERT INTO url_history (user_id, url, ts) VALUES (?, ?, ?)",
+                (user_id, url, time.time()),
+            )
+            # Trim to the most recent `keep` entries for this user.
+            ids = [
+                r["id"]
+                for r in conn.execute(
+                    "SELECT id FROM url_history WHERE user_id = ? "
+                    "ORDER BY ts DESC LIMIT -1 OFFSET ?",
+                    (user_id, keep),
+                )
+            ]
+            if ids:
+                conn.executemany(
+                    "DELETE FROM url_history WHERE id = ?", [(i,) for i in ids]
+                )
+            conn.commit()
+    except Exception as e:
+        log.warning("Could not save URL history for user %s: %s", user_id, e)
+
+
+def db_get_url_history(user_id: int, limit: int = 8) -> list[str]:
+    try:
+        with closing(db_connect()) as conn:
+            rows = conn.execute(
+                "SELECT url FROM url_history WHERE user_id = ? "
+                "ORDER BY ts DESC LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+            return [r["url"] for r in rows]
+    except Exception as e:
+        log.warning("Could not read URL history for user %s: %s", user_id, e)
+        return []
+
+
+def db_delete_url_history_entry(user_id: int, url: str) -> None:
+    try:
+        with closing(db_connect()) as conn:
+            conn.execute(
+                "DELETE FROM url_history WHERE user_id = ? AND url = ?",
+                (user_id, url),
+            )
+            conn.commit()
+    except Exception as e:
+        log.warning("Could not delete URL history entry for user %s: %s", user_id, e)
+
+
+def db_clear_url_history(user_id: int) -> None:
+    try:
+        with closing(db_connect()) as conn:
+            conn.execute("DELETE FROM url_history WHERE user_id = ?", (user_id,))
+            conn.commit()
+    except Exception as e:
+        log.warning("Could not clear URL history for user %s: %s", user_id, e)
+
+
+# ─── PROFILES (sync, called via asyncio.to_thread) ──────────────────────
+
+
+def db_save_profile(user_id: int, name: str, cfg: dict) -> None:
+    # Never persist the URL itself in a reusable profile.
+    to_save = {
+        k: v for k, v in cfg.items() if k not in ("url", "chat_id", "message_id")
+    }
+    try:
+        with closing(db_connect()) as conn:
+            conn.execute(
+                """
+                INSERT INTO profiles (user_id, name, config, ts)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, name) DO UPDATE SET
+                    config = excluded.config, ts = excluded.ts
+                """,
+                (user_id, name, json.dumps(to_save), time.time()),
+            )
+            conn.commit()
+    except Exception as e:
+        log.warning("Could not save profile %r for user %s: %s", name, user_id, e)
+
+
+def db_list_profiles(user_id: int) -> list[str]:
+    try:
+        with closing(db_connect()) as conn:
+            rows = conn.execute(
+                "SELECT name FROM profiles WHERE user_id = ? ORDER BY ts DESC",
+                (user_id,),
+            ).fetchall()
+            return [r["name"] for r in rows]
+    except Exception as e:
+        log.warning("Could not list profiles for user %s: %s", user_id, e)
+        return []
+
+
+def db_get_profile(user_id: int, name: str) -> dict | None:
+    try:
+        with closing(db_connect()) as conn:
+            row = conn.execute(
+                "SELECT config FROM profiles WHERE user_id = ? AND name = ?",
+                (user_id, name),
+            ).fetchone()
+            return json.loads(row["config"]) if row else None
+    except Exception as e:
+        log.warning("Could not load profile %r for user %s: %s", name, user_id, e)
+        return None
+
+
+def db_delete_profile(user_id: int, name: str) -> None:
+    try:
+        with closing(db_connect()) as conn:
+            conn.execute(
+                "DELETE FROM profiles WHERE user_id = ? AND name = ?", (user_id, name)
+            )
+            conn.commit()
+    except Exception as e:
+        log.warning("Could not delete profile %r for user %s: %s", name, user_id, e)
 
 
 def db_upsert_track(tags, fmt, bitrate, filepath):
@@ -641,6 +852,60 @@ async def run_spotiflac(url: str, job_cfg: dict) -> None:
         raise last_error
 
 
+# ─── HEALTH CHECK ────────────────────────────────────────────────────────
+# Mirrors interactive.py's automatic "Service Availability Check", scoped
+# to the 4 providers this bot actually exposes and cached for a few
+# minutes so it doesn't add latency to every single wizard.
+
+_health_cache: dict[str, bool] | None = None
+_health_cache_ts: float = 0.0
+
+
+async def check_health(force: bool = False) -> dict[str, bool]:
+    """Return {service: reachable} for VALID_SERVICES, using a short-lived
+    cache. Returns {} if the health-check module isn't available."""
+    global _health_cache, _health_cache_ts
+
+    if run_health_check_with_extensions is None:
+        return {}
+
+    if (
+        not force
+        and _health_cache is not None
+        and (time.monotonic() - _health_cache_ts) < HEALTH_CACHE_SECONDS
+    ):
+        return _health_cache
+
+    try:
+        results, _ext_result = await run_health_check_with_extensions(
+            VALID_SERVICES, include_all_endpoints=True
+        )
+    except Exception as e:
+        log.warning("Health check failed: %s", e)
+        return _health_cache or {}
+
+    status = dict.fromkeys(VALID_SERVICES, False)
+    for r in results:
+        if getattr(r, "ok", False) and r.provider in status:
+            status[r.provider] = True
+
+    _health_cache = status
+    _health_cache_ts = time.monotonic()
+    return status
+
+
+def health_summary_text(status: dict[str, bool]) -> str:
+    if not status:
+        return ""
+    lines = ["🩺 <b>Service availability</b>"]
+    for svc in VALID_SERVICES:
+        icon = "✅" if status.get(svc) else "❌"
+        lines.append(f"  {icon} {SERVICE_LABELS[svc]}")
+    working = sum(1 for v in status.values() if v)
+    lines.append(f"<i>{working}/{len(VALID_SERVICES)} reachable</i>")
+    return "\n".join(lines)
+
+
 # ─── DOWNLOAD QUEUE ─────────────────────────────────────────────────────
 
 download_queue: asyncio.Queue = asyncio.Queue()
@@ -800,35 +1065,172 @@ async def enqueue_job(chat_id: int, message_id: int, job_cfg: dict) -> int:
 
 
 def parse_quick_flags(args: list[str]) -> dict:
-    """E.g. ['--service', 'qobuz', '--quality', 'LOSSLESS', '--no-lyrics']"""
-    cfg = {}
+    """Mirror the interactive CLI quick flags as closely as possible.
+
+    Example:
+      ['--service', 'qobuz', 'tidal', '--quality', 'LOSSLESS', '--no-lyrics']
+    """
+    cfg: dict = {}
     i = 0
     while i < len(args):
         a = args[i]
-        if a == "--service" and i + 1 < len(args):
-            val = args[i + 1].lower()
-            if val in VALID_SERVICES:
-                cfg["service"] = val
-            i += 2
-        elif a == "--quality" and i + 1 < len(args):
+
+        if a in {"--service", "-s"}:
+            values: list[str] = []
+            i += 1
+            while i < len(args) and not args[i].startswith("-"):
+                values.append(args[i].lower())
+                i += 1
+            if values:
+                valid = [v for v in values if v in VALID_SERVICES]
+                if valid:
+                    cfg["services"] = valid
+            continue
+
+        if a == "--quality" and i + 1 < len(args):
             val = args[i + 1].upper()
             if val in VALID_QUALITIES:
                 cfg["quality"] = val
             i += 2
-        elif a == "--no-lyrics":
+            continue
+
+        if a == "--output-path" and i + 1 < len(args):
+            cfg["output_path"] = args[i + 1]
+            i += 2
+            continue
+
+        if a == "--filename-format" and i + 1 < len(args):
+            cfg["filename_format"] = args[i + 1]
+            i += 2
+            continue
+
+        if a == "--lyrics-providers" and i + 1 < len(args):
+            values = []
+            i += 1
+            while i < len(args) and not args[i].startswith("-"):
+                values.append(args[i].lower())
+                i += 1
+            valid = [v for v in values if v in LYRICS_PROVIDERS]
+            if valid:
+                cfg["lyrics_providers"] = valid
+            continue
+
+        if a == "--enrich-providers" and i + 1 < len(args):
+            values = []
+            i += 1
+            while i < len(args) and not args[i].startswith("-"):
+                values.append(args[i].lower())
+                i += 1
+            valid = [v for v in values if v in ENRICH_PROVIDERS]
+            if valid:
+                cfg["enrich_providers"] = valid
+            continue
+
+        if a in {"--no-extensions-fallback", "--disable-extensions-fallback"}:
+            cfg["use_extensions_fallback"] = False
+            i += 1
+            continue
+
+        if a in {"--no-fallback", "--disable-fallback"}:
+            cfg["allow_fallback"] = False
+            i += 1
+            continue
+
+        if a in {"--use-track-numbers", "--track-numbers"}:
+            cfg["use_track_numbers"] = True
+            i += 1
+            continue
+
+        if a == "--use-album-track-numbers":
+            cfg["use_album_track_numbers"] = True
+            i += 1
+            continue
+
+        if a == "--use-artist-subfolders":
+            cfg["use_artist_subfolders"] = True
+            i += 1
+            continue
+
+        if a == "--use-album-subfolders":
+            cfg["use_album_subfolders"] = True
+            i += 1
+            continue
+
+        if a == "--first-artist-only":
+            cfg["first_artist_only"] = True
+            i += 1
+            continue
+
+        if a == "--no-lyrics":
             cfg["embed_lyrics"] = False
             i += 1
-        elif a == "--mp3":
+            continue
+
+        if a == "--no-enrich":
+            cfg["enrich_metadata"] = False
+            i += 1
+            continue
+
+        if a in {"--retries", "--track-retries"} and i + 1 < len(args):
+            try:
+                cfg["track_max_retries"] = max(0, int(args[i + 1]))
+            except ValueError:
+                pass
+            i += 2
+            continue
+
+        if a == "--timeout" and i + 1 < len(args):
+            try:
+                cfg["timeout_s"] = max(0, int(args[i + 1]))
+            except ValueError:
+                pass
+            i += 2
+            continue
+
+        if a == "--qobuz-local-api" and i + 1 < len(args):
+            cfg["qobuz_local_api_url"] = args[i + 1]
+            i += 2
+            continue
+
+        if a == "--tidal-api" and i + 1 < len(args):
+            cfg["tidal_custom_api"] = args[i + 1]
+            i += 2
+            continue
+
+        if a == "--loop" and i + 1 < len(args):
+            try:
+                cfg["loop"] = max(0, int(args[i + 1]))
+            except ValueError:
+                pass
+            i += 2
+            continue
+
+        if a in {"--mp3", "--transcode-to"}:
             cfg["transcode_to"] = "mp3"
             i += 1
-        elif a == "--transcode-bitrate" and i + 1 < len(args):
+            continue
+
+        if a == "--transcode-bitrate" and i + 1 < len(args):
             cfg["transcode_bitrate"] = args[i + 1].lower()
             i += 2
-        elif a == "--keep-original":
+            continue
+
+        if a == "--keep-original":
             cfg["transcode_keep_original"] = True
             i += 1
-        else:
-            i += 1
+            continue
+
+        if a == "--post-action" and i + 1 < len(args):
+            cfg["post_download_action"] = args[i + 1].lower()
+            i += 2
+            continue
+
+        if a == "--post-command" and i + 1 < len(args):
+            cfg["post_download_command"] = args[i + 1]
+            i += 2
+            continue
+
+        i += 1
     return cfg
 
 
@@ -838,6 +1240,7 @@ def default_job_cfg(url: str) -> dict:
     return {
         "url": url,
         "services": ["tidal"],
+        "output_path": None,
         "use_extensions_fallback": True,
         "quality": "LOSSLESS",
         "allow_fallback": True,
@@ -856,6 +1259,11 @@ def default_job_cfg(url: str) -> dict:
         "transcode_bitrate": os.getenv("TRANSCODE_BITRATE") or "320k",
         "transcode_keep_original": _env_bool("TRANSCODE_KEEP_ORIGINAL"),
         "filename_format": FILENAME_FORMAT_PRESETS["default"],
+        "qobuz_local_api_url": os.getenv("QOBUZ_LOCAL_API_URL") or None,
+        "tidal_custom_api": os.getenv("TIDAL_CUSTOM_API") or None,
+        "loop": None,
+        "post_download_action": "none",
+        "post_download_command": "",
     }
 
 
@@ -1333,15 +1741,69 @@ async def handle_message(message: types.Message):
 
     if quick_cfg:
         job_cfg = default_job_cfg(url)
-        job_cfg["services"] = [
-            quick_cfg.get("service", saved_cfg.get("default_service", "tidal"))
-        ]
+        job_cfg.update({k: v for k, v in saved_cfg.items() if v is not None})
+        if "services" in quick_cfg:
+            job_cfg["services"] = quick_cfg["services"]
+        elif "service" in quick_cfg:
+            job_cfg["services"] = [quick_cfg["service"]]
         job_cfg["quality"] = quick_cfg.get(
-            "quality", saved_cfg.get("default_quality", "LOSSLESS")
+            "quality", job_cfg.get("quality", "LOSSLESS")
+        )
+        job_cfg["use_extensions_fallback"] = quick_cfg.get(
+            "use_extensions_fallback", job_cfg.get("use_extensions_fallback", True)
+        )
+        job_cfg["allow_fallback"] = quick_cfg.get(
+            "allow_fallback", job_cfg.get("allow_fallback", True)
+        )
+        job_cfg["use_track_numbers"] = quick_cfg.get(
+            "use_track_numbers", job_cfg.get("use_track_numbers", False)
+        )
+        job_cfg["use_album_track_numbers"] = quick_cfg.get(
+            "use_album_track_numbers", job_cfg.get("use_album_track_numbers", False)
+        )
+        job_cfg["use_artist_subfolders"] = quick_cfg.get(
+            "use_artist_subfolders", job_cfg.get("use_artist_subfolders", True)
+        )
+        job_cfg["use_album_subfolders"] = quick_cfg.get(
+            "use_album_subfolders", job_cfg.get("use_album_subfolders", True)
+        )
+        job_cfg["first_artist_only"] = quick_cfg.get(
+            "first_artist_only", job_cfg.get("first_artist_only", False)
         )
         job_cfg["embed_lyrics"] = quick_cfg.get(
-            "embed_lyrics", saved_cfg.get("embed_lyrics", True)
+            "embed_lyrics", job_cfg.get("embed_lyrics", True)
         )
+        if "lyrics_providers" in quick_cfg:
+            job_cfg["lyrics_providers"] = quick_cfg["lyrics_providers"]
+        job_cfg["enrich_metadata"] = quick_cfg.get(
+            "enrich_metadata", job_cfg.get("enrich_metadata", True)
+        )
+        if "enrich_providers" in quick_cfg:
+            job_cfg["enrich_providers"] = quick_cfg["enrich_providers"]
+        if "filename_format" in quick_cfg:
+            job_cfg["filename_format"] = quick_cfg["filename_format"]
+        if "output_path" in quick_cfg:
+            job_cfg["output_path"] = quick_cfg["output_path"]
+        if "track_max_retries" in quick_cfg:
+            job_cfg["track_max_retries"] = quick_cfg["track_max_retries"]
+        if "timeout_s" in quick_cfg:
+            job_cfg["timeout_s"] = quick_cfg["timeout_s"]
+        if "transcode_to" in quick_cfg:
+            job_cfg["transcode_to"] = quick_cfg["transcode_to"]
+        if "transcode_bitrate" in quick_cfg:
+            job_cfg["transcode_bitrate"] = quick_cfg["transcode_bitrate"]
+        if "transcode_keep_original" in quick_cfg:
+            job_cfg["transcode_keep_original"] = quick_cfg["transcode_keep_original"]
+        if "qobuz_local_api_url" in quick_cfg:
+            job_cfg["qobuz_local_api_url"] = quick_cfg["qobuz_local_api_url"]
+        if "tidal_custom_api" in quick_cfg:
+            job_cfg["tidal_custom_api"] = quick_cfg["tidal_custom_api"]
+        if "loop" in quick_cfg:
+            job_cfg["loop"] = quick_cfg["loop"]
+        if "post_download_action" in quick_cfg:
+            job_cfg["post_download_action"] = quick_cfg["post_download_action"]
+        if "post_download_command" in quick_cfg:
+            job_cfg["post_download_command"] = quick_cfg["post_download_command"]
         msg = await message.answer("⚡ Quick start with the given flags...")
         await enqueue_job(message.chat.id, msg.message_id, job_cfg)
         return

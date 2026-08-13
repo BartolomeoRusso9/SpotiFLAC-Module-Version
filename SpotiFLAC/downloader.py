@@ -94,6 +94,10 @@ class DownloadOptions:
     use_album_track_numbers: bool = False
     use_artist_subfolders: bool = False
     use_album_subfolders: bool = False
+    # When True, each playlist download is placed in a subfolder named after
+    # the playlist. Set to False to keep playlist downloads flat in the
+    # `output_dir` (useful for music libraries).
+    create_playlist_subfolders: bool = True
     first_artist_only: bool = False
     include_featuring: bool = False
     quality: str = "LOSSLESS"
@@ -753,7 +757,11 @@ class DownloadWorker:
                 return out
 
             out = os.path.normpath(self._opts.output_dir)
-            if (self._is_playlist and self._collection_name) or (
+            if (
+                self._is_playlist
+                and self._collection_name
+                and getattr(self._opts, "create_playlist_subfolders", True)
+            ) or (
                 self._is_album
                 and self._collection_name
                 and not self._opts.use_album_subfolders
@@ -1225,6 +1233,45 @@ class SpotiflacDownloader:
 
         except Exception as exc:
             logger.warning("[isrc] bulk resolution async failed: %s", exc)
+
+        # Some Spotify playlists may lose album/release dates during bulk
+        # ISRC resolution. For tracks that still miss a `release_date` but
+        # have an `open.spotify.com/track/` external URL, fetch detailed
+        # track metadata and hydrate the release date when available.
+        try:
+            missing_dates = [
+                (idx, t)
+                for idx, t in enumerate(tracks)
+                if not t.release_date
+                and "open.spotify.com/track/" in (t.external_url or "")
+            ]
+            if missing_dates:
+                semaphore = asyncio.Semaphore(10)
+
+                async def _hydrate(idx: int, track: TrackMetadata):
+                    async with semaphore:
+                        try:
+                            detailed = await self._client.get_track_async(track.id)
+                        except Exception as exc:
+                            logger.warning(
+                                "Could not fetch release date for %s: %s",
+                                track.title,
+                                exc,
+                            )
+                            return idx, track
+                    if not detailed.release_date:
+                        return idx, track
+                    return idx, track.model_copy(
+                        update={"release_date": detailed.release_date}
+                    )
+
+                for i, updated in await asyncio.gather(
+                    *(_hydrate(i, t) for i, t in missing_dates)
+                ):
+                    tracks[i] = updated
+        except Exception:
+            # Non-fatal — keep original tracks if hydration fails
+            pass
 
         return tracks
 
