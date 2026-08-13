@@ -16,6 +16,11 @@
   </p>
 </div>
 
+### Disclaimer
+> SpotiFLAC Module Version is an independent, third-party project and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service. It is the user's responsibility to comply with the Terms of Service of the respective platforms and with the laws applicable in their jurisdiction. This software is provided "as is", without warranty of any kind, express or implied. The maintainer(s) assume no liability for any direct, indirect, incidental, or consequential damages, bans, or legal issues arising from the use or misuse of this software. Users assume all risk associated with its use. If you are a copyright holder or an authorized representative and believe this repository infringes upon your rights, please contact the maintainer with sufficient detail (including relevant URLs and proof of ownership); the matter will be promptly investigated.
+
+---
+
 > **Looking for a standalone app?**
 > - [SpotiFLAC (Desktop)](https://github.com/afkarxyz/SpotiFLAC) — Download music in true lossless FLAC from different providers for Windows, macOS & Linux
 > - [SpotiFLAC (Mobile)](https://github.com/zarzet/SpotiFLAC-Mobile) — SpotiFLAC for Android & iOS, maintained by [@zarzet](https://github.com/zarzet)
