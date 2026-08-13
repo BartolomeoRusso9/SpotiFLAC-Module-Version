@@ -1242,7 +1242,8 @@ class SpotiflacDownloader:
             missing_dates = [
                 (idx, t)
                 for idx, t in enumerate(tracks)
-                if not t.release_date and "open.spotify.com/track/" in (t.external_url or "")
+                if not t.release_date
+                and "open.spotify.com/track/" in (t.external_url or "")
             ]
             if missing_dates:
                 semaphore = asyncio.Semaphore(10)
@@ -1260,9 +1261,13 @@ class SpotiflacDownloader:
                             return idx, track
                     if not detailed.release_date:
                         return idx, track
-                    return idx, track.model_copy(update={"release_date": detailed.release_date})
+                    return idx, track.model_copy(
+                        update={"release_date": detailed.release_date}
+                    )
 
-                for i, updated in await asyncio.gather(*( _hydrate(i, t) for i, t in missing_dates )):
+                for i, updated in await asyncio.gather(
+                    *(_hydrate(i, t) for i, t in missing_dates)
+                ):
                     tracks[i] = updated
         except Exception:
             # Non-fatal — keep original tracks if hydration fails

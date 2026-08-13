@@ -429,7 +429,9 @@ def db_clear_url_history(user_id: int) -> None:
 
 def db_save_profile(user_id: int, name: str, cfg: dict) -> None:
     # Never persist the URL itself in a reusable profile.
-    to_save = {k: v for k, v in cfg.items() if k not in ("url", "chat_id", "message_id")}
+    to_save = {
+        k: v for k, v in cfg.items() if k not in ("url", "chat_id", "message_id")
+    }
     try:
         with closing(db_connect()) as conn:
             conn.execute(

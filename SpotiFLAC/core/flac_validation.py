@@ -38,7 +38,18 @@ def validate_flac_file(filepath: str) -> tuple[bool, str]:
     try:
         # Try to decode only the audio stream with ffmpeg (ignore embedded images)
         result = subprocess.run(
-            [_ffmpeg_path(), "-v", "error", "-i", filepath, "-map", "0:a:0", "-f", "null", "-"],
+            [
+                _ffmpeg_path(),
+                "-v",
+                "error",
+                "-i",
+                filepath,
+                "-map",
+                "0:a:0",
+                "-f",
+                "null",
+                "-",
+            ],
             capture_output=True,
             text=True,
             timeout=30,

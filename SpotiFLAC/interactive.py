@@ -412,13 +412,15 @@ def _summary(cfg: dict) -> None:
         flags.append("artist-subfolders")
     if cfg["use_album_subfolders"]:
         flags.append("album-subfolders")
-        
+
     # Check if URL is a playlist for summary flag
     lower_url = cfg["url"].lower()
-    is_playlist = "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
+    is_playlist = (
+        "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
+    )
     if is_playlist and not cfg.get("create_playlist_subfolders", True):
         flags.append("no-playlist-subfolders")
-        
+
     if cfg["first_artist_only"]:
         flags.append("first-artist-only")
     row("Options", ", ".join(flags) if flags else "none")
@@ -852,10 +854,12 @@ async def run_interactive() -> dict:
     cfg["use_album_subfolders"] = cfg.get("use_album_subfolders", False)
     cfg["create_playlist_subfolders"] = cfg.get("create_playlist_subfolders", True)
     cfg["first_artist_only"] = cfg.get("first_artist_only", False)
-    
+
     # Check if URL is a playlist for organization question
     lower_url = cfg["url"].lower()
-    is_playlist = "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
+    is_playlist = (
+        "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
+    )
 
     if is_playlist:
         cfg["create_playlist_subfolders"] = _ask_bool(
@@ -863,7 +867,9 @@ async def run_interactive() -> dict:
             cfg["create_playlist_subfolders"],
         )
     else:
-        cfg["create_playlist_subfolders"] = True # Mantieni il default se non è una playlist
+        cfg["create_playlist_subfolders"] = (
+            True  # Mantieni il default se non è una playlist
+        )
 
     cfg["use_track_numbers"] = _ask_bool(
         "Add track number to filename?",
@@ -1048,13 +1054,15 @@ def _print_cli_command(cfg: dict) -> None:
         parts.append("--use-artist-subfolders")
     if cfg["use_album_subfolders"]:
         parts.append("--use-album-subfolders")
-        
+
     # Check if URL is a playlist before appending the CLI flag
     lower_url = cfg["url"].lower()
-    is_playlist = "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
+    is_playlist = (
+        "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
+    )
     if is_playlist and not cfg.get("create_playlist_subfolders", True):
         parts.append("--no-playlist-subfolders")
-        
+
     if cfg["first_artist_only"]:
         parts.append("--first-artist-only")
     if not cfg["embed_lyrics"]:
