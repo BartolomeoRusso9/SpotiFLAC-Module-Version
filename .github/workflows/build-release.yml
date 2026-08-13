@@ -230,12 +230,22 @@ jobs:
             if not commits.strip(): 
                 commits = '- Maintenance and minor updates'
             
-            # Prompt in inglese, sezioni fisse, NO EMOJI come richiesto
-            prompt = f'''You are a technical assistant. Here are the recent commits:\n{commits}\nGenerate professional release notes in Markdown. Sections: New Features, Bug Fixes, Maintenance. Explain in simple terms, ignore system commits. DO NOT use emojis.'''
+            # Prompt avanzato per generare note di rilascio altamente tecniche
+            prompt = f'''You are an expert software engineer and technical writer. Review the following commit logs:
+            {commits}
+            
+            Generate highly technical, professional release notes in Markdown format. Organize the changelog strictly into the following sections: **New Features**, **Bug Fixes**, and **Maintenance**.
+            
+            **Guidelines for technical depth:**
+            *   **Use specific technical terminology:** Describe changes at the code, architecture, or system level (e.g., specify API endpoints modified, database schema migrations, specific design patterns used, or algorithmic optimizations).
+            *   **Do not simplify:** Avoid abstracting the changes into layman's terms or user-centric language. The target audience is senior developers and DevOps engineers. 
+            *   **Be precise:** Mention the exact libraries, variables, or system components affected if present in the commit messages.
+            *   **Filter noise:** Ignore automated system commits, merge commits, version bumps, and trivial typo fixes. 
+            *   **Tone:** Strictly professional and objective. DO NOT use emojis.'''
             
             # Genera il contenuto usando la nuova sintassi
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-flash-latest',
                 contents=prompt
             )
             
