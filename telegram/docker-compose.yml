@@ -7,9 +7,9 @@ services:
     command: ["bot"]
     shm_size: "1gb"
     environment:
-      TELEGRAM_BOT_TOKEN: "123456789:AAFQcbdZmBgZGHXBtspiLAbem-yuFualgvw"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       # ALLOWED_USER_IDS: "123456789"
-      # QOBUZ_AUTH_TOKEN: "your_token_here"
+      # QOBUZ_AUTH_TOKEN: ${QOBUZ_AUTH_TOKEN}
     ports:
       - "5900:5900"
     volumes:
