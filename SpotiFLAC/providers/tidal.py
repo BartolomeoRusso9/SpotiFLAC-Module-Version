@@ -35,7 +35,6 @@ from SpotiFLAC.core.console import (
 from SpotiFLAC.core.download_validation import validate_downloaded_track_async
 from SpotiFLAC.core.endpoints import (
     get_community_url,
-    get_monochrome_token,
     get_tidal_post_endpoints,
 )
 from SpotiFLAC.core.errors import (
@@ -97,7 +96,6 @@ _COMMUNITY_POST_HEADERS = {
     "x-api-key": "explore-obscure-chivalry-travesty-blinks",
 }
 
-_TIDAL_PROXY_BASE = "https://tidal-proxy.monochrome.tf/api/v1"
 _TIDAL_API_GIST_URL = (
     "https://gist.githubusercontent.com/afkarxyz/2ce772b943321b9448b454f39403ce25/raw"
 )
@@ -998,42 +996,6 @@ class TidalProvider(BaseProvider):
         logger.info("[tidal] mirror search failed — trying Songlink")
         return await self._resolve_via_songlink_async(spotify_track_id)
 
-    async def _fetch_track_details_from_proxy(
-        self,
-        track_id: int,
-        country_code: str = "US",
-    ) -> dict:
-        try:
-            client = await NetworkManager.get_async_client_safe()
-            url = f"{_TIDAL_PROXY_BASE}/tracks/{track_id}?countryCode={country_code}"
-            headers = {
-                "User-Agent": _TIDAL_USER_AGENT,
-                "Accept": "application/json",
-                "Authorization": get_monochrome_token(),
-            }
-
-            resp = await client.get(url, headers=headers, timeout=8)
-
-            if resp.status_code != 200:
-                err_msg = f"proxy HTTP {resp.status_code}"
-                logger.debug("[tidal] %s, skipping (non-blocking)", err_msg)
-                print_api_failure("tidal", "proxy", err_msg)
-                return {}
-
-            try:
-                return resp.json()
-            except Exception as exc:
-                err_msg = f"proxy invalid JSON: {exc}"
-                logger.debug("[tidal] %s, skipping", err_msg)
-                print_api_failure("tidal", "proxy", err_msg)
-                return {}
-
-        except Exception as exc:
-            err_msg = f"proxy request failed: {exc}"
-            logger.debug("[tidal] %s, skipping (non-blocking)", err_msg)
-            print_api_failure("tidal", "proxy", err_msg)
-            return {}
-
     async def _search_on_mirrors_async(
         self,
         track_name: str,
@@ -1524,33 +1486,16 @@ class TidalProvider(BaseProvider):
 
             tidal_tags: dict[str, str] = {}
 
-            # Qobuz (per ISRC) e il proxy Tidal (per releaseDate, e ISRC come
-            # ultima risorsa) sono richieste di rete indipendenti tra loro:
-            # run them in parallel with asyncio.gather instead of awaiting them sequentially
-            # in sequenza, per ridurre la latenza totale di questa fase.
-            qobuz_isrc, details = await asyncio.gather(
-                _find_isrc_via_qobuz(
-                    getattr(metadata, "title", ""),
-                    getattr(metadata, "artists", ""),
-                    getattr(metadata, "duration_ms", 0),
-                ),
-                self._fetch_track_details_from_proxy(track_id),
-                return_exceptions=True,
+            qobuz_isrc = await _find_isrc_via_qobuz(
+                getattr(metadata, "title", ""),
+                getattr(metadata, "artists", ""),
+                getattr(metadata, "duration_ms", 0),
             )
 
-            # asyncio.gather con return_exceptions=True non propaga le
-            # exceptions: normalize them here to "no results", so
-            # un fallimento di una delle due chiamate non comporta la perdita
-            # dell'altra (comportamento equivalente a due try/except separati).
             if isinstance(qobuz_isrc, BaseException):
                 logger.debug("[tidal] Qobuz ISRC lookup raised: %s", qobuz_isrc)
                 qobuz_isrc = None
-            if isinstance(details, BaseException):
-                logger.debug("[tidal] proxy track-details lookup raised: %s", details)
-                details = {}
 
-            # Qobuz has priority over Spotify: always consulted,
-            # il suo ISRC sovrascrive quello originale se trovato.
             if qobuz_isrc:
                 metadata.isrc = qobuz_isrc
                 tidal_tags["ISRC"] = qobuz_isrc
@@ -1558,21 +1503,6 @@ class TidalProvider(BaseProvider):
             elif metadata.isrc:
                 tidal_tags["ISRC"] = metadata.isrc
                 logger.info("[tidal] ISRC from source metadata: %s", metadata.isrc)
-
-            # Proxy used for releaseDate; its ISRC is only the last resort.
-            if details:
-                if not metadata.isrc:
-                    if isrc_from_proxy := details.get("isrc"):
-                        tidal_tags["ISRC"] = isrc_from_proxy
-                        metadata.isrc = isrc_from_proxy
-                        logger.info(
-                            "[tidal] ISRC from proxy (last resort): %s",
-                            isrc_from_proxy,
-                        )
-
-                if (rd := details.get("releaseDate")) and len(rd) >= 4:
-                    tidal_tags["ORIGINALDATE"] = rd
-                    tidal_tags["ORIGINALYEAR"] = rd[:4]
 
             # ----------------------------------------------------------------
             # MUSICBRAINZ
