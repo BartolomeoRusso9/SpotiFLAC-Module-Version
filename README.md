@@ -1,7 +1,7 @@
 <div align="left">
   <h1>SpotiFLAC Python Module</h1>
   <p>
-    Get Spotify tracks in true FLAC from Tidal, Qobuz & Amazon Music — no account required.
+    Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends.
     Integrate directly into your Python projects, build custom Telegram bots, automation tools, or bulk downloaders.
   </p>
 
@@ -15,6 +15,23 @@
     <a href="https://t.me/SpotiFLAC_Module_Version" target="_blank"><img src="https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white" /></a>
   </p>
 </div>
+
+## Disclaimer
+This project is intended for **educational and personal use only**. The developer does not condone or encourage copyright infringement.
+
+**SpotiFLAC-Module-Version** is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service.
+
+You are solely responsible for:
+
+1. Ensuring your use of this software complies with your local laws.
+2. Reading and adhering to the Terms of Service of the respective platforms.
+3. Any legal consequences resulting from the misuse of this tool.
+
+The software is provided "as is", without warranty of any kind, express or implied. The author assumes no liability for any bans, damages, or legal issues arising from its use or misuse. Users assume all risk associated with its use.
+
+If you are a copyright holder or an authorized representative and believe this repository infringes upon your rights, please contact the maintainer with sufficient detail (including relevant URLs and proof of ownership); the matter will be promptly investigated.
+
+---
 
 > **Looking for a standalone app?**
 > - [SpotiFLAC (Desktop)](https://github.com/afkarxyz/SpotiFLAC) — Download music in true lossless FLAC from different providers for Windows, macOS & Linux
@@ -96,7 +113,7 @@ The classic synchronous API remains the simplest way to integrate SpotiFLAC into
 from SpotiFLAC import SpotiFLAC
 
 SpotiFLAC(
-    url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
+    url="https://open.spotify.com/track/TRACK_ID",
     output_dir="./downloads",
     services=["tidal"],
 )
@@ -137,12 +154,12 @@ async def main():
 
         # Download a single track
         await client.download_track(
-            "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+            "https://open.spotify.com/track/TRACK_ID"
         )
 
         # Fetch playlist metadata without downloading
         info, tracks = await client.get_playlist(
-            "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
+            "https://open.spotify.com/playlist/PLAYLIST_ID"
         )
 
         print(f"{info['name']} contains {len(tracks)} tracks")
@@ -215,7 +232,7 @@ docker run --rm -it \
   -v "$(pwd)/downloads:/app/downloads" \
   -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
   -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
-  spotiflac "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" \
+  spotiflac "https://open.spotify.com/track/TRACK_ID" \
   /app/downloads -s deezer -q LOSSLESS
 ```
 
@@ -235,9 +252,9 @@ SpotiFLAC therefore draws animated bars only when stderr is an interactive termi
 
 ```
 [RUN] 24 track(s) · tidal, qobuz · LOSSLESS · 2 in parallel → /app/downloads
-Track [3/24] Nightcall — Kavinsky (OutRun)
-  ⬇  Nightcall  ·  47%  ·  13.4 MB / 28.4 MB
-  ✓  Nightcall  ·  TIDAL  ·  FLAC  ·  28.4 MB  ·  12s
+Track [3/24] Track Title — Artist Name (Album Name)
+  ⬇  Track Title  ·  47%  ·  13.4 MB / 28.4 MB
+  ✓  Track Title  ·  TIDAL  ·  FLAC  ·  28.4 MB  ·  12s
 ```
 
 Progress lines are throttled to at most one per 25% and per 10 seconds, so a track costs a handful of lines rather than one per received chunk.
@@ -282,7 +299,7 @@ You can customize the download behavior, prioritize specific streaming services,
 from SpotiFLAC import SpotiFLAC
 
 SpotiFLAC(
-    url="https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ",
+    url="https://open.spotify.com/album/ALBUM_ID",
     output_dir="./MusicLibrary",
     services=["qobuz", "amazon", "tidal"],
     filename_format="{year} - {album}/{track}. {title}",
@@ -379,9 +396,9 @@ from SpotiFLAC import SpotiFLAC
 
 SpotiFLAC(
     url=[
-        "https://open.spotify.com/album/41MnTivkwTO3UUJ8DrqEJJ",
-        "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
-        "https://listen.tidal.com/album/364272512",
+        "https://open.spotify.com/album/ALBUM_ID",
+        "https://open.spotify.com/playlist/PLAYLIST_ID",
+        "https://listen.tidal.com/album/ALBUM_ID",
     ],
     output_dir="./MusicLibrary",
     services=["tidal", "qobuz"],
@@ -525,11 +542,11 @@ Download the complete discography of an artist. Duplicate tracks (same ISRC acro
 from SpotiFLAC import SpotiFLAC
 
 # Spotify — albums + singles
-SpotiFLAC(url="https://open.spotify.com/artist/1Xyo4u8uXC1ZmMpatF05PJ", output_dir="./MusicLibrary",
+SpotiFLAC(url="https://open.spotify.com/artist/ARTIST_ID", output_dir="./MusicLibrary",
           services=["qobuz", "tidal"], use_album_subfolders=True, filename_format="{year} - {album}/{track}. {title}")
 
 # Tidal — full discography (append /discography/albums or /discography/singles to filter)
-SpotiFLAC(url="https://listen.tidal.com/artist/7804", output_dir="./MusicLibrary",
+SpotiFLAC(url="https://listen.tidal.com/artist/ARTIST_ID", output_dir="./MusicLibrary",
           services=["tidal"], use_album_subfolders=True, filename_format="{year} - {album}/{track}. {title}")
 ```
 
@@ -549,7 +566,7 @@ For single track downloads you can specify the exact file path instead of relyin
 from SpotiFLAC import SpotiFLAC
 
 SpotiFLAC(
-    url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
+    url="https://open.spotify.com/track/TRACK_ID",
     output_dir="./downloads",
     output_path="files/song.flac"
 )
@@ -559,9 +576,11 @@ SpotiFLAC(
 
 ### Qobuz Local API URL (Optional)
 
-SpotiFLAC can use an optional self-hosted Qobuz stream API for improved reliability and reduced rate limits. If you do not provide a local API URL, Qobuz requests are attempted anonymously.
+By default, SpotiFLAC attempts Qobuz requests anonymously, without any local API configured. For improved reliability, reduced rate limits, and to use your own Qobuz subscription credentials instead of anonymous access, you can deploy a self-hosted Qobuz stream API and point SpotiFLAC to it.
 
 How to deploy your own instance: [github.com/BartolomeoRusso9/qobuz-rest-api](https://github.com/BartolomeoRusso9/qobuz-rest-api)
+
+> **Note:** Self-hosting requires your own valid Qobuz account and is subject to Qobuz's Terms of Service. You are responsible for ensuring your use complies with those terms and with applicable law in your jurisdiction.
 
 **How to apply the Qobuz Local API URL in SpotiFLAC:**
 
@@ -594,9 +613,11 @@ SpotiFLAC(
 
 ### Custom Tidal API Instance (Optional)
 
-SpotiFLAC connects to a shared pool of public hifi-api mirrors to fetch Tidal streams. If you want guaranteed availability and full control, you can self-host your own instance and point SpotiFLAC to it — it will always be tried first, before any public mirror.
+By default, SpotiFLAC connects to a shared pool of public hifi-api mirrors to fetch Tidal streams. For guaranteed availability, full control, and to use your own Tidal Premium credentials instead of relying on third-party mirrors, you can self-host your own instance and point SpotiFLAC to it — it will always be tried first, before any public mirror.
 
 How to deploy your own instance: [github.com/binimum/hifi-api](https://github.com/binimum/hifi-api)
+
+> **Note:** Self-hosting requires your own valid Tidal account and is subject to Tidal's Terms of Service. You are responsible for ensuring your use complies with those terms and with applicable law in your jurisdiction.
 
 **Python**
 
@@ -604,7 +625,7 @@ How to deploy your own instance: [github.com/binimum/hifi-api](https://github.co
 from SpotiFLAC import SpotiFLAC
 
 SpotiFLAC(
-    url="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
+    url="https://open.spotify.com/track/TRACK_ID",
     output_dir="./downloads",
     services=["tidal"],
     tidal_custom_api="https://your-instance.example.com",
