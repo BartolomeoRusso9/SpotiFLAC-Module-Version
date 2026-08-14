@@ -54,6 +54,12 @@ class PythonExtensionProvider(BaseProvider):
 
     def __new__(cls, ext_id: str, *, ext_dir: str | None = None, **kwargs: Any):
         manager = ExtensionManager(ext_dir=ext_dir, auto_install_downloads=False)
+        # Preload all python extension modules to resolve intra-extension imports
+        try:
+            manager.preload_python_modules()
+        except Exception:
+            # Don't fail hard if preloading has issues; fall back to loading utilities
+            pass
         load_python_utilities(manager)
         ext = manager.get_installed(ext_id)
         if ext is None or ext.runtime != "python":

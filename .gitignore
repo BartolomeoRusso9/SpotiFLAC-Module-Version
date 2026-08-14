@@ -22,3 +22,5 @@ CLAUDE.local.md
 docker-compose.yml
 /.cache_docker
 /.spotiflac_docker
+/.test_extensions
+/scripts

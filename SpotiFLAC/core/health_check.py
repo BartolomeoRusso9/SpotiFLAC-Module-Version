@@ -73,12 +73,19 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     # ── Tidal ──────────────────────────────────────────────────────────────
     tidal_eps = []
     try:
-        from SpotiFLAC.providers.tidal import get_tidal_api_list
-
-        for url in get_tidal_api_list()[:_TIDAL_MAX_MIRRORS]:
-            tidal_eps.append(
-                ("GET", f"{url.rstrip('/')}/track/?id=251380837&quality=LOSSLESS"),
-            )
+        import sys
+        from SpotiFLAC.extensions.manager import ExtensionManager
+        manager = ExtensionManager(auto_install_downloads=False)
+        cand = next((c.name for c in manager.list_installed() if c.runtime == "python" and "tidal" in c.name.lower()), None)
+        if cand:
+            mod_name = f"SpotiFLAC.extensions_plugins.{cand.replace('-', '_')}"
+            tidal_mod = sys.modules.get(mod_name)
+            if tidal_mod and hasattr(tidal_mod, "get_tidal_api_list"):
+                get_tidal_api_list = getattr(tidal_mod, "get_tidal_api_list")
+                for url in get_tidal_api_list()[:_TIDAL_MAX_MIRRORS]:
+                    tidal_eps.append(
+                        ("GET", f"{url.rstrip('/')}/track/?id=251380837&quality=LOSSLESS"),
+                    )
     except Exception:
         pass
 

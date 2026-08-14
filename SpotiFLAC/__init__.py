@@ -36,8 +36,13 @@ def __getattr__(name: str):
             DeprecationWarning,
             stacklevel=2,
         )
-        from . import providers
-        return getattr(providers, name)
+        # The legacy `SpotiFLAC.providers` package was removed. Instead of
+        # attempting a hard import that would raise ModuleNotFoundError,
+        # provide a clear error explaining the migration path.
+        raise AttributeError(
+            f"Legacy provider '{name}' is not available. Install and select an "
+            "extension (ext:) or use the extensions API instead."
+        )
     raise AttributeError(name)
 
 try:
