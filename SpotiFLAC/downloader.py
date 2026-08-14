@@ -1056,7 +1056,7 @@ class SpotiflacDownloader:
         self,
         url: str,
     ) -> tuple[str, list[TrackMetadata], dict]:
-        from .providers.apple_music_metadata import (
+        from .core.apple_music_metadata import (
             is_apple_music_url,
             parse_apple_music_url,
         )
@@ -1097,7 +1097,7 @@ class SpotiflacDownloader:
                     include_featuring=self._opts.include_featuring,
                 )
             elif is_apple:
-                from .providers.apple_music_metadata import AppleMusicMetadataClient
+                from .core.apple_music_metadata import AppleMusicMetadataClient
 
                 client = AppleMusicMetadataClient()
                 (

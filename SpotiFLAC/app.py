@@ -1155,7 +1155,7 @@ class SpotiFLAC_API:
 
                     client = TidalMetadataClient()
                 elif "music.apple.com" in url:
-                    from .providers.apple_music_metadata import AppleMusicMetadataClient
+                    from .core.apple_music_metadata import AppleMusicMetadataClient
 
                     client = AppleMusicMetadataClient()
                 else:
