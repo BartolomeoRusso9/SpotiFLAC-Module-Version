@@ -29,6 +29,7 @@ from typing import Any
 
 from typing_extensions import Self
 
+from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.errors import ErrorKind, SpotiflacError
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
 from SpotiFLAC.core.signed_session_mobile import (
@@ -36,7 +37,6 @@ from SpotiFLAC.core.signed_session_mobile import (
     client_from_manifest,
     perform_signed_fetch,
 )
-from SpotiFLAC.core.base import BaseProvider
 
 from .manager import ExtensionManager, InstalledExtension
 from .runtime import ExtensionRuntimeError, JSRuntime

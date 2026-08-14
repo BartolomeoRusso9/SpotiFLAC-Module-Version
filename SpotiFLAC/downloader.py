@@ -55,6 +55,7 @@ from .core.progress import (
     uninstall_console_interception,
 )
 from .core.quality import normalize_quality
+from .core.spotify_metadata import SpotifyMetadataClient
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
     ensure_ffmpeg_available,
@@ -63,7 +64,6 @@ from .core.transcode import (
     transcode_file_async,
     transcoded_file_exists,
 )
-from .core.spotify_metadata import SpotifyMetadataClient
 
 if TYPE_CHECKING:
     from .core.base import BaseProvider
@@ -1060,8 +1060,8 @@ class SpotiflacDownloader:
             is_apple_music_url,
             parse_apple_music_url,
         )
-        from .providers.pandora import is_pandora_url, parse_pandora_url
         from .core.tidal_metadata import is_tidal_url, parse_tidal_url
+        from .providers.pandora import is_pandora_url, parse_pandora_url
 
         is_tidal = is_tidal_url(url)
         is_apple = is_apple_music_url(url)

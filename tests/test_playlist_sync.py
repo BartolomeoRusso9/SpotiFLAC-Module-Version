@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata, build_filename
 from SpotiFLAC.core.playlist_sync import (
     PlaylistSource,
@@ -23,7 +24,6 @@ from SpotiFLAC.core.playlist_sync import (
     write_if_changed_async,
 )
 from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
-from SpotiFLAC.core.base import BaseProvider
 
 
 def _track(

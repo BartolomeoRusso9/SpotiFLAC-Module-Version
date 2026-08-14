@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 from typing_extensions import Self
 
 from .core.http import NetworkManager
-from .downloader import DownloadOptions, SpotiflacDownloader
 from .core.spotify_metadata import SpotifyMetadataClient, parse_spotify_url
+from .downloader import DownloadOptions, SpotiflacDownloader
 
 if TYPE_CHECKING:
     from types import TracebackType
