@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
 from SpotiFLAC.core.transcode import (
     normalize_bitrate,
@@ -22,7 +23,6 @@ from SpotiFLAC.downloader import (
     download_one_async,
     transcode_target_path,
 )
-from SpotiFLAC.core.base import BaseProvider
 
 FFMPEG = shutil.which("ffmpeg")
 requires_ffmpeg = pytest.mark.skipif(FFMPEG is None, reason="ffmpeg not installed")
