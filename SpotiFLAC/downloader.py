@@ -63,10 +63,10 @@ from .core.transcode import (
     transcode_file_async,
     transcoded_file_exists,
 )
-from .providers.spotify_metadata import SpotifyMetadataClient
+from .core.spotify_metadata import SpotifyMetadataClient
 
 if TYPE_CHECKING:
-    from .providers.base import BaseProvider
+    from .core.base import BaseProvider
 
 logger = logging.getLogger(__name__)
 
@@ -1061,7 +1061,7 @@ class SpotiflacDownloader:
             parse_apple_music_url,
         )
         from .providers.pandora import is_pandora_url, parse_pandora_url
-        from .providers.tidal_metadata import is_tidal_url, parse_tidal_url
+        from .core.tidal_metadata import is_tidal_url, parse_tidal_url
 
         is_tidal = is_tidal_url(url)
         is_apple = is_apple_music_url(url)
@@ -1084,7 +1084,7 @@ class SpotiflacDownloader:
 
         try:
             if is_tidal:
-                from .providers.tidal_metadata import TidalMetadataClient
+                from .core.tidal_metadata import TidalMetadataClient
 
                 client = TidalMetadataClient()
                 (
@@ -1183,7 +1183,7 @@ class SpotiflacDownloader:
         elif is_pandora:
             info = parse_pandora_url(url)
         else:
-            from .providers.spotify_metadata import parse_spotify_url
+            from .core.spotify_metadata import parse_spotify_url
 
             info = parse_spotify_url(url)
 

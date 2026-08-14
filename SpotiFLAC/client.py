@@ -10,7 +10,7 @@ from typing_extensions import Self
 
 from .core.http import NetworkManager
 from .downloader import DownloadOptions, SpotiflacDownloader
-from .providers.spotify_metadata import SpotifyMetadataClient, parse_spotify_url
+from .core.spotify_metadata import SpotifyMetadataClient, parse_spotify_url
 
 if TYPE_CHECKING:
     from types import TracebackType

@@ -1,12 +1,12 @@
 from .amazon import AmazonProvider
 from .apple_music import AppleMusicProvider
-from .base import BaseProvider
+from ..core.base import BaseProvider
 from .deezer import DeezerProvider
 from .gdstudio import JooxProvider, KuwoProvider, MiguProvider, NeteaseProvider
 from .pandora import PandoraProvider
 from .qobuz import QobuzProvider
 from .soundcloud import SoundCloudProvider
-from .spotify_metadata import SpotifyMetadataClient, parse_spotify_url
+from ..core.spotify_metadata import SpotifyMetadataClient, parse_spotify_url
 from .tidal import TidalProvider
 from .youtube import YouTubeProvider
 

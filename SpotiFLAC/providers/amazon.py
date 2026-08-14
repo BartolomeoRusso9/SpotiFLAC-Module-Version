@@ -40,7 +40,7 @@ from SpotiFLAC.core.signed_session_desktop import (
 from SpotiFLAC.core.signed_session_mono import fetch_mono_track_via_browser
 from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
 
-from .base import BaseProvider
+from ..core.base import BaseProvider
 from .tidal import _find_isrc_via_qobuz
 
 logger = logging.getLogger(__name__)

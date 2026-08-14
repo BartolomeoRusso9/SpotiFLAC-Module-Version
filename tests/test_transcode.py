@@ -22,7 +22,7 @@ from SpotiFLAC.downloader import (
     download_one_async,
     transcode_target_path,
 )
-from SpotiFLAC.providers.base import BaseProvider
+from SpotiFLAC.core.base import BaseProvider
 
 FFMPEG = shutil.which("ffmpeg")
 requires_ffmpeg = pytest.mark.skipif(FFMPEG is None, reason="ffmpeg not installed")

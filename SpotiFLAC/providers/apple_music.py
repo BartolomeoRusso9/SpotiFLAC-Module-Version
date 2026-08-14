@@ -19,7 +19,7 @@ from SpotiFLAC.core.provider_stats import record_failure_async, record_success_a
 from SpotiFLAC.core.quality import normalize_quality
 from SpotiFLAC.core.tagger import EmbedOptions, _print_mb_summary, embed_metadata_async
 
-from .base import BaseProvider
+from ..core.base import BaseProvider
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable

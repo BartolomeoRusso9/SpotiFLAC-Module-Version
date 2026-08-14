@@ -319,7 +319,7 @@ class SpotiFLAC_API:
         """Metodo chiamato da app.js per retrievesre l'Home Feed."""
         try:
             from .core.spotfetch import SpotifyWebClient
-            from .providers.spotify_metadata import parse_home_feed
+            from .core.spotify_metadata import parse_home_feed
 
             client = SpotifyWebClient()
             raw_data = client.get_home_feed()
@@ -336,7 +336,7 @@ class SpotiFLAC_API:
         Returns a dictionary with 4 sections: tracks, albums, artists, playlists (max 50 results each).
         """
         try:
-            from .providers.spotify_metadata import SpotifyMetadataClient
+            from .core.spotify_metadata import SpotifyMetadataClient
 
             client = SpotifyMetadataClient()
             # client.search() already returns a dictionary with the 4 arrays
@@ -429,7 +429,7 @@ class SpotiFLAC_API:
 
     def _search_provider_thread(self, query, limit) -> None:
         try:
-            from .providers.spotify_metadata import SpotifyMetadataClient
+            from .core.spotify_metadata import SpotifyMetadataClient
 
             client = SpotifyMetadataClient()
             results = client.search(query, limit=limit)
@@ -1121,7 +1121,7 @@ class SpotiFLAC_API:
 
         """
         try:
-            from .providers.spotify_metadata import SpotifyMetadataClient
+            from .core.spotify_metadata import SpotifyMetadataClient
 
             client = SpotifyMetadataClient()
             preview_url = client.get_track_preview(track_id)
@@ -1151,7 +1151,7 @@ class SpotiFLAC_API:
             if is_url:
                 # ── Scelta client in base al dominio ───────────────────────────
                 if "tidal.com" in url:
-                    from .providers.tidal_metadata import TidalMetadataClient
+                    from .core.tidal_metadata import TidalMetadataClient
 
                     client = TidalMetadataClient()
                 elif "music.apple.com" in url:
@@ -1159,12 +1159,12 @@ class SpotiFLAC_API:
 
                     client = AppleMusicMetadataClient()
                 else:
-                    from .providers.spotify_metadata import SpotifyMetadataClient
+                    from .core.spotify_metadata import SpotifyMetadataClient
 
                     client = SpotifyMetadataClient()
             else:
                 # ── Text search — always SpotifyMetadataClient ─────────────
-                from .providers.spotify_metadata import SpotifyMetadataClient
+                from .core.spotify_metadata import SpotifyMetadataClient
 
                 client = SpotifyMetadataClient()
             # Dopo aver scelto il client, prima di client.get_url()
