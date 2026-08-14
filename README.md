@@ -47,7 +47,7 @@ If you are a copyright holder or an authorized representative and believe this r
 ## Features
 
 - Native synchronous and asynchronous Python APIs
-- Modular JavaScript Extension system (bring-your-own registry — nothing bundled)
+- Modular Extension system (bring-your-own registry — nothing bundled)
 - Automatic fallback among the extensions *you* have installed
 - Built-in GUI
 - Interactive CLI Wizard
@@ -65,7 +65,7 @@ If you are a copyright holder or an authorized representative and believe this r
 pip install SpotiFLAC
 ```
 
-> **Important:** out of the box, SpotiFLAC does nothing but resolve Spotify metadata — it ships with **no built-in provider and no default extension source**. Before you can download anything, you need to point it at an extension registry of your own choosing and install at least one extension. See [JavaScript Extensions](#javascript-extensions) below.
+> **Important:** out of the box, SpotiFLAC does nothing but resolve Spotify metadata — it ships with **no built-in provider and no default extension source**. Before you can download anything, you need to point it at an extension registry of your own choosing and install at least one extension. See [Extensions](#extensions) below.
 
 ---
 
@@ -186,7 +186,7 @@ asyncio.run(main())
 
 ---
 
-## JavaScript Extensions
+## Extensions
 
 SpotiFLAC has **no built-in download provider and no default extension source**. Every provider — Tidal, Qobuz, Amazon Music, Deezer, or anything else — is supplied entirely by extensions that you find, review, and choose to install yourself.
 
@@ -669,7 +669,7 @@ chmod +x SpotiFLAC-Linux-arm64
 
 *(For ARM devices like Raspberry Pi, replace `x86_64` with `arm64`)*
 
-> **Reminder:** `--service` values only resolve to something functional if you have already installed a matching extension (`--service ext:tidal-web` needs the `tidal-web` extension installed from a registry you configured). See [JavaScript Extensions](#javascript-extensions).
+> **Reminder:** `--service` values only resolve to something functional if you have already installed a matching extension (`--service ext:tidal-web` needs the `tidal-web` extension installed from a registry you configured). See [Extensions](#extensions).
 
 ---
 
@@ -682,7 +682,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `url` | `str` / `list[str]` | Required | A single URL or a list of URLs (batch mode). |
 | `output_dir` | `str` | Required | The destination directory path where the audio files will be saved. |
 | `output_path` | `str` | `None` | Exact destination file path for single track downloads. Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies. |
-| `services` | `list` | `["ext:tidal-web"]` | Extensions to use and their priority order, as `ext:<id>` (or a legacy alias — see [JavaScript Extensions](#javascript-extensions)). Each `id` must correspond to an extension you have already installed; nothing is bundled or installed automatically. |
+| `services` | `list` | `["ext:tidal-web"]` | Extensions to use and their priority order, as `ext:<id>` (or a legacy alias — see [Extensions](#extensions)). Each `id` must correspond to an extension you have already installed; nothing is bundled or installed automatically. |
 | `filename_format` | `str` | `"{title} - {artist}"` | Format for naming downloaded files. See placeholders below. |
 | `use_track_numbers` | `bool` | `False` | Prefixes the filename with the track number. |
 | `use_album_track_numbers` | `bool` | `False` | Uses the track's original album number instead of the download queue position. |
@@ -728,7 +728,7 @@ When customizing the `filename_format` string, you can use the following dynamic
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--service` | `-s` | `ext:tidal-web` | One or more extensions in priority order, as `ext:<id>` (or a legacy alias resolved to an installed extension — see [JavaScript Extensions](#javascript-extensions)). |
+| `--service` | `-s` | `ext:tidal-web` | One or more extensions in priority order, as `ext:<id>` (or a legacy alias resolved to an installed extension — see [Extensions](#extensions)). |
 | `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
 | `--output-path` | `-o` | `None` | Exact output file path for single track downloads. Ignored for albums, playlists and discographies. |
 | `--quality` | `-q` | `LOSSLESS` | Requested audio quality. Supported values depend on the installed extension. |
