@@ -25,8 +25,15 @@ sleep 1
 # 2. Start Fluxbox window manager to keep Chromium windows organized
 fluxbox -display :99 >/dev/null 2>&1 &
 
-# 3. Start VNC server on port 5900 (password, for local access)
-x11vnc -display :99 -forever -passwd "spotiflac" -shared -bg -quiet
+# 3. Start VNC server on port 5900.
+# Password is read from an environment variable (default: disabled unless set).
+# Example: X11VNC_PASSWORD=your_secure_password docker run ...
+VNC_PASSWORD="${X11VNC_PASSWORD:-}"
+if [ -n "$VNC_PASSWORD" ]; then
+  x11vnc -display :99 -forever -passwd "$VNC_PASSWORD" -shared -bg -quiet
+else
+  x11vnc -display :99 -forever -shared -bg -quiet
+fi
 
 # 4. Start noVNC bridge to view the screen from a web browser on port 6080
 websockify --web=/usr/share/novnc --daemon 6080 localhost:5900 >/dev/null 2>&1
