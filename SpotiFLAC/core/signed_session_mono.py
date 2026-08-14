@@ -54,11 +54,13 @@ def ensure_app_dir() -> str:
 
 def monochrome_session_path() -> str:
     directory = ensure_app_dir()
-    os.chmod(directory, 0o700)
+    with contextlib.suppress(OSError):
+        os.chmod(directory, 0o700)
 
     signed_sessions_dir = os.path.join(directory, "signed_sessions")
     os.makedirs(signed_sessions_dir, exist_ok=True)
-    os.chmod(signed_sessions_dir, 0o700)
+    with contextlib.suppress(OSError):
+        os.chmod(signed_sessions_dir, 0o700)
 
     return os.path.join(signed_sessions_dir, "monochrome_sessions.json")
 
@@ -349,16 +351,25 @@ class _MonochromeBrowserSession:
             self._tab = None
 
 
-_mono_browser_session = _MonochromeBrowserSession()
+_mono_browser_session: _MonochromeBrowserSession | None = None
+
+
+def _get_mono_browser_session() -> _MonochromeBrowserSession:
+    """Create the legacy browser helper on first use, never at import time."""
+    global _mono_browser_session
+    if _mono_browser_session is None:
+        _mono_browser_session = _MonochromeBrowserSession()
+    return _mono_browser_session
 
 
 async def fetch_mono_track_via_browser(params: dict) -> dict:
     """Esegue la GET /api/track/ instradata dentro la sessione CDP del browser."""
-    return await _mono_browser_session.fetch_track(params)
+    return await _get_mono_browser_session().fetch_track(params)
 
 
 async def close_mono_browser_session() -> None:
-    await _mono_browser_session.close()
+    if _mono_browser_session is not None:
+        await _mono_browser_session.close()
 
 
 def _close_mono_browser_sync() -> None:

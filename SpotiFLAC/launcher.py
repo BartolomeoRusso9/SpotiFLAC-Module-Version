@@ -95,23 +95,10 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     )
 
     def _service_type(value: str) -> str:
-        native_services = {
-            "deezer",
-            "tidal",
-            "qobuz",
-            "amazon",
-            "joox",
-            "netease",
-            "migu",
-            "kuwo",
-            "soundcloud",
-            "youtube",
-            "apple",
-            "pandora",
-        }
-        if value in native_services or value.startswith("ext:"):
+        from .extensions.catalog import known_service
+        if known_service(value):
             return value
-        msg = f"invalid service: '{value}'. ``--service`` accepts native providers or ext:<name> extensions."
+        msg = f"invalid service: '{value}'. Use ext:<name> or a supported compatibility alias."
         raise argparse.ArgumentTypeError(
             msg,
         )
@@ -121,10 +108,10 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "-s",
         type=_service_type,
         nargs="+",
-        default=pd.get("services", ["tidal"]),
+        default=pd.get("services", ["ext:tidal-web"]),
         metavar="SERVICE",
-        help="Audio providers in priority order (default: tidal). "
-        "Choices: tidal, qobuz, deezer, amazon, joox, netease, migu, kuwo, soundcloud, youtube, apple, pandora, or ext:<name>",
+        help="Extension providers in priority order (default: ext:tidal-web). "
+        "Use ext:<name>; historical service aliases remain supported.",
     )
     parser.add_argument(
         "--filename-format",

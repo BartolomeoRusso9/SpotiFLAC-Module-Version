@@ -16,8 +16,12 @@ Default directory: ~/.spotiflac/extensions/{name}/
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import logging
+import os
+import shutil
+import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,7 +31,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 REGISTRY_URL = (
-    "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/registry.json"
+    "https://raw.githubusercontent.com/spotiflacapp/SpotiFLAC-Extension/main/registry.json"
 )
 
 DEFAULT_EXT_DIR = Path.home() / ".spotiflac" / "extensions"
@@ -50,6 +54,7 @@ class RegistryEntry:
     min_app_version: str = "0.0.0"
     icon_url: str | None = None
     updated_at: str = ""
+    sha256: str | None = None
 
 
 @dataclass
@@ -64,6 +69,14 @@ class InstalledExtension:
     @property
     def index_js(self) -> Path:
         return self.ext_dir / "index.js"
+
+    @property
+    def entry_point(self) -> Path:
+        return self.ext_dir / self.manifest.get("entryPoint", "index.js")
+
+    @property
+    def runtime(self) -> str:
+        return self.manifest.get("runtime", "javascript")
 
     @property
     def types(self) -> list[str]:
@@ -133,7 +146,7 @@ class ExtensionManager:
         for entry in entries:
             # Identifies if the extension is a download provider via category or tag
             is_download = (
-                entry.category == "download_provider"
+                entry.category in {"download", "download_provider"}
                 or "download" in entry.tags
                 or "download_provider" in entry.tags
             )
@@ -161,7 +174,7 @@ class ExtensionManager:
                 entry.version,
             )
             try:
-                self.install_from_url(entry.download_url)
+                self.install_from_url(entry.download_url, sha256=entry.sha256)
             except Exception as e:
                 logger.exception(
                     "[ExtMgr] Error during %s of '%s': %s",
@@ -197,6 +210,7 @@ class ExtensionManager:
                     min_app_version=item.get("min_app_version", "0.0.0"),
                     icon_url=item.get("icon_url"),
                     updated_at=item.get("updated_at", ""),
+                    sha256=item.get("sha256"),
                 ),
             )
         return entries
@@ -227,12 +241,15 @@ class ExtensionManager:
             logger.info("[ExtMgr] '%s' already up-to-date (v%s)", ext_id, entry.version)
             return existing
 
-        return self.install_from_url(entry.download_url, settings=settings)
+        return self.install_from_url(
+            entry.download_url, settings=settings, sha256=entry.sha256,
+        )
 
     def install_from_url(
         self,
         url: str,
         settings: dict | None = None,
+        sha256: str | None = None,
     ) -> InstalledExtension:
         """Downloads a .spotiflac-ext file (ZIP) from `url` and installs it.
         The extension name is read from `manifest.json` inside the ZIP.
@@ -246,7 +263,7 @@ class ExtensionManager:
             msg = f"Error downloading extension: {e}"
             raise RuntimeError(msg) from e
 
-        return self._install_from_bytes(raw, settings=settings)
+        return self._install_from_bytes(raw, settings=settings, sha256=sha256)
 
     def install_from_file(
         self,
@@ -261,7 +278,10 @@ class ExtensionManager:
         self,
         raw: bytes,
         settings: dict | None = None,
+        sha256: str | None = None,
     ) -> InstalledExtension:
+        if sha256 and hashlib.sha256(raw).hexdigest().lower() != sha256.lower():
+            raise ValueError("Extension checksum does not match the registry")
         try:
             zf = zipfile.ZipFile(io.BytesIO(raw))
         except zipfile.BadZipFile as e:
@@ -269,7 +289,9 @@ class ExtensionManager:
             raise ValueError(msg) from e
 
         names = zf.namelist()
-        if "manifest.json" not in names or "index.js" not in names:
+        python_modules = [name for name in names if name.endswith(".py") and "/" not in name]
+        is_legacy_python = "manifest.json" not in names and len(python_modules) == 1
+        if not is_legacy_python and ("manifest.json" not in names or "index.js" not in names):
             msg = (
                 f"The .spotiflac-ext must contain manifest.json and index.js. "
                 f"Found: {names}"
@@ -278,26 +300,55 @@ class ExtensionManager:
                 msg,
             )
 
-        manifest = json.loads(zf.read("manifest.json"))
+        if is_legacy_python:
+            module = Path(python_modules[0]).stem
+            name = module.removesuffix("_native").replace("_", "-")
+            utility = module in {"solver", "signed_session_mobile", "signed_session_desktop", "signed_session_mono"}
+            manifest = {
+                "name": name,
+                "displayName": name,
+                "version": "0.0.0+legacy",
+                "runtime": "python",
+                "entryPoint": python_modules[0],
+                "type": ["runtime_utility" if utility else "download_provider"],
+                "legacyPackage": True,
+            }
+        else:
+            manifest = json.loads(zf.read("manifest.json"))
         ext_name = manifest.get("name")
         if not ext_name:
             msg = "manifest.json must have the 'name' field."
             raise ValueError(msg)
 
         target = self.ext_dir / ext_name
-        target.mkdir(parents=True, exist_ok=True)
-
-        # Extract all files
-        for member in names:
-            data = zf.read(member)
-            (target / member).write_bytes(data)
-
-        # Save custom settings if provided
-        if settings:
-            (target / "settings.json").write_text(
-                json.dumps(settings, indent=2),
-                encoding="utf-8",
-            )
+        # Never allow a package to write outside its own extension directory.
+        if any(Path(member).is_absolute() or ".." in Path(member).parts for member in names):
+            raise ValueError("Extension archive contains an unsafe path")
+        previous_settings = target / "settings.json"
+        saved_settings = previous_settings.read_bytes() if previous_settings.exists() else None
+        staging = Path(tempfile.mkdtemp(prefix=f".{ext_name}-", dir=self.ext_dir))
+        try:
+            for member in names:
+                destination = staging / member
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(zf.read(member))
+            if is_legacy_python:
+                (staging / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            if saved_settings and not settings:
+                (staging / "settings.json").write_bytes(saved_settings)
+            if settings:
+                (staging / "settings.json").write_text(json.dumps(settings, indent=2), encoding="utf-8")
+            backup = target.with_suffix(".previous")
+            if backup.exists():
+                shutil.rmtree(backup)
+            if target.exists():
+                os.replace(target, backup)
+            os.replace(staging, target)
+            if backup.exists():
+                shutil.rmtree(backup)
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
 
         logger.info(
             "[ExtMgr] Success: '%s' v%s installed.",
@@ -416,7 +467,7 @@ class ExtensionManager:
             remote = entries[name]
             if remote.version != ext.version:
                 try:
-                    self.install_from_url(remote.download_url)
+                    self.install_from_url(remote.download_url, sha256=remote.sha256)
                     status[name] = f"updated → {remote.version}"
                 except Exception as e:
                     status[name] = f"error: {e}"

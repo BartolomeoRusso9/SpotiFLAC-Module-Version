@@ -32,14 +32,11 @@ from typing_extensions import Self
 from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.errors import ErrorKind, SpotiflacError
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
-from SpotiFLAC.core.signed_session_mobile import (
-    SignedSessionClient,
-    client_from_manifest,
-    perform_signed_fetch,
-)
+from SpotiFLAC.core.signed_session_mobile import SignedSessionClient
 
 from .manager import ExtensionManager, InstalledExtension
 from .runtime import ExtensionRuntimeError, JSRuntime
+from .runtime_features import signed_fetch, signed_session_client
 
 logger = logging.getLogger(__name__)
 
@@ -80,19 +77,7 @@ class JSExtensionProvider(BaseProvider):
 
         # signedSession configuration
         self._signed_session: SignedSessionClient | None = None
-        required = self._ext.manifest.get("requiredRuntimeFeatures", [])
-        ss_config = self._ext.manifest.get("signedSession")
-        if ss_config and any(f.startswith("signedSession") for f in required):
-            self._signed_session = SignedSessionClient(
-                base_url=ss_config["baseUrl"],
-                namespace=ss_config["namespace"],
-                app_version=ss_config.get("appVersion", "1.0"),
-                platform=ss_config.get("platform", "extension"),
-                scheme_label=ss_config.get("schemeLabel", "SPOTIFLAC-HMAC-V1"),
-                header_prefix=ss_config.get("headerPrefix", "X-Sig-"),
-                window_seconds=ss_config.get("timeWindowSeconds", 300),
-                endpoints=ss_config.get("endpoints"),
-            )
+        self._signed_session = signed_session_client(self._ext.manifest)
 
         # --- RUNTIME POOL CONFIGURATION ---
         self._max_runtimes = 2
@@ -136,16 +121,7 @@ class JSExtensionProvider(BaseProvider):
         body: Any,
         headers: dict,
     ) -> dict:
-        ss_manifest = self._ext.manifest.get("signedSession")
-        if not ss_manifest:
-            return {"error": "signedSession manifest missing"}
-
-        client = client_from_manifest(ss_manifest)
-        try:
-            return await perform_signed_fetch(client, method, path, body, headers)
-        finally:
-            with contextlib.suppress(Exception):
-                await client.aclose()
+        return await signed_fetch(self._ext.manifest, method, path, body, headers)
 
     def _create_runtime(self) -> JSRuntime:
         """Creates a new isolated instance of the Node.js process."""

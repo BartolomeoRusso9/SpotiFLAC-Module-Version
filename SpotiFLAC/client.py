@@ -81,7 +81,7 @@ class AsyncSpotiFLAC:
 
         self._opts = DownloadOptions(
             output_dir=output_dir,
-            services=services or ["tidal"],
+            services=services or ["ext:tidal-web"],
             filename_format=filename_format,
             use_track_numbers=use_track_numbers,
             use_album_track_numbers=use_album_track_numbers,

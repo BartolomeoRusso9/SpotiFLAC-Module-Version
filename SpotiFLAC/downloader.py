@@ -88,7 +88,7 @@ async def _call_metadata_get_url(client, url: str, **kwargs):
 @dataclass
 class DownloadOptions:
     output_dir: str
-    services: list[str] = field(default_factory=lambda: ["tidal"])
+    services: list[str] = field(default_factory=lambda: ["ext:tidal-web"])
     filename_format: str = "{title} - {artist}"
     use_track_numbers: bool = False
     use_album_track_numbers: bool = False
@@ -149,34 +149,20 @@ class DownloadOptions:
 
 
 def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
-    from .providers import PROVIDER_REGISTRY, _build_ext_provider
-
-    if name.startswith("ext:"):
-        try:
-            return _build_ext_provider(
-                name,
-                ext_dir=opts.ext_dir,
-                timeout_s=opts.timeout_s or 120,
-            )
-        except Exception as e:
-            logger.warning("Failed to create provider %s: %s", name, e)
-            return None
-
-    cls = PROVIDER_REGISTRY.get(name)
-    if cls is None:
-        logger.warning("Unknown provider: %s", name)
+    from .extensions.catalog import extension_id
+    from .extensions.manager import ExtensionManager
+    from .extensions.provider import JSExtensionProvider
+    try:
+        manager = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=True)
+        ext_id = extension_id(name, manager)
+        ext = manager.get_installed(ext_id)
+        if ext and ext.runtime == "python":
+            from .extensions.python_provider import PythonExtensionProvider
+            return PythonExtensionProvider(ext_id, ext_dir=opts.ext_dir)
+        return JSExtensionProvider(ext_id, ext_dir=opts.ext_dir, timeout_s=opts.timeout_s or 120)
+    except Exception as e:
+        logger.warning("Failed to create extension provider %s: %s", name, e)
         return None
-    kwargs = {}
-    if opts.timeout_s is not None:
-        kwargs["timeout_s"] = opts.timeout_s
-
-    if name == "qobuz":
-        kwargs["qobuz_token"] = opts.qobuz_token
-        kwargs["local_api_url"] = opts.qobuz_local_api_url
-    elif name == "tidal" and opts.tidal_custom_api:
-        kwargs["custom_api_url"] = opts.tidal_custom_api
-
-    return cls(**kwargs)
 
 
 def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProvider]:
@@ -192,57 +178,8 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
         list[BaseProvider]: Providers ordered with the requested native provider first, followed by at most one extension fallback.
 
     """
-    providers: list[BaseProvider] = []
-
-    # 0. If the user explicitly requests ONLY the extension (e.g. -s ext:qobuz-web)
-    if name.startswith("ext:"):
-        p = _build_provider(name, opts)
-        if p:
-            providers.append(p)
-        return providers
-
-    native = _build_provider(name, opts)
-    if native:
-        providers.append(native)
-
-    if getattr(opts, "auto_pair_extensions", True):
-        try:
-            from .extensions.manager import ExtensionManager
-
-            mgr = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=True)
-
-            possible_ext_ids = []
-
-            try:
-                from .providers import NATIVE_TO_EXTENSION_ID
-
-                if ext_id := NATIVE_TO_EXTENSION_ID.get(name):
-                    possible_ext_ids.append(ext_id)
-            except ImportError:
-                pass
-
-            # B. Automatically add the base name and the "-web" variant (e.g. qobuz, qobuz-web, tidal-web)
-            if name not in possible_ext_ids:
-                possible_ext_ids.append(name)
-            if f"{name}-web" not in possible_ext_ids:
-                possible_ext_ids.append(f"{name}-web")
-
-            for ext_id in possible_ext_ids:
-                if mgr.get_installed(ext_id) is not None:
-                    ext_provider = _build_provider(f"ext:{ext_id}", opts)
-                    if ext_provider:
-                        providers.append(ext_provider)
-                        logger.debug(
-                            "[auto-pair] '%s' + extension '%s' added as fallback",
-                            name,
-                            ext_id,
-                        )
-                    break
-
-        except Exception as e:
-            logger.debug("[auto-pair] Extension for '%s' skipped: %s", name, e)
-
-    return providers
+    provider = _build_provider(name, opts)
+    return [provider] if provider else []
 
 
 async def _move_file_async(src: str, dst: str) -> None:
@@ -841,7 +778,15 @@ class DownloadWorker:
 class SpotiflacDownloader:
     def __init__(self, opts: DownloadOptions) -> None:
         self._opts = opts
-        self._client = SpotifyMetadataClient()
+        # Metadata is only needed for Spotify URLs.  Keeping it lazy prevents
+        # construction from performing network work for extension URLs, tests,
+        # and playlist operations that inject their own metadata source.
+        self._client: SpotifyMetadataClient | None = None
+
+    def _metadata_client(self) -> SpotifyMetadataClient:
+        if self._client is None:
+            self._client = SpotifyMetadataClient()
+        return self._client
 
     async def run_async(
         self,
@@ -1142,7 +1087,7 @@ class SpotiflacDownloader:
                     tracks,
                     *_collection_cover,
                 ) = await _call_metadata_get_url(
-                    self._client,
+                    self._metadata_client(),
                     url,
                     include_featuring=self._opts.include_featuring,
                 )
@@ -1251,7 +1196,7 @@ class SpotiflacDownloader:
                 async def _hydrate(idx: int, track: TrackMetadata):
                     async with semaphore:
                         try:
-                            detailed = await self._client.get_track_async(track.id)
+                            detailed = await self._metadata_client().get_track_async(track.id)
                         except Exception as exc:
                             logger.warning(
                                 "Could not fetch release date for %s: %s",
