@@ -16,7 +16,7 @@ from SpotiFLAC.core.link_resolver import LinkResolver
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata, build_filename
 from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
 
-from .base import BaseProvider
+from ..core.base import BaseProvider
 
 logger = logging.getLogger(__name__)
 

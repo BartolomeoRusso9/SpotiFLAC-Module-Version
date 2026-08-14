@@ -9,8 +9,8 @@ class IsrcHelper:
     """Centralized handler for ISRC resolution with fallback and cross-platform translation."""
 
     def __init__(self, http_client) -> None:
-        from SpotiFLAC.providers.songstats import SongstatsProvider
-        from SpotiFLAC.providers.soundplate import SoundplateProvider
+        from SpotiFLAC.core.songstats import SongstatsProvider
+        from SpotiFLAC.core.soundplate import SoundplateProvider
 
         self.http = http_client
         self.finder = IsrcFinder(http_client)

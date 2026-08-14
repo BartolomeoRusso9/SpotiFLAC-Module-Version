@@ -58,7 +58,7 @@ from SpotiFLAC.core.signed_session_desktop import (
 )
 from SpotiFLAC.core.tagger import EmbedOptions, _print_mb_summary, embed_metadata_async
 
-from .base import BaseProvider
+from ..core.base import BaseProvider
 from .qobuz import _API_BASE as QOBUZ_API_BASE
 from .qobuz import _compute_signature, _scrape_credentials_async
 

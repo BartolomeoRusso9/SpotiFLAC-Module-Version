@@ -23,7 +23,7 @@ from SpotiFLAC.core.musicbrainz import fetch_mb_metadata_async, mb_result_to_tag
 from SpotiFLAC.core.quality import normalize_quality
 from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
 
-from .base import BaseProvider
+from ..core.base import BaseProvider
 
 try:
     from Crypto.Cipher import Blowfish

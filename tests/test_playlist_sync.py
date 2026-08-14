@@ -23,7 +23,7 @@ from SpotiFLAC.core.playlist_sync import (
     write_if_changed_async,
 )
 from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
-from SpotiFLAC.providers.base import BaseProvider
+from SpotiFLAC.core.base import BaseProvider
 
 
 def _track(

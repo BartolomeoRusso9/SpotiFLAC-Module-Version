@@ -36,7 +36,7 @@ from SpotiFLAC.core.signed_session_mobile import (
     client_from_manifest,
     perform_signed_fetch,
 )
-from SpotiFLAC.providers.base import BaseProvider
+from SpotiFLAC.core.base import BaseProvider
 
 from .manager import ExtensionManager, InstalledExtension
 from .runtime import ExtensionRuntimeError, JSRuntime

@@ -33,7 +33,7 @@ from SpotiFLAC.core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from SpotiFLAC.core.quality import normalize_quality
 from SpotiFLAC.core.tagger import EmbedOptions, _print_mb_summary, embed_metadata_async
 
-from .base import BaseProvider
+from ..core.base import BaseProvider
 
 logger = logging.getLogger(__name__)
 

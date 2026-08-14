@@ -20,7 +20,7 @@ from SpotiFLAC.core.models import DownloadResult, TrackMetadata
 from SpotiFLAC.core.musicbrainz import AsyncMBFetch, mb_result_to_tags
 from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
 
-from .base import BaseProvider
+from ..core.base import BaseProvider
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from SpotiFLAC.providers.base import BaseProvider
+from SpotiFLAC.core.base import BaseProvider
 
 
 class DummyProvider(BaseProvider):
