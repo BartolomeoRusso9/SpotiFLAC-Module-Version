@@ -153,6 +153,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
     
     Returns a list with the native Python extension (if installed) first, 
     followed by the JavaScript extension as a fallback.
+    Respects explicit requests like 'ext:qobuz-web' or 'ext:qobuz-py'.
     """
     from .extensions.catalog import extension_id
     from .extensions.manager import ExtensionManager
@@ -162,33 +163,40 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
     try:
         manager = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=True)
         
-        # Se l'utente ha passato esplicitamente ext:nome-estensione, gestiamo il mapping
         original_ext_id = extension_id(name, manager)
-        base_name = original_ext_id.lower().replace("-web", "").replace("ext:", "")
+        base_name = original_ext_id.lower().replace("-web", "").replace("ext:", "").replace("-py", "")
 
-        # 1. TENTATIVO PYTHON (Priorità 1: carica prima Python)
-        py_candidate_name = None
-        for cand in manager.list_installed():
-            if cand.runtime == "python" and base_name in cand.name.lower():
-                py_candidate_name = cand.name
-                break
-                
-        if py_candidate_name:
-            try:
-                from .extensions.python_provider import PythonExtensionProvider
-                py_prov = PythonExtensionProvider(py_candidate_name, ext_dir=opts.ext_dir)
-                providers.append(py_prov)
-                logger.debug("Added Python provider candidate: %s", py_candidate_name)
-            except Exception as e_py:
-                logger.warning("Python extension '%s' failed to initialize: %s", py_candidate_name, e_py)
+        # Analizza l'intento esplicito dell'utente
+        wants_explicit_js = "-web" in name.lower()
+        wants_explicit_py = "-py" in name.lower()
+
+        # 1. TENTATIVO PYTHON (Priorità 1)
+        # Se l'utente NON ha digitato esplicitamente "-web", prova ad usare Python
+        if not wants_explicit_js:
+            py_candidate_name = None
+            for cand in manager.list_installed():
+                if cand.runtime == "python" and base_name in cand.name.lower():
+                    py_candidate_name = cand.name
+                    break
+                    
+            if py_candidate_name:
+                try:
+                    from .extensions.python_provider import PythonExtensionProvider
+                    py_prov = PythonExtensionProvider(py_candidate_name, ext_dir=opts.ext_dir)
+                    providers.append(py_prov)
+                    logger.debug("Added Python provider candidate: %s", py_candidate_name)
+                except Exception as e_py:
+                    logger.warning("Python extension '%s' failed to initialize: %s", py_candidate_name, e_py)
 
         # 2. TENTATIVO JAVASCRIPT (Priorità 2: Fallback)
-        try:
-            js_prov = JSExtensionProvider(original_ext_id, ext_dir=opts.ext_dir, timeout_s=opts.timeout_s or 120)
-            providers.append(js_prov)
-            logger.debug("Added JS provider fallback: %s", original_ext_id)
-        except Exception as e_js:
-            logger.debug("JS extension fallback not available for '%s': %s", original_ext_id, e_js)
+        # Se l'utente NON ha digitato esplicitamente "-py", aggiunge JS (o come fallback, o come primario)
+        if not wants_explicit_py:
+            try:
+                js_prov = JSExtensionProvider(original_ext_id, ext_dir=opts.ext_dir, timeout_s=opts.timeout_s or 120)
+                providers.append(js_prov)
+                logger.debug("Added JS provider fallback: %s", original_ext_id)
+            except Exception as e_js:
+                logger.debug("JS extension fallback not available for '%s': %s", original_ext_id, e_js)
 
     except Exception as e:
         logger.warning("Failed to resolve providers for %s: %s", name, e)

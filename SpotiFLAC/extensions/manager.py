@@ -149,7 +149,7 @@ class ExtensionManager:
 
     def ensure_download_providers(self, registry_url: str | list[str] | None = None) -> None:
         """Checks the remote registry and automatically installs (or updates)
-        all extensions classified as download providers.
+        all extensions classified as download providers AND utilities.
         """
         logger.info("[ExtMgr] Automatic check for download extensions on startup...")
         try:
@@ -158,15 +158,19 @@ class ExtensionManager:
             logger.warning("[ExtMgr] Unable to retrieve registry for auto-setup: %s", e)
             return
 
+        # ORDINE CRITICO: Mettiamo prima le utility, così vengono scaricate prima dei provider
+        entries.sort(key=lambda e: 0 if e.category in ("utility", "runtime_utility") else 1)
+
         for entry in entries:
-            # Identifies if the extension is a download provider via category or tag
-            is_download = (
-                entry.category in {"download", "download_provider"}
+            # FIX: Aggiungiamo 'utility' e 'runtime_utility' tra le categorie consentite
+            is_target = (
+                entry.category in {"download", "download_provider", "utility", "runtime_utility"}
                 or "download" in entry.tags
                 or "download_provider" in entry.tags
+                or "utility" in entry.tags
             )
 
-            if not is_download:
+            if not is_target:
                 continue
 
             existing = self.get_installed(entry.id)
@@ -197,7 +201,7 @@ class ExtensionManager:
                     entry.id,
                     e,
                 )
-
+                
     # ── Remote Registry ──────────────────────────────────────
 
     def _registry_urls_from_env(self, registry_url: str | list[str] | None) -> list[str]:
