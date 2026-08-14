@@ -2,7 +2,7 @@ from .amazon import AmazonProvider
 from .apple_music import AppleMusicProvider
 from ..core.base import BaseProvider
 from .deezer import DeezerProvider
-from .gdstudio import JooxProvider, KuwoProvider, MiguProvider, NeteaseProvider
+from .gdstudio import GDStudioProvider, JooxProvider, KuwoProvider, MiguProvider, NeteaseProvider
 from .pandora import PandoraProvider
 from .qobuz import QobuzProvider
 from .soundcloud import SoundCloudProvider
@@ -17,6 +17,7 @@ __all__ = [
     "AppleMusicProvider",
     "BaseProvider",
     "DeezerProvider",
+    "GDStudioProvider",
     "JooxProvider",
     "KuwoProvider",
     "MiguProvider",

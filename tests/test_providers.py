@@ -22,7 +22,7 @@ if parent_dir not in sys.path:
 # Import core components via "SpotiFLAC."
 NetworkManager = importlib.import_module("SpotiFLAC.core.http").NetworkManager
 SpotifyMetadataClient = importlib.import_module(
-    "SpotiFLAC.providers.spotify_metadata"
+    "SpotiFLAC.core.spotify_metadata"
 ).SpotifyMetadataClient
 
 if TYPE_CHECKING:

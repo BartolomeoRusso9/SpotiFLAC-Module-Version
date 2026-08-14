@@ -62,12 +62,11 @@ def validate_flac_file(filepath: str) -> tuple[bool, str]:
             return False, f"FLAC validation failed: {error_msg[:100]}"
 
         flac_binary = shutil.which("flac")
-        # On some platforms (notably Windows) the external `flac` utility may
-        # be missing. In that case skip the secondary integrity test to avoid
-        # false negatives caused by embedded cover art being mapped into the
-        # null output by ffmpeg. Treat the file as valid when `flac` is absent.
+        # The external `flac` utility is required for a full integrity check.
+        # If it's missing, treat the validation as failed to avoid silently
+        # accepting potentially corrupted files.
         if flac_binary is None:
-            return True, ""
+            return False, "flac binary not found"
 
         integrity_result = subprocess.run(
             [flac_binary, "-t", filepath],
