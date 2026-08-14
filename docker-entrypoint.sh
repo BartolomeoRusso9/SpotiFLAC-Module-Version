@@ -6,10 +6,8 @@ Xvfb :99 -screen 0 1280x900x24 -ac +extension GLX +render -noreset &
 sleep 1
 
 # ==============================================================================
-# [OPTIONAL - VNC/WEB SCREEN]:
+# [VNC/WEB SCREEN]:
 # To view Chromium's screen live in your browser or via VNC:
-# 1. Make sure you uncommented the packages (fluxbox, x11vnc, novnc, websockify) and EXPOSE in the Dockerfile.
-# 2. Uncomment the 3 commands below.
 # 3. Run Docker with the port flag mapped: -p 6080:6080
 # 4. Open your browser at: http://localhost:6080/vnc.html
 #

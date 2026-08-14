@@ -12,12 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # - nodejs: for SpotiFLAC extensions
 # - xvfb: to create the virtual display (MANDATORY for Chromium even without VNC)
 # - chromium and fonts-liberation: browser for Pydoll and web fonts
-#
-# ==============================================================================
-# [OPTIONAL - VNC/WEB SCREEN]:
-# To enable viewing the container screen in your browser or via a VNC client,
-# uncomment the 4 packages below before building:
-# ==============================================================================
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -49,8 +44,8 @@ RUN mkdir -p /app/downloads \
 VOLUME ["/app/downloads", "/root/.spotiflac", "/root/.cache/spotiflac"]
 
 # ==============================================================================
-# [OPTIONAL - VNC/WEB SCREEN]:
-# Expose ports only if you want to view the container screen:
+# [VNC/WEB SCREEN]:
+# To view the container screen:
 # - 6080: Web Browser access (noVNC) -> http://localhost:6080/vnc.html
 # - 5900: Classic VNC client access (e.g., RealVNC, TigerVNC)
 # ==============================================================================
