@@ -545,6 +545,7 @@ class DownloadWorker:
         # file names do not change between runs.
         self._positions = positions or list(range(1, len(tracks) + 1))
         self._failed: list[tuple[str, str, str, str]] = []
+        self._skipped: list[tuple[str, str]] = []
         self._completed: dict[str, str] = {}
         self._providers: list[BaseProvider] = self._build_providers()
 
@@ -680,6 +681,7 @@ class DownloadWorker:
 
                 if result.success and result.skipped:
                     await manager.skip_download(track.id)
+                    self._skipped.append((track.id, track.title))
                 elif result.success:
                     size_mb = await _get_file_size_mb_async(result.file_path)
                     await manager.complete_download(
@@ -772,16 +774,18 @@ class DownloadWorker:
         return await asyncio.to_thread(_do_track_dir)
 
     def _print_summary(self, elapsed: float) -> None:
-        succeeded = len(self._tracks) - len(self._failed)
+        succeeded = len(self._tracks) - len(self._failed) - len(self._skipped)
+        skipped_count = len(self._skipped)
         display = [(t, a, e) for _, t, a, e in self._failed]
-        print_summary(len(self._tracks), succeeded, display, elapsed)
+        print_summary(len(self._tracks), succeeded, skipped_count, display, elapsed)
 
     async def _execute_post_action_async(self, output_dir: str) -> None:
         action = self._opts.post_download_action
         if not action or action == "none":
             return
 
-        succeeded = len(self._tracks) - len(self._failed)
+        succeeded = len(self._tracks) - len(self._failed) - len(self._skipped)
+        skipped_count = len(self._skipped)
         failed_count = len(self._failed)
 
         if action == "open_folder":
@@ -789,6 +793,8 @@ class DownloadWorker:
 
         elif action == "notify":
             body = f"{succeeded} tracks downloaded"
+            if skipped_count:
+                body += f", {skipped_count} skipped"
             if failed_count:
                 body += f", {failed_count} failed"
             await _send_system_notify_async("SpotiFLAC — Download completed", body)
@@ -803,6 +809,7 @@ class DownloadWorker:
             cmd = (
                 cmd_template.replace("{folder}", output_dir)
                 .replace("{succeeded}", str(succeeded))
+                .replace("{skipped}", str(skipped_count))
                 .replace("{failed}", str(failed_count))
             )
             try:
