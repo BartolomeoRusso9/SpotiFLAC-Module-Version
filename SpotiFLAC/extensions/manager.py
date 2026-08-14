@@ -147,7 +147,9 @@ class ExtensionManager:
 
     # ── Auto Setup ───────────────────────────────────────────
 
-    def ensure_download_providers(self, registry_url: str | list[str] | None = None) -> None:
+    def ensure_download_providers(
+        self, registry_url: str | list[str] | None = None
+    ) -> None:
         """Checks the remote registry and automatically installs (or updates)
         all extensions classified as download providers AND utilities.
         """
@@ -159,12 +161,15 @@ class ExtensionManager:
             return
 
         # ORDINE CRITICO: Mettiamo prima le utility, così vengono scaricate prima dei provider
-        entries.sort(key=lambda e: 0 if e.category in ("utility", "runtime_utility") else 1)
+        entries.sort(
+            key=lambda e: 0 if e.category in ("utility", "runtime_utility") else 1
+        )
 
         for entry in entries:
             # FIX: Aggiungiamo 'utility' e 'runtime_utility' tra le categorie consentite
             is_target = (
-                entry.category in {"download", "download_provider", "utility", "runtime_utility"}
+                entry.category
+                in {"download", "download_provider", "utility", "runtime_utility"}
                 or "download" in entry.tags
                 or "download_provider" in entry.tags
                 or "utility" in entry.tags
@@ -201,10 +206,12 @@ class ExtensionManager:
                     entry.id,
                     e,
                 )
-                
+
     # ── Remote Registry ──────────────────────────────────────
 
-    def _registry_urls_from_env(self, registry_url: str | list[str] | None) -> list[str]:
+    def _registry_urls_from_env(
+        self, registry_url: str | list[str] | None
+    ) -> list[str]:
         """Resolve registry URLs from parameter, environment variable, or .env file."""
         # If explicit provided, normalize to list
         if registry_url:
@@ -242,7 +249,9 @@ class ExtensionManager:
         urls = self._registry_urls_from_env(url)
         logger.debug("[ExtMgr] Fetching registries: %s", urls)
         if not urls:
-            raise RuntimeError("No registry URLs configured; set SPOTIFLAC_REGISTRIES in .env or environment")
+            raise RuntimeError(
+                "No registry URLs configured; set SPOTIFLAC_REGISTRIES in .env or environment"
+            )
 
         entries: list[RegistryEntry] = []
         for u in urls:
@@ -299,7 +308,9 @@ class ExtensionManager:
             return existing
 
         return self.install_from_url(
-            entry.download_url, settings=settings, sha256=entry.sha256,
+            entry.download_url,
+            settings=settings,
+            sha256=entry.sha256,
         )
 
     def install_from_url(
@@ -336,7 +347,9 @@ class ExtensionManager:
             msg = f"Error downloading extension: {e}"
             raise RuntimeError(msg) from e
 
-        return self._install_from_bytes(raw, settings=settings, sha256=sha256, runtime_hint=parsed_runtime)
+        return self._install_from_bytes(
+            raw, settings=settings, sha256=sha256, runtime_hint=parsed_runtime
+        )
 
     def install_from_file(
         self,
@@ -375,7 +388,9 @@ class ExtensionManager:
             raise ValueError(msg) from e
 
         names = zf.namelist()
-        python_modules = [name for name in names if name.endswith(".py") and "/" not in name]
+        python_modules = [
+            name for name in names if name.endswith(".py") and "/" not in name
+        ]
         manifest = None
         if "manifest.json" in names:
             try:
@@ -384,16 +399,15 @@ class ExtensionManager:
                 manifest = None
 
         # Legacy python: missing manifest but single top-level .py
-        is_legacy_python = (manifest is None and len(python_modules) == 1)
+        is_legacy_python = manifest is None and len(python_modules) == 1
 
         if not is_legacy_python:
             if "manifest.json" not in names:
-                msg = (
-                    f"The archive must contain manifest.json. "
-                    f"Found: {names}"
-                )
+                msg = f"The archive must contain manifest.json. " f"Found: {names}"
                 raise ValueError(msg)
-            if "index.js" not in names and not (manifest and manifest.get("runtime") == "python"):
+            if "index.js" not in names and not (
+                manifest and manifest.get("runtime") == "python"
+            ):
                 msg = (
                     f"The archive must contain manifest.json and index.js (unless runtime is python). "
                     f"Found: {names}"
@@ -403,7 +417,12 @@ class ExtensionManager:
         if is_legacy_python:
             module = Path(python_modules[0]).stem
             name = module.removesuffix("_native").replace("_", "-")
-            utility = module in {"solver", "signed_session_mobile", "signed_session_desktop", "signed_session_mono"}
+            utility = module in {
+                "solver",
+                "signed_session_mobile",
+                "signed_session_desktop",
+                "signed_session_mono",
+            }
             manifest = {
                 "name": name,
                 "displayName": name,
@@ -415,7 +434,7 @@ class ExtensionManager:
             }
         else:
             manifest = json.loads(zf.read("manifest.json"))
-            
+
         if runtime_hint == "python" and python_modules:
             manifest = dict(manifest)
             manifest["runtime"] = "python"
@@ -433,33 +452,41 @@ class ExtensionManager:
             if inferred:
                 manifest = dict(manifest)
                 manifest["runtime"] = inferred
-                
+
         ext_name = manifest.get("name")
         if not ext_name:
             msg = "manifest.json must have the 'name' field."
             raise ValueError(msg)
 
         target = self.ext_dir / ext_name
-        
-        if any(Path(member).is_absolute() or ".." in Path(member).parts for member in names):
+
+        if any(
+            Path(member).is_absolute() or ".." in Path(member).parts for member in names
+        ):
             raise ValueError("Extension archive contains an unsafe path")
-            
+
         previous_settings = target / "settings.json"
-        saved_settings = previous_settings.read_bytes() if previous_settings.exists() else None
+        saved_settings = (
+            previous_settings.read_bytes() if previous_settings.exists() else None
+        )
         staging = Path(tempfile.mkdtemp(prefix=f".{ext_name}-", dir=self.ext_dir))
-        
+
         try:
             for member in names:
                 destination = staging / member
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(zf.read(member))
-                
+
             if is_legacy_python:
-                (staging / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+                (staging / "manifest.json").write_text(
+                    json.dumps(manifest, indent=2), encoding="utf-8"
+                )
             if saved_settings and not settings:
                 (staging / "settings.json").write_bytes(saved_settings)
             if settings:
-                (staging / "settings.json").write_text(json.dumps(settings, indent=2), encoding="utf-8")
+                (staging / "settings.json").write_text(
+                    json.dumps(settings, indent=2), encoding="utf-8"
+                )
 
             # Standard Overwrite (removes old version entirely, replaces with new)
             backup = target.with_suffix(".previous")
@@ -467,9 +494,9 @@ class ExtensionManager:
                 shutil.rmtree(backup)
             if target.exists():
                 os.replace(target, backup)
-            
+
             os.replace(staging, target)
-            
+
             if backup.exists():
                 shutil.rmtree(backup)
 
@@ -534,7 +561,9 @@ class ExtensionManager:
                 pass
         return defaults
 
-    def install_from_links_file(self, path: str | Path | None = None) -> list[InstalledExtension]:
+    def install_from_links_file(
+        self, path: str | Path | None = None
+    ) -> list[InstalledExtension]:
         """Reads a simple env-like file containing extension download URLs."""
         candidates: list[InstalledExtension] = []
         path_to_try = None
@@ -556,7 +585,7 @@ class ExtensionManager:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            
+
             url = line
             runtime_hint = None
             if " " in line:
@@ -653,7 +682,7 @@ class ExtensionManager:
         python_paths: list[str] = []
         python_exts = [e for e in self.list_installed() if e.runtime == "python"]
         for ext in python_exts:
-            # We now rely directly on the parent directory of the entry point, 
+            # We now rely directly on the parent directory of the entry point,
             # as subdirectories (like python/) are no longer generated.
             python_paths.append(str(ext.entry_point.parent))
 
@@ -661,7 +690,7 @@ class ExtensionManager:
 
         if pkg_name not in sys.modules:
             pkg = types.ModuleType(pkg_name)
-            pkg.__path__ = python_paths[:] 
+            pkg.__path__ = python_paths[:]
             sys.modules[pkg_name] = pkg
         else:
             pkg = sys.modules[pkg_name]
@@ -686,7 +715,9 @@ class ExtensionManager:
         for ext in python_exts:
             module_name = f"{pkg_name}.{ext.name.replace('-', '_')}"
             try:
-                spec = importlib.util.spec_from_file_location(module_name, ext.entry_point)
+                spec = importlib.util.spec_from_file_location(
+                    module_name, ext.entry_point
+                )
                 if spec is None or spec.loader is None:
                     continue
                 module = importlib.util.module_from_spec(spec)
@@ -698,4 +729,8 @@ class ExtensionManager:
                     sys.modules.pop(module_name, None)
                     raise
             except Exception:
-                logger.debug("[ExtMgr] Failed preloading %s: %s", ext.name, traceback.format_exc())
+                logger.debug(
+                    "[ExtMgr] Failed preloading %s: %s",
+                    ext.name,
+                    traceback.format_exc(),
+                )

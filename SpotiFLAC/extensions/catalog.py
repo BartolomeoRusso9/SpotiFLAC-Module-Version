@@ -7,9 +7,14 @@ from .manager import ExtensionManager
 # These are public names historically accepted by the CLI/API.  They are now
 # aliases only; no Python provider is instantiated for them.
 SERVICE_ALIASES = {
-    "tidal": "tidal-web", "qobuz": "qobuz-web", "amazon": "amazon",
-    "apple": "apple-music", "deezer": "deezer", "soundcloud": "soundcloud",
-    "youtube": "ytmusic-spotiflac", "pandora": "pandora",
+    "tidal": "tidal-web",
+    "qobuz": "qobuz-web",
+    "amazon": "amazon",
+    "apple": "apple-music",
+    "deezer": "deezer",
+    "soundcloud": "soundcloud",
+    "youtube": "ytmusic-spotiflac",
+    "pandora": "pandora",
 }
 
 

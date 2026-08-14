@@ -96,6 +96,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
 
     def _service_type(value: str) -> str:
         from .extensions.catalog import known_service
+
         if known_service(value):
             return value
         msg = f"invalid service: '{value}'. Use ext:<name> or a supported compatibility alias."

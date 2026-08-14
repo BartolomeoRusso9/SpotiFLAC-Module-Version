@@ -32,7 +32,9 @@ def signed_session_client(manifest: dict[str, Any]) -> SignedSessionClient | Non
     return client_from_manifest(config)
 
 
-async def signed_fetch(manifest: dict[str, Any], method: str, path: str, body: Any, headers: dict) -> dict:
+async def signed_fetch(
+    manifest: dict[str, Any], method: str, path: str, body: Any, headers: dict
+) -> dict:
     client = signed_session_client(manifest)
     if client is None:
         return {"error": "extension did not declare signedSession@1"}

@@ -127,26 +127,45 @@ def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
 # Sync provider classes (invariate)
 # ---------------------------------------------------------------------------
 
+
 def _get_dynamic_python_module(base_name: str) -> Any:
     """Helper per trovare un modulo Python caricato dal manager."""
     import sys
     from SpotiFLAC.extensions.manager import ExtensionManager
+
     manager = ExtensionManager(auto_install_downloads=False)
-    cand = next((c.name for c in manager.list_installed() if c.runtime == "python" and base_name in c.name.lower()), None)
+    cand = next(
+        (
+            c.name
+            for c in manager.list_installed()
+            if c.runtime == "python" and base_name in c.name.lower()
+        ),
+        None,
+    )
     if cand:
         mod_name = f"SpotiFLAC.extensions_plugins.{cand.replace('-', '_')}"
         return sys.modules.get(mod_name)
     return None
 
+
 def _get_dynamic_python_provider(base_name: str, **kwargs) -> Any:
     """Helper per istanziare un provider Python caricato dal manager."""
     from SpotiFLAC.extensions.manager import ExtensionManager
     from SpotiFLAC.extensions.python_provider import PythonExtensionProvider
+
     manager = ExtensionManager(auto_install_downloads=False)
-    cand = next((c.name for c in manager.list_installed() if c.runtime == "python" and base_name in c.name.lower()), None)
+    cand = next(
+        (
+            c.name
+            for c in manager.list_installed()
+            if c.runtime == "python" and base_name in c.name.lower()
+        ),
+        None,
+    )
     if cand:
         return PythonExtensionProvider(cand, **kwargs)
     return None
+
 
 class _DeezerMeta:
     BASE = "https://api.deezer.com/2.0"
@@ -406,7 +425,9 @@ class _QobuzMeta:
     def _get_provider(self) -> Any:
         if self._provider is None:
             try:
-                self._provider = _get_dynamic_python_provider("qobuz", qobuz_token=self._qobuz_token)
+                self._provider = _get_dynamic_python_provider(
+                    "qobuz", qobuz_token=self._qobuz_token
+                )
             except Exception as exc:
                 logger.debug("[meta/qobuz] cannot init provider: %s", exc)
         return self._provider

@@ -23,9 +23,16 @@ from .downloader import DownloadOptions, SpotiflacDownloader
 # extension-first application start never initialises their browser/session
 # machinery.  New integrations should use ``SpotiFLAC.extensions``.
 _LEGACY_PROVIDER_EXPORTS = {
-    "AmazonProvider", "AppleMusicProvider", "DeezerProvider", "JooxProvider",
-    "KuwoProvider", "MiguProvider", "NeteaseProvider", "QobuzProvider",
-    "SpotifyMetadataClient", "TidalProvider",
+    "AmazonProvider",
+    "AppleMusicProvider",
+    "DeezerProvider",
+    "JooxProvider",
+    "KuwoProvider",
+    "MiguProvider",
+    "NeteaseProvider",
+    "QobuzProvider",
+    "SpotifyMetadataClient",
+    "TidalProvider",
 }
 
 
@@ -44,6 +51,7 @@ def __getattr__(name: str):
             "extension (ext:) or use the extensions API instead."
         )
     raise AttributeError(name)
+
 
 try:
     __version__ = importlib.metadata.version("SpotiFLAC")

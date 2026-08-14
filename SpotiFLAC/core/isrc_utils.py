@@ -32,14 +32,22 @@ async def confirm_isrc_with_qobuz_async(
     """Confirm an ISRC by querying Qobuz via the dynamically loaded Extension."""
     if not isrc:
         return False, None
-        
+
     prov = None
     try:
         from SpotiFLAC.extensions.manager import ExtensionManager
         from SpotiFLAC.extensions.python_provider import PythonExtensionProvider
+
         manager = ExtensionManager(auto_install_downloads=False)
         # Cerca il provider Python di Qobuz
-        cand = next((c.name for c in manager.list_installed() if c.runtime == "python" and "qobuz" in c.name.lower()), None)
+        cand = next(
+            (
+                c.name
+                for c in manager.list_installed()
+                if c.runtime == "python" and "qobuz" in c.name.lower()
+            ),
+            None,
+        )
         if cand:
             prov = PythonExtensionProvider(cand, qobuz_token=qobuz_token)
     except Exception:
@@ -69,10 +77,19 @@ async def confirm_isrc_with_qobuz_async(
             return True, track
         if diff <= 10000:
             import re
+
             tnorm = re.sub(r"\s+", " ", (title or "").strip().lower())
             pname = str(track.get("title") or track.get("name") or "").strip().lower()
-            performer = str((track.get("performer") or {}).get("name", "") or "").strip().lower()
-            if tnorm and (tnorm in pname or tnorm in performer or (artist and artist.lower() in performer)):
+            performer = (
+                str((track.get("performer") or {}).get("name", "") or "")
+                .strip()
+                .lower()
+            )
+            if tnorm and (
+                tnorm in pname
+                or tnorm in performer
+                or (artist and artist.lower() in performer)
+            ):
                 return True, track
             return False, None
 

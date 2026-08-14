@@ -150,21 +150,26 @@ class DownloadOptions:
 
 def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProvider]:
     """Build the provider list for a service name.
-    
-    Returns a list with the native Python extension (if installed) first, 
+
+    Returns a list with the native Python extension (if installed) first,
     followed by the JavaScript extension as a fallback.
     Respects explicit requests like 'ext:qobuz-web' or 'ext:qobuz-py'.
     """
     from .extensions.catalog import extension_id
     from .extensions.manager import ExtensionManager
     from .extensions.provider import JSExtensionProvider
-    
+
     providers: list[BaseProvider] = []
     try:
         manager = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=True)
-        
+
         original_ext_id = extension_id(name, manager)
-        base_name = original_ext_id.lower().replace("-web", "").replace("ext:", "").replace("-py", "")
+        base_name = (
+            original_ext_id.lower()
+            .replace("-web", "")
+            .replace("ext:", "")
+            .replace("-py", "")
+        )
 
         # Analizza l'intento esplicito dell'utente
         wants_explicit_js = "-web" in name.lower()
@@ -178,30 +183,48 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
                 if cand.runtime == "python" and base_name in cand.name.lower():
                     py_candidate_name = cand.name
                     break
-                    
+
             if py_candidate_name:
                 try:
                     from .extensions.python_provider import PythonExtensionProvider
-                    py_prov = PythonExtensionProvider(py_candidate_name, ext_dir=opts.ext_dir)
+
+                    py_prov = PythonExtensionProvider(
+                        py_candidate_name, ext_dir=opts.ext_dir
+                    )
                     providers.append(py_prov)
-                    logger.debug("Added Python provider candidate: %s", py_candidate_name)
+                    logger.debug(
+                        "Added Python provider candidate: %s", py_candidate_name
+                    )
                 except Exception as e_py:
-                    logger.warning("Python extension '%s' failed to initialize: %s", py_candidate_name, e_py)
+                    logger.warning(
+                        "Python extension '%s' failed to initialize: %s",
+                        py_candidate_name,
+                        e_py,
+                    )
 
         # 2. TENTATIVO JAVASCRIPT (Priorità 2: Fallback)
         # Se l'utente NON ha digitato esplicitamente "-py", aggiunge JS (o come fallback, o come primario)
         if not wants_explicit_py:
             try:
-                js_prov = JSExtensionProvider(original_ext_id, ext_dir=opts.ext_dir, timeout_s=opts.timeout_s or 120)
+                js_prov = JSExtensionProvider(
+                    original_ext_id,
+                    ext_dir=opts.ext_dir,
+                    timeout_s=opts.timeout_s or 120,
+                )
                 providers.append(js_prov)
                 logger.debug("Added JS provider fallback: %s", original_ext_id)
             except Exception as e_js:
-                logger.debug("JS extension fallback not available for '%s': %s", original_ext_id, e_js)
+                logger.debug(
+                    "JS extension fallback not available for '%s': %s",
+                    original_ext_id,
+                    e_js,
+                )
 
     except Exception as e:
         logger.warning("Failed to resolve providers for %s: %s", name, e)
 
     return providers
+
 
 async def _move_file_async(src: str, dst: str) -> None:
     """Async thread-safe helper to rename/move files."""
@@ -1047,39 +1070,63 @@ class SpotiflacDownloader:
         try:
             if is_tidal:
                 from .core.tidal_metadata import TidalMetadataClient
+
                 client = TidalMetadataClient()
-                (collection_name, tracks, *collection_cover) = await _call_metadata_get_url(
-                    client, url, include_featuring=self._opts.include_featuring
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(
+                        client, url, include_featuring=self._opts.include_featuring
+                    )
                 )
             elif is_apple:
                 from .core.apple_music_metadata import AppleMusicMetadataClient
+
                 client = AppleMusicMetadataClient()
-                (collection_name, tracks, *collection_cover) = await _call_metadata_get_url(
-                    client, url, include_featuring=self._opts.include_featuring
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(
+                        client, url, include_featuring=self._opts.include_featuring
+                    )
                 )
             elif is_soundcloud:
                 sc_providers = _build_providers_for_name("soundcloud", self._opts)
                 if not sc_providers:
-                    raise SpotiflacError(ErrorKind.UNAVAILABLE, "SoundCloud provider not installed")
-                (collection_name, tracks, *collection_cover) = await _call_metadata_get_url(sc_providers[0], url)
+                    raise SpotiflacError(
+                        ErrorKind.UNAVAILABLE, "SoundCloud provider not installed"
+                    )
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(sc_providers[0], url)
+                )
             elif is_youtube:
                 yt_providers = _build_providers_for_name("youtube", self._opts)
                 if not yt_providers:
-                    raise SpotiflacError(ErrorKind.UNAVAILABLE, "YouTube provider not installed")
-                (collection_name, tracks, *collection_cover) = await _call_metadata_get_url(yt_providers[0], url)
+                    raise SpotiflacError(
+                        ErrorKind.UNAVAILABLE, "YouTube provider not installed"
+                    )
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(yt_providers[0], url)
+                )
             elif is_pandora:
                 pd_providers = _build_providers_for_name("pandora", self._opts)
                 if not pd_providers:
-                    raise SpotiflacError(ErrorKind.UNAVAILABLE, "Pandora provider not installed")
-                (collection_name, tracks, *collection_cover) = await _call_metadata_get_url(pd_providers[0], url)
+                    raise SpotiflacError(
+                        ErrorKind.UNAVAILABLE, "Pandora provider not installed"
+                    )
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(pd_providers[0], url)
+                )
             else:
-                (collection_name, tracks, *_collection_cover) = await _call_metadata_get_url(
-                    self._metadata_client(), url, include_featuring=self._opts.include_featuring
+                collection_name, tracks, *_collection_cover = (
+                    await _call_metadata_get_url(
+                        self._metadata_client(),
+                        url,
+                        include_featuring=self._opts.include_featuring,
+                    )
                 )
         except SpotiflacError:
             raise
         except Exception as exc:
-            raise SpotiflacError(ErrorKind.NETWORK_ERROR, f"Metadata fetch failed: {exc}", cause=exc)
+            raise SpotiflacError(
+                ErrorKind.NETWORK_ERROR, f"Metadata fetch failed: {exc}", cause=exc
+            )
 
         if not tracks:
             return collection_name, [], {}
@@ -1090,6 +1137,7 @@ class SpotiflacDownloader:
             info = parse_apple_music_url(url)
         elif is_soundcloud:
             from urllib.parse import urlparse as _urlparse
+
             _parts = [p for p in _urlparse(url).path.strip("/").split("/") if p]
             if len(_parts) >= 2 and _parts[1] == "sets":
                 stype = "playlist"
@@ -1112,13 +1160,16 @@ class SpotiflacDownloader:
             info = {"type": stype, "id": url}
         else:
             from .core.spotify_metadata import parse_spotify_url
+
             info = parse_spotify_url(url)
 
         if not info:
-            raise SpotiflacError(ErrorKind.INVALID_URL, f"Unsupported or invalid URL: {url}")
+            raise SpotiflacError(
+                ErrorKind.INVALID_URL, f"Unsupported or invalid URL: {url}"
+            )
 
         return collection_name, tracks, info
-    
+
     async def _resolve_isrc_bulk_async(
         self,
         tracks: list[TrackMetadata],
@@ -1175,7 +1226,9 @@ class SpotiflacDownloader:
                 async def _hydrate(idx: int, track: TrackMetadata):
                     async with semaphore:
                         try:
-                            detailed = await self._metadata_client().get_track_async(track.id)
+                            detailed = await self._metadata_client().get_track_async(
+                                track.id
+                            )
                         except Exception as exc:
                             logger.warning(
                                 "Could not fetch release date for %s: %s",
