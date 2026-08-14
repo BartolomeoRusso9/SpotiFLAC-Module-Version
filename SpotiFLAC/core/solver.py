@@ -30,7 +30,11 @@ _MAX_RELOAD_ATTEMPTS = 3
 _DEBUG_VISIBLE = os.environ.get("TS_DEBUG_VISIBLE", "").strip() == "1"
 
 
-_docker_flags = ["--no-sandbox", "--disable-dev-shm-usage"]
+_docker_flags = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+]
 _BROWSER_START_TIMEOUT_ENV = "TS_BROWSER_START_TIMEOUT"
 _DEFAULT_BROWSER_START_TIMEOUT_SECONDS = 45
 
