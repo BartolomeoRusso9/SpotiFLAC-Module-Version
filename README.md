@@ -47,7 +47,6 @@ If you are a copyright holder or an authorized representative and believe this r
 ## Features
 
 - Native synchronous and asynchronous Python APIs
-- Modular Extension system (bring-your-own registry — nothing bundled)
 - Modular JavaScript Extension system (bring-your-own registry — nothing bundled)
 - Automatic fallback among the extensions *you* have installed
 - Built-in GUI
@@ -66,7 +65,7 @@ If you are a copyright holder or an authorized representative and believe this r
 pip install SpotiFLAC
 ```
 
-> **Important:** out of the box, SpotiFLAC does nothing but resolve Spotify metadata — it ships with **no built-in provider and no default extension source**. Before you can download anything, you need to point it at an extension registry of your own choosing and install at least one extension. See [JavaScript Extensions](#javascript-extensions) below.
+> **Important:** out of the box, SpotiFLAC does nothing but resolve Spotify metadata — it ships with **no built-in provider and no default extension source**. Before you can download anything, you need to point it at an extension registry of your own choosing and install at least one extension. See [Extensions](#extensions) below.
 
 ---
 
@@ -189,7 +188,10 @@ asyncio.run(main())
 
 ## Extensions
 
-SpotiFLAC has **no built-in download provider and no default extension source**. Every provider — Tidal, Qobuz, Amazon Music, Deezer, or anything else — is supplied entirely by extensions that you find, review, and choose to install yourself.
+SpotiFLAC has **no built-in download provider and no default extension source**. Every provider — Tidal, Qobuz, Amazon Music, Deezer, or anything else — is supplied entirely by extensions that you find, review, and choose to install yourself. Two extension runtimes are supported:
+
+- **JavaScript** — sharing the same extension format used by [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile), executed via a Node.js bridge.
+- **Python** — packaged as `.spotiflac-ext` / `.sflx` files (a ZIP containing a manifest and a Python entry point), loaded directly in-process.
 
 Extensions are never fetched or installed automatically. You must explicitly configure a registry before SpotiFLAC will contact anything:
 
@@ -230,6 +232,15 @@ spotiflac URL ./out \
 > **A note on legacy names:** for backwards compatibility, short names like `tidal`, `qobuz`, `amazon`, `deezer`, `apple`, `soundcloud`, `youtube`, `pandora` are still accepted in `services`/`--service`, and are resolved to an installed extension with a matching ID (e.g. `tidal` → `ext:tidal-web`) if — and only if — you have that extension installed. They are aliases, not built-in providers; nothing downloads without an extension behind it.
 >
 > The maintainer does not review, endorse, or take responsibility for the content or behavior of any third-party registry or extension. Choose your sources with the same care you would apply to installing any other third-party code.
+
+### Developing Extensions
+
+There is currently no dedicated extension-development guide for this project. Two paths exist today:
+
+- **JavaScript extensions** reuse the format built for [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile). Its [Extension Development Guide](https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/main/docs/EXTENSION_DEVELOPMENT.md) is the closest available reference, but it was written for Mobile — some details (packaging, available runtime capabilities) may not match this project exactly. Verify against this repository's own loader (`SpotiFLAC/extensions/runtime.py`) before relying on it.
+- **Python extensions** are ZIP packages (`.spotiflac-ext` / `.sflx`) containing a manifest and a Python module, loaded directly by `SpotiFLAC/extensions/python_provider.py`. There's no separate guide yet — reading that file, and an existing extension's manifest, is currently the best way to see the expected shape.
+
+If you build something reusable, consider publishing it to your own registry rather than asking the maintainer to bundle or endorse it — see [Extensions](#extensions) above for why nothing is bundled by design.
 
 ---
 
