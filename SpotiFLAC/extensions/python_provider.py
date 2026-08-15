@@ -60,6 +60,19 @@ def load_python_utilities(manager: ExtensionManager) -> None:
             continue
 
         canonical = f"SpotiFLAC.core.{base_name.replace('-', '_')}"
+
+        # Prevent extensions from shadowing first-party SpotiFLAC.core modules
+        if canonical in sys.modules:
+            existing_module = sys.modules[canonical]
+            # Check if it's a first-party module (already loaded from SpotiFLAC/core/)
+            module_file = getattr(existing_module, "__file__", None)
+            if module_file and "SpotiFLAC/core/" in module_file.replace("\\", "/"):
+                logger.error(
+                    f"[Utilities] Refusing to load extension utility '{base_name}': "
+                    f"name collision with first-party module {canonical}"
+                )
+                continue
+
         try:
             _load(ext, canonical)
             logger.info(f"[Utilities] Caricata con successo l'utility {canonical}")
@@ -83,15 +96,11 @@ class PythonExtensionProvider(BaseProvider):
         base_name = (
             ext_id.replace("ext:", "").replace("-web", "").replace("-py", "").lower()
         )
-        ext = next(
-            (
-                c
-                for c in manager.list_installed()
-                if c.runtime == "python" and base_name in c.name.lower()
-            ),
-            None,
-        )
+        ext_name = manager.find_python_extension(base_name)
+        if ext_name is None:
+            raise ValueError(f"Python extension for '{ext_id}' is not installed")
 
+        ext = manager.get_installed(ext_name)
         if ext is None:
             raise ValueError(f"Python extension for '{ext_id}' is not installed")
 

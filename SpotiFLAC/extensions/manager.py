@@ -133,7 +133,7 @@ class ExtensionManager:
         # Automatically downloads or updates download providers on startup
     """
 
-    _startup_registry_checks: set[str] = set()
+    _startup_registry_checks: set[tuple[str, ...]] = set()
     _startup_registry_checks_lock = threading.RLock()
 
     def __init__(
@@ -168,7 +168,7 @@ class ExtensionManager:
             )
             return
 
-        registry_key = tuple(sorted(urls))
+        registry_key = tuple(sorted(urls)) + (str(self.ext_dir),)
 
         with self.__class__._startup_registry_checks_lock:
             if registry_key in self.__class__._startup_registry_checks:
@@ -177,7 +177,6 @@ class ExtensionManager:
                     registry_key,
                 )
                 return
-            self.__class__._startup_registry_checks.add(registry_key)
 
         logger.info("[ExtMgr] Automatic check for download extensions on startup...")
         try:
@@ -185,6 +184,10 @@ class ExtensionManager:
         except Exception as e:
             logger.warning("[ExtMgr] Unable to retrieve registry for auto-setup: %s", e)
             return
+
+        # Only record the key after successful fetch so transient failures can be retried
+        with self.__class__._startup_registry_checks_lock:
+            self.__class__._startup_registry_checks.add(registry_key)
 
         # ORDINE CRITICO: Mettiamo prima le utility, così vengono scaricate prima dei provider
         entries.sort(
@@ -290,21 +293,35 @@ class ExtensionManager:
                 continue
 
             for item in data.get("extensions", []):
-                entries.append(
-                    RegistryEntry(
-                        id=item["id"],
-                        display_name=item.get("display_name", item["id"]),
-                        version=item.get("version", "0.0.0"),
-                        description=item.get("description", ""),
-                        download_url=item["download_url"],
-                        category=item.get("category", "unknown"),
-                        tags=item.get("tags", []),
-                        min_app_version=item.get("min_app_version", "0.0.0"),
-                        icon_url=item.get("icon_url"),
-                        updated_at=item.get("updated_at", ""),
-                        sha256=item.get("sha256"),
-                    ),
-                )
+                # Validate required fields before constructing RegistryEntry
+                if "id" not in item or "download_url" not in item:
+                    logger.warning(
+                        "[ExtMgr] Skipping malformed registry entry (missing id or download_url): %s",
+                        item.get("id", "<no id>"),
+                    )
+                    continue
+                try:
+                    entries.append(
+                        RegistryEntry(
+                            id=item["id"],
+                            display_name=item.get("display_name", item["id"]),
+                            version=item.get("version", "0.0.0"),
+                            description=item.get("description", ""),
+                            download_url=item["download_url"],
+                            category=item.get("category", "unknown"),
+                            tags=item.get("tags", []),
+                            min_app_version=item.get("min_app_version", "0.0.0"),
+                            icon_url=item.get("icon_url"),
+                            updated_at=item.get("updated_at", ""),
+                            sha256=item.get("sha256"),
+                        ),
+                    )
+                except (KeyError, TypeError) as e:
+                    logger.warning(
+                        "[ExtMgr] Skipping malformed registry entry '%s': %s",
+                        item.get("id", "<unknown>"),
+                        e,
+                    )
         return entries
 
     # ── Installation ────────────────────────────────────────
@@ -384,7 +401,7 @@ class ExtensionManager:
     ) -> InstalledExtension:
         """Installs from a local file (ZIP)."""
         raw = Path(path).read_bytes()
-        return self._install_from_bytes(raw, settings=settings)
+        return self._install_from_bytes(raw, settings=settings, allow_override=True)
 
     def _install_from_bytes(
         self,
@@ -392,21 +409,35 @@ class ExtensionManager:
         settings: dict | None = None,
         sha256: str | None = None,
         runtime_hint: str | None = None,
+        allow_override: bool = False,
     ) -> InstalledExtension:
         # Validate checksum if provided by the registry.
         if sha256:
             actual = hashlib.sha256(raw).hexdigest().lower()
             expected = sha256.lower()
             if actual != expected:
-                allow = os.environ.get("SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH", "").lower()
-                if allow in ("1", "true", "yes", "y"):
-                    logger.warning(
-                        "[ExtMgr] Checksum mismatch for extension (expected=%s actual=%s) — proceeding because SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH is set",
-                        expected,
-                        actual,
-                    )
+                # SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH only applies to trusted install_from_file
+                if allow_override:
+                    allow = os.environ.get("SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH", "").lower()
+                    if allow in ("1", "true", "yes", "y"):
+                        logger.warning(
+                            "[ExtMgr] Checksum mismatch for extension (expected=%s actual=%s) — "
+                            "proceeding because SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH is set",
+                            expected,
+                            actual,
+                        )
+                    else:
+                        raise ValueError("Extension checksum does not match")
                 else:
+                    # Registry-driven bootstrap always rejects mismatches
                     raise ValueError("Extension checksum does not match the registry")
+        else:
+            # Warn when registry omits sha256
+            logger.warning(
+                "[ExtMgr] Registry did not provide sha256 checksum for extension — "
+                "installation is proceeding unverified. Consider using a registry that "
+                "provides checksums for security."
+            )
         try:
             zf = zipfile.ZipFile(io.BytesIO(raw))
         except zipfile.BadZipFile as e:
@@ -515,7 +546,8 @@ class ExtensionManager:
                 )
 
             # Standard Overwrite (removes old version entirely, replaces with new)
-            backup = target.with_suffix(".previous")
+            # Append ".previous" to full name to preserve distinct names like "tidal.web"
+            backup = target.parent / (target.name + ".previous")
             if backup.exists():
                 shutil.rmtree(backup)
             if target.exists():
@@ -555,6 +587,9 @@ class ExtensionManager:
         """Returns all installed extensions."""
         result = []
         for d in sorted(self.ext_dir.iterdir()):
+            # Filter out staging and hidden backup directories (dot-prefixed or .previous suffix)
+            if d.name.startswith(".") or d.name.endswith(".previous"):
+                continue
             if d.is_dir() and (d / "manifest.json").exists():
                 try:
                     result.append(self._load_installed(d))
@@ -760,3 +795,13 @@ class ExtensionManager:
                     ext.name,
                     traceback.format_exc(),
                 )
+
+    def find_python_extension(self, base_name: str) -> str | None:
+        """Find an installed Python extension matching base_name.
+
+        Returns the extension name if found, None otherwise.
+        """
+        for ext in self.list_installed():
+            if ext.runtime == "python" and base_name in ext.name.lower():
+                return ext.name
+        return None

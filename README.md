@@ -42,7 +42,7 @@ If you are a copyright holder or an authorized representative and believe this r
 ## Features
 
 - Native synchronous and asynchronous Python APIs
-- Modular JavaScript Extension system (bring-your-own registry — nothing bundled)
+- Modular JavaScript and Python Extension system (bring-your-own registry — nothing bundled)
 - Automatic fallback among the extensions *you* have installed
 - Built-in GUI
 - Interactive CLI Wizard

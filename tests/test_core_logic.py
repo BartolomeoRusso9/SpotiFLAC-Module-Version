@@ -372,50 +372,62 @@ def test_transcode_helpers_and_conversion(monkeypatch, tmp_path):
 def test_extension_manager_deduplicates_registry_checks_in_one_process(
     monkeypatch, tmp_path
 ):
-    ExtensionManager._startup_registry_checks.clear()
-    calls = []
+    # Snapshot original state and restore in finally block
+    original_checks = ExtensionManager._startup_registry_checks.copy()
+    try:
+        ExtensionManager._startup_registry_checks.clear()
+        calls = []
 
-    def fake_fetch_registry(self, url=None):
-        calls.append(url)
-        return [
-            RegistryEntry(
-                id="demo-provider",
-                display_name="Demo provider",
-                version="1.0.0",
-                description="",
-                download_url="https://example.com/demo.zip",
-                category="download_provider",
-                tags=["download_provider"],
-            )
+        def fake_fetch_registry(self, url=None):
+            calls.append(url)
+            return [
+                RegistryEntry(
+                    id="demo-provider",
+                    display_name="Demo provider",
+                    version="1.0.0",
+                    description="",
+                    download_url="https://example.com/demo.zip",
+                    category="download_provider",
+                    tags=["download_provider"],
+                )
+            ]
+
+        monkeypatch.setattr(ExtensionManager, "fetch_registry", fake_fetch_registry)
+        monkeypatch.setattr(ExtensionManager, "get_installed", lambda self, ext_id: None)
+        monkeypatch.setattr(
+            ExtensionManager, "install_from_url", lambda *args, **kwargs: None
+        )
+        monkeypatch.setenv("SPOTIFLAC_REGISTRIES", "https://example.com/registry.json")
+
+        manager = ExtensionManager(ext_dir=tmp_path / "exts", auto_install_downloads=True)
+        manager.ensure_download_providers("https://example.com/registry.json")
+        manager.ensure_download_providers("https://example.com/registry.json")
+
+        assert calls == [["https://example.com/registry.json"]]
+
+        manager2 = ExtensionManager(ext_dir=tmp_path / "exts2", auto_install_downloads=True)
+        manager2.ensure_download_providers("https://example.com/registry.json")
+
+        # exts2 is a different directory, so it should trigger another fetch
+        assert calls == [
+            ["https://example.com/registry.json"],
+            ["https://example.com/registry.json"],
         ]
 
-    monkeypatch.setattr(ExtensionManager, "fetch_registry", fake_fetch_registry)
-    monkeypatch.setattr(ExtensionManager, "get_installed", lambda self, ext_id: None)
-    monkeypatch.setattr(
-        ExtensionManager, "install_from_url", lambda *args, **kwargs: None
-    )
-    monkeypatch.setenv("SPOTIFLAC_REGISTRIES", "https://example.com/registry.json")
+        manager3 = ExtensionManager(
+            ext_dir=tmp_path / "exts3", auto_install_downloads=False
+        )
+        manager3.ensure_download_providers("https://example.com/other-registry.json")
 
-    manager = ExtensionManager(ext_dir=tmp_path / "exts", auto_install_downloads=True)
-    manager.ensure_download_providers("https://example.com/registry.json")
-    manager.ensure_download_providers("https://example.com/registry.json")
-
-    assert calls == [["https://example.com/registry.json"]]
-
-    manager2 = ExtensionManager(ext_dir=tmp_path / "exts2", auto_install_downloads=True)
-    manager2.ensure_download_providers("https://example.com/registry.json")
-
-    assert calls == [["https://example.com/registry.json"]]
-
-    manager3 = ExtensionManager(
-        ext_dir=tmp_path / "exts3", auto_install_downloads=False
-    )
-    manager3.ensure_download_providers("https://example.com/other-registry.json")
-
-    assert calls == [
-        ["https://example.com/registry.json"],
-        ["https://example.com/other-registry.json"],
-    ]
+        assert calls == [
+            ["https://example.com/registry.json"],
+            ["https://example.com/registry.json"],
+            ["https://example.com/other-registry.json"],
+        ]
+    finally:
+        # Restore original state
+        ExtensionManager._startup_registry_checks.clear()
+        ExtensionManager._startup_registry_checks.update(original_checks)
 
 
 def test_async_client_tracks_loop_minutes_and_default_playlist_subfolders():

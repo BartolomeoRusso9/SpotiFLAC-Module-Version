@@ -74,17 +74,17 @@ def test_split_positionals_handles_playlist_url_mode():
 
 def test_load_config_validates_profile_shape(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # Place values at root instead of under "default", with non-default values
     payload = {
-        "default": {
-            "services": ["tidal"],
-            "quality": "LOSSLESS",
-            "embed_lyrics": True,
-        }
+        "services": ["qobuz"],
+        "quality": "HI_RES",
+        "embed_lyrics": False,
     }
     (tmp_path / "config.json").write_text(json.dumps(payload), encoding="utf-8")
 
     cfg = load_config()
 
-    assert cfg["services"] == ["tidal"]
-    assert cfg["quality"] == "LOSSLESS"
-    assert cfg["embed_lyrics"] is True
+    # Verify load_config reads the file rather than returning defaults
+    assert cfg["services"] == ["qobuz"]
+    assert cfg["quality"] == "HI_RES"
+    assert cfg["embed_lyrics"] is False

@@ -18,9 +18,13 @@ from SpotiFLAC.core.signed_session_mobile import (
 
 
 def supports(manifest: dict[str, Any], feature: str) -> bool:
+    required_features = manifest.get("requiredRuntimeFeatures", [])
+    # Validate that requiredRuntimeFeatures is a list
+    if not isinstance(required_features, list):
+        return False
     return any(
-        value == feature or value.startswith(feature + "@")
-        for value in manifest.get("requiredRuntimeFeatures", [])
+        isinstance(value, str) and (value == feature or value.startswith(feature + "@"))
+        for value in required_features
     )
 
 

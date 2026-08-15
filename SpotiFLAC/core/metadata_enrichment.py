@@ -134,14 +134,12 @@ def _get_dynamic_python_module(base_name: str) -> Any:
     from SpotiFLAC.extensions.manager import ExtensionManager
 
     manager = ExtensionManager(auto_install_downloads=False)
-    cand = next(
-        (
-            c.name
-            for c in manager.list_installed()
-            if c.runtime == "python" and base_name in c.name.lower()
-        ),
-        None,
-    )
+    try:
+        manager.preload_python_modules()
+    except Exception as e:
+        logger.warning("[metadata_enrichment] Failed to preload Python modules: %s", e)
+
+    cand = manager.find_python_extension(base_name)
     if cand:
         mod_name = f"SpotiFLAC.extensions_plugins.{cand.replace('-', '_')}"
         return sys.modules.get(mod_name)
@@ -154,14 +152,7 @@ def _get_dynamic_python_provider(base_name: str, **kwargs) -> Any:
     from SpotiFLAC.extensions.python_provider import PythonExtensionProvider
 
     manager = ExtensionManager(auto_install_downloads=False)
-    cand = next(
-        (
-            c.name
-            for c in manager.list_installed()
-            if c.runtime == "python" and base_name in c.name.lower()
-        ),
-        None,
-    )
+    cand = manager.find_python_extension(base_name)
     if cand:
         return PythonExtensionProvider(cand, **kwargs)
     return None

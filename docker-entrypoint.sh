@@ -26,34 +26,19 @@ sleep 1
 fluxbox -display :99 >/dev/null 2>&1 &
 
 # 3. Start VNC server on port 5900.
-# Password is read from an environment variable (default: disabled unless set).
+# Password is read from an environment variable (required for security).
 # Example: X11VNC_PASSWORD=your_secure_password docker run ...
 VNC_PASSWORD="${X11VNC_PASSWORD:-}"
 if [ -n "$VNC_PASSWORD" ]; then
   x11vnc -display :99 -forever -passwd "$VNC_PASSWORD" -shared -bg -quiet
+  # 4. Start noVNC bridge to view the screen from a web browser on port 6080
+  websockify --web=/usr/share/novnc --daemon 6080 localhost:5900 >/dev/null 2>&1
 else
-  x11vnc -display :99 -forever -shared -bg -quiet
+  echo "VNC/noVNC services disabled: X11VNC_PASSWORD not set."
+  echo "Set X11VNC_PASSWORD environment variable to enable screen viewing."
 fi
-
-# 4. Start noVNC bridge to view the screen from a web browser on port 6080
-websockify --web=/usr/share/novnc --daemon 6080 localhost:5900 >/dev/null 2>&1
 
 export TS_DEBUG_VISIBLE=1
-
-# ==============================================================================
-# [TELEGRAM BOT MODE]:
-# If the first argument is "bot", run the Telegram bot instead of the
-# SpotiFLAC CLI. Xvfb is already running above, so any Chromium/pydoll-based
-# provider features the bot triggers still work.
-#
-# Set this as the container's command, e.g. in docker-compose.yml:
-#   command: ["bot"]
-# or in Portainer's "Command" field: bot
-# ==============================================================================
-if [ "$1" = "bot" ]; then
-  shift
-  exec python3 /app/telegram/bot.py "$@"
-fi
 
 if [ "$#" -eq 0 ]; then
   echo "SpotiFLAC Docker image: pass a URL and output directory as arguments."
@@ -66,8 +51,6 @@ if [ "$#" -eq 0 ]; then
   echo "    --shm-size=1g \\"
   echo "    spotiflac \"https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT\" \\"
   echo "    /app/downloads -s amazon -v"
-  echo
-  echo "Or run the Telegram bot instead: pass \"bot\" as the command."
   echo
   exec spotiflac --help
 fi

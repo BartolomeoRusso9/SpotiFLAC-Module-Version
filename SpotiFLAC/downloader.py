@@ -85,6 +85,34 @@ async def _call_metadata_get_url(client, url: str, **kwargs):
     return await asyncio.to_thread(fn, url, **kwargs)
 
 
+def _adapt_js_metadata_response(response):
+    """Adapt JSExtensionProvider dict response to expected tuple format.
+
+    JSExtensionProvider may return a dict with keys like:
+    {'collection_name': str, 'tracks': list, 'collection_cover': str (optional)}
+
+    This adapter converts it to the tuple format expected by the caller:
+    (collection_name, tracks, *optional_cover)
+    """
+    from .extensions.provider import JSExtensionProvider
+
+    # If response is already a tuple/list, return as-is (native Python provider format)
+    if isinstance(response, (tuple, list)):
+        return response
+
+    # If it's a dict (JS provider format), convert to tuple
+    if isinstance(response, dict):
+        collection_name = response.get("collection_name", "Unknown")
+        tracks = response.get("tracks", [])
+        collection_cover = response.get("collection_cover")
+        if collection_cover:
+            return (collection_name, tracks, collection_cover)
+        return (collection_name, tracks)
+
+    # Fallback: return as-is
+    return response
+
+
 @dataclass
 class DownloadOptions:
     output_dir: str
@@ -178,11 +206,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
         # 1. TENTATIVO PYTHON (Priorità 1)
         # Se l'utente NON ha digitato esplicitamente "-web", prova ad usare Python
         if not wants_explicit_js:
-            py_candidate_name = None
-            for cand in manager.list_installed():
-                if cand.runtime == "python" and base_name in cand.name.lower():
-                    py_candidate_name = cand.name
-                    break
+            py_candidate_name = manager.find_python_extension(base_name)
 
             if py_candidate_name:
                 try:
@@ -204,7 +228,8 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
 
         # 2. TENTATIVO JAVASCRIPT (Priorità 2: Fallback)
         # Se l'utente NON ha digitato esplicitamente "-py", aggiunge JS (o come fallback, o come primario)
-        if not wants_explicit_py:
+        # Rispetta opts.auto_pair_extensions per il fallback automatico
+        if not wants_explicit_py and (wants_explicit_js or opts.auto_pair_extensions):
             try:
                 js_prov = JSExtensionProvider(
                     original_ext_id,
@@ -1099,27 +1124,24 @@ class SpotiflacDownloader:
                     raise SpotiflacError(
                         ErrorKind.UNAVAILABLE, "SoundCloud provider not installed"
                     )
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(sc_providers[0], url)
-                )
+                response = await _call_metadata_get_url(sc_providers[0], url)
+                collection_name, tracks, *collection_cover = _adapt_js_metadata_response(response)
             elif is_youtube:
                 yt_providers = _build_providers_for_name("youtube", self._opts)
                 if not yt_providers:
                     raise SpotiflacError(
                         ErrorKind.UNAVAILABLE, "YouTube provider not installed"
                     )
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(yt_providers[0], url)
-                )
+                response = await _call_metadata_get_url(yt_providers[0], url)
+                collection_name, tracks, *collection_cover = _adapt_js_metadata_response(response)
             elif is_pandora:
                 pd_providers = _build_providers_for_name("pandora", self._opts)
                 if not pd_providers:
                     raise SpotiflacError(
                         ErrorKind.UNAVAILABLE, "Pandora provider not installed"
                     )
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(pd_providers[0], url)
-                )
+                response = await _call_metadata_get_url(pd_providers[0], url)
+                collection_name, tracks, *collection_cover = _adapt_js_metadata_response(response)
             else:
                 collection_name, tracks, *_collection_cover = (
                     await _call_metadata_get_url(
@@ -1161,9 +1183,14 @@ class SpotiflacDownloader:
                 stype = "artist_discography"
             info = {"type": stype, "id": url}
         elif is_pandora:
+            from urllib.parse import urlparse as _urlparse
+
+            _parts = [p for p in _urlparse(url).path.strip("/").split("/") if p]
             stype = "track"
-            if "playlist" in url or "album" in url:
-                stype = "playlist" if "playlist" in url else "album"
+            if "playlist" in _parts:
+                stype = "playlist"
+            elif "album" in _parts:
+                stype = "album"
             info = {"type": stype, "id": url}
         else:
             from .core.spotify_metadata import parse_spotify_url

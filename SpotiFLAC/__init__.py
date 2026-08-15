@@ -31,12 +31,14 @@ _LEGACY_PROVIDER_EXPORTS = {
     "MiguProvider",
     "NeteaseProvider",
     "QobuzProvider",
-    "SpotifyMetadataClient",
     "TidalProvider",
 }
 
 
 def __getattr__(name: str):
+    if name == "SpotifyMetadataClient":
+        from .core.spotify_metadata import SpotifyMetadataClient
+        return SpotifyMetadataClient
     if name in _LEGACY_PROVIDER_EXPORTS:
         warnings.warn(
             f"SpotiFLAC.{name} is deprecated; install and select an extension instead.",
@@ -59,20 +61,11 @@ except importlib.metadata.PackageNotFoundError:
     __version__ = "unknown"
 
 __all__ = [
-    "AmazonProvider",
-    "AppleMusicProvider",
     "AsyncSpotiFLAC",
-    "DeezerProvider",
     "DownloadOptions",
     "DownloadResult",
-    "JooxProvider",
-    "KuwoProvider",
-    "MiguProvider",
-    "NeteaseProvider",
-    "QobuzProvider",
     "SpotiFLAC",
     "SpotiflacDownloader",
     "SpotifyMetadataClient",
-    "TidalProvider",
     "TrackMetadata",
 ]

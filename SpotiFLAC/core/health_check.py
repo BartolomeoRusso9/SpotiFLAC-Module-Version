@@ -86,6 +86,10 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
             None,
         )
         if cand:
+            try:
+                manager.preload_python_modules()
+            except Exception as e:
+                logger.warning("[health_check] Failed to preload Python modules: %s", e)
             mod_name = f"SpotiFLAC.extensions_plugins.{cand.replace('-', '_')}"
             tidal_mod = sys.modules.get(mod_name)
             if tidal_mod and hasattr(tidal_mod, "get_tidal_api_list"):
