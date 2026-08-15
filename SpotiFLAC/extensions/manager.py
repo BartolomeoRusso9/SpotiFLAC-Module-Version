@@ -163,7 +163,9 @@ class ExtensionManager:
         """
         urls = self._registry_urls_from_env(registry_url)
         if not urls:
-            logger.debug("[ExtMgr] No registry URLs configured; skipping automatic startup bootstrap")
+            logger.debug(
+                "[ExtMgr] No registry URLs configured; skipping automatic startup bootstrap"
+            )
             return
 
         registry_key = tuple(sorted(urls))

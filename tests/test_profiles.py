@@ -58,7 +58,9 @@ def test_rename_and_delete_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(profiles, "_PROFILES_FILE", tmp_path / "profiles.json")
 
     async def _run():
-        await profiles.save_profile_async("old", {"services": ["tidal"], "quality": "HIGH"})
+        await profiles.save_profile_async(
+            "old", {"services": ["tidal"], "quality": "HIGH"}
+        )
         assert await profiles.rename_profile_async("old", "new") is True
         assert await profiles.get_profile_async("old") is None
         assert await profiles.get_profile_async("new") is not None

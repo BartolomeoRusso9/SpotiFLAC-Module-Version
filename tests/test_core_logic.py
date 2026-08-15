@@ -1,5 +1,4 @@
 import asyncio
-import json
 from pathlib import Path
 
 import pytest
@@ -16,7 +15,12 @@ from SpotiFLAC.core import (
 from SpotiFLAC.core.history import HistoryManager
 from SpotiFLAC.extensions.manager import ExtensionManager, RegistryEntry
 from SpotiFLAC.core.isrc_utils import is_valid_isrc, normalize_isrc
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata, build_filename, sanitize
+from SpotiFLAC.core.models import (
+    DownloadResult,
+    TrackMetadata,
+    build_filename,
+    sanitize,
+)
 from SpotiFLAC.core.quality import (
     map_amazon_community_quality,
     normalize_quality,
@@ -142,7 +146,9 @@ def test_history_manager_handles_invalid_json(tmp_path):
     assert manager.get_all() == []
 
 
-def test_download_validation_rejects_preview_and_accepts_missing_duration(monkeypatch, tmp_path):
+def test_download_validation_rejects_preview_and_accepts_missing_duration(
+    monkeypatch, tmp_path
+):
     path = tmp_path / "preview.flac"
     path.write_bytes(b"fake-audio")
 
@@ -155,10 +161,14 @@ def test_download_validation_rejects_preview_and_accepts_missing_duration(monkey
         async def fake_remove(filepath: str) -> None:
             removed["path"] = filepath
 
-        monkeypatch.setattr(download_validation, "_get_audio_duration_async", fake_duration)
+        monkeypatch.setattr(
+            download_validation, "_get_audio_duration_async", fake_duration
+        )
         monkeypatch.setattr(download_validation, "_remove_file_async", fake_remove)
 
-        ok, msg = await download_validation.validate_downloaded_track_async(str(path), 180)
+        ok, msg = await download_validation.validate_downloaded_track_async(
+            str(path), 180
+        )
         assert ok is False
         assert "Preview" in msg
         assert removed["path"] == str(path)
@@ -166,8 +176,12 @@ def test_download_validation_rejects_preview_and_accepts_missing_duration(monkey
         async def fake_missing_duration(_filepath: str) -> float:
             return 0.0
 
-        monkeypatch.setattr(download_validation, "_get_audio_duration_async", fake_missing_duration)
-        ok2, msg2 = await download_validation.validate_downloaded_track_async(str(path), 180)
+        monkeypatch.setattr(
+            download_validation, "_get_audio_duration_async", fake_missing_duration
+        )
+        ok2, msg2 = await download_validation.validate_downloaded_track_async(
+            str(path), 180
+        )
         assert ok2 is True
         assert msg2 == ""
 
@@ -200,9 +214,13 @@ def test_link_resolver_normalizes_and_extracts_links():
     resolver = link_resolver.LinkResolver()
 
     assert resolver.identify_provider("https://open.spotify.com/track/abc") == "spotify"
-    assert resolver.identify_provider("https://soundcloud.com/user/track") == "soundcloud"
+    assert (
+        resolver.identify_provider("https://soundcloud.com/user/track") == "soundcloud"
+    )
 
-    amazon_url = "https://music.amazon.com/albums/XXXXXXXXXX?trackAsin=B07T2G5CB2&foo=bar"
+    amazon_url = (
+        "https://music.amazon.com/albums/XXXXXXXXXX?trackAsin=B07T2G5CB2&foo=bar"
+    )
     assert resolver._normalize_amazon_url(amazon_url) == (
         "https://music.amazon.com/tracks/B07T2G5CB2?musicTerritory=US"
     )
@@ -213,13 +231,18 @@ def test_link_resolver_normalizes_and_extracts_links():
     songlink_payload = {
         "linksByPlatform": {
             "deezer": {"url": "https://www.deezer.com/track/123456"},
-            "amazonMusic": {"url": "https://music.amazon.com/albums/XXXXXXXXXX?trackAsin=B07T2G5CB2"},
+            "amazonMusic": {
+                "url": "https://music.amazon.com/albums/XXXXXXXXXX?trackAsin=B07T2G5CB2"
+            },
             "tidal": {"url": "https://listen.tidal.com/track/987654"},
         }
     }
     normalized = resolver._process_songlink_response(songlink_payload)
     assert normalized["deezer"] == "https://www.deezer.com/track/123456"
-    assert normalized["amazonMusic"] == "https://music.amazon.com/tracks/B07T2G5CB2?musicTerritory=US"
+    assert (
+        normalized["amazonMusic"]
+        == "https://music.amazon.com/tracks/B07T2G5CB2?musicTerritory=US"
+    )
     assert normalized["tidal"] == "https://listen.tidal.com/track/987654"
 
     html = (
@@ -227,12 +250,15 @@ def test_link_resolver_normalizes_and_extracts_links():
         '{"sameAs":["https://listen.tidal.com/track/987654",'
         '"https://music.amazon.com/tracks/B07T2G5CB2?musicTerritory=US",'
         '"https://www.deezer.com/track/123456"]}'
-        '</script>'
+        "</script>"
     )
     songstats = resolver._process_songstats_links(html)
     assert songstats["tidal"] == "https://listen.tidal.com/track/987654"
     assert songstats["deezer"] == "https://www.deezer.com/track/123456"
-    assert songstats["amazonMusic"] == "https://music.amazon.com/tracks/B07T2G5CB2?musicTerritory=US"
+    assert (
+        songstats["amazonMusic"]
+        == "https://music.amazon.com/tracks/B07T2G5CB2?musicTerritory=US"
+    )
 
 
 def test_playlist_sync_dedup_and_rendering(tmp_path):
@@ -278,7 +304,11 @@ def test_playlist_sync_dedup_and_rendering(tmp_path):
     assert playlist_sync.find_existing(index, "song") == created
 
     m3u = playlist_sync.render_m3u(
-        [playlist_sync.M3UEntry(path=created, title="Song Title", artists="Artist One", duration_s=180)],
+        [
+            playlist_sync.M3UEntry(
+                path=created, title="Song Title", artists="Artist One", duration_s=180
+            )
+        ],
         tmp_path / "playlist" / "Alpha.m3u8",
     )
     assert "#EXTM3U" in m3u
@@ -295,7 +325,9 @@ def test_tagger_helpers_cover_url_and_embedded_tags():
     assert options.embed_lyrics is True
     assert options.lyrics_providers == ["spotify"]
 
-    payload = tagger.EmbeddedTags(tags={"TITLE": "Song", "ARTIST": "Artist"}, lyrics="hello")
+    payload = tagger.EmbeddedTags(
+        tags={"TITLE": "Song", "ARTIST": "Artist"}, lyrics="hello"
+    )
     assert bool(payload) is True
 
 
@@ -327,7 +359,9 @@ def test_transcode_helpers_and_conversion(monkeypatch, tmp_path):
     monkeypatch.setattr(transcode, "transfer_tags_to_mp3_async", fake_transfer)
 
     async def _run():
-        dest = await transcode.transcode_file_async(source, fmt="mp3", keep_original=True)
+        dest = await transcode.transcode_file_async(
+            source, fmt="mp3", keep_original=True
+        )
         assert dest == tmp_path / "song.mp3"
         assert dest.exists()
         assert source.exists()
@@ -335,7 +369,9 @@ def test_transcode_helpers_and_conversion(monkeypatch, tmp_path):
     asyncio.run(_run())
 
 
-def test_extension_manager_deduplicates_registry_checks_in_one_process(monkeypatch, tmp_path):
+def test_extension_manager_deduplicates_registry_checks_in_one_process(
+    monkeypatch, tmp_path
+):
     ExtensionManager._startup_registry_checks.clear()
     calls = []
 
@@ -355,7 +391,9 @@ def test_extension_manager_deduplicates_registry_checks_in_one_process(monkeypat
 
     monkeypatch.setattr(ExtensionManager, "fetch_registry", fake_fetch_registry)
     monkeypatch.setattr(ExtensionManager, "get_installed", lambda self, ext_id: None)
-    monkeypatch.setattr(ExtensionManager, "install_from_url", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        ExtensionManager, "install_from_url", lambda *args, **kwargs: None
+    )
     monkeypatch.setenv("SPOTIFLAC_REGISTRIES", "https://example.com/registry.json")
 
     manager = ExtensionManager(ext_dir=tmp_path / "exts", auto_install_downloads=True)
@@ -369,7 +407,9 @@ def test_extension_manager_deduplicates_registry_checks_in_one_process(monkeypat
 
     assert calls == [["https://example.com/registry.json"]]
 
-    manager3 = ExtensionManager(ext_dir=tmp_path / "exts3", auto_install_downloads=False)
+    manager3 = ExtensionManager(
+        ext_dir=tmp_path / "exts3", auto_install_downloads=False
+    )
     manager3.ensure_download_providers("https://example.com/other-registry.json")
 
     assert calls == [
@@ -400,8 +440,11 @@ def test_async_client_tracks_loop_minutes_and_default_playlist_subfolders():
     asyncio.sleep = fake_sleep
 
     try:
+
         async def _run():
-            await client.download_track("https://open.spotify.com/track/abc", loop_minutes=7)
+            await client.download_track(
+                "https://open.spotify.com/track/abc", loop_minutes=7
+            )
 
         asyncio.run(_run())
     finally:

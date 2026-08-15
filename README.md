@@ -1,20 +1,14 @@
-<div align="left">
-  <h1>SpotiFLAC Python Module</h1>
-  <p>
-    Fetch Spotify track metadata and retrieve matching lossless audio through Tidal, Qobuz, Amazon Music & other provider backends — supplied entirely via extensions you choose and configure yourself.
-    Integrate directly into your Python projects, build custom Telegram bots, automation tools, or bulk downloaders.
-  </p>
+# SpotiFLAC Python Module
 
-  <p>
-    <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/stargazers"><img src="https://img.shields.io/github/stars/BartolomeoRusso9/SpotiFLAC-Module-Version?color=ffcb47&labelColor=black&logo=github&label=Stars" /></a>
-    <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases/latest"><img src="https://img.shields.io/github/v/release/BartolomeoRusso9/SpotiFLAC-Module-Version?color=8b5cf6&labelColor=black&logo=github&label=Latest%20Release" /></a>
-    <a href="https://pypi.org/project/SpotiFLAC/"><img src="https://img.shields.io/pypi/v/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000&color=7b97ed" /></a>
-    <a href="https://pypi.org/project/SpotiFLAC/"><img src="https://img.shields.io/pypi/pyversions/spotiflac?logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed" /></a>
-    <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases"><img src="https://img.shields.io/github/downloads/BartolomeoRusso9/SpotiFLAC-Module-Version/total?color=22c55e&labelColor=black&logo=github&label=Downloads" /></a>
-    <a href="https://pypi.org/project/SpotiFLAC/"><img src="https://img.shields.io/pepy/dt/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000" /></a>
-    <a href="https://t.me/SpotiFLAC_Module_Version" target="_blank"><img src="https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white" /></a>
-  </p>
-</div>
+Fetch Spotify track metadata and retrieve matching lossless audio through Tidal, Qobuz, Amazon Music and other provider backends — supplied entirely via extensions you choose and configure yourself. Integrate directly into your Python projects, build custom Telegram bots, automation tools, or bulk downloaders.
+
+[![GitHub stars](https://img.shields.io/github/stars/BartolomeoRusso9/SpotiFLAC-Module-Version?color=ffcb47&labelColor=black&logo=github&label=Stars)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/BartolomeoRusso9/SpotiFLAC-Module-Version?color=8b5cf6&labelColor=black&logo=github&label=Latest%20Release)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases/latest)
+[![PyPI version](https://img.shields.io/pypi/v/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/)
+[![Python versions](https://img.shields.io/pypi/pyversions/spotiflac?logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/)
+[![GitHub downloads](https://img.shields.io/github/downloads/BartolomeoRusso9/SpotiFLAC-Module-Version/total?color=22c55e&labelColor=black&logo=github&label=Downloads)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases)
+[![PyPI downloads](https://img.shields.io/pepy/dt/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000)](https://pypi.org/project/SpotiFLAC/)
+[![Telegram community](https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white)](https://t.me/SpotiFLAC_Module_Version)
 
 ## Disclaimer
 
@@ -39,6 +33,7 @@ If you are a copyright holder or an authorized representative and believe this r
 ---
 
 > **Looking for a standalone app?**
+>
 > - [SpotiFLAC (Desktop)](https://github.com/afkarxyz/SpotiFLAC) — Download music in true lossless FLAC from different providers for Windows, macOS & Linux
 > - [SpotiFLAC (Mobile)](https://github.com/zarzet/SpotiFLAC-Mobile) — SpotiFLAC for Android & iOS, maintained by [@zarzet](https://github.com/zarzet)
 
@@ -131,7 +126,7 @@ This API is fully backwards-compatible with previous releases and is recommended
 ### Which API should I use?
 
 | API | Best for |
-|---|---|
+| --- | --- |
 | `SpotiFLAC` | Scripts, CLI wrappers, automation |
 | `AsyncSpotiFLAC` | Discord bots, Telegram bots, FastAPI, asyncio applications |
 
@@ -202,7 +197,7 @@ export SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json"
 
 or in a local `.env` file (see `.env.example`):
 
-```
+```env
 SPOTIFLAC_REGISTRIES=https://example.com/my-registry.json
 ```
 
@@ -225,17 +220,16 @@ spotiflac URL ./out \
 > **Note:** If Node.js is not installed, SpotiFLAC automatically attempts to install it the first time a JavaScript extension is used.
 >
 > Supported package managers:
+>
 > - **Linux:** apt-get, dnf, yum, pacman
 > - **macOS:** brew
 > - **Windows:** winget, choco
 
-> **A note on legacy names:** for backwards compatibility, short names like `tidal`, `qobuz`, `amazon`, `deezer`, `apple`, `soundcloud`, `youtube`, `pandora` are still accepted in `services`/`--service`, and are resolved to an installed extension with a matching ID (e.g. `tidal` → `ext:tidal-web`) if — and only if — you have that extension installed. They are aliases, not built-in providers; nothing downloads without an extension behind it.
->
-> The maintainer does not review, endorse, or take responsibility for the content or behavior of any third-party registry or extension. Choose your sources with the same care you would apply to installing any other third-party code.
+**A note on legacy names:** for backwards compatibility, short names like `tidal`, `qobuz`, `amazon`, `deezer`, `apple`, `soundcloud`, `youtube`, `pandora` are still accepted in `services`/`--service`, and are resolved to an installed extension with a matching ID (e.g. `tidal` → `ext:tidal-web`) if — and only if — you have that extension installed. They are aliases, not built-in providers; nothing downloads without an extension behind it.
+
+The maintainer does not review, endorse, or take responsibility for the content or behavior of any third-party registry or extension. Choose your sources with the same care you would apply to installing any other third-party code.
 
 ### Developing Extensions
-
-There is currently no dedicated extension-development guide for this project. Two paths exist today:
 
 - **JavaScript extensions** reuse the format built for [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile). Its [Extension Development Guide](https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/main/docs/EXTENSION_DEVELOPMENT.md) is the closest available reference, but it was written for Mobile — some details (packaging, available runtime capabilities) may not match this project exactly. Verify against this repository's own loader (`SpotiFLAC/extensions/runtime.py`) before relying on it.
 - **Python extensions** are ZIP packages (`.spotiflac-ext` / `.sflx`) containing a manifest and a Python module, loaded directly by `SpotiFLAC/extensions/python_provider.py`. There's no separate guide yet — reading that file, and an existing extension's manifest, is currently the best way to see the expected shape.
@@ -288,7 +282,7 @@ A progress bar is a stream of carriage returns: readable on a terminal, unreadab
 
 SpotiFLAC therefore draws animated bars only when stderr is an interactive terminal. Everywhere else — Docker, cron, a redirected file — it prints the same information as plain lines instead:
 
-```
+```text
 [RUN] 24 track(s) · ext:tidal-web, ext:qobuz-web · LOSSLESS · 2 in parallel → /app/downloads
 Track [3/24] Track Title — Artist Name (Album Name)
   ⬇  Track Title  ·  47%  ·  13.4 MB / 28.4 MB
@@ -311,7 +305,7 @@ export SPOTIFLAC_PROGRESS_BARS=1   # always draw bars
 SpotiFLAC's core resolves the following URL formats as input; whether a given target is actually reachable depends entirely on which extensions you have installed:
 
 | Type | Spotify |
-|---|---|
+| --- | --- |
 | Track | `open.spotify.com/track/...` |
 | Album | `open.spotify.com/album/...` |
 | Playlist | `open.spotify.com/playlist/...` |
@@ -382,7 +376,7 @@ The health check runs in parallel with a configurable timeout (default: 5 s per 
 
 Save and reuse complete download configurations without re-typing them every time.
 
-**Save a profile**
+### Save a profile
 
 ```bash
 # Save current flags as "hires-tidal"
@@ -394,14 +388,14 @@ spotiflac https://... ./out \
   --save-profile hires-tidal
 ```
 
-**Load a profile**
+### Load a profile
 
 ```bash
 # Load "hires-tidal" — flags override profile values when both are present
 spotiflac https://... ./out --profile hires-tidal
 ```
 
-**In Python**
+### In Python
 
 ```python
 import asyncio
@@ -552,7 +546,7 @@ With `--mp3` a playlist entry points at the converted file, and a track already 
 ### Post-Download Actions
 
 | Action | Description |
-|---|---|
+| --- | --- |
 | `none` | Do nothing (default) |
 | `open_folder` | Open the output folder in the system file manager |
 | `notify` | Send an OS desktop notification with a summary |
@@ -706,7 +700,7 @@ chmod +x SpotiFLAC-Linux-arm64
 ### `SpotiFLAC()` Parameters
 
 | Parameter | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `url` | `str` / `list[str]` | Required | A single URL or a list of URLs (batch mode). |
 | `output_dir` | `str` | Required | The destination directory path where the audio files will be saved. |
 | `output_path` | `str` | `None` | Exact destination file path for single track downloads. Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies. |
@@ -758,7 +752,7 @@ When customizing the `filename_format` string, you can use the following dynamic
 ### CLI Flag Reference
 
 | Flag | Short | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `--service` | `-s` | `ext:tidal-web` | One or more extensions in priority order, as `ext:<id>` (or a legacy alias resolved to an installed extension — see [Extensions](#extensions)). |
 | `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
 | `--output-path` | `-o` | `None` | Exact output file path for single track downloads. Ignored for albums, playlists and discographies. |
@@ -798,7 +792,7 @@ When customizing the `filename_format` string, you can use the following dynamic
 SpotiFLAC automatically queries MusicBrainz in the background (when an ISRC is available) while the audio is being downloaded, adding professional-grade tags at no extra time cost. Fields written when found:
 
 | Tag | Description |
-|---|---|
+| --- | --- |
 | `GENRE` | Genre |
 | `ORGANIZATION` | Record label |
 | `BPM` | Beats per minute |
@@ -830,6 +824,5 @@ If this software is useful and brings you value, consider supporting the project
 [Song.link](https://song.link) · [MusicBrainz](https://musicbrainz.org) · [LRCLIB](https://lrclib.net) · [Musixmatch](https://www.musixmatch.com) · [iTunes Search API](https://itunes.apple.com)
 
 > Provider-specific credits (Tidal, Qobuz, Amazon Music, Deezer, SoundCloud, Apple Music, Pandora, and any third-party API used to reach them) now belong to whichever extension you install — see that extension's own documentation for its credits and terms.
-
-> **[!TIP]**
-> Star the repo to show support, and click **Watch → Custom → Releases** on GitHub if you want to be notified as soon as a new release goes out.
+>
+> **[!TIP]** Star the repo to show support, and click **Watch → Custom → Releases** on GitHub if you want to be notified as soon as a new release goes out.
