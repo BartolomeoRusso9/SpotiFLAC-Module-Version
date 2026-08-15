@@ -29,23 +29,35 @@ async def confirm_isrc_with_qobuz_async(
     duration_ms: int = 0,
     qobuz_token: str | None = None,
 ) -> tuple[bool, dict | None]:
-    """Confirm an ISRC by querying Qobuz: search the track by ISRC and compare
-    duration (if available). Returns (True, track_dict) if the found track
-    matches (duration within tolerance), otherwise (False, None).
-
-    Note: performs a dynamic import of `QobuzProvider` to avoid import cycles
-    between `core` and `providers`.
-    """
+    """Confirm an ISRC by querying Qobuz via the dynamically loaded Extension."""
     if not isrc:
         return False, None
+
+    prov = None
     try:
-        # import dinamico per evitare circular import durante il caricamento
-        from SpotiFLAC.providers.qobuz import QobuzProvider
+        from SpotiFLAC.extensions.manager import ExtensionManager
+        from SpotiFLAC.extensions.python_provider import PythonExtensionProvider
+
+        manager = ExtensionManager(auto_install_downloads=False)
+        # Cerca il provider Python di Qobuz
+        cand = next(
+            (
+                c.name
+                for c in manager.list_installed()
+                if c.runtime == "python" and "qobuz" in c.name.lower()
+            ),
+            None,
+        )
+        if cand:
+            prov = PythonExtensionProvider(cand, qobuz_token=qobuz_token)
     except Exception:
+        pass
+
+    if not prov:
         return False, None
 
     try:
-        prov = QobuzProvider(qobuz_token=qobuz_token)
+        # Se il provider è quello nativo Python, avrà questo metodo
         track = await prov._search_by_isrc_async(isrc)
     except Exception:
         return False, None
@@ -53,7 +65,6 @@ async def confirm_isrc_with_qobuz_async(
     if not track:
         return False, None
 
-    # Qobuz API spesso fornisce `duration` in secondi
     candidate_dur = 0
     if isinstance(track.get("duration"), (int, float)):
         candidate_dur = int(track.get("duration") or 0) * 1000
@@ -61,12 +72,12 @@ async def confirm_isrc_with_qobuz_async(
         candidate_dur = int(track.get("duration_ms") or 0)
 
     if duration_ms and candidate_dur:
-        # tolleranza: 3s stretto, 10s permissivo
         diff = abs(duration_ms - candidate_dur)
         if diff <= 3000:
             return True, track
         if diff <= 10000:
-            # se titolo/artista coerenti, accettiamo anche 10s
+            import re
+
             tnorm = re.sub(r"\s+", " ", (title or "").strip().lower())
             pname = str(track.get("title") or track.get("name") or "").strip().lower()
             performer = (
@@ -82,5 +93,4 @@ async def confirm_isrc_with_qobuz_async(
                 return True, track
             return False, None
 
-    # if no duration available, accept match based on presence of isrc
     return True, track

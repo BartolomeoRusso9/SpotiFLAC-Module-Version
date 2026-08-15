@@ -9,8 +9,7 @@ import unicodedata
 import urllib.parse
 from dataclasses import dataclass
 
-from SpotiFLAC.providers.amazon import get_amazon_endpoint
-
+from .endpoints import get_amazon_endpoint
 from .http import NetworkManager
 
 

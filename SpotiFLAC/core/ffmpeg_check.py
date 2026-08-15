@@ -50,14 +50,12 @@ def print_ffmpeg_warning(result: dict | None = None) -> dict:
         return result
 
     lines = [
-        "⚠  ffmpeg NOT FOUND — some providers will fail",
-        "   · Tidal FLAC muxing / Dolby Atmos",
-        "   · Amazon Music stream decryption",
+        "⚠  ffmpeg NOT FOUND  ⚠",
         "",
         f"   Error:    {result['error']}",
         f"   Download: {_DOWNLOAD_URL}",
     ]
     for _line in lines:
-        pass
+        print(_line)
 
     return result

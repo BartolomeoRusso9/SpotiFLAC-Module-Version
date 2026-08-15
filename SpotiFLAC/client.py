@@ -81,7 +81,7 @@ class AsyncSpotiFLAC:
 
         self._opts = DownloadOptions(
             output_dir=output_dir,
-            services=services or ["tidal"],
+            services=services or ["ext:tidal-web"],
             filename_format=filename_format,
             use_track_numbers=use_track_numbers,
             use_album_track_numbers=use_album_track_numbers,
@@ -157,7 +157,18 @@ class AsyncSpotiFLAC:
         loop_minutes: int | None = None,
     ) -> list[TrackMetadata]:
         self._ensure_entered()
-        return await self._downloader._run_once_async(url)
+
+        failed_tracks: list[TrackMetadata] | None = None
+        while True:
+            failed_tracks = await self._downloader._run_once_async(
+                url,
+                target_tracks=failed_tracks,
+            )
+            if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
+                break
+            await asyncio.sleep(loop_minutes * 60)
+
+        return failed_tracks or []
 
     async def download_batch(
         self,

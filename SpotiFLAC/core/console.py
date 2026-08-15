@@ -135,6 +135,7 @@ def print_official_source(provider: str, quality: str) -> None:
 def print_summary(
     total: int,
     succeeded: int,
+    skipped: int,
     failed: list[tuple[str, str, str]],
     elapsed_s: float,
 ) -> None:
@@ -144,6 +145,7 @@ def print_summary(
     summary += f"╠{bar}╣\n"
     summary += f"║  Total Tracks  : {total:<42}║\n"
     summary += f"║  Successful    : {succeeded:<42}║\n"
+    summary += f"║  Skipped       : {skipped:<42}║\n"
     summary += f"║  Failed        : {len(failed):<42}║\n"
     summary += f"║  Time Elapsed  : {_fmt_seconds(elapsed_s):<42}║"
 

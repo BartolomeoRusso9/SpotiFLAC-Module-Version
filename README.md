@@ -1,31 +1,30 @@
-<div align="left">
-  <h1>SpotiFLAC Python Module</h1>
-  <p>
-    Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends.
-    Integrate directly into your Python projects, build custom Telegram bots, automation tools, or bulk downloaders.
-  </p>
+# SpotiFLAC Python Module
 
-  <p>
-    <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/stargazers"><img src="https://img.shields.io/github/stars/BartolomeoRusso9/SpotiFLAC-Module-Version?color=ffcb47&labelColor=black&logo=github&label=Stars" /></a>
-    <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases/latest"><img src="https://img.shields.io/github/v/release/BartolomeoRusso9/SpotiFLAC-Module-Version?color=8b5cf6&labelColor=black&logo=github&label=Latest%20Release" /></a>
-    <a href="https://pypi.org/project/SpotiFLAC/"><img src="https://img.shields.io/pypi/v/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000&color=7b97ed" /></a>
-    <a href="https://pypi.org/project/SpotiFLAC/"><img src="https://img.shields.io/pypi/pyversions/spotiflac?logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed" /></a>
-    <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases"><img src="https://img.shields.io/github/downloads/BartolomeoRusso9/SpotiFLAC-Module-Version/total?color=22c55e&labelColor=black&logo=github&label=Downloads" /></a>
-    <a href="https://pypi.org/project/SpotiFLAC/"><img src="https://img.shields.io/pepy/dt/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000" /></a>
-    <a href="https://t.me/SpotiFLAC_Module_Version" target="_blank"><img src="https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white" /></a>
-  </p>
-</div>
+Fetch Spotify track metadata and retrieve matching lossless audio through Tidal, Qobuz, Amazon Music and other provider backends — supplied entirely via extensions you choose and configure yourself. Integrate directly into your Python projects, build custom Telegram bots, automation tools, or bulk downloaders.
+
+[![GitHub stars](https://img.shields.io/github/stars/BartolomeoRusso9/SpotiFLAC-Module-Version?color=ffcb47&labelColor=black&logo=github&label=Stars)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/BartolomeoRusso9/SpotiFLAC-Module-Version?color=8b5cf6&labelColor=black&logo=github&label=Latest%20Release)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases/latest)
+[![PyPI version](https://img.shields.io/pypi/v/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/)
+[![Python versions](https://img.shields.io/pypi/pyversions/spotiflac?logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/)
+[![GitHub downloads](https://img.shields.io/github/downloads/BartolomeoRusso9/SpotiFLAC-Module-Version/total?color=22c55e&labelColor=black&logo=github&label=Downloads)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases)
+[![PyPI downloads](https://img.shields.io/pepy/dt/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000)](https://pypi.org/project/SpotiFLAC/)
+[![Telegram community](https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white)](https://t.me/SpotiFLAC_Module_Version)
 
 ## Disclaimer
-This project is intended for **educational and personal use only**. The developer does not condone or encourage copyright infringement.
 
-**SpotiFLAC-Module-Version** is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service.
+This project is intended for **educational and personal use only**. The developer does not condone or encourage copyright infringement. The software is licensed under the [MIT License](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/blob/main/LICENSE).
+
+**SpotiFLAC-Module-Version** is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service. It is also not affiliated with, and has no control over or responsibility for, any other project sharing a similar name on other platforms.
+
+No copyrighted content is hosted, stored, mirrored, or distributed by this repository. The core application does not bundle, ship, or default to any third-party extension, registry, or provider. Extensions are installed only if a user explicitly configures and requests them from a source of their own choosing; the maintainer has no control over, does not review, and assumes no responsibility for the content or behavior of third-party extensions or registries a user may choose to install.
 
 You are solely responsible for:
 
-1. Ensuring your use of this software complies with your local laws.
-2. Reading and adhering to the Terms of Service of the respective platforms.
-3. Any legal consequences resulting from the misuse of this tool.
+1. Ensuring your use of this software, and any extension or registry you choose to install, complies with your local laws.
+2. Reading and adhering to the Terms of Service of any platform or provider you access, directly or through an extension.
+3. Any legal consequences resulting from the use or misuse of this tool.
+
+This software is provided free of charge by the maintainer. If you paid a third party for access to it, you may have been misled or scammed.
 
 The software is provided "as is", without warranty of any kind, express or implied. The author assumes no liability for any bans, damages, or legal issues arising from its use or misuse. Users assume all risk associated with its use.
 
@@ -34,6 +33,7 @@ If you are a copyright holder or an authorized representative and believe this r
 ---
 
 > **Looking for a standalone app?**
+>
 > - [SpotiFLAC (Desktop)](https://github.com/afkarxyz/SpotiFLAC) — Download music in true lossless FLAC from different providers for Windows, macOS & Linux
 > - [SpotiFLAC (Mobile)](https://github.com/zarzet/SpotiFLAC-Mobile) — SpotiFLAC for Android & iOS, maintained by [@zarzet](https://github.com/zarzet)
 
@@ -42,8 +42,8 @@ If you are a copyright holder or an authorized representative and believe this r
 ## Features
 
 - Native synchronous and asynchronous Python APIs
-- Modular JavaScript Extension system
-- Automatic provider fallback
+- Modular JavaScript and Python Extension system (bring-your-own registry — nothing bundled)
+- Automatic fallback among the extensions *you* have installed
 - Built-in GUI
 - Interactive CLI Wizard
 - Docker support
@@ -59,6 +59,8 @@ If you are a copyright holder or an authorized representative and believe this r
 ```bash
 pip install SpotiFLAC
 ```
+
+> **Important:** out of the box, SpotiFLAC does nothing but resolve Spotify metadata — it ships with **no built-in provider and no default extension source**. Before you can download anything, you need to point it at an extension registry of your own choosing and install at least one extension. See [Extensions](#extensions) below.
 
 ---
 
@@ -86,11 +88,11 @@ spotiflac --interactive
 
 *(Or `python launcher.py --interactive` if running from source)*
 
-On launch it automatically runs a service health check before asking any questions, so you always know which providers are reachable.
+On launch it automatically runs a service health check before asking any questions, so you always know which of your installed extensions are reachable.
 
 **What the wizard does at startup:**
 
-- **Service Health Check** — probes provider endpoints and shows provider availability inline (✅ / ❌) before asking anything
+- **Service Health Check** — probes the endpoints of your installed extensions and shows availability inline (✅ / ❌) before asking anything
 - **URL History** — shows your last 8 downloads so you can re-run one with a single keypress
 - **Folder Memory** — remembers your last output directory and offers it as the default
 - **Profile Load** — optionally restores a full saved configuration
@@ -99,7 +101,7 @@ On launch it automatically runs a service health check before asking any questio
 
 **Smart File Paths:** If you input a Single Track URL, it will ask if you want to set a specific `.flac` output path. If you do, it intelligently skips all questions about filename formatting and subfolder organization.
 
-**Unified Quality Profiles:** Automatically translates your desired quality tier across different services (like Tidal and Qobuz).
+**Unified Quality Profiles:** Automatically translates your desired quality tier across different services.
 
 **CLI Generator:** At the end of the configuration, it generates and prints the exact CLI command for your specific setup, so you can copy and reuse it in your automated scripts.
 
@@ -107,7 +109,7 @@ On launch it automatically runs a service health check before asking any questio
 
 ### Python API (Synchronous)
 
-The classic synchronous API remains the simplest way to integrate SpotiFLAC into your own applications.
+The classic synchronous API remains the simplest way to integrate SpotiFLAC into your own applications. `services` accepts either a legacy alias (resolved to `ext:<id>` if you have a matching extension installed) or an explicit `ext:<id>`.
 
 ```python
 from SpotiFLAC import SpotiFLAC
@@ -115,7 +117,7 @@ from SpotiFLAC import SpotiFLAC
 SpotiFLAC(
     url="https://open.spotify.com/track/TRACK_ID",
     output_dir="./downloads",
-    services=["tidal"],
+    services=["ext:tidal-web"],  # requires the corresponding extension to already be installed
 )
 ```
 
@@ -124,7 +126,7 @@ This API is fully backwards-compatible with previous releases and is recommended
 ### Which API should I use?
 
 | API | Best for |
-|---|---|
+| --- | --- |
 | `SpotiFLAC` | Scripts, CLI wrappers, automation |
 | `AsyncSpotiFLAC` | Discord bots, Telegram bots, FastAPI, asyncio applications |
 
@@ -148,7 +150,7 @@ from SpotiFLAC import AsyncSpotiFLAC
 async def main():
     async with AsyncSpotiFLAC(
         output_dir="./downloads",
-        services=["tidal", "qobuz"],
+        services=["ext:tidal-web", "ext:qobuz-web"],
         quality="LOSSLESS",
     ) as client:
 
@@ -179,37 +181,60 @@ asyncio.run(main())
 
 ---
 
-## JavaScript Extensions
+## Extensions
 
-SpotiFLAC supports modular JavaScript extensions originally developed for SpotiFLAC Mobile and now shared across all SpotiFLAC projects.
+SpotiFLAC has **no built-in download provider and no default extension source**. Every provider — Tidal, Qobuz, Amazon Music, Deezer, or anything else — is supplied entirely by extensions that you find, review, and choose to install yourself. Two extension runtimes are supported:
 
-Extensions can provide alternative implementations for streaming services, allowing SpotiFLAC to continue working even when native APIs change. They are downloaded automatically, kept up to date, and transparently used as fallbacks whenever a native provider fails.
+- **JavaScript** — sharing the same extension format used by [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile), executed via a Node.js bridge.
+- **Python** — packaged as `.spotiflac-ext` / `.sflx` files (a ZIP containing a manifest and a Python entry point), loaded directly in-process.
 
-> **Note:** If Node.js is not installed, SpotiFLAC automatically attempts to install it the first time a JavaScript extension is used.
->
-> Supported package managers:
-> - **Linux:** apt-get, dnf, yum, pacman
-> - **macOS:** brew
-> - **Windows:** winget, choco
+Extensions are never fetched or installed automatically. You must explicitly configure a registry before SpotiFLAC will contact anything:
 
-You can also explicitly prioritize an extension:
+```bash
+# Comma-separated list of registry JSON URLs — none is set by default
+export SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json"
+```
+
+or in a local `.env` file (see `.env.example`):
+
+```env
+SPOTIFLAC_REGISTRIES=https://example.com/my-registry.json
+```
+
+Once configured, you can install and manage extensions:
+
+```python
+from SpotiFLAC.extensions import ExtensionManager
+
+em = ExtensionManager()
+em.install("some-extension-id", registry_url="https://example.com/my-registry.json")
+```
+
+Extensions use the `ext:` prefix and are referenced like any other provider:
 
 ```bash
 spotiflac URL ./out \
   --service ext:tidal-web ext:qobuz-web
 ```
 
-Extensions use the `ext:` prefix and behave exactly like native providers. They can be mixed freely:
+> **Note:** If Node.js is not installed, SpotiFLAC automatically attempts to install it the first time a JavaScript extension is used.
+>
+> Supported package managers:
+>
+> - **Linux:** apt-get, dnf, yum, pacman
+> - **macOS:** brew
+> - **Windows:** winget, choco
 
-```bash
-spotiflac URL ./out \
-  --service tidal ext:qobuz-web deezer
-```
+**A note on legacy names:** for backwards compatibility, short names like `tidal`, `qobuz`, `amazon`, `deezer`, `apple`, `soundcloud`, `youtube`, `pandora` are still accepted in `services`/`--service`, and are resolved to an installed extension with a matching ID (e.g. `tidal` → `ext:tidal-web`) if — and only if — you have that extension installed. They are aliases, not built-in providers; nothing downloads without an extension behind it.
 
-> **Note:** Automatic fallback to extensions is enabled by default whenever a native provider for
-> the same service is installed as an extension. Disable it with `use_extensions_fallback=False`
-> (Python) or `--no-extensions-fallback` (CLI) if you want SpotiFLAC to use only the explicitly
-> requested providers in `services`/`--service`.
+The maintainer does not review, endorse, or take responsibility for the content or behavior of any third-party registry or extension. Choose your sources with the same care you would apply to installing any other third-party code.
+
+### Developing Extensions
+
+- **JavaScript extensions** reuse the format built for [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile). Its [Extension Development Guide](https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/main/docs/EXTENSION_DEVELOPMENT.md) is the closest available reference, but it was written for Mobile — some details (packaging, available runtime capabilities) may not match this project exactly. Verify against this repository's own loader (`SpotiFLAC/extensions/runtime.py`) before relying on it.
+- **Python extensions** are ZIP packages (`.spotiflac-ext` / `.sflx`) containing a manifest and a Python module, loaded directly by `SpotiFLAC/extensions/python_provider.py`. There's no separate guide yet — reading that file, and an existing extension's manifest, is currently the best way to see the expected shape.
+
+If you build something reusable, consider publishing it to your own registry rather than asking the maintainer to bundle or endorse it — see [Extensions](#extensions) above for why nothing is bundled by design.
 
 ---
 
@@ -225,16 +250,23 @@ docker build -t spotiflac .
 
 ### Basic Docker Usage
 
-Run a download by mounting local directories to persist your downloads, configuration, cache, and extension registry across container restarts:
+The image runs a virtual display (Xvfb) and exposes it over VNC — some installed extensions may rely on a headless browser internally. Map port `6080` (web VNC viewer) and set `--shm-size=1g`, or the browser-dependent parts may crash:
+
+Run a download by mounting local directories to persist your downloads, configuration, cache, and extension registry across container restarts. Remember to also pass `SPOTIFLAC_REGISTRIES` (via `-e` or an `.env` file) since none is configured by default:
 
 ```bash
 docker run --rm -it \
+  -p 6080:6080 \
+  --shm-size=1g \
+  -e SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json" \
   -v "$(pwd)/downloads:/app/downloads" \
   -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
   -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
   spotiflac "https://open.spotify.com/track/TRACK_ID" \
-  /app/downloads -s deezer -q LOSSLESS
+  /app/downloads -s ext:deezer-web -q LOSSLESS
 ```
+
+Open `http://localhost:6080/vnc.html` in a browser to watch the virtual screen live, if needed. Set `X11VNC_PASSWORD` (env var, see `.env.example`) to protect the VNC session with a password; if unset, it starts without one.
 
 ### Published Image (GHCR)
 
@@ -250,11 +282,11 @@ A progress bar is a stream of carriage returns: readable on a terminal, unreadab
 
 SpotiFLAC therefore draws animated bars only when stderr is an interactive terminal. Everywhere else — Docker, cron, a redirected file — it prints the same information as plain lines instead:
 
-```
-[RUN] 24 track(s) · tidal, qobuz · LOSSLESS · 2 in parallel → /app/downloads
+```text
+[RUN] 24 track(s) · ext:tidal-web, ext:qobuz-web · LOSSLESS · 2 in parallel → /app/downloads
 Track [3/24] Track Title — Artist Name (Album Name)
   ⬇  Track Title  ·  47%  ·  13.4 MB / 28.4 MB
-  ✓  Track Title  ·  TIDAL  ·  FLAC  ·  28.4 MB  ·  12s
+  ✓  Track Title  ·  TIDAL-WEB  ·  FLAC  ·  28.4 MB  ·  12s
 ```
 
 Progress lines are throttled to at most one per 25% and per 10 seconds, so a track costs a handful of lines rather than one per received chunk.
@@ -270,30 +302,22 @@ export SPOTIFLAC_PROGRESS_BARS=1   # always draw bars
 
 ## Supported URL Types
 
-SpotiFLAC supports the following URL formats for Spotify, Tidal, Apple Music, SoundCloud, YouTube and Pandora:
+SpotiFLAC's core resolves the following URL formats as input; whether a given target is actually reachable depends entirely on which extensions you have installed:
 
-| Type | Spotify | Tidal | Apple Music | SoundCloud | YouTube / YT Music | Pandora |
-|---|---|---|---|---|---|---|
-| Track | `open.spotify.com/track/...` | `listen.tidal.com/track/...` | `music.apple.com/.../song/...` | `soundcloud.com/artist/track-slug` | `youtube.com/watch?v=...` · `youtu.be/...` | `pandora.com/artist/.../song/TR:...` · `pandora.app.link/...` |
-| Album / Set | `open.spotify.com/album/...` | `listen.tidal.com/album/...` | `music.apple.com/.../album/...` | `soundcloud.com/artist/sets/set-slug` | `music.youtube.com/playlist?list=OLAK5uy_...` | — |
-| Playlist | `open.spotify.com/playlist/...` | `listen.tidal.com/playlist/...` | `music.apple.com/.../playlist/...` | — | `youtube.com/playlist?list=PL...` | — |
-| Discography (via artist URL) | `open.spotify.com/artist/...` | `listen.tidal.com/artist/.../discography/albums` | `music.apple.com/.../artist/...` | — | — | — |
+| Type | Spotify |
+| --- | --- |
+| Track | `open.spotify.com/track/...` |
+| Album | `open.spotify.com/album/...` |
+| Playlist | `open.spotify.com/playlist/...` |
+| Discography (via artist URL) | `open.spotify.com/artist/...` |
 
-> **Note:** SoundCloud and YouTube tracks are downloaded as MP3 (neither platform distributes lossless audio). Apple Music downloads as M4A/ALAC (lossless) or AAC depending on the selected quality. Pandora downloads as MP3 (`mp3_192` by default) or M4A (`aac_64` / `aac_32`). All other services deliver FLAC.
->
-> Joox, NetEase, Migu and Kuwo are download-only services — they cannot be used as input URL sources. Use a Spotify or Tidal link and set one of these as the service. These providers are primarily available in select Asian markets and may require a VPN outside those regions.
->
-> SoundCloud short links (`on.soundcloud.com/...`) and mobile links (`m.soundcloud.com/...`) are automatically resolved. Tracking parameters (e.g. `?utm_source=...`) are stripped before processing.
->
-> Apple Music track links with an `?i=` song parameter (e.g. `music.apple.com/us/album/album-name/id?i=trackid`) are also supported.
->
-> Pandora app links (`pandora.app.link/...`) are automatically resolved to their canonical web URL. Pandora pretty URLs (e.g. `pandora.com/artist/artist-name/album-name/song-name/TR:...`) are fully supported.
+> Extensions may add support for resolving Tidal, Apple Music, SoundCloud, YouTube, Pandora, or other platform URLs directly, and may output FLAC, ALAC/M4A, AAC, or MP3 depending on what the source and the extension support. Consult the documentation of the specific extension you install for its supported URL formats and output format.
 
 ---
 
 ## Advanced Configuration
 
-You can customize the download behavior, prioritize specific streaming services, and organize your files automatically into folders.
+You can customize the download behavior, prioritize specific installed extensions, and organize your files automatically into folders.
 
 ```python
 from SpotiFLAC import SpotiFLAC
@@ -301,7 +325,7 @@ from SpotiFLAC import SpotiFLAC
 SpotiFLAC(
     url="https://open.spotify.com/album/ALBUM_ID",
     output_dir="./MusicLibrary",
-    services=["qobuz", "amazon", "tidal"],
+    services=["ext:qobuz-web", "ext:amazon-web", "ext:tidal-web"],
     filename_format="{year} - {album}/{track}. {title}",
     use_artist_subfolders=True,
     use_album_subfolders=True,
@@ -313,7 +337,7 @@ SpotiFLAC(
 
 ### Service Health Check
 
-SpotiFLAC can probe all provider endpoints before downloading to verify which ones are currently reachable.
+SpotiFLAC can probe the endpoints of your installed extensions before downloading, to verify which ones are currently reachable.
 
 In Interactive Mode this runs automatically at startup. In code or scripts you can call it directly:
 
@@ -324,16 +348,26 @@ from SpotiFLAC.core.health_check import (
     get_working_providers,
 )
 
-results = run_health_check(["tidal", "qobuz", "deezer", "soundcloud", "pandora"])
-print_health_report(results)
+import asyncio
+from SpotiFLAC.core.health_check import (
+    run_health_check,
+    print_health_report,
+    get_working_providers,
+)
 
-working = get_working_providers(results)
-print("Available providers:", working)
+async def main():
+    results = await run_health_check(["ext:tidal-web", "ext:qobuz-web", "ext:deezer-web"])
+    print_health_report(results)
+
+    working = get_working_providers(results)
+    print("Available providers:", working)
+
+asyncio.run(main())
 ```
 
 ```bash
-# CLI: check all services then download
-spotiflac https://open.spotify.com/track/... ./out --service tidal qobuz
+# CLI: check installed extensions then download
+spotiflac https://open.spotify.com/track/... ./out --service ext:tidal-web ext:qobuz-web
 ```
 
 The health check runs in parallel with a configurable timeout (default: 5 s per endpoint) and never blocks your download if a check fails. In the GUI, the check reports provider-level availability and endpoint counts, without exposing individual raw endpoint URLs.
@@ -342,26 +376,26 @@ The health check runs in parallel with a configurable timeout (default: 5 s per 
 
 Save and reuse complete download configurations without re-typing them every time.
 
-**Save a profile**
+### Save a profile
 
 ```bash
 # Save current flags as "hires-tidal"
 spotiflac https://... ./out \
-  --service tidal \
+  --service ext:tidal-web \
   --quality HI_RES_LOSSLESS \
   --use-album-subfolders \
   --filename-format "{year} - {album}/{track}. {title}" \
   --save-profile hires-tidal
 ```
 
-**Load a profile**
+### Load a profile
 
 ```bash
 # Load "hires-tidal" — flags override profile values when both are present
 spotiflac https://... ./out --profile hires-tidal
 ```
 
-**In Python**
+### In Python
 
 ```python
 import asyncio
@@ -373,7 +407,7 @@ from SpotiFLAC.core.profiles import (
 
 async def main():
     await save_profile_async("hires-tidal", {
-        "services":             ["tidal"],
+        "services":             ["ext:tidal-web"],
         "quality":              "HI_RES_LOSSLESS",
         "use_album_subfolders": True,
         "filename_format":      "{year} - {album}/{track}. {title}",
@@ -398,17 +432,16 @@ SpotiFLAC(
     url=[
         "https://open.spotify.com/album/ALBUM_ID",
         "https://open.spotify.com/playlist/PLAYLIST_ID",
-        "https://listen.tidal.com/album/ALBUM_ID",
     ],
     output_dir="./MusicLibrary",
-    services=["tidal", "qobuz"],
+    services=["ext:tidal-web", "ext:qobuz-web"],
     use_album_subfolders=True,
 )
 ```
 
 ### Auto-Retry on Failure
 
-Set `track_max_retries` (Python) or `--retries` (CLI) to automatically retry failed tracks. Each retry cycles through all configured providers from the beginning, waiting exponentially longer between attempts (2 s → 4 s → 8 s …, capped at 30 s).
+Set `track_max_retries` (Python) or `--retries` (CLI) to automatically retry failed tracks. Each retry cycles through all configured extensions from the beginning, waiting exponentially longer between attempts (2 s → 4 s → 8 s …, capped at 30 s).
 
 ```python
 from SpotiFLAC import SpotiFLAC
@@ -416,14 +449,14 @@ from SpotiFLAC import SpotiFLAC
 SpotiFLAC(
     url="https://open.spotify.com/album/...",
     output_dir="./downloads",
-    services=["tidal", "qobuz", "deezer"],
+    services=["ext:tidal-web", "ext:qobuz-web", "ext:deezer-web"],
     track_max_retries=3,   # up to 3 extra attempts per track
 )
 ```
 
 ```bash
 spotiflac https://open.spotify.com/album/... ./out \
-  --service tidal qobuz deezer \
+  --service ext:tidal-web ext:qobuz-web ext:deezer-web \
   --retries 3
 ```
 
@@ -431,11 +464,11 @@ spotiflac https://open.spotify.com/album/... ./out \
 
 ### Per-Track Timeout
 
-Set `timeout_s` (Python) or `--timeout` (CLI) to cap the time SpotiFLAC will spend downloading a single track. If the download does not complete within the specified number of seconds, the process is terminated and the track is marked as failed — allowing the next provider or retry to take over.
+Set `timeout_s` (Python) or `--timeout` (CLI) to cap the time SpotiFLAC will spend downloading a single track. If the download does not complete within the specified number of seconds, the process is terminated and the track is marked as failed — allowing the next extension or retry to take over.
 
 ```bash
 # CLI — skip any track that takes more than 3 minutes
-spotiflac https://open.spotify.com/album/... ./out --service tidal --timeout 180
+spotiflac https://open.spotify.com/album/... ./out --service ext:tidal-web --timeout 180
 ```
 
 ```python
@@ -444,22 +477,22 @@ from SpotiFLAC import SpotiFLAC
 SpotiFLAC(
     url="https://open.spotify.com/album/...",
     output_dir="./downloads",
-    services=["tidal", "qobuz"],
+    services=["ext:tidal-web", "ext:qobuz-web"],
     timeout_s=120,
 )
 ```
 
-> **Tip:** Pair `--timeout` with `--retries` so that a stalled track is automatically re-attempted against the next provider instead of blocking the entire queue indefinitely.
+> **Tip:** Pair `--timeout` with `--retries` so that a stalled track is automatically re-attempted against the next extension instead of blocking the entire queue indefinitely.
 
 ### MP3 Transcoding
 
-Downloads always fetch the best source a provider offers (FLAC, ALAC/M4A, …). Set `transcode_to="mp3"` (Python) or `--mp3` / `--transcode mp3` (CLI) to convert every finished track to MP3 — 320 kbps by default — for players or car stereos that cannot handle lossless files. Tags, cover art and lyrics are carried over to the MP3, and the original file is deleted once the conversion succeeds unless `transcode_keep_original` / `--keep-original` is set.
+Downloads always fetch the best source an extension offers (FLAC, ALAC/M4A, …). Set `transcode_to="mp3"` (Python) or `--mp3` / `--transcode mp3` (CLI) to convert every finished track to MP3 — 320 kbps by default — for players or car stereos that cannot handle lossless files. Tags, cover art and lyrics are carried over to the MP3, and the original file is deleted once the conversion succeeds unless `transcode_keep_original` / `--keep-original` is set.
 
 Requires `ffmpeg` on your `PATH`: the run stops immediately with a clear error if it is missing, so you never download a whole album only to fail at the conversion step.
 
 ```bash
 # CLI — every track ends up as a 320 kbps MP3
-spotiflac https://open.spotify.com/album/... ./out --service tidal --mp3
+spotiflac https://open.spotify.com/album/... ./out --service ext:tidal-web --mp3
 
 # Keep the FLAC too, and use 192 kbps instead
 spotiflac https://open.spotify.com/album/... ./out --mp3 --transcode-bitrate 192k --keep-original
@@ -471,15 +504,15 @@ from SpotiFLAC import SpotiFLAC
 SpotiFLAC(
     url="https://open.spotify.com/album/...",
     output_dir="./downloads",
-    services=["tidal", "qobuz"],
+    services=["ext:tidal-web", "ext:qobuz-web"],
     transcode_to="mp3",
     transcode_bitrate="320k",
 )
 ```
 
-**Skipping already-downloaded tracks still works.** The converted file keeps the exact name the provider would have used, only with an `.mp3` extension, so SpotiFLAC looks for that file *before* contacting any provider and skips the track when it is already there — no network request, no re-encode. Running the same album twice therefore costs nothing the second time. A leftover file from an earlier lossless run is converted in place instead of being re-downloaded, so an existing library converges to MP3 in a single pass.
+**Skipping already-downloaded tracks still works.** The converted file keeps the exact name the extension would have used, only with an `.mp3` extension, so SpotiFLAC looks for that file *before* contacting any extension and skips the track when it is already there — no network request, no re-encode. Running the same album twice therefore costs nothing the second time. A leftover file from an earlier lossless run is converted in place instead of being re-downloaded, so an existing library converges to MP3 in a single pass.
 
-The conversion is a no-op for providers that already deliver MP3 (e.g. SoundCloud), which are passed through untouched.
+The conversion is a no-op for extensions that already deliver MP3, which are passed through untouched.
 
 ### Multiple Playlists in One Folder
 
@@ -489,11 +522,11 @@ Pass `--playlist` (`-p`) once per playlist to sync several of them into a **sing
 spotiflac -p https://open.spotify.com/playlist/AAA \
           -p https://open.spotify.com/playlist/BBB \
           -p https://open.spotify.com/playlist/CCC \
-          ./Music --service tidal
+          ./Music --service ext:tidal-web
 ```
 
 - **One copy per track.** A song that appears in three of those playlists is downloaded once. Tracks are matched by ISRC (resolved automatically when the metadata lacks it), falling back to artist + title, so the same recording pulled from different playlists is recognised even when the catalogue ids differ.
-- **Nothing already on disk is downloaded again.** The destination folder is indexed before any provider is contacted, in *any* audio format — a track already there as `.m4a` is not re-fetched just because this run would produce a `.flac`.
+- **Nothing already on disk is downloaded again.** The destination folder is indexed before any extension is contacted, in *any* audio format — a track already there as `.m4a` is not re-fetched just because this run would produce a `.flac`.
 - **One M3U per playlist.** Each playlist gets a `<Playlist Name>.m3u8` file in the destination folder listing its own tracks, in playlist order, with paths relative to the folder — so the whole directory stays portable and can be copied to a phone or a USB stick as is. Two playlists sharing a name get `Name.m3u8` and `Name (2).m3u8`.
 - **Cheap to re-run.** Playlist files are rewritten only when their content actually changed. Running the same command again after a playlist gained a track downloads that one track and touches that one M3U file.
 
@@ -513,11 +546,11 @@ With `--mp3` a playlist entry points at the converted file, and a track already 
 ### Post-Download Actions
 
 | Action | Description |
-|---|---|
+| --- | --- |
 | `none` | Do nothing (default) |
 | `open_folder` | Open the output folder in the system file manager |
 | `notify` | Send an OS desktop notification with a summary |
-| `command` | Run a custom shell command — placeholders: `{folder}`, `{succeeded}`, `{failed}` (quote `{folder}` in your template, e.g. `'{folder}'`, to handle spaces; this does not protect against an apostrophe inside the path itself) |
+| `command` | Run a custom shell command — placeholders: `{folder}`, `{succeeded}`, `{skipped}`, `{failed}` (quote `{folder}` in your template, e.g. `'{folder}'`, to handle spaces; this does not protect against an apostrophe inside the path itself) |
 
 ```python
 SpotiFLAC(url="...", output_dir="./downloads", post_download_action="open_folder")
@@ -541,18 +574,14 @@ Download the complete discography of an artist. Duplicate tracks (same ISRC acro
 ```python
 from SpotiFLAC import SpotiFLAC
 
-# Spotify — albums + singles
 SpotiFLAC(url="https://open.spotify.com/artist/ARTIST_ID", output_dir="./MusicLibrary",
-          services=["qobuz", "tidal"], use_album_subfolders=True, filename_format="{year} - {album}/{track}. {title}")
-
-# Tidal — full discography (append /discography/albums or /discography/singles to filter)
-SpotiFLAC(url="https://listen.tidal.com/artist/ARTIST_ID", output_dir="./MusicLibrary",
-          services=["tidal"], use_album_subfolders=True, filename_format="{year} - {album}/{track}. {title}")
+          services=["ext:qobuz-web", "ext:tidal-web"], use_album_subfolders=True,
+          filename_format="{year} - {album}/{track}. {title}")
 ```
 
 ```bash
 spotiflac https://open.spotify.com/artist/... ./MusicLibrary \
-  --service tidal --include-featuring \
+  --service ext:tidal-web --include-featuring \
   --use-album-subfolders --filename-format "{year} - {album}/{track}. {title}"
 ```
 
@@ -574,52 +603,9 @@ SpotiFLAC(
 
 > **Note:** `output_path` is automatically ignored when the URL points to an album, playlist, or artist/discography.
 
-### Qobuz Local API URL (Optional)
+### Passing Settings to an Extension (e.g. a self-hosted API instance)
 
-By default, SpotiFLAC attempts Qobuz requests anonymously, without any local API configured. For improved reliability, reduced rate limits, and to use your own Qobuz subscription credentials instead of anonymous access, you can deploy a self-hosted Qobuz stream API and point SpotiFLAC to it.
-
-How to deploy your own instance: [github.com/BartolomeoRusso9/qobuz-rest-api](https://github.com/BartolomeoRusso9/qobuz-rest-api)
-
-> **Note:** Self-hosting requires your own valid Qobuz account and is subject to Qobuz's Terms of Service. You are responsible for ensuring your use complies with those terms and with applicable law in your jurisdiction.
-
-**How to apply the Qobuz Local API URL in SpotiFLAC:**
-
-- **Interactive Wizard:** The wizard prompts you to enter your local Qobuz API URL during configuration.
-- **Environment Variable:**
-
-```bash
-export QOBUZ_LOCAL_API_URL="https://localhost:8000"
-```
-
-- **Python:**
-
-```python
-from SpotiFLAC import SpotiFLAC
-
-SpotiFLAC(
-    url="URL",
-    output_dir="./downloads",
-    qobuz_local_api_url="https://localhost:8000",
-)
-```
-
-- **`config.json`:**
-
-```json
-{
-    "qobuz_local_api_url": "https://localhost:8000"
-}
-```
-
-### Custom Tidal API Instance (Optional)
-
-By default, SpotiFLAC connects to a shared pool of public hifi-api mirrors to fetch Tidal streams. For guaranteed availability, full control, and to use your own Tidal Premium credentials instead of relying on third-party mirrors, you can self-host your own instance and point SpotiFLAC to it — it will always be tried first, before any public mirror.
-
-How to deploy your own instance: [github.com/binimum/hifi-api](https://github.com/binimum/hifi-api)
-
-> **Note:** Self-hosting requires your own valid Tidal account and is subject to Tidal's Terms of Service. You are responsible for ensuring your use complies with those terms and with applicable law in your jurisdiction.
-
-**Python**
+`qobuz_local_api_url` and `tidal_custom_api` (and equivalents you'll find documented by other extensions) are **not** built-in behaviors of the core — they are optional settings forwarded to whichever extension you have installed for that service, if that extension supports them. Whether they do anything at all, what they connect to, and what account or credentials they expect depends entirely on the specific extension's own documentation and implementation, which the maintainer of this repository does not control or vouch for.
 
 ```python
 from SpotiFLAC import SpotiFLAC
@@ -627,32 +613,18 @@ from SpotiFLAC import SpotiFLAC
 SpotiFLAC(
     url="https://open.spotify.com/track/TRACK_ID",
     output_dir="./downloads",
-    services=["tidal"],
+    services=["ext:tidal-web"],
     tidal_custom_api="https://your-instance.example.com",
 )
 ```
 
-**CLI**
-
 ```bash
 spotiflac https://open.spotify.com/track/... ./downloads \
-  --service tidal \
+  --service ext:tidal-web \
   --tidal-api "https://your-instance.example.com"
 ```
 
-**Interactive Wizard**
-
-The wizard prompts for a custom Tidal API URL at step 12.5, right after the optional tokens section.
-
-**`config.json`**
-
-```json
-{
-    "tidal_custom_api": "https://your-instance.example.com"
-}
-```
-
-> **Note:** The custom instance is also saved and restored when using `--save-profile` / `--profile`.
+> **Note:** These values are also saved and restored when using `--save-profile` / `--profile`.
 
 ---
 
@@ -661,7 +633,7 @@ The wizard prompts for a custom Tidal API URL at step 12.5, right after the opti
 ```bash
 ./SpotiFLAC-Windows.exe url
                         output_dir
-                        [--service tidal qobuz deezer amazon soundcloud youtube apple pandora joox netease migu kuwo]
+                        [--service ext:<id> [ext:<id> ...]]
                         [--filename-format "{title} - {artist}"]
                         [--output-path "files/song.flac"]
                         [--quality LOSSLESS]
@@ -682,7 +654,7 @@ The wizard prompts for a custom Tidal API URL at step 12.5, right after the opti
                         [--enrich-providers deezer apple qobuz tidal soundcloud]
                         [--retries N]
                         [--post-action none|open_folder|notify|command]
-                        [--post-command "CMD with {folder} {succeeded} {failed}"]
+                        [--post-command "CMD with {folder} {succeeded} {skipped} {failed}"]
                         [--profile NAME]
                         [--save-profile NAME]
 ```
@@ -691,7 +663,7 @@ The wizard prompts for a custom Tidal API URL at step 12.5, right after the opti
 chmod +x SpotiFLAC-Linux-arm64
 ./SpotiFLAC-Linux-arm64 url
                         output_dir
-                        [--service tidal qobuz deezer amazon soundcloud youtube apple pandora joox netease migu kuwo]
+                        [--service ext:<id> [ext:<id> ...]]
                         [--filename-format "{title} - {artist}"]
                         [--output-path "files/song.flac"]
                         [--quality LOSSLESS]
@@ -712,12 +684,14 @@ chmod +x SpotiFLAC-Linux-arm64
                         [--enrich-providers deezer apple qobuz tidal soundcloud]
                         [--retries N]
                         [--post-action none|open_folder|notify|command]
-                        [--post-command "CMD with {folder} {succeeded} {failed}"]
+                        [--post-command "CMD with {folder} {succeeded} {skipped} {failed}"]
                         [--profile NAME]
                         [--save-profile NAME]
 ```
 
 *(For ARM devices like Raspberry Pi, replace `x86_64` with `arm64`)*
+
+> **Reminder:** `--service` values only resolve to something functional if you have already installed a matching extension (`--service ext:tidal-web` needs the `tidal-web` extension installed from a registry you configured). See [Extensions](#extensions).
 
 ---
 
@@ -726,36 +700,39 @@ chmod +x SpotiFLAC-Linux-arm64
 ### `SpotiFLAC()` Parameters
 
 | Parameter | Type | Default | Description |
-|---|---|---|---|
-| `url` | `str` / `list[str]` | Required | A single URL or a list of URLs (batch mode) for Spotify, Tidal, Apple Music, SoundCloud, YouTube or Pandora. |
+| --- | --- | --- | --- |
+| `url` | `str` / `list[str]` | Required | A single URL or a list of URLs (batch mode). |
 | `output_dir` | `str` | Required | The destination directory path where the audio files will be saved. |
 | `output_path` | `str` | `None` | Exact destination file path for single track downloads. Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies. |
-| `services` | `list` | `["tidal"]` | Specifies which services to use and their priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `soundcloud`, `youtube`, `apple`, `pandora`, `joox`, `netease`, `migu`, `kuwo`. Also accepts `ext:<extension-name>` (e.g. `ext:tidal-web`) to use an installed [JavaScript extension](#-javascript-extensions) as a provider; native and `ext:` providers can be freely mixed in the same priority list. |
+| `services` | `list` | `["ext:tidal-web"]` | Extensions to use and their priority order, as `ext:<id>` (or a legacy alias — see [Extensions](#extensions)). Each `id` must correspond to an extension you have already installed; nothing is bundled or installed automatically. |
 | `filename_format` | `str` | `"{title} - {artist}"` | Format for naming downloaded files. See placeholders below. |
 | `use_track_numbers` | `bool` | `False` | Prefixes the filename with the track number. |
 | `use_album_track_numbers` | `bool` | `False` | Uses the track's original album number instead of the download queue position. |
 | `use_artist_subfolders` | `bool` | `False` | Automatically organizes downloaded files into subfolders by artist. |
 | `use_album_subfolders` | `bool` | `False` | Automatically organizes downloaded files into subfolders by album. |
+| `create_playlist_subfolders` | `bool` | `False` | Creates a subfolder per playlist/album when downloading a collection, in addition to any artist/album subfolders. |
 | `first_artist_only` | `bool` | `False` | Uses only the first artist in tags and filename. |
 | `include_featuring` | `bool` | `False` | When downloading an artist discography, also includes tracks where the artist appears as a featured artist. |
-| `tidal_custom_api` | `str` | `None` | URL of a self-hosted hifi-api instance. Takes priority over all public mirrors. |
-| `timeout_s` | `int` | `None` | Per-track download timeout in seconds. If a single track download does not complete within this time, the process is terminated and the track is marked as failed. SpotiFLAC then moves on to the next provider or retry. Set to `None` (default) to disable the timeout. |
+| `max_concurrent_downloads` | `int` | `2` | How many tracks to download in parallel. |
+| `tidal_custom_api` | `str` | `None` | Optional setting forwarded to the installed `tidal-web`-family extension, if it supports it. Has no effect on its own — see [Passing Settings to an Extension](#passing-settings-to-an-extension-eg-a-self-hosted-api-instance). |
+| `timeout_s` | `int` | `None` | Per-track download timeout in seconds. If a single track download does not complete within this time, the process is terminated and the track is marked as failed. SpotiFLAC then moves on to the next extension or retry. Set to `None` (default) to disable the timeout. |
 | `loop` | `int` | `None` | Duration in minutes to keep retrying permanently failed tracks after a full session completes. |
-| `track_max_retries` | `int` | `0` | Extra download attempts per track when all providers fail on the first try. Each retry cycles through all providers again with exponential backoff (2 s → 4 s → 8 s …, capped at 30 s). |
-| `quality` | `str` | `"LOSSLESS"` | Download quality. Tidal: `"DOLBY_ATMOS"`, `"HI_RES_LOSSLESS"`, `"LOSSLESS"`, `"HIGH"`, `"LOW"`. Qobuz: `"6"` (CD), `"7"` (Hi-Res), `"27"` (Hi-Res Max). Apple Music: `"alac"`, `"atmos"`, `"ac3"`, `"aac"`, `"aac-legacy"`. Pandora: `"mp3_192"`, `"aac_64"`, `"aac_32"`. |
+| `track_max_retries` | `int` | `0` | Extra download attempts per track when all extensions fail on the first try. Each retry cycles through all configured extensions again with exponential backoff (2 s → 4 s → 8 s …, capped at 30 s). |
+| `quality` | `str` | `"LOSSLESS"` | Requested audio quality. Supported values depend on the installed extension. |
 | `allow_fallback` | `bool` | `True` | Automatically falls back to the next available quality tier if the requested quality is unavailable. |
 | `log_level` | `int` | `logging.WARNING` | Python logging level. |
 | `embed_lyrics` | `bool` | `True` | Whether to fetch and embed synchronized lyrics (LRC) into the audio file. |
 | `lyrics_providers` | `list` | `["spotify", "apple", "musixmatch", "lrclib", "amazon"]` | Priority order of lyrics providers to attempt. |
 | `enrich_metadata` | `bool` | `True` | Enables multi-provider metadata enrichment (HD covers, BPM, labels, etc.). |
 | `enrich_providers` | `list` | `["deezer", "apple", "qobuz", "tidal", "soundcloud"]` | Priority order of metadata providers to attempt. |
-| `qobuz_local_api_url` | `str` | `None` | Optional local Qobuz stream API URL. When set, the provider uses this endpoint for Qobuz stream requests. |
-| `use_extensions_fallback` | `bool` | `True` | Whether to automatically pair a matching installed [JavaScript extension](#-javascript-extensions) as a fallback provider when a native provider fails. Set to `False` to use only the providers explicitly listed in `services`. |
-| `transcode_to` | `str` | `None` | Converts every finished track to this format. Currently only `"mp3"` (see [MP3 Transcoding](#mp3-transcoding)). `None` keeps the provider's original format. Requires `ffmpeg`. |
+| `qobuz_token` | `str` | `None` | Optional setting forwarded to the installed Qobuz extension, if it supports it. Has no built-in behavior of its own. |
+| `qobuz_local_api_url` | `str` | `None` | Optional setting forwarded to the installed `qobuz-web`-family extension, if it supports it. Has no effect on its own — see [Passing Settings to an Extension](#passing-settings-to-an-extension-eg-a-self-hosted-api-instance). |
+| `use_extensions_fallback` | `bool` | `True` | Whether to automatically fall back to another installed extension for the same alias if one fails. Set to `False` to use only the extensions explicitly listed in `services`. |
+| `transcode_to` | `str` | `None` | Converts every finished track to this format. Currently only `"mp3"` (see [MP3 Transcoding](#mp3-transcoding)). `None` keeps the extension's original format. Requires `ffmpeg`. |
 | `transcode_bitrate` | `str` | `"320k"` | Bitrate used by `transcode_to`, e.g. `"320k"`, `"256k"`, `"192k"`. |
 | `transcode_keep_original` | `bool` | `False` | Keeps the original lossless file next to the converted one. By default the source is deleted once the conversion succeeds. |
 | `post_download_action` | `str` | `"none"` | Action after all downloads finish: `"none"`, `"open_folder"`, `"notify"`, `"command"`. |
-| `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
+| `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{skipped}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 
 ### Filename Format Placeholders
 
@@ -775,24 +752,23 @@ When customizing the `filename_format` string, you can use the following dynamic
 ### CLI Flag Reference
 
 | Flag | Short | Default | Description |
-|---|---|---|---|
-| `--service` | `-s` | `tidal` | One or more providers in priority order. Choices: `tidal`, `qobuz`, `deezer`, `amazon`, `soundcloud`, `youtube`, `apple`, `pandora`, `joox`, `netease`, `migu`, `kuwo`. Also accepts `ext:<extension-name>` (e.g. `ext:tidal-web`) for installed JavaScript extension providers, mixable with native providers in the same list. |
+| --- | --- | --- | --- |
+| `--service` | `-s` | `ext:tidal-web` | One or more extensions in priority order, as `ext:<id>` (or a legacy alias resolved to an installed extension — see [Extensions](#extensions)). |
 | `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
 | `--output-path` | `-o` | `None` | Exact output file path for single track downloads. Ignored for albums, playlists and discographies. |
-| `--quality` | `-q` | `LOSSLESS` | Audio quality. Tidal: `DOLBY_ATMOS`, `HI_RES_LOSSLESS`, `LOSSLESS`, `HIGH`, `LOW`. Qobuz: `6`, `7`, `27`. Apple Music: `alac`, `atmos`, `ac3`, `aac`, `aac-legacy`. Pandora: `mp3_192`, `aac_64`, `aac_32`. |
+| `--quality` | `-q` | `LOSSLESS` | Requested audio quality. Supported values depend on the installed extension. |
 | `--use-track-numbers` | | `False` | Prefix filenames with track numbers. |
 | `--use-album-track-numbers` | | `False` | Use the track's original album number instead of queue position. |
 | `--use-artist-subfolders` | | `False` | Organize files into per-artist subfolders. |
 | `--use-album-subfolders` | | `False` | Organize files into per-album subfolders. |
 | `--first-artist-only` | | `False` | Use only the first artist in tags and filename. |
 | `--include-featuring` | | `False` | Include tracks where the artist appears as a featured artist. Only applies to artist/discography URLs. |
-| `--qobuz-local-api` | | `None` | Optional local Qobuz stream API URL. |
-| `--tidal-api` | | `None` | URL of a self-hosted hifi-api instance. Takes priority over the built-in public mirror pool. |
-| `--timeout` | | `None` | Per-track download timeout in seconds. If a track download stalls or takes longer than this limit, it is forcibly terminated and marked as failed, then SpotiFLAC moves to the next provider or retry. |
+| `--qobuz-local-api` | | `None` | Optional setting forwarded to the installed Qobuz extension, if it supports it. |
+| `--tidal-api` | | `None` | Optional setting forwarded to the installed Tidal extension, if it supports it. |
+| `--timeout` | | `None` | Per-track download timeout in seconds. If a track download stalls or takes longer than this limit, it is forcibly terminated and marked as failed, then SpotiFLAC moves to the next extension or retry. |
 | `--loop` | `-l` | `None` | Keep retrying permanently failed tracks every N minutes. |
- `--no-extensions-fallback` | | `False` | Disable automatic fallback to installed JS extensions when a native provider fails (fallback is enabled by default). |
-| `--loop` | `-l` | `None` | Keep retrying permanently failed tracks every N minutes. |
-| `--retries` | | `0` | Extra per-track download attempts on failure. Cycles through all providers with exponential backoff. |
+| `--no-extensions-fallback` | | `False` | Disable automatic fallback to another installed extension for the same alias when one fails (fallback is enabled by default). |
+| `--retries` | | `0` | Extra per-track download attempts on failure. Cycles through all configured extensions with exponential backoff. |
 | `--playlist` | `-p` | `None` | Playlist URL to sync; repeat once per playlist. All tracks go to a single destination folder, shared tracks are downloaded once, and each playlist gets its own M3U file (see [Multiple Playlists in One Folder](#multiple-playlists-in-one-folder)). |
 | `--m3u` | | `m3u8` | Playlist file written for each `--playlist`: `m3u8`, `m3u` or `none`. Rewritten only when its content changed. |
 | `--transcode` | | `none` | Convert every downloaded track to this format: `none` or `mp3`. Requires `ffmpeg`. |
@@ -805,7 +781,7 @@ When customizing the `filename_format` string, you can use the following dynamic
 | `--no-enrich` | | `False` | Disable multi-provider metadata enrichment (enrichment is enabled by default). |
 | `--enrich-providers` | | `deezer apple qobuz tidal soundcloud` | Metadata enrichment provider priority order. |
 | `--post-action` | | `none` | Action after all downloads finish: `none`, `open_folder`, `notify`, `command`. |
-| `--post-command` | | `""` | Shell command for `--post-action=command`. Placeholders: `{folder}`, `{succeeded}`, `{failed}`; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
+| `--post-command` | | `""` | Shell command for `--post-action=command`. Placeholders: `{folder}`, `{succeeded}`, `{skipped}`, `{failed}`; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 | `--profile` | | `None` | Load a saved profile. CLI flags override profile values. |
 | `--save-profile` | | `None` | Save current CLI configuration as a named profile after the run. |
 
@@ -816,25 +792,13 @@ When customizing the `filename_format` string, you can use the following dynamic
 SpotiFLAC automatically queries MusicBrainz in the background (when an ISRC is available) while the audio is being downloaded, adding professional-grade tags at no extra time cost. Fields written when found:
 
 | Tag | Description |
-|---|---|
-| `GENRE` | Genre(s), sorted by popularity (up to 5) |
+| --- | --- |
+| `GENRE` | Genre |
+| `ORGANIZATION` | Record label |
 | `BPM` | Beats per minute |
-| `LABEL` / `ORGANIZATION` | Record label name |
-| `CATALOGNUMBER` | Catalog number |
-| `BARCODE` | Release barcode / UPC |
-| `ORIGINALDATE` / `ORIGINALYEAR` | First-ever release date |
-| `RELEASECOUNTRY` | Country of release |
-| `RELEASESTATUS` | Release status (e.g. Official) |
-| `RELEASETYPE` | Release type (e.g. Album, Single) |
-| `MEDIA` | Media format (e.g. CD, Digital Media) |
-| `SCRIPT` | Script of the release text |
-| `ARTISTSORT` | Artist sort name for file managers |
-| `MUSICBRAINZ_TRACKID` | MusicBrainz recording ID |
-| `MUSICBRAINZ_ALBUMID` | MusicBrainz release ID |
-| `MUSICBRAINZ_ARTISTID` | MusicBrainz artist ID |
-| `MUSICBRAINZ_RELEASEGROUPID` | MusicBrainz release group ID |
-| `MUSICBRAINZ_ALBUMARTISTID` | MusicBrainz album artist ID |
-| `ALBUMARTISTSORT` | Album artist sort name for file managers |
+| `UPC` | Release barcode / UPC |
+| `ISRC` | Track ISRC code (normalized) |
+| `ITUNESADVISORY` | Set to `1` when the release is marked explicit |
 
 ---
 
@@ -842,7 +806,7 @@ SpotiFLAC automatically queries MusicBrainz in the background (when an ISRC is a
 
 After each download, SpotiFLAC validates the file to detect common issues:
 
-- **Preview detection** — if the expected duration is ≥ 60 s but the downloaded file is ≤ 35 s, the file is deleted and the download is retried with the next provider.
+- **Preview detection** — if the expected duration is ≥ 60 s but the downloaded file is ≤ 35 s, the file is deleted and the download is retried with the next extension.
 - **Duration mismatch** — for tracks longer than 90 s, a deviation greater than 25% (or 15 s minimum) from the expected duration is treated as a corrupt download and the file is removed.
 
 ---
@@ -857,7 +821,8 @@ If this software is useful and brings you value, consider supporting the project
 
 ## API Credits
 
-[Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [qobuz-rest-api](https://github.com/BartolomeoRusso9/qobuz-rest-api) · [dabmusic.xyz](https://dabmusic.xyz) · [GD Studio Music API](https://music.gdstudio.xyz) · [Music Wjhe API](https://music.wjhe.top/) · [afkarxyz](https://github.com/afkarxyz) · [MusicBrainz](https://musicbrainz.org) · [SoundCloud](https://soundcloud.com) · [Apple Music](https://music.apple.com) · [YouTube Music](https://music.youtube.com) · [Pandora](https://www.pandora.com) · [squid.wtf](https://squid.wtf) · [flacdownloader.com](https://flacdownloader.com) · [monochrome](https://monochrome.tf) · [spotiflacapp](https://github.com/spotiflacapp/SpotiFLAC-Mobile) · [anandprtp](https://github.com/anandprtp/Antra) · [Deezer](https://www.deezer.com) · [Amazon Music](https://music.amazon.com) · [Tidal](https://tidal.com) · [LRCLIB](https://lrclib.net) · [Musixmatch](https://www.musixmatch.com) · [Songstats](https://songstats.com) · [Soundplate](https://soundplate.com) · [iTunes Search API](https://itunes.apple.com) · [Cobalt](https://cobalt.tools)
+[Song.link](https://song.link) · [MusicBrainz](https://musicbrainz.org) · [LRCLIB](https://lrclib.net) · [Musixmatch](https://www.musixmatch.com) · [iTunes Search API](https://itunes.apple.com)
 
-> **[!TIP]**
-> Star the repo to show support, and click **Watch → Custom → Releases** on GitHub if you want to be notified as soon as a new release goes out.
+> Provider-specific credits (Tidal, Qobuz, Amazon Music, Deezer, SoundCloud, Apple Music, Pandora, and any third-party API used to reach them) now belong to whichever extension you install — see that extension's own documentation for its credits and terms.
+>
+> **[!TIP]** Star the repo to show support, and click **Watch → Custom → Releases** on GitHub if you want to be notified as soon as a new release goes out.

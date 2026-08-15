@@ -6,10 +6,8 @@ Xvfb :99 -screen 0 1280x900x24 -ac +extension GLX +render -noreset &
 sleep 1
 
 # ==============================================================================
-# [OPTIONAL - VNC/WEB SCREEN]:
+# [VNC/WEB SCREEN]:
 # To view Chromium's screen live in your browser or via VNC:
-# 1. Make sure you uncommented the packages (fluxbox, x11vnc, novnc, websockify) and EXPOSE in the Dockerfile.
-# 2. Uncomment the 3 commands below.
 # 3. Run Docker with the port flag mapped: -p 6080:6080
 # 4. Open your browser at: http://localhost:6080/vnc.html
 #
@@ -27,28 +25,20 @@ sleep 1
 # 2. Start Fluxbox window manager to keep Chromium windows organized
 fluxbox -display :99 >/dev/null 2>&1 &
 
-# 3. Start VNC server on port 5900 (password, for local access)
-x11vnc -display :99 -forever -passwd "spotiflac" -shared -bg -quiet
-
-# 4. Start noVNC bridge to view the screen from a web browser on port 6080
-websockify --web=/usr/share/novnc --daemon 6080 localhost:5900 >/dev/null 2>&1
+# 3. Start VNC server on port 5900.
+# Password is read from an environment variable (required for security).
+# Example: X11VNC_PASSWORD=your_secure_password docker run ...
+VNC_PASSWORD="${X11VNC_PASSWORD:-}"
+if [ -n "$VNC_PASSWORD" ]; then
+  x11vnc -display :99 -forever -passwd "$VNC_PASSWORD" -shared -bg -quiet
+  # 4. Start noVNC bridge to view the screen from a web browser on port 6080
+  websockify --web=/usr/share/novnc --daemon 6080 localhost:5900 >/dev/null 2>&1
+else
+  echo "VNC/noVNC services disabled: X11VNC_PASSWORD not set."
+  echo "Set X11VNC_PASSWORD environment variable to enable screen viewing."
+fi
 
 export TS_DEBUG_VISIBLE=1
-
-# ==============================================================================
-# [TELEGRAM BOT MODE]:
-# If the first argument is "bot", run the Telegram bot instead of the
-# SpotiFLAC CLI. Xvfb is already running above, so any Chromium/pydoll-based
-# provider features the bot triggers still work.
-#
-# Set this as the container's command, e.g. in docker-compose.yml:
-#   command: ["bot"]
-# or in Portainer's "Command" field: bot
-# ==============================================================================
-if [ "$1" = "bot" ]; then
-  shift
-  exec python3 /app/telegram/bot.py "$@"
-fi
 
 if [ "$#" -eq 0 ]; then
   echo "SpotiFLAC Docker image: pass a URL and output directory as arguments."
@@ -61,8 +51,6 @@ if [ "$#" -eq 0 ]; then
   echo "    --shm-size=1g \\"
   echo "    spotiflac \"https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT\" \\"
   echo "    /app/downloads -s amazon -v"
-  echo
-  echo "Or run the Telegram bot instead: pass \"bot\" as the command."
   echo
   exec spotiflac --help
 fi

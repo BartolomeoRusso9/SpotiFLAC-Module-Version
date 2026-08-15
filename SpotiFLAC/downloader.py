@@ -85,10 +85,38 @@ async def _call_metadata_get_url(client, url: str, **kwargs):
     return await asyncio.to_thread(fn, url, **kwargs)
 
 
+def _adapt_js_metadata_response(response):
+    """Adapt JSExtensionProvider dict response to expected tuple format.
+
+    JSExtensionProvider may return a dict with keys like:
+    {'collection_name': str, 'tracks': list, 'collection_cover': str (optional)}
+
+    This adapter converts it to the tuple format expected by the caller:
+    (collection_name, tracks, *optional_cover)
+    """
+    from .extensions.provider import JSExtensionProvider
+
+    # If response is already a tuple/list, return as-is (native Python provider format)
+    if isinstance(response, (tuple, list)):
+        return response
+
+    # If it's a dict (JS provider format), convert to tuple
+    if isinstance(response, dict):
+        collection_name = response.get("collection_name", "Unknown")
+        tracks = response.get("tracks", [])
+        collection_cover = response.get("collection_cover")
+        if collection_cover:
+            return (collection_name, tracks, collection_cover)
+        return (collection_name, tracks)
+
+    # Fallback: return as-is
+    return response
+
+
 @dataclass
 class DownloadOptions:
     output_dir: str
-    services: list[str] = field(default_factory=lambda: ["tidal"])
+    services: list[str] = field(default_factory=lambda: ["ext:tidal-web"])
     filename_format: str = "{title} - {artist}"
     use_track_numbers: bool = False
     use_album_track_numbers: bool = False
@@ -148,99 +176,77 @@ class DownloadOptions:
         self.transcode_bitrate = normalize_bitrate(self.transcode_bitrate)
 
 
-def _build_provider(name: str, opts: DownloadOptions) -> BaseProvider | None:
-    from .providers import PROVIDER_REGISTRY, _build_ext_provider
-
-    if name.startswith("ext:"):
-        try:
-            return _build_ext_provider(
-                name,
-                ext_dir=opts.ext_dir,
-                timeout_s=opts.timeout_s or 120,
-            )
-        except Exception as e:
-            logger.warning("Failed to create provider %s: %s", name, e)
-            return None
-
-    cls = PROVIDER_REGISTRY.get(name)
-    if cls is None:
-        logger.warning("Unknown provider: %s", name)
-        return None
-    kwargs = {}
-    if opts.timeout_s is not None:
-        kwargs["timeout_s"] = opts.timeout_s
-
-    if name == "qobuz":
-        kwargs["qobuz_token"] = opts.qobuz_token
-        kwargs["local_api_url"] = opts.qobuz_local_api_url
-    elif name == "tidal" and opts.tidal_custom_api:
-        kwargs["custom_api_url"] = opts.tidal_custom_api
-
-    return cls(**kwargs)
-
-
 def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProvider]:
-    """Build the provider list for a service name, optionally adding an installed extension fallback.
+    """Build the provider list for a service name.
 
-    Parameters
-    ----------
-        name (str): Native service name or an explicit extension identifier prefixed with `ext:`.
-        opts (DownloadOptions): Provider and extension configuration.
-
-    Returns
-    -------
-        list[BaseProvider]: Providers ordered with the requested native provider first, followed by at most one extension fallback.
-
+    Returns a list with the native Python extension (if installed) first,
+    followed by the JavaScript extension as a fallback.
+    Respects explicit requests like 'ext:qobuz-web' or 'ext:qobuz-py'.
     """
+    from .extensions.catalog import extension_id
+    from .extensions.manager import ExtensionManager
+    from .extensions.provider import JSExtensionProvider
+
     providers: list[BaseProvider] = []
+    try:
+        manager = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=True)
 
-    # 0. If the user explicitly requests ONLY the extension (e.g. -s ext:qobuz-web)
-    if name.startswith("ext:"):
-        p = _build_provider(name, opts)
-        if p:
-            providers.append(p)
-        return providers
+        original_ext_id = extension_id(name, manager)
+        base_name = (
+            original_ext_id.lower()
+            .replace("-web", "")
+            .replace("ext:", "")
+            .replace("-py", "")
+        )
 
-    native = _build_provider(name, opts)
-    if native:
-        providers.append(native)
+        # Analizza l'intento esplicito dell'utente
+        wants_explicit_js = "-web" in name.lower()
+        wants_explicit_py = "-py" in name.lower()
 
-    if getattr(opts, "auto_pair_extensions", True):
-        try:
-            from .extensions.manager import ExtensionManager
+        # 1. TENTATIVO PYTHON (Priorità 1)
+        # Se l'utente NON ha digitato esplicitamente "-web", prova ad usare Python
+        if not wants_explicit_js:
+            py_candidate_name = manager.find_python_extension(base_name)
 
-            mgr = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=True)
+            if py_candidate_name:
+                try:
+                    from .extensions.python_provider import PythonExtensionProvider
 
-            possible_ext_ids = []
+                    py_prov = PythonExtensionProvider(
+                        py_candidate_name, ext_dir=opts.ext_dir
+                    )
+                    providers.append(py_prov)
+                    logger.debug(
+                        "Added Python provider candidate: %s", py_candidate_name
+                    )
+                except Exception as e_py:
+                    logger.warning(
+                        "Python extension '%s' failed to initialize: %s",
+                        py_candidate_name,
+                        e_py,
+                    )
 
+        # 2. TENTATIVO JAVASCRIPT (Priorità 2: Fallback)
+        # Se l'utente NON ha digitato esplicitamente "-py", aggiunge JS (o come fallback, o come primario)
+        # Rispetta opts.auto_pair_extensions per il fallback automatico
+        if not wants_explicit_py and (wants_explicit_js or opts.auto_pair_extensions):
             try:
-                from .providers import NATIVE_TO_EXTENSION_ID
+                js_prov = JSExtensionProvider(
+                    original_ext_id,
+                    ext_dir=opts.ext_dir,
+                    timeout_s=opts.timeout_s or 120,
+                )
+                providers.append(js_prov)
+                logger.debug("Added JS provider fallback: %s", original_ext_id)
+            except Exception as e_js:
+                logger.debug(
+                    "JS extension fallback not available for '%s': %s",
+                    original_ext_id,
+                    e_js,
+                )
 
-                if ext_id := NATIVE_TO_EXTENSION_ID.get(name):
-                    possible_ext_ids.append(ext_id)
-            except ImportError:
-                pass
-
-            # B. Automatically add the base name and the "-web" variant (e.g. qobuz, qobuz-web, tidal-web)
-            if name not in possible_ext_ids:
-                possible_ext_ids.append(name)
-            if f"{name}-web" not in possible_ext_ids:
-                possible_ext_ids.append(f"{name}-web")
-
-            for ext_id in possible_ext_ids:
-                if mgr.get_installed(ext_id) is not None:
-                    ext_provider = _build_provider(f"ext:{ext_id}", opts)
-                    if ext_provider:
-                        providers.append(ext_provider)
-                        logger.debug(
-                            "[auto-pair] '%s' + extension '%s' added as fallback",
-                            name,
-                            ext_id,
-                        )
-                    break
-
-        except Exception as e:
-            logger.debug("[auto-pair] Extension for '%s' skipped: %s", name, e)
+    except Exception as e:
+        logger.warning("Failed to resolve providers for %s: %s", name, e)
 
     return providers
 
@@ -564,6 +570,7 @@ class DownloadWorker:
         # file names do not change between runs.
         self._positions = positions or list(range(1, len(tracks) + 1))
         self._failed: list[tuple[str, str, str, str]] = []
+        self._skipped: list[tuple[str, str]] = []
         self._completed: dict[str, str] = {}
         self._providers: list[BaseProvider] = self._build_providers()
 
@@ -699,6 +706,7 @@ class DownloadWorker:
 
                 if result.success and result.skipped:
                     await manager.skip_download(track.id)
+                    self._skipped.append((track.id, track.title))
                 elif result.success:
                     size_mb = await _get_file_size_mb_async(result.file_path)
                     await manager.complete_download(
@@ -791,16 +799,18 @@ class DownloadWorker:
         return await asyncio.to_thread(_do_track_dir)
 
     def _print_summary(self, elapsed: float) -> None:
-        succeeded = len(self._tracks) - len(self._failed)
+        succeeded = len(self._tracks) - len(self._failed) - len(self._skipped)
+        skipped_count = len(self._skipped)
         display = [(t, a, e) for _, t, a, e in self._failed]
-        print_summary(len(self._tracks), succeeded, display, elapsed)
+        print_summary(len(self._tracks), succeeded, skipped_count, display, elapsed)
 
     async def _execute_post_action_async(self, output_dir: str) -> None:
         action = self._opts.post_download_action
         if not action or action == "none":
             return
 
-        succeeded = len(self._tracks) - len(self._failed)
+        succeeded = len(self._tracks) - len(self._failed) - len(self._skipped)
+        skipped_count = len(self._skipped)
         failed_count = len(self._failed)
 
         if action == "open_folder":
@@ -808,6 +818,8 @@ class DownloadWorker:
 
         elif action == "notify":
             body = f"{succeeded} tracks downloaded"
+            if skipped_count:
+                body += f", {skipped_count} skipped"
             if failed_count:
                 body += f", {failed_count} failed"
             await _send_system_notify_async("SpotiFLAC — Download completed", body)
@@ -822,6 +834,7 @@ class DownloadWorker:
             cmd = (
                 cmd_template.replace("{folder}", output_dir)
                 .replace("{succeeded}", str(succeeded))
+                .replace("{skipped}", str(skipped_count))
                 .replace("{failed}", str(failed_count))
             )
             try:
@@ -841,7 +854,15 @@ class DownloadWorker:
 class SpotiflacDownloader:
     def __init__(self, opts: DownloadOptions) -> None:
         self._opts = opts
-        self._client = SpotifyMetadataClient()
+        # Metadata is only needed for Spotify URLs.  Keeping it lazy prevents
+        # construction from performing network work for extension URLs, tests,
+        # and playlist operations that inject their own metadata source.
+        self._client: SpotifyMetadataClient | None = None
+
+    def _metadata_client(self) -> SpotifyMetadataClient:
+        if self._client is None:
+            self._client = SpotifyMetadataClient()
+        return self._client
 
     async def run_async(
         self,
@@ -1056,18 +1077,14 @@ class SpotiflacDownloader:
         self,
         url: str,
     ) -> tuple[str, list[TrackMetadata], dict]:
-        from .core.apple_music_metadata import (
-            is_apple_music_url,
-            parse_apple_music_url,
-        )
+        from .core.apple_music_metadata import is_apple_music_url, parse_apple_music_url
         from .core.tidal_metadata import is_tidal_url, parse_tidal_url
-        from .providers.pandora import is_pandora_url, parse_pandora_url
 
         is_tidal = is_tidal_url(url)
         is_apple = is_apple_music_url(url)
         is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
         is_youtube = "youtube.com" in url or "youtu.be" in url
-        is_pandora = is_pandora_url(url)
+        is_pandora = "pandora.com" in url or "pandora.app.link" in url
 
         if "deezer.com" in url or "deezer.page.link" in url:
             raise SpotiflacError(
@@ -1087,72 +1104,57 @@ class SpotiflacDownloader:
                 from .core.tidal_metadata import TidalMetadataClient
 
                 client = TidalMetadataClient()
-                (
-                    collection_name,
-                    tracks,
-                    *collection_cover,
-                ) = await _call_metadata_get_url(
-                    client,
-                    url,
-                    include_featuring=self._opts.include_featuring,
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(
+                        client, url, include_featuring=self._opts.include_featuring
+                    )
                 )
             elif is_apple:
                 from .core.apple_music_metadata import AppleMusicMetadataClient
 
                 client = AppleMusicMetadataClient()
-                (
-                    collection_name,
-                    tracks,
-                    *collection_cover,
-                ) = await _call_metadata_get_url(
-                    client,
-                    url,
-                    include_featuring=self._opts.include_featuring,
+                collection_name, tracks, *collection_cover = (
+                    await _call_metadata_get_url(
+                        client, url, include_featuring=self._opts.include_featuring
+                    )
                 )
             elif is_soundcloud:
-                from .providers.soundcloud import SoundCloudProvider
-
-                client = SoundCloudProvider()
-                (
-                    collection_name,
-                    tracks,
-                    *collection_cover,
-                ) = await _call_metadata_get_url(client, url)
+                sc_providers = _build_providers_for_name("soundcloud", self._opts)
+                if not sc_providers:
+                    raise SpotiflacError(
+                        ErrorKind.UNAVAILABLE, "SoundCloud provider not installed"
+                    )
+                response = await _call_metadata_get_url(sc_providers[0], url)
+                collection_name, tracks, *collection_cover = _adapt_js_metadata_response(response)
             elif is_youtube:
-                from .providers.youtube import YouTubeProvider
-
-                client = YouTubeProvider()
-                (
-                    collection_name,
-                    tracks,
-                    *collection_cover,
-                ) = await _call_metadata_get_url(client, url)
+                yt_providers = _build_providers_for_name("youtube", self._opts)
+                if not yt_providers:
+                    raise SpotiflacError(
+                        ErrorKind.UNAVAILABLE, "YouTube provider not installed"
+                    )
+                response = await _call_metadata_get_url(yt_providers[0], url)
+                collection_name, tracks, *collection_cover = _adapt_js_metadata_response(response)
             elif is_pandora:
-                from .providers.pandora import PandoraProvider
-
-                client = PandoraProvider()
-                (
-                    collection_name,
-                    tracks,
-                    *collection_cover,
-                ) = await _call_metadata_get_url(client, url)
+                pd_providers = _build_providers_for_name("pandora", self._opts)
+                if not pd_providers:
+                    raise SpotiflacError(
+                        ErrorKind.UNAVAILABLE, "Pandora provider not installed"
+                    )
+                response = await _call_metadata_get_url(pd_providers[0], url)
+                collection_name, tracks, *collection_cover = _adapt_js_metadata_response(response)
             else:
-                (
-                    collection_name,
-                    tracks,
-                    *_collection_cover,
-                ) = await _call_metadata_get_url(
-                    self._client,
-                    url,
-                    include_featuring=self._opts.include_featuring,
+                collection_name, tracks, *_collection_cover = (
+                    await _call_metadata_get_url(
+                        self._metadata_client(),
+                        url,
+                        include_featuring=self._opts.include_featuring,
+                    )
                 )
         except SpotiflacError:
             raise
         except Exception as exc:
             raise SpotiflacError(
-                ErrorKind.NETWORK_ERROR,
-                f"Metadata fetch failed: {exc}",
-                cause=exc,
+                ErrorKind.NETWORK_ERROR, f"Metadata fetch failed: {exc}", cause=exc
             )
 
         if not tracks:
@@ -1181,7 +1183,15 @@ class SpotiflacDownloader:
                 stype = "artist_discography"
             info = {"type": stype, "id": url}
         elif is_pandora:
-            info = parse_pandora_url(url)
+            from urllib.parse import urlparse as _urlparse
+
+            _parts = [p for p in _urlparse(url).path.strip("/").split("/") if p]
+            stype = "track"
+            if "playlist" in _parts:
+                stype = "playlist"
+            elif "album" in _parts:
+                stype = "album"
+            info = {"type": stype, "id": url}
         else:
             from .core.spotify_metadata import parse_spotify_url
 
@@ -1189,8 +1199,7 @@ class SpotiflacDownloader:
 
         if not info:
             raise SpotiflacError(
-                ErrorKind.INVALID_URL,
-                f"Unsupported or invalid URL: {url}",
+                ErrorKind.INVALID_URL, f"Unsupported or invalid URL: {url}"
             )
 
         return collection_name, tracks, info
@@ -1251,7 +1260,9 @@ class SpotiflacDownloader:
                 async def _hydrate(idx: int, track: TrackMetadata):
                     async with semaphore:
                         try:
-                            detailed = await self._client.get_track_async(track.id)
+                            detailed = await self._metadata_client().get_track_async(
+                                track.id
+                            )
                         except Exception as exc:
                             logger.warning(
                                 "Could not fetch release date for %s: %s",

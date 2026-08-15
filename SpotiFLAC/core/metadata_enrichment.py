@@ -128,6 +128,36 @@ def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _get_dynamic_python_module(base_name: str) -> Any:
+    """Helper per trovare un modulo Python caricato dal manager."""
+    import sys
+    from SpotiFLAC.extensions.manager import ExtensionManager
+
+    manager = ExtensionManager(auto_install_downloads=False)
+    try:
+        manager.preload_python_modules()
+    except Exception as e:
+        logger.warning("[metadata_enrichment] Failed to preload Python modules: %s", e)
+
+    cand = manager.find_python_extension(base_name)
+    if cand:
+        mod_name = f"SpotiFLAC.extensions_plugins.{cand.replace('-', '_')}"
+        return sys.modules.get(mod_name)
+    return None
+
+
+def _get_dynamic_python_provider(base_name: str, **kwargs) -> Any:
+    """Helper per istanziare un provider Python caricato dal manager."""
+    from SpotiFLAC.extensions.manager import ExtensionManager
+    from SpotiFLAC.extensions.python_provider import PythonExtensionProvider
+
+    manager = ExtensionManager(auto_install_downloads=False)
+    cand = manager.find_python_extension(base_name)
+    if cand:
+        return PythonExtensionProvider(cand, **kwargs)
+    return None
+
+
 class _DeezerMeta:
     BASE = "https://api.deezer.com/2.0"
 
@@ -274,13 +304,13 @@ class _TidalMeta:
 
     def _load_apis_from_cache(self) -> None:
         try:
-            from SpotiFLAC.providers.tidal import get_tidal_api_list
-
-            apis = get_tidal_api_list()
-            if apis:
-                self._apis = apis
-                self._apis_ready = True
-                return
+            mod = _get_dynamic_python_module("tidal")
+            if mod and hasattr(mod, "get_tidal_api_list"):
+                apis = mod.get_tidal_api_list()
+                if apis:
+                    self._apis = apis
+                    self._apis_ready = True
+                    return
         except Exception:
             pass
         self._apis = list(_TIDAL_APIS_BUILTIN)
@@ -289,12 +319,12 @@ class _TidalMeta:
 
     def _refresh_bg(self) -> None:
         try:
-            from SpotiFLAC.providers.tidal import refresh_tidal_api_list
-
-            apis = refresh_tidal_api_list(force=False)
-            if apis:
-                with self._apis_lock:
-                    self._apis = apis
+            mod = _get_dynamic_python_module("tidal")
+            if mod and hasattr(mod, "refresh_tidal_api_list"):
+                apis = mod.refresh_tidal_api_list(force=False)
+                if apis:
+                    with self._apis_lock:
+                        self._apis = apis
         except Exception as exc:
             logger.debug("[meta/tidal] refresh background failed: %s", exc)
 
@@ -386,9 +416,9 @@ class _QobuzMeta:
     def _get_provider(self) -> Any:
         if self._provider is None:
             try:
-                from SpotiFLAC.providers.qobuz import QobuzProvider
-
-                self._provider = QobuzProvider(qobuz_token=self._qobuz_token)
+                self._provider = _get_dynamic_python_provider(
+                    "qobuz", qobuz_token=self._qobuz_token
+                )
             except Exception as exc:
                 logger.debug("[meta/qobuz] cannot init provider: %s", exc)
         return self._provider
@@ -441,9 +471,7 @@ class _SoundCloudMeta:
             return self._provider
         self._init_attempted = True
         try:
-            from SpotiFLAC.providers.soundcloud import SoundCloudProvider
-
-            self._provider = SoundCloudProvider()
+            self._provider = _get_dynamic_python_provider("soundcloud")
         except Exception as exc:
             logger.debug("[meta/soundcloud] cannot init provider: %s", exc)
         return self._provider
