@@ -1533,6 +1533,19 @@
     .svc-name  { flex: 1; font-size: 12.5px; color: var(--text2); }
     .svc-badge { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; padding: 1.5px 5px; border-radius: 4px; background: var(--surface3); color: var(--muted); border: 1px solid var(--border); }
 
+    /* Extension registry list */
+    .reg-item { cursor: default; align-items: center; justify-content: space-between; gap: 12px; }
+    .reg-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .reg-url { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .reg-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+    .reg-badge { font-size: 9.5px; padding: 1.5px 6px; border-radius: 999px; background: var(--surface3); color: var(--muted); border: 1px solid var(--border); white-space: nowrap; }
+    .reg-badge-environment { color: var(--yellow); border-color: rgba(240,176,0,0.35); }
+    .reg-badge-env_file { color: #60a5fa; border-color: rgba(96,165,250,0.35); }
+    .reg-badge-custom { color: #34d399; border-color: rgba(52,211,153,0.35); }
+    .reg-badge-off { color: var(--red); border-color: rgba(239,68,68,0.35); }
+    .reg-item-disabled { opacity: .55; }
+    .reg-remove-btn { padding: 5px 12px; font-size: 11px; color: var(--red); border-color: rgba(239,68,68,.35); flex-shrink: 0; }
+
     .status-panel-header {
       display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
       margin-bottom: 14px;

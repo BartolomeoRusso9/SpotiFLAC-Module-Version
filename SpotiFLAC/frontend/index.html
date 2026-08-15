@@ -302,6 +302,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><path d="M6 10v4"/><path d="M10 6v8"/><path d="M14 10v4"/><path d="M18 6v8"/><circle cx="6" cy="18" r="1"/><circle cx="10" cy="18" r="1"/></svg>
           Status
         </button>
+        <button class="stab" onclick="switchTab('extensions',this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+          Extensions
+        </button>
       </div>
       <div class="s-body">
 
@@ -569,6 +573,24 @@
             <div id="status-extensions-grid" class="status-grid status-grid-extensions"></div>
           </div>
           <div id="hc-results"></div>
+        </div>
+
+        <div class="tc" id="tc-extensions">
+          <div class="s-section">
+            <div class="s-title">Extension Registries</div>
+            <p style="font-size:12px;color:var(--muted);margin:-4px 0 12px;line-height:1.6;">
+              Registry URLs tell SpotiFLAC where to look for installable extensions. Sources
+              can come from a terminal <code>export</code>, from a <code>.env</code> file, or
+              be added here. You can remove any of them, including ones set outside the app.
+            </p>
+            <div class="s-row" style="align-items:stretch;gap:8px;">
+              <input type="text" id="registry-url-input" class="full" placeholder="https://example.com/registry.json" style="flex:1;">
+              <button class="act-btn primary" type="button" onclick="addRegistryLink()" style="padding:8px 16px;font-size:12px;white-space:nowrap;">Add Link</button>
+            </div>
+            <div id="registry-list" class="sort-list" style="margin-top:12px;">
+              <div class="s-label" style="font-size:11.5px;">Loading registries…</div>
+            </div>
+          </div>
         </div>
 
         <div class="s-footer">

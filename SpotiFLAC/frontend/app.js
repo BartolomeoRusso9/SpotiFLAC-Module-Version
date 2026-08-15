@@ -131,6 +131,7 @@ function switchTab(name, btn) {
   document.querySelectorAll('.tc').forEach(c => c.classList.remove('active'));
   btn.classList.add('active');
   $('tc-' + name).classList.add('active');
+  if (name === 'extensions') loadRegistries();
 }
 
 // ── Appearance ───────────────────────────────────────────────────────────────
@@ -3299,6 +3300,101 @@ function renderHealthResults(data) {
 function pyWin(method, arg) {
   if (arg !== undefined) window.pywebview?.api?.[method]?.(arg);
   else window.pywebview?.api?.[method]?.();
+}
+
+// ── Extension Registries ───────────────────────────────────────────────────
+const REGISTRY_SOURCE_LABELS = {
+  environment: 'Terminal export',
+  env_file: '.env file',
+  custom: 'Added in app',
+};
+
+function regEscapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str ?? '';
+  return d.innerHTML;
+}
+
+async function loadRegistries() {
+  const list = $('registry-list');
+  if (!list) return;
+  if (!window.pywebview?.api?.get_registries) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;">Registry management is unavailable in this build.</div>';
+    return;
+  }
+  try {
+    const registries = await window.pywebview.api.get_registries();
+    renderRegistries(registries || []);
+  } catch (e) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Unable to load registries.</div>';
+  }
+}
+
+function renderRegistries(registries) {
+  const list = $('registry-list');
+  if (!list) return;
+
+  if (!registries.length) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;">No registry links configured yet.</div>';
+    return;
+  }
+
+  list.innerHTML = registries.map((r) => {
+    const badges = (r.sources || []).map((s) =>
+      `<span class="reg-badge reg-badge-${regEscapeHtml(s)}">${regEscapeHtml(REGISTRY_SOURCE_LABELS[s] || s)}</span>`
+    ).join('');
+    const disabledCls = r.enabled ? '' : ' reg-item-disabled';
+    return `
+      <div class="sort-item reg-item${disabledCls}">
+        <div class="reg-item-main">
+          <span class="reg-url" title="${regEscapeHtml(r.url)}">${regEscapeHtml(r.url)}</span>
+          <div class="reg-badges">${badges}${r.enabled ? '' : '<span class="reg-badge reg-badge-off">Removed</span>'}</div>
+        </div>
+        <button class="act-btn secondary reg-remove-btn" type="button" onclick="removeRegistryLink('${encodeURIComponent(r.url)}')" title="Remove this registry link">
+          Remove
+        </button>
+      </div>`;
+  }).join('');
+}
+
+async function addRegistryLink() {
+  const input = $('registry-url-input');
+  const url = (input?.value || '').trim();
+  if (!url) return;
+  if (!window.pywebview?.api?.add_registry) {
+    showToast('Registry management is unavailable in this build.', 'error');
+    return;
+  }
+  try {
+    const result = await window.pywebview.api.add_registry(url);
+    if (result?.ok) {
+      input.value = '';
+      renderRegistries(result.registries || []);
+      logMessage(`Registry added: ${url}`, 'ok');
+      showToast('Registry link added.');
+    } else {
+      showToast(result?.error || 'Unable to add registry link.', 'error');
+    }
+  } catch (e) {
+    showToast('Unable to add registry link.', 'error');
+  }
+}
+
+async function removeRegistryLink(encodedUrl) {
+  const url = decodeURIComponent(encodedUrl);
+  if (!window.pywebview?.api?.remove_registry) return;
+  try {
+    const result = await window.pywebview.api.remove_registry(url);
+    if (result?.ok) {
+      renderRegistries(result.registries || []);
+      logMessage(`Registry removed: ${url}`, 'ok');
+      showToast('Registry link removed.');
+    } else {
+      showToast(result?.error || 'Unable to remove registry link.', 'error');
+    }
+  } catch (e) {
+    showToast('Unable to remove registry link.', 'error');
+  }
 }
 
 // --- EXPLORE LOGIC ---

@@ -241,19 +241,31 @@ class ExtensionManager:
     def _registry_urls_from_env(
         self, registry_url: str | list[str] | None
     ) -> list[str]:
-        """Resolve registry URLs from parameter, environment variable, or .env file."""
+        """Resolve registry URLs from parameter, or the unified registry config.
+
+        The unified config (see ``extensions.registry_config``) merges the
+        ``SPOTIFLAC_REGISTRIES`` environment variable, ``.env``-style files,
+        and any URLs added from the GUI Settings screen, minus anything the
+        user has removed/disabled from there.
+        """
         # If explicit provided, normalize to list
         if registry_url:
             if isinstance(registry_url, (list, tuple)):
                 return [str(u) for u in registry_url]
             return [str(registry_url)]
 
-        # Check environment variable
+        try:
+            from . import registry_config
+
+            return registry_config.effective_urls()
+        except Exception as e:
+            logger.debug("[ExtMgr] Falling back to legacy registry lookup: %s", e)
+
+        # Legacy fallback (kept in case registry_config can't be imported)
         env_val = os.environ.get(REGISTRY_ENV_KEY)
         if env_val:
             return [u.strip() for u in env_val.split(",") if u.strip()]
 
-        # Try to read .env-like files from common locations
         for p in ENV_FILES_TO_CHECK:
             try:
                 if p.exists():
