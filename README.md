@@ -528,7 +528,7 @@ With `--mp3` a playlist entry points at the converted file, and a track already 
 | `none` | Do nothing (default) |
 | `open_folder` | Open the output folder in the system file manager |
 | `notify` | Send an OS desktop notification with a summary |
-| `command` | Run a custom shell command — placeholders: `{folder}`, `{succeeded}`, `{failed}` (quote `{folder}` in your template, e.g. `'{folder}'`, to handle spaces; this does not protect against an apostrophe inside the path itself) |
+| `command` | Run a custom shell command — placeholders: `{folder}`, `{succeeded}`, `{skipped}`, `{failed}` (quote `{folder}` in your template, e.g. `'{folder}'`, to handle spaces; this does not protect against an apostrophe inside the path itself) |
 
 ```python
 SpotiFLAC(url="...", output_dir="./downloads", post_download_action="open_folder")
@@ -632,7 +632,7 @@ spotiflac https://open.spotify.com/track/... ./downloads \
                         [--enrich-providers deezer apple qobuz tidal soundcloud]
                         [--retries N]
                         [--post-action none|open_folder|notify|command]
-                        [--post-command "CMD with {folder} {succeeded} {failed}"]
+                        [--post-command "CMD with {folder} {succeeded} {skipped} {failed}"]
                         [--profile NAME]
                         [--save-profile NAME]
 ```
@@ -662,7 +662,7 @@ chmod +x SpotiFLAC-Linux-arm64
                         [--enrich-providers deezer apple qobuz tidal soundcloud]
                         [--retries N]
                         [--post-action none|open_folder|notify|command]
-                        [--post-command "CMD with {folder} {succeeded} {failed}"]
+                        [--post-command "CMD with {folder} {succeeded} {skipped} {failed}"]
                         [--profile NAME]
                         [--save-profile NAME]
 ```
@@ -707,7 +707,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `transcode_bitrate` | `str` | `"320k"` | Bitrate used by `transcode_to`, e.g. `"320k"`, `"256k"`, `"192k"`. |
 | `transcode_keep_original` | `bool` | `False` | Keeps the original lossless file next to the converted one. By default the source is deleted once the conversion succeeds. |
 | `post_download_action` | `str` | `"none"` | Action after all downloads finish: `"none"`, `"open_folder"`, `"notify"`, `"command"`. |
-| `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
+| `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{skipped}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 
 ### Filename Format Placeholders
 
@@ -756,7 +756,7 @@ When customizing the `filename_format` string, you can use the following dynamic
 | `--no-enrich` | | `False` | Disable multi-provider metadata enrichment (enrichment is enabled by default). |
 | `--enrich-providers` | | `deezer apple qobuz tidal soundcloud` | Metadata enrichment provider priority order. |
 | `--post-action` | | `none` | Action after all downloads finish: `none`, `open_folder`, `notify`, `command`. |
-| `--post-command` | | `""` | Shell command for `--post-action=command`. Placeholders: `{folder}`, `{succeeded}`, `{failed}`; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
+| `--post-command` | | `""` | Shell command for `--post-action=command`. Placeholders: `{folder}`, `{succeeded}`, `{skipped}`, `{failed}`; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 | `--profile` | | `None` | Load a saved profile. CLI flags override profile values. |
 | `--save-profile` | | `None` | Save current CLI configuration as a named profile after the run. |
 
