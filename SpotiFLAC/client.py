@@ -50,7 +50,7 @@ class AsyncSpotiFLAC:
         use_album_track_numbers: bool = False,
         use_artist_subfolders: bool = False,
         use_album_subfolders: bool = False,
-        create_playlist_subfolders: bool = True,
+        create_playlist_subfolders: bool = False,
         allow_fallback: bool = True,
         quality: str = "LOSSLESS",
         first_artist_only: bool = False,
