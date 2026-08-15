@@ -48,6 +48,7 @@ If you are a copyright holder or an authorized representative and believe this r
 
 - Native synchronous and asynchronous Python APIs
 - Modular Extension system (bring-your-own registry — nothing bundled)
+- Modular JavaScript Extension system (bring-your-own registry — nothing bundled)
 - Automatic fallback among the extensions *you* have installed
 - Built-in GUI
 - Interactive CLI Wizard
@@ -65,7 +66,7 @@ If you are a copyright holder or an authorized representative and believe this r
 pip install SpotiFLAC
 ```
 
-> **Important:** out of the box, SpotiFLAC does nothing but resolve Spotify metadata — it ships with **no built-in provider and no default extension source**. Before you can download anything, you need to point it at an extension registry of your own choosing and install at least one extension. See [Extensions](#extensions) below.
+> **Important:** out of the box, SpotiFLAC does nothing but resolve Spotify metadata — it ships with **no built-in provider and no default extension source**. Before you can download anything, you need to point it at an extension registry of your own choosing and install at least one extension. See [JavaScript Extensions](#javascript-extensions) below.
 
 ---
 
@@ -244,10 +245,14 @@ docker build -t spotiflac .
 
 ### Basic Docker Usage
 
+The image runs a virtual display (Xvfb) and exposes it over VNC — some installed extensions may rely on a headless browser internally. Map port `6080` (web VNC viewer) and set `--shm-size=1g`, or the browser-dependent parts may crash:
+
 Run a download by mounting local directories to persist your downloads, configuration, cache, and extension registry across container restarts. Remember to also pass `SPOTIFLAC_REGISTRIES` (via `-e` or an `.env` file) since none is configured by default:
 
 ```bash
 docker run --rm -it \
+  -p 6080:6080 \
+  --shm-size=1g \
   -e SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json" \
   -v "$(pwd)/downloads:/app/downloads" \
   -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
@@ -255,6 +260,8 @@ docker run --rm -it \
   spotiflac "https://open.spotify.com/track/TRACK_ID" \
   /app/downloads -s ext:deezer-web -q LOSSLESS
 ```
+
+Open `http://localhost:6080/vnc.html` in a browser to watch the virtual screen live, if needed. Set `X11VNC_PASSWORD` (env var, see `.env.example`) to protect the VNC session with a password; if unset, it starts without one.
 
 ### Published Image (GHCR)
 
@@ -336,11 +343,21 @@ from SpotiFLAC.core.health_check import (
     get_working_providers,
 )
 
-results = run_health_check(["ext:tidal-web", "ext:qobuz-web", "ext:deezer-web"])
-print_health_report(results)
+import asyncio
+from SpotiFLAC.core.health_check import (
+    run_health_check,
+    print_health_report,
+    get_working_providers,
+)
 
-working = get_working_providers(results)
-print("Available providers:", working)
+async def main():
+    results = await run_health_check(["ext:tidal-web", "ext:qobuz-web", "ext:deezer-web"])
+    print_health_report(results)
+
+    working = get_working_providers(results)
+    print("Available providers:", working)
+
+asyncio.run(main())
 ```
 
 ```bash
@@ -688,8 +705,10 @@ chmod +x SpotiFLAC-Linux-arm64
 | `use_album_track_numbers` | `bool` | `False` | Uses the track's original album number instead of the download queue position. |
 | `use_artist_subfolders` | `bool` | `False` | Automatically organizes downloaded files into subfolders by artist. |
 | `use_album_subfolders` | `bool` | `False` | Automatically organizes downloaded files into subfolders by album. |
+| `create_playlist_subfolders` | `bool` | `False` | Creates a subfolder per playlist/album when downloading a collection, in addition to any artist/album subfolders. |
 | `first_artist_only` | `bool` | `False` | Uses only the first artist in tags and filename. |
 | `include_featuring` | `bool` | `False` | When downloading an artist discography, also includes tracks where the artist appears as a featured artist. |
+| `max_concurrent_downloads` | `int` | `2` | How many tracks to download in parallel. |
 | `tidal_custom_api` | `str` | `None` | Optional setting forwarded to the installed `tidal-web`-family extension, if it supports it. Has no effect on its own — see [Passing Settings to an Extension](#passing-settings-to-an-extension-eg-a-self-hosted-api-instance). |
 | `timeout_s` | `int` | `None` | Per-track download timeout in seconds. If a single track download does not complete within this time, the process is terminated and the track is marked as failed. SpotiFLAC then moves on to the next extension or retry. Set to `None` (default) to disable the timeout. |
 | `loop` | `int` | `None` | Duration in minutes to keep retrying permanently failed tracks after a full session completes. |
@@ -701,6 +720,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `lyrics_providers` | `list` | `["spotify", "apple", "musixmatch", "lrclib", "amazon"]` | Priority order of lyrics providers to attempt. |
 | `enrich_metadata` | `bool` | `True` | Enables multi-provider metadata enrichment (HD covers, BPM, labels, etc.). |
 | `enrich_providers` | `list` | `["deezer", "apple", "qobuz", "tidal", "soundcloud"]` | Priority order of metadata providers to attempt. |
+| `qobuz_token` | `str` | `None` | Optional setting forwarded to the installed Qobuz extension, if it supports it. Has no built-in behavior of its own. |
 | `qobuz_local_api_url` | `str` | `None` | Optional setting forwarded to the installed `qobuz-web`-family extension, if it supports it. Has no effect on its own — see [Passing Settings to an Extension](#passing-settings-to-an-extension-eg-a-self-hosted-api-instance). |
 | `use_extensions_fallback` | `bool` | `True` | Whether to automatically fall back to another installed extension for the same alias if one fails. Set to `False` to use only the extensions explicitly listed in `services`. |
 | `transcode_to` | `str` | `None` | Converts every finished track to this format. Currently only `"mp3"` (see [MP3 Transcoding](#mp3-transcoding)). `None` keeps the extension's original format. Requires `ffmpeg`. |
@@ -768,24 +788,12 @@ SpotiFLAC automatically queries MusicBrainz in the background (when an ISRC is a
 
 | Tag | Description |
 |---|---|
-| `GENRE` | Genre(s), sorted by popularity (up to 5) |
+| `GENRE` | Genre |
+| `ORGANIZATION` | Record label |
 | `BPM` | Beats per minute |
-| `LABEL` / `ORGANIZATION` | Record label name |
-| `CATALOGNUMBER` | Catalog number |
-| `BARCODE` | Release barcode / UPC |
-| `ORIGINALDATE` / `ORIGINALYEAR` | First-ever release date |
-| `RELEASECOUNTRY` | Country of release |
-| `RELEASESTATUS` | Release status (e.g. Official) |
-| `RELEASETYPE` | Release type (e.g. Album, Single) |
-| `MEDIA` | Media format (e.g. CD, Digital Media) |
-| `SCRIPT` | Script of the release text |
-| `ARTISTSORT` | Artist sort name for file managers |
-| `MUSICBRAINZ_TRACKID` | MusicBrainz recording ID |
-| `MUSICBRAINZ_ALBUMID` | MusicBrainz release ID |
-| `MUSICBRAINZ_ARTISTID` | MusicBrainz artist ID |
-| `MUSICBRAINZ_RELEASEGROUPID` | MusicBrainz release group ID |
-| `MUSICBRAINZ_ALBUMARTISTID` | MusicBrainz album artist ID |
-| `ALBUMARTISTSORT` | Album artist sort name for file managers |
+| `UPC` | Release barcode / UPC |
+| `ISRC` | Track ISRC code (normalized) |
+| `ITUNESADVISORY` | Set to `1` when the release is marked explicit |
 
 ---
 
