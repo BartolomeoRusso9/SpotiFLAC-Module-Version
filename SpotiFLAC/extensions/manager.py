@@ -22,6 +22,7 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -132,6 +133,9 @@ class ExtensionManager:
         # Automatically downloads or updates download providers on startup
     """
 
+    _startup_registry_checks: set[str] = set()
+    _startup_registry_checks_lock = threading.RLock()
+
     def __init__(
         self,
         ext_dir: str | Path | None = None,
@@ -152,10 +156,30 @@ class ExtensionManager:
     ) -> None:
         """Checks the remote registry and automatically installs (or updates)
         all extensions classified as download providers AND utilities.
+
+        The auto-setup is deduplicated per-process for the same registry
+        configuration to avoid repeated startup fetches when multiple manager
+        instances are created while the app is booting.
         """
+        urls = self._registry_urls_from_env(registry_url)
+        if not urls:
+            logger.debug("[ExtMgr] No registry URLs configured; skipping automatic startup bootstrap")
+            return
+
+        registry_key = tuple(sorted(urls))
+
+        with self.__class__._startup_registry_checks_lock:
+            if registry_key in self.__class__._startup_registry_checks:
+                logger.debug(
+                    "[ExtMgr] Skipping duplicate registry bootstrap for %s",
+                    registry_key,
+                )
+                return
+            self.__class__._startup_registry_checks.add(registry_key)
+
         logger.info("[ExtMgr] Automatic check for download extensions on startup...")
         try:
-            entries = self.fetch_registry(registry_url)
+            entries = self.fetch_registry(urls if urls else registry_url)
         except Exception as e:
             logger.warning("[ExtMgr] Unable to retrieve registry for auto-setup: %s", e)
             return
