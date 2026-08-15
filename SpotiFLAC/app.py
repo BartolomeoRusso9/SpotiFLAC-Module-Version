@@ -40,6 +40,9 @@ class UILogHandler(logging.Handler):
 class SpotiFLAC_API:
     def __init__(self) -> None:
         self._window = None
+        # Optional callable set by webapp.py in web mode: fn(event_name, args_list).
+        # Desktop (pywebview) mode never sets this and is completely unaffected.
+        self._ws_broadcast = None
         self.download_dir = DEFAULT_DOWNLOAD_DIR
         self.current_tracks = []
         self.current_url = ""
@@ -72,6 +75,24 @@ class SpotiFLAC_API:
     def set_window(self, window) -> None:
         self._window = window
 
+    def _push(self, fn_name: str, *args) -> None:
+        """Sends a frontend event, either as a pywebview evaluate_js call
+        (desktop) or as a structured WebSocket message (web mode via
+        webapp.py). Exactly one of the two paths runs depending on which
+        mode the app was launched in.
+        """
+        if self._window:
+            try:
+                js_args = ", ".join(json.dumps(a) for a in args)
+                self._window.evaluate_js(f"window.{fn_name}({js_args});")
+            except Exception:
+                pass
+        if self._ws_broadcast:
+            try:
+                self._ws_broadcast(fn_name, list(args))
+            except Exception:
+                pass
+
     def _on_loaded(self) -> None:
         """Initializes the frontend after the webview finishes loading.
 
@@ -92,14 +113,8 @@ class SpotiFLAC_API:
             self.log(f"Errore avvio estensioni: {e}", "warn")
         app_version = self.app_version
         try:
-            if self._window:
-                self._window.evaluate_js("window.loadHistoryAndProfiles();")
-                self._window.evaluate_js(
-                    f"document.getElementById('tb-version').innerText = '{app_version}';",
-                )
-                self._window.evaluate_js(
-                    f"document.getElementById('hero-version').innerText = 'v{app_version}';",
-                )
+            self._push("loadHistoryAndProfiles")
+            self._push("__set_version_label", app_version)
         except Exception:
             pass
 
@@ -148,12 +163,7 @@ class SpotiFLAC_API:
                     "error",
                 )
                 try:
-                    if self._window:
-                        import json
-
-                        self._window.evaluate_js(
-                            f"window.showFfmpegWarning({json.dumps(result)});",
-                        )
+                    self._push("showFfmpegWarning", result)
                 except Exception:
                     pass
         except Exception as exc:
@@ -172,19 +182,14 @@ class SpotiFLAC_API:
     # ── UI communication ──────────────────────────────────────────────────────
 
     def log(self, message, type="") -> None:
-        safe = json.dumps(str(message))
-        safe_type = json.dumps(type)
         try:
-            if self._window:
-                self._window.evaluate_js(f"window.app_log({safe}, {safe_type});")
+            self._push("app_log", str(message), type)
         except Exception:
             pass
 
     def set_progress(self, label="") -> None:
-        safe_label = json.dumps(label)
         try:
-            if self._window:
-                self._window.evaluate_js(f"window.app_set_progress({safe_label});")
+            self._push("app_set_progress", label)
         except Exception:
             pass
 
@@ -235,10 +240,8 @@ class SpotiFLAC_API:
         if track_count is not None:
             payload["track_count"] = track_count
 
-        data = json.dumps(payload)
         try:
-            if self._window:
-                self._window.evaluate_js(f"window.app_set_metadata({data});")
+            self._push("app_set_metadata", payload)
         except Exception:
             pass
 
@@ -550,18 +553,16 @@ class SpotiFLAC_API:
                     },
                 )
 
-            payload = json.dumps(out)
-            if self._window:
+            try:
                 # The JS will now receive a complete object as in the Go version
-                self._window.evaluate_js(
-                    f"window.app_handle_provider_search_results({payload});",
-                )
+                self._push("app_handle_provider_search_results", out)
+            except Exception:
+                pass
         except Exception as e:
-            msg = json.dumps(str(e))
-            if self._window:
-                self._window.evaluate_js(
-                    f"window.app_handle_provider_search_error({msg});",
-                )
+            try:
+                self._push("app_handle_provider_search_error", str(e))
+            except Exception:
+                pass
 
     def search_provider_async(self, query, limit=50):  # Limite di default updated a 50
         if not query:
@@ -737,15 +738,34 @@ class SpotiFLAC_API:
         os._exit(0)
 
     def choose_folder(self) -> None:
+        """Desktop-only: opens the native OS folder picker. In web mode
+        self._window is always None here, so this is a safe no-op — the web
+        frontend uses set_download_dir() (below) with its own server-side
+        folder browser instead, since a browser cannot open a native dialog
+        that returns a real filesystem path on the server.
+        """
         if self._window:
             result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
             if result and len(result) > 0:
                 self.download_dir = result[0]
                 self.log(f"Download folder changed: {self.download_dir}", "ok")
                 with contextlib.suppress(Exception):
-                    self._window.evaluate_js(
-                        f"window.updateFolderLabel({json.dumps(self.download_dir)});",
-                    )
+                    self._push("updateFolderLabel", self.download_dir)
+
+    def set_download_dir(self, path: str) -> dict:
+        """Web-mode equivalent of choose_folder(): sets the download
+        directory to a path chosen via the server-side folder browser
+        (see webapp.py's /api/browse-folder). Validates that the path
+        exists and is a directory on the server before accepting it.
+        """
+        p = Path(path).expanduser()
+        if not p.is_dir():
+            return {"ok": False, "error": f"Not a directory: {path}"}
+        self.download_dir = str(p)
+        self.log(f"Download folder changed: {self.download_dir}", "ok")
+        with contextlib.suppress(Exception):
+            self._push("updateFolderLabel", self.download_dir)
+        return {"ok": True, "download_dir": self.download_dir}
 
     def open_config_folder(self) -> None:
         config_dir = os.path.join(os.path.expanduser("~"), ".cache", "spotiflac")
@@ -1419,10 +1439,7 @@ class SpotiFLAC_API:
                 pass
 
             try:
-                if self._window:
-                    self._window.evaluate_js(
-                        f"window.showTracklist({json.dumps(track_data)});",
-                    )
+                self._push("showTracklist", track_data)
             except Exception:
                 pass
 
@@ -1580,8 +1597,7 @@ class SpotiFLAC_API:
             self.set_progress("Complete!")
             self.log(f"All tracks saved to: {self.download_dir}", "ok")
             try:
-                if self._window:
-                    self._window.evaluate_js("window.app_download_finished(true);")
+                self._push("app_download_finished", True)
             except Exception:
                 pass
 
@@ -1590,8 +1606,7 @@ class SpotiFLAC_API:
             self.set_progress("Error.")
             self._push_download_stats()
             try:
-                if self._window:
-                    self._window.evaluate_js("window.app_download_finished(false);")
+                self._push("app_download_finished", False)
             except Exception:
                 pass
         finally:
@@ -1631,9 +1646,7 @@ class SpotiFLAC_API:
                 from .core.progress import DownloadManager
 
                 stats = DownloadManager().get_stats_sync()
-            safe = json.dumps(stats)
-            if self._window:
-                self._window.evaluate_js(f"window.app_update_download_stats({safe});")
+            self._push("app_update_download_stats", stats)
         except Exception:
             pass
 
@@ -1668,10 +1681,7 @@ class SpotiFLAC_API:
                 "ok" if ext_result.ok else "error",
             )
             try:
-                if self._window:
-                    self._window.evaluate_js(
-                        f"window.updateHealthResults({json.dumps(data)});",
-                    )
+                self._push("updateHealthResults", data)
             except Exception:
                 pass
         except ImportError:
