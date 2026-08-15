@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
-import sys
 import logging
+import sys
 from typing import Any
 
 from SpotiFLAC.core.base import BaseProvider
+
 from .manager import ExtensionManager, InstalledExtension
 
 logger = logging.getLogger(__name__)

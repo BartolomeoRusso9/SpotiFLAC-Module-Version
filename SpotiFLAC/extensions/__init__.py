@@ -26,11 +26,11 @@ Requirements:
     - Extension installed via ExtensionManager
 """
 
+from .catalog import SERVICE_ALIASES, extension_id
 from .manager import REGISTRY_URL, ExtensionManager, InstalledExtension, RegistryEntry
 from .provider import JSExtensionProvider, make_extension_provider
-from .runtime import ExtensionRuntimeError, JSRuntime
-from .catalog import SERVICE_ALIASES, extension_id
 from .python_provider import PythonExtensionProvider
+from .runtime import ExtensionRuntimeError, JSRuntime
 
 __all__ = [
     "REGISTRY_URL",

@@ -94,7 +94,6 @@ def _adapt_js_metadata_response(response):
     This adapter converts it to the tuple format expected by the caller:
     (collection_name, tracks, *optional_cover)
     """
-    from .extensions.provider import JSExtensionProvider
 
     # If response is already a tuple/list, return as-is (native Python provider format)
     if isinstance(response, (tuple, list)):
@@ -1125,7 +1124,9 @@ class SpotiflacDownloader:
                         ErrorKind.UNAVAILABLE, "SoundCloud provider not installed"
                     )
                 response = await _call_metadata_get_url(sc_providers[0], url)
-                collection_name, tracks, *collection_cover = _adapt_js_metadata_response(response)
+                collection_name, tracks, *collection_cover = (
+                    _adapt_js_metadata_response(response)
+                )
             elif is_youtube:
                 yt_providers = _build_providers_for_name("youtube", self._opts)
                 if not yt_providers:
@@ -1133,7 +1134,9 @@ class SpotiflacDownloader:
                         ErrorKind.UNAVAILABLE, "YouTube provider not installed"
                     )
                 response = await _call_metadata_get_url(yt_providers[0], url)
-                collection_name, tracks, *collection_cover = _adapt_js_metadata_response(response)
+                collection_name, tracks, *collection_cover = (
+                    _adapt_js_metadata_response(response)
+                )
             elif is_pandora:
                 pd_providers = _build_providers_for_name("pandora", self._opts)
                 if not pd_providers:
@@ -1141,7 +1144,9 @@ class SpotiflacDownloader:
                         ErrorKind.UNAVAILABLE, "Pandora provider not installed"
                     )
                 response = await _call_metadata_get_url(pd_providers[0], url)
-                collection_name, tracks, *collection_cover = _adapt_js_metadata_response(response)
+                collection_name, tracks, *collection_cover = (
+                    _adapt_js_metadata_response(response)
+                )
             else:
                 collection_name, tracks, *_collection_cover = (
                     await _call_metadata_get_url(

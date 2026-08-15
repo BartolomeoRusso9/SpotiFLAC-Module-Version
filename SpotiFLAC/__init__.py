@@ -38,6 +38,7 @@ _LEGACY_PROVIDER_EXPORTS = {
 def __getattr__(name: str):
     if name == "SpotifyMetadataClient":
         from .core.spotify_metadata import SpotifyMetadataClient
+
         return SpotifyMetadataClient
     if name in _LEGACY_PROVIDER_EXPORTS:
         warnings.warn(

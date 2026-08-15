@@ -13,7 +13,6 @@ from SpotiFLAC.core import (
     transcode,
 )
 from SpotiFLAC.core.history import HistoryManager
-from SpotiFLAC.extensions.manager import ExtensionManager, RegistryEntry
 from SpotiFLAC.core.isrc_utils import is_valid_isrc, normalize_isrc
 from SpotiFLAC.core.models import (
     DownloadResult,
@@ -26,6 +25,7 @@ from SpotiFLAC.core.quality import (
     normalize_quality,
     quality_fallback_chain,
 )
+from SpotiFLAC.extensions.manager import ExtensionManager, RegistryEntry
 
 
 def test_normalize_isrc_strips_prefix_and_validates():
@@ -393,19 +393,25 @@ def test_extension_manager_deduplicates_registry_checks_in_one_process(
             ]
 
         monkeypatch.setattr(ExtensionManager, "fetch_registry", fake_fetch_registry)
-        monkeypatch.setattr(ExtensionManager, "get_installed", lambda self, ext_id: None)
+        monkeypatch.setattr(
+            ExtensionManager, "get_installed", lambda self, ext_id: None
+        )
         monkeypatch.setattr(
             ExtensionManager, "install_from_url", lambda *args, **kwargs: None
         )
         monkeypatch.setenv("SPOTIFLAC_REGISTRIES", "https://example.com/registry.json")
 
-        manager = ExtensionManager(ext_dir=tmp_path / "exts", auto_install_downloads=True)
+        manager = ExtensionManager(
+            ext_dir=tmp_path / "exts", auto_install_downloads=True
+        )
         manager.ensure_download_providers("https://example.com/registry.json")
         manager.ensure_download_providers("https://example.com/registry.json")
 
         assert calls == [["https://example.com/registry.json"]]
 
-        manager2 = ExtensionManager(ext_dir=tmp_path / "exts2", auto_install_downloads=True)
+        manager2 = ExtensionManager(
+            ext_dir=tmp_path / "exts2", auto_install_downloads=True
+        )
         manager2.ensure_download_providers("https://example.com/registry.json")
 
         # exts2 is a different directory, so it should trigger another fetch

@@ -15,22 +15,22 @@ Default directory: ~/.spotiflac/extensions/{name}/
 
 from __future__ import annotations
 
-import io
 import hashlib
+import importlib.util
+import io
 import json
 import logging
 import os
 import shutil
+import sys
 import tempfile
 import threading
+import traceback
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
-import importlib.util
-import sys
-import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -418,7 +418,9 @@ class ExtensionManager:
             if actual != expected:
                 # SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH only applies to trusted install_from_file
                 if allow_override:
-                    allow = os.environ.get("SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH", "").lower()
+                    allow = os.environ.get(
+                        "SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH", ""
+                    ).lower()
                     if allow in ("1", "true", "yes", "y"):
                         logger.warning(
                             "[ExtMgr] Checksum mismatch for extension (expected=%s actual=%s) — "

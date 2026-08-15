@@ -74,6 +74,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
     tidal_eps = []
     try:
         import sys
+
         from SpotiFLAC.extensions.manager import ExtensionManager
 
         manager = ExtensionManager(auto_install_downloads=False)
@@ -93,7 +94,7 @@ def _load_endpoints() -> dict[str, list[tuple[str, str]]]:
             mod_name = f"SpotiFLAC.extensions_plugins.{cand.replace('-', '_')}"
             tidal_mod = sys.modules.get(mod_name)
             if tidal_mod and hasattr(tidal_mod, "get_tidal_api_list"):
-                get_tidal_api_list = getattr(tidal_mod, "get_tidal_api_list")
+                get_tidal_api_list = tidal_mod.get_tidal_api_list
                 for url in get_tidal_api_list()[:_TIDAL_MAX_MIRRORS]:
                     tidal_eps.append(
                         (

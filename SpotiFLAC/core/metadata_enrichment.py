@@ -131,6 +131,7 @@ def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
 def _get_dynamic_python_module(base_name: str) -> Any:
     """Helper per trovare un modulo Python caricato dal manager."""
     import sys
+
     from SpotiFLAC.extensions.manager import ExtensionManager
 
     manager = ExtensionManager(auto_install_downloads=False)
