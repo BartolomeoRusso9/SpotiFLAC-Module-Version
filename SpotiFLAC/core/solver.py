@@ -397,6 +397,20 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
     # --- Stealth: remove the most obvious automation signals ---------
     options.add_argument("--disable-blink-features=AutomationControlled")
 
+    # Cloudflare Turnstile relies on rAF/timer-driven checks and on the page
+    # being considered "visible" to actually register the checkbox
+    # interaction. Chromium normally throttles/pauses timers and rendering
+    # for occluded, minimized, or off-screen-positioned windows (which is
+    # exactly how this browser is kept out of the user's way, see `hidden`
+    # above and `_try_minimize_window()`), and that throttling is enough to
+    # make the Turnstile click silently never register. These flags disable
+    # that backgrounding behavior so the challenge keeps running normally
+    # even while the window is minimized/off-screen. (Same fix already used
+    # by ``signed_session_mono.py`` for its own browser session.)
+    options.add_argument("--disable-background-timer-throttling")
+    options.add_argument("--disable-backgrounding-occluded-windows")
+    options.add_argument("--disable-renderer-backgrounding")
+
     # A freshly-created profile (first launch, expires_at unset, etc.)
     # looks suspicious to fingerprinting. Pretend the profile has already
     # been used for a few hours and exited normally.
@@ -538,12 +552,29 @@ async def _solve_impl(
     except Exception as exc:
         message = _describe_browser_start_error(exc, options)
         logger.error("[solver] %s", message)
+        # `browser` may already have a live subprocess behind it even though
+        # `.start()` raised (e.g. the process spawned but pydoll's startup
+        # watchdog timed out before confirming it). Best-effort close it so
+        # we don't leave an orphaned Chrome window behind on every failed
+        # start.
+        if browser is not None:
+            with contextlib.suppress(Exception):
+                await browser.stop()
         raise RuntimeError(
             "Browser failed to start. Verify the Chromium binary and Docker/host runtime; "
             "the pydoll startup watchdog timed out or the browser process never became discoverable. "
             "See the logs for the configured binary/profile/display details.",
         ) from exc
-    await _try_minimize_window(browser)
+    # NOTE: the browser window is intentionally *not* minimized here anymore.
+    # Minimizing (on top of the off-screen `--window-position`) makes
+    # Chromium report `document.visibilityState === 'hidden'`, which
+    # Cloudflare Turnstile treats as a signal to refuse to register the
+    # checkbox interaction — the click silently never "takes". Staying
+    # off-screen but not minimized keeps the browser out of the user's way
+    # while the page still reports as visible, which is what Turnstile
+    # actually requires to solve. `_try_minimize_window()` is kept for other
+    # callers (e.g. ``signed_session_mono``) that don't need Turnstile to
+    # keep working after the window is hidden.
 
     callback_grant = _extract_grant_from_callback_url(siteurl)
     network_grant: dict[str, str | None] = {"value": None}
@@ -593,7 +624,6 @@ async def _solve_impl(
         """
         # MOVED UP: enable network capture immediately so we don't miss auto-verification!
         await _enable_network_capture()
-        await _try_minimize_window(browser)
 
         async def _do_navigate():
             try:
@@ -809,8 +839,35 @@ async def _solve_impl(
                 await capture_callback_grant()
 
     finally:
-        with contextlib.suppress(Exception):
+        stopped_cleanly = False
+        try:
             await browser.stop()
+            stopped_cleanly = True
+        except Exception as exc:
+            logger.warning(
+                "[solver] browser.stop() failed, forcing cleanup: %s", exc
+            )
+        if not stopped_cleanly:
+            # Best-effort hard kill so a browser.stop() failure never leaves
+            # the solver window open indefinitely (e.g. after the download
+            # already finished). Scoped to this solver's own profile dir so
+            # it doesn't touch unrelated Chrome windows the user has open.
+            with contextlib.suppress(Exception):
+                import subprocess as _subprocess
+
+                profile_dir = _get_profile_dir()
+                if platform.system() != "Windows":
+                    _subprocess.run(
+                        ["pkill", "-f", profile_dir],
+                        stdout=_subprocess.DEVNULL,
+                        stderr=_subprocess.DEVNULL,
+                    )
+                else:
+                    _subprocess.run(
+                        ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
+                        stdout=_subprocess.DEVNULL,
+                        stderr=_subprocess.DEVNULL,
+                    )
 
     if not token and not (capture_callback and callback_grant):
         msg = (
