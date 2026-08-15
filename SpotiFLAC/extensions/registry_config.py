@@ -223,7 +223,9 @@ def _strip_from_env_file(url: str, path: Path) -> None:
                 ]
                 changed = True
                 if urls:
-                    new_lines.append(f"{indent}{export_prefix}{REGISTRY_ENV_KEY}={','.join(urls)}")
+                    new_lines.append(
+                        f"{indent}{export_prefix}{REGISTRY_ENV_KEY}={','.join(urls)}"
+                    )
                 # else: drop the line entirely (no registries left)
                 continue
             new_lines.append(ln)
