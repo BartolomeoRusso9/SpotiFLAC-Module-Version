@@ -290,7 +290,7 @@ class SpotiFLAC_API:
 
     # ── Extension Registry API ─────────────────────────────────────────────
 
-    def get_registries(self) -> list:
+    def get_registries(self) -> list | dict:
         """Returns every known extension-registry URL with its origin
         (environment variable, .env file, or added from the GUI) and
         whether it is currently enabled."""
@@ -300,7 +300,7 @@ class SpotiFLAC_API:
             return registry_config.list_registries()
         except Exception as e:
             self.log(f"Failed to load registries: {e}", "error")
-            return []
+            return {"error": True, "message": str(e)}
 
     def add_registry(self, url: str) -> dict:
         try:

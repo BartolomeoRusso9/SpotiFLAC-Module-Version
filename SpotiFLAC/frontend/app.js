@@ -3312,7 +3312,9 @@ const REGISTRY_SOURCE_LABELS = {
 function regEscapeHtml(str) {
   const d = document.createElement('div');
   d.textContent = str ?? '';
-  return d.innerHTML;
+  return d.innerHTML
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 async function loadRegistries() {
@@ -3324,7 +3326,7 @@ async function loadRegistries() {
   }
   try {
     const registries = await window.pywebview.api.get_registries();
-    renderRegistries(registries || []);
+    renderRegistries(registries);
   } catch (e) {
     list.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Unable to load registries.</div>';
   }
@@ -3334,7 +3336,12 @@ function renderRegistries(registries) {
   const list = $('registry-list');
   if (!list) return;
 
-  if (!registries.length) {
+  if (registries?.error) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Failed to load registries: ' + regEscapeHtml(registries.message || 'unknown error') + '</div>';
+    return;
+  }
+
+  if (!registries || !registries.length) {
     list.innerHTML = '<div class="s-label" style="font-size:11.5px;">No registry links configured yet.</div>';
     return;
   }

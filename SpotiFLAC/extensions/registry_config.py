@@ -96,6 +96,16 @@ def _env_var_urls() -> list[str]:
     return [u.strip() for u in raw.split(",") if u.strip()]
 
 
+def _parse_env_value(val: str) -> str:
+    """Normalize an env value by stripping quotes and whitespace."""
+    val = val.strip()
+    # Remove matching surrounding quotes (single or double)
+    if len(val) >= 2:
+        if (val[0] == '"' and val[-1] == '"') or (val[0] == "'" and val[-1] == "'"):
+            val = val[1:-1]
+    return val
+
+
 def _env_file_urls() -> dict[str, list[Path]]:
     """Maps url -> list of .env-style files it was found in."""
     found: dict[str, list[Path]] = {}
@@ -107,8 +117,12 @@ def _env_file_urls() -> dict[str, list[Path]]:
                 stripped = ln.strip()
                 if not stripped or stripped.startswith("#"):
                     continue
+                # Accept optional "export" prefix
+                if stripped.startswith("export "):
+                    stripped = stripped[7:].strip()
                 if stripped.startswith(f"{REGISTRY_ENV_KEY}="):
                     _, val = stripped.split("=", 1)
+                    val = _parse_env_value(val)
                     for u in val.split(","):
                         u = u.strip()
                         if not u:
@@ -169,8 +183,8 @@ def add_registry(url: str) -> list[dict]:
     url = (url or "").strip()
     if not url:
         raise ValueError("Empty registry URL")
-    if not (url.startswith("http://") or url.startswith("https://")):
-        raise ValueError("Registry URL must start with http:// or https://")
+    if not url.startswith("https://"):
+        raise ValueError("Registry URL must use https:// (http:// is not allowed)")
 
     cfg = _load_config()
     custom = cfg.setdefault("custom", [])
@@ -194,16 +208,22 @@ def _strip_from_env_file(url: str, path: Path) -> None:
         new_lines: list[str] = []
         for ln in lines:
             stripped = ln.strip()
+            # Accept optional "export" prefix
+            export_prefix = ""
+            if stripped.startswith("export "):
+                export_prefix = "export "
+                stripped = stripped[7:].strip()
             if stripped.startswith(f"{REGISTRY_ENV_KEY}="):
                 prefix_len = len(ln) - len(ln.lstrip())
                 indent = ln[:prefix_len]
                 _, val = stripped.split("=", 1)
+                val = _parse_env_value(val)
                 urls = [
                     u.strip() for u in val.split(",") if u.strip() and u.strip() != url
                 ]
                 changed = True
                 if urls:
-                    new_lines.append(f"{indent}{REGISTRY_ENV_KEY}={','.join(urls)}")
+                    new_lines.append(f"{indent}{export_prefix}{REGISTRY_ENV_KEY}={','.join(urls)}")
                 # else: drop the line entirely (no registries left)
                 continue
             new_lines.append(ln)

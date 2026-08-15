@@ -13,7 +13,6 @@
       --yellow:     #f5c542;
       --yellow-d:   #d89d00;
       --yellow-bg:  rgba(245,197,66,0.18);
-      --yellow-glow:rgba(245,197,66,0.28);
       --green:      #22c55e;
       --red:        #ef4444;
       --blue:       #3b82f6;
@@ -73,6 +72,8 @@
       --button-bg:  #2a2a2e;
       --button-text:#f5f5f7;
       --button-border: rgba(255,255,255,0.1);
+      --shadow-soft: 0 20px 48px rgba(0, 0, 0, 0.4);
+      --shadow-strong: 0 28px 64px rgba(0, 0, 0, 0.6);
     }
     body.dark-theme .s-section { background: #0a0a0a; }
 
@@ -1539,9 +1540,9 @@
     .reg-url { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .reg-badges { display: flex; flex-wrap: wrap; gap: 5px; }
     .reg-badge { font-size: 9.5px; padding: 1.5px 6px; border-radius: 999px; background: var(--surface3); color: var(--muted); border: 1px solid var(--border); white-space: nowrap; }
-    .reg-badge-environment { color: var(--yellow); border-color: rgba(240,176,0,0.35); }
-    .reg-badge-env_file { color: #60a5fa; border-color: rgba(96,165,250,0.35); }
-    .reg-badge-custom { color: #34d399; border-color: rgba(52,211,153,0.35); }
+    .reg-badge-environment { color: var(--yellow-d); background: rgba(245,197,66,0.15); border-color: rgba(212,162,0,0.5); }
+    .reg-badge-env_file { color: #3b82f6; background: rgba(59,130,246,0.12); border-color: rgba(59,130,246,0.45); }
+    .reg-badge-custom { color: #10b981; background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.45); }
     .reg-badge-off { color: var(--red); border-color: rgba(239,68,68,0.35); }
     .reg-item-disabled { opacity: .55; }
     .reg-remove-btn { padding: 5px 12px; font-size: 11px; color: var(--red); border-color: rgba(239,68,68,.35); flex-shrink: 0; }
