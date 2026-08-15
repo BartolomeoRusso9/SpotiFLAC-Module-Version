@@ -291,6 +291,7 @@ async def _pick_from_history() -> str | None:
 
         return val or None
 
+
 # ---------------------------------------------------------------------------
 # Extension Registries
 # ---------------------------------------------------------------------------
@@ -307,7 +308,9 @@ def _print_registries(registries: list[dict]) -> None:
         print(DIM("  No registry links configured."))
         return
     for _i, r in enumerate(registries, 1):
-        sources = ", ".join(_REGISTRY_SOURCE_LABELS.get(s, s) for s in r.get("sources", []))
+        sources = ", ".join(
+            _REGISTRY_SOURCE_LABELS.get(s, s) for s in r.get("sources", [])
+        )
         state = GREEN("enabled") if r.get("enabled") else RED("removed")
         print(f"  {_i}. {r['url']}")
         print(f"     {DIM(f'source: {sources}  ·  {state}')}")
@@ -330,11 +333,7 @@ async def _manage_registries_section() -> None:
 
         _section("Extension Registries  (optional)")
         _print_registries(registries)
-        print(
-            DIM(
-                "\n  Enter: Continue  |  a: Add link  |  d<num>: Remove link"
-            )
-        )
+        print(DIM("\n  Enter: Continue  |  a: Add link  |  d<num>: Remove link"))
 
         try:
             val = input("  → ").strip()
@@ -371,6 +370,7 @@ async def _manage_registries_section() -> None:
 
         # Unrecognized input: just redraw the menu
         continue
+
 
 # ---------------------------------------------------------------------------
 # Profile Management

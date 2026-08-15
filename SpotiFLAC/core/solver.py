@@ -844,9 +844,7 @@ async def _solve_impl(
             await browser.stop()
             stopped_cleanly = True
         except Exception as exc:
-            logger.warning(
-                "[solver] browser.stop() failed, forcing cleanup: %s", exc
-            )
+            logger.warning("[solver] browser.stop() failed, forcing cleanup: %s", exc)
         if not stopped_cleanly:
             # Best-effort hard kill so a browser.stop() failure never leaves
             # the solver window open indefinitely (e.g. after the download
