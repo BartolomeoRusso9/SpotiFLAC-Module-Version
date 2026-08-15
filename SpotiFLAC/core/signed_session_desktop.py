@@ -29,7 +29,7 @@ COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
 # open past that budget rather than timing out at 45s and aborting the whole
 # flow while the background solver is still trying to complete.
 COMMUNITY_VERIFY_TIMEOUT = 90  # seconds
-DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS = 5
+DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS = 10
 
 
 def wait_before_desktop_solver_start() -> None:
