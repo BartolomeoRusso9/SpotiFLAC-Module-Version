@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from SpotiFLAC.client import AsyncSpotiFLAC
 from SpotiFLAC.core import (
     download_validation,
     ffmpeg_check,
@@ -375,3 +376,39 @@ def test_extension_manager_deduplicates_registry_checks_in_one_process(monkeypat
         ["https://example.com/registry.json"],
         ["https://example.com/other-registry.json"],
     ]
+
+
+def test_async_client_tracks_loop_minutes_and_default_playlist_subfolders():
+    client = AsyncSpotiFLAC(output_dir="./downloads")
+    assert client._opts.create_playlist_subfolders is False
+
+    calls = []
+    sleep_calls = []
+
+    async def fake_run_once(url, target_tracks=None):
+        calls.append((url, target_tracks))
+        if len(calls) == 1:
+            return [{"id": "retry-track"}]
+        return []
+
+    async def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    client._entered = True
+    client._downloader._run_once_async = fake_run_once
+    original_sleep = asyncio.sleep
+    asyncio.sleep = fake_sleep
+
+    try:
+        async def _run():
+            await client.download_track("https://open.spotify.com/track/abc", loop_minutes=7)
+
+        asyncio.run(_run())
+    finally:
+        asyncio.sleep = original_sleep
+
+    assert calls == [
+        ("https://open.spotify.com/track/abc", None),
+        ("https://open.spotify.com/track/abc", [{"id": "retry-track"}]),
+    ]
+    assert sleep_calls == [420]

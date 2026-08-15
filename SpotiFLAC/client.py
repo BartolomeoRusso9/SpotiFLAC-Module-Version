@@ -50,7 +50,7 @@ class AsyncSpotiFLAC:
         use_album_track_numbers: bool = False,
         use_artist_subfolders: bool = False,
         use_album_subfolders: bool = False,
-        create_playlist_subfolders: bool = True,
+        create_playlist_subfolders: bool = False,
         allow_fallback: bool = True,
         quality: str = "LOSSLESS",
         first_artist_only: bool = False,
@@ -157,7 +157,18 @@ class AsyncSpotiFLAC:
         loop_minutes: int | None = None,
     ) -> list[TrackMetadata]:
         self._ensure_entered()
-        return await self._downloader._run_once_async(url)
+
+        failed_tracks: list[TrackMetadata] | None = None
+        while True:
+            failed_tracks = await self._downloader._run_once_async(
+                url,
+                target_tracks=failed_tracks,
+            )
+            if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
+                break
+            await asyncio.sleep(loop_minutes * 60)
+
+        return failed_tracks or []
 
     async def download_batch(
         self,
