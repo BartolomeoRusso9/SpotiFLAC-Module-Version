@@ -288,6 +288,42 @@ class SpotiFLAC_API:
             self.log(f"Failed to load settings: {e}", "error")
         return {}
 
+    # ── Extension Registry API ─────────────────────────────────────────────
+
+    def get_registries(self) -> list | dict:
+        """Returns every known extension-registry URL with its origin
+        (environment variable, .env file, or added from the GUI) and
+        whether it is currently enabled."""
+        try:
+            from .extensions import registry_config
+
+            return registry_config.list_registries()
+        except Exception as e:
+            self.log(f"Failed to load registries: {e}", "error")
+            return {"error": True, "message": str(e)}
+
+    def add_registry(self, url: str) -> dict:
+        try:
+            from .extensions import registry_config
+
+            registries = registry_config.add_registry(url)
+            self.log(f"Registry added: {url}", "info")
+            return {"ok": True, "registries": registries}
+        except Exception as e:
+            self.log(f"Failed to add registry: {e}", "error")
+            return {"ok": False, "error": str(e)}
+
+    def remove_registry(self, url: str) -> dict:
+        try:
+            from .extensions import registry_config
+
+            registries = registry_config.remove_registry(url)
+            self.log(f"Registry removed: {url}", "info")
+            return {"ok": True, "registries": registries}
+        except Exception as e:
+            self.log(f"Failed to remove registry: {e}", "error")
+            return {"ok": False, "error": str(e)}
+
     def get_history(self):
         try:
             from .core.session_memory import get_url_history_async
