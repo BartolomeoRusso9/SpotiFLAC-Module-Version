@@ -35,6 +35,7 @@ def _load(ext: InstalledExtension, name: str | None = None):
         raise
     return module
 
+
 class PythonExtensionProvider(BaseProvider):
     """Loads a trusted Python provider extension and delegates BaseProvider calls."""
 

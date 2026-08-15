@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from typing import NamedTuple
 from urllib.parse import urlparse
@@ -9,6 +10,8 @@ from urllib.parse import urlparse
 import httpx
 
 from SpotiFLAC.core.endpoints import get_health_zarz_url
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Helper for payload validation

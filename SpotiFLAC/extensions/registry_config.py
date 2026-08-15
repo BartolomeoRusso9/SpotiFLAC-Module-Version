@@ -198,7 +198,9 @@ def _strip_from_env_file(url: str, path: Path) -> None:
                 prefix_len = len(ln) - len(ln.lstrip())
                 indent = ln[:prefix_len]
                 _, val = stripped.split("=", 1)
-                urls = [u.strip() for u in val.split(",") if u.strip() and u.strip() != url]
+                urls = [
+                    u.strip() for u in val.split(",") if u.strip() and u.strip() != url
+                ]
                 changed = True
                 if urls:
                     new_lines.append(f"{indent}{REGISTRY_ENV_KEY}={','.join(urls)}")
