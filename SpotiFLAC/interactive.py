@@ -291,6 +291,86 @@ async def _pick_from_history() -> str | None:
 
         return val or None
 
+# ---------------------------------------------------------------------------
+# Extension Registries
+# ---------------------------------------------------------------------------
+
+_REGISTRY_SOURCE_LABELS = {
+    "environment": "terminal export",
+    "env_file": ".env file",
+    "custom": "added here",
+}
+
+
+def _print_registries(registries: list[dict]) -> None:
+    if not registries:
+        print(DIM("  No registry links configured."))
+        return
+    for _i, r in enumerate(registries, 1):
+        sources = ", ".join(_REGISTRY_SOURCE_LABELS.get(s, s) for s in r.get("sources", []))
+        state = GREEN("enabled") if r.get("enabled") else RED("removed")
+        print(f"  {_i}. {r['url']}")
+        print(f"     {DIM(f'source: {sources}  ·  {state}')}")
+
+
+async def _manage_registries_section() -> None:
+    """Lets the user inspect, add, or remove extension-registry links.
+
+    Mirrors the same management available from the GUI Settings → Extensions
+    tab: shows links coming from a terminal export, a .env file, or added
+    previously from this menu, and lets the user delete any of them.
+    """
+    try:
+        from .extensions import registry_config
+    except Exception:
+        return
+
+    while True:
+        registries = await asyncio.to_thread(registry_config.list_registries)
+
+        _section("Extension Registries  (optional)")
+        _print_registries(registries)
+        print(
+            DIM(
+                "\n  Enter: Continue  |  a: Add link  |  d<num>: Remove link"
+            )
+        )
+
+        try:
+            val = input("  → ").strip()
+        except (EOFError, KeyboardInterrupt):
+            sys.exit(0)
+
+        if not val:
+            return
+
+        val_lower = val.lower()
+
+        if val_lower in ("a", "add"):
+            url = _ask("Registry URL (https://...)").strip()
+            if url:
+                try:
+                    await asyncio.to_thread(registry_config.add_registry, url)
+                except Exception as e:
+                    print(f"  {RED('Unable to add registry:')} {e}")
+            continue
+
+        if val_lower.startswith("d") and len(val_lower) > 1:
+            num_str = val_lower[1:].strip()
+            if num_str.isdigit():
+                idx = int(num_str) - 1
+                if 0 <= idx < len(registries):
+                    url_to_remove = registries[idx]["url"]
+                    try:
+                        await asyncio.to_thread(
+                            registry_config.remove_registry, url_to_remove
+                        )
+                    except Exception as e:
+                        print(f"  {RED('Unable to remove registry:')} {e}")
+                    continue
+
+        # Unrecognized input: just redraw the menu
+        continue
 
 # ---------------------------------------------------------------------------
 # Profile Management
@@ -484,6 +564,9 @@ async def run_interactive() -> dict:
             break
 
     cfg: dict = {}
+
+    # ── Extension registries ────────────────────────────────────────────────
+    await _manage_registries_section()
 
     # ── Profile load ────────────────────────────────────────────────────────
     cfg = await _profile_load_section(cfg)
