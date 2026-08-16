@@ -44,12 +44,15 @@ RUN mkdir -p /app/downloads \
 VOLUME ["/app/downloads", "/root/.spotiflac", "/root/.cache/spotiflac"]
 
 # ==============================================================================
-# [VNC/WEB SCREEN]:
-# To view the container screen:
+# [VNC/WEB SCREEN] — desktop GUI over VNC (default `spotiflac --gui` path):
 # - 6080: Web Browser access (noVNC) -> http://localhost:6080/vnc.html
 # - 5900: Classic VNC client access (e.g., RealVNC, TigerVNC)
+#
+# [WEB MODE] — `spotiflac --web` (see docker-entrypoint.sh): no VNC needed,
+# uses a lightweight local web server instead.
+# - 8000: web GUI -> http://localhost:8000
 # ==============================================================================
-EXPOSE 6080 5900
+EXPOSE 6080 5900 8000
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

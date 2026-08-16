@@ -140,9 +140,7 @@ def create_app() -> FastAPI:
         # every push below goes out over the WebSocket only).
         await run_in_threadpool(api.log, "Python backend connected (web mode).", "info")
         await run_in_threadpool(
-            api.log,
-            f"Default download folder: {api.download_dir}",
-            "info",
+            api.log, f"Default download folder: {api.download_dir}", "info",
         )
         await run_in_threadpool(api._check_ffmpeg_startup)
         try:
@@ -158,15 +156,10 @@ def create_app() -> FastAPI:
     @app.post("/api/{method_name}")
     async def call_method(method_name: str, payload: Any = None) -> JSONResponse:
         if method_name not in ALLOWED_METHODS:
-            return JSONResponse(
-                {"error": f"Unknown or disallowed method: {method_name}"},
-                status_code=404,
-            )
+            return JSONResponse({"error": f"Unknown or disallowed method: {method_name}"}, status_code=404)
         fn = getattr(api, method_name, None)
         if fn is None:
-            return JSONResponse(
-                {"error": f"No such method: {method_name}"}, status_code=404
-            )
+            return JSONResponse({"error": f"No such method: {method_name}"}, status_code=404)
 
         args: list = []
         kwargs: dict = {}
@@ -184,9 +177,7 @@ def create_app() -> FastAPI:
             # running them in a worker thread avoids that).
             result = await run_in_threadpool(fn, *args, **kwargs)
         except TypeError as e:
-            return JSONResponse(
-                {"error": f"Bad arguments for {method_name}: {e}"}, status_code=400
-            )
+            return JSONResponse({"error": f"Bad arguments for {method_name}: {e}"}, status_code=400)
         except Exception as e:
             logger.exception("Error calling %s", method_name)
             return JSONResponse({"error": str(e)}, status_code=500)
@@ -202,11 +193,7 @@ def create_app() -> FastAPI:
             if not base.is_dir():
                 base = Path.home().resolve()
             entries = sorted(
-                (
-                    p.name
-                    for p in base.iterdir()
-                    if p.is_dir() and not p.name.startswith(".")
-                ),
+                (p.name for p in base.iterdir() if p.is_dir() and not p.name.startswith(".")),
                 key=str.lower,
             )
         except Exception as e:
@@ -236,7 +223,7 @@ def create_app() -> FastAPI:
     async def index() -> HTMLResponse:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
-            "<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n"
+            '<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n'
             '<script src="/web-shim.js"></script>\n'
         )
         html = html.replace(
@@ -247,9 +234,7 @@ def create_app() -> FastAPI:
 
     @app.get("/web-shim.js")
     async def web_shim() -> FileResponse:
-        return FileResponse(
-            FRONTEND_DIR / "web-shim.js", media_type="application/javascript"
-        )
+        return FileResponse(FRONTEND_DIR / "web-shim.js", media_type="application/javascript")
 
     # Everything else (app.js, styles.css, assets/...) served as-is.
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
@@ -257,10 +242,7 @@ def create_app() -> FastAPI:
     return app
 
 
-def run(host: str = "127.0.0.1", port: int = 8000) -> None:
-    """Entry point used by launcher.py's --web flag."""
-    import uvicorn
-
+def _warn_if_exposed(host: str) -> None:
     if host not in ("127.0.0.1", "localhost"):
         logger.warning(
             "Binding SpotiFLAC's web GUI to %s exposes it beyond this machine, "
@@ -270,4 +252,40 @@ def run(host: str = "127.0.0.1", port: int = 8000) -> None:
             "own authentication if you do.",
             host,
         )
+
+
+async def run_async(host: str = "127.0.0.1", port: int = 8000) -> None:
+    """Use this from code that is already running inside an asyncio event
+    loop (e.g. launcher.py's amain(), itself started via asyncio.run()).
+    Calling uvicorn.run() there would try to start a second event loop with
+    its own asyncio.run() and raise 'asyncio.run() cannot be called from a
+    running event loop' — this awaits the server directly instead.
+    """
+    import uvicorn
+
+    _warn_if_exposed(host)
+    config = uvicorn.Config(create_app(), host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+def run(host: str = "127.0.0.1", port: int = 8000) -> None:
+    """Use this only from plain (non-async) code, with no event loop already
+    running — e.g. a standalone `python -m SpotiFLAC.webapp` invocation.
+    From inside launcher.py's amain() (async), use run_async() and await it
+    instead, or this will raise the same nested-loop error it exists to avoid.
+    """
+    import uvicorn
+
+    _warn_if_exposed(host)
     uvicorn.run(create_app(), host=host, port=port, log_level="info")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    run(host=args.host, port=args.port)

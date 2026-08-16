@@ -3590,3 +3590,12 @@ window.showFfmpegWarning = function(result) {
     searchBar.parentNode.insertBefore(banner, searchBar.nextSibling);
   }
 };
+// Sets the two version-label DOM elements. Called from Python via the
+// generic _push() bridge (desktop: evaluate_js, web: WebSocket dispatch) —
+// see SpotiFLAC/app.py's _push() and frontend/web-shim.js.
+window.__set_version_label = function (version) {
+  const tb = document.getElementById('tb-version');
+  if (tb) tb.innerText = version;
+  const hero = document.getElementById('hero-version');
+  if (hero) hero.innerText = 'v' + version;
+};

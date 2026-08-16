@@ -510,9 +510,9 @@ async def amain() -> None:
         web_parser.add_argument("--port", type=int, default=8000)
         web_args, _ = web_parser.parse_known_args(sys.argv[1:])
 
-        from .webapp import run as run_web
+        from .webapp import run_async as run_web
 
-        run_web(host=web_args.host, port=web_args.port)
+        await run_web(host=web_args.host, port=web_args.port)
         return
 
     if "--interactive" in sys.argv:
