@@ -9,7 +9,7 @@ set -e
 # Example:
 # docker run --rm -it \
 #   -p 8000:8000 \
-#   -e SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json" \
+#   -e SPOTIFLAC_REGISTRIES=https://example.com/my-registry.json \
 #   -v "$(pwd)/downloads:/app/downloads" \
 #   -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
 #   -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
