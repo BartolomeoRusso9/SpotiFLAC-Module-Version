@@ -19,15 +19,11 @@ import importlib.metadata
 import json
 import logging
 import os
-import re
 import sys
 
 from .check_update import check_for_updates_async
 from .downloader import DownloadOptions, SpotiflacDownloader
 from .interactive import run_interactive
-
-# Rimuove colori standard (CSI) e hyperlink (OSC 8) per calcolare la larghezza reale
-_STRIP_ANSI_RE = re.compile(r"\033\[[0-9;]*m|\033\]8;;.*?(?:\033\\|\x07)")
 
 
 def _print_welcome_banner() -> None:
@@ -44,40 +40,64 @@ def _print_welcome_banner() -> None:
         return text if no_color else f"\033[{code}m{text}\033[0m"
 
     def l(url: str) -> str:  # noqa: E743
-        # Usa OSC 8 per rendere l'URL cliccabile. Il testo visibile resta l'URL stesso,
-        # in modo che se il terminale non supporta OSC 8 (o lo ignora), l'URL si possa
-        # comunque leggere e copiare a mano.
-        return url if no_color else f"\033]8;;{url}\033\\{url}\033]8;;\033\\"
+        # Rende l'URL cliccabile con OSC 8 e lo formatta in ciano sottolineato (4;36)
+        styled_url = url if no_color else f"\033[4;36m{url}\033[0m"
+        return url if no_color else f"\033]8;;{url}\033\\{styled_url}\033]8;;\033\\"
 
     try:
         version = importlib.metadata.version("spotiflac")
     except importlib.metadata.PackageNotFoundError:
         version = "dev"
 
-    rows = [
-        c("1;95", "SpotiFLAC") + "  " + c("2", "— Module Version"),
-        c("2", f"v{version}"),
-        "",
-        c("2", "by ") + c("1", "BartolomeoRusso9"),
-        c("2", "GitHub    ") + l("https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version"),
-        c("2", "Telegram  ") + l("https://t.me/SpotiFLAC_Module_Version"),
-        c("2", "Support   ") + l("https://ko-fi.com/bartolomeorusso9"),
+    # Logo esteso "SpotiFLAC Python Module" in font Slant, verde brillante (1;92)
+    ascii_logo = [
+        c(
+            "1;92",
+            r"   _____             __  _ ________    ___  ______   ____        __  __                  __  ___          __      __     ",
+        ),
+        c(
+            "1;92",
+            r"  / ___/____  ____  / /_(_) ____/ /   /   |/ ____/  / __ \__  __/ / / /_  ____  ____    /  |/  /___  ____/ /_  __/ /___  ",
+        ),
+        c(
+            "1;92",
+            r"  \__ \/ __ \/ __ \/ __/ / /_  / /   / /| / /      / /_/ / / / / /_/ __ \/ __ \/ __ \  / /|_/ / __ \/ __  / / / / / __ \ ",
+        ),
+        c(
+            "1;92",
+            r" ___/ / /_/ / /_/ / /_/ / __/ / /___/ ___ / /___  / ____/ /_/ / __/ / / / /_/ / / / / / /  / / /_/ / /_/ / /_/ / /  __/  ",
+        ),
+        c(
+            "1;92",
+            r"/____/ .___/\____/\__/_/_/   /_____/_/  |_\____/ /_/    \__, /_/ /_/ /_/\____/_/ /_/ /_/  /_/\____/\__,_/\__,_/_/\___/   ",
+        ),
+        c(
+            "1;92",
+            r"    /_/                                                 /____/                                                           ",
+        ),
     ]
 
-    # Width follows the longest visible (ANSI-stripped) row so nothing wraps.
-    width = max(len(_STRIP_ANSI_RE.sub("", row)) for row in rows) + 2
+    print()
+    for line in ascii_logo:
+        print(line)
 
-    top = c("96", "╭" + "─" * (width + 2) + "╮")
-    bottom = c("96", "╰" + "─" * (width + 2) + "╯")
-    side = c("96", "│")
+    # Crea un "Badge" con sfondo ciano (46), testo nero (30) e grassetto (1)
+    version_badge = c("1;30;46", f" v{version} ")
 
     print()
-    print(top)
-    for row in rows:
-        visible_len = len(_STRIP_ANSI_RE.sub("", row))
-        padding = " " * max(width - visible_len, 0)
-        print(f"{side} {row}{padding} {side}")
-    print(bottom)
+    print(f"  {c('1;90', '▪')} {c('1;37', 'Version')}   {version_badge}")
+    print(
+        f"  {c('1;90', '▪')} {c('1;37', 'Author')}    {c('1;93', 'BartolomeoRusso9')}"
+    )
+    print(
+        f"  {c('1;90', '▪')} {c('1;37', 'GitHub')}    {l('https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version')}"
+    )
+    print(
+        f"  {c('1;90', '▪')} {c('1;37', 'Telegram')}  {l('https://t.me/SpotiFLAC_Chat')}"
+    )
+    print(
+        f"  {c('1;90', '▪')} {c('1;37', 'Support')}   {l('https://ko-fi.com/bartolomeorusso9')}"
+    )
     print()
 
 

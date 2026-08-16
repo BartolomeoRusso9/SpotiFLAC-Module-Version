@@ -149,7 +149,10 @@ class BaseProvider(ABC):
             platform=(
                 platform
                 if platform is not None
-                else self.name.lower().replace("ext:", "").replace("-web", "").replace("-py", "")
+                else self.name.lower()
+                .replace("ext:", "")
+                .replace("-web", "")
+                .replace("-py", "")
             ),
             native_id=native_id,
         )

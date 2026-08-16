@@ -8,7 +8,7 @@ Fetch Spotify track metadata and retrieve matching lossless audio through Tidal,
 [![Python versions](https://img.shields.io/pypi/pyversions/spotiflac?logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/)
 [![GitHub downloads](https://img.shields.io/github/downloads/BartolomeoRusso9/SpotiFLAC-Module-Version/total?color=22c55e&labelColor=black&logo=github&label=Downloads)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases)
 [![PyPI downloads](https://img.shields.io/pepy/dt/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000)](https://pypi.org/project/SpotiFLAC/)
-[![Telegram community](https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white)](https://t.me/c/SpotiFLAC_Chat)
+[![Telegram community](https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white)](https://t.me/SpotiFLAC_Chat)
 
 ## Disclaimer
 
