@@ -26,7 +26,8 @@ from .check_update import check_for_updates_async
 from .downloader import DownloadOptions, SpotiflacDownloader
 from .interactive import run_interactive
 
-_STRIP_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+# Rimuove colori standard (CSI) e hyperlink (OSC 8) per calcolare la larghezza reale
+_STRIP_ANSI_RE = re.compile(r"\033\[[0-9;]*m|\033\]8;;.*?(?:\033\\|\x07)")
 
 
 def _print_welcome_banner() -> None:
@@ -34,13 +35,19 @@ def _print_welcome_banner() -> None:
 
     Shown for every launch mode (CLI, --interactive, --gui, --web) since it
     runs as the very first thing in amain(), before any mode-specific setup.
-    Colors are skipped for non-tty output (piped/redirected) or when
+    Colors and links are skipped for non-tty output (piped/redirected) or when
     NO_COLOR is set, matching the convention used elsewhere (interactive.py).
     """
     no_color = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
 
     def c(code: str, text: str) -> str:
         return text if no_color else f"\033[{code}m{text}\033[0m"
+
+    def l(url: str) -> str:  # noqa: E743
+        # Usa OSC 8 per rendere l'URL cliccabile. Il testo visibile resta l'URL stesso,
+        # in modo che se il terminale non supporta OSC 8 (o lo ignora), l'URL si possa
+        # comunque leggere e copiare a mano.
+        return url if no_color else f"\033]8;;{url}\033\\{url}\033]8;;\033\\"
 
     try:
         version = importlib.metadata.version("spotiflac")
@@ -52,10 +59,9 @@ def _print_welcome_banner() -> None:
         c("2", f"v{version}"),
         "",
         c("2", "by ") + c("1", "BartolomeoRusso9"),
-        c("2", "GitHub    ")
-        + "https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version",
-        c("2", "Telegram  ") + "https://t.me/SpotiFLAC_Module_Version",
-        c("2", "Support   ") + "https://ko-fi.com/bartolomeorusso9",
+        c("2", "GitHub    ") + l("https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version"),
+        c("2", "Telegram  ") + l("https://t.me/SpotiFLAC_Module_Version"),
+        c("2", "Support   ") + l("https://ko-fi.com/bartolomeorusso9"),
     ]
 
     # Width follows the longest visible (ANSI-stripped) row so nothing wraps.
