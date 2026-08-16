@@ -44,7 +44,7 @@ If you are a copyright holder or an authorized representative and believe this r
 - Native synchronous and asynchronous Python APIs
 - Modular JavaScript and Python Extension system (bring-your-own registry — nothing bundled)
 - Automatic fallback among the extensions *you* have installed
-- Built-in GUI
+- Built-in GUI, as a native window or served locally in a browser (`--gui` / `--web`)
 - Interactive CLI Wizard
 - Docker support
 - Configuration Profiles
@@ -77,6 +77,20 @@ spotiflac --gui
 ```
 
 *(Or `python launcher.py --gui` if running from source)*
+
+### Web Mode (same GUI, in your browser)
+
+Runs the exact same interface as `--gui`, served as a local web server instead of a native window — open it at `http://127.0.0.1:8000` (or whatever host/port you choose) in any browser:
+
+```bash
+spotiflac --web
+```
+
+*(Or `python launcher.py --web` if running from source)*
+
+Binds to `127.0.0.1` (this machine only) by default. Override with `--host`/`--port` if needed — see the [CLI Flag Reference](#cli-flag-reference) below. Useful for running the GUI on a headless machine, inside Docker without a virtual display, or just preferring a browser tab over a native window.
+
+> **Security note:** binding `--host` to anything other than `127.0.0.1`/`localhost` (e.g. `0.0.0.0`, or a LAN address) exposes the GUI — including endpoints that trigger downloads — to anyone who can reach that address, with no authentication of any kind. Only do this deliberately, on a network you trust, and consider putting it behind your own authentication (a reverse proxy, VPN, etc.) if you do.
 
 ### Interactive Mode (step-by-step wizard)
 
@@ -267,6 +281,24 @@ docker run --rm -it \
 ```
 
 Open `http://localhost:6080/vnc.html` in a browser to watch the virtual screen live, if needed. Set `X11VNC_PASSWORD` (env var, see `.env.example`) to protect the VNC session with a password; if unset, it starts without one.
+
+### Web Mode in Docker (lighter alternative to VNC)
+
+If you just want the GUI itself over the network — not a live view of a virtual desktop — `--web` mode needs none of the above. The entrypoint detects `--web` and skips Xvfb/Fluxbox/VNC entirely, so the container starts faster and uses less memory:
+
+```bash
+docker run --rm -it \
+  -p 8000:8000 \
+  -e SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json" \
+  -v "$(pwd)/downloads:/app/downloads" \
+  -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
+  -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
+  spotiflac --web --host 0.0.0.0 --port 8000
+```
+
+Open `http://localhost:8000` in a browser.
+
+> **Note:** `--host 0.0.0.0` is required here — the CLI default (`127.0.0.1`) would only accept connections from inside the container itself, unreachable from the host. This also means the GUI is reachable by anything that can reach the mapped port, with no authentication (see the security note under [Web Mode](#web-mode-same-gui-in-your-browser)). Only publish the port on a network you trust, or put it behind your own authentication/reverse proxy.
 
 ### Published Image (GHCR)
 
@@ -784,6 +816,11 @@ When customizing the `filename_format` string, you can use the following dynamic
 | `--post-command` | | `""` | Shell command for `--post-action=command`. Placeholders: `{folder}`, `{succeeded}`, `{skipped}`, `{failed}`; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 | `--profile` | | `None` | Load a saved profile. CLI flags override profile values. |
 | `--save-profile` | | `None` | Save current CLI configuration as a named profile after the run. |
+| `--gui` | | `False` | Launch the GUI as a native window (pywebview). See [GUI Mode](#gui-mode-recommended-for-most-users). |
+| `--web` | | `False` | Launch the same GUI as a local web server instead of a native window. See [Web Mode](#web-mode-same-gui-in-your-browser). |
+| `--host` | | `127.0.0.1` | Host to bind `--web` to. Only change this deliberately — see the security note under [Web Mode](#web-mode-same-gui-in-your-browser). |
+| `--port` | | `8000` | Port to bind `--web` to. |
+| `--interactive` | | `False` | Launch the interactive step-by-step wizard. See [Interactive Mode](#interactive-mode-step-by-step-wizard). |
 
 ---
 
