@@ -15,14 +15,64 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import importlib.metadata
 import json
 import logging
 import os
+import re
 import sys
 
 from .check_update import check_for_updates_async
 from .downloader import DownloadOptions, SpotiflacDownloader
 from .interactive import run_interactive
+
+_STRIP_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+def _print_welcome_banner() -> None:
+    """Prints a one-time ASCII banner with project/community links on startup.
+
+    Shown for every launch mode (CLI, --interactive, --gui, --web) since it
+    runs as the very first thing in amain(), before any mode-specific setup.
+    Colors are skipped for non-tty output (piped/redirected) or when
+    NO_COLOR is set, matching the convention used elsewhere (interactive.py).
+    """
+    no_color = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
+
+    def c(code: str, text: str) -> str:
+        return text if no_color else f"\033[{code}m{text}\033[0m"
+
+    try:
+        version = importlib.metadata.version("spotiflac")
+    except importlib.metadata.PackageNotFoundError:
+        version = "dev"
+
+    rows = [
+        c("1;95", "SpotiFLAC") + "  " + c("2", "— Module Version"),
+        c("2", f"v{version}"),
+        "",
+        c("2", "by ") + c("1", "BartolomeoRusso9"),
+        c("2", "GitHub    ")
+        + "https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version",
+        c("2", "Telegram  ") + "https://t.me/SpotiFLAC_Module_Version",
+        c("2", "Support   ") + "https://ko-fi.com/bartolomeorusso9",
+    ]
+
+    # Width follows the longest visible (ANSI-stripped) row so nothing wraps.
+    width = max(len(_STRIP_ANSI_RE.sub("", row)) for row in rows) + 2
+
+    top = c("96", "╭" + "─" * (width + 2) + "╮")
+    bottom = c("96", "╰" + "─" * (width + 2) + "╯")
+    side = c("96", "│")
+
+    print()
+    print(top)
+    for row in rows:
+        visible_len = len(_STRIP_ANSI_RE.sub("", row))
+        padding = " " * max(width - visible_len, 0)
+        print(f"{side} {row}{padding} {side}")
+    print(bottom)
+    print()
 
 
 def load_config() -> dict:
@@ -485,6 +535,8 @@ async def amain() -> None:
     Handles startup checks, extension installation, configuration loading, profile management, argument parsing, and download execution across the supported application modes.
     """
     from .core.ffmpeg_check import print_ffmpeg_warning
+
+    _print_welcome_banner()
 
     with contextlib.suppress(Exception):
         await check_for_updates_async()
