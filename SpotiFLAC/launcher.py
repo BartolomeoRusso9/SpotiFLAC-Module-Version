@@ -215,6 +215,27 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         default=False,
         help="Launch graphical user interface (GUI)",
     )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        default=False,
+        help="Launch the GUI as a local web server instead of a native window "
+        "(same interface, open it at http://<host>:<port> in a browser)",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind --web to. Defaults to 127.0.0.1 (this machine only). "
+        "Binding to 0.0.0.0 or a LAN address exposes the GUI — including "
+        "download-triggering endpoints — to anyone who can reach it, with "
+        "no authentication. Only do this deliberately.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind --web to (default: 8000)",
+    )
 
     # ── Profile ─────────────────────────────────────────────────────────────
     profile_grp = parser.add_argument_group("Profile")
@@ -479,6 +500,19 @@ async def amain() -> None:
         from .app import run_gui
 
         run_gui()
+        return
+
+    if "--web" in sys.argv:
+        # --host/--port need the parsed args (argparse), not a raw sys.argv
+        # scan like the flags above, since they take a value.
+        web_parser = argparse.ArgumentParser(add_help=False)
+        web_parser.add_argument("--host", default="127.0.0.1")
+        web_parser.add_argument("--port", type=int, default=8000)
+        web_args, _ = web_parser.parse_known_args(sys.argv[1:])
+
+        from .webapp import run_async as run_web
+
+        await run_web(host=web_args.host, port=web_args.port)
         return
 
     if "--interactive" in sys.argv:

@@ -233,7 +233,6 @@ def _find_chrome() -> str:
         candidates = [
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-            "/Applications/Helium.app/Contents/MacOS/Helium",
             "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
             "/Applications/Arc.app/Contents/MacOS/Arc",
             "/Applications/Chromium.app/Contents/MacOS/Chromium",
