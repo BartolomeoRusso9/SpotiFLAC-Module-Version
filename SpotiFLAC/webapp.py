@@ -140,7 +140,9 @@ def create_app() -> FastAPI:
         # every push below goes out over the WebSocket only).
         await run_in_threadpool(api.log, "Python backend connected (web mode).", "info")
         await run_in_threadpool(
-            api.log, f"Default download folder: {api.download_dir}", "info",
+            api.log,
+            f"Default download folder: {api.download_dir}",
+            "info",
         )
         await run_in_threadpool(api._check_ffmpeg_startup)
         try:
@@ -156,10 +158,15 @@ def create_app() -> FastAPI:
     @app.post("/api/{method_name}")
     async def call_method(method_name: str, payload: Any = None) -> JSONResponse:
         if method_name not in ALLOWED_METHODS:
-            return JSONResponse({"error": f"Unknown or disallowed method: {method_name}"}, status_code=404)
+            return JSONResponse(
+                {"error": f"Unknown or disallowed method: {method_name}"},
+                status_code=404,
+            )
         fn = getattr(api, method_name, None)
         if fn is None:
-            return JSONResponse({"error": f"No such method: {method_name}"}, status_code=404)
+            return JSONResponse(
+                {"error": f"No such method: {method_name}"}, status_code=404
+            )
 
         args: list = []
         kwargs: dict = {}
@@ -177,7 +184,9 @@ def create_app() -> FastAPI:
             # running them in a worker thread avoids that).
             result = await run_in_threadpool(fn, *args, **kwargs)
         except TypeError as e:
-            return JSONResponse({"error": f"Bad arguments for {method_name}: {e}"}, status_code=400)
+            return JSONResponse(
+                {"error": f"Bad arguments for {method_name}: {e}"}, status_code=400
+            )
         except Exception as e:
             logger.exception("Error calling %s", method_name)
             return JSONResponse({"error": str(e)}, status_code=500)
@@ -193,7 +202,11 @@ def create_app() -> FastAPI:
             if not base.is_dir():
                 base = Path.home().resolve()
             entries = sorted(
-                (p.name for p in base.iterdir() if p.is_dir() and not p.name.startswith(".")),
+                (
+                    p.name
+                    for p in base.iterdir()
+                    if p.is_dir() and not p.name.startswith(".")
+                ),
                 key=str.lower,
             )
         except Exception as e:
@@ -223,7 +236,7 @@ def create_app() -> FastAPI:
     async def index() -> HTMLResponse:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
-            '<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n'
+            "<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n"
             '<script src="/web-shim.js"></script>\n'
         )
         html = html.replace(
@@ -234,7 +247,9 @@ def create_app() -> FastAPI:
 
     @app.get("/web-shim.js")
     async def web_shim() -> FileResponse:
-        return FileResponse(FRONTEND_DIR / "web-shim.js", media_type="application/javascript")
+        return FileResponse(
+            FRONTEND_DIR / "web-shim.js", media_type="application/javascript"
+        )
 
     # Everything else (app.js, styles.css, assets/...) served as-is.
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
