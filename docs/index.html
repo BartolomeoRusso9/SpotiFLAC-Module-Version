@@ -10,16 +10,18 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --ink: #13120E;
-    --panel: #1C1B15;
-    --panel-2: #221F17;
-    --hairline: #33301F;
-    --brass: #C8963C;
-    --brass-bright: #E3B25E;
-    --signal: #5FA89E;
-    --paper: #EDE7D8;
-    --paper-dim: #A39C87;
-    --paper-faint: #6E6957;
+    --ink: #0a0a0a;
+    --panel: #1a1a1a;
+    --panel-2: #121212;
+    --panel-hover: #222222;
+    --hairline: #262626;
+    --brass: #1DB954;
+    --brass-bright: #2ee673;
+    --brass-dim: #1aa34a;
+    --signal: #1DB954;
+    --paper: #e8e8e8;
+    --paper-dim: #999999;
+    --paper-faint: #555555;
     --danger: #C15B4A;
     --radius: 3px;
     --display: 'Space Grotesk', sans-serif;
@@ -98,7 +100,7 @@
   @media (max-width: 720px) { .topnav { display: none; } }
 
   /* ── Hero ────────────────────────────────────────────── */
-  .hero { padding: 96px 0 64px; position: relative; overflow: hidden; }
+  .hero { padding: 96px 0 64px; position: relative; overflow: hidden; background: radial-gradient(ellipse at 50% 0%, rgba(29,185,84,.06) 0%, transparent 55%); }
   .hero-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 56px; align-items: center; }
   @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; } }
 
@@ -172,7 +174,7 @@
   .jack-node circle.ring { fill: none; stroke: var(--hairline); stroke-width: 1.5; }
   .jack-node circle.hole { fill: var(--ink); }
   .jack-node.core circle.ring { stroke: var(--brass); }
-  .jack-node.core circle.hole { fill: #221a0e; }
+  .jack-node.core circle.hole { fill: #0f2417; }
   .jack-node.filled circle.ring { stroke: var(--signal); }
   .jack-node.filled circle.hole { fill: #16211f; }
   .cable { fill: none; stroke: var(--brass); stroke-width: 1.6; opacity: 0.85; stroke-dasharray: 3 4; }

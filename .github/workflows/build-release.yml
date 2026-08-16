@@ -153,8 +153,9 @@ jobs:
       if: matrix.arch == 'x86_64'
       shell: bash
       run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then SEP=";"; else SEP=":"; fi
         cd SpotiFLAC
-        pyinstaller --onefile --name "${{ matrix.build_name }}" --console ../launcher.py
+        pyinstaller --onefile --name "${{ matrix.build_name }}" --add-data "frontend${SEP}SpotiFLAC/frontend" --console ../launcher.py
 
     - name: Setup QEMU for ARM64
       if: matrix.arch == 'arm64'
@@ -174,7 +175,7 @@ jobs:
             pip install pyinstaller certifi requests mutagen && \
             pip install . && \
             cd SpotiFLAC && \
-            pyinstaller --onefile --name '${{ matrix.build_name }}' --console ../launcher.py
+            pyinstaller --onefile --name '${{ matrix.build_name }}' --add-data 'frontend:SpotiFLAC/frontend' --console ../launcher.py
           "
 
     - name: Upload build artifact
@@ -273,7 +274,7 @@ jobs:
             <details>
             <summary><b>💻 Usage Instructions</b></summary>
             
-            ### Windows (PowerShell ou CMD)
+            ### Windows (PowerShell or CMD)
             ```cmd
             SpotiFLAC-Windows.exe [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
             ```
