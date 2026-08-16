@@ -350,6 +350,7 @@ class JSExtensionProvider(BaseProvider):
             use_album_track_num=use_album_track_num,
             first_artist_only=first_artist_only,
             extension=ext_hint,
+            native_id=track_id,
         )
 
         try:

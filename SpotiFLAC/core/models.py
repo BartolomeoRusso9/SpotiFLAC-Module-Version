@@ -5,7 +5,7 @@ Replace raw dicts to guarantee validation, coercion, and zero KeyError.
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
@@ -219,16 +219,81 @@ def sanitize(value: str, fallback: str = "Unknown") -> str:
 
 def build_filename(
     metadata: TrackMetadata,
-    fmt: str,
+    fmt: str | Callable[..., str],
     position: int = 1,
     include_track_number: bool = False,
     use_album_track_number: bool = False,
     first_artist_only: bool = False,
     extension: str = ".flac",
+    platform: str = "",
+    native_id: str = "",
 ) -> str:
-    """Costruisce il filename finale applicando i placeholder o i formati legacy.
-    Placeholder supportati: {title}, {artist}, {album}, {album_artist}, {year}, {date}, {disc}, {isrc}, {track}.
+    """Costruisce il filename finale applicando i placeholder, i formati legacy,
+    o una funzione fornita dall'utente.
+
+    Placeholder supportati: {title}, {artist}, {album}, {album_artist}, {year},
+    {date}, {disc}, {isrc}, {track}, {position}, {platform}, {id}.
+
+    {platform} is the name of the provider/extension that will serve this file
+    (e.g. "ext:tidal-web"); {id} is that provider's own native ID for the
+    matched track (e.g. a Tidal or SoundCloud track ID) — NOT the Spotify ID,
+    which is available separately as `metadata.id` if needed via a callable.
+    Both are only known once a provider has matched the track, so they may be
+    empty ("") in contexts where no provider has been selected yet (see the
+    `platform`/`native_id` docstring note on BaseProvider._build_output_path).
+
+    `fmt` can also be a callable instead of a template string, for logic that
+    a placeholder string can't express — e.g. "use the ISRC if present,
+    otherwise fall back to platform_id":
+
+        def my_filename(metadata, *, platform, native_id, **_ctx) -> str:
+            if metadata.isrc:
+                return metadata.isrc
+            return f"{platform}_{native_id}" if native_id else metadata.title
+
+        SpotiFLAC(..., filename_format=my_filename)
+
+    The callable receives `metadata` positionally, plus every value used to
+    resolve the built-in placeholders as keyword arguments: `position`,
+    `include_track_number`, `use_album_track_number`, `first_artist_only`,
+    `platform`, `native_id`, `extension` (with the leading dot, e.g. ".flac").
+    Its return value is used as the filename (extension appended
+    automatically, same as the string-template path) after the same unsafe-
+    character stripping applied everywhere else — you don't need to sanitize
+    it yourself, but do keep in mind the result must be a non-empty string.
+
+    Note: a filename_format that uses {platform}/{id} (or a callable that
+    depends on them) may not be resolvable yet in contexts that run before any
+    provider has been chosen — currently, only the pre-download "does the
+    transcoded file already exist" check in downloader.transcode_target_path().
+    There, platform/native_id are always "", so such a format won't match the
+    path a provider later actually writes to, and that specific dedup check is
+    skipped rather than producing a wrong match — it never causes data loss or
+    a crash, just a missed early-exit in that one case.
     """
+    if callable(fmt):
+        result = fmt(
+            metadata,
+            position=position,
+            include_track_number=include_track_number,
+            use_album_track_number=use_album_track_number,
+            first_artist_only=first_artist_only,
+            platform=platform,
+            native_id=native_id,
+            extension=extension,
+        )
+        if not isinstance(result, str) or not result.strip():
+            msg = (
+                "filename_format callable must return a non-empty string, "
+                f"got {result!r}"
+            )
+            raise ValueError(msg)
+        result = sanitize(result)
+        result = _WHITESPACE.sub(" ", result).strip() or "Unknown"
+        if not result.lower().endswith(extension):
+            result += extension
+        return result
+
     artist = sanitize(metadata.first_artist if first_artist_only else metadata.artists)
     album_artist = sanitize(
         metadata.first_artist if first_artist_only else metadata.album_artist,
@@ -256,6 +321,8 @@ def build_filename(
             .replace("{disc}", str(disc) if disc > 0 else "")
             .replace("{isrc}", sanitize(metadata.isrc))
             .replace("{position}", f"{position:02d}")
+            .replace("{platform}", sanitize(platform, fallback=""))
+            .replace("{id}", sanitize(native_id, fallback=""))
         )
 
         if metadata.track_number > 0:

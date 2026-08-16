@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from .core.console import (
     print_playlist_resolved,
@@ -116,7 +116,7 @@ def _adapt_js_metadata_response(response):
 class DownloadOptions:
     output_dir: str
     services: list[str] = field(default_factory=lambda: ["ext:tidal-web"])
-    filename_format: str = "{title} - {artist}"
+    filename_format: str | Callable[..., str] = "{title} - {artist}"
     use_track_numbers: bool = False
     use_album_track_numbers: bool = False
     use_artist_subfolders: bool = False
@@ -930,7 +930,11 @@ class SpotiflacDownloader:
             )
             opts = replace(opts, output_path=None)
 
-        if opts.use_track_numbers or "{position}" in opts.filename_format:
+        uses_position = (
+            isinstance(opts.filename_format, str)
+            and "{position}" in opts.filename_format
+        )
+        if opts.use_track_numbers or uses_position:
             logger.warning(
                 "[playlists] track numbers depend on the merged playlist order: "
                 "filenames will change whenever a playlist does, and already "
