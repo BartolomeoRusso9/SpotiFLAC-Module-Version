@@ -620,6 +620,18 @@ class SpotiFLAC_API:
         """
         if not path:
             return {"status": "error", "error": "No path given"}
+
+        # Clean up path: remove leading/trailing quotes and expand ~ to home
+        path = path.strip().strip("'\"")
+        path = os.path.expanduser(path)
+
+        # Validate that the path exists
+        if not os.path.exists(path):
+            return {
+                "status": "error",
+                "error": f"Path does not exist: {path}",
+            }
+
         threading.Thread(
             target=self._scan_local_thread,
             args=(path,),
@@ -861,12 +873,48 @@ class SpotiFLAC_API:
         that returns a real filesystem path on the server.
         """
         if self._window:
-            result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+            dialog_type = getattr(webview, "FileDialog", None)
+            if dialog_type is None:
+                dialog_type = getattr(webview, "FOLDER_DIALOG", None)
+            if dialog_type is None:
+                return
+            result = self._window.create_file_dialog(
+                dialog_type.FOLDER if hasattr(dialog_type, "FOLDER") else dialog_type
+            )
             if result and len(result) > 0:
                 self.download_dir = result[0]
                 self.log(f"Download folder changed: {self.download_dir}", "ok")
                 with contextlib.suppress(Exception):
                     self._push("updateFolderLabel", self.download_dir)
+
+    def get_home_dir(self) -> str:
+        """Return the user's home dir for desktop and browser folder pickers."""
+        return str(Path.home())
+
+    def browse_folder(self, path: str | None = None) -> dict:
+        """List subdirectories for a folder, matching the web-mode /api/browse-folder payload."""
+        base = Path(path).expanduser() if path else Path.home()
+        try:
+            base = base.resolve()
+            if not base.is_dir():
+                base = Path.home().resolve()
+            entries = sorted(
+                (
+                    p.name
+                    for p in base.iterdir()
+                    if p.is_dir() and not p.name.startswith(".")
+                ),
+                key=str.lower,
+            )
+        except Exception as e:
+            return {
+                "error": str(e),
+                "path": str(base),
+                "parent": None,
+                "directories": [],
+            }
+        parent = str(base.parent) if base.parent != base else None
+        return {"path": str(base), "parent": parent, "directories": entries}
 
     def set_download_dir(self, path: str) -> dict:
         """Web-mode equivalent of choose_folder(): sets the download

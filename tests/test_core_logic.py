@@ -14,6 +14,7 @@ from SpotiFLAC.core import (
 )
 from SpotiFLAC.core.history import HistoryManager
 from SpotiFLAC.core.isrc_utils import is_valid_isrc, normalize_isrc
+from SpotiFLAC.core.local_scanner import scan_file
 from SpotiFLAC.core.models import (
     DownloadResult,
     TrackMetadata,
@@ -113,6 +114,25 @@ def test_sanitize_and_build_filename_are_filesystem_safe():
 
     assert filename == "Artist, Guest - Song Name.mp3"
     assert filename.endswith(".mp3")
+
+
+def test_local_scan_uses_plain_filename_as_title_when_no_tags(monkeypatch, tmp_path):
+    file_path = tmp_path / "plain_track.flac"
+    file_path.write_bytes(b"fake-flac-data")
+
+    class FakeEmbedded:
+        tags = {}
+        cover_data = None
+        cover_mime = None
+
+    monkeypatch.setattr(
+        "SpotiFLAC.core.local_scanner.read_embedded_tags", lambda _p: FakeEmbedded()
+    )
+
+    info = scan_file(file_path)
+    assert info.guessed_title == "plain track"
+    assert info.search_title == "plain track"
+    assert info.error == ""
 
 
 def test_history_manager_round_trip(tmp_path):

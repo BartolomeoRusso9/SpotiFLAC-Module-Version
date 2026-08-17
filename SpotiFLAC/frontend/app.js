@@ -3649,6 +3649,124 @@ function onLocalDrop(e) {
     );
 }
 
+// ── Folder Browser for Local Auto-Tagger ──────────────────────────────────
+
+let currentFolderBrowserPath = null;
+
+async function openFolderBrowser() {
+    const modal = $('folder-browser-modal');
+    modal.classList.remove('hidden');
+
+    const currentPath = $('local-path-input').value.trim() || null;
+
+    if (window.pywebview?.api) {
+        const api = window.pywebview.api;
+        try {
+            const homePath = typeof api.get_home_dir === 'function' ? await api.get_home_dir() : '/';
+            await navigateFolderBrowser(homePath || currentPath || '/');
+            return;
+        } catch (err) {
+            console.warn('pywebview folder browse fallback failed:', err);
+        }
+    }
+
+    if (currentPath) {
+        await navigateFolderBrowser(currentPath);
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/get-home-dir');
+        if (!response.ok) {
+            console.warn('get-home-dir endpoint not available, using /');
+            await navigateFolderBrowser('/');
+            return;
+        }
+        const data = await response.json();
+        const homePath = data.home_dir || '/';
+        await navigateFolderBrowser(homePath);
+    } catch (err) {
+        console.warn('Failed to get home dir, falling back to root:', err);
+        await navigateFolderBrowser('/');
+    }
+}
+
+function closeFolderBrowser() {
+    $('folder-browser-modal').classList.add('hidden');
+}
+
+async function navigateFolderBrowser(path) {
+    if (!path) return;
+
+    const modal = $('folder-browser-modal');
+    if (modal.classList.contains('hidden')) return;
+
+    try {
+        let data;
+
+        if (window.pywebview?.api && typeof window.pywebview.api.browse_folder === 'function') {
+            data = await window.pywebview.api.browse_folder(path);
+        } else {
+            console.log('[FolderBrowser] Navigating to:', path);
+            const encodedPath = encodeURIComponent(path);
+            const url = `/api/browse-folder?path=${encodedPath}`;
+            const response = await fetch(url);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: response.statusText }));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+            data = await response.json();
+        }
+
+        if (!data || data.error) {
+            toastMgr.error(`Browse error: ${data?.error || 'Unknown folder browse error'}`);
+            console.error('[FolderBrowser] Backend error:', data?.error || data);
+            return;
+        }
+
+        currentFolderBrowserPath = data.path;
+        $('fb-path').value = data.path;
+
+        const entriesDiv = $('fb-entries');
+        entriesDiv.innerHTML = '';
+
+        if (data.directories && data.directories.length > 0) {
+            data.directories.forEach(dirName => {
+                const div = document.createElement('div');
+                div.style.cssText = 'padding:8px 12px; cursor:pointer; border-radius:6px; display:flex; align-items:center; gap:8px; color:var(--text); font-size:13px; border:1px solid transparent;';
+                div.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> ' + dirName;
+
+                div.onmouseover = () => div.style.backgroundColor = 'var(--surface2)';
+                div.onmouseout = () => div.style.backgroundColor = 'transparent';
+
+                div.onclick = async () => {
+                    const nextPath = data.path + '/' + dirName;
+                    await navigateFolderBrowser(nextPath);
+                };
+
+                entriesDiv.appendChild(div);
+            });
+        } else {
+            entriesDiv.innerHTML = '<div style="padding:20px; text-align:center; color:var(--muted); font-size:12px;">No subdirectories found.</div>';
+        }
+
+        $('fb-back').disabled = !data.parent;
+        $('fb-back').style.opacity = data.parent ? '1' : '0.5';
+
+    } catch (err) {
+        console.error('[FolderBrowser] Navigation error:', err);
+        toastMgr.error(`Failed to browse: ${err.message}`);
+    }
+}
+
+function setFolderPath() {
+    if (currentFolderBrowserPath) {
+        $('local-path-input').value = currentFolderBrowserPath;
+        closeFolderBrowser();
+        toastMgr.success(`Selected: ${currentFolderBrowserPath}`);
+    }
+}
+
 function startLocalScan() {
     const path = $('local-path-input').value.trim();
     if (!path) { 

@@ -218,6 +218,11 @@ def create_app() -> FastAPI:
             {"path": str(base), "parent": parent, "directories": entries},
         )
 
+    @app.get("/api/get-home-dir")
+    async def get_home_dir() -> JSONResponse:
+        """Returns the user's home directory path."""
+        return JSONResponse({"home_dir": str(Path.home())})
+
     # ── WebSocket: push channel for log/progress/metadata/etc. ─────────────
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:

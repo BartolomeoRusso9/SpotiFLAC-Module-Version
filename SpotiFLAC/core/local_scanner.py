@@ -68,18 +68,37 @@ class LocalFileInfo:
 
 
 def _guess_from_filename(path: Path) -> tuple[str, str]:
-    """Task 4 (Fallback Parser): deduces (artist, title) from a filename like
-    'Artist - Title.mp3' when the file itself carries no usable tags.
-    Returns ("", "") if the filename doesn't match the expected shape —
-    callers should treat that as "no guess available", not silently wrong.
+    """Fallback parser for files that have no embedded metadata.
+
+    Files named like 'Artist - Title.flac' are parsed into both artist and title.
+    Plain names such as 'plain_track.flac' still produce a useful title to search
+    with, even though there is no reliable artist guess.
     """
     stem = path.stem
     m = _FILENAME_PATTERN.match(stem)
-    if not m:
+    if m:
+        artist = m.group("artist").strip().replace("_", " ")
+        title = m.group("title").strip().replace("_", " ")
+
+        # A single underscore or dash between two short words is often just a
+        # plain filename like 'plain_track' rather than a real "Artist - Title"
+        # split. In that case we keep the whole stem as the title and leave the
+        # artist empty so the search still has a useful value.
+        separator_count = sum(stem.count(ch) for ch in "_-–—")
+        if (
+            separator_count <= 1
+            and " " not in stem
+            and not any(ch in stem for ch in " -–—")
+        ):
+            cleaned = re.sub(r"[_\-.]+", " ", stem).strip()
+            return "", cleaned if cleaned else ""
+
+        return artist, title
+
+    cleaned = re.sub(r"[_\-.]+", " ", stem).strip()
+    if not cleaned:
         return "", ""
-    artist = m.group("artist").strip().replace("_", " ")
-    title = m.group("title").strip().replace("_", " ")
-    return artist, title
+    return "", cleaned
 
 
 def _apply_embedded_tags(embedded: EmbeddedTags, info: LocalFileInfo) -> None:
@@ -156,13 +175,21 @@ def scan_path(path: str | Path, *, recursive: bool = True) -> list[LocalFileInfo
     if p.is_file():
         return [scan_file(p)]
 
-    if not p.is_dir():
-        return [LocalFileInfo(file_path=str(p), error="Path not found")]
+    if p.is_dir():
+        pattern = "**/*" if recursive else "*"
+        files = sorted(
+            f
+            for f in p.glob(pattern)
+            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+        )
+        return [scan_file(f) for f in files]
 
-    pattern = "**/*" if recursive else "*"
-    files = sorted(
-        f
-        for f in p.glob(pattern)
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
-    )
-    return [scan_file(f) for f in files]
+    # Path doesn't exist or is neither file nor directory
+    if not p.exists():
+        return [LocalFileInfo(file_path=str(p), error=f"Path does not exist: {p}")]
+
+    return [
+        LocalFileInfo(
+            file_path=str(p), error=f"Path is neither file nor directory: {p}"
+        )
+    ]

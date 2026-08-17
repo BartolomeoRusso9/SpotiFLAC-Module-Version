@@ -285,7 +285,9 @@ _ID3_FRAME_MAP: dict[str, type] = {
     "ALBUMARTISTSORT": TSO2,
 }
 
-_ID3_REVERSE_MAP: dict[str, str] = {v: k for k, v in _ID3_FRAME_MAP.items() if k != "LABEL"}
+_ID3_REVERSE_MAP: dict[str, str] = {
+    v: k for k, v in _ID3_FRAME_MAP.items() if k != "LABEL"
+}
 
 _ID3_SKIP = {
     "TRACKNUMBER",
@@ -568,7 +570,9 @@ def _embed_vorbis_comment(
         pic.type = PictureType.COVER_FRONT
         pic.mime = "image/jpeg"
         pic.desc = "Cover"
-        audio["METADATA_BLOCK_PICTURE"] = [base64.b64encode(pic.write()).decode("ascii")]
+        audio["METADATA_BLOCK_PICTURE"] = [
+            base64.b64encode(pic.write()).decode("ascii")
+        ]
 
     audio.save()
     logger.debug("[tagger/ogg] tags written: %s", path.name)
@@ -577,13 +581,17 @@ def _embed_vorbis_comment(
 def _embed_oggvorbis(path, tags, cover_data, lyrics, lyrics_prov, multi_artist) -> None:
     from mutagen.oggvorbis import OggVorbis
 
-    _embed_vorbis_comment(path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggVorbis)
+    _embed_vorbis_comment(
+        path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggVorbis
+    )
 
 
 def _embed_oggopus(path, tags, cover_data, lyrics, lyrics_prov, multi_artist) -> None:
     from mutagen.oggopus import OggOpus
 
-    _embed_vorbis_comment(path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggOpus)
+    _embed_vorbis_comment(
+        path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggOpus
+    )
 
 
 def _read_vorbis_comment_tags(path: Path, file_cls: type) -> EmbeddedTags:
@@ -604,7 +612,9 @@ def _read_vorbis_comment_tags(path: Path, file_cls: type) -> EmbeddedTags:
         else:
             result.tags[key_up] = values[0]
 
-    pic_values = audio.get("METADATA_BLOCK_PICTURE") or audio.get("metadata_block_picture")
+    pic_values = audio.get("METADATA_BLOCK_PICTURE") or audio.get(
+        "metadata_block_picture"
+    )
     if pic_values:
         import base64
 
@@ -623,7 +633,9 @@ def _read_vorbis_comment_tags(path: Path, file_cls: type) -> EmbeddedTags:
 # ---------------------------------------------------------------------------
 
 
-def _build_wm_picture(data: bytes, mime: str, desc: str = "Cover", pic_type: int = 3) -> bytes:
+def _build_wm_picture(
+    data: bytes, mime: str, desc: str = "Cover", pic_type: int = 3
+) -> bytes:
     """Builds a `WM/Picture` attribute value per the ASF picture layout.
 
     Layout: 1 byte picture type, 4 bytes (LE) image size, UTF-16LE
@@ -632,7 +644,12 @@ def _build_wm_picture(data: bytes, mime: str, desc: str = "Cover", pic_type: int
     """
     mime_bytes = mime.encode("utf-16-le") + b"\x00\x00"
     desc_bytes = desc.encode("utf-16-le") + b"\x00\x00"
-    header = struct.pack("<B", pic_type) + struct.pack("<I", len(data)) + mime_bytes + desc_bytes
+    header = (
+        struct.pack("<B", pic_type)
+        + struct.pack("<I", len(data))
+        + mime_bytes
+        + desc_bytes
+    )
     return header + data
 
 
@@ -676,7 +693,14 @@ def _embed_asf(
     if disc_num:
         audio.tags["WM/PartOfSet"] = str(disc_num)
 
-    skip = {"TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL", "URL", "DESCRIPTION"}
+    skip = {
+        "TRACKNUMBER",
+        "TRACKTOTAL",
+        "DISCNUMBER",
+        "DISCTOTAL",
+        "URL",
+        "DESCRIPTION",
+    }
     for key, val in tags.items():
         key_up = key.upper()
         if key_up in skip or not val:
@@ -789,12 +813,21 @@ def _embed_apev2(
 
     if track_num and track_num != "0":
         audio.tags["Track"] = (
-            f"{track_num}/{track_total}" if track_total and track_total != "0" else track_num
+            f"{track_num}/{track_total}"
+            if track_total and track_total != "0"
+            else track_num
         )
     if disc_num and disc_total and disc_total != "1":
         audio.tags["Disc"] = f"{disc_num}/{disc_total}"
 
-    skip = {"TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL", "URL", "DESCRIPTION"}
+    skip = {
+        "TRACKNUMBER",
+        "TRACKTOTAL",
+        "DISCNUMBER",
+        "DISCTOTAL",
+        "URL",
+        "DESCRIPTION",
+    }
     for key, val in tags.items():
         key_up = key.upper()
         if key_up in skip or not val:
@@ -832,7 +865,9 @@ def _read_apev2_tags(path: Path, file_cls: type) -> EmbeddedTags:
             raw = bytes(value)
             img = raw.split(b"\x00", 1)[1] if b"\x00" in raw else raw
             result.cover_data = img
-            result.cover_mime = "image/png" if img[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
+            result.cover_mime = (
+                "image/png" if img[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
+            )
             continue
 
         if key_up == "LYRICS":
@@ -875,7 +910,13 @@ async def _write_tags_async(
 ) -> None:
     if suffix in _EXT_FLAC:
         await asyncio.to_thread(
-            _embed_flac, path, tags, cover_data, lyrics, lyrics_prov, multi_artist,
+            _embed_flac,
+            path,
+            tags,
+            cover_data,
+            lyrics,
+            lyrics_prov,
+            multi_artist,
         )
     elif suffix in _EXT_MP3:
         await asyncio.to_thread(_embed_id3, path, tags, cover_data, lyrics, lyrics_prov)
@@ -883,22 +924,42 @@ async def _write_tags_async(
         await asyncio.to_thread(_embed_m4a, path, tags, cover_data, lyrics, lyrics_prov)
     elif suffix in _EXT_OGG_VORBIS:
         await asyncio.to_thread(
-            _embed_oggvorbis, path, tags, cover_data, lyrics, lyrics_prov, multi_artist,
+            _embed_oggvorbis,
+            path,
+            tags,
+            cover_data,
+            lyrics,
+            lyrics_prov,
+            multi_artist,
         )
     elif suffix in _EXT_OPUS:
         await asyncio.to_thread(
-            _embed_oggopus, path, tags, cover_data, lyrics, lyrics_prov, multi_artist,
+            _embed_oggopus,
+            path,
+            tags,
+            cover_data,
+            lyrics,
+            lyrics_prov,
+            multi_artist,
         )
     elif suffix in _EXT_WAV:
         await asyncio.to_thread(_embed_wav, path, tags, cover_data, lyrics, lyrics_prov)
     elif suffix in _EXT_AIFF:
-        await asyncio.to_thread(_embed_aiff, path, tags, cover_data, lyrics, lyrics_prov)
+        await asyncio.to_thread(
+            _embed_aiff, path, tags, cover_data, lyrics, lyrics_prov
+        )
     elif suffix in _EXT_WMA:
         await asyncio.to_thread(_embed_asf, path, tags, cover_data, lyrics, lyrics_prov)
     elif suffix in _EXT_APEV2:
         file_cls = _apev2_class_for(suffix)
         await asyncio.to_thread(
-            _embed_apev2, path, tags, cover_data, lyrics, lyrics_prov, file_cls,
+            _embed_apev2,
+            path,
+            tags,
+            cover_data,
+            lyrics,
+            lyrics_prov,
+            file_cls,
         )
     else:
         raise SpotiflacError(ErrorKind.FILE_IO, f"Unsupported file type: {suffix}")
