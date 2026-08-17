@@ -566,6 +566,7 @@ async def run_interactive() -> dict:
         )
 
         import os
+
         path = ""
         while not path or not os.path.exists(path):
             path = _ask("Folder or file path to scan")

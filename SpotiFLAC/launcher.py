@@ -39,7 +39,7 @@ def _print_welcome_banner() -> None:
     def c(code: str, text: str) -> str:
         return text if no_color else f"\033[{code}m{text}\033[0m"
 
-    def l(url: str) -> str:  # noqa: E743
+    def l(url: str) -> str:
         # Rende l'URL cliccabile con OSC 8 e lo formatta in ciano sottolineato (4;36)
         styled_url = url if no_color else f"\033[4;36m{url}\033[0m"
         return url if no_color else f"\033]8;;{url}\033\\{styled_url}\033]8;;\033\\"
@@ -629,7 +629,9 @@ async def amain() -> None:
         await run_web(host=web_args.host, port=web_args.port)
         return
 
-    if "--tag-local" in sys.argv or any(arg.startswith("--tag-local=") for arg in sys.argv):
+    if "--tag-local" in sys.argv or any(
+        arg.startswith("--tag-local=") for arg in sys.argv
+    ):
         local_parser = argparse.ArgumentParser(add_help=False)
         local_parser.add_argument("--tag-local")
         local_parser.add_argument("--dry-run", action="store_true", default=False)

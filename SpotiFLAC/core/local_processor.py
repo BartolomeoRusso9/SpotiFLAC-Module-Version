@@ -72,6 +72,7 @@ async def scan_and_match_async(
     infos = await asyncio.to_thread(scan_path, path, recursive=recursive)
 
     import os
+
     concurrency_limit = min(8, (os.cpu_count() or 4))
     semaphore = asyncio.Semaphore(concurrency_limit)
 

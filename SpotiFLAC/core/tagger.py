@@ -843,7 +843,7 @@ def _embed_apev2(
         logger.debug("[tagger/apev2] lyrics embedded (%d chars)", len(lyrics))
 
     if cover_data:
-        value = "Cover Art (Front).jpg\x00".encode() + cover_data
+        value = b"Cover Art (Front).jpg\x00" + cover_data
         audio.tags["Cover Art (Front)"] = APEBinaryValue(value)
 
     audio.save()

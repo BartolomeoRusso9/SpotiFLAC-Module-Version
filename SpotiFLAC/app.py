@@ -641,6 +641,7 @@ class SpotiFLAC_API:
 
         # Path traversal protection
         from pathlib import Path
+
         try:
             resolved = Path(path).resolve()
             approved_roots = [
@@ -676,11 +677,12 @@ class SpotiFLAC_API:
     def _apply_local_tags_thread(self, items) -> None:
         try:
             from pathlib import Path
-            from .core.models import TrackMetadata
+
             from .core.local_processor import (
                 default_embed_options,
                 retag_local_file_async,
             )
+            from .core.models import TrackMetadata
 
             opts = default_embed_options()
             results = []
