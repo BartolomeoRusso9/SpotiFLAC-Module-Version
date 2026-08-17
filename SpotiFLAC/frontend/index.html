@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SpotiFLAC</title>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">  
+  <link rel="stylesheet" href="styles.css?v=20260817">  
 </head>
 <body>
 
@@ -33,6 +33,9 @@
     </button>
     <button class="nav-btn" id="nav-explore" onclick="switchView('explore'); loadExploreData();" title="Explore" data-label="Explore">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+    </button>
+    <button class="nav-btn" id="nav-local" onclick="switchView('local')" title="Fix Local Files" data-label="Fix Local Files">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
     </button>
     <button class="nav-btn" id="nav-logs"     onclick="switchView('logs')"     title="Logs" data-label="Logs">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
@@ -268,6 +271,76 @@
             <span class="log-msg info">SpotiFLAC ready.</span>
           </div>
         </div>
+      </div>
+    </div>
+    <div class="view" id="view-local">
+      <div class="s-header">
+        <h1>Local Auto-Tagger</h1>
+        <div class="s-actions">
+          <button class="act-btn primary" onclick="startLocalScan()" id="btn-scan-local">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            Scan Folder
+          </button>
+        </div>
+      </div>
+      
+      <div class="s-body" style="display:flex; flex-direction:column; gap:16px;">
+        <div class="s-section" style="padding: 16px 20px;">
+          <div class="s-title">Target Directory</div>
+          <div
+            id="local-drop-zone"
+            class="local-drop-zone"
+            ondragover="onLocalDragOver(event)"
+            ondragleave="onLocalDragLeave(event)"
+            ondrop="onLocalDrop(event)"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            <span class="local-drop-zone-text">Drag & drop a folder or audio file here, or paste a path below</span>
+            <div class="s-row" style="align-items:center; gap:8px; width:100%;">
+              <input type="text" id="local-path-input" class="full" placeholder="Enter absolute folder path (e.g., C:\Music\ToFix or /Users/name/Music)..." style="flex:1;" onclick="event.stopPropagation()">
+              <button class="act-btn secondary" onclick="openFolderBrowser()" style="padding:6px 12px; font-size:12px; white-space:nowrap;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                Browse
+              </button>
+            </div>
+            <div id="folder-browser-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="folder-browser-title" tabindex="-1" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:9999;">
+              <div style="background:var(--surface); border:1px solid var(--border); border-radius:12px; width:90%; max-width:500px; max-height:80vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                <div style="padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+                  <div id="folder-browser-title" style="font-weight:600; color:var(--text);">Select Folder</div>
+                  <button onclick="closeFolderBrowser()" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:18px; padding:0; line-height:1;">×</button>
+                </div>
+                <div style="padding:12px 20px; border-bottom:1px solid var(--border); display:flex; gap:8px; align-items:center;">
+                  <button id="fb-back" onclick="goFolderBrowserBack()" style="background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:6px 12px; cursor:pointer; color:var(--text); font-size:12px;">← Back</button>
+                  <input type="text" id="fb-path" readonly style="flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text2); font-size:11px; font-family:monospace;">
+                  <button onclick="setFolderPath()" style="background:var(--yellow); border:none; border-radius:6px; padding:6px 12px; cursor:pointer; color:black; font-weight:600; font-size:12px;">Select</button>
+                </div>
+                <div id="fb-entries" style="flex:1; overflow-y:auto; padding:8px;"></div>
+              </div>
+            </div>
+          </div>
+          <p style="font-size:11.5px; color:var(--muted); margin-top:8px; line-height:1.5;">
+            Paste (or drop) the folder or file you want to fix. Supported formats: FLAC, MP3, M4A/AAC, OGG Vorbis, Opus, WAV, AIFF, WMA, WavPack, Monkey's Audio, Musepack, TrueAudio.
+            SpotiFLAC will scan them, find the correct Spotify metadata, and let you compare before applying changes.
+          </p>
+        </div>
+        
+        <div id="local-results-wrap" class="hidden" style="flex:1; display:flex; flex-direction:column; min-height: 0;">
+          <div class="track-table-header" style="grid-template-columns: 24px 1fr 80px 1fr; margin-bottom: 8px;">
+            <div><input id="check-all-local" type="checkbox" checked onchange="toggleAllLocal(this)"></div>
+            <div>Current File (Local)</div>
+            <div style="text-align:center;">Match</div>
+            <div>New Tags (SpotiFLAC)</div>
+          </div>
+          <div id="local-track-rows" style="display:flex; flex-direction:column; gap:6px; overflow-y:auto; padding-right: 4px;"></div>
+        </div>
+      </div>
+
+      <div class="s-footer hidden" id="local-footer" style="padding:14px 18px; border-top:1px solid var(--border); background:var(--surface2); justify-content:space-between; align-items:center; flex-shrink: 0;">
+        <span id="local-selected-count" style="font-weight:600; font-size:13px; color:var(--text);">0 selected</span>
+        <button class="act-btn primary" onclick="applyLocalTags()" id="btn-apply-local">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          Apply Selected Tags
+        </button>
       </div>
     </div>
 
@@ -624,7 +697,7 @@
       </div>
     </div>
   </div>
-  </div><script src="toast-system.js"></script>
-  <script src="app.js"></script>
+  </div><script src="toast-system.js?v=20260817"></script>
+  <script src="app.js?v=20260817"></script>
 </body>
 </html>

@@ -92,7 +92,7 @@ class BaseProvider(ABC):
         metadata: TrackMetadata,
         output_dir: str,
         *,
-        filename_format: str = "{title} - {artist}",
+        filename_format: str | Callable[..., str] = "{title} - {artist}",
         position: int = 1,
         include_track_num: bool = False,
         use_album_track_num: bool = False,
@@ -121,7 +121,23 @@ class BaseProvider(ABC):
         use_album_track_num: bool,
         first_artist_only: bool,
         extension: str = ".flac",
+        platform: str | None = None,
+        native_id: str = "",
     ) -> Path:
+        """Builds the final on-disk path for a track.
+
+        `platform` defaults to a cleaned-up form of this provider's own
+        `self.name` (e.g. "tidal-web" → "tidal", stripping the "ext:" prefix
+        and "-web"/"-py" suffix, same normalization used elsewhere for
+        service aliases) — pass an explicit value only if you want the
+        {platform} placeholder to show something else. `native_id` is this
+        provider's own ID for the matched track (e.g. a Tidal or SoundCloud
+        track ID, as opposed to `metadata.id`, which is the Spotify ID) —
+        pass it once your provider has resolved a match, if you want
+        {id} / a filename_format callable to have access to it. Both default
+        to "" / self.name harmlessly if omitted; existing providers that
+        don't pass native_id simply won't populate {id}.
+        """
         filename = build_filename(
             metadata,
             fmt=filename_format,
@@ -130,6 +146,15 @@ class BaseProvider(ABC):
             use_album_track_number=use_album_track_num,
             first_artist_only=first_artist_only,
             extension=extension,
+            platform=(
+                platform
+                if platform is not None
+                else self.name.lower()
+                .replace("ext:", "")
+                .replace("-web", "")
+                .replace("-py", "")
+            ),
+            native_id=native_id,
         )
         path = Path(output_dir) / filename
         path.parent.mkdir(parents=True, exist_ok=True)

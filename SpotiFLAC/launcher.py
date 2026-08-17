@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import importlib.metadata
 import json
 import logging
 import os
@@ -23,6 +24,81 @@ import sys
 from .check_update import check_for_updates_async
 from .downloader import DownloadOptions, SpotiflacDownloader
 from .interactive import run_interactive
+
+
+def _print_welcome_banner() -> None:
+    """Prints a one-time ASCII banner with project/community links on startup.
+
+    Shown for every launch mode (CLI, --interactive, --gui, --web) since it
+    runs as the very first thing in amain(), before any mode-specific setup.
+    Colors and links are skipped for non-tty output (piped/redirected) or when
+    NO_COLOR is set, matching the convention used elsewhere (interactive.py).
+    """
+    no_color = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
+
+    def c(code: str, text: str) -> str:
+        return text if no_color else f"\033[{code}m{text}\033[0m"
+
+    def l(url: str) -> str:  # noqa: E743
+        # Rende l'URL cliccabile con OSC 8 e lo formatta in ciano sottolineato (4;36)
+        styled_url = url if no_color else f"\033[4;36m{url}\033[0m"
+        return url if no_color else f"\033]8;;{url}\033\\{styled_url}\033]8;;\033\\"
+
+    try:
+        version = importlib.metadata.version("spotiflac")
+    except importlib.metadata.PackageNotFoundError:
+        version = "dev"
+
+    # Logo esteso "SpotiFLAC Python Module" in font Slant, verde brillante (1;92)
+    ascii_logo = [
+        c(
+            "1;92",
+            r"   _____             __  _ ________    ___  ______   ____        __  __                  __  ___          __      __     ",
+        ),
+        c(
+            "1;92",
+            r"  / ___/____  ____  / /_(_) ____/ /   /   |/ ____/  / __ \__  __/ / / /_  ____  ____    /  |/  /___  ____/ /_  __/ /___  ",
+        ),
+        c(
+            "1;92",
+            r"  \__ \/ __ \/ __ \/ __/ / /_  / /   / /| / /      / /_/ / / / / /_/ __ \/ __ \/ __ \  / /|_/ / __ \/ __  / / / / / __ \ ",
+        ),
+        c(
+            "1;92",
+            r" ___/ / /_/ / /_/ / /_/ / __/ / /___/ ___ / /___  / ____/ /_/ / __/ / / / /_/ / / / / / /  / / /_/ / /_/ / /_/ / /  __/  ",
+        ),
+        c(
+            "1;92",
+            r"/____/ .___/\____/\__/_/_/   /_____/_/  |_\____/ /_/    \__, /_/ /_/ /_/\____/_/ /_/ /_/  /_/\____/\__,_/\__,_/_/\___/   ",
+        ),
+        c(
+            "1;92",
+            r"    /_/                                                 /____/                                                           ",
+        ),
+    ]
+
+    print()
+    for line in ascii_logo:
+        print(line)
+
+    # Crea un "Badge" con sfondo ciano (46), testo nero (30) e grassetto (1)
+    version_badge = c("1;30;46", f" v{version} ")
+
+    print()
+    print(f"  {c('1;90', '▪')} {c('1;37', 'Version')}   {version_badge}")
+    print(
+        f"  {c('1;90', '▪')} {c('1;37', 'Author')}    {c('1;93', 'BartolomeoRusso9')}"
+    )
+    print(
+        f"  {c('1;90', '▪')} {c('1;37', 'GitHub')}    {l('https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version')}"
+    )
+    print(
+        f"  {c('1;90', '▪')} {c('1;37', 'Telegram')}  {l('https://t.me/SpotiFLAC_Chat')}"
+    )
+    print(
+        f"  {c('1;90', '▪')} {c('1;37', 'Support')}   {l('https://ko-fi.com/bartolomeorusso9')}"
+    )
+    print()
 
 
 def load_config() -> dict:
@@ -366,6 +442,42 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "Placeholders: {folder} {succeeded} {failed}",
     )
 
+    # ── Local Auto-Tagger ────────────────────────────────────────────────────
+    local_grp = parser.add_argument_group("Local Auto-Tagger")
+    local_grp.add_argument(
+        "--tag-local",
+        metavar="PATH",
+        default=None,
+        help="Scan a local audio file or folder (FLAC, MP3, M4A/AAC, OGG "
+        "Vorbis, Opus, WAV, AIFF, WMA, WavPack, Monkey's Audio, Musepack, "
+        "TrueAudio), match each track against online metadata, and re-tag "
+        "it. Runs instead of a normal download when given; url/output_dir "
+        "are ignored.",
+    )
+    local_grp.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="With --tag-local: scan and match only, print what would change, "
+        "write nothing to disk.",
+    )
+    local_grp.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="With --tag-local: automatically apply every 'safe match' "
+        "(confidence >= 90%%) without asking for confirmation. Files below "
+        "that threshold are still skipped and reported, never applied "
+        "automatically — use the GUI/web tab to review those.",
+    )
+    local_grp.add_argument(
+        "--no-backup",
+        action="store_true",
+        default=False,
+        help="With --tag-local: skip the automatic .bak backup before "
+        "overwriting each file. Not recommended.",
+    )
+
     return parser.parse_args()
 
 
@@ -486,6 +598,8 @@ async def amain() -> None:
     """
     from .core.ffmpeg_check import print_ffmpeg_warning
 
+    _print_welcome_banner()
+
     with contextlib.suppress(Exception):
         await check_for_updates_async()
 
@@ -513,6 +627,24 @@ async def amain() -> None:
         from .webapp import run_async as run_web
 
         await run_web(host=web_args.host, port=web_args.port)
+        return
+
+    if "--tag-local" in sys.argv or any(arg.startswith("--tag-local=") for arg in sys.argv):
+        local_parser = argparse.ArgumentParser(add_help=False)
+        local_parser.add_argument("--tag-local")
+        local_parser.add_argument("--dry-run", action="store_true", default=False)
+        local_parser.add_argument("--force", action="store_true", default=False)
+        local_parser.add_argument("--no-backup", action="store_true", default=False)
+        local_args, _ = local_parser.parse_known_args(sys.argv[1:])
+
+        from .core.local_processor import run_local_tagging_cli
+
+        await run_local_tagging_cli(
+            local_args.tag_local,
+            dry_run=local_args.dry_run,
+            force=local_args.force,
+            backup=not local_args.no_backup,
+        )
         return
 
     if "--interactive" in sys.argv:

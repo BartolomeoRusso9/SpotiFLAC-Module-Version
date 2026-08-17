@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from SpotiFLAC.app import SpotiFLAC_API
 from SpotiFLAC.client import AsyncSpotiFLAC
 from SpotiFLAC.core import (
     download_validation,
@@ -14,6 +15,7 @@ from SpotiFLAC.core import (
 )
 from SpotiFLAC.core.history import HistoryManager
 from SpotiFLAC.core.isrc_utils import is_valid_isrc, normalize_isrc
+from SpotiFLAC.core.local_scanner import scan_file
 from SpotiFLAC.core.models import (
     DownloadResult,
     TrackMetadata,
@@ -113,6 +115,58 @@ def test_sanitize_and_build_filename_are_filesystem_safe():
 
     assert filename == "Artist, Guest - Song Name.mp3"
     assert filename.endswith(".mp3")
+
+
+def test_local_scan_uses_plain_filename_as_title_when_no_tags(monkeypatch, tmp_path):
+    file_path = tmp_path / "plain_track.flac"
+    file_path.write_bytes(b"fake-flac-data")
+
+    class FakeEmbedded:
+        tags = {}
+        cover_data = None
+        cover_mime = None
+
+    monkeypatch.setattr(
+        "SpotiFLAC.core.local_scanner.read_embedded_tags", lambda _p: FakeEmbedded()
+    )
+
+    info = scan_file(file_path)
+    assert info.guessed_title == "plain track"
+    assert info.search_title == "plain track"
+    assert info.error == ""
+
+
+def test_local_scan_handles_title_before_artist_in_filename(monkeypatch, tmp_path):
+    file_path = tmp_path / "Ouverture - Lazza, Low Kidd.flac"
+    file_path.write_bytes(b"fake-flac-data")
+
+    class FakeEmbedded:
+        tags = {}
+        cover_data = None
+        cover_mime = None
+
+    monkeypatch.setattr(
+        "SpotiFLAC.core.local_scanner.read_embedded_tags", lambda _p: FakeEmbedded()
+    )
+
+    info = scan_file(file_path)
+    assert info.guessed_title == "Ouverture"
+    assert info.guessed_artist == "Lazza, Low Kidd"
+    assert info.search_title == "Ouverture"
+    assert info.error == ""
+
+
+def test_browse_folder_lists_directories_and_files(tmp_path):
+    base = tmp_path / "music"
+    nested = base / "nested"
+    nested.mkdir(parents=True)
+    file_path = base / "track.flac"
+    file_path.write_bytes(b"fake-flac-data")
+
+    result = SpotiFLAC_API().browse_folder(str(base))
+
+    assert nested.name in result["directories"]
+    assert file_path.name in result["files"]
 
 
 def test_history_manager_round_trip(tmp_path):

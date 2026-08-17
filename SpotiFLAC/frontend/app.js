@@ -122,6 +122,26 @@ function switchView(name) {
 
 let networkStatus = { ip: '', country_name: 'Italy', country_code: 'IT' };
 
+// Fetches IP/country info for the Settings titlebar. Guarded throughout:
+// safe to call even if titlebar-network isn't present in the current
+// markup, and never throws on a failed/slow lookup.
+async function loadNetworkStatus() {
+  try {
+    const api = window.pywebview?.api;
+    if (!api || typeof api.get_network_status !== 'function') return;
+    const status = await api.get_network_status();
+    if (status) {
+      networkStatus = { ...networkStatus, ...status };
+    }
+    const ipEl = $('network-ip');
+    if (ipEl) ipEl.textContent = networkStatus.ip || '';
+    const countryEl = $('network-country');
+    if (countryEl) countryEl.textContent = networkStatus.country_name || '';
+  } catch (err) {
+    console.warn('[NetworkStatus] failed to load:', err);
+  }
+}
+
 function togglePublicIp() {
   /* removed by design */
 }
@@ -3598,4 +3618,440 @@ window.__set_version_label = function (version) {
   if (tb) tb.innerText = version;
   const hero = document.getElementById('hero-version');
   if (hero) hero.innerText = 'v' + version;
+};
+// ══════════ LOCAL AUTO-TAGGER LOGIC ══════════
+
+let localScanData = [];
+
+// ── Drag & drop for the "Fix Local Files" target directory ─────────────────
+//
+// A dropped item only carries a real, absolute filesystem path when the app
+// is running as a native pywebview window (pywebview's embedded webview
+// exposes File.path for dropped files/folders, unlike a normal browser
+// sandbox). In plain browser/web mode there is no way for JS to learn the
+// server-side path of something dragged from the user's OS file manager, so
+// we fall back to asking the user to type/paste it instead.
+function onLocalDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    $('local-drop-zone').classList.add('drag-over');
+}
+
+function onLocalDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    $('local-drop-zone').classList.remove('drag-over');
+}
+
+function onLocalDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    $('local-drop-zone').classList.remove('drag-over');
+
+    const files = e.dataTransfer?.files;
+    if (!files || !files.length) return;
+
+    const dropped = files[0];
+    const realPath = dropped.path; // populated by pywebview's desktop webview
+
+    if (realPath) {
+        $('local-path-input').value = realPath;
+        if (files.length > 1) {
+            toastMgr.info(`Using "${realPath.split(/[\\/]/).pop()}" — drop one folder/file at a time.`);
+        }
+        startLocalScan();
+        return;
+    }
+
+    toastMgr.warning(
+        "Browsers can't reveal the real folder path of a dropped item — "
+        + "paste the absolute path into the field above instead."
+    );
+}
+
+// ── Folder Browser for Local Auto-Tagger ──────────────────────────────────
+
+let currentFolderBrowserPath = null;
+let currentFolderBrowserParent = null;
+
+// Wrapper for the "← Back" button: navigateFolderBrowser() needs the real
+// parent path from the server (stored after each browse), not a literal
+// '..' — the server resolves paths itself and has no notion of a relative
+// '..' relative to nothing.
+function goFolderBrowserBack() {
+    if (currentFolderBrowserParent) {
+        navigateFolderBrowser(currentFolderBrowserParent);
+    }
+}
+
+async function openFolderBrowser() {
+    const modal = $('folder-browser-modal');
+    modal.classList.remove('hidden');
+    modal.focus();
+
+    // Escape key handler
+    const escapeHandler = (e) => {
+        if (e.key === 'Escape') {
+            closeFolderBrowser();
+        }
+    };
+    modal.addEventListener('keydown', escapeHandler);
+    modal.dataset.escapeAttached = 'true';
+
+    currentFolderBrowserParent = null;
+    const currentPath = $('local-path-input').value.trim() || null;
+
+    if (window.pywebview?.api) {
+        const api = window.pywebview.api;
+        try {
+            const homePath = typeof api.get_home_dir === 'function' ? await api.get_home_dir() : '/';
+            await navigateFolderBrowser(homePath || currentPath || '/');
+            return;
+        } catch (err) {
+            console.warn('pywebview folder browse fallback failed:', err);
+        }
+    }
+
+    if (currentPath) {
+        await navigateFolderBrowser(currentPath);
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/get-home-dir');
+        if (!response.ok) {
+            console.warn('get-home-dir endpoint not available, using /');
+            await navigateFolderBrowser('/');
+            return;
+        }
+        const data = await response.json();
+        const homePath = data.home_dir || '/';
+        await navigateFolderBrowser(homePath);
+    } catch (err) {
+        console.warn('Failed to get home dir, falling back to root:', err);
+        await navigateFolderBrowser('/');
+    }
+}
+
+function closeFolderBrowser() {
+    $('folder-browser-modal').classList.add('hidden');
+}
+
+async function navigateFolderBrowser(path) {
+    if (!path) return;
+
+    const modal = $('folder-browser-modal');
+    if (modal.classList.contains('hidden')) return;
+
+    try {
+        let data;
+
+        if (window.pywebview?.api && typeof window.pywebview.api.browse_folder === 'function') {
+            data = await window.pywebview.api.browse_folder(path);
+        } else {
+            console.log('[FolderBrowser] Navigating to:', path);
+            const encodedPath = encodeURIComponent(path);
+            const url = `/api/browse-folder?path=${encodedPath}`;
+            const response = await fetch(url);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: response.statusText }));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+            data = await response.json();
+        }
+
+        if (!data || data.error) {
+            toastMgr.error(`Browse error: ${data?.error || 'Unknown folder browse error'}`);
+            console.error('[FolderBrowser] Backend error:', data?.error || data);
+            return;
+        }
+
+        currentFolderBrowserPath = data.path;
+        currentFolderBrowserParent = data.parent || null;
+        $('fb-path').value = data.path;
+
+        const entriesDiv = $('fb-entries');
+        entriesDiv.innerHTML = '';
+
+        const items = [];
+        (data.directories || []).forEach(dirName => {
+            items.push({
+                type: 'dir',
+                name: dirName,
+                path: (data.path || '') + '/' + dirName,
+            });
+        });
+        (data.files || []).forEach(fileName => {
+            items.push({
+                type: 'file',
+                name: fileName,
+                path: (data.path || '') + '/' + fileName,
+            });
+        });
+
+        if (items.length > 0) {
+            items.forEach(item => {
+                const div = document.createElement('div');
+                div.style.cssText = 'padding:8px 12px; cursor:pointer; border-radius:6px; display:flex; align-items:center; gap:8px; color:var(--text); font-size:13px; border:1px solid transparent;';
+                const icon = item.type === 'dir'
+                    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>'
+                    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>';
+                div.innerHTML = icon + ' ';
+                div.appendChild(document.createTextNode(item.name));
+
+                div.onmouseover = () => div.style.backgroundColor = 'var(--surface2)';
+                div.onmouseout = () => div.style.backgroundColor = 'transparent';
+
+                div.onclick = async () => {
+                    if (item.type === 'dir') {
+                        await navigateFolderBrowser(item.path);
+                        return;
+                    }
+
+                    $('local-path-input').value = item.path;
+                    closeFolderBrowser();
+                    toastMgr.success(`Selected: ${item.path}`);
+                    startLocalScan();
+                };
+
+                entriesDiv.appendChild(div);
+            });
+        } else {
+            entriesDiv.innerHTML = '<div style="padding:20px; text-align:center; color:var(--muted); font-size:12px;">No files or subdirectories found.</div>';
+        }
+
+        $('fb-back').disabled = !data.parent;
+        $('fb-back').style.opacity = data.parent ? '1' : '0.5';
+
+    } catch (err) {
+        console.error('[FolderBrowser] Navigation error:', err);
+        toastMgr.error(`Failed to browse: ${err.message}`);
+    }
+}
+
+function setFolderPath() {
+    if (currentFolderBrowserPath) {
+        $('local-path-input').value = currentFolderBrowserPath;
+        closeFolderBrowser();
+        toastMgr.success(`Selected: ${currentFolderBrowserPath}`);
+        startLocalScan();
+    }
+}
+
+async function startLocalScan() {
+    const path = $('local-path-input').value.trim();
+    if (!path) {
+        toastMgr.error("Please enter a valid folder or file path.");
+        return;
+    }
+
+    setTaBtnState($('btn-scan-local'), 'loading');
+    $('local-results-wrap').classList.add('hidden');
+    $('local-footer').classList.add('hidden');
+
+    try {
+        if (window.pywebview?.api && typeof window.pywebview.api.scan_local === 'function') {
+            const result = await window.pywebview.api.scan_local(path);
+            if (result && result.status === 'error') {
+                throw new Error(result.error || 'Scan failed');
+            }
+        } else {
+            const response = await fetch('/api/scan_local', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify([path]),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.error || 'Failed to start local scan');
+            }
+            if (data?.result?.status === 'error') {
+                throw new Error(data.result.error || 'Scan failed');
+            }
+        }
+        toastMgr.info("Scanning local files... this may take a moment.");
+    } catch (err) {
+        console.error('[LocalScan] start failed:', err);
+        setTaBtnState($('btn-scan-local'), 'error');
+        setTimeout(() => setTaBtnState($('btn-scan-local'), 'default'), 2500);
+        toastMgr.error(err.message || 'Failed to start local scan');
+    }
+}
+
+// Called by backend when scanning finishes
+window.app_local_scan_results = function(payload) {
+    setTaBtnState($('btn-scan-local'), 'default');
+    localScanData = payload.files || [];
+    renderLocalTracks();
+    $('local-results-wrap').classList.remove('hidden');
+    $('local-footer').classList.remove('hidden');
+    updateLocalSelection();
+    toastMgr.success(`Scan complete: found ${localScanData.length} files.`);
+};
+
+// Called by backend on scan error
+window.app_local_scan_error = function(err) {
+    setTaBtnState($('btn-scan-local'), 'error');
+    setTimeout(() => setTaBtnState($('btn-scan-local'), 'default'), 2500);
+    toastMgr.error("Scan failed: " + err);
+};
+
+function renderLocalTracks() {
+    const container = $('local-track-rows');
+    container.innerHTML = '';
+    
+    if (!localScanData.length) {
+        container.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--muted);font-size:14px;">No supported audio files found in this folder (FLAC, MP3, M4A/AAC, OGG, Opus, WAV, AIFF, WMA, WavPack, APE and more).</div>';
+        return;
+    }
+    
+    localScanData.forEach((item, i) => {
+        const best = item.candidates && item.candidates[0];
+        const hasMatch = !!best;
+        const isSafe = hasMatch && best.is_safe;
+        
+        const oldCover = item.old_cover_base64 
+            ? `<img src="${item.old_cover_base64}" alt="cover">` 
+            : `🎵`;
+            
+        const fileName = item.file_path.split(/[\\/]/).pop();
+        const oldTitle = item.old_title || item.guessed_title || fileName;
+        const oldArtist = item.old_artist || item.guessed_artist || "Unknown Artist";
+        
+        let newCol = `<div style="color:var(--muted); font-size:12.5px; font-style:italic;">No match found</div>`;
+        let scoreCol = `<span class="local-badge err">No Match</span>`;
+        let checkbox = `<input type="checkbox" class="local-cb" value="${i}" data-file-path="${escHtml(item.file_path)}" disabled>`;
+
+        if (hasMatch) {
+            const newCover = best.metadata.cover_url || best.metadata.cover || '';
+            const newCoverHtml = newCover ? `<img src="${newCover}">` : `🎵`;
+            const newTitle = best.metadata.title || '';
+            const newArtist = best.metadata.first_artist || '';
+
+            // Diffing logic: mark as different if texts don't match (case insensitive)
+            const hlTitle = oldTitle.toLowerCase() !== newTitle.toLowerCase() ? 'diff' : '';
+            const hlArtist = oldArtist.toLowerCase() !== newArtist.toLowerCase() ? 'diff' : '';
+
+            newCol = `
+                <div class="local-cell-content">
+                    <div class="local-thumb">${newCoverHtml}</div>
+                    <div class="local-info">
+                        <div class="local-title ${hlTitle}" title="New: ${escHtml(newTitle)}">${escHtml(newTitle)}</div>
+                        <div class="local-artist ${hlArtist}">${escHtml(newArtist)}</div>
+                    </div>
+                </div>
+            `;
+
+            scoreCol = `<span class="local-badge ${isSafe ? 'ok' : 'warn'}" title="Confidence Score">${best.confidence}%</span>`;
+            checkbox = `<input type="checkbox" class="local-cb" value="${i}" data-file-path="${escHtml(item.file_path)}" ${isSafe ? 'checked' : ''} onchange="updateLocalSelection()">`;
+        } else if (item.error) {
+            scoreCol = `<span class="local-badge err">Error</span>`;
+            newCol = `<div style="color:var(--red); font-size:11px;">${escHtml(item.error)}</div>`;
+        }
+
+        const row = document.createElement('div');
+        row.className = 'track-row local-row';
+        row.style.gridTemplateColumns = "24px 1fr 80px 1fr";
+        row.style.cursor = "default";
+        
+        row.innerHTML = `
+            <div class="tr-check">${checkbox}</div>
+            <div class="local-cell-content">
+                <div class="local-thumb">${oldCover}</div>
+                <div class="local-info">
+                    <div class="local-title" title="Current: ${escHtml(oldTitle)}">${escHtml(oldTitle)}</div>
+                    <div class="local-artist">${escHtml(oldArtist)}</div>
+                    <div style="font-family:'JetBrains Mono', monospace; font-size:9.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:3px;" title="${escHtml(item.file_path)}">${escHtml(fileName)}</div>
+                </div>
+            </div>
+            <div style="text-align:center;">${scoreCol}</div>
+            ${newCol}
+        `;
+        container.appendChild(row);
+    });
+}
+
+function toggleAllLocal(cb) {
+    document.querySelectorAll('.local-cb:not([disabled])').forEach(c => c.checked = cb.checked);
+    updateLocalSelection();
+}
+
+function updateLocalSelection() {
+    const checked = document.querySelectorAll('.local-cb:checked').length;
+    const total = document.querySelectorAll('.local-cb:not([disabled])').length;
+    
+    const checkAll = $('check-all-local');
+    if (checkAll) {
+        checkAll.checked = total > 0 && checked === total;
+        checkAll.indeterminate = checked > 0 && checked < total;
+    }
+    
+    $('local-selected-count').textContent = `${checked} file(s) selected`;
+    $('btn-apply-local').disabled = checked === 0;
+}
+
+function applyLocalTags() {
+    const selectedIdx = Array.from(document.querySelectorAll('.local-cb:checked')).map(cb => parseInt(cb.value));
+    if (!selectedIdx.length) return;
+    
+    const itemsToApply = selectedIdx.map(i => {
+        const entry = localScanData[i];
+        return {
+            file_path: entry.file_path,
+            metadata: entry.candidates[0].metadata,
+            backup: true // Always create .bak for safety
+        };
+    });
+    
+    setTaBtnState($('btn-apply-local'), 'loading');
+    $('btn-apply-local').innerHTML = `Applying 0/${itemsToApply.length}...`;
+    
+    if (window.pywebview?.api) {
+        window.pywebview.api.apply_local_tags(itemsToApply);
+    } else {
+        setTimeout(() => window.app_local_apply_finished({results: itemsToApply.map(i => ({success: true}))}), 2000);
+    }
+}
+
+// Called per file during apply
+window.app_local_apply_progress = function(payload) {
+    const { done, total, last } = payload;
+    $('btn-apply-local').innerHTML = `Applying ${done}/${total}...`;
+    
+    if (!last.success) {
+        const name = last.file_path.split(/[\\/]/).pop();
+        toastMgr.error(`Failed to tag ${name}: ${last.error}`);
+    }
+};
+
+// Called when all applies are done
+window.app_local_apply_finished = function(payload) {
+    setTaBtnState($('btn-apply-local'), 'success');
+    setTimeout(() => {
+        setTaBtnState($('btn-apply-local'), 'default');
+        $('btn-apply-local').innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          Apply Selected Tags`;
+    }, 2000);
+    
+    const successes = payload.results.filter(r => r.success).length;
+    const errors = payload.results.length - successes;
+    
+    if (errors === 0) {
+        toastMgr.success(`Done! ${successes} files successfully tagged and backed up.`);
+    } else {
+        toastMgr.warning(`Finished: ${successes} tagged, ${errors} failed.`);
+    }
+    
+    // Automatically deselect checkboxes for successful ones so the user knows they are done
+    payload.results.forEach((res) => {
+        if (res.success && res.file_path) {
+            const cb = document.querySelector(`.local-cb[data-file-path="${CSS.escape(res.file_path)}"]`);
+            if (cb) {
+                cb.checked = false;
+                cb.disabled = true;
+            }
+        }
+    });
+    updateLocalSelection();
 };

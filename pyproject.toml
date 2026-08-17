@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "3.0.2"
+version = "3.0.3"
 description = "Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends."
 readme = "README.md"
 requires-python = ">=3.9"
-license = "MIT"
+license = {text = "MIT"}
 authors = [
     { name=" BartolomeoRusso9, ShuKurenais" }
 ]

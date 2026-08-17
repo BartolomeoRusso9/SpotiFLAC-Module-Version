@@ -26,7 +26,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -36,6 +36,31 @@ from .app import SpotiFLAC_API
 logger = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
+
+
+def _is_path_safe(candidate: Path, api) -> bool:
+    """Check if candidate path is within approved roots (download_dir, home).
+
+    Returns True if the resolved canonical path is a descendant of (or equal to)
+    at least one approved root. Returns False otherwise (path traversal attempt).
+    """
+    try:
+        resolved = candidate.resolve()
+        # Approved roots: download_dir and user home
+        approved_roots = [
+            Path(api.download_dir).resolve(),
+            Path.home().resolve(),
+        ]
+        for root in approved_roots:
+            try:
+                resolved.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
+    except Exception:
+        return False
+
 
 # Methods safe to expose directly over HTTP. This is an explicit allowlist —
 # window-chrome methods (minimize/maximize/resize/move/destroy, which only
@@ -79,6 +104,8 @@ ALLOWED_METHODS: set[str] = {
     "fetch_metadata",
     "download_tracks",
     "run_health_check",
+    "scan_local",
+    "apply_local_tags",
 }
 
 
@@ -132,6 +159,17 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="SpotiFLAC Web")
 
+    @app.middleware("http")
+    async def _no_cache_frontend(request, call_next):
+        response = await call_next(request)
+        if request.url.path.endswith((".js", ".css", ".html")):
+            response.headers["Cache-Control"] = (
+                "no-store, no-cache, must-revalidate, max-age=0"
+            )
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     @app.on_event("startup")
     async def _on_startup() -> None:
         manager.bind_loop(asyncio.get_running_loop())
@@ -156,7 +194,9 @@ def create_app() -> FastAPI:
 
     # ── Dynamic dispatcher for every whitelisted Api method ────────────────
     @app.post("/api/{method_name}")
-    async def call_method(method_name: str, payload: Any = None) -> JSONResponse:
+    async def call_method(
+        method_name: str, payload: Any = Body(default=None)
+    ) -> JSONResponse:
         if method_name not in ALLOWED_METHODS:
             return JSONResponse(
                 {"error": f"Unknown or disallowed method: {method_name}"},
@@ -199,9 +239,15 @@ def create_app() -> FastAPI:
         base = Path(path).expanduser() if path else Path.home()
         try:
             base = base.resolve()
+            # Path traversal protection
+            if not _is_path_safe(base, api):
+                return JSONResponse(
+                    {"error": "Access denied: path is outside approved directories"},
+                    status_code=403,
+                )
             if not base.is_dir():
                 base = Path.home().resolve()
-            entries = sorted(
+            directories = sorted(
                 (
                     p.name
                     for p in base.iterdir()
@@ -209,12 +255,30 @@ def create_app() -> FastAPI:
                 ),
                 key=str.lower,
             )
+            files = sorted(
+                (
+                    p.name
+                    for p in base.iterdir()
+                    if p.is_file() and not p.name.startswith(".")
+                ),
+                key=str.lower,
+            )
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         parent = str(base.parent) if base.parent != base else None
         return JSONResponse(
-            {"path": str(base), "parent": parent, "directories": entries},
+            {
+                "path": str(base),
+                "parent": parent,
+                "directories": directories,
+                "files": files,
+            },
         )
+
+    @app.get("/api/get-home-dir")
+    async def get_home_dir() -> JSONResponse:
+        """Returns the user's home directory path."""
+        return JSONResponse({"home_dir": str(Path.home())})
 
     # ── WebSocket: push channel for log/progress/metadata/etc. ─────────────
     @app.websocket("/ws")
@@ -237,11 +301,11 @@ def create_app() -> FastAPI:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
             "<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n"
-            '<script src="/web-shim.js"></script>\n'
+            '<script src="/web-shim.js?v=20260817"></script>\n'
         )
         html = html.replace(
-            '<script src="toast-system.js"></script>',
-            inject + '<script src="toast-system.js"></script>',
+            '<script src="toast-system.js?v=20260817"></script>',
+            inject + '<script src="toast-system.js?v=20260817"></script>',
         )
         return HTMLResponse(html)
 

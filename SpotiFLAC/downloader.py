@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from .core.console import (
     print_playlist_resolved,
@@ -116,7 +116,7 @@ def _adapt_js_metadata_response(response):
 class DownloadOptions:
     output_dir: str
     services: list[str] = field(default_factory=lambda: ["ext:tidal-web"])
-    filename_format: str = "{title} - {artist}"
+    filename_format: str | Callable[..., str] = "{title} - {artist}"
     use_track_numbers: bool = False
     use_album_track_numbers: bool = False
     use_artist_subfolders: bool = False
@@ -248,6 +248,50 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
         logger.warning("Failed to resolve providers for %s: %s", name, e)
 
     return providers
+
+
+def _no_providers_error_message(services: list[str]) -> str:
+    """Builds an actionable error when no provider (Python or JS extension)
+    could be resolved for any requested service.
+
+    SpotiFLAC now downloads exclusively through installed extensions — there
+    are no built-in native providers anymore. The most common cause of an
+    empty provider list is that no extension registry is configured at all,
+    so nothing was ever installed. Distinguish that case (fixable by setting
+    SPOTIFLAC_REGISTRIES) from the case where registries ARE configured but
+    still failed to produce a usable extension for these specific services
+    (network issue, registry doesn't list them, etc.).
+    """
+    services_str = ", ".join(services)
+
+    urls: list[str] = []
+    try:
+        from .extensions import registry_config
+
+        urls = registry_config.effective_urls()
+    except Exception as e:
+        logger.debug("[downloader] Unable to inspect registry config: %s", e)
+
+    if not urls:
+        return (
+            f"No extensions found for: [{services_str}]. SpotiFLAC downloads "
+            "exclusively through installed extensions, and no extension "
+            "registry is currently configured, so none were ever installed.\n"
+            "Fix: export a registry URL with SPOTIFLAC_REGISTRIES, or add it "
+            "to a .env file (in the project folder or ~/.spotiflac_env), e.g.:\n"
+            '  export SPOTIFLAC_REGISTRIES="https://your-registry-url/registry.json"\n'
+            "or in .env:\n"
+            "  SPOTIFLAC_REGISTRIES=https://your-registry-url/registry.json\n"
+            "(comma-separate multiple registry URLs)."
+        )
+
+    registry_word = "registry is" if len(urls) == 1 else "registries are"
+    return (
+        f"No valid providers found in: [{services_str}]. {len(urls)} extension "
+        f"{registry_word} configured but none of them produced a working "
+        "extension for these services. Check your network connection, or that "
+        "these services are actually listed in the registry."
+    )
 
 
 async def _move_file_async(src: str, dst: str) -> None:
@@ -588,8 +632,7 @@ class DownloadWorker:
         for name in self._opts.services:
             result.extend(_build_providers_for_name(name, self._opts))
         if not result:
-            msg = f"No valid providers found in: {self._opts.services}"
-            raise ValueError(msg)
+            raise ValueError(_no_providers_error_message(self._opts.services))
         return result
 
     def _close_providers(self) -> None:
@@ -930,7 +973,11 @@ class SpotiflacDownloader:
             )
             opts = replace(opts, output_path=None)
 
-        if opts.use_track_numbers or "{position}" in opts.filename_format:
+        uses_position = (
+            isinstance(opts.filename_format, str)
+            and "{position}" in opts.filename_format
+        )
+        if opts.use_track_numbers or uses_position:
             logger.warning(
                 "[playlists] track numbers depend on the merged playlist order: "
                 "filenames will change whenever a playlist does, and already "

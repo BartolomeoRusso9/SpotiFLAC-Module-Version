@@ -8,7 +8,7 @@ Fetch Spotify track metadata and retrieve matching lossless audio through Tidal,
 [![Python versions](https://img.shields.io/pypi/pyversions/spotiflac?logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/)
 [![GitHub downloads](https://img.shields.io/github/downloads/BartolomeoRusso9/SpotiFLAC-Module-Version/total?color=22c55e&labelColor=black&logo=github&label=Downloads)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases)
 [![PyPI downloads](https://img.shields.io/pepy/dt/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000)](https://pypi.org/project/SpotiFLAC/)
-[![Telegram community](https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white)](https://t.me/c/SpotiFLAC_Chat)
+[![Telegram community](https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white)](https://t.me/SpotiFLAC_Chat)
 
 ## Disclaimer
 
@@ -660,6 +660,126 @@ spotiflac https://open.spotify.com/track/... ./downloads \
 
 ---
 
+## Local Tagging
+
+Improve your existing music library by automatically matching local audio files against Spotify metadata and applying professional-grade tags. This is useful for:
+
+- Fixing incomplete or incorrect tags on older ripped CDs or downloads
+- Enriching a library with album art, genres, BPM, ISRCs, and other metadata from Spotify and MusicBrainz
+- Bulk-updating hundreds of files in a single operation
+
+The Local Tagging system works in **three phases**:
+
+1. **Scan** — reads all audio files in a folder, extracts their current tags, and (for files with no tags) guesses artist/title from the filename
+2. **Match** — searches for each file using the extracted or guessed metadata, returns ranked candidate matches from Spotify sorted by confidence
+3. **Apply** — writes the chosen metadata to each file with automatic backup
+
+### Supported Audio Formats
+
+Scans and tags any format that SpotiFLAC can write: FLAC, MP3, M4A/AAC, OGG Vorbis, Opus, WAV, AIFF, WMA, WavPack, Monkey's Audio, Musepack, TrueAudio.
+
+### Using the GUI / Web Interface
+
+Open the **"Fix Local Files"** tab and follow the wizard:
+
+1. **Choose a folder** — browse to your music directory (or drag & drop a folder onto the interface)
+2. **Review matches** — SpotiFLAC scans, matches, and displays each file with up to 5 candidate matches, sorted by confidence (0–100)
+3. **Select metadata** — for each file, choose which match to apply, or skip it entirely
+4. **Preview changes** — see what tags will be written before applying
+5. **Apply** — apply all changes at once with progress tracking and automatic per-file backup
+
+Files with confidence ≥ 90% are marked as "safe to auto-apply"; files below that threshold are flagged for manual review.
+
+### Using the Python API
+
+```python
+import asyncio
+from SpotiFLAC.core.local_processor import (
+    scan_and_match_async,
+    retag_local_file_async,
+    default_embed_options,
+)
+from SpotiFLAC.core.models import TrackMetadata
+
+async def fix_library(folder_path: str) -> None:
+    # Phase 1 & 2: scan folder and find matches for each file
+    entries = await scan_and_match_async(
+        folder_path,
+        recursive=True,           # scan subdirectories too
+        candidates_per_file=5,    # show top 5 matches
+    )
+
+    # Phase 3: apply metadata for each file
+    embed_opts = default_embed_options()
+    for entry in entries:
+        if entry.best and entry.is_safe_match:  # confidence >= 90%
+            result = await retag_local_file_async(
+                file_path=str(entry.info.file_path),
+                metadata=entry.best.metadata,
+                options=embed_opts,
+                backup=True,  # automatic .bak backup
+            )
+            if result.success:
+                print(f"✓ {entry.info.file_path}: tagged successfully")
+            else:
+                print(f"✗ {entry.info.file_path}: {result.error}")
+
+asyncio.run(fix_library("~/Music/MyLibrary"))
+```
+
+### Match Confidence & Safety
+
+Matching uses a **string-similarity algorithm** that compares the file's title + artist against each Spotify search result:
+
+- **Confidence ≥ 90%** — marked as "safe" and can be auto-applied without review
+- **Confidence < 90%** — flagged for manual review to avoid mislabeling
+
+The matching algorithm is heuristic and does not analyze audio content — it compares text only. A track with unusual spelling or featuring artists can have legitimate lower scores even when the match is correct. Always review before applying in bulk if you're unsure.
+
+### Metadata Written
+
+When applying a match, the following tags are written (previous tags are stripped):
+
+- Standard tags: title, artist, album, album artist, date, disc, track number, genre
+- Extended metadata: ISRC, BPM, labels, lyrics (if `embed_lyrics=True`)
+- Cover art: highest-resolution available from Spotify and enrichment providers
+- MusicBrainz enrichment: genre, BPM, organization/label, UPC (if available)
+
+### Backup & Recovery
+
+Every file gets an automatic `.bak` backup before tagging:
+
+```text
+MyTrack.flac         (original)
+MyTrack.flac.bak     (backup)
+```
+
+If something goes wrong during the apply step, the backup is restored and the operation is rolled back for that file. You can also delete `.bak` files manually after confirming the results are correct.
+
+### Per-File Customization
+
+Fine-tune embedding options for specific use cases:
+
+```python
+from SpotiFLAC.core.tagger import EmbedOptions
+
+custom_opts = EmbedOptions(
+    embed_cover=True,
+    embed_lyrics=True,
+    lyrics_type="lrc",
+    flac_compression_level=8,
+)
+
+result = await retag_local_file_async(
+    file_path="song.flac",
+    metadata=matched_metadata,
+    options=custom_opts,
+    backup=True,
+)
+```
+
+---
+
 ## CLI Usage (standalone executables)
 
 ```bash
@@ -766,7 +886,9 @@ chmod +x SpotiFLAC-Linux-arm64
 | `post_download_action` | `str` | `"none"` | Action after all downloads finish: `"none"`, `"open_folder"`, `"notify"`, `"command"`. |
 | `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{skipped}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 
-### Filename Format Placeholders
+### Filename Format Placeholders & Custom Formatting
+
+#### String Template with Placeholders
 
 When customizing the `filename_format` string, you can use the following dynamic tags:
 
@@ -780,6 +902,76 @@ When customizing the `filename_format` string, you can use the following dynamic
 - `{date}` — Full release date (e.g., `YYYY-MM-DD`)
 - `{year}` — Release year (e.g., `YYYY`)
 - `{isrc}` — Track ISRC code
+- `{platform}` — Source platform (e.g., `"tidal"`, `"soundcloud"`, `"youtube"`) — *the extension/service that provided the download*
+- `{id}` — Platform-specific track ID (e.g., Tidal track ID, SoundCloud user ID, YouTube video ID) — useful for tracing a file back to its origin
+
+**Examples:**
+
+```python
+SpotiFLAC(
+    url="https://open.spotify.com/track/...",
+    output_dir="./downloads",
+    services=["ext:tidal-web"],
+    # Standard string template
+    filename_format="{year} - {album}/{track}. {title}",
+)
+
+# Using platform and ID in the filename (flat):
+SpotiFLAC(
+    url="https://open.spotify.com/playlist/...",
+    output_dir="./downloads",
+    filename_format="{platform}_{album}_{title}",
+)
+```
+
+#### Custom Function (Lambda) for Advanced Logic
+
+For complex naming rules, pass a **callable** (function or lambda) instead of a string. The function receives:
+
+- `metadata` — the `TrackMetadata` object
+- `platform` — the source platform string (e.g., `"tidal"`)
+- `native_id` — the platform-specific ID, or `None` if not available
+- `**kwargs` — additional context
+
+The function must return a **filename** (without directory or extension — those are added automatically).
+
+**Example — use ISRC if available, fall back to platform_id:**
+
+```python
+from SpotiFLAC import SpotiFLAC
+
+def my_filename_logic(metadata, platform, native_id, **kwargs):
+    """
+    Prioritize ISRC, then fall back to platform_id for traceability,
+    then just use the title.
+    """
+    if metadata.isrc:
+        return metadata.isrc
+    
+    if native_id:
+        return f"{platform}_{native_id}"
+    
+    return metadata.title
+
+SpotiFLAC(
+    url="https://open.spotify.com/album/...",
+    output_dir="./downloads",
+    services=["ext:tidal-web", "ext:soundcloud-web"],
+    filename_format=my_filename_logic,  # Pass the function directly
+)
+```
+
+**Example — include platform and year in filename (flat):**
+
+```python
+SpotiFLAC(
+    url="https://open.spotify.com/playlist/...",
+    output_dir="./downloads",
+    filename_format=lambda metadata, platform, native_id, **kw: (
+        f"{platform}_{metadata.year or 'unknown'}_{metadata.title}"
+    ),
+)
+```
 
 ### CLI Flag Reference
 

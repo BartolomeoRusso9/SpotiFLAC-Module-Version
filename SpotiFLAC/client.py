@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from typing_extensions import Self
 
@@ -45,7 +45,7 @@ class AsyncSpotiFLAC:
         self,
         output_dir: str,
         services: list[str] | None = None,
-        filename_format: str = "{title} - {artist}",
+        filename_format: str | Callable[..., str] = "{title} - {artist}",
         use_track_numbers: bool = False,
         use_album_track_numbers: bool = False,
         use_artist_subfolders: bool = False,
@@ -225,7 +225,7 @@ def SpotiFLAC(
     url: str | list[str],
     output_dir: str,
     services: list[str] | None = None,
-    filename_format: str = "{title} - {artist}",
+    filename_format: str | Callable[..., str] = "{title} - {artist}",
     use_track_numbers: bool = False,
     use_album_track_numbers: bool = False,
     use_artist_subfolders: bool = False,
