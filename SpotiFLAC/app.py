@@ -574,6 +574,122 @@ class SpotiFLAC_API:
         ).start()
         return {"status": "started"}
 
+    # ── Local Auto-Tagger (Phase 5: GUI/Web) ────────────────────────────────
+
+    def _serialize_scan_entry(self, entry) -> dict:
+        info = entry.info
+        candidates = [
+            {
+                "confidence": c.confidence,
+                "is_safe": c.is_safe,
+                "metadata": c.metadata.model_dump(),
+            }
+            for c in entry.candidates
+        ]
+        return {
+            "file_path": info.file_path,
+            "old_title": info.old_title,
+            "old_artist": info.old_artist,
+            "old_album": info.old_album,
+            "old_year": info.old_year,
+            "old_genre": info.old_genre,
+            "old_cover_base64": info.old_cover_base64,
+            "has_tags": info.has_tags,
+            "guessed_title": info.guessed_title,
+            "guessed_artist": info.guessed_artist,
+            "error": info.error,
+            "candidates": candidates,
+        }
+
+    def _scan_local_thread(self, path) -> None:
+        try:
+            from .core.local_processor import scan_and_match_async
+
+            entries = asyncio.run(scan_and_match_async(path))
+            payload = [self._serialize_scan_entry(e) for e in entries]
+            self._push("app_local_scan_results", {"path": path, "files": payload})
+        except Exception as e:
+            self.log(f"[local-tagger] scan failed: {e}", "error")
+            self._push("app_local_scan_error", str(e))
+
+    def scan_local(self, path: str) -> dict:
+        """Phase 5, Task 2: scans `path` (file or folder) and matches every
+        track found, in a background thread. Results arrive via the
+        'app_local_scan_results' push event — see _serialize_scan_entry()
+        for the exact shape (a list of {file_path, old_*, candidates: [...]}).
+        """
+        if not path:
+            return {"status": "error", "error": "No path given"}
+        threading.Thread(
+            target=self._scan_local_thread,
+            args=(path,),
+            daemon=True,
+        ).start()
+        return {"status": "started"}
+
+    def _apply_local_tags_thread(self, items) -> None:
+        try:
+            from .core.models import TrackMetadata
+            from .core.local_processor import (
+                default_embed_options,
+                retag_local_file_async,
+            )
+
+            opts = default_embed_options()
+            results = []
+            total = len(items)
+
+            for idx, item in enumerate(items, start=1):
+                file_path = item.get("file_path", "")
+                metadata_dict = item.get("metadata") or {}
+                backup = item.get("backup", True)
+                try:
+                    metadata = TrackMetadata.model_validate(metadata_dict)
+                    result = asyncio.run(
+                        retag_local_file_async(
+                            file_path, metadata, opts, backup=backup
+                        ),
+                    )
+                    results.append(
+                        {
+                            "file_path": result.file_path,
+                            "success": result.success,
+                            "error": result.error,
+                        },
+                    )
+                except Exception as e:
+                    results.append(
+                        {"file_path": file_path, "success": False, "error": str(e)},
+                    )
+
+                self._push(
+                    "app_local_apply_progress",
+                    {"done": idx, "total": total, "last": results[-1]},
+                )
+
+            self._push("app_local_apply_finished", {"results": results})
+        except Exception as e:
+            self.log(f"[local-tagger] apply failed: {e}", "error")
+            self._push("app_local_apply_error", str(e))
+
+    def apply_local_tags(self, items: list) -> dict:
+        """Phase 5, Task 5: applies the chosen match for each item in
+        `items` — a list of {file_path, metadata, backup?} dicts, where
+        `metadata` is one of the `candidates[i].metadata` dicts a prior
+        scan_local() call pushed. Runs in a background thread; per-file
+        progress arrives via 'app_local_apply_progress', the final summary
+        via 'app_local_apply_finished' (both pushed — see set_window()/
+        webapp.py for how push reaches the frontend in each mode).
+        """
+        if not items:
+            return {"status": "error", "error": "Nothing to apply"}
+        threading.Thread(
+            target=self._apply_local_tags_thread,
+            args=(items,),
+            daemon=True,
+        ).start()
+        return {"status": "started"}
+
     def search_code(self, query, path=".", limit=200):
         """Search repository codebase (substring case-insensitive).
 

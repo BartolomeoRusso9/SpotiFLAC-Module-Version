@@ -442,6 +442,42 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "Placeholders: {folder} {succeeded} {failed}",
     )
 
+    # ── Local Auto-Tagger ────────────────────────────────────────────────────
+    local_grp = parser.add_argument_group("Local Auto-Tagger")
+    local_grp.add_argument(
+        "--tag-local",
+        metavar="PATH",
+        default=None,
+        help="Scan a local audio file or folder (FLAC, MP3, M4A/AAC, OGG "
+        "Vorbis, Opus, WAV, AIFF, WMA, WavPack, Monkey's Audio, Musepack, "
+        "TrueAudio), match each track against online metadata, and re-tag "
+        "it. Runs instead of a normal download when given; url/output_dir "
+        "are ignored.",
+    )
+    local_grp.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="With --tag-local: scan and match only, print what would change, "
+        "write nothing to disk.",
+    )
+    local_grp.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="With --tag-local: automatically apply every 'safe match' "
+        "(confidence >= 90%%) without asking for confirmation. Files below "
+        "that threshold are still skipped and reported, never applied "
+        "automatically — use the GUI/web tab to review those.",
+    )
+    local_grp.add_argument(
+        "--no-backup",
+        action="store_true",
+        default=False,
+        help="With --tag-local: skip the automatic .bak backup before "
+        "overwriting each file. Not recommended.",
+    )
+
     return parser.parse_args()
 
 
@@ -591,6 +627,24 @@ async def amain() -> None:
         from .webapp import run_async as run_web
 
         await run_web(host=web_args.host, port=web_args.port)
+        return
+
+    if "--tag-local" in sys.argv:
+        local_parser = argparse.ArgumentParser(add_help=False)
+        local_parser.add_argument("--tag-local")
+        local_parser.add_argument("--dry-run", action="store_true", default=False)
+        local_parser.add_argument("--force", action="store_true", default=False)
+        local_parser.add_argument("--no-backup", action="store_true", default=False)
+        local_args, _ = local_parser.parse_known_args(sys.argv[1:])
+
+        from .core.local_processor import run_local_tagging_cli
+
+        await run_local_tagging_cli(
+            local_args.tag_local,
+            dry_run=local_args.dry_run,
+            force=local_args.force,
+            backup=not local_args.no_backup,
+        )
         return
 
     if "--interactive" in sys.argv:

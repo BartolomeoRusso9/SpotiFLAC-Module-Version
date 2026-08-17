@@ -3599,3 +3599,248 @@ window.__set_version_label = function (version) {
   const hero = document.getElementById('hero-version');
   if (hero) hero.innerText = 'v' + version;
 };
+// ══════════ LOCAL AUTO-TAGGER LOGIC ══════════
+
+let localScanData = [];
+
+// ── Drag & drop for the "Fix Local Files" target directory ─────────────────
+//
+// A dropped item only carries a real, absolute filesystem path when the app
+// is running as a native pywebview window (pywebview's embedded webview
+// exposes File.path for dropped files/folders, unlike a normal browser
+// sandbox). In plain browser/web mode there is no way for JS to learn the
+// server-side path of something dragged from the user's OS file manager, so
+// we fall back to asking the user to type/paste it instead.
+function onLocalDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    $('local-drop-zone').classList.add('drag-over');
+}
+
+function onLocalDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    $('local-drop-zone').classList.remove('drag-over');
+}
+
+function onLocalDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    $('local-drop-zone').classList.remove('drag-over');
+
+    const files = e.dataTransfer?.files;
+    if (!files || !files.length) return;
+
+    const dropped = files[0];
+    const realPath = dropped.path; // populated by pywebview's desktop webview
+
+    if (realPath) {
+        $('local-path-input').value = realPath;
+        if (files.length > 1) {
+            toastMgr.info(`Using "${realPath.split(/[\\/]/).pop()}" — drop one folder/file at a time.`);
+        }
+        startLocalScan();
+        return;
+    }
+
+    toastMgr.warning(
+        "Browsers can't reveal the real folder path of a dropped item — "
+        + "paste the absolute path into the field above instead."
+    );
+}
+
+function startLocalScan() {
+    const path = $('local-path-input').value.trim();
+    if (!path) { 
+        toastMgr.error("Please enter a valid folder or file path."); 
+        return; 
+    }
+    
+    setTaBtnState($('btn-scan-local'), 'loading');
+    $('local-results-wrap').classList.add('hidden');
+    $('local-footer').classList.add('hidden');
+    
+    if (window.pywebview?.api) {
+        window.pywebview.api.scan_local(path);
+        toastMgr.info("Scanning local files... this may take a moment.");
+    } else {
+        toastMgr.warning("Demo mode: Local scanning not available.");
+        setTimeout(() => setTaBtnState($('btn-scan-local'), 'default'), 1000);
+    }
+}
+
+// Called by backend when scanning finishes
+window.app_local_scan_results = function(payload) {
+    setTaBtnState($('btn-scan-local'), 'default');
+    localScanData = payload.files || [];
+    renderLocalTracks();
+    $('local-results-wrap').classList.remove('hidden');
+    $('local-footer').classList.remove('hidden');
+    updateLocalSelection();
+    toastMgr.success(`Scan complete: found ${localScanData.length} files.`);
+};
+
+// Called by backend on scan error
+window.app_local_scan_error = function(err) {
+    setTaBtnState($('btn-scan-local'), 'error');
+    setTimeout(() => setTaBtnState($('btn-scan-local'), 'default'), 2500);
+    toastMgr.error("Scan failed: " + err);
+};
+
+function renderLocalTracks() {
+    const container = $('local-track-rows');
+    container.innerHTML = '';
+    
+    if (!localScanData.length) {
+        container.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--muted);font-size:14px;">No supported audio files found in this folder (FLAC, MP3, M4A/AAC, OGG, Opus, WAV, AIFF, WMA, WavPack, APE and more).</div>';
+        return;
+    }
+    
+    localScanData.forEach((item, i) => {
+        const best = item.candidates && item.candidates[0];
+        const hasMatch = !!best;
+        const isSafe = hasMatch && best.is_safe;
+        
+        const oldCover = item.old_cover_base64 
+            ? `<img src="${item.old_cover_base64}" alt="cover">` 
+            : `🎵`;
+            
+        const fileName = item.file_path.split(/[\\/]/).pop();
+        const oldTitle = item.old_title || item.guessed_title || fileName;
+        const oldArtist = item.old_artist || item.guessed_artist || "Unknown Artist";
+        
+        let newCol = `<div style="color:var(--muted); font-size:12.5px; font-style:italic;">No match found</div>`;
+        let scoreCol = `<span class="local-badge err">No Match</span>`;
+        let checkbox = `<input type="checkbox" class="local-cb" value="${i}" disabled>`;
+        
+        if (hasMatch) {
+            const newCover = best.metadata.cover_url || best.metadata.cover || '';
+            const newCoverHtml = newCover ? `<img src="${newCover}">` : `🎵`;
+            
+            // Diffing logic: mark as different if texts don't match (case insensitive)
+            const hlTitle = oldTitle.toLowerCase() !== best.metadata.title.toLowerCase() ? 'diff' : '';
+            const hlArtist = oldArtist.toLowerCase() !== best.metadata.first_artist.toLowerCase() ? 'diff' : '';
+            
+            newCol = `
+                <div class="local-cell-content">
+                    <div class="local-thumb">${newCoverHtml}</div>
+                    <div class="local-info">
+                        <div class="local-title ${hlTitle}" title="New: ${escHtml(best.metadata.title)}">${escHtml(best.metadata.title)}</div>
+                        <div class="local-artist ${hlArtist}">${escHtml(best.metadata.first_artist)}</div>
+                    </div>
+                </div>
+            `;
+            
+            scoreCol = `<span class="local-badge ${isSafe ? 'ok' : 'warn'}" title="Confidence Score">${best.confidence}%</span>`;
+            checkbox = `<input type="checkbox" class="local-cb" value="${i}" ${isSafe ? 'checked' : ''} onchange="updateLocalSelection()">`;
+        } else if (item.error) {
+            scoreCol = `<span class="local-badge err">Error</span>`;
+            newCol = `<div style="color:var(--red); font-size:11px;">${escHtml(item.error)}</div>`;
+        }
+
+        const row = document.createElement('div');
+        row.className = 'track-row local-row';
+        row.style.gridTemplateColumns = "24px 1fr 80px 1fr";
+        row.style.cursor = "default";
+        
+        row.innerHTML = `
+            <div class="tr-check">${checkbox}</div>
+            <div class="local-cell-content">
+                <div class="local-thumb">${oldCover}</div>
+                <div class="local-info">
+                    <div class="local-title" title="Current: ${escHtml(oldTitle)}">${escHtml(oldTitle)}</div>
+                    <div class="local-artist">${escHtml(oldArtist)}</div>
+                    <div style="font-family:'JetBrains Mono', monospace; font-size:9.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:3px;" title="${escHtml(item.file_path)}">${escHtml(fileName)}</div>
+                </div>
+            </div>
+            <div style="text-align:center;">${scoreCol}</div>
+            ${newCol}
+        `;
+        container.appendChild(row);
+    });
+}
+
+function toggleAllLocal(cb) {
+    document.querySelectorAll('.local-cb:not([disabled])').forEach(c => c.checked = cb.checked);
+    updateLocalSelection();
+}
+
+function updateLocalSelection() {
+    const checked = document.querySelectorAll('.local-cb:checked').length;
+    const total = document.querySelectorAll('.local-cb:not([disabled])').length;
+    
+    const checkAll = $('check-all-local');
+    if (checkAll) {
+        checkAll.checked = total > 0 && checked === total;
+        checkAll.indeterminate = checked > 0 && checked < total;
+    }
+    
+    $('local-selected-count').textContent = `${checked} file(s) selected`;
+    $('btn-apply-local').disabled = checked === 0;
+}
+
+function applyLocalTags() {
+    const selectedIdx = Array.from(document.querySelectorAll('.local-cb:checked')).map(cb => parseInt(cb.value));
+    if (!selectedIdx.length) return;
+    
+    const itemsToApply = selectedIdx.map(i => {
+        const entry = localScanData[i];
+        return {
+            file_path: entry.file_path,
+            metadata: entry.candidates[0].metadata,
+            backup: true // Always create .bak for safety
+        };
+    });
+    
+    setTaBtnState($('btn-apply-local'), 'loading');
+    $('btn-apply-local').innerHTML = `Applying 0/${itemsToApply.length}...`;
+    
+    if (window.pywebview?.api) {
+        window.pywebview.api.apply_local_tags(itemsToApply);
+    } else {
+        setTimeout(() => window.app_local_apply_finished({results: itemsToApply.map(i => ({success: true}))}), 2000);
+    }
+}
+
+// Called per file during apply
+window.app_local_apply_progress = function(payload) {
+    const { done, total, last } = payload;
+    $('btn-apply-local').innerHTML = `Applying ${done}/${total}...`;
+    
+    if (!last.success) {
+        const name = last.file_path.split(/[\\/]/).pop();
+        toastMgr.error(`Failed to tag ${name}: ${last.error}`);
+    }
+};
+
+// Called when all applies are done
+window.app_local_apply_finished = function(payload) {
+    setTaBtnState($('btn-apply-local'), 'success');
+    setTimeout(() => {
+        setTaBtnState($('btn-apply-local'), 'default');
+        $('btn-apply-local').innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          Apply Selected Tags`;
+    }, 2000);
+    
+    const successes = payload.results.filter(r => r.success).length;
+    const errors = payload.results.length - successes;
+    
+    if (errors === 0) {
+        toastMgr.success(`Done! ${successes} files successfully tagged and backed up.`);
+    } else {
+        toastMgr.warning(`Finished: ${successes} tagged, ${errors} failed.`);
+    }
+    
+    // Automatically deselect checkboxes for successful ones so the user knows they are done
+    payload.results.forEach((res, i) => {
+        if (res.success) {
+            const cb = document.querySelectorAll('.local-cb:not([disabled])')[i];
+            if (cb) {
+                cb.checked = false;
+                cb.disabled = true;
+            }
+        }
+    });
+    updateLocalSelection();
+};

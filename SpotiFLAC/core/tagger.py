@@ -1,9 +1,17 @@
-"""Centralized Tagger — support for FLAC and MP3.
+"""Centralized Tagger — support for all common audio formats.
 
-FLAC → Vorbis Comment tags via mutagen.flac
-MP3  → ID3v2 tags via mutagen.id3
+FLAC              → Vorbis Comment tags via mutagen.flac
+MP3               → ID3v2 tags via mutagen.id3
+M4A / AAC / MP4   → MP4 atoms via mutagen.mp4
+OGG Vorbis        → Vorbis Comment tags via mutagen.oggvorbis
+Opus              → Vorbis Comment tags via mutagen.oggopus
+WAV               → ID3v2 tags (RIFF chunk) via mutagen.wave
+AIFF              → ID3v2 tags via mutagen.aiff
+WMA               → ASF attributes via mutagen.asf
+WavPack / APE /
+Musepack / TTA    → APEv2 tags via mutagen.apev2 (and format-specific wrappers)
 
-Both formats share the same pipeline:
+All formats share the same pipeline:
   1. Metadata enrichment (Deezer / Apple / Qobuz / Tidal / SoundCloud)
   2. Cover art (HD if available)
   3. Multi-provider lyrics
@@ -16,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -58,6 +67,32 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 SOURCE_TAG = "https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version"
+
+# ---------------------------------------------------------------------------
+# Supported extensions, grouped by tagging system
+# ---------------------------------------------------------------------------
+
+_EXT_FLAC = {".flac"}
+_EXT_MP3 = {".mp3"}
+_EXT_M4A = {".m4a", ".aac", ".mp4", ".m4b", ".m4r"}
+_EXT_OGG_VORBIS = {".ogg", ".oga"}
+_EXT_OPUS = {".opus"}
+_EXT_WAV = {".wav", ".wave"}
+_EXT_AIFF = {".aiff", ".aif", ".afc"}
+_EXT_WMA = {".wma"}
+_EXT_APEV2 = {".wv", ".ape", ".mpc", ".mp+", ".tta"}
+
+SUPPORTED_SUFFIXES = (
+    _EXT_FLAC
+    | _EXT_MP3
+    | _EXT_M4A
+    | _EXT_OGG_VORBIS
+    | _EXT_OPUS
+    | _EXT_WAV
+    | _EXT_AIFF
+    | _EXT_WMA
+    | _EXT_APEV2
+)
 
 # ---------------------------------------------------------------------------
 # FLAC tag → ID3 frame mapping
@@ -105,6 +140,41 @@ _M4A_MAP: dict[str, str] = {
     "ORGANIZATION": "----:com.apple.iTunes:LABEL",
     "LABEL": "----:com.apple.iTunes:LABEL",
     "BPM": "tmpo",
+}
+
+# Vorbis tag → chiave ASF/WMA
+_ASF_MAP: dict[str, str] = {
+    "TITLE": "Title",
+    "ARTIST": "Author",
+    "ALBUM": "WM/AlbumTitle",
+    "ALBUMARTIST": "WM/AlbumArtist",
+    "DATE": "WM/Year",
+    "GENRE": "WM/Genre",
+    "COMPOSER": "WM/Composer",
+    "COPYRIGHT": "Copyright",
+    "ORGANIZATION": "WM/Publisher",
+    "LABEL": "WM/Publisher",
+    "ISRC": "WM/ISRC",
+    "BPM": "WM/BeatsPerMinute",
+    "ORIGINALDATE": "WM/OriginalReleaseYear",
+    "ORIGINALYEAR": "WM/OriginalReleaseYear",
+}
+
+# Vorbis tag → chiave APEv2 (WavPack / Monkey's Audio / Musepack / TTA)
+_APEV2_MAP: dict[str, str] = {
+    "TITLE": "Title",
+    "ARTIST": "Artist",
+    "ALBUM": "Album",
+    "ALBUMARTIST": "Album Artist",
+    "DATE": "Year",
+    "GENRE": "Genre",
+    "COMPOSER": "Composer",
+    "COPYRIGHT": "Copyright",
+    "ORGANIZATION": "Label",
+    "LABEL": "Label",
+    "ISRC": "ISRC",
+    "BPM": "BPM",
+    "ORIGINALDATE": "Original Release Year",
 }
 
 # Tag che finiscono in TXXX con la chiave come desc
@@ -194,26 +264,51 @@ def _print_mb_summary(mb_tags: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Internal: write ID3 tags to an MP3 file
+# Shared ID3 frame builder (MP3 / WAV / AIFF all use ID3v2 tags)
 # ---------------------------------------------------------------------------
 
+_ID3_FRAME_MAP: dict[str, type] = {
+    "TITLE": TIT2,
+    "ARTIST": TPE1,
+    "ALBUM": TALB,
+    "ALBUMARTIST": TPE2,
+    "DATE": TDRC,
+    "ISRC": TSRC,
+    "COPYRIGHT": TCOP,
+    "COMPOSER": TCOM,
+    "ORGANIZATION": TPUB,
+    "LABEL": TPUB,  # alias — uno sovrascrive l'altro (ok)
+    "GENRE": TCON,
+    "BPM": TBPM,
+    "ORIGINALDATE": TDOR,
+    "ARTISTSORT": TSOP,
+    "ALBUMARTISTSORT": TSO2,
+}
 
-def _embed_id3(
-    path: Path,
+_ID3_REVERSE_MAP: dict[str, str] = {v: k for k, v in _ID3_FRAME_MAP.items() if k != "LABEL"}
+
+_ID3_SKIP = {
+    "TRACKNUMBER",
+    "TRACKTOTAL",
+    "DISCNUMBER",
+    "DISCTOTAL",
+    "URL",
+    "DESCRIPTION",
+}
+
+
+def _apply_id3_frames(
+    audio: ID3,
     tags: dict[str, str],
     cover_data: bytes | None,
     lyrics: str | None,
     lyrics_prov: str,
     cover_mime: str = "image/jpeg",
 ) -> None:
-    """Scrive tutti i tag ID3 su un file MP3."""
-    try:
-        audio = ID3(str(path))
-        audio.delete()
-    except ID3NoHeaderError:
-        audio = ID3()
+    """Applies ID3v2 frames onto an already-open, already-cleared tag container.
 
-    # ── numeri track e disco ──────────────────────────────────────────────
+    Shared by MP3, WAV and AIFF embedding — all three use ID3v2 tags.
+    """
     track_num = tags.get("TRACKNUMBER", "0")
     track_total = tags.get("TRACKTOTAL", "0")
     disc_num = tags.get("DISCNUMBER", "1")
@@ -229,40 +324,13 @@ def _embed_id3(
     audio.add(TRCK(encoding=3, text=trck))
     audio.add(TPOS(encoding=3, text=tpos))
 
-    # ── tag con frame dedicato ─────────────────────────────────────────────
-    _FRAME_MAP: dict[str, type] = {
-        "TITLE": TIT2,
-        "ARTIST": TPE1,
-        "ALBUM": TALB,
-        "ALBUMARTIST": TPE2,
-        "DATE": TDRC,
-        "ISRC": TSRC,
-        "COPYRIGHT": TCOP,
-        "COMPOSER": TCOM,
-        "ORGANIZATION": TPUB,
-        "LABEL": TPUB,  # alias — uno sovrascrive l'altro (ok)
-        "GENRE": TCON,
-        "BPM": TBPM,
-        "ORIGINALDATE": TDOR,
-        "ARTISTSORT": TSOP,
-        "ALBUMARTISTSORT": TSO2,
-    }
-    skip = {
-        "TRACKNUMBER",
-        "TRACKTOTAL",
-        "DISCNUMBER",
-        "DISCTOTAL",
-        "URL",
-        "DESCRIPTION",
-    }
-
     for key, val in tags.items():
         key_up = key.upper()
-        if key_up in skip or not val:
+        if key_up in _ID3_SKIP or not val:
             continue
 
-        if key_up in _FRAME_MAP:
-            frame_cls = _FRAME_MAP[key_up]
+        if key_up in _ID3_FRAME_MAP:
+            frame_cls = _ID3_FRAME_MAP[key_up]
             audio.add(frame_cls(encoding=3, text=str(val)))
 
         elif key_up == "URL":
@@ -285,7 +353,7 @@ def _embed_id3(
     # ── lyrics ─────────────────────────────────────────────────────────────
     if lyrics and lyrics.strip():
         audio.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
-        logger.debug("[tagger/mp3] lyrics embedded (%d chars)", len(lyrics))
+        logger.debug("[tagger/id3] lyrics embedded (%d chars)", len(lyrics))
 
     # ── cover art ──────────────────────────────────────────────────────────
     if cover_data:
@@ -299,8 +367,121 @@ def _embed_id3(
             ),
         )
 
+
+def _read_id3_container_tags(id3: ID3 | None) -> EmbeddedTags:
+    """Reads back tags from an already-open ID3 instance (MP3 / WAV / AIFF)."""
+    result = EmbeddedTags()
+    if id3 is None:
+        return result
+
+    for frame in id3.values():
+        fid = frame.FrameID
+        if fid == "APIC":
+            result.cover_data = frame.data
+            result.cover_mime = frame.mime or "image/jpeg"
+        elif fid == "USLT":
+            result.lyrics = str(frame.text)
+        elif fid == "TXXX":
+            if frame.text:
+                result.tags[str(frame.desc).upper()] = str(frame.text[0])
+        elif fid == "WXXX":
+            result.tags["URL"] = frame.url
+        elif fid == "TRCK":
+            parts = str(frame.text[0]).split("/")
+            result.tags["TRACKNUMBER"] = parts[0]
+            if len(parts) > 1:
+                result.tags["TRACKTOTAL"] = parts[1]
+        elif fid == "TPOS":
+            parts = str(frame.text[0]).split("/")
+            result.tags["DISCNUMBER"] = parts[0]
+            if len(parts) > 1:
+                result.tags["DISCTOTAL"] = parts[1]
+        elif fid in _ID3_REVERSE_MAP:
+            key = _ID3_REVERSE_MAP[fid]
+            if getattr(frame, "text", None):
+                result.tags[key] = str(frame.text[0])
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Internal: write ID3 tags to an MP3 file
+# ---------------------------------------------------------------------------
+
+
+def _embed_id3(
+    path: Path,
+    tags: dict[str, str],
+    cover_data: bytes | None,
+    lyrics: str | None,
+    lyrics_prov: str,
+    cover_mime: str = "image/jpeg",
+) -> None:
+    """Scrive tutti i tag ID3 su un file MP3."""
+    try:
+        audio = ID3(str(path))
+        audio.delete()
+    except ID3NoHeaderError:
+        audio = ID3()
+
+    _apply_id3_frames(audio, tags, cover_data, lyrics, lyrics_prov, cover_mime)
+
     audio.save(str(path), v2_version=3)
     logger.debug("[tagger/mp3] tags written: %s", path.name)
+
+
+# ---------------------------------------------------------------------------
+# Internal: write ID3 tags to a WAV file
+# ---------------------------------------------------------------------------
+
+
+def _embed_wav(
+    path: Path,
+    tags: dict[str, str],
+    cover_data: bytes | None,
+    lyrics: str | None,
+    lyrics_prov: str,
+    cover_mime: str = "image/jpeg",
+) -> None:
+    """Scrive tag ID3v2 (chunk RIFF) su un file WAV."""
+    from mutagen.wave import WAVE
+
+    audio = WAVE(str(path))
+    if audio.tags is None:
+        audio.add_tags()
+    audio.tags.clear()
+
+    _apply_id3_frames(audio.tags, tags, cover_data, lyrics, lyrics_prov, cover_mime)
+
+    audio.save()
+    logger.debug("[tagger/wav] tags written: %s", path.name)
+
+
+# ---------------------------------------------------------------------------
+# Internal: write ID3 tags to an AIFF file
+# ---------------------------------------------------------------------------
+
+
+def _embed_aiff(
+    path: Path,
+    tags: dict[str, str],
+    cover_data: bytes | None,
+    lyrics: str | None,
+    lyrics_prov: str,
+    cover_mime: str = "image/jpeg",
+) -> None:
+    """Scrive tag ID3v2 su un file AIFF."""
+    from mutagen.aiff import AIFF
+
+    audio = AIFF(str(path))
+    if audio.tags is None:
+        audio.add_tags()
+    audio.tags.clear()
+
+    _apply_id3_frames(audio.tags, tags, cover_data, lyrics, lyrics_prov, cover_mime)
+
+    audio.save()
+    logger.debug("[tagger/aiff] tags written: %s", path.name)
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +524,346 @@ def _embed_flac(
     logger.debug("[tagger/flac] tags written: %s", path.name)
 
 
+# ---------------------------------------------------------------------------
+# Internal: write Vorbis Comment tags to OGG Vorbis / Opus files
+# ---------------------------------------------------------------------------
+
+
+def _embed_vorbis_comment(
+    path: Path,
+    tags: dict[str, str],
+    cover_data: bytes | None,
+    lyrics: str | None,
+    lyrics_prov: str,
+    multi_artist: bool,
+    file_cls: type,
+) -> None:
+    """Scrive tag Vorbis Comment su un file OGG Vorbis o Opus.
+
+    Il container OGG non ha un blocco immagine nativo come FLAC: la cover
+    viene incorporata secondo lo standard `METADATA_BLOCK_PICTURE`
+    (blocco FLAC Picture codificato in base64), riconosciuto da tutti i
+    player e tagger moderni (foobar2000, VLC, MusicBee, Picard, ecc.).
+    """
+    audio = file_cls(str(path))
+    audio.delete()
+
+    tags = dict(tags)
+    if lyrics and lyrics.strip():
+        tags["LYRICS"] = lyrics
+        logger.debug("[tagger/ogg] lyrics embedded (%d chars)", len(lyrics))
+
+    for key, val in tags.items():
+        if multi_artist and key in ("ARTIST", "ALBUMARTIST") and "," in val:
+            parts = [a.strip() for a in val.split(",") if a.strip()]
+            audio[key] = parts
+        else:
+            audio[key] = val
+
+    if cover_data:
+        import base64
+
+        pic = FlacPicture()
+        pic.data = cover_data
+        pic.type = PictureType.COVER_FRONT
+        pic.mime = "image/jpeg"
+        pic.desc = "Cover"
+        audio["METADATA_BLOCK_PICTURE"] = [base64.b64encode(pic.write()).decode("ascii")]
+
+    audio.save()
+    logger.debug("[tagger/ogg] tags written: %s", path.name)
+
+
+def _embed_oggvorbis(path, tags, cover_data, lyrics, lyrics_prov, multi_artist) -> None:
+    from mutagen.oggvorbis import OggVorbis
+
+    _embed_vorbis_comment(path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggVorbis)
+
+
+def _embed_oggopus(path, tags, cover_data, lyrics, lyrics_prov, multi_artist) -> None:
+    from mutagen.oggopus import OggOpus
+
+    _embed_vorbis_comment(path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggOpus)
+
+
+def _read_vorbis_comment_tags(path: Path, file_cls: type) -> EmbeddedTags:
+    audio = file_cls(str(path))
+    result = EmbeddedTags()
+
+    for key in audio:
+        if key.upper() == "METADATA_BLOCK_PICTURE":
+            continue
+        values = [v for v in audio[key] if v]
+        if not values:
+            continue
+        key_up = key.upper()
+        if key_up in _LYRICS_TAGS:
+            result.lyrics = values[0]
+        elif key_up in _MULTI_VALUE_TAGS:
+            result.tags[key_up] = ", ".join(values)
+        else:
+            result.tags[key_up] = values[0]
+
+    pic_values = audio.get("METADATA_BLOCK_PICTURE") or audio.get("metadata_block_picture")
+    if pic_values:
+        import base64
+
+        try:
+            pic = FlacPicture(base64.b64decode(pic_values[0]))
+            result.cover_data = pic.data
+            result.cover_mime = pic.mime or "image/jpeg"
+        except Exception as exc:
+            logger.debug("[tagger/ogg] could not decode cover: %s", exc)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Internal: write ASF attributes to a WMA file
+# ---------------------------------------------------------------------------
+
+
+def _build_wm_picture(data: bytes, mime: str, desc: str = "Cover", pic_type: int = 3) -> bytes:
+    """Builds a `WM/Picture` attribute value per the ASF picture layout.
+
+    Layout: 1 byte picture type, 4 bytes (LE) image size, UTF-16LE
+    null-terminated MIME type, UTF-16LE null-terminated description,
+    then the raw image bytes.
+    """
+    mime_bytes = mime.encode("utf-16-le") + b"\x00\x00"
+    desc_bytes = desc.encode("utf-16-le") + b"\x00\x00"
+    header = struct.pack("<B", pic_type) + struct.pack("<I", len(data)) + mime_bytes + desc_bytes
+    return header + data
+
+
+def _parse_wm_picture(data: bytes) -> tuple[bytes, str]:
+    """Parses a `WM/Picture` attribute value back into (image_bytes, mime)."""
+    if len(data) < 5:
+        return b"", "image/jpeg"
+
+    size = struct.unpack("<I", data[1:5])[0]
+    pos = 5
+
+    def _read_wstr(start: int) -> tuple[str, int]:
+        end = start
+        while end + 1 < len(data) and data[end : end + 2] != b"\x00\x00":
+            end += 2
+        return data[start:end].decode("utf-16-le", errors="ignore"), end + 2
+
+    mime, pos = _read_wstr(pos)
+    _desc, pos = _read_wstr(pos)
+    img_data = data[pos : pos + size] if size else data[pos:]
+    return img_data, mime or "image/jpeg"
+
+
+def _embed_asf(
+    path: Path,
+    tags: dict[str, str],
+    cover_data: bytes | None,
+    lyrics: str | None,
+    lyrics_prov: str,
+) -> None:
+    """Scrive attributi ASF su un file WMA."""
+    from mutagen.asf import ASF, ASFByteArrayAttribute
+
+    audio = ASF(str(path))
+    audio.tags.clear()
+
+    track_num = tags.get("TRACKNUMBER")
+    disc_num = tags.get("DISCNUMBER")
+    if track_num:
+        audio.tags["WM/TrackNumber"] = str(track_num)
+    if disc_num:
+        audio.tags["WM/PartOfSet"] = str(disc_num)
+
+    skip = {"TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL", "URL", "DESCRIPTION"}
+    for key, val in tags.items():
+        key_up = key.upper()
+        if key_up in skip or not val:
+            continue
+        asf_key = _ASF_MAP.get(key_up, f"WM/{key_up.title().replace('_', '')}")
+        audio.tags[asf_key] = str(val)
+
+    if lyrics and lyrics.strip():
+        audio.tags["WM/Lyrics"] = lyrics
+        logger.debug("[tagger/wma] lyrics embedded (%d chars)", len(lyrics))
+
+    if cover_data:
+        pic_bytes = _build_wm_picture(cover_data, "image/jpeg")
+        audio.tags["WM/Picture"] = [ASFByteArrayAttribute(pic_bytes)]
+
+    audio.save()
+    logger.debug("[tagger/wma] tags written: %s", path.name)
+
+
+def _read_asf_tags(path: Path) -> EmbeddedTags:
+    from mutagen.asf import ASF
+
+    audio = ASF(str(path))
+    result = EmbeddedTags()
+    reverse = {v: k for k, v in _ASF_MAP.items()}
+
+    for key, values in (audio.tags or {}).items():
+        if not values:
+            continue
+
+        if key == "WM/Picture":
+            try:
+                raw = bytes(values[0].value)
+                img, mime = _parse_wm_picture(raw)
+                if img:
+                    result.cover_data = img
+                    result.cover_mime = mime
+            except Exception as exc:
+                logger.debug("[tagger/wma] could not decode cover: %s", exc)
+            continue
+
+        if key == "WM/Lyrics":
+            result.lyrics = str(values[0])
+            continue
+
+        if key == "WM/TrackNumber":
+            result.tags["TRACKNUMBER"] = str(values[0])
+            continue
+
+        if key == "WM/PartOfSet":
+            result.tags["DISCNUMBER"] = str(values[0])
+            continue
+
+        name = reverse.get(key)
+        if name is None:
+            continue
+        result.tags[name] = str(values[0])
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Internal: write APEv2 tags (WavPack / Monkey's Audio / Musepack / TTA)
+# ---------------------------------------------------------------------------
+
+
+def _apev2_class_for(suffix: str) -> type:
+    if suffix == ".wv":
+        from mutagen.wavpack import WavPack
+
+        return WavPack
+    if suffix == ".ape":
+        from mutagen.monkeysaudio import MonkeysAudio
+
+        return MonkeysAudio
+    if suffix in (".mpc", ".mp+"):
+        from mutagen.musepack import Musepack
+
+        return Musepack
+    if suffix == ".tta":
+        from mutagen.trueaudio import TrueAudio
+
+        return TrueAudio
+
+    from mutagen.apev2 import APEv2File
+
+    return APEv2File
+
+
+def _embed_apev2(
+    path: Path,
+    tags: dict[str, str],
+    cover_data: bytes | None,
+    lyrics: str | None,
+    lyrics_prov: str,
+    file_cls: type,
+) -> None:
+    """Scrive tag APEv2 su file WavPack / Monkey's Audio / Musepack / TrueAudio."""
+    from mutagen.apev2 import APEBinaryValue
+
+    audio = file_cls(str(path))
+    if audio.tags is None:
+        audio.add_tags()
+    audio.tags.clear()
+
+    track_num = tags.get("TRACKNUMBER", "0")
+    track_total = tags.get("TRACKTOTAL", "0")
+    disc_num = tags.get("DISCNUMBER", "1")
+    disc_total = tags.get("DISCTOTAL", "1")
+
+    if track_num and track_num != "0":
+        audio.tags["Track"] = (
+            f"{track_num}/{track_total}" if track_total and track_total != "0" else track_num
+        )
+    if disc_num and disc_total and disc_total != "1":
+        audio.tags["Disc"] = f"{disc_num}/{disc_total}"
+
+    skip = {"TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL", "URL", "DESCRIPTION"}
+    for key, val in tags.items():
+        key_up = key.upper()
+        if key_up in skip or not val:
+            continue
+        ape_key = _APEV2_MAP.get(key_up, key_up.title())
+        audio.tags[ape_key] = str(val)
+
+    if tags.get("URL"):
+        audio.tags["Weblink"] = tags["URL"]
+
+    if lyrics and lyrics.strip():
+        audio.tags["Lyrics"] = lyrics
+        logger.debug("[tagger/apev2] lyrics embedded (%d chars)", len(lyrics))
+
+    if cover_data:
+        value = "Cover Art (Front).jpg\x00".encode() + cover_data
+        audio.tags["Cover Art (Front)"] = APEBinaryValue(value)
+
+    audio.save()
+    logger.debug("[tagger/apev2] tags written: %s", path.name)
+
+
+def _read_apev2_tags(path: Path, file_cls: type) -> EmbeddedTags:
+    audio = file_cls(str(path))
+    result = EmbeddedTags()
+    if audio.tags is None:
+        return result
+
+    reverse = {v.upper(): k for k, v in _APEV2_MAP.items()}
+
+    for key, value in audio.tags.items():
+        key_up = key.upper()
+
+        if key_up.startswith("COVER ART"):
+            raw = bytes(value)
+            img = raw.split(b"\x00", 1)[1] if b"\x00" in raw else raw
+            result.cover_data = img
+            result.cover_mime = "image/png" if img[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
+            continue
+
+        if key_up == "LYRICS":
+            result.lyrics = str(value)
+            continue
+
+        if key_up == "TRACK":
+            parts = str(value).split("/")
+            result.tags["TRACKNUMBER"] = parts[0]
+            if len(parts) > 1:
+                result.tags["TRACKTOTAL"] = parts[1]
+            continue
+
+        if key_up == "DISC":
+            parts = str(value).split("/")
+            result.tags["DISCNUMBER"] = parts[0]
+            if len(parts) > 1:
+                result.tags["DISCTOTAL"] = parts[1]
+            continue
+
+        name = reverse.get(key_up, key_up.replace(" ", ""))
+        result.tags[name] = str(value)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher: write tags according to the target file's extension
+# ---------------------------------------------------------------------------
+
+
 async def _write_tags_async(
     path: Path,
     tags: dict[str, str],
@@ -350,26 +871,37 @@ async def _write_tags_async(
     lyrics: str | None,
     lyrics_prov: str,
     multi_artist: bool,
-    is_flac: bool,
-    is_mp3: bool,
-    is_m4a: bool,
+    suffix: str,
 ) -> None:
-    if is_flac:
+    if suffix in _EXT_FLAC:
         await asyncio.to_thread(
-            _embed_flac,
-            path,
-            tags,
-            cover_data,
-            lyrics,
-            lyrics_prov,
-            multi_artist,
+            _embed_flac, path, tags, cover_data, lyrics, lyrics_prov, multi_artist,
         )
-    elif is_mp3:
+    elif suffix in _EXT_MP3:
         await asyncio.to_thread(_embed_id3, path, tags, cover_data, lyrics, lyrics_prov)
-    elif is_m4a:
+    elif suffix in _EXT_M4A:
         await asyncio.to_thread(_embed_m4a, path, tags, cover_data, lyrics, lyrics_prov)
+    elif suffix in _EXT_OGG_VORBIS:
+        await asyncio.to_thread(
+            _embed_oggvorbis, path, tags, cover_data, lyrics, lyrics_prov, multi_artist,
+        )
+    elif suffix in _EXT_OPUS:
+        await asyncio.to_thread(
+            _embed_oggopus, path, tags, cover_data, lyrics, lyrics_prov, multi_artist,
+        )
+    elif suffix in _EXT_WAV:
+        await asyncio.to_thread(_embed_wav, path, tags, cover_data, lyrics, lyrics_prov)
+    elif suffix in _EXT_AIFF:
+        await asyncio.to_thread(_embed_aiff, path, tags, cover_data, lyrics, lyrics_prov)
+    elif suffix in _EXT_WMA:
+        await asyncio.to_thread(_embed_asf, path, tags, cover_data, lyrics, lyrics_prov)
+    elif suffix in _EXT_APEV2:
+        file_cls = _apev2_class_for(suffix)
+        await asyncio.to_thread(
+            _embed_apev2, path, tags, cover_data, lyrics, lyrics_prov, file_cls,
+        )
     else:
-        raise SpotiflacError(ErrorKind.FILE_IO, f"Unsupported file type: {path.suffix}")
+        raise SpotiflacError(ErrorKind.FILE_IO, f"Unsupported file type: {suffix}")
 
 
 def _embed_m4a(
@@ -531,10 +1063,35 @@ def read_embedded_tags(filepath: str | Path) -> EmbeddedTags:
     suffix = path.suffix.lower()
 
     try:
-        if suffix == ".flac":
+        if suffix in _EXT_FLAC:
             return _read_flac_tags(path)
-        if suffix in (".m4a", ".aac", ".mp4"):
+        if suffix in _EXT_M4A:
             return _read_m4a_tags(path)
+        if suffix in _EXT_MP3:
+            return _read_id3_container_tags(ID3(str(path)))
+        if suffix in _EXT_WAV:
+            from mutagen.wave import WAVE
+
+            return _read_id3_container_tags(WAVE(str(path)).tags)
+        if suffix in _EXT_AIFF:
+            from mutagen.aiff import AIFF
+
+            return _read_id3_container_tags(AIFF(str(path)).tags)
+        if suffix in _EXT_OGG_VORBIS:
+            from mutagen.oggvorbis import OggVorbis
+
+            return _read_vorbis_comment_tags(path, OggVorbis)
+        if suffix in _EXT_OPUS:
+            from mutagen.oggopus import OggOpus
+
+            return _read_vorbis_comment_tags(path, OggOpus)
+        if suffix in _EXT_WMA:
+            return _read_asf_tags(path)
+        if suffix in _EXT_APEV2:
+            file_cls = _apev2_class_for(suffix)
+            return _read_apev2_tags(path, file_cls)
+    except ID3NoHeaderError:
+        return EmbeddedTags()
     except Exception as exc:
         logger.warning("[tagger] could not read tags from %s: %s", path.name, exc)
         return EmbeddedTags()
@@ -543,29 +1100,43 @@ def read_embedded_tags(filepath: str | Path) -> EmbeddedTags:
     return EmbeddedTags()
 
 
+async def transfer_tags_async(
+    source: str | Path,
+    dest: str | Path,
+) -> bool:
+    """Copies tags, cover art and lyrics from `source` onto `dest`.
+
+    Works across any pair of supported formats (e.g. FLAC → OGG, M4A → MP3,
+    WAV → WMA, …). Returns True when tags were written, False when the
+    source carried nothing worth transferring.
+    """
+    embedded = await asyncio.to_thread(read_embedded_tags, source)
+    if not embedded:
+        return False
+
+    dest_path = Path(dest)
+    await _write_tags_async(
+        dest_path,
+        dict(embedded.tags),
+        embedded.cover_data,
+        embedded.lyrics,
+        "",
+        True,
+        dest_path.suffix.lower(),
+    )
+    return True
+
+
 async def transfer_tags_to_mp3_async(
     source: str | Path,
     dest: str | Path,
 ) -> bool:
     """Copies tags, cover art and lyrics from `source` onto an MP3 at `dest`.
 
-    Returns True when tags were written, False when the source carried nothing
-    worth transferring.
+    Kept as a thin, explicitly-named wrapper around `transfer_tags_async`
+    for backward compatibility with existing call sites.
     """
-    embedded = await asyncio.to_thread(read_embedded_tags, source)
-    if not embedded:
-        return False
-
-    await asyncio.to_thread(
-        _embed_id3,
-        Path(dest),
-        dict(embedded.tags),
-        embedded.cover_data,
-        embedded.lyrics,
-        "",
-        embedded.cover_mime,
-    )
-    return True
+    return await transfer_tags_async(source, dest)
 
 
 @dataclass
@@ -585,10 +1156,6 @@ class EmbedOptions:
 # Public API
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
 
 async def embed_metadata_async(
     filepath: str | Path,
@@ -603,11 +1170,9 @@ async def embed_metadata_async(
     if not path.exists():
         raise SpotiflacError(ErrorKind.FILE_IO, f"File not found: {path}")
 
-    is_mp3 = path.suffix.lower() == ".mp3"
-    is_flac = path.suffix.lower() == ".flac"
-    is_m4a = path.suffix.lower() in (".m4a", ".aac")
+    suffix = path.suffix.lower()
 
-    if not is_mp3 and not is_flac and not is_m4a:
+    if suffix not in SUPPORTED_SUFFIXES:
         logger.warning("[tagger] formato non supportato: %s — skip", path.suffix)
         return
 
@@ -719,9 +1284,7 @@ async def embed_metadata_async(
             lyrics,
             lyrics_prov,
             multi_artist,
-            is_flac,
-            is_mp3,
-            is_m4a,
+            suffix,
         )
     except SpotiflacError:
         raise

@@ -550,6 +550,36 @@ def _summary(cfg: dict) -> None:
 async def run_interactive() -> dict:
     _header()
 
+    # ── 0. Operation Mode ───────────────────────────────────────────────────
+    op_mode = _ask_choice(
+        "Operation Mode:",
+        options=["Download music", "Fix Local Files (Auto-Tagger)"],
+        default="Download music",
+    )
+
+    if op_mode == "Fix Local Files (Auto-Tagger)":
+        _section("Local Auto-Tagger")
+        print(
+            DIM(
+                "  Scan local audio files, match them against online metadata, and apply cleaned tags/covers.\n"
+            )
+        )
+
+        path = ""
+        while not path:
+            path = _ask("Folder or file path to scan")
+
+        dry_run = _ask_bool("Dry run? (Scan and match only, write nothing)", False)
+        force = _ask_bool(
+            "Force? (Automatically apply safe matches without asking)", False
+        )
+        backup = _ask_bool("Create .bak backups before overwriting?", True)
+
+        from .core.local_processor import run_local_tagging_cli
+
+        await run_local_tagging_cli(path, dry_run=dry_run, force=force, backup=backup)
+        sys.exit(0)
+
     # ── Health check ────────────────────────────────────────────────────────
     while True:
         health_status = await _display_health_check()

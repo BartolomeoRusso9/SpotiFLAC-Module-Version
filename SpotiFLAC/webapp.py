@@ -79,6 +79,8 @@ ALLOWED_METHODS: set[str] = {
     "fetch_metadata",
     "download_tracks",
     "run_health_check",
+    "scan_local",
+    "apply_local_tags",
 }
 
 
