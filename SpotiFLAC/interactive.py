@@ -873,17 +873,17 @@ async def run_interactive() -> dict:
         elif has_qobuz or has_tidal or has_deezer or has_apple:
             combined_options = [
                 "LOSSLESS (FLAC on Deezer/Tidal, '6' on Qobuz, ALAC on Apple)",
-                "HI_RES (Best available everywhere, '27' on Qobuz)",
+                "HI_RES_LOSSLESS (Best available everywhere, '27' on Qobuz)",
             ]
             if has_apple:
                 combined_options.append(
-                    "ATMOS (Spatial Audio on Apple, HI_RES elsewhere)",
+                    "ATMOS (Spatial Audio on Apple, HI_RES_LOSSLESS elsewhere)",
                 )
                 combined_options.append("AC3 (Dolby Digital on Apple, HIGH elsewhere)")
             if has_tidal:
                 combined_options.insert(
                     1,
-                    "DOLBY_ATMOS (Dolby Atmos on Tidal, HI_RES elsewhere)",
+                    "DOLBY_ATMOS (Dolby Atmos on Tidal, HI_RES_LOSSLESS elsewhere)",
                 )
             if has_qobuz:
                 combined_options.append("7 (Hi-Res mid on Qobuz only)")
@@ -905,8 +905,8 @@ async def run_interactive() -> dict:
             )
             if q_choice.startswith("LOSSLESS"):
                 cfg["quality"] = "LOSSLESS"
-            elif q_choice.startswith("HI_RES"):
-                cfg["quality"] = "HI_RES"
+            elif q_choice.startswith("HI_RES_LOSSLESS"):
+                cfg["quality"] = "HI_RES_LOSSLESS"
             elif q_choice.startswith("DOLBY_ATMOS"):
                 cfg["quality"] = "DOLBY_ATMOS"
             elif q_choice.startswith("ATMOS"):
@@ -924,7 +924,7 @@ async def run_interactive() -> dict:
         else:
             q = _ask_choice(
                 "Quality:",
-                options=["LOSSLESS", "HI_RES", "HIGH"],
+                options=["LOSSLESS", "HI_RES_LOSSLESS", "HIGH"],
                 default="LOSSLESS",
             )
             cfg["quality"] = normalize_quality(q)
