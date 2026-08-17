@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SpotiFLAC</title>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">  
+  <link rel="stylesheet" href="styles.css?v=20260817">  
 </head>
 <body>
 
@@ -310,7 +310,7 @@
                   <button onclick="closeFolderBrowser()" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:18px; padding:0; line-height:1;">×</button>
                 </div>
                 <div style="padding:12px 20px; border-bottom:1px solid var(--border); display:flex; gap:8px; align-items:center;">
-                  <button id="fb-back" onclick="navigateFolderBrowser('..')" style="background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:6px 12px; cursor:pointer; color:var(--text); font-size:12px;">← Back</button>
+                  <button id="fb-back" onclick="goFolderBrowserBack()" style="background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:6px 12px; cursor:pointer; color:var(--text); font-size:12px;">← Back</button>
                   <input type="text" id="fb-path" readonly style="flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text2); font-size:11px; font-family:monospace;">
                   <button onclick="setFolderPath()" style="background:var(--yellow); border:none; border-radius:6px; padding:6px 12px; cursor:pointer; color:black; font-weight:600; font-size:12px;">Select</button>
                 </div>
@@ -697,7 +697,7 @@
       </div>
     </div>
   </div>
-  </div><script src="toast-system.js"></script>
-  <script src="app.js"></script>
+  </div><script src="toast-system.js?v=20260817"></script>
+  <script src="app.js?v=20260817"></script>
 </body>
 </html>

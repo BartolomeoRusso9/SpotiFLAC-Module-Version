@@ -8,6 +8,9 @@ tags before writing new ones (see tagger._embed_flac / _embed_id3, both call
 audio.delete() first). What this module adds on top:
   - a temporary .bak backup before overwriting, restored automatically if
     anything goes wrong partway through
+  - MusicBrainz enrichment by ISRC (genre, MBIDs, barcode, label, ...),
+    merged into EmbedOptions.extra_tags right before the write — see
+    _with_musicbrainz_tags()
   - tying local_scanner (Phase 1) + local_matcher (Phase 2) + the tagger
     together into the "scan a folder, decide what to do with each file"
     workflows used by the CLI and the API layer
@@ -18,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -77,6 +80,41 @@ async def scan_and_match_async(
     return list(await asyncio.gather(*(_match_one(i) for i in infos)))
 
 
+async def _with_musicbrainz_tags(
+    metadata: TrackMetadata, opts: EmbedOptions
+) -> EmbedOptions:
+    """Looks up `metadata.isrc` on MusicBrainz and merges the resulting tags
+    (genre, MBIDs, barcode, label, ...) into `opts.extra_tags`.
+
+    Written as its own step (rather than inside embed_metadata_async) so a
+    MusicBrainz outage or missing ISRC never blocks the retag — on any
+    failure this just returns `opts` unchanged, same as if MusicBrainz
+    enrichment had never been requested. User-supplied `opts.extra_tags`
+    values still win over MusicBrainz's on a key clash.
+    """
+    if not metadata.isrc:
+        return opts
+
+    try:
+        from .musicbrainz import fetch_mb_metadata_async, mb_result_to_tags
+
+        mb_data = await fetch_mb_metadata_async(metadata.isrc)
+        mb_tags = mb_result_to_tags(mb_data)
+    except Exception as exc:
+        logger.debug(
+            "[local_processor] MusicBrainz enrichment failed for isrc=%s: %s",
+            metadata.isrc,
+            exc,
+        )
+        return opts
+
+    if not mb_tags:
+        return opts
+
+    merged = {**mb_tags, **(opts.extra_tags or {})}
+    return replace(opts, extra_tags=merged)
+
+
 async def retag_local_file_async(
     file_path: str | Path,
     metadata: TrackMetadata,
@@ -107,6 +145,8 @@ async def retag_local_file_async(
                 success=False,
                 error=f"Could not create backup, aborting before any write: {exc}",
             )
+
+    opts = await _with_musicbrainz_tags(metadata, opts)
 
     try:
         await embed_metadata_async(path, metadata, opts)

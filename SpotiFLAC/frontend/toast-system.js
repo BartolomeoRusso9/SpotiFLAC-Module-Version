@@ -21,12 +21,39 @@ class ToastManager {
 
   playSound(type) {
     if (!this.soundEnabled) return;
-    // Use a try-catch because browsers may block autoplay audio not started by the user
+
+    const tones = {
+      success: { frequency: 660, duration: 0.10 },
+      error: { frequency: 220, duration: 0.18 },
+      warning: { frequency: 440, duration: 0.12 },
+      info: { frequency: 520, duration: 0.08 },
+    };
+
+    const tone = tones[type] || tones.info;
+
     try {
-      const audio = new Audio(`assets/sounds/${type}.mp3`);
-      audio.volume = 0.5;
-      audio.play().catch(e => { /* Ignore auto-play policy errors */ });
-    } catch(e) {}
+      const AudioCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtor) return;
+
+      const ctx = new AudioCtor();
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      oscillator.type = 'sine';
+      oscillator.frequency.value = tone.frequency;
+
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + tone.duration);
+
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + tone.duration + 0.02);
+      oscillator.onended = () => ctx.close().catch(() => {});
+    } catch (e) {
+      // Browsers may block audio until user interaction; ignore silently.
+    }
   }
 
   getIcon(type) {

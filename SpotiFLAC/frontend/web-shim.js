@@ -44,7 +44,7 @@
     'check_tidal_api', 'open_config_folder', 'open_url', 'download_track_lyrics',
     'download_track_cover', 'download_cover', 'download_album_cover', 'download_all_covers',
     'download_all_lyrics', 'get_track_preview', 'fetch_metadata', 'download_tracks',
-    'run_health_check',
+    'run_health_check', 'scan_local', 'apply_local_tags', 'set_download_dir',
   ];
 
   const api = {};

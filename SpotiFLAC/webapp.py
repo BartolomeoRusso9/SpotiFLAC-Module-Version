@@ -26,7 +26,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -134,6 +134,17 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="SpotiFLAC Web")
 
+    @app.middleware("http")
+    async def _no_cache_frontend(request, call_next):
+        response = await call_next(request)
+        if request.url.path.endswith((".js", ".css", ".html")):
+            response.headers["Cache-Control"] = (
+                "no-store, no-cache, must-revalidate, max-age=0"
+            )
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     @app.on_event("startup")
     async def _on_startup() -> None:
         manager.bind_loop(asyncio.get_running_loop())
@@ -158,7 +169,9 @@ def create_app() -> FastAPI:
 
     # ── Dynamic dispatcher for every whitelisted Api method ────────────────
     @app.post("/api/{method_name}")
-    async def call_method(method_name: str, payload: Any = None) -> JSONResponse:
+    async def call_method(
+        method_name: str, payload: Any = Body(default=None)
+    ) -> JSONResponse:
         if method_name not in ALLOWED_METHODS:
             return JSONResponse(
                 {"error": f"Unknown or disallowed method: {method_name}"},
@@ -203,7 +216,7 @@ def create_app() -> FastAPI:
             base = base.resolve()
             if not base.is_dir():
                 base = Path.home().resolve()
-            entries = sorted(
+            directories = sorted(
                 (
                     p.name
                     for p in base.iterdir()
@@ -211,11 +224,24 @@ def create_app() -> FastAPI:
                 ),
                 key=str.lower,
             )
+            files = sorted(
+                (
+                    p.name
+                    for p in base.iterdir()
+                    if p.is_file() and not p.name.startswith(".")
+                ),
+                key=str.lower,
+            )
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         parent = str(base.parent) if base.parent != base else None
         return JSONResponse(
-            {"path": str(base), "parent": parent, "directories": entries},
+            {
+                "path": str(base),
+                "parent": parent,
+                "directories": directories,
+                "files": files,
+            },
         )
 
     @app.get("/api/get-home-dir")
@@ -244,11 +270,11 @@ def create_app() -> FastAPI:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
             "<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n"
-            '<script src="/web-shim.js"></script>\n'
+            '<script src="/web-shim.js?v=20260817"></script>\n'
         )
         html = html.replace(
-            '<script src="toast-system.js"></script>',
-            inject + '<script src="toast-system.js"></script>',
+            '<script src="toast-system.js?v=20260817"></script>',
+            inject + '<script src="toast-system.js?v=20260817"></script>',
         )
         return HTMLResponse(html)
 

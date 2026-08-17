@@ -32,11 +32,42 @@ logger = logging.getLogger(__name__)
 # lives in tagger.py so it can never fall out of sync with what gets written.
 SUPPORTED_EXTENSIONS = SUPPORTED_SUFFIXES
 
-# "Artist - Title.ext", "Artist_-_Title.ext", "01. Artist - Title.ext", etc.
+# Common local filename shapes: "Artist - Title.ext",
+# "Title - Artist.ext", "Artist_-_Title.ext", "01. Artist - Title.ext", etc.
 _FILENAME_PATTERN = re.compile(
     r"^(?:\d{1,3}[.\-_\s]+)?"  # optional leading track number
     r"(?P<artist>.+?)\s*[-–—_]\s*(?P<title>.+)$",
 )
+_FILENAME_TITLE_FIRST_PATTERN = re.compile(
+    r"^(?:\d{1,3}[.\-_\s]+)?"  # optional leading track number
+    r"(?P<title>.+?)\s*[-–—_]\s*(?P<artist>.+)$",
+)
+
+
+def _looks_like_artist(value: str) -> bool:
+    """Heuristic for whether a filename segment is more likely an artist name."""
+    text = value.strip()
+    if not text:
+        return False
+    lower = text.lower()
+    if any(token in lower for token in (" feat", " ft.", " ft", "&", "/", ",")):
+        return True
+    words = re.split(r"[\s_]+", text)
+    return len(words) > 1 and not any(ch.isdigit() for ch in text)
+
+
+def _filename_guess_score(artist: str, title: str) -> int:
+    """Higher score means more likely to be the correct artist/title split."""
+    score = 0
+    if _looks_like_artist(artist):
+        score += 5
+    if not _looks_like_artist(title):
+        score += 2
+    if len(title.split()) <= 3 and len(artist.split()) > 1:
+        score += 2
+    if len(artist.split()) > len(title.split()):
+        score += 1
+    return score
 
 
 @dataclass
@@ -71,19 +102,31 @@ def _guess_from_filename(path: Path) -> tuple[str, str]:
     """Fallback parser for files that have no embedded metadata.
 
     Files named like 'Artist - Title.flac' are parsed into both artist and title.
-    Plain names such as 'plain_track.flac' still produce a useful title to search
-    with, even though there is no reliable artist guess.
+    We also support title-first variants such as 'Ouverture - Lazza, Low Kidd.flac'
+    without losing the valid plain filename fallback for simple names like
+    'plain_track.flac'.
     """
     stem = path.stem
-    m = _FILENAME_PATTERN.match(stem)
-    if m:
-        artist = m.group("artist").strip().replace("_", " ")
-        title = m.group("title").strip().replace("_", " ")
+    candidates: list[tuple[str, str]] = []
+
+    for pattern in (_FILENAME_PATTERN, _FILENAME_TITLE_FIRST_PATTERN):
+        match = pattern.match(stem)
+        if not match:
+            continue
+
+        artist = match.group("artist").strip().replace("_", " ")
+        title = match.group("title").strip().replace("_", " ")
+        if artist and title:
+            candidates.append((artist, title))
+
+    if candidates:
+        best_artist, best_title = max(
+            candidates,
+            key=lambda pair: _filename_guess_score(*pair),
+        )
 
         # A single underscore or dash between two short words is often just a
-        # plain filename like 'plain_track' rather than a real "Artist - Title"
-        # split. In that case we keep the whole stem as the title and leave the
-        # artist empty so the search still has a useful value.
+        # plain filename like 'plain_track' rather than a real artist/title split.
         separator_count = sum(stem.count(ch) for ch in "_-–—")
         if (
             separator_count <= 1
@@ -93,7 +136,7 @@ def _guess_from_filename(path: Path) -> tuple[str, str]:
             cleaned = re.sub(r"[_\-.]+", " ", stem).strip()
             return "", cleaned if cleaned else ""
 
-        return artist, title
+        return best_artist, best_title
 
     cleaned = re.sub(r"[_\-.]+", " ", stem).strip()
     if not cleaned:

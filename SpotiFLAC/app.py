@@ -582,7 +582,14 @@ class SpotiFLAC_API:
             {
                 "confidence": c.confidence,
                 "is_safe": c.is_safe,
-                "metadata": c.metadata.model_dump(),
+                # first_artist is a computed property on TrackMetadata, not a
+                # stored field — model_dump() only includes real fields, so
+                # it has to be added back in explicitly or the frontend
+                # (which reads best.metadata.first_artist) gets undefined.
+                "metadata": {
+                    **c.metadata.model_dump(),
+                    "first_artist": c.metadata.first_artist,
+                },
             }
             for c in entry.candidates
         ]
@@ -892,17 +899,25 @@ class SpotiFLAC_API:
         return str(Path.home())
 
     def browse_folder(self, path: str | None = None) -> dict:
-        """List subdirectories for a folder, matching the web-mode /api/browse-folder payload."""
+        """List subdirectories and files for a folder, matching the web-mode /api/browse-folder payload."""
         base = Path(path).expanduser() if path else Path.home()
         try:
             base = base.resolve()
             if not base.is_dir():
                 base = Path.home().resolve()
-            entries = sorted(
+            directories = sorted(
                 (
                     p.name
                     for p in base.iterdir()
                     if p.is_dir() and not p.name.startswith(".")
+                ),
+                key=str.lower,
+            )
+            files = sorted(
+                (
+                    p.name
+                    for p in base.iterdir()
+                    if p.is_file() and not p.name.startswith(".")
                 ),
                 key=str.lower,
             )
@@ -912,9 +927,15 @@ class SpotiFLAC_API:
                 "path": str(base),
                 "parent": None,
                 "directories": [],
+                "files": [],
             }
         parent = str(base.parent) if base.parent != base else None
-        return {"path": str(base), "parent": parent, "directories": entries}
+        return {
+            "path": str(base),
+            "parent": parent,
+            "directories": directories,
+            "files": files,
+        }
 
     def set_download_dir(self, path: str) -> dict:
         """Web-mode equivalent of choose_folder(): sets the download

@@ -122,6 +122,26 @@ function switchView(name) {
 
 let networkStatus = { ip: '', country_name: 'Italy', country_code: 'IT' };
 
+// Fetches IP/country info for the Settings titlebar. Guarded throughout:
+// safe to call even if titlebar-network isn't present in the current
+// markup, and never throws on a failed/slow lookup.
+async function loadNetworkStatus() {
+  try {
+    const api = window.pywebview?.api;
+    if (!api || typeof api.get_network_status !== 'function') return;
+    const status = await api.get_network_status();
+    if (status) {
+      networkStatus = { ...networkStatus, ...status };
+    }
+    const ipEl = $('network-ip');
+    if (ipEl) ipEl.textContent = networkStatus.ip || '';
+    const countryEl = $('network-country');
+    if (countryEl) countryEl.textContent = networkStatus.country_name || '';
+  } catch (err) {
+    console.warn('[NetworkStatus] failed to load:', err);
+  }
+}
+
 function togglePublicIp() {
   /* removed by design */
 }
@@ -3652,11 +3672,23 @@ function onLocalDrop(e) {
 // ── Folder Browser for Local Auto-Tagger ──────────────────────────────────
 
 let currentFolderBrowserPath = null;
+let currentFolderBrowserParent = null;
+
+// Wrapper for the "← Back" button: navigateFolderBrowser() needs the real
+// parent path from the server (stored after each browse), not a literal
+// '..' — the server resolves paths itself and has no notion of a relative
+// '..' relative to nothing.
+function goFolderBrowserBack() {
+    if (currentFolderBrowserParent) {
+        navigateFolderBrowser(currentFolderBrowserParent);
+    }
+}
 
 async function openFolderBrowser() {
     const modal = $('folder-browser-modal');
     modal.classList.remove('hidden');
 
+    currentFolderBrowserParent = null;
     const currentPath = $('local-path-input').value.trim() || null;
 
     if (window.pywebview?.api) {
@@ -3725,29 +3757,56 @@ async function navigateFolderBrowser(path) {
         }
 
         currentFolderBrowserPath = data.path;
+        currentFolderBrowserParent = data.parent || null;
         $('fb-path').value = data.path;
 
         const entriesDiv = $('fb-entries');
         entriesDiv.innerHTML = '';
 
-        if (data.directories && data.directories.length > 0) {
-            data.directories.forEach(dirName => {
+        const items = [];
+        (data.directories || []).forEach(dirName => {
+            items.push({
+                type: 'dir',
+                name: dirName,
+                path: (data.path || '') + '/' + dirName,
+            });
+        });
+        (data.files || []).forEach(fileName => {
+            items.push({
+                type: 'file',
+                name: fileName,
+                path: (data.path || '') + '/' + fileName,
+            });
+        });
+
+        if (items.length > 0) {
+            items.forEach(item => {
                 const div = document.createElement('div');
                 div.style.cssText = 'padding:8px 12px; cursor:pointer; border-radius:6px; display:flex; align-items:center; gap:8px; color:var(--text); font-size:13px; border:1px solid transparent;';
-                div.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> ' + dirName;
+                const icon = item.type === 'dir'
+                    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>'
+                    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>';
+                div.innerHTML = icon + ' ' + item.name;
 
                 div.onmouseover = () => div.style.backgroundColor = 'var(--surface2)';
                 div.onmouseout = () => div.style.backgroundColor = 'transparent';
 
                 div.onclick = async () => {
-                    const nextPath = data.path + '/' + dirName;
-                    await navigateFolderBrowser(nextPath);
+                    if (item.type === 'dir') {
+                        await navigateFolderBrowser(item.path);
+                        return;
+                    }
+
+                    $('local-path-input').value = item.path;
+                    closeFolderBrowser();
+                    toastMgr.success(`Selected: ${item.path}`);
+                    startLocalScan();
                 };
 
                 entriesDiv.appendChild(div);
             });
         } else {
-            entriesDiv.innerHTML = '<div style="padding:20px; text-align:center; color:var(--muted); font-size:12px;">No subdirectories found.</div>';
+            entriesDiv.innerHTML = '<div style="padding:20px; text-align:center; color:var(--muted); font-size:12px;">No files or subdirectories found.</div>';
         }
 
         $('fb-back').disabled = !data.parent;
@@ -3764,26 +3823,44 @@ function setFolderPath() {
         $('local-path-input').value = currentFolderBrowserPath;
         closeFolderBrowser();
         toastMgr.success(`Selected: ${currentFolderBrowserPath}`);
+        startLocalScan();
     }
 }
 
-function startLocalScan() {
+async function startLocalScan() {
     const path = $('local-path-input').value.trim();
-    if (!path) { 
-        toastMgr.error("Please enter a valid folder or file path."); 
-        return; 
+    if (!path) {
+        toastMgr.error("Please enter a valid folder or file path.");
+        return;
     }
-    
+
     setTaBtnState($('btn-scan-local'), 'loading');
     $('local-results-wrap').classList.add('hidden');
     $('local-footer').classList.add('hidden');
-    
-    if (window.pywebview?.api) {
-        window.pywebview.api.scan_local(path);
+
+    try {
+        if (window.pywebview?.api && typeof window.pywebview.api.scan_local === 'function') {
+            await window.pywebview.api.scan_local(path);
+        } else {
+            const response = await fetch('/api/scan_local', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify([path]),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.error || 'Failed to start local scan');
+            }
+            if (data?.result?.status === 'error') {
+                throw new Error(data.result.error || 'Scan failed');
+            }
+        }
         toastMgr.info("Scanning local files... this may take a moment.");
-    } else {
-        toastMgr.warning("Demo mode: Local scanning not available.");
-        setTimeout(() => setTaBtnState($('btn-scan-local'), 'default'), 1000);
+    } catch (err) {
+        console.error('[LocalScan] start failed:', err);
+        setTaBtnState($('btn-scan-local'), 'error');
+        setTimeout(() => setTaBtnState($('btn-scan-local'), 'default'), 2500);
+        toastMgr.error(err.message || 'Failed to start local scan');
     }
 }
 
@@ -3834,17 +3911,19 @@ function renderLocalTracks() {
         if (hasMatch) {
             const newCover = best.metadata.cover_url || best.metadata.cover || '';
             const newCoverHtml = newCover ? `<img src="${newCover}">` : `🎵`;
-            
+            const newTitle = best.metadata.title || '';
+            const newArtist = best.metadata.first_artist || '';
+
             // Diffing logic: mark as different if texts don't match (case insensitive)
-            const hlTitle = oldTitle.toLowerCase() !== best.metadata.title.toLowerCase() ? 'diff' : '';
-            const hlArtist = oldArtist.toLowerCase() !== best.metadata.first_artist.toLowerCase() ? 'diff' : '';
+            const hlTitle = oldTitle.toLowerCase() !== newTitle.toLowerCase() ? 'diff' : '';
+            const hlArtist = oldArtist.toLowerCase() !== newArtist.toLowerCase() ? 'diff' : '';
             
             newCol = `
                 <div class="local-cell-content">
                     <div class="local-thumb">${newCoverHtml}</div>
                     <div class="local-info">
-                        <div class="local-title ${hlTitle}" title="New: ${escHtml(best.metadata.title)}">${escHtml(best.metadata.title)}</div>
-                        <div class="local-artist ${hlArtist}">${escHtml(best.metadata.first_artist)}</div>
+                        <div class="local-title ${hlTitle}" title="New: ${escHtml(newTitle)}">${escHtml(newTitle)}</div>
+                        <div class="local-artist ${hlArtist}">${escHtml(newArtist)}</div>
                     </div>
                 </div>
             `;

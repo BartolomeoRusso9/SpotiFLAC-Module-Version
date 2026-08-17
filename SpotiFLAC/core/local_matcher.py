@@ -90,7 +90,30 @@ async def search_and_match(
                 c.confidence = min(100.0, c.confidence + 5.0)
 
     candidates.sort(key=lambda c: c.confidence, reverse=True)
-    return candidates[:limit]
+    candidates = candidates[:limit]
+
+    # search_async() above is Spotify's lightweight search — it deliberately
+    # leaves several fields blank (release_date, composer, copyright, isrc,
+    # track_number, disc_number, total_tracks) and its cover art is often
+    # lower-resolution than the dedicated track endpoint. The local
+    # auto-tagger UI only ever previews/applies candidates[0], so fetch full
+    # details for that one match (same call the normal search→download flow
+    # already makes) instead of leaving it at search-result quality.
+    if candidates:
+        try:
+            full = await client.get_track_async(candidates[0].metadata.id)
+            candidates[0] = MatchCandidate(
+                metadata=full, confidence=candidates[0].confidence
+            )
+        except Exception as exc:
+            logger.debug(
+                "[local_matcher] full-detail fetch failed for %r, keeping "
+                "search-result metadata: %s",
+                candidates[0].metadata.id,
+                exc,
+            )
+
+    return candidates
 
 
 async def match_local_file(
