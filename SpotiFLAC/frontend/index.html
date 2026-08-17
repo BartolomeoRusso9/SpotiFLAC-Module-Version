@@ -303,10 +303,10 @@
                 Browse
               </button>
             </div>
-            <div id="folder-browser-modal" class="hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:9999;">
+            <div id="folder-browser-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="folder-browser-title" tabindex="-1" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:9999;">
               <div style="background:var(--surface); border:1px solid var(--border); border-radius:12px; width:90%; max-width:500px; max-height:80vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
                 <div style="padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-                  <div style="font-weight:600; color:var(--text);">Select Folder</div>
+                  <div id="folder-browser-title" style="font-weight:600; color:var(--text);">Select Folder</div>
                   <button onclick="closeFolderBrowser()" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:18px; padding:0; line-height:1;">×</button>
                 </div>
                 <div style="padding:12px 20px; border-bottom:1px solid var(--border); display:flex; gap:8px; align-items:center;">

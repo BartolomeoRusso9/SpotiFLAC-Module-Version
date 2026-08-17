@@ -639,6 +639,33 @@ class SpotiFLAC_API:
                 "error": f"Path does not exist: {path}",
             }
 
+        # Path traversal protection
+        from pathlib import Path
+        try:
+            resolved = Path(path).resolve()
+            approved_roots = [
+                Path(self.download_dir).resolve(),
+                Path.home().resolve(),
+            ]
+            is_safe = False
+            for root in approved_roots:
+                try:
+                    resolved.relative_to(root)
+                    is_safe = True
+                    break
+                except ValueError:
+                    continue
+            if not is_safe:
+                return {
+                    "status": "error",
+                    "error": "Access denied: path is outside approved directories",
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": f"Path validation failed: {e}",
+            }
+
         threading.Thread(
             target=self._scan_local_thread,
             args=(path,),
@@ -648,6 +675,7 @@ class SpotiFLAC_API:
 
     def _apply_local_tags_thread(self, items) -> None:
         try:
+            from pathlib import Path
             from .core.models import TrackMetadata
             from .core.local_processor import (
                 default_embed_options,
@@ -658,10 +686,45 @@ class SpotiFLAC_API:
             results = []
             total = len(items)
 
+            # Approved roots for path traversal protection
+            approved_roots = [
+                Path(self.download_dir).resolve(),
+                Path.home().resolve(),
+            ]
+
+            def _is_path_safe(candidate_path: str) -> bool:
+                try:
+                    resolved = Path(candidate_path).resolve()
+                    for root in approved_roots:
+                        try:
+                            resolved.relative_to(root)
+                            return True
+                        except ValueError:
+                            continue
+                    return False
+                except Exception:
+                    return False
+
             for idx, item in enumerate(items, start=1):
                 file_path = item.get("file_path", "")
                 metadata_dict = item.get("metadata") or {}
                 backup = item.get("backup", True)
+
+                # Path traversal protection
+                if not _is_path_safe(file_path):
+                    results.append(
+                        {
+                            "file_path": file_path,
+                            "success": False,
+                            "error": "Access denied: path is outside approved directories",
+                        }
+                    )
+                    self._push(
+                        "app_local_apply_progress",
+                        {"done": idx, "total": total, "last": results[-1]},
+                    )
+                    continue
+
                 try:
                     metadata = TrackMetadata.model_validate(metadata_dict)
                     result = asyncio.run(

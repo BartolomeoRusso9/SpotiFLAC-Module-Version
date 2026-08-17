@@ -35,7 +35,17 @@ class ToastManager {
       const AudioCtor = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtor) return;
 
-      const ctx = new AudioCtor();
+      // Reuse shared AudioContext
+      if (!this.audioContext) {
+        this.audioContext = new AudioCtor();
+      }
+      const ctx = this.audioContext;
+
+      // Resume if suspended (e.g., autoplay policy)
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
       const oscillator = ctx.createOscillator();
       const gain = ctx.createGain();
 
@@ -50,7 +60,10 @@ class ToastManager {
       gain.connect(ctx.destination);
       oscillator.start();
       oscillator.stop(ctx.currentTime + tone.duration + 0.02);
-      oscillator.onended = () => ctx.close().catch(() => {});
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        gain.disconnect();
+      };
     } catch (e) {
       // Browsers may block audio until user interaction; ignore silently.
     }

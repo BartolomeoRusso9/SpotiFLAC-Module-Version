@@ -288,10 +288,9 @@ def _no_providers_error_message(services: list[str]) -> str:
     registry_word = "registry is" if len(urls) == 1 else "registries are"
     return (
         f"No valid providers found in: [{services_str}]. {len(urls)} extension "
-        f"{registry_word} configured ({', '.join(urls)}) but none of them "
-        "produced a working extension for these services. Check your network "
-        "connection, or that these services are actually listed in the "
-        "registry."
+        f"{registry_word} configured but none of them produced a working "
+        "extension for these services. Check your network connection, or that "
+        "these services are actually listed in the registry."
     )
 
 

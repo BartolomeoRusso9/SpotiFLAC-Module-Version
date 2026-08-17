@@ -3687,6 +3687,16 @@ function goFolderBrowserBack() {
 async function openFolderBrowser() {
     const modal = $('folder-browser-modal');
     modal.classList.remove('hidden');
+    modal.focus();
+
+    // Escape key handler
+    const escapeHandler = (e) => {
+        if (e.key === 'Escape') {
+            closeFolderBrowser();
+        }
+    };
+    modal.addEventListener('keydown', escapeHandler);
+    modal.dataset.escapeAttached = 'true';
 
     currentFolderBrowserParent = null;
     const currentPath = $('local-path-input').value.trim() || null;
@@ -3786,7 +3796,8 @@ async function navigateFolderBrowser(path) {
                 const icon = item.type === 'dir'
                     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>'
                     : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>';
-                div.innerHTML = icon + ' ' + item.name;
+                div.innerHTML = icon + ' ';
+                div.appendChild(document.createTextNode(item.name));
 
                 div.onmouseover = () => div.style.backgroundColor = 'var(--surface2)';
                 div.onmouseout = () => div.style.backgroundColor = 'transparent';
@@ -3840,7 +3851,10 @@ async function startLocalScan() {
 
     try {
         if (window.pywebview?.api && typeof window.pywebview.api.scan_local === 'function') {
-            await window.pywebview.api.scan_local(path);
+            const result = await window.pywebview.api.scan_local(path);
+            if (result && result.status === 'error') {
+                throw new Error(result.error || 'Scan failed');
+            }
         } else {
             const response = await fetch('/api/scan_local', {
                 method: 'POST',
@@ -3906,8 +3920,8 @@ function renderLocalTracks() {
         
         let newCol = `<div style="color:var(--muted); font-size:12.5px; font-style:italic;">No match found</div>`;
         let scoreCol = `<span class="local-badge err">No Match</span>`;
-        let checkbox = `<input type="checkbox" class="local-cb" value="${i}" disabled>`;
-        
+        let checkbox = `<input type="checkbox" class="local-cb" value="${i}" data-file-path="${escHtml(item.file_path)}" disabled>`;
+
         if (hasMatch) {
             const newCover = best.metadata.cover_url || best.metadata.cover || '';
             const newCoverHtml = newCover ? `<img src="${newCover}">` : `🎵`;
@@ -3917,7 +3931,7 @@ function renderLocalTracks() {
             // Diffing logic: mark as different if texts don't match (case insensitive)
             const hlTitle = oldTitle.toLowerCase() !== newTitle.toLowerCase() ? 'diff' : '';
             const hlArtist = oldArtist.toLowerCase() !== newArtist.toLowerCase() ? 'diff' : '';
-            
+
             newCol = `
                 <div class="local-cell-content">
                     <div class="local-thumb">${newCoverHtml}</div>
@@ -3927,9 +3941,9 @@ function renderLocalTracks() {
                     </div>
                 </div>
             `;
-            
+
             scoreCol = `<span class="local-badge ${isSafe ? 'ok' : 'warn'}" title="Confidence Score">${best.confidence}%</span>`;
-            checkbox = `<input type="checkbox" class="local-cb" value="${i}" ${isSafe ? 'checked' : ''} onchange="updateLocalSelection()">`;
+            checkbox = `<input type="checkbox" class="local-cb" value="${i}" data-file-path="${escHtml(item.file_path)}" ${isSafe ? 'checked' : ''} onchange="updateLocalSelection()">`;
         } else if (item.error) {
             scoreCol = `<span class="local-badge err">Error</span>`;
             newCol = `<div style="color:var(--red); font-size:11px;">${escHtml(item.error)}</div>`;
@@ -4030,9 +4044,9 @@ window.app_local_apply_finished = function(payload) {
     }
     
     // Automatically deselect checkboxes for successful ones so the user knows they are done
-    payload.results.forEach((res, i) => {
-        if (res.success) {
-            const cb = document.querySelectorAll('.local-cb:not([disabled])')[i];
+    payload.results.forEach((res) => {
+        if (res.success && res.file_path) {
+            const cb = document.querySelector(`.local-cb[data-file-path="${CSS.escape(res.file_path)}"]`);
             if (cb) {
                 cb.checked = false;
                 cb.disabled = true;

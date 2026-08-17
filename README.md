@@ -749,7 +749,7 @@ When applying a match, the following tags are written (previous tags are strippe
 
 Every file gets an automatic `.bak` backup before tagging:
 
-```
+```text
 MyTrack.flac         (original)
 MyTrack.flac.bak     (backup)
 ```
@@ -916,11 +916,11 @@ SpotiFLAC(
     filename_format="{year} - {album}/{track}. {title}",
 )
 
-# Using platform and ID to organize by source:
+# Using platform and ID in the filename (flat):
 SpotiFLAC(
     url="https://open.spotify.com/playlist/...",
     output_dir="./downloads",
-    filename_format="{platform}/{album}/{title}",
+    filename_format="{platform}_{album}_{title}",
 )
 ```
 
@@ -961,14 +961,14 @@ SpotiFLAC(
 )
 ```
 
-**Example — organize by platform and year:**
+**Example — include platform and year in filename (flat):**
 
 ```python
 SpotiFLAC(
     url="https://open.spotify.com/playlist/...",
     output_dir="./downloads",
     filename_format=lambda metadata, platform, native_id, **kw: (
-        f"{platform}/{metadata.year or 'unknown'}/{metadata.title}"
+        f"{platform}_{metadata.year or 'unknown'}_{metadata.title}"
     ),
 )
 ```

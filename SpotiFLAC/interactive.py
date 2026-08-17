@@ -565,9 +565,12 @@ async def run_interactive() -> dict:
             )
         )
 
+        import os
         path = ""
-        while not path:
+        while not path or not os.path.exists(path):
             path = _ask("Folder or file path to scan")
+            if path and not os.path.exists(path):
+                print(DIM(f"  Path does not exist: {path}. Please try again."))
 
         dry_run = _ask_bool("Dry run? (Scan and match only, write nothing)", False)
         force = _ask_bool(

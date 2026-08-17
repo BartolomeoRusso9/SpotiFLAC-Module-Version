@@ -37,6 +37,31 @@ logger = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 
+
+def _is_path_safe(candidate: Path, api) -> bool:
+    """Check if candidate path is within approved roots (download_dir, home).
+
+    Returns True if the resolved canonical path is a descendant of (or equal to)
+    at least one approved root. Returns False otherwise (path traversal attempt).
+    """
+    try:
+        resolved = candidate.resolve()
+        # Approved roots: download_dir and user home
+        approved_roots = [
+            Path(api.download_dir).resolve(),
+            Path.home().resolve(),
+        ]
+        for root in approved_roots:
+            try:
+                resolved.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
+    except Exception:
+        return False
+
+
 # Methods safe to expose directly over HTTP. This is an explicit allowlist —
 # window-chrome methods (minimize/maximize/resize/move/destroy, which only
 # make sense for a native pywebview window) are intentionally excluded; the
@@ -214,6 +239,12 @@ def create_app() -> FastAPI:
         base = Path(path).expanduser() if path else Path.home()
         try:
             base = base.resolve()
+            # Path traversal protection
+            if not _is_path_safe(base, api):
+                return JSONResponse(
+                    {"error": "Access denied: path is outside approved directories"},
+                    status_code=403,
+                )
             if not base.is_dir():
                 base = Path.home().resolve()
             directories = sorted(

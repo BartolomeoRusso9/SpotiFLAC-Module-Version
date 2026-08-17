@@ -629,7 +629,7 @@ async def amain() -> None:
         await run_web(host=web_args.host, port=web_args.port)
         return
 
-    if "--tag-local" in sys.argv:
+    if "--tag-local" in sys.argv or any(arg.startswith("--tag-local=") for arg in sys.argv):
         local_parser = argparse.ArgumentParser(add_help=False)
         local_parser.add_argument("--tag-local")
         local_parser.add_argument("--dry-run", action="store_true", default=False)

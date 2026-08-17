@@ -286,7 +286,7 @@ _ID3_FRAME_MAP: dict[str, type] = {
 }
 
 _ID3_REVERSE_MAP: dict[str, str] = {
-    v: k for k, v in _ID3_FRAME_MAP.items() if k != "LABEL"
+    v.__name__: k for k, v in _ID3_FRAME_MAP.items() if k != "LABEL"
 }
 
 _ID3_SKIP = {

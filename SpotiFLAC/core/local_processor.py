@@ -71,10 +71,15 @@ async def scan_and_match_async(
     """
     infos = await asyncio.to_thread(scan_path, path, recursive=recursive)
 
+    import os
+    concurrency_limit = min(8, (os.cpu_count() or 4))
+    semaphore = asyncio.Semaphore(concurrency_limit)
+
     async def _match_one(info: LocalFileInfo) -> LocalScanEntry:
         if info.error:
             return LocalScanEntry(info=info, candidates=[])
-        candidates = await match_local_file(info, limit=candidates_per_file)
+        async with semaphore:
+            candidates = await match_local_file(info, limit=candidates_per_file)
         return LocalScanEntry(info=info, candidates=candidates)
 
     return list(await asyncio.gather(*(_match_one(i) for i in infos)))
@@ -136,7 +141,12 @@ async def retag_local_file_async(
         return RetagResult(str(path), success=False, error="File not found")
 
     if backup:
+        # Find an unused backup path to avoid overwriting existing backups
         backup_path = path.with_suffix(path.suffix + ".bak")
+        counter = 1
+        while backup_path.exists():
+            backup_path = path.with_suffix(f"{path.suffix}.bak.{counter}")
+            counter += 1
         try:
             await asyncio.to_thread(shutil.copy2, path, backup_path)
         except Exception as exc:
