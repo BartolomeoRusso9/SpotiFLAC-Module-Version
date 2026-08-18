@@ -794,6 +794,7 @@ result = await retag_local_file_async(
                         [--use-artist-subfolders]
                         [--use-album-subfolders]
                         [--first-artist-only]
+                        [--artist-separator SEP]
                         [--qobuz-local-api URL]
                         [--tidal-api URL]
                         [--timeout seconds]
@@ -864,6 +865,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `use_album_subfolders` | `bool` | `False` | Automatically organizes downloaded files into subfolders by album. |
 | `create_playlist_subfolders` | `bool` | `False` | Creates a subfolder per playlist/album when downloading a collection, in addition to any artist/album subfolders. |
 | `first_artist_only` | `bool` | `False` | Uses only the first artist in tags and filename. |
+| `artist_separator` | `str` | `None` | Custom separator (e.g. `", "` or `" / "`) to join multiple artists into a single string in tags, instead of using standard multi-value fields. Useful for players like Rekordbox. |
 | `include_featuring` | `bool` | `False` | When downloading an artist discography, also includes tracks where the artist appears as a featured artist. |
 | `max_concurrent_downloads` | `int` | `2` | How many tracks to download in parallel. |
 | `tidal_custom_api` | `str` | `None` | Optional setting forwarded to the installed `tidal-web`-family extension, if it supports it. Has no effect on its own — see [Passing Settings to an Extension](#passing-settings-to-an-extension-eg-a-self-hosted-api-instance). |
@@ -986,6 +988,7 @@ SpotiFLAC(
 | `--use-artist-subfolders` | | `False` | Organize files into per-artist subfolders. |
 | `--use-album-subfolders` | | `False` | Organize files into per-album subfolders. |
 | `--first-artist-only` | | `False` | Use only the first artist in tags and filename. |
+| `--artist-separator` | | `None` | Custom separator for joining multiple artists in tags (e.g. `", "` or `" / "`). Useful for Rekordbox. |
 | `--include-featuring` | | `False` | Include tracks where the artist appears as a featured artist. Only applies to artist/discography URLs. |
 | `--qobuz-local-api` | | `None` | Optional setting forwarded to the installed Qobuz extension, if it supports it. |
 | `--tidal-api` | | `None` | Optional setting forwarded to the installed Tidal extension, if it supports it. |

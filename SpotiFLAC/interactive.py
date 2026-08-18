@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shlex
 import sys
 from urllib.parse import urlparse
 
@@ -505,6 +506,9 @@ def _summary(cfg: dict) -> None:
         flags.append("first-artist-only")
     row("Options", ", ".join(flags) if flags else "none")
 
+    if cfg.get("artist_separator"):
+        row("Artist Separator", repr(cfg["artist_separator"]))
+
     row(
         "Lyrics",
         (
@@ -821,6 +825,9 @@ async def run_interactive() -> dict:
             cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
         elif has_tidal and not (has_qobuz or has_deezer or has_apple):
             tidal_default = str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper()
+            # Normalize legacy HI_RES value to HI_RES_LOSSLESS
+            if tidal_default == "HI_RES":
+                tidal_default = "HI_RES_LOSSLESS"
             if tidal_default not in [
                 "DOLBY_ATMOS",
                 "HI_RES_LOSSLESS",
@@ -873,17 +880,17 @@ async def run_interactive() -> dict:
         elif has_qobuz or has_tidal or has_deezer or has_apple:
             combined_options = [
                 "LOSSLESS (FLAC on Deezer/Tidal, '6' on Qobuz, ALAC on Apple)",
-                "HI_RES (Best available everywhere, '27' on Qobuz)",
+                "HI_RES_LOSSLESS (Best available everywhere, '27' on Qobuz)",
             ]
             if has_apple:
                 combined_options.append(
-                    "ATMOS (Spatial Audio on Apple, HI_RES elsewhere)",
+                    "ATMOS (Spatial Audio on Apple, HI_RES_LOSSLESS elsewhere)",
                 )
                 combined_options.append("AC3 (Dolby Digital on Apple, HIGH elsewhere)")
             if has_tidal:
                 combined_options.insert(
                     1,
-                    "DOLBY_ATMOS (Dolby Atmos on Tidal, HI_RES elsewhere)",
+                    "DOLBY_ATMOS (Dolby Atmos on Tidal, HI_RES_LOSSLESS elsewhere)",
                 )
             if has_qobuz:
                 combined_options.append("7 (Hi-Res mid on Qobuz only)")
@@ -905,8 +912,8 @@ async def run_interactive() -> dict:
             )
             if q_choice.startswith("LOSSLESS"):
                 cfg["quality"] = "LOSSLESS"
-            elif q_choice.startswith("HI_RES"):
-                cfg["quality"] = "HI_RES"
+            elif q_choice.startswith("HI_RES_LOSSLESS"):
+                cfg["quality"] = "HI_RES_LOSSLESS"
             elif q_choice.startswith("DOLBY_ATMOS"):
                 cfg["quality"] = "DOLBY_ATMOS"
             elif q_choice.startswith("ATMOS"):
@@ -924,7 +931,7 @@ async def run_interactive() -> dict:
         else:
             q = _ask_choice(
                 "Quality:",
-                options=["LOSSLESS", "HI_RES", "HIGH"],
+                options=["LOSSLESS", "HI_RES_LOSSLESS", "HIGH"],
                 default="LOSSLESS",
             )
             cfg["quality"] = normalize_quality(q)
@@ -1015,6 +1022,20 @@ async def run_interactive() -> dict:
             "Use only the first artist in tags and filename?",
             cfg["first_artist_only"],
         )
+
+    if not cfg["first_artist_only"]:
+        want_sep = _ask_bool(
+            "Join multiple artists with a custom separator (useful for Rekordbox)?",
+            bool(cfg.get("artist_separator")),
+        )
+        if want_sep:
+            cfg["artist_separator"] = _ask(
+                "Separator (e.g. ', ' or ' / ')", cfg.get("artist_separator") or ", "
+            )
+        else:
+            cfg["artist_separator"] = None
+    else:
+        cfg["artist_separator"] = None
 
     # ── 7. Lyrics ────────────────────────────────────────────────────────────
     _section("7 · Lyrics")
@@ -1182,6 +1203,9 @@ def _print_cli_command(cfg: dict) -> None:
 
     if cfg["first_artist_only"]:
         parts.append("--first-artist-only")
+    if cfg.get("artist_separator"):
+        # Use shlex.quote to properly escape the separator value for shell
+        parts.append(f'--artist-separator {shlex.quote(cfg["artist_separator"])}')
     if not cfg["embed_lyrics"]:
         parts.append("--no-lyrics")
     else:

@@ -9,6 +9,7 @@ import platform
 import random
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from urllib.parse import parse_qsl, urlparse
@@ -294,13 +295,18 @@ def _find_chrome() -> str:
 
 
 def _get_profile_dir() -> str:
-    """Return a persistent Chrome profile directory for the current OS."""
+    """Return a persistent Chrome profile directory for the current OS, isolated per thread."""
     if os.environ.get("TS_PROFILE_DIR"):
         return os.environ["TS_PROFILE_DIR"]
+
     if platform.system() == "Windows":
         base = os.environ.get("TEMP") or os.environ.get("TMP") or r"C:\Temp"
-        return os.path.join(base, "ts_profile")
-    return "/tmp/ts_profile"
+    else:
+        base = "/tmp"
+
+    # Use tempfile.mkdtemp to create a collision-resistant, unpredictable,
+    # per-process/thread directory with restrictive permissions by default
+    return tempfile.mkdtemp(prefix="ts_profile_", dir=base)
 
 
 def _start_xvfb_if_needed() -> subprocess.Popen | None:
@@ -337,7 +343,7 @@ def _ensure_xvfb() -> None:
         _xvfb_started = True
 
 
-def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
+def build_chromium_options(*, hidden: bool = True) -> tuple[ChromiumOptions, str]:
     """Build the ChromiumOptions used to launch the solver browser.
 
     Exposed (not prefixed with ``_``) so other modules that need to spin up
@@ -349,6 +355,10 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
     ``--disable-blink-features=AutomationControlled`` plus realistic
     ``browser_preferences`` that make the profile look like it's been used
     for a while, instead of a freshly-created automation profile.
+
+    Returns:
+        A tuple of (ChromiumOptions, profile_dir) where profile_dir is the
+        actual temp directory path created for this browser session.
     """
     # TS_DEBUG_VISIBLE=1 overrides `hidden`: keep the window on-screen and
     # normally positioned so it can be watched live via VNC.
@@ -379,10 +389,11 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
         try:
             shutil.rmtree(profile_dir)
         except Exception:
-            pass
-    # A persistent profile dir. pydoll doesn't have a first-class
-    # `user_data_dir` option (yet), so it's passed as a raw Chromium flag,
-    # same as nodriver did internally.
+            # FIX: Se l'eliminazione fallisce perché un processo zombie di Chrome
+            # tiene i file bloccati, crea al volo una nuova cartella per aggirare il blocco (Errno 13).
+            profile_dir = f"{profile_dir}_{int(time.time() * 1000)}"
+
+    # A persistent profile dir. pydoll doesn't have a first-class...
     options.add_argument(f"--user-data-dir={profile_dir}")
     options.add_argument("--window-size=1280,900")
     if hidden and not debug_visible:
@@ -432,7 +443,7 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
         debug_visible,
     )
 
-    return options
+    return options, profile_dir
 
 
 def _js_value(evaluate_response: dict):
@@ -530,8 +541,9 @@ async def _solve_impl(
 ) -> str | tuple[str, str | None]:
     options: ChromiumOptions | None = None
     browser = None
+    profile_dir: str | None = None
     try:
-        options = build_chromium_options(hidden=True)
+        options, profile_dir = build_chromium_options(hidden=True)
     except Exception as exc:
         message = _describe_browser_start_error(exc, options)
         logger.error("[solver] %s", message)
@@ -852,14 +864,14 @@ async def _solve_impl(
             with contextlib.suppress(Exception):
                 import subprocess as _subprocess
 
-                profile_dir = _get_profile_dir()
-                if platform.system() != "Windows":
+                # Use the actual profile_dir from browser launch, not a recomputed one
+                if profile_dir and platform.system() != "Windows":
                     _subprocess.run(
                         ["pkill", "-f", profile_dir],
                         stdout=_subprocess.DEVNULL,
                         stderr=_subprocess.DEVNULL,
                     )
-                else:
+                elif platform.system() == "Windows":
                     _subprocess.run(
                         ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
                         stdout=_subprocess.DEVNULL,
