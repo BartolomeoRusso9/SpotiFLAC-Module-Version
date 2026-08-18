@@ -297,12 +297,12 @@ def _get_profile_dir() -> str:
     """Return a persistent Chrome profile directory for the current OS, isolated per thread."""
     if os.environ.get("TS_PROFILE_DIR"):
         return os.environ["TS_PROFILE_DIR"]
-    
+
     if platform.system() == "Windows":
         base = os.environ.get("TEMP") or os.environ.get("TMP") or r"C:\Temp"
     else:
         base = "/tmp"
-        
+
     # FIX: Evita PermissionError separando i profili per Processo e Thread
     return os.path.join(base, f"ts_profile_{os.getpid()}_{threading.get_ident()}")
 
@@ -383,7 +383,7 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
         try:
             shutil.rmtree(profile_dir)
         except Exception:
-            # FIX: Se l'eliminazione fallisce perché un processo zombie di Chrome 
+            # FIX: Se l'eliminazione fallisce perché un processo zombie di Chrome
             # tiene i file bloccati, crea al volo una nuova cartella per aggirare il blocco (Errno 13).
             profile_dir = f"{profile_dir}_{int(time.time() * 1000)}"
 

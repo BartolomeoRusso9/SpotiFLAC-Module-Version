@@ -1022,10 +1022,12 @@ async def run_interactive() -> dict:
     if not cfg["first_artist_only"]:
         want_sep = _ask_bool(
             "Join multiple artists with a custom separator (useful for Rekordbox)?",
-            bool(cfg.get("artist_separator"))
+            bool(cfg.get("artist_separator")),
         )
         if want_sep:
-            cfg["artist_separator"] = _ask("Separator (e.g. ', ' or ' / ')", cfg.get("artist_separator") or ", ")
+            cfg["artist_separator"] = _ask(
+                "Separator (e.g. ', ' or ' / ')", cfg.get("artist_separator") or ", "
+            )
         else:
             cfg["artist_separator"] = None
     else:
