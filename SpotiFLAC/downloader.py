@@ -126,7 +126,8 @@ class DownloadOptions:
     # `output_dir` (useful for music libraries).
     create_playlist_subfolders: bool = True
     first_artist_only: bool = False
-    include_featuring: bool = False
+    artist_separator: str | None = None
+    include_featuring: bool = True
     quality: str = "LOSSLESS"
     allow_fallback: bool = True
     inter_track_delay_s: float = 1.0
@@ -470,6 +471,7 @@ async def download_one_async(
                     include_track_num=opts.use_track_numbers,
                     use_album_track_num=opts.use_album_track_numbers,
                     first_artist_only=opts.first_artist_only,
+                    artist_separator=opts.artist_separator,
                     allow_fallback=opts.allow_fallback,
                     embed_lyrics=opts.embed_lyrics,
                     lyrics_providers=opts.lyrics_providers,

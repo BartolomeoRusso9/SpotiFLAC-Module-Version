@@ -1735,6 +1735,7 @@ class SpotiFLAC_API:
             use_artist_subfolders = config.get("use_artist_subfolders", False)
             use_album_subfolders = config.get("use_album_subfolders", False)
             first_artist_only = config.get("first_artist_only", False)
+            artist_separator = config.get("artist_separator")
             lyrics_providers = config.get("lyrics_providers") or [
                 "spotify",
                 "apple",
@@ -1827,6 +1828,7 @@ class SpotiFLAC_API:
                     use_artist_subfolders=use_artist_subfolders,
                     use_album_subfolders=use_album_subfolders,
                     first_artist_only=first_artist_only,
+                    artist_separator=artist_separator,
                     embed_lyrics=embed_lyrics,
                     lyrics_providers=lyrics_providers,
                     enrich_metadata=enrich_metadata,

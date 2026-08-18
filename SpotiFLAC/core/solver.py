@@ -294,13 +294,17 @@ def _find_chrome() -> str:
 
 
 def _get_profile_dir() -> str:
-    """Return a persistent Chrome profile directory for the current OS."""
+    """Return a persistent Chrome profile directory for the current OS, isolated per thread."""
     if os.environ.get("TS_PROFILE_DIR"):
         return os.environ["TS_PROFILE_DIR"]
+    
     if platform.system() == "Windows":
         base = os.environ.get("TEMP") or os.environ.get("TMP") or r"C:\Temp"
-        return os.path.join(base, "ts_profile")
-    return "/tmp/ts_profile"
+    else:
+        base = "/tmp"
+        
+    # FIX: Evita PermissionError separando i profili per Processo e Thread
+    return os.path.join(base, f"ts_profile_{os.getpid()}_{threading.get_ident()}")
 
 
 def _start_xvfb_if_needed() -> subprocess.Popen | None:
@@ -379,10 +383,11 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
         try:
             shutil.rmtree(profile_dir)
         except Exception:
-            pass
-    # A persistent profile dir. pydoll doesn't have a first-class
-    # `user_data_dir` option (yet), so it's passed as a raw Chromium flag,
-    # same as nodriver did internally.
+            # FIX: Se l'eliminazione fallisce perché un processo zombie di Chrome 
+            # tiene i file bloccati, crea al volo una nuova cartella per aggirare il blocco (Errno 13).
+            profile_dir = f"{profile_dir}_{int(time.time() * 1000)}"
+
+    # A persistent profile dir. pydoll doesn't have a first-class...
     options.add_argument(f"--user-data-dir={profile_dir}")
     options.add_argument("--window-size=1280,900")
     if hidden and not debug_visible:

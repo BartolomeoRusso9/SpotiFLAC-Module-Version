@@ -1211,6 +1211,15 @@ class EmbedOptions:
     enrich_qobuz_token: str | None = None
     is_album: bool = False
     extra_tags: dict[str, str] = field(default_factory=dict)
+    # When set, ARTIST/ALBUMARTIST are written as a single string joined
+    # with this separator (e.g. ", " or " / ") instead of as a multi-value
+    # Vorbis Comment field. Multi-value ARTIST fields are the "correct"
+    # Vorbis Comment way to store several artists, but some players (e.g.
+    # Rekordbox) join multi-value fields with a plain space when displaying
+    # them, producing "Artist1Artist2"-style mush with no separator at all.
+    # Leave as None to keep the previous behavior (multi-value on
+    # FLAC/OGG/Opus, single ", "-joined string elsewhere).
+    artist_separator: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1298,6 +1307,19 @@ async def embed_metadata_async(
     tags = metadata.as_flac_tags(first_artist_only=opts.first_artist_only)
     tags["DESCRIPTION"] = SOURCE_TAG
 
+    # If a custom artist separator was requested, rejoin ARTIST/ALBUMARTIST
+    # as one single string right here — before any per-format embed
+    # function sees them — so every format (FLAC, OGG/Opus, MP3, M4A, WMA,
+    # ...) gets the same single joined value instead of a multi-value field.
+    effective_multi_artist = multi_artist
+    if opts.artist_separator is not None:
+        for key in ("ARTIST", "ALBUMARTIST"):
+            val = tags.get(key, "")
+            if val:
+                parts = [a.strip() for a in val.split(",") if a.strip()]
+                tags[key] = opts.artist_separator.join(parts)
+        effective_multi_artist = False
+
     # Merge enrichment + extra (MusicBrainz, ecc.)
     merged_extra: dict[str, str] = {**enriched_tags}
     if opts.extra_tags:
@@ -1344,7 +1366,7 @@ async def embed_metadata_async(
             cover_data,
             lyrics,
             lyrics_prov,
-            multi_artist,
+            effective_multi_artist,
             suffix,
         )
     except SpotiflacError:

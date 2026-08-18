@@ -505,6 +505,9 @@ def _summary(cfg: dict) -> None:
         flags.append("first-artist-only")
     row("Options", ", ".join(flags) if flags else "none")
 
+    if cfg.get("artist_separator"):
+        row("Artist Separator", repr(cfg["artist_separator"]))
+
     row(
         "Lyrics",
         (
@@ -1016,6 +1019,18 @@ async def run_interactive() -> dict:
             cfg["first_artist_only"],
         )
 
+    if not cfg["first_artist_only"]:
+        want_sep = _ask_bool(
+            "Join multiple artists with a custom separator (useful for Rekordbox)?",
+            bool(cfg.get("artist_separator"))
+        )
+        if want_sep:
+            cfg["artist_separator"] = _ask("Separator (e.g. ', ' or ' / ')", cfg.get("artist_separator") or ", ")
+        else:
+            cfg["artist_separator"] = None
+    else:
+        cfg["artist_separator"] = None
+
     # ── 7. Lyrics ────────────────────────────────────────────────────────────
     _section("7 · Lyrics")
     cfg["embed_lyrics"] = _ask_bool(
@@ -1182,6 +1197,8 @@ def _print_cli_command(cfg: dict) -> None:
 
     if cfg["first_artist_only"]:
         parts.append("--first-artist-only")
+    if cfg.get("artist_separator"):
+        parts.append(f'--artist-separator "{cfg["artist_separator"]}"')
     if not cfg["embed_lyrics"]:
         parts.append("--no-lyrics")
     else:
