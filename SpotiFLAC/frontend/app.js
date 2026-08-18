@@ -242,6 +242,7 @@ function applySettings(settings = {}) {
   if ($('config-artist-sub')) $('config-artist-sub').checked = cfg.use_artist_subfolders;
   if ($('config-album-sub')) $('config-album-sub').checked = cfg.use_album_subfolders;
   if ($('config-first-artist')) $('config-first-artist').checked = cfg.first_artist_only;
+  if ($('config-artist-separator')) $('config-artist-separator').value = cfg.artist_separator || '';
   if ($('config-transcode')) { $('config-transcode').value = cfg.transcode_to || 'none'; onTranscodeChange(); }
   if ($('config-transcode-bitrate')) $('config-transcode-bitrate').value = cfg.transcode_bitrate || '320k';
   if ($('config-transcode-keep')) $('config-transcode-keep').checked = cfg.transcode_keep_original;
@@ -444,6 +445,7 @@ const DEFAULT_SETTINGS = {
   use_artist_subfolders: true,
   use_album_subfolders: true,
   first_artist_only: false,
+  artist_separator: '',
   track_max_retries: 0,
   post_download_action: 'none',
   post_download_command: '',
@@ -3060,6 +3062,7 @@ function buildConfig() {
     use_artist_subfolders:  $('config-artist-sub').checked,
     use_album_subfolders:   $('config-album-sub').checked,
     first_artist_only:       $('config-first-artist').checked,
+    artist_separator:        $('config-artist-separator')?.value.trim() || null,
     transcode_to:           $('config-transcode')?.value || 'none',
     transcode_bitrate:      $('config-transcode-bitrate')?.value || '320k',
     transcode_keep_original: $('config-transcode-keep')?.checked || false,
@@ -4055,3 +4058,13 @@ window.app_local_apply_finished = function(payload) {
     });
     updateLocalSelection();
 };
+
+if ($('config-first-artist')) {
+    $('config-first-artist').addEventListener('change', function() {
+        const row = $('config-artist-sep-row');
+        if (row) {
+            row.style.opacity = this.checked ? '0.4' : '1';
+            row.style.pointerEvents = this.checked ? 'none' : 'auto';
+        }
+    });
+}
