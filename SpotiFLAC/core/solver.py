@@ -9,6 +9,7 @@ import platform
 import random
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from urllib.parse import parse_qsl, urlparse
@@ -303,8 +304,9 @@ def _get_profile_dir() -> str:
     else:
         base = "/tmp"
 
-    # FIX: Evita PermissionError separando i profili per Processo e Thread
-    return os.path.join(base, f"ts_profile_{os.getpid()}_{threading.get_ident()}")
+    # Use tempfile.mkdtemp to create a collision-resistant, unpredictable,
+    # per-process/thread directory with restrictive permissions by default
+    return tempfile.mkdtemp(prefix="ts_profile_", dir=base)
 
 
 def _start_xvfb_if_needed() -> subprocess.Popen | None:
@@ -341,7 +343,7 @@ def _ensure_xvfb() -> None:
         _xvfb_started = True
 
 
-def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
+def build_chromium_options(*, hidden: bool = True) -> tuple[ChromiumOptions, str]:
     """Build the ChromiumOptions used to launch the solver browser.
 
     Exposed (not prefixed with ``_``) so other modules that need to spin up
@@ -353,6 +355,10 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
     ``--disable-blink-features=AutomationControlled`` plus realistic
     ``browser_preferences`` that make the profile look like it's been used
     for a while, instead of a freshly-created automation profile.
+
+    Returns:
+        A tuple of (ChromiumOptions, profile_dir) where profile_dir is the
+        actual temp directory path created for this browser session.
     """
     # TS_DEBUG_VISIBLE=1 overrides `hidden`: keep the window on-screen and
     # normally positioned so it can be watched live via VNC.
@@ -437,7 +443,7 @@ def build_chromium_options(*, hidden: bool = True) -> ChromiumOptions:
         debug_visible,
     )
 
-    return options
+    return options, profile_dir
 
 
 def _js_value(evaluate_response: dict):
@@ -535,8 +541,9 @@ async def _solve_impl(
 ) -> str | tuple[str, str | None]:
     options: ChromiumOptions | None = None
     browser = None
+    profile_dir: str | None = None
     try:
-        options = build_chromium_options(hidden=True)
+        options, profile_dir = build_chromium_options(hidden=True)
     except Exception as exc:
         message = _describe_browser_start_error(exc, options)
         logger.error("[solver] %s", message)
@@ -857,14 +864,14 @@ async def _solve_impl(
             with contextlib.suppress(Exception):
                 import subprocess as _subprocess
 
-                profile_dir = _get_profile_dir()
-                if platform.system() != "Windows":
+                # Use the actual profile_dir from browser launch, not a recomputed one
+                if profile_dir and platform.system() != "Windows":
                     _subprocess.run(
                         ["pkill", "-f", profile_dir],
                         stdout=_subprocess.DEVNULL,
                         stderr=_subprocess.DEVNULL,
                     )
-                else:
+                elif platform.system() == "Windows":
                     _subprocess.run(
                         ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
                         stdout=_subprocess.DEVNULL,

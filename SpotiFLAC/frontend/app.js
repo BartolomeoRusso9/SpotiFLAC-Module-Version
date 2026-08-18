@@ -243,6 +243,7 @@ function applySettings(settings = {}) {
   if ($('config-album-sub')) $('config-album-sub').checked = cfg.use_album_subfolders;
   if ($('config-first-artist')) $('config-first-artist').checked = cfg.first_artist_only;
   if ($('config-artist-separator')) $('config-artist-separator').value = cfg.artist_separator || '';
+  updateArtistSeparatorState(cfg.first_artist_only);
   if ($('config-transcode')) { $('config-transcode').value = cfg.transcode_to || 'none'; onTranscodeChange(); }
   if ($('config-transcode-bitrate')) $('config-transcode-bitrate').value = cfg.transcode_bitrate || '320k';
   if ($('config-transcode-keep')) $('config-transcode-keep').checked = cfg.transcode_keep_original;
@@ -4059,12 +4060,23 @@ window.app_local_apply_finished = function(payload) {
     updateLocalSelection();
 };
 
+// Helper function to update artist separator field and row state
+function updateArtistSeparatorState(firstArtistOnly) {
+    const sepField = $('config-artist-separator');
+    const row = $('config-artist-sep-row');
+    const disabled = firstArtistOnly;
+
+    if (sepField) {
+        sepField.disabled = disabled;
+    }
+    if (row) {
+        row.style.opacity = disabled ? '0.4' : '1';
+        row.style.pointerEvents = disabled ? 'none' : 'auto';
+    }
+}
+
 if ($('config-first-artist')) {
     $('config-first-artist').addEventListener('change', function() {
-        const row = $('config-artist-sep-row');
-        if (row) {
-            row.style.opacity = this.checked ? '0.4' : '1';
-            row.style.pointerEvents = this.checked ? 'none' : 'auto';
-        }
+        updateArtistSeparatorState(this.checked);
     });
 }

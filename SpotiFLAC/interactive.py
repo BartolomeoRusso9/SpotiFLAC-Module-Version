@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shlex
 import sys
 from urllib.parse import urlparse
 
@@ -824,6 +825,9 @@ async def run_interactive() -> dict:
             cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
         elif has_tidal and not (has_qobuz or has_deezer or has_apple):
             tidal_default = str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper()
+            # Normalize legacy HI_RES value to HI_RES_LOSSLESS
+            if tidal_default == "HI_RES":
+                tidal_default = "HI_RES_LOSSLESS"
             if tidal_default not in [
                 "DOLBY_ATMOS",
                 "HI_RES_LOSSLESS",
@@ -1200,7 +1204,8 @@ def _print_cli_command(cfg: dict) -> None:
     if cfg["first_artist_only"]:
         parts.append("--first-artist-only")
     if cfg.get("artist_separator"):
-        parts.append(f'--artist-separator "{cfg["artist_separator"]}"')
+        # Use shlex.quote to properly escape the separator value for shell
+        parts.append(f'--artist-separator {shlex.quote(cfg["artist_separator"])}')
     if not cfg["embed_lyrics"]:
         parts.append("--no-lyrics")
     else:

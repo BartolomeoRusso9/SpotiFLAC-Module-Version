@@ -1307,19 +1307,6 @@ async def embed_metadata_async(
     tags = metadata.as_flac_tags(first_artist_only=opts.first_artist_only)
     tags["DESCRIPTION"] = SOURCE_TAG
 
-    # If a custom artist separator was requested, rejoin ARTIST/ALBUMARTIST
-    # as one single string right here — before any per-format embed
-    # function sees them — so every format (FLAC, OGG/Opus, MP3, M4A, WMA,
-    # ...) gets the same single joined value instead of a multi-value field.
-    effective_multi_artist = multi_artist
-    if opts.artist_separator is not None:
-        for key in ("ARTIST", "ALBUMARTIST"):
-            val = tags.get(key, "")
-            if val:
-                parts = [a.strip() for a in val.split(",") if a.strip()]
-                tags[key] = opts.artist_separator.join(parts)
-        effective_multi_artist = False
-
     # Merge enrichment + extra (MusicBrainz, ecc.)
     merged_extra: dict[str, str] = {**enriched_tags}
     if opts.extra_tags:
@@ -1358,6 +1345,20 @@ async def embed_metadata_async(
     for key, val in merged_extra.items():
         if key not in _date_keys and key.upper() not in _date_keys:
             tags[key.upper()] = str(val)
+
+    # If a custom artist separator was requested, rejoin ARTIST/ALBUMARTIST
+    # as one single string right here — after all tag sources (including
+    # enriched_tags and opts.extra_tags) have been merged — so every format
+    # (FLAC, OGG/Opus, MP3, M4A, WMA, ...) gets the same single joined value
+    # instead of a multi-value field.
+    effective_multi_artist = multi_artist
+    if opts.artist_separator is not None:
+        for key in ("ARTIST", "ALBUMARTIST"):
+            val = tags.get(key, "")
+            if val:
+                parts = [a.strip() for a in val.split(",") if a.strip()]
+                tags[key] = opts.artist_separator.join(parts)
+        effective_multi_artist = False
 
     try:
         await _write_tags_async(
