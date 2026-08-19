@@ -1432,7 +1432,7 @@ class SpotiFLAC_API:
             from .core.spotify_metadata import SpotifyMetadataClient
 
             client = SpotifyMetadataClient()
-            preview_url = client.get_track_preview(track_id)
+            preview_url = asyncio.run(client.get_track_preview_async(track_id))
             return preview_url or ""
         except Exception as e:
             self.log(f"Failed to fetch preview for track {track_id}: {e}", "debug")
