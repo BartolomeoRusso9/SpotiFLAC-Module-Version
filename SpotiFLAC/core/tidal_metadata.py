@@ -300,7 +300,7 @@ class TidalMetadataClient:
         self,
         artist_id: str,
         include_groups: str = f"{_TIDAL_FILTER_ALBUMS},{_TIDAL_FILTER_EPSANDSINGLES}",
-        include_featuring: bool = False,
+        include_featuring: bool = True,
     ) -> tuple[dict[str, Any], list[TrackMetadata]]:
         artist = await self._get(f"/artists/{artist_id}")
         artist_name = artist.get("name", "")
@@ -382,7 +382,7 @@ class TidalMetadataClient:
     async def get_url(
         self,
         tidal_url: str,
-        include_featuring: bool = False,
+        include_featuring: bool = True,
     ) -> tuple[str, list[TrackMetadata], str, dict[str, Any]]:
         info = parse_tidal_url(tidal_url)
         t = info["type"]

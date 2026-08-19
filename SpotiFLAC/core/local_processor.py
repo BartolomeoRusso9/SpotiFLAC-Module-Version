@@ -231,6 +231,7 @@ async def run_local_tagging_cli(
     dry_run: bool = False,
     force: bool = False,
     backup: bool = True,
+    artist_separator: str | None = None,
 ) -> list[RetagResult]:
     """Drives `--tag-local` end to end: scan, match, print old → new for
     every file, then either stop there (--dry-run) or apply "safe matches"
@@ -299,7 +300,7 @@ async def run_local_tagging_cli(
             print("Cancelled — nothing written.")
             return []
 
-    opts = default_embed_options()
+    opts = default_embed_options(artist_separator=artist_separator)
     results: list[RetagResult] = []
     print()
     for entry, metadata in to_apply:

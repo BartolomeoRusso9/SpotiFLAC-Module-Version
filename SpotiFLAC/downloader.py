@@ -131,7 +131,7 @@ class DownloadOptions:
     # core/tagger.py EmbedOptions.artist_separator for why — some players
     # (notably Rekordbox) mangle multi-value fields into unseparated text.
     artist_separator: str | None = None
-    include_featuring: bool = False
+    include_featuring: bool = True
     quality: str = "LOSSLESS"
     allow_fallback: bool = True
     inter_track_delay_s: float = 1.0

@@ -421,7 +421,7 @@ class AppleMusicMetadataClient:
     async def get_artist_albums(
         self,
         artist_id: str,
-        include_featuring: bool = False,
+        include_featuring: bool = True,
         storefront: str = "us",
     ) -> tuple[dict[str, Any], list[TrackMetadata]]:
         artist_data = await self._get(f"/{storefront}/artists/{artist_id}")
@@ -508,7 +508,7 @@ class AppleMusicMetadataClient:
     async def get_url(
         self,
         url: str,
-        include_featuring: bool = False,
+        include_featuring: bool = True,
     ) -> tuple[str, list[TrackMetadata], str, dict[str, Any]]:
         info = parse_apple_music_url(url)
         t = info["type"]

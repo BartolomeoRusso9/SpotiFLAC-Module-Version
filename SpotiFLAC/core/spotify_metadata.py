@@ -340,7 +340,7 @@ class SpotifyMetadataClient:
     def get_url(
         self,
         url: str,
-        include_featuring: bool = False,
+        include_featuring: bool = True,
     ) -> tuple[str, list[TrackMetadata], str, dict]:
         """Synchronous wrapper used by GUI metadata fetch and downloader."""
         return _run_async_sync(
@@ -972,7 +972,7 @@ class SpotifyMetadataClient:
         self,
         artist_id: str,
         include_groups: str = "album,single",
-        include_featuring: bool = False,
+        include_featuring: bool = True,
     ) -> tuple[dict, list[TrackMetadata]]:
         artist_info = await self.get_artist_profile_async(artist_id)
 
@@ -1130,7 +1130,7 @@ class SpotifyMetadataClient:
     async def get_url_async(
         self,
         spotify_url: str,
-        include_featuring: bool = False,
+        include_featuring: bool = True,
     ) -> tuple[str, list[TrackMetadata], str, dict]:
         info = parse_spotify_url(spotify_url)
         t = info["type"]

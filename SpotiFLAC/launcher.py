@@ -670,6 +670,7 @@ async def amain() -> None:
         local_parser.add_argument("--dry-run", action="store_true", default=False)
         local_parser.add_argument("--force", action="store_true", default=False)
         local_parser.add_argument("--no-backup", action="store_true", default=False)
+        local_parser.add_argument("--artist-separator", dest="artist_separator", default=None)
         local_args, _ = local_parser.parse_known_args(sys.argv[1:])
 
         from .core.local_processor import run_local_tagging_cli
@@ -679,6 +680,7 @@ async def amain() -> None:
             dry_run=local_args.dry_run,
             force=local_args.force,
             backup=not local_args.no_backup,
+            artist_separator=local_args.artist_separator,
         )
         return
 
