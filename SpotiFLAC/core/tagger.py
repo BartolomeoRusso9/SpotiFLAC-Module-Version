@@ -1278,6 +1278,7 @@ async def embed_metadata_async(
         best_cover = enriched_cover_url or opts.cover_url or metadata.cover_url
         if best_cover:
             from .spotify_metadata import _maximize_cover_url
+
             try:
                 best_cover = _maximize_cover_url(best_cover)
             except Exception:
@@ -1388,7 +1389,7 @@ async def embed_metadata_async(
 async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | None:
     if not url:
         return None
-    
+
     for attempt in range(3):
         try:
             async with httpx.AsyncClient() as client:

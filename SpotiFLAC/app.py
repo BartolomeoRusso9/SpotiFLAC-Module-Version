@@ -22,6 +22,7 @@ from .core.spotify_metadata import _maximize_cover_url
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
 
+
 class UILogHandler(logging.Handler):
     def __init__(self, api) -> None:
         super().__init__()
@@ -1111,7 +1112,7 @@ class SpotiFLAC_API:
 
             title = track_data.get("title", "Unknown")
             artist = track_data.get("artist", "")
-            
+
             raw_url = track_data.get("cover") or track_data.get("images", "")
             cover_url = _maximize_cover_url(raw_url)
 
@@ -1120,14 +1121,18 @@ class SpotiFLAC_API:
                 return
 
             self.log(f"Downloading HQ cover for: {title}…", "info")
-            
+
             async with httpx.AsyncClient() as client:
                 resp = await client.get(cover_url, timeout=15)
                 resp.raise_for_status()
 
             safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-            filename = f"{safe_artist} - {safe_title}.jpg" if safe_artist else f"{safe_title}.jpg"
+            filename = (
+                f"{safe_artist} - {safe_title}.jpg"
+                if safe_artist
+                else f"{safe_title}.jpg"
+            )
             out_path = os.path.join(self.download_dir, filename)
 
             os.makedirs(self.download_dir, exist_ok=True)
@@ -1153,7 +1158,6 @@ class SpotiFLAC_API:
         try:
             title = cover_data.get("title", "Unknown")
             artist = cover_data.get("artist", "")
-            owner = cover_data.get("owner", "")
             item_type = cover_data.get("type", "ALBUM").upper()
 
             raw_url = cover_data.get("cover", "")
@@ -1165,10 +1169,7 @@ class SpotiFLAC_API:
 
             safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-            safe_owner = re.sub(r'[\\/*?:"<>|]', "", owner).strip()
 
-            self.log(f"Downloading HQ {item_type.lower()} cover: {title}…", "info")
-            
             async with httpx.AsyncClient() as client:
                 resp = await client.get(cover_url, timeout=15)
                 resp.raise_for_status()
@@ -1208,7 +1209,7 @@ class SpotiFLAC_API:
         try:
             title = album_data.get("title", "Unknown")
             artist = album_data.get("artist", "Unknown Artist")
-            
+
             raw_url = album_data.get("cover", "")
             cover_url = _maximize_cover_url(raw_url)
 
@@ -1217,7 +1218,7 @@ class SpotiFLAC_API:
                 return
 
             self.log(f"Downloading HQ album cover: {artist} - {title}…", "info")
-            
+
             async with httpx.AsyncClient() as client:
                 resp = await client.get(cover_url, timeout=15)
                 resp.raise_for_status()
@@ -1306,7 +1307,7 @@ class SpotiFLAC_API:
             nonlocal success, skipped
             title = track_data.get("title", "Unknown")
             artist = track_data.get("artist", "")
-            
+
             raw_url = track_data.get("cover", "")
             cover_url = _maximize_cover_url(raw_url)
 
@@ -1320,7 +1321,11 @@ class SpotiFLAC_API:
 
                 safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
                 safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-                filename = f"{safe_artist} - {safe_title}.jpg" if safe_artist else f"{safe_title}.jpg"
+                filename = (
+                    f"{safe_artist} - {safe_title}.jpg"
+                    if safe_artist
+                    else f"{safe_title}.jpg"
+                )
                 out_path = os.path.join(self.download_dir, filename)
 
                 async with aiofiles.open(out_path, "wb") as f:
