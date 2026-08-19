@@ -22,13 +22,13 @@ All formats share the same pipeline:
 from __future__ import annotations
 
 import asyncio
+import httpx
 import contextlib
 import logging
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
 from mutagen.flac import FLAC
 from mutagen.flac import Picture as FlacPicture
 from mutagen.id3 import (
@@ -1277,6 +1277,12 @@ async def embed_metadata_async(
     if not cover_data:
         best_cover = enriched_cover_url or opts.cover_url or metadata.cover_url
         if best_cover:
+            from .spotify_metadata import _maximize_cover_url
+
+            try:
+                best_cover = _maximize_cover_url(best_cover)
+            except Exception:
+                pass
             cover_data = await _fetch_cover_async(best_cover, session)
 
     # ── 3. Lyrics ──────────────────────────────────────────────────────────
@@ -1384,16 +1390,19 @@ async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | No
     if not url:
         return None
 
-    from .http import AsyncHttpClient
-
-    client = AsyncHttpClient(provider="tagger", timeout_s=10)
-    headers = {}
-
     for attempt in range(3):
         try:
-            resp = await client.get(url, headers=headers)
+            # Se la sessione è stata iniettata (es. dal downloader o da un test), usala.
+            if session is not None:
+                resp = await session.get(url, follow_redirects=True, timeout=15)
+            # Altrimenti, crea un client temporaneo e chiudilo subito dopo.
+            else:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(url, follow_redirects=True, timeout=15)
+
             if resp.status_code == 200:
                 return resp.content
+
             logger.warning(
                 "[tagger] cover HTTP %s (attempt %d)",
                 resp.status_code,
@@ -1401,8 +1410,10 @@ async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | No
             )
         except Exception as exc:
             logger.warning("[tagger] cover attempt %d failed: %s", attempt + 1, exc)
+
         if attempt < 2:
             await asyncio.sleep(1.5 * (attempt + 1))
+
     return None
 
 

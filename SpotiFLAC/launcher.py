@@ -823,6 +823,7 @@ async def amain() -> None:
         loop=args.loop,
         quality=quality,
         first_artist_only=args.first_artist_only,
+        artist_separator=args.artist_separator,
         include_featuring=args.include_featuring,
         log_level=log_level,
         output_path=args.output_path,
