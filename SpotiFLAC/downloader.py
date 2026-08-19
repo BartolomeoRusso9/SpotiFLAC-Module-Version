@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import os
 import re
@@ -126,6 +127,10 @@ class DownloadOptions:
     # `output_dir` (useful for music libraries).
     create_playlist_subfolders: bool = True
     first_artist_only: bool = False
+    # When set (e.g. ", " or " / "), multiple artists are written as one
+    # joined string instead of a multi-value ARTIST/ALBUMARTIST field. See
+    # core/tagger.py EmbedOptions.artist_separator for why — some players
+    # (notably Rekordbox) mangle multi-value fields into unseparated text.
     artist_separator: str | None = None
     include_featuring: bool = True
     quality: str = "LOSSLESS"
@@ -429,7 +434,7 @@ async def download_one_async(
         if attempt > 0:
             wait = min(2**attempt, 30)
             safe_tqdm_write(
-                f"\n  ↺  Retry {attempt}/{opts.track_max_retries} in {wait}s…",
+                f"\n  ↺  [#{position}] Retry {attempt}/{opts.track_max_retries} in {wait}s…",
             )
             await asyncio.sleep(wait)
             errors.clear()
@@ -439,7 +444,7 @@ async def download_one_async(
                 is_ext = provider.name.startswith("ext:")
                 target_type = "extension" if is_ext else "provider"
                 safe_tqdm_write(
-                    f"  ⚠️  Fallback: switching to backup {target_type} ({provider.name})...",
+                    f"[#{position}] Switching to next extension: {target_type} ({provider.name})...",
                 )
 
             logger.info(
@@ -463,23 +468,38 @@ async def download_one_async(
                     max(1, opts.timeout_s - time_elapsed) if opts.timeout_s else None
                 )
 
+                # Check if provider supports artist_separator parameter
+                download_kwargs = {
+                    "filename_format": opts.filename_format,
+                    "position": position,
+                    "include_track_num": opts.use_track_numbers,
+                    "use_album_track_num": opts.use_album_track_numbers,
+                    "first_artist_only": opts.first_artist_only,
+                    "allow_fallback": opts.allow_fallback,
+                    "embed_lyrics": opts.embed_lyrics,
+                    "lyrics_providers": opts.lyrics_providers,
+                    "enrich_metadata": opts.enrich_metadata,
+                    "enrich_providers": opts.enrich_providers,
+                    "is_album": is_album,
+                    "quality": normalize_quality(opts.quality),
+                    "qobuz_token": opts.qobuz_token,
+                }
+
+                # Use signature inspection to check if artist_separator is supported
+                try:
+                    sig = inspect.signature(provider.download_track_async)
+                    if "artist_separator" in sig.parameters or any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+                    ):
+                        download_kwargs["artist_separator"] = opts.artist_separator
+                except Exception:
+                    # If inspection fails, try to include it anyway (default behavior)
+                    download_kwargs["artist_separator"] = opts.artist_separator
+
                 download_task = provider.download_track_async(
                     metadata,
                     output_dir,
-                    filename_format=opts.filename_format,
-                    position=position,
-                    include_track_num=opts.use_track_numbers,
-                    use_album_track_num=opts.use_album_track_numbers,
-                    first_artist_only=opts.first_artist_only,
-                    artist_separator=opts.artist_separator,
-                    allow_fallback=opts.allow_fallback,
-                    embed_lyrics=opts.embed_lyrics,
-                    lyrics_providers=opts.lyrics_providers,
-                    enrich_metadata=opts.enrich_metadata,
-                    enrich_providers=opts.enrich_providers,
-                    is_album=is_album,
-                    quality=normalize_quality(opts.quality),
-                    qobuz_token=opts.qobuz_token,
+                    **download_kwargs,
                 )
 
                 if timeout_left:
@@ -499,6 +519,22 @@ async def download_one_async(
                 return DownloadResult.fail(
                     "none",
                     f"Download timed out after {opts.timeout_s}s",
+                )
+            except Exception as exc:
+                # A well-behaved provider never raises — it returns
+                # DownloadResult.fail(...) (see BaseProvider.download_track_async
+                # in core/provider.py). But an extension can override
+                # download_track_async directly instead of the intended
+                # _do_download_async hook, bypassing that safety net. Treat
+                # any such raise the same as an ordinary provider failure —
+                # log one short line and fall through to the next provider —
+                # instead of letting it surface as an unhandled crash with a
+                # full traceback in the middle of the progress output.
+                logger.warning(
+                    "[%s] raised instead of failing cleanly: %s", provider.name, exc
+                )
+                result = DownloadResult.fail(
+                    provider.name, str(exc) or type(exc).__name__
                 )
 
             if result.success:
@@ -546,7 +582,10 @@ async def download_one_async(
                 return result
 
             errors[provider.name] = result.error or "unknown error"
-            safe_tqdm_write(f"  ✗  {provider.name}  ·  {result.error}", file=sys.stderr)
+            safe_tqdm_write(
+                f"  ✗  [#{position}] {provider.name}  ·  {result.error}",
+                file=sys.stderr,
+            )
             logger.debug("[%s] ✗ %s", provider.name, result.error)
 
     attempts_str = f"{opts.track_max_retries + 1} attempt(s)"

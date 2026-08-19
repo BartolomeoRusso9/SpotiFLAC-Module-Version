@@ -421,7 +421,7 @@ class AppleMusicMetadataClient:
     async def get_artist_albums(
         self,
         artist_id: str,
-        include_featuring: bool = False,
+        include_featuring: bool = True,
         storefront: str = "us",
     ) -> tuple[dict[str, Any], list[TrackMetadata]]:
         artist_data = await self._get(f"/{storefront}/artists/{artist_id}")
@@ -463,19 +463,22 @@ class AppleMusicMetadataClient:
             len(album_ids),
         )
 
-        # Fetch parallelo con asyncio.gather
+        # Fetch parallelo con asyncio.gather + semaphore for concurrency limiting
+        semaphore = asyncio.Semaphore(5)
+
         async def _fetch_one(
             aid: str,
         ) -> tuple[str, list[TrackMetadata] | None]:
-            try:
-                _, album_tracks = await self.get_album_tracks(
-                    aid,
-                    storefront=storefront,
-                )
-                return aid, album_tracks
-            except Exception as exc:
-                logger.warning("[apple_metadata] Album %s skipped: %s", aid, exc)
-                return aid, None
+            async with semaphore:
+                try:
+                    _, album_tracks = await self.get_album_tracks(
+                        aid,
+                        storefront=storefront,
+                    )
+                    return aid, album_tracks
+                except Exception as exc:
+                    logger.warning("[apple_metadata] Album %s skipped: %s", aid, exc)
+                    return aid, None
 
         raw_results = await asyncio.gather(*[_fetch_one(aid) for aid in album_ids])
 
@@ -508,7 +511,7 @@ class AppleMusicMetadataClient:
     async def get_url(
         self,
         url: str,
-        include_featuring: bool = False,
+        include_featuring: bool = True,
     ) -> tuple[str, list[TrackMetadata], str, dict[str, Any]]:
         info = parse_apple_music_url(url)
         t = info["type"]

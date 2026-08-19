@@ -20,11 +20,42 @@ if TYPE_CHECKING:
 logger = logging.getLogger("SpotiFLAC")
 
 
+class _CleanConsoleFormatter(logging.Formatter):
+    """Same as logging.Formatter, except it drops the full exception
+    traceback from console output for anything logged via
+    logger.exception()/logger.error(..., exc_info=True).
+
+    Providers and extensions are expected to fail sometimes (missing API
+    config, a track not found, a timed-out request, ...) — that's a normal,
+    surfaced-as-DownloadResult.fail() condition, not a crash. But several
+    call sites (ours and, we've seen, third-party extensions) log those
+    with exc_info=True anyway, which used to dump a full multi-frame
+    traceback into the middle of the progress output for every single
+    provider fallback. This keeps the console to one clean line per event
+    while still showing the real traceback when actually debugging
+    (log_level == DEBUG), since that's when you'd want it.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        if record.exc_info and self.level_allows_traceback():
+            return super().format(record)
+        record_copy = logging.makeLogRecord(record.__dict__)
+        record_copy.exc_info = None
+        record_copy.exc_text = None
+        return super().format(record_copy)
+
+    def level_allows_traceback(self) -> bool:
+        return logger.getEffectiveLevel() <= logging.DEBUG
+
+
 def _setup_logger(level: int) -> logging.Logger:
     if not logger.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
+        handler.setFormatter(
+            _CleanConsoleFormatter("[%(levelname)s] %(name)s: %(message)s")
+        )
         logger.addHandler(handler)
+        logger.propagate = False
     logger.setLevel(level)
     return logger
 

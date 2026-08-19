@@ -300,7 +300,7 @@ class TidalMetadataClient:
         self,
         artist_id: str,
         include_groups: str = f"{_TIDAL_FILTER_ALBUMS},{_TIDAL_FILTER_EPSANDSINGLES}",
-        include_featuring: bool = False,
+        include_featuring: bool = True,
     ) -> tuple[dict[str, Any], list[TrackMetadata]]:
         artist = await self._get(f"/artists/{artist_id}")
         artist_name = artist.get("name", "")
@@ -337,18 +337,21 @@ class TidalMetadataClient:
                 seen_album_ids.add(album_id)
                 albums_to_fetch.append((album_id, album_data, is_compilation))
 
-        # Fetch parallelo con asyncio.gather
+        # Fetch parallelo con asyncio.gather + semaphore for concurrency limiting
+        semaphore = asyncio.Semaphore(5)
+
         async def _fetch_one(
             aid: str,
             preloaded: dict[str, Any],
             is_comp: bool,
         ) -> tuple[str, bool, tuple[dict, list[TrackMetadata]] | None]:
-            try:
-                result = await self.get_album_tracks(aid, preloaded)
-                return aid, is_comp, result
-            except Exception as exc:
-                logger.warning("[tidal_metadata] album %s skipped: %s", aid, exc)
-                return aid, is_comp, None
+            async with semaphore:
+                try:
+                    result = await self.get_album_tracks(aid, preloaded)
+                    return aid, is_comp, result
+                except Exception as exc:
+                    logger.warning("[tidal_metadata] album %s skipped: %s", aid, exc)
+                    return aid, is_comp, None
 
         raw_results = await asyncio.gather(
             *[
@@ -382,7 +385,7 @@ class TidalMetadataClient:
     async def get_url(
         self,
         tidal_url: str,
-        include_featuring: bool = False,
+        include_featuring: bool = True,
     ) -> tuple[str, list[TrackMetadata], str, dict[str, Any]]:
         info = parse_tidal_url(tidal_url)
         t = info["type"]
