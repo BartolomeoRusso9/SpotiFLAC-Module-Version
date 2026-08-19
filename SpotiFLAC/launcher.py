@@ -877,6 +877,7 @@ async def amain() -> None:
                 "tidal_custom_api": tidal_custom_api,
                 "timeout_s": timeout_s,
                 "loop": args.loop,
+                "max_concurrent_downloads": args.max_concurrent,
             }
             await save_profile_async(args.save_profile, profile_cfg)
         except Exception:

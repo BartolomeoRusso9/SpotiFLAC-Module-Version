@@ -463,19 +463,22 @@ class AppleMusicMetadataClient:
             len(album_ids),
         )
 
-        # Fetch parallelo con asyncio.gather
+        # Fetch parallelo con asyncio.gather + semaphore for concurrency limiting
+        semaphore = asyncio.Semaphore(5)
+
         async def _fetch_one(
             aid: str,
         ) -> tuple[str, list[TrackMetadata] | None]:
-            try:
-                _, album_tracks = await self.get_album_tracks(
-                    aid,
-                    storefront=storefront,
-                )
-                return aid, album_tracks
-            except Exception as exc:
-                logger.warning("[apple_metadata] Album %s skipped: %s", aid, exc)
-                return aid, None
+            async with semaphore:
+                try:
+                    _, album_tracks = await self.get_album_tracks(
+                        aid,
+                        storefront=storefront,
+                    )
+                    return aid, album_tracks
+                except Exception as exc:
+                    logger.warning("[apple_metadata] Album %s skipped: %s", aid, exc)
+                    return aid, None
 
         raw_results = await asyncio.gather(*[_fetch_one(aid) for aid in album_ids])
 

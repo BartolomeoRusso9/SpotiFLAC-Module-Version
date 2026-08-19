@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shlex
 import sys
 from urllib.parse import urlparse
 
@@ -584,9 +585,21 @@ async def run_interactive() -> dict:
         )
         backup = _ask_bool("Create .bak backups before overwriting?", True)
 
+        sep = _ask(
+            "Artist separator (leave blank for standard multi-value tags, e.g. ', ' or ' / ')",
+            "",
+        )
+        artist_separator = sep if sep else None
+
         from .core.local_processor import run_local_tagging_cli
 
-        await run_local_tagging_cli(path, dry_run=dry_run, force=force, backup=backup)
+        await run_local_tagging_cli(
+            path,
+            dry_run=dry_run,
+            force=force,
+            backup=backup,
+            artist_separator=artist_separator,
+        )
         sys.exit(0)
 
     # ── Health check ────────────────────────────────────────────────────────
@@ -1209,7 +1222,7 @@ def _print_cli_command(cfg: dict) -> None:
     if cfg["first_artist_only"]:
         parts.append("--first-artist-only")
     if cfg.get("artist_separator"):
-        parts.append(f'--artist-separator "{cfg["artist_separator"]}"')
+        parts.append(f'--artist-separator {shlex.quote(cfg["artist_separator"])}')
     if not cfg["embed_lyrics"]:
         parts.append("--no-lyrics")
     else:

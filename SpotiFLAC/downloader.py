@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import os
 import re
@@ -467,23 +468,38 @@ async def download_one_async(
                     max(1, opts.timeout_s - time_elapsed) if opts.timeout_s else None
                 )
 
+                # Check if provider supports artist_separator parameter
+                download_kwargs = {
+                    "filename_format": opts.filename_format,
+                    "position": position,
+                    "include_track_num": opts.use_track_numbers,
+                    "use_album_track_num": opts.use_album_track_numbers,
+                    "first_artist_only": opts.first_artist_only,
+                    "allow_fallback": opts.allow_fallback,
+                    "embed_lyrics": opts.embed_lyrics,
+                    "lyrics_providers": opts.lyrics_providers,
+                    "enrich_metadata": opts.enrich_metadata,
+                    "enrich_providers": opts.enrich_providers,
+                    "is_album": is_album,
+                    "quality": normalize_quality(opts.quality),
+                    "qobuz_token": opts.qobuz_token,
+                }
+
+                # Use signature inspection to check if artist_separator is supported
+                try:
+                    sig = inspect.signature(provider.download_track_async)
+                    if "artist_separator" in sig.parameters or any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+                    ):
+                        download_kwargs["artist_separator"] = opts.artist_separator
+                except Exception:
+                    # If inspection fails, try to include it anyway (default behavior)
+                    download_kwargs["artist_separator"] = opts.artist_separator
+
                 download_task = provider.download_track_async(
                     metadata,
                     output_dir,
-                    filename_format=opts.filename_format,
-                    position=position,
-                    include_track_num=opts.use_track_numbers,
-                    use_album_track_num=opts.use_album_track_numbers,
-                    first_artist_only=opts.first_artist_only,
-                    artist_separator=opts.artist_separator,
-                    allow_fallback=opts.allow_fallback,
-                    embed_lyrics=opts.embed_lyrics,
-                    lyrics_providers=opts.lyrics_providers,
-                    enrich_metadata=opts.enrich_metadata,
-                    enrich_providers=opts.enrich_providers,
-                    is_album=is_album,
-                    quality=normalize_quality(opts.quality),
-                    qobuz_token=opts.qobuz_token,
+                    **download_kwargs,
                 )
 
                 if timeout_left:
