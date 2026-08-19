@@ -503,6 +503,8 @@ def _summary(cfg: dict) -> None:
 
     if cfg["first_artist_only"]:
         flags.append("first-artist-only")
+    if cfg.get("artist_separator"):
+        flags.append(f"artist-separator: '{cfg['artist_separator']}'")
     row("Options", ", ".join(flags) if flags else "none")
 
     row(
@@ -1019,6 +1021,12 @@ async def run_interactive() -> dict:
             cfg["first_artist_only"],
         )
 
+    if not cfg["first_artist_only"]:
+        sep = _ask("Artist separator (leave blank for standard multi-value tags, e.g. ', ' or ' / ')", cfg.get("artist_separator") or "")
+        cfg["artist_separator"] = sep if sep else None
+    else:
+        cfg["artist_separator"] = None
+
     # ── 7. Lyrics ────────────────────────────────────────────────────────────
     _section("7 · Lyrics")
     cfg["embed_lyrics"] = _ask_bool(
@@ -1197,6 +1205,8 @@ def _print_cli_command(cfg: dict) -> None:
 
     if cfg["first_artist_only"]:
         parts.append("--first-artist-only")
+    if cfg.get("artist_separator"):
+        parts.append(f'--artist-separator "{cfg["artist_separator"]}"')
     if not cfg["embed_lyrics"]:
         parts.append("--no-lyrics")
     else:
