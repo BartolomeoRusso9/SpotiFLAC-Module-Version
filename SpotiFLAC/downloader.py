@@ -443,7 +443,7 @@ async def download_one_async(
                 is_ext = provider.name.startswith("ext:")
                 target_type = "extension" if is_ext else "provider"
                 safe_tqdm_write(
-                    f"  ⚠️  [#{position}] Fallback: switching to backup {target_type} ({provider.name})...",
+                    f"[#{position}] Switching to next extension: {target_type} ({provider.name})...",
                 )
 
             logger.info(
