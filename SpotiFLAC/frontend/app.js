@@ -1778,23 +1778,44 @@ function downloadLyrics(i) {
 
 function downloadCover(i) {
   const t = currentTracks[i];
-  if (!t) return;
+  if (!t || !t.id) return;
   
   // Select both the hidden table button and the visible card button
   const btns = document.querySelectorAll(`#track-row-${i} .ta-btn.ta-cover, .ta-cover[data-track-index="${i}"]`);
+  
+  // Se è già in caricamento, ignora ulteriori click
+  if (btns[0] && btns[0].classList.contains('ta-loading')) return;
+
   btns.forEach(btn => setTaBtnState(btn, 'loading'));
   logMessage(`Fetching cover: ${t.title}…`, 'info');
   
   if (window.pywebview?.api) {
-    // Chiama la funzione python "download_track_cover" che abbiamo sistemato prima!
-    Promise.resolve(window.pywebview.api.download_track_cover(t))
-      .then(() => { btns.forEach(btn => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }); })
-      .catch(() => { btns.forEach(btn => { setTaBtnState(btn, 'error'); resetTaBtnAfter(btn, 2200); }); });
+    // Avvia solo il processo. Lo stato 'success' o 'error' verrà impostato 
+    // dal listener app_cover_download_finished qui sotto.
+    window.pywebview.api.download_track_cover(t).catch((err) => {
+        btns.forEach(btn => { setTaBtnState(btn, 'error'); resetTaBtnAfter(btn, 2200); });
+        logMessage('Error starting cover download: ' + err, 'error');
+    });
   } else {
     logMessage('Python not connected — demo mode', 'warn');
-    setTimeout(() => { btns.forEach(btn => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }); }, 700);
+    setTimeout(() => { btns.forEach(btn => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }); }, 1500);
   }
 }
+
+// ── In ascolto per il completamento REALE dal backend ──
+window.app_cover_download_finished = function(payload) {
+  const trackId = payload.id;
+  const success = payload.success;
+  
+  const idx = currentTracks.findIndex(t => t.id === trackId);
+  if (idx === -1) return;
+  
+  const btns = document.querySelectorAll(`#track-row-${idx} .ta-btn.ta-cover, .ta-cover[data-track-index="${idx}"]`);
+  btns.forEach(btn => {
+      setTaBtnState(btn, success ? 'success' : 'error');
+      resetTaBtnAfter(btn, 2200);
+  });
+};
 
 function downloadAlbumCover(btn, imageUrl, title = 'album', artist = 'Unknown', owner = '') {
   const itemType = currentItemType || 'ALBUM';
