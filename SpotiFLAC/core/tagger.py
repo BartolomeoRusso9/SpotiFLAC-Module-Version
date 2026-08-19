@@ -29,7 +29,6 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
 from mutagen.flac import FLAC
 from mutagen.flac import Picture as FlacPicture
 from mutagen.id3 import (

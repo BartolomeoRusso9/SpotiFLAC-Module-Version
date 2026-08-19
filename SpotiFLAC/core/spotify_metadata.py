@@ -1355,15 +1355,12 @@ def _maximize_cover_url(url: str) -> str:
     
     import re
     
-    # Spotify (Forza 640x640 per gli Album/Tracks)
     url = url.replace("ab67616d00001e02", "ab67616d0000b273")
     url = url.replace("ab67616d00004851", "ab67616d0000b273")
     
-    # Spotify (Forza 640x640 per i profili Artista)
     url = url.replace("ab67616100005174", "ab6761610000e5eb")
     url = url.replace("ab6761610000f178", "ab6761610000e5eb")
     
-    # Apple Music (Forza 2000x2000)
     if "mzstatic.com/image" in url:
         url = re.sub(r"/\d+x\d+([a-zA-Z]*)\.(jpg|webp|png)", r"/2000x2000\1.\2", url)
         
