@@ -22,13 +22,14 @@ All formats share the same pipeline:
 from __future__ import annotations
 
 import asyncio
-import httpx
 import contextlib
 import logging
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import httpx
 from mutagen.flac import FLAC
 from mutagen.flac import Picture as FlacPicture
 from mutagen.id3 import (
