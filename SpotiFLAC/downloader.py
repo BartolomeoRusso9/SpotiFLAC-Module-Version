@@ -126,8 +126,12 @@ class DownloadOptions:
     # `output_dir` (useful for music libraries).
     create_playlist_subfolders: bool = True
     first_artist_only: bool = False
+    # When set (e.g. ", " or " / "), multiple artists are written as one
+    # joined string instead of a multi-value ARTIST/ALBUMARTIST field. See
+    # core/tagger.py EmbedOptions.artist_separator for why — some players
+    # (notably Rekordbox) mangle multi-value fields into unseparated text.
     artist_separator: str | None = None
-    include_featuring: bool = True
+    include_featuring: bool = False
     quality: str = "LOSSLESS"
     allow_fallback: bool = True
     inter_track_delay_s: float = 1.0
@@ -429,7 +433,7 @@ async def download_one_async(
         if attempt > 0:
             wait = min(2**attempt, 30)
             safe_tqdm_write(
-                f"\n  ↺  Retry {attempt}/{opts.track_max_retries} in {wait}s…",
+                f"\n  ↺  [#{position}] Retry {attempt}/{opts.track_max_retries} in {wait}s…",
             )
             await asyncio.sleep(wait)
             errors.clear()
@@ -439,7 +443,7 @@ async def download_one_async(
                 is_ext = provider.name.startswith("ext:")
                 target_type = "extension" if is_ext else "provider"
                 safe_tqdm_write(
-                    f"  ⚠️  Fallback: switching to backup {target_type} ({provider.name})...",
+                    f"  ⚠️  [#{position}] Fallback: switching to backup {target_type} ({provider.name})...",
                 )
 
             logger.info(
@@ -500,6 +504,18 @@ async def download_one_async(
                     "none",
                     f"Download timed out after {opts.timeout_s}s",
                 )
+            except Exception as exc:
+                # A well-behaved provider never raises — it returns
+                # DownloadResult.fail(...) (see BaseProvider.download_track_async
+                # in core/provider.py). But an extension can override
+                # download_track_async directly instead of the intended
+                # _do_download_async hook, bypassing that safety net. Treat
+                # any such raise the same as an ordinary provider failure —
+                # log one short line and fall through to the next provider —
+                # instead of letting it surface as an unhandled crash with a
+                # full traceback in the middle of the progress output.
+                logger.warning("[%s] raised instead of failing cleanly: %s", provider.name, exc)
+                result = DownloadResult.fail(provider.name, str(exc) or type(exc).__name__)
 
             if result.success:
                 if opts.transcode_to:
@@ -546,7 +562,7 @@ async def download_one_async(
                 return result
 
             errors[provider.name] = result.error or "unknown error"
-            safe_tqdm_write(f"  ✗  {provider.name}  ·  {result.error}", file=sys.stderr)
+            safe_tqdm_write(f"  ✗  [#{position}] {provider.name}  ·  {result.error}", file=sys.stderr)
             logger.debug("[%s] ✗ %s", provider.name, result.error)
 
     attempts_str = f"{opts.track_max_retries + 1} attempt(s)"

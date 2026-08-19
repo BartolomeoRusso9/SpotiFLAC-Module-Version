@@ -97,6 +97,7 @@ class BaseProvider(ABC):
         include_track_num: bool = False,
         use_album_track_num: bool = False,
         first_artist_only: bool = False,
+        artist_separator: str | None = None,
         allow_fallback: bool = True,
         embed_lyrics: bool = False,
         lyrics_providers: list[str] | None = None,

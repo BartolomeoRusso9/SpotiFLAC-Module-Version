@@ -684,7 +684,9 @@ class SpotiFLAC_API:
             )
             from .core.models import TrackMetadata
 
-            opts = default_embed_options()
+            opts = default_embed_options(
+                artist_separator=self.load_settings().get("artist_separator") or None,
+            )
             results = []
             total = len(items)
 
@@ -1735,7 +1737,7 @@ class SpotiFLAC_API:
             use_artist_subfolders = config.get("use_artist_subfolders", False)
             use_album_subfolders = config.get("use_album_subfolders", False)
             first_artist_only = config.get("first_artist_only", False)
-            artist_separator = config.get("artist_separator")
+            artist_separator = config.get("artist_separator") or None
             lyrics_providers = config.get("lyrics_providers") or [
                 "spotify",
                 "apple",
