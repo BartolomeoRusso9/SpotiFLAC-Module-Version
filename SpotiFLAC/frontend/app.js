@@ -1745,7 +1745,15 @@ function setTaBtnState(btn, state) {
 }
 
 function resetTaBtnAfter(btn, ms) {
-  setTimeout(() => setTaBtnState(btn, 'default'), ms);
+  // Cancel any previous timer for this button
+  if (btn._resetTimer) {
+    clearTimeout(btn._resetTimer);
+  }
+  // Schedule new timer and store the ID on the button element
+  btn._resetTimer = setTimeout(() => {
+    setTaBtnState(btn, 'default');
+    btn._resetTimer = null;
+  }, ms);
 }
 
 // ── Track actions ─────────────────────────────────────────────────────────────
@@ -1785,6 +1793,14 @@ function downloadCover(i) {
   
   // Se è già in caricamento, ignora ulteriori click
   if (btns[0] && btns[0].classList.contains('ta-loading')) return;
+
+  // Cancel any previously scheduled reset timers before setting loading state
+  btns.forEach(btn => {
+    if (btn._resetTimer) {
+      clearTimeout(btn._resetTimer);
+      btn._resetTimer = null;
+    }
+  });
 
   btns.forEach(btn => setTaBtnState(btn, 'loading'));
   logMessage(`Fetching cover: ${t.title}…`, 'info');

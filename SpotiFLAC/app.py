@@ -1353,7 +1353,7 @@ class SpotiFLAC_API:
                 self.log(f"[{idx}/{total}] Cover error for '{title}': {e}", "error")
 
         # Create an async client and start all downloads together!
-        async with httpx.AsyncClient(limits=httpx.Limits(max_connections=50)) as client:
+        async with httpx.AsyncClient(limits=httpx.Limits(max_connections=50), follow_redirects=True) as client:
             tasks = [
                 fetch_and_save(client, track, i)
                 for i, track in enumerate(tracks_data, 1)
