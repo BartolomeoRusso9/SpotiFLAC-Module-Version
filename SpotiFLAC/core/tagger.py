@@ -1385,6 +1385,7 @@ async def embed_metadata_async(
             cause=exc,
         )
 
+
 async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | None:
     if not url:
         return None
@@ -1401,7 +1402,7 @@ async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | No
 
             if resp.status_code == 200:
                 return resp.content
-            
+
             logger.warning(
                 "[tagger] cover HTTP %s (attempt %d)",
                 resp.status_code,
@@ -1409,10 +1410,10 @@ async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | No
             )
         except Exception as exc:
             logger.warning("[tagger] cover attempt %d failed: %s", attempt + 1, exc)
-            
+
         if attempt < 2:
             await asyncio.sleep(1.5 * (attempt + 1))
-            
+
     return None
 
 

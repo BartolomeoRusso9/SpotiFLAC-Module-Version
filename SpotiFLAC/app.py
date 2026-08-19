@@ -1120,12 +1120,15 @@ class SpotiFLAC_API:
 
             if not cover_url:
                 self.log(f"No cover URL available for: {title}", "error")
-                self._push("app_cover_download_finished", {"id": track_id, "success": False})
+                self._push(
+                    "app_cover_download_finished", {"id": track_id, "success": False}
+                )
                 return
 
             self.log(f"Downloading HQ cover for: {title}…", "info")
 
             import httpx
+
             async with httpx.AsyncClient() as client:
                 resp = await client.get(cover_url, timeout=15, follow_redirects=True)
                 resp.raise_for_status()
@@ -1141,17 +1144,20 @@ class SpotiFLAC_API:
 
             os.makedirs(self.download_dir, exist_ok=True)
             import aiofiles
+
             async with aiofiles.open(out_path, "wb") as f:
                 await f.write(resp.content)
 
             self.log(f"Cover saved: {filename}", "ok")
             # Notifica successo al Frontend
             self._push("app_cover_download_finished", {"id": track_id, "success": True})
-            
+
         except Exception as e:
             self.log(f"Cover download error: {e}", "error")
             # Notifica errore al Frontend
-            self._push("app_cover_download_finished", {"id": track_id, "success": False})
+            self._push(
+                "app_cover_download_finished", {"id": track_id, "success": False}
+            )
 
     def download_cover(self, cover_data) -> None:
         """Download and save cover with appropriate folder structure based on type."""
