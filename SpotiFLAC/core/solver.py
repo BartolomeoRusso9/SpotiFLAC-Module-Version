@@ -132,6 +132,7 @@ def _default_browser_path_macos() -> str | None:
         app_path = (
             subprocess.run(
                 ["mdfind", f"kMDItemCFBundleIdentifier == '{bundle_id}'"],
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -159,6 +160,7 @@ def _default_browser_path_linux() -> str | None:
     try:
         desktop_name = subprocess.run(
             ["xdg-settings", "get", "default-web-browser"],
+            check=False,
             capture_output=True,
             text=True,
             timeout=30,
@@ -868,12 +870,14 @@ async def _solve_impl(
                 if profile_dir and platform.system() != "Windows":
                     _subprocess.run(
                         ["pkill", "-f", profile_dir],
+                        check=False,
                         stdout=_subprocess.DEVNULL,
                         stderr=_subprocess.DEVNULL,
                     )
                 elif platform.system() == "Windows":
                     _subprocess.run(
                         ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
+                        check=False,
                         stdout=_subprocess.DEVNULL,
                         stderr=_subprocess.DEVNULL,
                     )

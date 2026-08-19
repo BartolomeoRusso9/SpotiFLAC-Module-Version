@@ -1022,7 +1022,10 @@ async def run_interactive() -> dict:
         )
 
     if not cfg["first_artist_only"]:
-        sep = _ask("Artist separator (leave blank for standard multi-value tags, e.g. ', ' or ' / ')", cfg.get("artist_separator") or "")
+        sep = _ask(
+            "Artist separator (leave blank for standard multi-value tags, e.g. ', ' or ' / ')",
+            cfg.get("artist_separator") or "",
+        )
         cfg["artist_separator"] = sep if sep else None
     else:
         cfg["artist_separator"] = None

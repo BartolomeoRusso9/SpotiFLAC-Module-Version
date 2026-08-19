@@ -514,8 +514,12 @@ async def download_one_async(
                 # log one short line and fall through to the next provider —
                 # instead of letting it surface as an unhandled crash with a
                 # full traceback in the middle of the progress output.
-                logger.warning("[%s] raised instead of failing cleanly: %s", provider.name, exc)
-                result = DownloadResult.fail(provider.name, str(exc) or type(exc).__name__)
+                logger.warning(
+                    "[%s] raised instead of failing cleanly: %s", provider.name, exc
+                )
+                result = DownloadResult.fail(
+                    provider.name, str(exc) or type(exc).__name__
+                )
 
             if result.success:
                 if opts.transcode_to:
@@ -562,7 +566,10 @@ async def download_one_async(
                 return result
 
             errors[provider.name] = result.error or "unknown error"
-            safe_tqdm_write(f"  ✗  [#{position}] {provider.name}  ·  {result.error}", file=sys.stderr)
+            safe_tqdm_write(
+                f"  ✗  [#{position}] {provider.name}  ·  {result.error}",
+                file=sys.stderr,
+            )
             logger.debug("[%s] ✗ %s", provider.name, result.error)
 
     attempts_str = f"{opts.track_max_retries + 1} attempt(s)"
