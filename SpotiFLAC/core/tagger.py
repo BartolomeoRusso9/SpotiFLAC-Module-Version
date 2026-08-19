@@ -1385,7 +1385,6 @@ async def embed_metadata_async(
             cause=exc,
         )
 
-
 async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | None:
     if not url:
         return None
