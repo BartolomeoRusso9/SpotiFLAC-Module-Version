@@ -489,7 +489,8 @@ async def download_one_async(
                 try:
                     sig = inspect.signature(provider.download_track_async)
                     if "artist_separator" in sig.parameters or any(
-                        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+                        p.kind == inspect.Parameter.VAR_KEYWORD
+                        for p in sig.parameters.values()
                     ):
                         download_kwargs["artist_separator"] = opts.artist_separator
                 except Exception:
