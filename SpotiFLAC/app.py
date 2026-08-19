@@ -1123,7 +1123,7 @@ class SpotiFLAC_API:
             self.log(f"Downloading HQ cover for: {title}…", "info")
 
             async with httpx.AsyncClient() as client:
-                resp = await client.get(cover_url, timeout=15)
+                resp = await client.get(cover_url, timeout=15, follow_redirects=True)
                 resp.raise_for_status()
 
             safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
@@ -1171,7 +1171,7 @@ class SpotiFLAC_API:
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
 
             async with httpx.AsyncClient() as client:
-                resp = await client.get(cover_url, timeout=15)
+                resp = await client.get(cover_url, timeout=15, follow_redirects=True)
                 resp.raise_for_status()
 
             if item_type == "PLAYLIST":
@@ -1220,7 +1220,7 @@ class SpotiFLAC_API:
             self.log(f"Downloading HQ album cover: {artist} - {title}…", "info")
 
             async with httpx.AsyncClient() as client:
-                resp = await client.get(cover_url, timeout=15)
+                resp = await client.get(cover_url, timeout=15, follow_redirects=True)
                 resp.raise_for_status()
 
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
