@@ -1776,6 +1776,26 @@ function downloadLyrics(i) {
   }
 }
 
+function downloadCover(i) {
+  const t = currentTracks[i];
+  if (!t) return;
+  
+  // Select both the hidden table button and the visible card button
+  const btns = document.querySelectorAll(`#track-row-${i} .ta-btn.ta-cover, .ta-cover[data-track-index="${i}"]`);
+  btns.forEach(btn => setTaBtnState(btn, 'loading'));
+  logMessage(`Fetching cover: ${t.title}…`, 'info');
+  
+  if (window.pywebview?.api) {
+    // Chiama la funzione python "download_track_cover" che abbiamo sistemato prima!
+    Promise.resolve(window.pywebview.api.download_track_cover(t))
+      .then(() => { btns.forEach(btn => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }); })
+      .catch(() => { btns.forEach(btn => { setTaBtnState(btn, 'error'); resetTaBtnAfter(btn, 2200); }); });
+  } else {
+    logMessage('Python not connected — demo mode', 'warn');
+    setTimeout(() => { btns.forEach(btn => { setTaBtnState(btn, 'success'); resetTaBtnAfter(btn, 2200); }); }, 700);
+  }
+}
+
 function downloadAlbumCover(btn, imageUrl, title = 'album', artist = 'Unknown', owner = '') {
   const itemType = currentItemType || 'ALBUM';
   const displayName = itemType === 'PLAYLIST' ? owner || title : artist;

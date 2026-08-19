@@ -21,6 +21,40 @@ from .core.http import AsyncHttpClient
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
 
+def _maximize_cover_url(url: str) -> str:
+    """Modifica l'URL della cover per richiederne la versione alla massima qualità."""
+    if not url:
+        return ""
+    
+    # Spotify (Forza 640x640 per gli Album/Tracks)
+    url = url.replace("ab67616d00001e02", "ab67616d0000b273")
+    url = url.replace("ab67616d00004851", "ab67616d0000b273")
+    
+    # Spotify (Forza 640x640 per i profili Artista)
+    url = url.replace("ab67616100005174", "ab6761610000e5eb")
+    url = url.replace("ab6761610000f178", "ab6761610000e5eb")
+    
+    # Apple Music (Forza 2000x2000)
+    if "mzstatic.com/image" in url:
+        url = re.sub(r"/\d+x\d+([a-zA-Z]*)\.(jpg|webp|png)", r"/2000x2000\1.\2", url)
+        
+    # Tidal (Forza 1280x1280)
+    if "resources.tidal.com/images" in url:
+        url = re.sub(r"/\d+x\d+\.jpg", "/1280x1280.jpg", url)
+        
+    # Deezer (Forza 1000x1000)
+    if "dzcdn.net/images" in url:
+        url = re.sub(r"/\d+x\d+-", "/1000x1000-", url)
+        
+    # Qobuz (Risoluzione originale max)
+    if "static.qobuz.com/images" in url:
+        url = re.sub(r"_\d+\.jpg", "_max.jpg", url)
+        
+    # SoundCloud (Forza originale/500x500)
+    if "sndcdn.com/artworks" in url:
+        url = re.sub(r"-t\d+x\d+\.jpg", "-t500x500.jpg", url)
+        
+    return url
 
 class UILogHandler(logging.Handler):
     def __init__(self, api) -> None:
@@ -1106,26 +1140,28 @@ class SpotiFLAC_API:
 
     async def _download_cover_task_async(self, track_data) -> None:
         try:
+            if isinstance(track_data, list) and len(track_data) > 0:
+                track_data = track_data[0]
+
             title = track_data.get("title", "Unknown")
             artist = track_data.get("artist", "")
-            cover_url = track_data.get("cover", "")
+            
+            raw_url = track_data.get("cover") or track_data.get("images", "")
+            cover_url = _maximize_cover_url(raw_url)
 
             if not cover_url:
                 self.log(f"No cover URL available for: {title}", "error")
                 return
 
-            self.log(f"Downloading cover for: {title}…", "info")
-            client = AsyncHttpClient("cover", timeout_s=15)
-            resp = await client.get(cover_url, timeout=15)
-            resp.raise_for_status()
+            self.log(f"Downloading HQ cover for: {title}…", "info")
+            
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(cover_url, timeout=15)
+                resp.raise_for_status()
 
             safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-            filename = (
-                f"{safe_artist} - {safe_title}.jpg"
-                if safe_artist
-                else f"{safe_title}.jpg"
-            )
+            filename = f"{safe_artist} - {safe_title}.jpg" if safe_artist else f"{safe_title}.jpg"
             out_path = os.path.join(self.download_dir, filename)
 
             os.makedirs(self.download_dir, exist_ok=True)
@@ -1133,7 +1169,6 @@ class SpotiFLAC_API:
                 await f.write(resp.content)
 
             self.log(f"Cover saved: {filename}", "ok")
-
         except Exception as e:
             self.log(f"Cover download error: {e}", "error")
 
@@ -1153,8 +1188,10 @@ class SpotiFLAC_API:
             title = cover_data.get("title", "Unknown")
             artist = cover_data.get("artist", "")
             owner = cover_data.get("owner", "")
-            cover_url = cover_data.get("cover", "")
             item_type = cover_data.get("type", "ALBUM").upper()
+
+            raw_url = cover_data.get("cover", "")
+            cover_url = _maximize_cover_url(raw_url)
 
             if not cover_url:
                 self.log(f"No cover URL available for: {title}", "error")
@@ -1162,22 +1199,21 @@ class SpotiFLAC_API:
 
             safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-            re.sub(r'[\\/*?:"<>|]', "", owner).strip()
-            client = AsyncHttpClient("cover", timeout_s=15)
-            resp = await client.get(cover_url, timeout=15)
-            resp.raise_for_status()
+            safe_owner = re.sub(r'[\\/*?:"<>|]', "", owner).strip()
 
-            # Determine folder structure based on type
+            self.log(f"Downloading HQ {item_type.lower()} cover: {title}…", "info")
+            
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(cover_url, timeout=15)
+                resp.raise_for_status()
+
             if item_type == "PLAYLIST":
-                # Playlist/cover.jpg
                 folder_path = os.path.join(self.download_dir, safe_title)
                 folder_display = safe_title
             elif item_type == "ARTIST":
-                # Artist/cover.jpg
                 folder_path = os.path.join(self.download_dir, safe_artist)
                 folder_display = safe_artist
-            else:  # ALBUM or TRACK
-                # Artist/Album/cover.jpg
+            else:
                 folder_path = os.path.join(self.download_dir, safe_artist, safe_title)
                 folder_display = f"{safe_artist}/{safe_title}"
 
@@ -1188,7 +1224,6 @@ class SpotiFLAC_API:
                 await f.write(resp.content)
 
             self.log(f"Cover saved: {folder_display}/cover.jpg", "ok")
-
         except Exception as e:
             self.log(f"Cover download error: {e}", "error")
 
@@ -1207,31 +1242,31 @@ class SpotiFLAC_API:
         try:
             title = album_data.get("title", "Unknown")
             artist = album_data.get("artist", "Unknown Artist")
-            cover_url = album_data.get("cover", "")
+            
+            raw_url = album_data.get("cover", "")
+            cover_url = _maximize_cover_url(raw_url)
 
             if not cover_url:
                 self.log(f"No cover URL available for: {title}", "error")
                 return
 
-            self.log(f"Downloading album cover: {artist} - {title}…", "info")
-            client = AsyncHttpClient("cover", timeout_s=15)
-            resp = await client.get(cover_url, timeout=15)
-            resp.raise_for_status()
+            self.log(f"Downloading HQ album cover: {artist} - {title}…", "info")
+            
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(cover_url, timeout=15)
+                resp.raise_for_status()
 
             safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
             safe_album = re.sub(r'[\\/*?:"<>|]', "", title).strip()
 
-            # Create folder structure: Artist/Album/
             folder_path = os.path.join(self.download_dir, safe_artist, safe_album)
             os.makedirs(folder_path, exist_ok=True)
-
             out_path = os.path.join(folder_path, "cover.jpg")
 
-            with open(out_path, "wb") as f:
-                f.write(resp.content)
+            async with aiofiles.open(out_path, "wb") as f:
+                await f.write(resp.content)
 
             self.log(f"Album cover saved: {safe_artist}/{safe_album}/cover.jpg", "ok")
-
         except Exception as e:
             self.log(f"Album cover download error: {e}", "error")
 
@@ -1305,7 +1340,9 @@ class SpotiFLAC_API:
             nonlocal success, skipped
             title = track_data.get("title", "Unknown")
             artist = track_data.get("artist", "")
-            cover_url = track_data.get("cover", "")
+            
+            raw_url = track_data.get("cover", "")
+            cover_url = _maximize_cover_url(raw_url)
 
             if not cover_url:
                 skipped += 1
@@ -1317,18 +1354,14 @@ class SpotiFLAC_API:
 
                 safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
                 safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-                filename = (
-                    f"{safe_artist} - {safe_title}.jpg"
-                    if safe_artist
-                    else f"{safe_title}.jpg"
-                )
+                filename = f"{safe_artist} - {safe_title}.jpg" if safe_artist else f"{safe_title}.jpg"
                 out_path = os.path.join(self.download_dir, filename)
 
                 async with aiofiles.open(out_path, "wb") as f:
                     await f.write(resp.content)
 
                 success += 1
-                self.log(f"[{idx}/{total}] Cover saved: {filename}", "ok")
+                self.log(f"[{idx}/{total}] HQ Cover saved: {filename}", "ok")
             except Exception as e:
                 self.log(f"[{idx}/{total}] Cover error for '{title}': {e}", "error")
 

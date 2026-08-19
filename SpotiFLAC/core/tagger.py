@@ -22,6 +22,7 @@ All formats share the same pipeline:
 from __future__ import annotations
 
 import asyncio
+import httpx
 import contextlib
 import logging
 import struct
@@ -1277,6 +1278,11 @@ async def embed_metadata_async(
     if not cover_data:
         best_cover = enriched_cover_url or opts.cover_url or metadata.cover_url
         if best_cover:
+            from .spotify_metadata import _maximize_cover_url
+            try:
+                best_cover = _maximize_cover_url(best_cover)
+            except Exception:
+                pass
             cover_data = await _fetch_cover_async(best_cover, session)
 
     # ── 3. Lyrics ──────────────────────────────────────────────────────────
@@ -1383,17 +1389,13 @@ async def embed_metadata_async(
 async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | None:
     if not url:
         return None
-
-    from .http import AsyncHttpClient
-
-    client = AsyncHttpClient(provider="tagger", timeout_s=10)
-    headers = {}
-
+    
     for attempt in range(3):
         try:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code == 200:
-                return resp.content
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, follow_redirects=True, timeout=15)
+                if resp.status_code == 200:
+                    return resp.content
             logger.warning(
                 "[tagger] cover HTTP %s (attempt %d)",
                 resp.status_code,

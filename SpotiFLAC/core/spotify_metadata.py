@@ -1347,3 +1347,40 @@ def parse_home_feed(raw_data: dict) -> dict:
             sections.append({"title": title, "uri": sec_uri, "items": items})
 
     return {"success": True, "greeting": greeting, "sections": sections}
+
+def _maximize_cover_url(url: str) -> str:
+    """Modifica l'URL della cover per richiederne la versione alla massima qualità."""
+    if not url:
+        return ""
+    
+    import re
+    
+    # Spotify (Forza 640x640 per gli Album/Tracks)
+    url = url.replace("ab67616d00001e02", "ab67616d0000b273")
+    url = url.replace("ab67616d00004851", "ab67616d0000b273")
+    
+    # Spotify (Forza 640x640 per i profili Artista)
+    url = url.replace("ab67616100005174", "ab6761610000e5eb")
+    url = url.replace("ab6761610000f178", "ab6761610000e5eb")
+    
+    # Apple Music (Forza 2000x2000)
+    if "mzstatic.com/image" in url:
+        url = re.sub(r"/\d+x\d+([a-zA-Z]*)\.(jpg|webp|png)", r"/2000x2000\1.\2", url)
+        
+    # Tidal (Forza 1280x1280)
+    if "resources.tidal.com/images" in url:
+        url = re.sub(r"/\d+x\d+\.jpg", "/1280x1280.jpg", url)
+        
+    # Deezer (Forza 1000x1000)
+    if "dzcdn.net/images" in url:
+        url = re.sub(r"/\d+x\d+-", "/1000x1000-", url)
+        
+    # Qobuz (Risoluzione originale max)
+    if "static.qobuz.com/images" in url:
+        url = re.sub(r"_\d+\.jpg", "_max.jpg", url)
+        
+    # SoundCloud (Forza originale/500x500)
+    if "sndcdn.com/artworks" in url:
+        url = re.sub(r"-t\d+x\d+\.jpg", "-t500x500.jpg", url)
+        
+    return url
