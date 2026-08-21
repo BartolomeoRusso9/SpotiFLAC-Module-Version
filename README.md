@@ -39,6 +39,22 @@ If you are a copyright holder or an authorized representative and believe this r
 
 ---
 
+## Why the module (instead of the standalone apps)
+
+The Desktop and Mobile apps are built for direct, immediate use: open it, paste a link, download. The Python module exists for a different case — **integrating** this logic into something else.
+
+It makes sense to start here if:
+
+- **You're building a bot** (Telegram, Discord) or a service that needs to handle requests from many users automatically, not a single manual download.
+- **You need the async API** (`AsyncSpotiFLAC`) inside an existing FastAPI/Quart/Sanic app, with shared connection pooling.
+- **You want to orchestrate bulk downloads** via scripts — multiple playlists, full discographies, local library retagging — with custom logic (filenames via a Python function, post-download actions, saved profiles).
+- **You need to run headless**, on a server, a NAS, or inside Docker, possibly as part of a larger pipeline.
+- **You want full control over which extensions get loaded** and from which registry, instead of relying on a fixed set baked into an app.
+
+If you just want a GUI for personal use, with no code involved, the [Desktop](https://github.com/afkarxyz/SpotiFLAC) or [Mobile](https://github.com/zarzet/SpotiFLAC-Mobile) apps remain the simpler choice — this module is the building block those (and similar projects) can be built on top of.
+
+---
+
 ## Features
 
 - Native synchronous and asynchronous Python APIs
