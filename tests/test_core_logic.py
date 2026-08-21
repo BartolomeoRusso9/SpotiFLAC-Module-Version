@@ -28,7 +28,11 @@ from SpotiFLAC.core.quality import (
     quality_for_provider,
     quality_fallback_chain,
 )
-from SpotiFLAC.extensions.manager import ExtensionManager, RegistryEntry
+from SpotiFLAC.extensions.manager import (
+    ExtensionManager,
+    InstalledExtension,
+    RegistryEntry,
+)
 
 
 def test_normalize_isrc_strips_prefix_and_validates():
@@ -492,6 +496,50 @@ def test_extension_manager_deduplicates_registry_checks_in_one_process(
         # Restore original state
         ExtensionManager._startup_registry_checks.clear()
         ExtensionManager._startup_registry_checks.update(original_checks)
+
+
+def test_extension_manager_skips_matching_registry_checksum(tmp_path):
+    manager = ExtensionManager(ext_dir=tmp_path, auto_install_downloads=False)
+    installed = InstalledExtension(
+        name="demo",
+        display_name="Demo",
+        version="1.0.0",
+        description="",
+        ext_dir=tmp_path / "demo",
+        manifest={"_registry_sha256": "ABC123"},
+    )
+    remote = RegistryEntry(
+        id="demo",
+        display_name="Demo",
+        version="1.0.0",
+        description="",
+        download_url="https://example.com/demo.zip",
+        sha256="abc123",
+    )
+
+    assert manager._matches_registry_entry(installed, remote) is True
+
+
+def test_extension_manager_detects_changed_registry_checksum(tmp_path):
+    manager = ExtensionManager(ext_dir=tmp_path, auto_install_downloads=False)
+    installed = InstalledExtension(
+        name="demo",
+        display_name="Demo",
+        version="1.0.0",
+        description="",
+        ext_dir=tmp_path / "demo",
+        manifest={"_registry_sha256": "old"},
+    )
+    remote = RegistryEntry(
+        id="demo",
+        display_name="Demo",
+        version="1.0.0",
+        description="",
+        download_url="https://example.com/demo.zip",
+        sha256="new",
+    )
+
+    assert manager._matches_registry_entry(installed, remote) is False
 
 
 def test_async_client_tracks_loop_minutes_and_default_playlist_subfolders():
