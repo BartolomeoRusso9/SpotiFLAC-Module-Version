@@ -765,7 +765,10 @@ class ExtensionManager:
             return False
         if not remote.sha256:
             return True
-        return installed.manifest.get("_registry_sha256", "").lower() == remote.sha256.lower()
+        return (
+            installed.manifest.get("_registry_sha256", "").lower()
+            == remote.sha256.lower()
+        )
 
     def preload_python_modules(self) -> None:
         """Pre-loads all installed Python extension entry points into sys.modules.

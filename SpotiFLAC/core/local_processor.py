@@ -199,6 +199,7 @@ async def retag_local_file_async(
         backup_path=str(backup_path) if (backup_path and keep_backup) else "",
     )
 
+
 def default_embed_options(
     *,
     embed_lyrics: bool = True,
