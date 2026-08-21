@@ -55,7 +55,7 @@ class JSExtensionProvider(BaseProvider):
         settings: dict | None = None,
         ext_dir: str | None = None,
         node_executable: str = "node",
-        timeout_s: int = 120,
+        timeout_s: int = 180,
     ) -> None:
         super().__init__(timeout_s=timeout_s)
 
@@ -837,7 +837,7 @@ def make_extension_provider(
     settings: dict | None = None,
     ext_dir: str | None = None,
     node_executable: str = "node",
-    timeout_s: int = 120,
+    timeout_s: int = 180,
 ) -> JSExtensionProvider:
     return JSExtensionProvider(
         ext_id=ext_id,

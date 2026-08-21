@@ -1144,7 +1144,7 @@ async def run_interactive() -> dict:
 
     # ── 9.5. Timeout ───────────────────────────────────────────────────
     _section("9.5 · Download Timeout")
-    default_timeout = cfg.get("timeout_s", 0)
+    default_timeout = cfg.get("timeout_s", 180)
     timeout_str = _ask(
         "Timeout per provider attempt in seconds (0 = disabled)",
         str(default_timeout),

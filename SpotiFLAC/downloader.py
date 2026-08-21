@@ -238,7 +238,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
                 js_prov = JSExtensionProvider(
                     original_ext_id,
                     ext_dir=opts.ext_dir,
-                    timeout_s=opts.timeout_s or 120,
+                    timeout_s=opts.timeout_s or 180,
                 )
                 providers.append(js_prov)
                 logger.debug("Added JS provider fallback: %s", original_ext_id)
@@ -847,12 +847,57 @@ class DownloadWorker:
                 if not t.done():
                     t.cancel()
             await asyncio.gather(consumer_task, *worker_tasks, return_exceptions=True)
+            await self._remove_partial_files_async(base_out)
             raise
 
+        await self._remove_partial_files_async(base_out)
         elapsed = time.perf_counter() - start
         self._print_summary(elapsed)
         await self._execute_post_action_async(base_out)
         return self._failed
+
+    async def _remove_partial_files_async(self, output_dir: str) -> None:
+        """Removes leftover `.part` files and invalid temporary M4A files."""
+
+        def _remove() -> int:
+            removed = 0
+            root = Path(output_dir)
+            if not root.exists():
+                return 0
+            candidates = list(root.rglob("*.part")) + list(root.rglob("*.m4a"))
+            for path in candidates:
+                if not path.is_file() or (
+                    path.suffix.lower() == ".m4a" and self._valid_m4a(path)
+                ):
+                    continue
+                try:
+                    path.unlink()
+                    removed += 1
+                except OSError as exc:
+                    logger.warning(
+                        "[downloader] Could not remove partial file %s: %s",
+                        path,
+                        exc,
+                    )
+            return removed
+
+        removed = await asyncio.to_thread(_remove)
+        if removed:
+            logger.debug(
+                "[downloader] Removed %d leftover partial/invalid audio file(s)",
+                removed,
+            )
+
+    @staticmethod
+    def _valid_m4a(path: Path) -> bool:
+        """Returns whether an M4A has a readable audio container."""
+        try:
+            from mutagen.mp4 import MP4
+
+            audio = MP4(str(path))
+            return bool(audio.info and audio.info.length > 0)
+        except Exception:
+            return False
 
     async def _resolve_output_dir_async(self) -> str:
         """Asynchronously resolves the output directory ensuring it exists."""

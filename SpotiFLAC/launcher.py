@@ -469,7 +469,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     timeout_grp.add_argument(
         "--timeout",
         type=int,
-        default=pd.get("timeout_s", None),
+        default=pd.get("timeout_s", 180),
         dest="timeout_s",
         metavar="SECONDS",
         help="Maximum seconds allowed for each provider attempt (default: no limit). "
