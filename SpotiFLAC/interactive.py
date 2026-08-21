@@ -165,9 +165,29 @@ _ALL_SERVICES = [
     "kugou",
 ]
 
+_SERVICE_LABELS = {
+    "apple": "Apple Music (lyrics)",
+    "lrclib": "LRCLIB (lyrics)",
+    "musixmatch": "Musixmatch (lyrics)",
+    "spotify": "Spotify (lyrics)",
+    "amazon": "Amazon Music (lyrics)",
+    "deezer": "Deezer (lyrics)",
+    "genius": "Genius (lyrics)",
+    "netease": "NetEase (lyrics)",
+    "qq": "QQ Music (lyrics)",
+    "youtube": "YouTube (lyrics)",
+    "kugou": "Kugou (lyrics)",
+}
+
 
 async def _display_health_check() -> dict[str, bool]:
-    _section("Service Availability Check")
+    _section("Lyrics Providers Availability Check")
+    print(
+        DIM(
+            "  These checks cover lyric sources used for embedding lyrics. "
+            "They are not audio download providers and a failed check does not block downloads."
+        )
+    )
 
     try:
         results = await run_health_check(
@@ -188,7 +208,7 @@ async def _display_health_check() -> dict[str, bool]:
     for svc in _ALL_SERVICES:
         ok = status[svc]
         icon = GREEN("✅") if ok else RED("❌")
-        print(f"  {icon} {svc.capitalize()}")
+        print(f"  {icon} {_SERVICE_LABELS[svc]}")
 
     working_count = sum(status.values())
     total_services = len(_ALL_SERVICES)
@@ -548,52 +568,6 @@ def _summary(cfg: dict) -> None:
 async def run_interactive() -> dict:
     _header()
 
-    # ── 0. Operation Mode ───────────────────────────────────────────────────
-    op_mode = _ask_choice(
-        "Operation Mode:",
-        options=["Download music", "Fix Local Files (Auto-Tagger)"],
-        default="Download music",
-    )
-
-    if op_mode == "Fix Local Files (Auto-Tagger)":
-        _section("Local Auto-Tagger")
-        print(
-            DIM(
-                "  Scan local audio files, match them against online metadata, and apply cleaned tags/covers.\n"
-            )
-        )
-
-        import os
-
-        path = ""
-        while not path or not os.path.exists(path):
-            path = _ask("Folder or file path to scan")
-            if path and not os.path.exists(path):
-                print(DIM(f"  Path does not exist: {path}. Please try again."))
-
-        dry_run = _ask_bool("Dry run? (Scan and match only, write nothing)", False)
-        force = _ask_bool(
-            "Force? (Automatically apply safe matches without asking)", False
-        )
-        backup = _ask_bool("Create .bak backups before overwriting?", True)
-
-        sep = _ask(
-            "Artist separator (leave blank for standard multi-value tags, e.g. ', ' or ' / ')",
-            "",
-        )
-        artist_separator = sep if sep else None
-
-        from .core.local_processor import run_local_tagging_cli
-
-        await run_local_tagging_cli(
-            path,
-            dry_run=dry_run,
-            force=force,
-            backup=backup,
-            artist_separator=artist_separator,
-        )
-        sys.exit(0)
-
     # ── Health check ────────────────────────────────────────────────────────
     while True:
         health_status = await _display_health_check()
@@ -604,7 +578,10 @@ async def run_interactive() -> dict:
         if working_count == total_services:
             break
 
-        if not _ask_bool("Some providers are unreachable. Retry health check?", False):
+        if not _ask_bool(
+            "Some lyric providers are unreachable. Retry health check?",
+            False,
+        ):
             break
 
     cfg: dict = {}
