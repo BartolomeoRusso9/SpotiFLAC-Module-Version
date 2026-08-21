@@ -16,6 +16,7 @@ from SpotiFLAC.core import (
 from SpotiFLAC.core.history import HistoryManager
 from SpotiFLAC.core.isrc_utils import is_valid_isrc, normalize_isrc
 from SpotiFLAC.core.local_scanner import scan_file
+from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.models import (
     DownloadResult,
     TrackMetadata,
@@ -540,6 +541,31 @@ def test_extension_manager_detects_changed_registry_checksum(tmp_path):
     )
 
     assert manager._matches_registry_entry(installed, remote) is False
+
+
+def test_base_provider_caches_validated_flac_until_file_changes(tmp_path, monkeypatch):
+    class DummyProvider(BaseProvider):
+        async def download_track_async(self, *args, **kwargs):
+            raise NotImplementedError
+
+    path = tmp_path / "track.flac"
+    path.write_bytes(b"valid audio")
+    validations = []
+
+    def fake_validate(filepath):
+        validations.append(filepath)
+        return True, ""
+
+    monkeypatch.setattr("SpotiFLAC.core.base.validate_flac_file", fake_validate)
+    provider = DummyProvider()
+
+    assert provider._file_exists(path) is True
+    assert provider._file_exists(path) is True
+    assert len(validations) == 1
+
+    path.write_bytes(b"changed audio")
+    assert provider._file_exists(path) is True
+    assert len(validations) == 2
 
 
 def test_async_client_tracks_loop_minutes_and_default_playlist_subfolders():
