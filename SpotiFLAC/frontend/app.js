@@ -616,11 +616,6 @@ const API_SOURCES = [
   { id:'youtube',    type:'youtube',    name:'YouTube Lyrics',    url:'' },
   { id:'kugou',      type:'kugou',      name:'Kugou Lyrics',      url:'' },
 ];
-// Servizio centralizzato usato dalle estensioni SpotiFLAC, mostrato in una
-// sezione separata dai provider musicali veri e propri.
-const EXTENSION_SOURCES = [
-  { id:'extensions', type:'extensions', name:'Extensions', url:'' },
-];
 let apiStatusState = {
   checkingSources: {},
   statuses: {},
@@ -706,17 +701,11 @@ function buildStatusCard(source) {
   </div>`;
 }
 
-/**
- * Renders the provider and extension status cards in their respective grids.
- */
+/** Renders the lyrics provider status cards. */
 function renderStatusGrids() {
   const servicesGrid = $('status-services-grid');
   if (servicesGrid) {
     servicesGrid.innerHTML = API_SOURCES.map((source) => buildStatusCard(source)).join('');
-  }
-  const extensionsGrid = $('status-extensions-grid');
-  if (extensionsGrid) {
-    extensionsGrid.innerHTML = EXTENSION_SOURCES.map((source) => buildStatusCard(source)).join('');
   }
 }
 
@@ -749,10 +738,6 @@ function checkAll() {
     apiStatusState.checkingSources[sourceId] = true;
     apiStatusState.statuses[sourceId] = 'checking';
   });
-  EXTENSION_SOURCES.forEach((source) => {
-    apiStatusState.checkingSources[source.id] = true;
-    apiStatusState.statuses[source.id] = 'checking';
-  });
   renderStatusGrids();
   updateStatusSummary('Checking all providers...');
   if (window.pywebview?.api?.run_health_check) {
@@ -761,10 +746,6 @@ function checkAll() {
       sources.forEach((sourceId) => {
         apiStatusState.statuses[sourceId] = 'offline';
         apiStatusState.checkingSources[sourceId] = false;
-      });
-      EXTENSION_SOURCES.forEach((source) => {
-        apiStatusState.statuses[source.id] = 'offline';
-        apiStatusState.checkingSources[source.id] = false;
       });
       renderStatusGrids();
       updateStatusSummary('Health check failed.');
@@ -775,10 +756,6 @@ function checkAll() {
       sources.forEach((sourceId) => {
         apiStatusState.statuses[sourceId] = 'offline';
         apiStatusState.checkingSources[sourceId] = false;
-      });
-      EXTENSION_SOURCES.forEach((source) => {
-        apiStatusState.statuses[source.id] = 'offline';
-        apiStatusState.checkingSources[source.id] = false;
       });
       renderStatusGrids();
       updateStatusSummary('Demo: all providers offline.');
@@ -819,7 +796,7 @@ function checkOne(sourceId) {
 }
 
 /**
- * Updates health-check statuses for providers and extensions.
+ * Updates health-check statuses for lyrics providers.
  * @param {Array<Object>} data - Health-check results containing provider identifiers and success states.
  */
 function updateStatusesFromResults(data) {
@@ -833,7 +810,7 @@ function updateStatusesFromResults(data) {
       statusMap[result.provider] = 'offline';
     }
   });
-  for (const source of [...API_SOURCES, ...EXTENSION_SOURCES]) {
+  for (const source of API_SOURCES) {
     if (statusMap[source.id]) {
       apiStatusState.statuses[source.id] = statusMap[source.id];
     }

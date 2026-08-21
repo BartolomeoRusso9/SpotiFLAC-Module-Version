@@ -1,4 +1,4 @@
-"""Health checks for direct metadata/lyrics servers and extensions service."""
+"""Health checks for direct lyrics provider servers."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import NamedTuple
 
 import httpx
 
-from .endpoints import get_amazon_endpoint, get_health_zarz_url
+from .endpoints import get_amazon_endpoint
 
 _UA = "SpotiFLAC-HealthCheck/5.0"
 _TIMEOUT = httpx.Timeout(connect=2.0, read=3.0, write=2.0, pool=2.0)
@@ -28,7 +28,6 @@ _SERVERS = {
     "youtube": "https://lyrics.paxsenix.org/youtube/search?q=Bohemian%20Rhapsody%20Queen",
     "kugou": "https://lyrics.paxsenix.org/kugou/search?q=Bohemian%20Rhapsody%20Queen",
 }
-_EXTENSIONS_URL = get_health_zarz_url() or "https://api.zarz.moe/v1/health"
 
 
 class HealthResult(NamedTuple):
@@ -74,43 +73,13 @@ async def run_health_check(
     return list(results)
 
 
-async def check_extensions_health(
-    client: httpx.AsyncClient | None = None,
-) -> HealthResult:
-    """Check the service used to discover and install extensions."""
-    own_client = client is None
-    if own_client:
-        client = httpx.AsyncClient(timeout=_TIMEOUT)
-    try:
-        return await _probe(client, "extensions", _EXTENSIONS_URL)
-    finally:
-        if own_client:
-            await client.aclose()
-
-
-async def run_health_check_with_extensions(
-    services: list[str] | None = None,
-    *,
-    include_all_endpoints: bool = True,
-) -> tuple[list[HealthResult], HealthResult]:
-    """Check direct servers and the extensions service concurrently."""
-    return await asyncio.gather(
-        run_health_check(services, include_all_endpoints=include_all_endpoints),
-        check_extensions_health(),
-    )
-
-
 def print_health_report(
     results: list[HealthResult],
     *,
     show_urls: bool = True,
-    extensions: HealthResult | None = None,
 ) -> None:
     """Print a compact health report for direct servers."""
     for result in results:
         suffix = f" {result.url}" if show_urls else ""
         state = "OK" if result.ok else "FAIL"
         print(f"{result.provider}: {state} ({result.detail}){suffix}")
-    if extensions is not None:
-        state = "OK" if extensions.ok else "FAIL"
-        print(f"extensions: {state} ({extensions.detail})")

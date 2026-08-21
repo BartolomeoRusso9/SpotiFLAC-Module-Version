@@ -17,7 +17,7 @@ import shlex
 import sys
 from urllib.parse import urlparse
 
-from .core.health_check import run_health_check_with_extensions
+from .core.health_check import run_health_check
 from .core.quality import normalize_quality
 
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
@@ -170,12 +170,12 @@ async def _display_health_check() -> dict[str, bool]:
     _section("Service Availability Check")
 
     try:
-        results, ext_result = await run_health_check_with_extensions(
+        results = await run_health_check(
             _ALL_SERVICES,
             include_all_endpoints=True,
         )
     except Exception:
-        results, ext_result = [], None
+        results = []
 
     if not results:
         return {}
@@ -196,11 +196,6 @@ async def _display_health_check() -> dict[str, bool]:
 
     if working_count == 0:
         print(f"  {RED('Warning: All primary services are currently unreachable!')}")
-
-    if ext_result is not None:
-        icon = GREEN("✅") if ext_result.ok else RED("❌")
-        status["extensions"] = ext_result.ok
-        print(f"\n  {icon} Extensions Service")
 
     return status
 
