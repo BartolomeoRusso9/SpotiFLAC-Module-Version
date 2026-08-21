@@ -248,6 +248,19 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         default=pd.get("use_album_subfolders", False),
     )
     parser.add_argument(
+        "--playlist-subfolders",
+        action="store_true",
+        dest="create_playlist_subfolders",
+        default=pd.get("create_playlist_subfolders", True),
+        help="Create a subfolder for playlist downloads (default: enabled).",
+    )
+    parser.add_argument(
+        "--no-playlist-subfolders",
+        action="store_false",
+        dest="create_playlist_subfolders",
+        help="Keep playlist downloads in the output directory.",
+    )
+    parser.add_argument(
         "--first-artist-only",
         action="store_true",
         dest="first_artist_only",
@@ -494,6 +507,7 @@ async def _run_download_async(
     use_album_track_numbers: bool,
     use_artist_subfolders: bool,
     use_album_subfolders: bool,
+    create_playlist_subfolders: bool,
     loop: int | None,
     quality: str,
     first_artist_only: bool,
@@ -542,6 +556,7 @@ async def _run_download_async(
         use_artist_subfolders=use_artist_subfolders,
         allow_fallback=allow_fallback,
         use_album_subfolders=use_album_subfolders,
+        create_playlist_subfolders=create_playlist_subfolders,
         quality=quality,
         first_artist_only=first_artist_only,
         artist_separator=artist_separator,
@@ -660,6 +675,7 @@ async def amain() -> None:
             use_album_track_numbers=cfg["use_album_track_numbers"],
             use_artist_subfolders=cfg["use_artist_subfolders"],
             use_album_subfolders=cfg["use_album_subfolders"],
+            create_playlist_subfolders=cfg.get("create_playlist_subfolders", True),
             loop=cfg.get("loop"),
             quality=cfg["quality"],
             first_artist_only=cfg["first_artist_only"],
@@ -771,6 +787,7 @@ async def amain() -> None:
         use_album_track_numbers=args.use_album_track_numbers,
         use_artist_subfolders=args.use_artist_subfolders,
         use_album_subfolders=args.use_album_subfolders,
+        create_playlist_subfolders=args.create_playlist_subfolders,
         loop=args.loop,
         quality=quality,
         first_artist_only=args.first_artist_only,
