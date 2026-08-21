@@ -1244,8 +1244,12 @@ def _print_cli_command(cfg: dict) -> None:
 
     # Check if URL is a playlist before appending the CLI flag
     is_playlist = _is_playlist_url(cfg["url"])
-    if is_playlist and not cfg.get("create_playlist_subfolders", True):
-        parts.append("--no-playlist-subfolders")
+    if is_playlist:
+        parts.append(
+            "--playlist-subfolders"
+            if cfg.get("create_playlist_subfolders", True)
+            else "--no-playlist-subfolders"
+        )
 
     if cfg["first_artist_only"]:
         parts.append("--first-artist-only")
