@@ -12,6 +12,8 @@ _CANONICAL = {
     "DOLBY_ATMOS": ["DOLBY_ATMOS", "ATMOS", "DOLBY", "EAC3", "EC3", "EAC3_JOC"],
 }
 
+_LOSSLESS_PROVIDERS = {"tidal", "qobuz", "amazon", "apple", "deezer"}
+
 
 def normalize_quality(q: str) -> str:
     """Return a canonical quality name for a provider-agnostic input."""
@@ -30,7 +32,7 @@ def normalize_quality(q: str) -> str:
         if s == "6":
             return "LOSSLESS"
     if "HI" in s or "24" in s or "96" in s:
-        return "HI_RES"
+        return "HI_RES_LOSSLESS"
     if "LOSS" in s:
         return "LOSSLESS"
     if "LOW" in s or "MP3" in s:
@@ -41,14 +43,43 @@ def normalize_quality(q: str) -> str:
 def quality_fallback_chain(quality: str) -> list[str]:
     """Return a canonical fallback chain for a given quality."""
     chains = {
-        "DOLBY_ATMOS": ["DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"],
-        "HI_RES_LOSSLESS": ["HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"],
-        "LOSSLESS": ["LOSSLESS", "HIGH", "LOW"],
-        "HIGH": ["HIGH", "LOW"],
-        "LOW": ["LOW"],
+        "DOLBY_ATMOS": ["DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS"],
+        "HI_RES_LOSSLESS": ["HI_RES_LOSSLESS", "LOSSLESS"],
+        "HI_RES": ["HI_RES", "LOSSLESS"],
+        "LOSSLESS": ["LOSSLESS"],
+        "HIGH": ["LOSSLESS"],
+        "LOW": ["LOSSLESS"],
     }
     n = normalize_quality(quality)
     return chains.get(n, [n or "LOSSLESS"])
+
+
+def quality_for_provider(provider: str, quality: str) -> str:
+    """Translate a canonical quality into the provider's native token."""
+    normalized = normalize_quality(quality)
+    name = str(provider or "").lower().replace("ext:", "")
+    for suffix in ("-native", "-web", "-py", "_native", "_web", "_py"):
+        name = name.removesuffix(suffix)
+
+    if name == "qobuz":
+        if normalized == "HI_RES":
+            return "7"
+        return "27" if normalized == "HI_RES_LOSSLESS" else "6"
+    if name == "tidal":
+        return normalized
+    if name in _LOSSLESS_PROVIDERS:
+        if name == "amazon":
+            return "best"
+        if name == "apple":
+            return "ALAC"
+        return "FLAC"
+    if name == "pandora":
+        return "mp3_192"
+    if name in {"youtube", "ytmusic"}:
+        return "best"
+    if name == "soundcloud":
+        return "mp3_128"
+    return normalized
 
 
 def get_squid_tier(q: str) -> str:

@@ -9,7 +9,7 @@ import unicodedata
 import urllib.parse
 from dataclasses import dataclass
 
-from .endpoints import get_amazon_endpoint
+from . import get_amazon_endpoint
 from .http import NetworkManager
 from .response_cache import get as get_cached_response
 from .response_cache import put as put_cached_response
@@ -452,8 +452,7 @@ def _first_search_item(value: object) -> dict | None:
     if not isinstance(value, dict):
         return None
     if any(
-        key in value
-        for key in ("id", "songId", "songmid", "videoId", "hash", "url")
+        key in value for key in ("id", "songId", "songmid", "videoId", "hash", "url")
     ):
         return value
     for key in ("results", "data", "items", "tracks", "songs", "videos"):

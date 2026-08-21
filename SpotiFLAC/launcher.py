@@ -40,7 +40,7 @@ def _print_welcome_banner() -> None:
     def c(code: str, text: str) -> str:
         return text if no_color else f"\033[{code}m{text}\033[0m"
 
-    def l(url: str) -> str:
+    def format_link(url: str) -> str:
         # Rende l'URL cliccabile con OSC 8 e lo formatta in ciano sottolineato (4;36)
         styled_url = url if no_color else f"\033[4;36m{url}\033[0m"
         return url if no_color else f"\033]8;;{url}\033\\{styled_url}\033]8;;\033\\"
@@ -91,13 +91,13 @@ def _print_welcome_banner() -> None:
         f"  {c('1;90', '▪')} {c('1;37', 'Author')}    {c('1;93', 'BartolomeoRusso9')}"
     )
     print(
-        f"  {c('1;90', '▪')} {c('1;37', 'GitHub')}    {l('https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version')}"
+        f"  {c('1;90', '▪')} {c('1;37', 'GitHub')}    {format_link('https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version')}"
     )
     print(
-        f"  {c('1;90', '▪')} {c('1;37', 'Telegram')}  {l('https://t.me/SpotiFLAC_Chat')}"
+        f"  {c('1;90', '▪')} {c('1;37', 'Telegram')}  {format_link('https://t.me/SpotiFLAC_Chat')}"
     )
     print(
-        f"  {c('1;90', '▪')} {c('1;37', 'Support')}   {l('https://ko-fi.com/bartolomeorusso9')}"
+        f"  {c('1;90', '▪')} {c('1;37', 'Support')}   {format_link('https://ko-fi.com/bartolomeorusso9')}"
     )
     print()
 
@@ -210,9 +210,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "--quality",
         "-q",
         default=pd.get("quality", "LOSSLESS"),
-        help="Quality: DOLBY_ATMOS, HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW (Tidal). "
-        "Qobuz: 27, 7, 6. Apple: alac, atmos, ac3, aac. "
-        "Pandora: mp3_192, aac_64, aac_32. Default: LOSSLESS",
+        help="Quality: HI_RES_LOSSLESS (best available) or LOSSLESS. "
+        "Legacy provider-specific values remain accepted. Default: LOSSLESS",
     )
     parser.add_argument(
         "--use-track-numbers",

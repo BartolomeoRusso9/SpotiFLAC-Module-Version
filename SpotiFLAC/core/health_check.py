@@ -8,7 +8,7 @@ from typing import NamedTuple
 
 import httpx
 
-from .endpoints import get_amazon_endpoint
+from . import get_amazon_endpoint
 
 _UA = "SpotiFLAC-HealthCheck/5.0"
 _TIMEOUT = httpx.Timeout(connect=2.0, read=3.0, write=2.0, pool=2.0)
@@ -18,9 +18,11 @@ _SERVERS = {
     "lrclib": "https://lrclib.net/api/get?artist_name=Queen&track_name=Bohemian%20Rhapsody",
     "musixmatch": "https://lyrics.paxsenix.org/musixmatch/lyrics?type=word&t=Bohemian%20Rhapsody&a=Queen&d=355&format=lrc",
     "spotify": "https://spclient.wg.spotify.com/color-lyrics/v2/track/0UHB9METy4VCXNgkcGqHqS?format=json&market=from_token",
-    "amazon": f"{_AMAZON_LYRICS_URL.rstrip('/')}/lyrics/QM5FT1600115"
-    if _AMAZON_LYRICS_URL
-    else "https://invalid.local/amazon-lyrics",
+    "amazon": (
+        f"{_AMAZON_LYRICS_URL.rstrip('/')}/lyrics/QM5FT1600115"
+        if _AMAZON_LYRICS_URL
+        else "https://invalid.local/amazon-lyrics"
+    ),
     "deezer": "https://lyrics.paxsenix.org/deezer/lyrics?id=3135556",
     "genius": "https://lyrics.paxsenix.org/genius/lyrics?url=https%3A%2F%2Fgenius.com%2FQueen-bohemian-rhapsody-lyrics",
     "netease": "https://lyrics.paxsenix.org/netease/search?q=Bohemian%20Rhapsody%20Queen",
@@ -49,8 +51,12 @@ async def _probe(client: httpx.AsyncClient, name: str, url: str) -> HealthResult
         )
         latency = (time.perf_counter() - started) * 1000
         if 200 <= response.status_code < 300:
-            return HealthResult(name, url, "GET", True, latency, f"HTTP {response.status_code}")
-        return HealthResult(name, url, "GET", False, latency, f"HTTP {response.status_code}")
+            return HealthResult(
+                name, url, "GET", True, latency, f"HTTP {response.status_code}"
+            )
+        return HealthResult(
+            name, url, "GET", False, latency, f"HTTP {response.status_code}"
+        )
     except httpx.TimeoutException:
         return HealthResult(name, url, "GET", False, -1, "timeout")
     except httpx.RequestError as exc:

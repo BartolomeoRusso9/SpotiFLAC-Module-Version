@@ -55,7 +55,7 @@ from .core.progress import (
     safe_tqdm_write,
     uninstall_console_interception,
 )
-from .core.quality import normalize_quality
+from .core.quality import normalize_quality, quality_for_provider
 from .core.spotify_metadata import SpotifyMetadataClient
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
@@ -478,7 +478,10 @@ async def download_one_async(
                     "enrich_metadata": opts.enrich_metadata,
                     "enrich_providers": opts.enrich_providers,
                     "is_album": is_album,
-                    "quality": normalize_quality(opts.quality),
+                    "quality": quality_for_provider(
+                        provider.name,
+                        normalize_quality(opts.quality),
+                    ),
                     "qobuz_token": opts.qobuz_token,
                 }
 

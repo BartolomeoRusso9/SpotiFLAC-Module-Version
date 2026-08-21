@@ -811,17 +811,24 @@ async def run_interactive() -> dict:
         len(cfg["services"]) == 1 and cfg["services"][0] == "pandora"
     ):
         cfg["allow_fallback"] = True
+        quality_default = str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper()
+        if quality_default not in ["HI_RES_LOSSLESS", "LOSSLESS"]:
+            quality_default = "LOSSLESS"
         q_choice = _ask_choice(
             "Pandora Quality:",
-            options=["mp3_192 (High — default)", "aac_64 (Medium)", "aac_32 (Low)"],
-            default="mp3_192 (High — default)",
+            options=[
+                "HI_RES_LOSSLESS (Best available; Pandora is lossy)",
+                "LOSSLESS (Best available; Pandora is lossy)",
+            ],
+            default=quality_default,
         )
-        # Pandora uses provider-specific tokens directly
-        cfg["quality"] = q_choice.split(" ")[0]
+        cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
     elif is_youtube_url or (
         len(cfg["services"]) == 1 and cfg["services"][0] == "youtube"
     ):
-        cfg["quality"] = "BEST"
+        cfg["quality"] = normalize_quality(
+            cfg.get("quality", "LOSSLESS") or "LOSSLESS",
+        )
         cfg["allow_fallback"] = True
     else:
         has_qobuz = "qobuz" in cfg["services"]
@@ -830,65 +837,51 @@ async def run_interactive() -> dict:
         has_apple = "apple" in cfg["services"]
 
         if has_qobuz and not (has_tidal or has_deezer or has_apple):
-            q_default = {
-                "6": "6 (CD Lossless)",
-                "7": "7 (Hi-Res)",
-                "27": "27 (Hi-Res Max)",
-            }.get(str(cfg.get("quality", "6") or "6"), "6 (CD Lossless)")
+            q_default = (
+                "27 (Hi-Res Max)"
+                if normalize_quality(cfg.get("quality", "LOSSLESS"))
+                == "HI_RES_LOSSLESS"
+                else "6 (CD Lossless)"
+            )
             q_choice = _ask_choice(
                 "Qobuz Quality:",
-                options=["6 (CD Lossless)", "7 (Hi-Res)", "27 (Hi-Res Max)"],
+                options=["6 (CD Lossless)", "27 (Hi-Res Max)"],
                 default=q_default,
             )
             cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
         elif has_tidal and not (has_qobuz or has_deezer or has_apple):
             tidal_default = str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper()
-            if tidal_default not in [
-                "DOLBY_ATMOS",
-                "HI_RES_LOSSLESS",
-                "LOSSLESS",
-                "HIGH",
-                "LOW",
-            ]:
+            if tidal_default not in ["HI_RES_LOSSLESS", "LOSSLESS"]:
                 tidal_default = "LOSSLESS"
             q = _ask_choice(
                 "Tidal Quality:",
-                options=["DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"],
+                options=["HI_RES_LOSSLESS", "LOSSLESS"],
                 default=tidal_default,
             )
             cfg["quality"] = normalize_quality(q)
         elif has_deezer and not (has_qobuz or has_tidal or has_apple):
-            deezer_default = {
-                "LOSSLESS": "LOSSLESS (FLAC)",
-                "HIGH": "HIGH (MP3 320)",
-                "NORMAL": "NORMAL (MP3 128)",
-            }.get(
-                str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper(),
-                "LOSSLESS (FLAC)",
+            deezer_default = (
+                "HI_RES_LOSSLESS (Best available)"
+                if normalize_quality(cfg.get("quality", "LOSSLESS"))
+                == "HI_RES_LOSSLESS"
+                else "LOSSLESS (FLAC)"
             )
             q_choice = _ask_choice(
                 "Deezer Quality:",
-                options=["LOSSLESS (FLAC)", "HIGH (MP3 320)", "NORMAL (MP3 128)"],
+                options=["LOSSLESS (FLAC)", "HI_RES_LOSSLESS (Best available)"],
                 default=deezer_default,
             )
             cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
         elif has_apple and not (has_qobuz or has_tidal or has_deezer):
-            apple_default = {
-                "ALAC": "ALAC (Lossless)",
-                "ATMOS": "ATMOS (Spatial)",
-                "AC3": "AC3",
-                "AAC": "AAC",
-                "AAC-LEGACY": "AAC-LEGACY",
-            }.get(str(cfg.get("quality", "ALAC") or "ALAC").upper(), "ALAC (Lossless)")
+            apple_default = (
+                "HI_RES_LOSSLESS (Best available)"
+                if normalize_quality(cfg.get("quality", "LOSSLESS"))
+                == "HI_RES_LOSSLESS"
+                else "ALAC (Lossless)"
+            )
             q_choice = _ask_choice(
                 "Apple Music Quality:",
-                options=[
-                    "ALAC (Lossless)",
-                    "ATMOS (Spatial)",
-                    "AC3",
-                    "AAC",
-                    "AAC-LEGACY",
-                ],
+                options=["ALAC (Lossless)", "HI_RES_LOSSLESS (Best available)"],
                 default=apple_default,
             )
             cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
@@ -897,23 +890,6 @@ async def run_interactive() -> dict:
                 "LOSSLESS (FLAC on Deezer/Tidal, '6' on Qobuz, ALAC on Apple)",
                 "HI_RES_LOSSLESS (Best available everywhere, '27' on Qobuz)",
             ]
-            if has_apple:
-                combined_options.append(
-                    "ATMOS (Spatial Audio on Apple, HI_RES_LOSSLESS elsewhere)",
-                )
-                combined_options.append("AC3 (Dolby Digital on Apple, HIGH elsewhere)")
-            if has_tidal:
-                combined_options.insert(
-                    1,
-                    "DOLBY_ATMOS (Dolby Atmos on Tidal, HI_RES_LOSSLESS elsewhere)",
-                )
-            if has_qobuz:
-                combined_options.append("7 (Hi-Res mid on Qobuz only)")
-            combined_options.append("HIGH (MP3 320 / AAC on Apple)")
-            if has_apple:
-                combined_options.append(
-                    "AAC-LEGACY (Legacy iTunes on Apple, HIGH elsewhere)",
-                )
 
             quality_key = str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper()
             default_combined = next(
@@ -927,26 +903,14 @@ async def run_interactive() -> dict:
             )
             if q_choice.startswith("LOSSLESS"):
                 cfg["quality"] = "LOSSLESS"
-            elif q_choice.startswith("HI_RES_LOSSLESS"):
-                cfg["quality"] = "HI_RES_LOSSLESS"
-            elif q_choice.startswith("DOLBY_ATMOS"):
-                cfg["quality"] = "DOLBY_ATMOS"
-            elif q_choice.startswith("ATMOS"):
-                cfg["quality"] = "atmos"
-            elif q_choice.startswith("AC3"):
-                cfg["quality"] = "ac3"
-            elif q_choice.startswith("7"):
-                cfg["quality"] = "7"
-            elif q_choice.startswith("AAC-LEGACY"):
-                cfg["quality"] = "aac-legacy"
             else:
-                cfg["quality"] = "HIGH"
+                cfg["quality"] = "HI_RES_LOSSLESS"
             # normalize combined choice to canonical form
             cfg["quality"] = normalize_quality(cfg["quality"])
         else:
             q = _ask_choice(
                 "Quality:",
-                options=["LOSSLESS", "HI_RES_LOSSLESS", "HIGH"],
+                options=["LOSSLESS", "HI_RES_LOSSLESS"],
                 default="LOSSLESS",
             )
             cfg["quality"] = normalize_quality(q)

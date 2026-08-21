@@ -432,7 +432,9 @@ def fetch_mb_metadata(isrc: str) -> dict:
         data = _query_recordings(f"isrc:{isrc}")
         set_mb_status(True)
         res = _parse_mb_response(data)
-        res.update(_parse_mb_details(_query_recording_details(res.get("mbid_track", ""))))
+        res.update(
+            _parse_mb_details(_query_recording_details(res.get("mbid_track", "")))
+        )
         if res:
             put_cached_response("musicbrainz", cache_key, res)
     except Exception as e:

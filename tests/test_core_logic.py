@@ -25,6 +25,7 @@ from SpotiFLAC.core.models import (
 from SpotiFLAC.core.quality import (
     map_amazon_community_quality,
     normalize_quality,
+    quality_for_provider,
     quality_fallback_chain,
 )
 from SpotiFLAC.extensions.manager import ExtensionManager, RegistryEntry
@@ -43,9 +44,12 @@ def test_quality_helpers_normalize_and_fallbacks():
     assert quality_fallback_chain("hi_res_lossless") == [
         "HI_RES_LOSSLESS",
         "LOSSLESS",
-        "HIGH",
-        "LOW",
     ]
+    assert quality_fallback_chain("LOSSLESS") == ["LOSSLESS"]
+    assert quality_for_provider("ext:qobuz-web", "HI_RES_LOSSLESS") == "27"
+    assert quality_for_provider("qobuz", "HI_RES") == "7"
+    assert quality_for_provider("tidal", "LOSSLESS") == "LOSSLESS"
+    assert quality_for_provider("pandora_native", "LOSSLESS") == "mp3_192"
     assert map_amazon_community_quality("DOLBY_ATMOS") == "atmos"
     assert map_amazon_community_quality("HI_RES_LOSSLESS") == "24"
 

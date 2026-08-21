@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import requests
 
-from SpotiFLAC.core.endpoints import get_community_url
+from SpotiFLAC.core import get_community_url
 
 logger = logging.getLogger(__name__)
 
