@@ -17,7 +17,7 @@ import shlex
 import sys
 from urllib.parse import urlparse
 
-from .core.health_check import run_health_check_with_extensions
+from .core.health_check import run_health_check
 from .core.quality import normalize_quality
 
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
@@ -152,31 +152,50 @@ def _header() -> None:
 # ---------------------------------------------------------------------------
 
 _ALL_SERVICES = [
-    "tidal",
-    "qobuz",
-    "deezer",
-    "amazon",
-    "soundcloud",
     "apple",
-    "youtube",
-    "pandora",
-    "joox",
+    "lrclib",
+    "musixmatch",
+    "spotify",
+    "amazon",
+    "deezer",
+    "genius",
     "netease",
-    "migu",
-    "kuwo",
+    "qq",
+    "youtube",
+    "kugou",
 ]
+
+_SERVICE_LABELS = {
+    "apple": "Apple Music (lyrics)",
+    "lrclib": "LRCLIB (lyrics)",
+    "musixmatch": "Musixmatch (lyrics)",
+    "spotify": "Spotify (lyrics)",
+    "amazon": "Amazon Music (lyrics)",
+    "deezer": "Deezer (lyrics)",
+    "genius": "Genius (lyrics)",
+    "netease": "NetEase (lyrics)",
+    "qq": "QQ Music (lyrics)",
+    "youtube": "YouTube (lyrics)",
+    "kugou": "Kugou (lyrics)",
+}
 
 
 async def _display_health_check() -> dict[str, bool]:
-    _section("Service Availability Check")
+    _section("Lyrics Providers Availability Check")
+    print(
+        DIM(
+            "  These checks cover lyric sources used for embedding lyrics. "
+            "They are not audio download providers and a failed check does not block downloads."
+        )
+    )
 
     try:
-        results, ext_result = await run_health_check_with_extensions(
+        results = await run_health_check(
             _ALL_SERVICES,
             include_all_endpoints=True,
         )
     except Exception:
-        results, ext_result = [], None
+        results = []
 
     if not results:
         return {}
@@ -189,7 +208,7 @@ async def _display_health_check() -> dict[str, bool]:
     for svc in _ALL_SERVICES:
         ok = status[svc]
         icon = GREEN("✅") if ok else RED("❌")
-        print(f"  {icon} {svc.capitalize()}")
+        print(f"  {icon} {_SERVICE_LABELS[svc]}")
 
     working_count = sum(status.values())
     total_services = len(_ALL_SERVICES)
@@ -197,11 +216,6 @@ async def _display_health_check() -> dict[str, bool]:
 
     if working_count == 0:
         print(f"  {RED('Warning: All primary services are currently unreachable!')}")
-
-    if ext_result is not None:
-        icon = GREEN("✅") if ext_result.ok else RED("❌")
-        status["extensions"] = ext_result.ok
-        print(f"\n  {icon} Extensions Fallback")
 
     return status
 
@@ -431,6 +445,7 @@ async def _profile_load_section(cfg: dict) -> dict:
                 cfg.update(
                     {k: v for k, v in profile_data.items() if not k.startswith("_")},
                 )
+                cfg["_profile_loaded"] = chosen_name
             return cfg
 
 
@@ -480,9 +495,6 @@ def _summary(cfg: dict) -> None:
             f"{cfg['transcode_to'].upper()} {cfg.get('transcode_bitrate', '320k')}{kept}",
         )
     row("Filename format", cfg["filename_format"])
-
-    if not cfg.get("use_extensions_fallback", True):
-        row("Extensions fallback", "disabled")
 
     flags = []
     if cfg["use_track_numbers"]:
@@ -556,52 +568,6 @@ def _summary(cfg: dict) -> None:
 async def run_interactive() -> dict:
     _header()
 
-    # ── 0. Operation Mode ───────────────────────────────────────────────────
-    op_mode = _ask_choice(
-        "Operation Mode:",
-        options=["Download music", "Fix Local Files (Auto-Tagger)"],
-        default="Download music",
-    )
-
-    if op_mode == "Fix Local Files (Auto-Tagger)":
-        _section("Local Auto-Tagger")
-        print(
-            DIM(
-                "  Scan local audio files, match them against online metadata, and apply cleaned tags/covers.\n"
-            )
-        )
-
-        import os
-
-        path = ""
-        while not path or not os.path.exists(path):
-            path = _ask("Folder or file path to scan")
-            if path and not os.path.exists(path):
-                print(DIM(f"  Path does not exist: {path}. Please try again."))
-
-        dry_run = _ask_bool("Dry run? (Scan and match only, write nothing)", False)
-        force = _ask_bool(
-            "Force? (Automatically apply safe matches without asking)", False
-        )
-        backup = _ask_bool("Create .bak backups before overwriting?", True)
-
-        sep = _ask(
-            "Artist separator (leave blank for standard multi-value tags, e.g. ', ' or ' / ')",
-            "",
-        )
-        artist_separator = sep if sep else None
-
-        from .core.local_processor import run_local_tagging_cli
-
-        await run_local_tagging_cli(
-            path,
-            dry_run=dry_run,
-            force=force,
-            backup=backup,
-            artist_separator=artist_separator,
-        )
-        sys.exit(0)
-
     # ── Health check ────────────────────────────────────────────────────────
     while True:
         health_status = await _display_health_check()
@@ -612,16 +578,13 @@ async def run_interactive() -> dict:
         if working_count == total_services:
             break
 
-        if not _ask_bool("Some providers are unreachable. Retry health check?", False):
+        if not _ask_bool(
+            "Some lyric providers are unreachable. Retry health check?",
+            False,
+        ):
             break
 
     cfg: dict = {}
-
-    # ── Extension registries ────────────────────────────────────────────────
-    await _manage_registries_section()
-
-    # ── Profile load ────────────────────────────────────────────────────────
-    cfg = await _profile_load_section(cfg)
 
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
@@ -661,6 +624,31 @@ async def run_interactive() -> dict:
             break
 
     cfg["url"] = url
+
+    # ── Profile load ────────────────────────────────────────────────────────
+    cfg = await _profile_load_section(cfg)
+
+    # ── Extension registries ────────────────────────────────────────────────
+    await _manage_registries_section()
+
+    if cfg.get("_profile_loaded"):
+        cfg.pop("_profile_loaded", None)
+        cfg.setdefault("output_dir", "./Downloads")
+        cfg.setdefault("services", ["tidal"])
+        cfg.setdefault("filename_format", "{title} - {artist}")
+        cfg.setdefault("quality", "LOSSLESS")
+        cfg.setdefault("use_track_numbers", False)
+        cfg.setdefault("use_album_track_numbers", False)
+        cfg.setdefault("use_artist_subfolders", False)
+        cfg.setdefault("use_album_subfolders", False)
+        cfg.setdefault("first_artist_only", False)
+        cfg.setdefault("embed_lyrics", True)
+        cfg.setdefault("lyrics_providers", ["apple", "lrclib"])
+        cfg.setdefault("enrich_metadata", True)
+        cfg.setdefault("enrich_providers", ["deezer", "apple"])
+        cfg.setdefault("allow_fallback", True)
+        cfg.setdefault("max_concurrent_downloads", 2)
+        return cfg
 
     # ── 2. Output directory ─────────────────────────────────────────────────
     _section("2 · Output Directory")
@@ -790,13 +778,6 @@ async def run_interactive() -> dict:
             ordered=True,
         )
 
-    # ── 3.5. Extensions Fallback ─────────────────────────────────────────────
-    _section("3.5 · Extensions Fallback")
-    cfg["use_extensions_fallback"] = _ask_bool(
-        "Use installed extensions as automatic fallback?",
-        cfg.get("use_extensions_fallback", True),
-    )
-
     # ── 4. Audio Quality ─────────────────────────────────────────────────────
     _section("4 · Audio Quality")
 
@@ -807,17 +788,24 @@ async def run_interactive() -> dict:
         len(cfg["services"]) == 1 and cfg["services"][0] == "pandora"
     ):
         cfg["allow_fallback"] = True
+        quality_default = str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper()
+        if quality_default not in ["HI_RES_LOSSLESS", "LOSSLESS"]:
+            quality_default = "LOSSLESS"
         q_choice = _ask_choice(
             "Pandora Quality:",
-            options=["mp3_192 (High — default)", "aac_64 (Medium)", "aac_32 (Low)"],
-            default="mp3_192 (High — default)",
+            options=[
+                "HI_RES_LOSSLESS (Best available; Pandora is lossy)",
+                "LOSSLESS (Best available; Pandora is lossy)",
+            ],
+            default=quality_default,
         )
-        # Pandora uses provider-specific tokens directly
-        cfg["quality"] = q_choice.split(" ")[0]
+        cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
     elif is_youtube_url or (
         len(cfg["services"]) == 1 and cfg["services"][0] == "youtube"
     ):
-        cfg["quality"] = "BEST"
+        cfg["quality"] = normalize_quality(
+            cfg.get("quality", "LOSSLESS") or "LOSSLESS",
+        )
         cfg["allow_fallback"] = True
     else:
         has_qobuz = "qobuz" in cfg["services"]
@@ -826,65 +814,51 @@ async def run_interactive() -> dict:
         has_apple = "apple" in cfg["services"]
 
         if has_qobuz and not (has_tidal or has_deezer or has_apple):
-            q_default = {
-                "6": "6 (CD Lossless)",
-                "7": "7 (Hi-Res)",
-                "27": "27 (Hi-Res Max)",
-            }.get(str(cfg.get("quality", "6") or "6"), "6 (CD Lossless)")
+            q_default = (
+                "27 (Hi-Res Max)"
+                if normalize_quality(cfg.get("quality", "LOSSLESS"))
+                == "HI_RES_LOSSLESS"
+                else "6 (CD Lossless)"
+            )
             q_choice = _ask_choice(
                 "Qobuz Quality:",
-                options=["6 (CD Lossless)", "7 (Hi-Res)", "27 (Hi-Res Max)"],
+                options=["6 (CD Lossless)", "27 (Hi-Res Max)"],
                 default=q_default,
             )
             cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
         elif has_tidal and not (has_qobuz or has_deezer or has_apple):
             tidal_default = str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper()
-            if tidal_default not in [
-                "DOLBY_ATMOS",
-                "HI_RES_LOSSLESS",
-                "LOSSLESS",
-                "HIGH",
-                "LOW",
-            ]:
+            if tidal_default not in ["HI_RES_LOSSLESS", "LOSSLESS"]:
                 tidal_default = "LOSSLESS"
             q = _ask_choice(
                 "Tidal Quality:",
-                options=["DOLBY_ATMOS", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"],
+                options=["HI_RES_LOSSLESS", "LOSSLESS"],
                 default=tidal_default,
             )
             cfg["quality"] = normalize_quality(q)
         elif has_deezer and not (has_qobuz or has_tidal or has_apple):
-            deezer_default = {
-                "LOSSLESS": "LOSSLESS (FLAC)",
-                "HIGH": "HIGH (MP3 320)",
-                "NORMAL": "NORMAL (MP3 128)",
-            }.get(
-                str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper(),
-                "LOSSLESS (FLAC)",
+            deezer_default = (
+                "HI_RES_LOSSLESS (Best available)"
+                if normalize_quality(cfg.get("quality", "LOSSLESS"))
+                == "HI_RES_LOSSLESS"
+                else "LOSSLESS (FLAC)"
             )
             q_choice = _ask_choice(
                 "Deezer Quality:",
-                options=["LOSSLESS (FLAC)", "HIGH (MP3 320)", "NORMAL (MP3 128)"],
+                options=["LOSSLESS (FLAC)", "HI_RES_LOSSLESS (Best available)"],
                 default=deezer_default,
             )
             cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
         elif has_apple and not (has_qobuz or has_tidal or has_deezer):
-            apple_default = {
-                "ALAC": "ALAC (Lossless)",
-                "ATMOS": "ATMOS (Spatial)",
-                "AC3": "AC3",
-                "AAC": "AAC",
-                "AAC-LEGACY": "AAC-LEGACY",
-            }.get(str(cfg.get("quality", "ALAC") or "ALAC").upper(), "ALAC (Lossless)")
+            apple_default = (
+                "HI_RES_LOSSLESS (Best available)"
+                if normalize_quality(cfg.get("quality", "LOSSLESS"))
+                == "HI_RES_LOSSLESS"
+                else "ALAC (Lossless)"
+            )
             q_choice = _ask_choice(
                 "Apple Music Quality:",
-                options=[
-                    "ALAC (Lossless)",
-                    "ATMOS (Spatial)",
-                    "AC3",
-                    "AAC",
-                    "AAC-LEGACY",
-                ],
+                options=["ALAC (Lossless)", "HI_RES_LOSSLESS (Best available)"],
                 default=apple_default,
             )
             cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
@@ -893,23 +867,6 @@ async def run_interactive() -> dict:
                 "LOSSLESS (FLAC on Deezer/Tidal, '6' on Qobuz, ALAC on Apple)",
                 "HI_RES_LOSSLESS (Best available everywhere, '27' on Qobuz)",
             ]
-            if has_apple:
-                combined_options.append(
-                    "ATMOS (Spatial Audio on Apple, HI_RES_LOSSLESS elsewhere)",
-                )
-                combined_options.append("AC3 (Dolby Digital on Apple, HIGH elsewhere)")
-            if has_tidal:
-                combined_options.insert(
-                    1,
-                    "DOLBY_ATMOS (Dolby Atmos on Tidal, HI_RES_LOSSLESS elsewhere)",
-                )
-            if has_qobuz:
-                combined_options.append("7 (Hi-Res mid on Qobuz only)")
-            combined_options.append("HIGH (MP3 320 / AAC on Apple)")
-            if has_apple:
-                combined_options.append(
-                    "AAC-LEGACY (Legacy iTunes on Apple, HIGH elsewhere)",
-                )
 
             quality_key = str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper()
             default_combined = next(
@@ -923,26 +880,14 @@ async def run_interactive() -> dict:
             )
             if q_choice.startswith("LOSSLESS"):
                 cfg["quality"] = "LOSSLESS"
-            elif q_choice.startswith("HI_RES_LOSSLESS"):
-                cfg["quality"] = "HI_RES_LOSSLESS"
-            elif q_choice.startswith("DOLBY_ATMOS"):
-                cfg["quality"] = "DOLBY_ATMOS"
-            elif q_choice.startswith("ATMOS"):
-                cfg["quality"] = "atmos"
-            elif q_choice.startswith("AC3"):
-                cfg["quality"] = "ac3"
-            elif q_choice.startswith("7"):
-                cfg["quality"] = "7"
-            elif q_choice.startswith("AAC-LEGACY"):
-                cfg["quality"] = "aac-legacy"
             else:
-                cfg["quality"] = "HIGH"
+                cfg["quality"] = "HI_RES_LOSSLESS"
             # normalize combined choice to canonical form
             cfg["quality"] = normalize_quality(cfg["quality"])
         else:
             q = _ask_choice(
                 "Quality:",
-                options=["LOSSLESS", "HI_RES_LOSSLESS", "HIGH"],
+                options=["LOSSLESS", "HI_RES_LOSSLESS"],
                 default="LOSSLESS",
             )
             cfg["quality"] = normalize_quality(q)
@@ -1053,14 +998,26 @@ async def run_interactive() -> dict:
     if cfg["embed_lyrics"]:
         cfg["lyrics_providers"] = _ask_multi(
             "Lyrics providers (order = priority):",
-            options=["spotify", "apple", "musixmatch", "lrclib", "amazon"],
-            defaults=cfg.get("lyrics_providers") or ["lrclib", "apple", "amazon"],
+            options=[
+                "spotify",
+                "apple",
+                "deezer",
+                "genius",
+                "netease",
+                "qq",
+                "youtube",
+                "kugou",
+                "musixmatch",
+                "lrclib",
+                "amazon",
+            ],
+            defaults=cfg.get("lyrics_providers") or ["apple", "lrclib"],
             ordered=True,
         )
     else:
         cfg["lyrics_providers"] = cfg.get("lyrics_providers") or [
-            "lrclib",
             "apple",
+            "lrclib",
             "amazon",
         ]
 
@@ -1196,8 +1153,6 @@ def _print_cli_command(cfg: dict) -> None:
     if cfg.get("output_path"):
         parts.append(f'-o "{cfg["output_path"]}"')
     parts.append(f"-s {' '.join(cfg['services'])}")
-    if not cfg.get("use_extensions_fallback", True):
-        parts.append("--no-extensions-fallback")
     if cfg["quality"] not in ("LOSSLESS", "BEST"):
         parts.append(f"-q {cfg['quality']}")
     if cfg["filename_format"] != "{title} - {artist}":

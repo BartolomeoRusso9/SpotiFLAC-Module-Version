@@ -55,7 +55,7 @@ from .core.progress import (
     safe_tqdm_write,
     uninstall_console_interception,
 )
-from .core.quality import normalize_quality
+from .core.quality import normalize_quality, quality_for_provider
 from .core.spotify_metadata import SpotifyMetadataClient
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
@@ -165,7 +165,6 @@ class DownloadOptions:
     post_download_command: str = ""
     tidal_custom_api: str | None = None
     timeout_s: int | None = None
-    auto_pair_extensions: bool = True
     ext_dir: str | None = None
     # Phase 2: maximum concurrent downloads managed by the semaphore
     # asyncio.Semaphore in DownloadWorker._run_downloads_async(). Previously
@@ -231,10 +230,8 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
                         e_py,
                     )
 
-        # 2. TENTATIVO JAVASCRIPT (Priorità 2: Fallback)
-        # Se l'utente NON ha digitato esplicitamente "-py", aggiunge JS (o come fallback, o come primario)
-        # Rispetta opts.auto_pair_extensions per il fallback automatico
-        if not wants_explicit_py and (wants_explicit_js or opts.auto_pair_extensions):
+        # Pair the JavaScript extension automatically unless Python was requested explicitly.
+        if not wants_explicit_py:
             try:
                 js_prov = JSExtensionProvider(
                     original_ext_id,
@@ -481,7 +478,10 @@ async def download_one_async(
                     "enrich_metadata": opts.enrich_metadata,
                     "enrich_providers": opts.enrich_providers,
                     "is_album": is_album,
-                    "quality": normalize_quality(opts.quality),
+                    "quality": quality_for_provider(
+                        provider.name,
+                        normalize_quality(opts.quality),
+                    ),
                     "qobuz_token": opts.qobuz_token,
                 }
 

@@ -40,7 +40,7 @@ def _print_welcome_banner() -> None:
     def c(code: str, text: str) -> str:
         return text if no_color else f"\033[{code}m{text}\033[0m"
 
-    def l(url: str) -> str:
+    def format_link(url: str) -> str:
         # Rende l'URL cliccabile con OSC 8 e lo formatta in ciano sottolineato (4;36)
         styled_url = url if no_color else f"\033[4;36m{url}\033[0m"
         return url if no_color else f"\033]8;;{url}\033\\{styled_url}\033]8;;\033\\"
@@ -91,13 +91,13 @@ def _print_welcome_banner() -> None:
         f"  {c('1;90', '▪')} {c('1;37', 'Author')}    {c('1;93', 'BartolomeoRusso9')}"
     )
     print(
-        f"  {c('1;90', '▪')} {c('1;37', 'GitHub')}    {l('https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version')}"
+        f"  {c('1;90', '▪')} {c('1;37', 'GitHub')}    {format_link('https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version')}"
     )
     print(
-        f"  {c('1;90', '▪')} {c('1;37', 'Telegram')}  {l('https://t.me/SpotiFLAC_Chat')}"
+        f"  {c('1;90', '▪')} {c('1;37', 'Telegram')}  {format_link('https://t.me/SpotiFLAC_Chat')}"
     )
     print(
-        f"  {c('1;90', '▪')} {c('1;37', 'Support')}   {l('https://ko-fi.com/bartolomeorusso9')}"
+        f"  {c('1;90', '▪')} {c('1;37', 'Support')}   {format_link('https://ko-fi.com/bartolomeorusso9')}"
     )
     print()
 
@@ -145,7 +145,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         nargs="?",
         help="Spotify, Tidal, Apple Music, SoundCloud, YouTube or Pandora URL",
     )
-    parser.add_argument("output_dir", nargs="?", help="Destination directory")
+    parser.add_argument("output_dir", nargs="?", default=pd.get("output_dir"), help="Destination directory")
 
     # ── Multi-playlist ──────────────────────────────────────────────────────
     playlists_grp = parser.add_argument_group("Multi-Playlist")
@@ -210,9 +210,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "--quality",
         "-q",
         default=pd.get("quality", "LOSSLESS"),
-        help="Quality: DOLBY_ATMOS, HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW (Tidal). "
-        "Qobuz: 27, 7, 6. Apple: alac, atmos, ac3, aac. "
-        "Pandora: mp3_192, aac_64, aac_32. Default: LOSSLESS",
+        help="Quality: HI_RES_LOSSLESS (best available) or LOSSLESS. "
+        "Legacy provider-specific values remain accepted. Default: LOSSLESS",
     )
     parser.add_argument(
         "--use-track-numbers",
@@ -275,14 +274,6 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         metavar="URL",
         help="URL of a self-hosted hifi-api instance (https://github.com/binimum/hifi-api). "
         "Takes priority over built-in API pool.",
-    )
-    parser.add_argument(
-        "--no-extensions-fallback",
-        action="store_false",
-        dest="use_extensions_fallback",
-        default=pd.get("auto_pair_extensions", True),
-        help="Disable automatic fallback to JS extensions when a native "
-        "provider fails (enabled by default).",
     )
     parser.add_argument("--loop", "-l", type=int, default=pd.get("loop", None))
     parser.add_argument(
@@ -353,9 +344,21 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     lyrics_grp.add_argument(
         "--lyrics-providers",
         nargs="+",
-        default=pd.get("lyrics_providers", ["spotify", "apple", "lrclib", "amazon"]),
+        default=pd.get("lyrics_providers", ["apple", "lrclib"]),
         dest="lyrics_providers",
-        choices=["spotify", "apple", "musixmatch", "amazon", "lrclib"],
+        choices=[
+            "spotify",
+            "apple",
+            "deezer",
+            "genius",
+            "netease",
+            "qq",
+            "youtube",
+            "kugou",
+            "musixmatch",
+            "amazon",
+            "lrclib",
+        ],
     )
 
     # ── Metadata enrichment ─────────────────────────────────────────────────
@@ -468,42 +471,6 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "Placeholders: {folder} {succeeded} {failed}",
     )
 
-    # ── Local Auto-Tagger ────────────────────────────────────────────────────
-    local_grp = parser.add_argument_group("Local Auto-Tagger")
-    local_grp.add_argument(
-        "--tag-local",
-        metavar="PATH",
-        default=None,
-        help="Scan a local audio file or folder (FLAC, MP3, M4A/AAC, OGG "
-        "Vorbis, Opus, WAV, AIFF, WMA, WavPack, Monkey's Audio, Musepack, "
-        "TrueAudio), match each track against online metadata, and re-tag "
-        "it. Runs instead of a normal download when given; url/output_dir "
-        "are ignored.",
-    )
-    local_grp.add_argument(
-        "--dry-run",
-        action="store_true",
-        default=False,
-        help="With --tag-local: scan and match only, print what would change, "
-        "write nothing to disk.",
-    )
-    local_grp.add_argument(
-        "--force",
-        action="store_true",
-        default=False,
-        help="With --tag-local: automatically apply every 'safe match' "
-        "(confidence >= 90%%) without asking for confirmation. Files below "
-        "that threshold are still skipped and reported, never applied "
-        "automatically — use the GUI/web tab to review those.",
-    )
-    local_grp.add_argument(
-        "--no-backup",
-        action="store_true",
-        default=False,
-        help="With --tag-local: skip the automatic .bak backup before "
-        "overwriting each file. Not recommended.",
-    )
-
     return parser.parse_args()
 
 
@@ -535,7 +502,6 @@ async def _run_download_async(
     post_download_action: str,
     post_download_command: str,
     timeout_s: int | None,
-    use_extensions_fallback: bool = True,
     transcode_to: str | None = None,
     transcode_bitrate: str = "320k",
     transcode_keep_original: bool = False,
@@ -580,7 +546,6 @@ async def _run_download_async(
         post_download_command=post_download_command,
         tidal_custom_api=tidal_custom_api,
         timeout_s=timeout_s,
-        auto_pair_extensions=use_extensions_fallback,
         transcode_to=transcode_to,
         transcode_bitrate=transcode_bitrate,
         transcode_keep_original=transcode_keep_original,
@@ -662,30 +627,6 @@ async def amain() -> None:
         await run_web(host=web_args.host, port=web_args.port)
         return
 
-    if "--tag-local" in sys.argv or any(
-        arg.startswith("--tag-local=") for arg in sys.argv
-    ):
-        local_parser = argparse.ArgumentParser(add_help=False)
-        local_parser.add_argument("--tag-local")
-        local_parser.add_argument("--dry-run", action="store_true", default=False)
-        local_parser.add_argument("--force", action="store_true", default=False)
-        local_parser.add_argument("--no-backup", action="store_true", default=False)
-        local_parser.add_argument(
-            "--artist-separator", dest="artist_separator", default=None
-        )
-        local_args, _ = local_parser.parse_known_args(sys.argv[1:])
-
-        from .core.local_processor import run_local_tagging_cli
-
-        await run_local_tagging_cli(
-            local_args.tag_local,
-            dry_run=local_args.dry_run,
-            force=local_args.force,
-            backup=not local_args.no_backup,
-            artist_separator=local_args.artist_separator,
-        )
-        return
-
     if "--interactive" in sys.argv:
         print_ffmpeg_warning()
         cfg = await run_interactive()
@@ -726,7 +667,6 @@ async def amain() -> None:
             post_download_action=cfg.get("post_download_action", "none"),
             post_download_command=cfg.get("post_download_command", ""),
             timeout_s=cfg.get("timeout_s"),
-            use_extensions_fallback=cfg.get("use_extensions_fallback", True),
             transcode_to=cfg.get("transcode_to"),
             transcode_bitrate=cfg.get("transcode_bitrate", "320k"),
             transcode_keep_original=cfg.get("transcode_keep_original", False),
@@ -838,7 +778,6 @@ async def amain() -> None:
         post_download_action=args.post_action,
         post_download_command=args.post_command,
         timeout_s=timeout_s,
-        use_extensions_fallback=args.use_extensions_fallback,
         transcode_to=args.transcode_to,
         transcode_bitrate=args.transcode_bitrate,
         transcode_keep_original=args.transcode_keep_original,
@@ -852,6 +791,7 @@ async def amain() -> None:
             from .core.profiles import save_profile_async
 
             profile_cfg = {
+                "output_dir": args.output_dir or "./Downloads",
                 "services": args.service,
                 "quality": quality,
                 "filename_format": args.filename_format,

@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Downloads — SpotiFLAC Module Version</title>
+<meta name="theme-color" content="#0f1115">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0f1115; --panel: #1a1d24; --panel-hover: #21252e; --surface: #151820;
+    --hairline: #272b34; --accent: #7c5cff; --accent-bright: #9b82ff; --accent-dim: #6647e0;
+    --ok: #3ddc97; --warn: #e0a640;
+    --text: #e9e9ee; --text-dim: #96979f; --text-faint: #55565f;
+    --display: 'Sora', sans-serif; --body: 'Inter', -apple-system, sans-serif; --mono: 'JetBrains Mono', monospace;
+    --max-w: 1080px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { font-family: var(--body); background: var(--ink); color: var(--text); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent-bright); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, .mono { font-family: var(--mono); }
+  h1, h2 { font-family: var(--display); letter-spacing: -0.01em; }
+
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(15,17,21,.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .nav-inner { max-width: var(--max-w); margin: auto; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 62px; }
+  .nav-brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-weight: 700; font-size: 1.02rem; color: var(--text); }
+  .nav-brand .dot { width: 9px; height: 9px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 10px var(--accent); transform: rotate(45deg); }
+  .nav-links { display: flex; align-items: center; gap: 24px; list-style: none; }
+  .nav-links a { color: var(--text-dim); font-size: .88rem; }
+  .nav-links a:hover, .nav-links a.active { color: var(--text); text-decoration: none; }
+  .nav-links .nav-divider { width: 1px; height: 18px; background: rgba(255,255,255,.1); }
+  .nav-gh { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 6px 12px; color: var(--text-dim); font-size: .82rem; }
+  .nav-gh:hover { color: var(--text); border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.08); text-decoration: none; }
+  @media (max-width: 760px) { .nav-links { display: none; } }
+
+  .page-header { max-width: var(--max-w); margin: auto; padding: 140px 24px 40px; text-align: center; }
+  .page-header h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; margin-bottom: 10px; }
+  .page-header p { color: var(--text-dim); font-size: 1rem; }
+
+  .section-inner { max-width: var(--max-w); margin: auto; padding: 0 24px 80px; }
+
+  .loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 50px; color: var(--text-dim); font-size: .9rem; }
+  .loading-spinner { width: 18px; height: 18px; border: 2px solid var(--hairline); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .latest-card { background: var(--panel); border: 1px solid var(--hairline); border-radius: 16px; padding: 26px; }
+  .latest-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .latest-tag { font-family: var(--mono); font-size: .95rem; font-weight: 600; color: var(--text); }
+  .latest-badge { background: rgba(124,92,255,.16); color: var(--accent-bright); font-size: .7rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+  .latest-date { color: var(--text-faint); font-size: .8rem; margin-left: auto; }
+
+  .latest-assets { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .latest-asset { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; padding: 12px 14px; transition: background .2s, border-color .2s; }
+  .latest-asset:hover { background: var(--panel-hover); border-color: rgba(124,92,255,.3); text-decoration: none; }
+  .latest-asset-icon { flex-shrink: 0; color: var(--accent-bright); }
+  .latest-asset-name { font-family: var(--mono); font-size: .82rem; color: var(--text); word-break: break-all; }
+  .latest-asset-meta { font-size: .74rem; color: var(--text-faint); margin-top: 2px; }
+
+  .latest-changelog-toggle { background: none; border: 1px solid var(--hairline); color: var(--text-dim); font-size: .82rem; padding: 7px 14px; border-radius: 8px; cursor: pointer; font-family: var(--body); }
+  .latest-changelog-toggle:hover { color: var(--text); border-color: rgba(255,255,255,.25); }
+  .latest-changelog { display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--hairline); }
+  .latest-changelog.show { display: block; }
+  .release-body { color: var(--text-dim); font-size: .88rem; line-height: 1.75; }
+  .release-body h1, .release-body h2, .release-body h3 { font-size: 1rem; color: var(--text); margin: 14px 0 6px; }
+  .release-body ul { margin-left: 20px; margin-bottom: 10px; }
+  .release-body code { background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 4px; font-size: .85em; }
+  .release-body a { color: var(--accent-bright); }
+
+  .older-section { margin-top: 32px; }
+  .older-title { font-family: var(--mono); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 14px; }
+  .release-card { background: var(--panel); border: 1px solid var(--hairline); border-radius: 12px; margin-bottom: 8px; }
+  .release-summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 18px; }
+  .release-summary::-webkit-details-marker { display: none; }
+  .release-tag { font-family: var(--mono); font-size: .85rem; font-weight: 600; }
+  .release-badge-pre { background: rgba(224,166,64,.16); color: var(--warn); font-size: .68rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+  .release-date { color: var(--text-faint); font-size: .78rem; margin-left: auto; }
+  .release-expand { color: var(--text-faint); font-size: .7rem; transition: transform .2s; }
+  .release-card[open] .release-expand { transform: rotate(180deg); }
+  .release-detail { padding: 0 18px 16px; }
+  .release-assets { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .release-asset { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: .78rem; color: var(--text-dim); padding: 6px 0; }
+  .release-asset:hover { color: var(--accent-bright); }
+  .release-asset-size { color: var(--text-faint); margin-left: auto; }
+
+  .all-releases-link { display: inline-block; margin-top: 18px; font-size: .86rem; }
+
+  footer { background: var(--surface); padding: 40px 24px; text-align: center; border-top: 1px solid var(--hairline); }
+  .footer-links { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+  .footer-links a { color: var(--text-dim); font-size: .88rem; }
+  .footer-links a:hover { color: var(--text); }
+  .footer-copy { color: var(--text-faint); font-size: .78rem; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a class="nav-brand" href="index.html"><span class="dot"></span>SpotiFLAC Module Version<span style="color:var(--text-faint)">
+    <ul class="nav-links">
+      <li><a href="index.html#how">How it works</a></li>
+      <li><a href="index.html#features">Features</a></li>
+      <li><a href="index.html#start">Quick start</a></li>
+      <li><a href="index.html#faq">FAQ</a></li>
+      <li><a href="downloads.html" class="active">Downloads</a></li>
+      <li><a href="partners.html">Partners</a></li>
+      <li class="nav-divider"></li>
+      <li><a class="nav-gh" href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub →</a></li>
+    </ul>
+  </div>
+</nav>
+
+<div class="page-header">
+  <h1>Downloads</h1>
+  <p>Standalone builds for Windows, macOS and Linux — pulled live from GitHub Releases.</p>
+</div>
+
+<div class="section-inner">
+  <div id="latest-hero">
+    <div class="loading"><div class="loading-spinner"></div>Loading latest release…</div>
+  </div>
+  <div class="older-section" id="older-section" style="display:none">
+    <div class="older-title">Previous releases</div>
+    <div id="older-releases"></div>
+    <a class="all-releases-link" href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases" target="_blank">
+      View all releases on GitHub →
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-links">
+    <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://pypi.org/project/SpotiFLAC/" target="_blank" rel="noopener">PyPI</a>
+    <a href="https://t.me/SpotiFLAC_Module_Version" target="_blank" rel="noopener">Telegram</a>
+    <a href="index.html">Home</a>
+    <a href="partners.html">Partners</a>
+  </div>
+  <div class="footer-copy">MIT Licensed · not affiliated with any streaming service</div>
+</footer>
+
+<script>
+(async () => {
+  // Public repo, unauthenticated GitHub API — fine for occasional page loads,
+  // subject to GitHub's standard unauthenticated rate limit (60 req/hour/IP).
+  const REPO = 'BartolomeoRusso9/SpotiFLAC-Module-Version';
+  const latestEl = document.getElementById('latest-hero');
+  const olderEl = document.getElementById('older-releases');
+  const olderSection = document.getElementById('older-section');
+
+  function fmtDate(d) {
+    return new Date(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+  function fmtSize(bytes) {
+    if (!bytes) return '';
+    const mb = bytes / (1024 * 1024);
+    return mb >= 1 ? mb.toFixed(1) + ' MB' : (bytes / 1024).toFixed(0) + ' KB';
+  }
+  function fmtCount(n) {
+    return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  }
+  // Minimal, safe-ish markdown -> HTML for release notes: escapes first,
+  // then only re-enables a small known set of patterns. Good enough for
+  // GitHub's own auto-generated release body format; not a general parser.
+  function sanitizeHTML(html) {
+    const allowedTags = ['h1', 'h2', 'h3', 'p', 'ul', 'li', 'strong', 'code', 'a'];
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+
+    function sanitizeNode(node) {
+      if (node.nodeType === 3) return node; // text node
+      if (node.nodeType !== 1) return null;
+
+      const tagName = node.tagName.toLowerCase();
+      if (!allowedTags.includes(tagName)) return null;
+
+      const newNode = document.createElement(tagName);
+
+      // Only allow href on <a> tags, validate it's safe
+      if (tagName === 'a') {
+        const href = node.getAttribute('href');
+        if (href && /^https?:\/\//i.test(href)) {
+          newNode.setAttribute('href', href);
+          newNode.setAttribute('target', '_blank');
+          newNode.setAttribute('rel', 'noopener');
+        }
+      }
+
+      Array.from(node.childNodes).forEach(child => {
+        const sanitized = sanitizeNode(child);
+        if (sanitized) newNode.appendChild(sanitized);
+      });
+
+      return newNode;
+    }
+
+    const result = document.createElement('div');
+    Array.from(temp.childNodes).forEach(child => {
+      const sanitized = sanitizeNode(child);
+      if (sanitized) result.appendChild(sanitized);
+    });
+
+    return result.innerHTML;
+  }
+
+  function md(text) {
+    const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = esc
+      .replace(/^### (.*)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.*)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.*)$/gm, '<h1>$1</h1>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/^- (.*)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>\n?)+/g, m => '<ul>' + m + '</ul>')
+      .split('\n\n').map(p => p.trim()).filter(Boolean)
+      .map(p => (/^<(h\d|ul|li)/.test(p) ? p : `<p>${p}</p>`)).join('\n');
+    return sanitizeHTML(html);
+  }
+
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=10`);
+    if (!res.ok) throw new Error(String(res.status));
+    const releases = await res.json();
+    if (!releases.length) {
+      latestEl.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:40px">No releases published yet.</p>';
+      return;
+    }
+
+    const latest = releases[0];
+    const latestAssets = (latest.assets || []).filter(a => !a.name.endsWith('.sha256'));
+    const latestBody = md(latest.body || '');
+
+    const card = document.createElement('div');
+    card.className = 'latest-card';
+
+    const header = document.createElement('div');
+    header.className = 'latest-header';
+
+    const tag = document.createElement('span');
+    tag.className = 'latest-tag';
+    tag.textContent = latest.tag_name;
+
+    const badge = document.createElement('span');
+    badge.className = 'latest-badge';
+    badge.textContent = latest.prerelease ? 'Pre-release' : 'Latest release';
+
+    const date = document.createElement('span');
+    date.className = 'latest-date';
+    date.textContent = fmtDate(latest.published_at);
+
+    header.appendChild(tag);
+    header.appendChild(badge);
+    header.appendChild(date);
+    card.appendChild(header);
+
+    const assetsDiv = document.createElement('div');
+    assetsDiv.className = 'latest-assets';
+    latestAssets.forEach(a => {
+      if (!/^https?:\/\//i.test(a.browser_download_url)) return;
+      const link = document.createElement('a');
+      link.className = 'latest-asset';
+      link.href = a.browser_download_url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.innerHTML = `<svg class="latest-asset-icon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
+      const div = document.createElement('div');
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'latest-asset-name';
+      nameDiv.textContent = a.name;
+      const metaDiv = document.createElement('div');
+      metaDiv.className = 'latest-asset-meta';
+      metaDiv.textContent = `${fmtSize(a.size)} · ${fmtCount(a.download_count)} downloads`;
+      div.appendChild(nameDiv);
+      div.appendChild(metaDiv);
+      link.appendChild(div);
+      assetsDiv.appendChild(link);
+    });
+    card.appendChild(assetsDiv);
+
+    if (latestBody) {
+      const btn = document.createElement('button');
+      btn.className = 'latest-changelog-toggle';
+      btn.textContent = 'Show changelog';
+      btn.onclick = function() {
+        this.nextElementSibling.classList.toggle('show');
+        this.textContent = this.nextElementSibling.classList.contains('show') ? 'Hide changelog' : 'Show changelog';
+      };
+      const changelogDiv = document.createElement('div');
+      changelogDiv.className = 'latest-changelog';
+      const bodyDiv = document.createElement('div');
+      bodyDiv.className = 'release-body';
+      bodyDiv.innerHTML = latestBody;
+      changelogDiv.appendChild(bodyDiv);
+      card.appendChild(btn);
+      card.appendChild(changelogDiv);
+    }
+
+    latestEl.innerHTML = '';
+    latestEl.appendChild(card);
+
+    const older = releases.slice(1);
+    if (older.length) {
+      olderSection.style.display = '';
+      olderEl.innerHTML = '';
+      older.forEach(r => {
+        const assets = (r.assets || []).filter(a => !a.name.endsWith('.sha256'));
+        const body = md(r.body || '');
+
+        const details = document.createElement('details');
+        details.className = 'release-card';
+
+        const summary = document.createElement('summary');
+        summary.className = 'release-summary';
+
+        const tagSpan = document.createElement('span');
+        tagSpan.className = 'release-tag';
+        tagSpan.textContent = r.tag_name;
+        summary.appendChild(tagSpan);
+
+        if (r.prerelease) {
+          const preBadge = document.createElement('span');
+          preBadge.className = 'release-badge-pre';
+          preBadge.textContent = 'Pre-release';
+          summary.appendChild(preBadge);
+        }
+
+        const dateSpan = document.createElement('span');
+        dateSpan.className = 'release-date';
+        dateSpan.textContent = fmtDate(r.published_at);
+        summary.appendChild(dateSpan);
+
+        const expand = document.createElement('span');
+        expand.className = 'release-expand';
+        expand.textContent = '▾';
+        summary.appendChild(expand);
+
+        details.appendChild(summary);
+
+        const detail = document.createElement('div');
+        detail.className = 'release-detail';
+
+        if (assets.length) {
+          const assetsDiv = document.createElement('div');
+          assetsDiv.className = 'release-assets';
+          assets.forEach(a => {
+            if (!/^https?:\/\//i.test(a.browser_download_url)) return;
+            const link = document.createElement('a');
+            link.className = 'release-asset';
+            link.href = a.browser_download_url;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
+            link.appendChild(document.createTextNode(a.name));
+            const sizeSpan = document.createElement('span');
+            sizeSpan.className = 'release-asset-size';
+            sizeSpan.textContent = fmtSize(a.size);
+            link.appendChild(sizeSpan);
+            assetsDiv.appendChild(link);
+          });
+          detail.appendChild(assetsDiv);
+        }
+
+        if (body) {
+          const bodyDiv = document.createElement('div');
+          bodyDiv.className = 'release-body';
+          bodyDiv.innerHTML = body;
+          detail.appendChild(bodyDiv);
+        }
+
+        details.appendChild(detail);
+        olderEl.appendChild(details);
+      });
+    }
+  } catch (e) {
+    latestEl.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:40px">Couldn't load releases (${e.message}). <a href="https://github.com/${REPO}/releases" target="_blank">View on GitHub</a> instead.</p>`;
+  }
+})();
+</script>
+
+</body>
+</html>

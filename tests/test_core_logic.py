@@ -16,6 +16,7 @@ from SpotiFLAC.core import (
 from SpotiFLAC.core.history import HistoryManager
 from SpotiFLAC.core.isrc_utils import is_valid_isrc, normalize_isrc
 from SpotiFLAC.core.local_scanner import scan_file
+from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.models import (
     DownloadResult,
     TrackMetadata,
@@ -25,9 +26,14 @@ from SpotiFLAC.core.models import (
 from SpotiFLAC.core.quality import (
     map_amazon_community_quality,
     normalize_quality,
+    quality_for_provider,
     quality_fallback_chain,
 )
-from SpotiFLAC.extensions.manager import ExtensionManager, RegistryEntry
+from SpotiFLAC.extensions.manager import (
+    ExtensionManager,
+    InstalledExtension,
+    RegistryEntry,
+)
 
 
 def test_normalize_isrc_strips_prefix_and_validates():
@@ -43,9 +49,12 @@ def test_quality_helpers_normalize_and_fallbacks():
     assert quality_fallback_chain("hi_res_lossless") == [
         "HI_RES_LOSSLESS",
         "LOSSLESS",
-        "HIGH",
-        "LOW",
     ]
+    assert quality_fallback_chain("LOSSLESS") == ["LOSSLESS"]
+    assert quality_for_provider("ext:qobuz-web", "HI_RES_LOSSLESS") == "27"
+    assert quality_for_provider("qobuz", "HI_RES") == "7"
+    assert quality_for_provider("tidal", "LOSSLESS") == "LOSSLESS"
+    assert quality_for_provider("pandora_native", "LOSSLESS") == "mp3_192"
     assert map_amazon_community_quality("DOLBY_ATMOS") == "atmos"
     assert map_amazon_community_quality("HI_RES_LOSSLESS") == "24"
 
@@ -488,6 +497,75 @@ def test_extension_manager_deduplicates_registry_checks_in_one_process(
         # Restore original state
         ExtensionManager._startup_registry_checks.clear()
         ExtensionManager._startup_registry_checks.update(original_checks)
+
+
+def test_extension_manager_skips_matching_registry_checksum(tmp_path):
+    manager = ExtensionManager(ext_dir=tmp_path, auto_install_downloads=False)
+    installed = InstalledExtension(
+        name="demo",
+        display_name="Demo",
+        version="1.0.0",
+        description="",
+        ext_dir=tmp_path / "demo",
+        manifest={"_registry_sha256": "ABC123"},
+    )
+    remote = RegistryEntry(
+        id="demo",
+        display_name="Demo",
+        version="1.0.0",
+        description="",
+        download_url="https://example.com/demo.zip",
+        sha256="abc123",
+    )
+
+    assert manager._matches_registry_entry(installed, remote) is True
+
+
+def test_extension_manager_detects_changed_registry_checksum(tmp_path):
+    manager = ExtensionManager(ext_dir=tmp_path, auto_install_downloads=False)
+    installed = InstalledExtension(
+        name="demo",
+        display_name="Demo",
+        version="1.0.0",
+        description="",
+        ext_dir=tmp_path / "demo",
+        manifest={"_registry_sha256": "old"},
+    )
+    remote = RegistryEntry(
+        id="demo",
+        display_name="Demo",
+        version="1.0.0",
+        description="",
+        download_url="https://example.com/demo.zip",
+        sha256="new",
+    )
+
+    assert manager._matches_registry_entry(installed, remote) is False
+
+
+def test_base_provider_caches_validated_flac_until_file_changes(tmp_path, monkeypatch):
+    class DummyProvider(BaseProvider):
+        async def download_track_async(self, *args, **kwargs):
+            raise NotImplementedError
+
+    path = tmp_path / "track.flac"
+    path.write_bytes(b"valid audio")
+    validations = []
+
+    def fake_validate(filepath):
+        validations.append(filepath)
+        return True, ""
+
+    monkeypatch.setattr("SpotiFLAC.core.base.validate_flac_file", fake_validate)
+    provider = DummyProvider()
+
+    assert provider._file_exists(path) is True
+    assert provider._file_exists(path) is True
+    assert len(validations) == 1
+
+    path.write_bytes(b"changed audio")
+    assert provider._file_exists(path) is True
+    assert len(validations) == 2
 
 
 def test_async_client_tracks_loop_minutes_and_default_playlist_subfolders():

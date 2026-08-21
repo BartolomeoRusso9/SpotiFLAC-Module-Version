@@ -41,6 +41,7 @@ class BaseProvider(ABC):
         )
         # Type hint aggiornato per supportare sia callback sincroni (None) che asincroni (Awaitable)
         self._progress_cb: Callable[[int, int], Awaitable[None] | None] | None = None
+        self._validated_flac_files: dict[str, tuple[int, int]] = {}
 
     def set_progress_callback(
         self,
@@ -162,12 +163,22 @@ class BaseProvider(ABC):
         return path
 
     def _file_exists(self, path: Path) -> bool:
-        if not (path.exists() and path.stat().st_size > 0):
+        try:
+            file_stat = path.stat()
+        except OSError:
+            return False
+        if file_stat.st_size <= 0:
             return False
 
         if path.suffix.lower() == ".flac":
+            cache_key = str(path.absolute())
+            cache_signature = (file_stat.st_mtime_ns, file_stat.st_size)
+            if self._validated_flac_files.get(cache_key) == cache_signature:
+                return True
+
             is_valid, error_msg = validate_flac_file(str(path))
             if not is_valid:
+                self._validated_flac_files.pop(cache_key, None)
                 logger.warning(
                     "Existing file is corrupted, removing so it can be re-downloaded: "
                     "%s (%s)",
@@ -183,8 +194,9 @@ class BaseProvider(ABC):
                         exc,
                     )
                 return False
+            self._validated_flac_files[cache_key] = cache_signature
 
-        size_mb = path.stat().st_size / (1024 * 1024)
+        size_mb = file_stat.st_size / (1024 * 1024)
         logger.debug("File already exists: %s (%.2f MB)", path.name, size_mb)
         return True
 

@@ -209,8 +209,8 @@ class ExtensionManager:
 
             existing = self.get_installed(entry.id)
 
-            # If already installed and version matches, skip without downloading
-            if existing and existing.version == entry.version:
+            # Skip only when both registry version and package checksum match.
+            if existing and self._matches_registry_entry(existing, entry):
                 logger.debug(
                     "[ExtMgr] '%s' is already installed and updated (v%s)",
                     entry.id,
@@ -253,6 +253,12 @@ class ExtensionManager:
             if isinstance(registry_url, (list, tuple)):
                 return [str(u) for u in registry_url]
             return [str(registry_url)]
+
+        # An explicit environment setting takes precedence over registry URLs
+        # persisted by the GUI or discovered in local .env files.
+        env_val = os.environ.get(REGISTRY_ENV_KEY)
+        if env_val:
+            return [u.strip() for u in env_val.split(",") if u.strip()]
 
         try:
             from . import registry_config
@@ -312,6 +318,14 @@ class ExtensionManager:
                         item.get("id", "<no id>"),
                     )
                     continue
+                sha256_val = item.get("sha256")
+                if sha256_val is not None and not isinstance(sha256_val, str):
+                    logger.warning(
+                        "[ExtMgr] Skipping registry entry '%s' with non-string sha256: %s",
+                        item.get("id", "<unknown>"),
+                        type(sha256_val),
+                    )
+                    continue
                 try:
                     entries.append(
                         RegistryEntry(
@@ -325,7 +339,7 @@ class ExtensionManager:
                             min_app_version=item.get("min_app_version", "0.0.0"),
                             icon_url=item.get("icon_url"),
                             updated_at=item.get("updated_at", ""),
-                            sha256=item.get("sha256"),
+                            sha256=sha256_val,
                         ),
                     )
                 except (KeyError, TypeError) as e:
@@ -358,7 +372,7 @@ class ExtensionManager:
 
         # Check if already installed and up-to-date
         existing = self.get_installed(ext_id)
-        if existing and existing.version == entry.version:
+        if existing and self._matches_registry_entry(existing, entry):
             logger.info("[ExtMgr] '%s' already up-to-date (v%s)", ext_id, entry.version)
             return existing
 
@@ -505,6 +519,11 @@ class ExtensionManager:
             }
         else:
             manifest = json.loads(zf.read("manifest.json"))
+
+        manifest = dict(manifest)
+        manifest.pop("_registry_sha256", None)
+        if sha256:
+            manifest["_registry_sha256"] = sha256.lower()
 
         if runtime_hint == "python" and python_modules:
             manifest = dict(manifest)
@@ -735,7 +754,7 @@ class ExtensionManager:
                 status[name] = "not_in_registry"
                 continue
             remote = entries[name]
-            if remote.version != ext.version:
+            if not self._matches_registry_entry(ext, remote):
                 try:
                     self.install_from_url(remote.download_url, sha256=remote.sha256)
                     status[name] = f"updated → {remote.version}"
@@ -745,6 +764,20 @@ class ExtensionManager:
                 status[name] = "already_up_to_date"
 
         return status
+
+    @staticmethod
+    def _matches_registry_entry(
+        installed: InstalledExtension, remote: RegistryEntry
+    ) -> bool:
+        """Return whether an installed package matches the registry metadata."""
+        if installed.version != remote.version:
+            return False
+        if not remote.sha256:
+            return True
+        installed_sha = installed.manifest.get("_registry_sha256")
+        if not isinstance(installed_sha, str):
+            return False
+        return installed_sha.lower() == remote.sha256.lower()
 
     def preload_python_modules(self) -> None:
         """Pre-loads all installed Python extension entry points into sys.modules.

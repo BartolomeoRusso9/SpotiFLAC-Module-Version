@@ -1761,11 +1761,8 @@ class SpotiFLAC_API:
             first_artist_only = config.get("first_artist_only", False)
             artist_separator = config.get("artist_separator") or None
             lyrics_providers = config.get("lyrics_providers") or [
-                "spotify",
                 "apple",
-                "musixmatch",
                 "lrclib",
-                "amazon",
             ]
             enrich_providers = config.get("enrich_providers") or [
                 "deezer",
@@ -1927,15 +1924,12 @@ class SpotiFLAC_API:
             pass
 
     def _health_check_task(self, services) -> None:
-        """Run provider and extension health checks and update the frontend with their results."""
+        """Run lyrics provider health checks and update the frontend."""
         try:
-            from .core.health_check import run_health_check_with_extensions
+            from .core.health_check import run_health_check
 
             self.log(f"Health check started for: {', '.join(services)}", "info")
-            results, ext_result = asyncio.run(
-                run_health_check_with_extensions(services),
-            )
-            all_results = [*list(results), ext_result]
+            results = asyncio.run(run_health_check(services))
             data = [
                 {
                     "provider": r.provider,
@@ -1945,16 +1939,12 @@ class SpotiFLAC_API:
                     "latency": round(r.latency) if r.latency >= 0 else -1,
                     "detail": r.detail,
                 }
-                for r in all_results
+                for r in results
             ]
             ok_providers = [r.provider for r in results if r.ok]
             self.log(
                 f"Health check — {len([r for r in results if r.ok])}/{len(results)} endpoints OK.",
                 "ok" if ok_providers else "error",
-            )
-            self.log(
-                f"Extensions — {'reachable' if ext_result.ok else 'unreachable'} ({ext_result.detail}).",
-                "ok" if ext_result.ok else "error",
             )
             try:
                 self._push("updateHealthResults", data)

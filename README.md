@@ -115,7 +115,7 @@ On launch it automatically runs a service health check before asking any questio
 
 **Smart File Paths:** If you input a Single Track URL, it will ask if you want to set a specific `.flac` output path. If you do, it intelligently skips all questions about filename formatting and subfolder organization.
 
-**Unified Quality Profiles:** Automatically translates your desired quality tier across different services.
+**Unified Quality Profiles:** Choose `HI_RES_LOSSLESS` for the best available lossless tier or `LOSSLESS` for standard lossless audio. SpotiFLAC translates either profile into each provider's native quality token; lossy-only services use their best available audio.
 
 **CLI Generator:** At the end of the configuration, it generates and prints the exact CLI command for your specific setup, so you can copy and reuse it in your automated scripts.
 
@@ -518,7 +518,7 @@ SpotiFLAC(
 
 ### MP3 Transcoding
 
-Downloads always fetch the best source an extension offers (FLAC, ALAC/M4A, …). Set `transcode_to="mp3"` (Python) or `--mp3` / `--transcode mp3` (CLI) to convert every finished track to MP3 — 320 kbps by default — for players or car stereos that cannot handle lossless files. Tags, cover art and lyrics are carried over to the MP3, and the original file is deleted once the conversion succeeds unless `transcode_keep_original` / `--keep-original` is set.
+Downloads use the selected quality profile: `HI_RES_LOSSLESS` requests the best available lossless tier, while `LOSSLESS` requests standard lossless audio. Set `transcode_to="mp3"` (Python) or `--mp3` / `--transcode mp3` (CLI) to convert every finished track to MP3 — 320 kbps by default — for players or car stereos that cannot handle lossless files. Tags, cover art and lyrics are carried over to the MP3, and the original file is deleted once the conversion succeeds unless `transcode_keep_original` / `--keep-original` is set.
 
 Requires `ffmpeg` on your `PATH`: the run stops immediately with a clear error if it is missing, so you never download a whole album only to fail at the conversion step.
 
@@ -872,8 +872,8 @@ chmod +x SpotiFLAC-Linux-arm64
 | `timeout_s` | `int` | `None` | Per-track download timeout in seconds. If a single track download does not complete within this time, the process is terminated and the track is marked as failed. SpotiFLAC then moves on to the next extension or retry. Set to `None` (default) to disable the timeout. |
 | `loop` | `int` | `None` | Duration in minutes to keep retrying permanently failed tracks after a full session completes. |
 | `track_max_retries` | `int` | `0` | Extra download attempts per track when all extensions fail on the first try. Each retry cycles through all configured extensions again with exponential backoff (2 s → 4 s → 8 s …, capped at 30 s). |
-| `quality` | `str` | `"LOSSLESS"` | Requested audio quality. Supported values depend on the installed extension. |
-| `allow_fallback` | `bool` | `True` | Automatically falls back to the next available quality tier if the requested quality is unavailable. |
+| `quality` | `str` | `"LOSSLESS"` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. Legacy provider-specific values are accepted and normalized. |
+| `allow_fallback` | `bool` | `True` | For `HI_RES_LOSSLESS`, allows fallback to `LOSSLESS` when the higher-resolution tier is unavailable. It never downgrades lossless requests to compressed audio. |
 | `log_level` | `int` | `logging.WARNING` | Python logging level. |
 | `embed_lyrics` | `bool` | `True` | Whether to fetch and embed synchronized lyrics (LRC) into the audio file. |
 | `lyrics_providers` | `list` | `["spotify", "apple", "musixmatch", "lrclib", "amazon"]` | Priority order of lyrics providers to attempt. |
@@ -982,7 +982,7 @@ SpotiFLAC(
 | `--service` | `-s` | `ext:tidal-web` | One or more extensions in priority order, as `ext:<id>` (or a legacy alias resolved to an installed extension — see [Extensions](#extensions)). |
 | `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
 | `--output-path` | `-o` | `None` | Exact output file path for single track downloads. Ignored for albums, playlists and discographies. |
-| `--quality` | `-q` | `LOSSLESS` | Requested audio quality. Supported values depend on the installed extension. |
+| `--quality` | `-q` | `LOSSLESS` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. Legacy provider-specific values are accepted and normalized. |
 | `--use-track-numbers` | | `False` | Prefix filenames with track numbers. |
 | `--use-album-track-numbers` | | `False` | Use the track's original album number instead of queue position. |
 | `--use-artist-subfolders` | | `False` | Organize files into per-artist subfolders. |

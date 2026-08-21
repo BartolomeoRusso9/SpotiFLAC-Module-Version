@@ -25,6 +25,7 @@ _PROFILES_FILE = Path.home() / ".cache" / "spotiflac" / "profiles.json"
 
 
 class ProfileConfig(BaseModel):
+    output_dir: str = "./Downloads"
     services: list[str] = Field(default_factory=lambda: ["tidal"])
     filename_format: str = "{title} - {artist}"
     use_track_numbers: bool = False
@@ -37,7 +38,7 @@ class ProfileConfig(BaseModel):
     quality: str = "LOSSLESS"
     embed_lyrics: bool = True
     lyrics_providers: list[str] = Field(
-        default_factory=lambda: ["spotify", "apple", "musixmatch", "amazon", "lrclib"],
+        default_factory=lambda: ["apple", "lrclib"],
     )
     enrich_metadata: bool = True
     enrich_providers: list[str] = Field(
@@ -56,6 +57,8 @@ class ProfileConfig(BaseModel):
     loop: int | None = None
     log_level: int | None = None
     output_path: str | None = None
+    include_featuring: bool = True
+    max_concurrent_downloads: int = 2
 
     model_config = {"extra": "ignore"}
 

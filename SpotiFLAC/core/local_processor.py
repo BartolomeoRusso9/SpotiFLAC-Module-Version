@@ -1,5 +1,5 @@
 """SpotiFLAC/core/local_processor.py — Phase 3: Safe Tagger, plus the
-orchestration glue used by both the CLI (--tag-local) and the GUI/web
+orchestration glue used by the GUI/web
 "Fix Local Files" tab.
 
 Tag-writing itself is NOT reimplemented here — tagger.embed_metadata_async()
@@ -218,104 +218,11 @@ def default_embed_options(
     """
     return EmbedOptions(
         embed_lyrics=embed_lyrics,
-        lyrics_providers=["lrclib", "musixmatch", "apple"],
+        lyrics_providers=[
+            "apple",
+            "lrclib",
+        ],
         enrich=enrich,
         enrich_providers=["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         artist_separator=artist_separator,
     )
-
-
-async def run_local_tagging_cli(
-    path: str | Path,
-    *,
-    dry_run: bool = False,
-    force: bool = False,
-    backup: bool = True,
-    artist_separator: str | None = None,
-) -> list[RetagResult]:
-    """Drives `--tag-local` end to end: scan, match, print old → new for
-    every file, then either stop there (--dry-run) or apply "safe matches"
-    (--force) while always leaving anything below the confidence threshold
-    for manual review — this function never applies a low-confidence match
-    on its own, --force only removes the *safe*-match confirmation prompt.
-    """
-    print(f"\n🔎 Scanning: {path}\n")
-    entries = await scan_and_match_async(path)
-
-    if not entries:
-        from .local_scanner import SUPPORTED_EXTENSIONS
-
-        exts = ", ".join(sorted(SUPPORTED_EXTENSIONS))
-        print(f"No supported audio files found ({exts}).")
-        return []
-
-    to_apply: list[tuple[LocalScanEntry, TrackMetadata]] = []
-
-    for entry in entries:
-        info = entry.info
-        old_label = (
-            f"{info.old_artist or '?'} - {info.old_title or Path(info.file_path).name}"
-        )
-
-        if info.error:
-            print(f"  ⚠️  {Path(info.file_path).name}: {info.error}")
-            continue
-
-        best = entry.best
-        if best is None:
-            print(f"  ✗  {old_label}\n     → no match found")
-            continue
-
-        new_label = f"{best.metadata.first_artist} - {best.metadata.title}"
-        tag = "✓ safe match" if best.is_safe else "? needs review"
-        print(f"  {old_label}\n     → {new_label}  [{best.confidence:.0f}% · {tag}]")
-
-        if best.is_safe:
-            to_apply.append((entry, best.metadata))
-        else:
-            print(
-                "     (below 90% confidence — not applied automatically even "
-                "with --force; review it in the GUI/web tab instead)",
-            )
-
-    if dry_run:
-        print(
-            f"\n--dry-run: {len(to_apply)} file(s) would be retagged, nothing written."
-        )
-        return []
-
-    if not to_apply:
-        print("\nNothing to apply.")
-        return []
-
-    if not force:
-        answer = (
-            input(
-                f"\nApply {len(to_apply)} safe match(es) now? [y/N] ",
-            )
-            .strip()
-            .lower()
-        )
-        if answer not in ("y", "yes"):
-            print("Cancelled — nothing written.")
-            return []
-
-    opts = default_embed_options(artist_separator=artist_separator)
-    results: list[RetagResult] = []
-    print()
-    for entry, metadata in to_apply:
-        name = Path(entry.info.file_path).name
-        result = await retag_local_file_async(
-            entry.info.file_path,
-            metadata,
-            opts,
-            backup=backup,
-        )
-        results.append(result)
-        icon = "✓" if result.success else "✗"
-        detail = "" if result.success else f" — {result.error}"
-        print(f"  {icon}  {name}{detail}")
-
-    ok = sum(1 for r in results if r.success)
-    print(f"\nDone: {ok}/{len(results)} file(s) retagged.")
-    return results

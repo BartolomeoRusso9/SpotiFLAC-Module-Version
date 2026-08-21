@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pydoll.browser.chromium import Chrome
 from pydoll.protocol.network.events import NetworkEvent
 
-from SpotiFLAC.core.endpoints import get_amazon_endpoint
+from SpotiFLAC.core import get_amazon_endpoint
 from SpotiFLAC.core.solver import (
     _ensure_xvfb,
     _try_minimize_window,
