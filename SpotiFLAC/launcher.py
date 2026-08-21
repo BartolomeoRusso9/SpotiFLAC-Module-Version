@@ -131,6 +131,11 @@ async def _load_profile_into_defaults(profile_name: str) -> dict:
     return {}
 
 
+def _resolve_log_level(verbose: bool) -> int:
+    """Hide warnings unless the user explicitly asked for verbose logging."""
+    return logging.DEBUG if verbose else logging.ERROR
+
+
 def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     pd = profile_defaults or {}
 
@@ -636,7 +641,7 @@ async def amain() -> None:
         print_ffmpeg_warning()
         cfg = await run_interactive()
 
-        log_level = logging.WARNING
+        log_level = _resolve_log_level(cfg.get("verbose", False))
         _root_handler = logging.StreamHandler(sys.stdout)
         _root_handler.setFormatter(
             _CleanConsoleFormatter(
@@ -746,7 +751,7 @@ async def amain() -> None:
         else merged_defaults.get("track_max_retries", 0)
     )
 
-    log_level = logging.DEBUG if args.verbose else logging.WARNING
+    log_level = _resolve_log_level(args.verbose)
     log_format = (
         "%(levelname)s:%(name)s: %(message)s"
         if args.verbose

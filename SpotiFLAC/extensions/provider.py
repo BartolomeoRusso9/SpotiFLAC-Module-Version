@@ -57,6 +57,8 @@ class JSExtensionProvider(BaseProvider):
         node_executable: str = "node",
         timeout_s: int = 120,
     ) -> None:
+        super().__init__(timeout_s=timeout_s)
+
         self._timeout_s = timeout_s
         self._node_executable = node_executable
         self._progress_cb = None

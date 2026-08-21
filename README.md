@@ -118,11 +118,11 @@ spotiflac --interactive
 
 *(Or `python launcher.py --interactive` if running from source)*
 
-On launch it automatically runs a service health check before asking any questions, so you always know which of your installed extensions are reachable.
+On launch it automatically runs a lyrics-provider health check before asking any questions, so you always know which of your installed lyric sources are reachable.
 
 **What the wizard does at startup:**
 
-- **Service Health Check** — probes the endpoints of your installed extensions and shows availability inline (✅ / ❌) before asking anything
+- **Lyrics Provider Health Check** — probes the configured lyric endpoints and shows availability inline (✅ / ❌) before asking anything
 - **URL History** — shows your last 8 downloads so you can re-run one with a single keypress
 - **Folder Memory** — remembers your last output directory and offers it as the default
 - **Profile Load** — optionally restores a full saved configuration
@@ -383,11 +383,11 @@ SpotiFLAC(
 )
 ```
 
-### Service Health Check
+### Lyrics Provider Health Check
 
-SpotiFLAC can probe the endpoints of your installed extensions before downloading, to verify which ones are currently reachable.
+SpotiFLAC can probe the endpoints of the installed lyrics providers before embedding lyrics, to verify which lyric sources are currently reachable.
 
-In Interactive Mode this runs automatically at startup. In code or scripts you can call it directly:
+This check is specifically about lyrics sources, not audio download providers. In Interactive Mode it runs automatically at startup. In code or scripts you can call it directly:
 
 ```python
 from SpotiFLAC.core.health_check import (

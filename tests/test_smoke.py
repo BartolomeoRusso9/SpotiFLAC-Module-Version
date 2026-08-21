@@ -2,8 +2,20 @@ import argparse
 import json
 import logging
 
+import pytest
+
 from SpotiFLAC.core.profiles import ProfileConfig
-from SpotiFLAC.launcher import _split_positionals, load_config, parse_args
+from SpotiFLAC.launcher import (
+    _resolve_log_level,
+    _split_positionals,
+    load_config,
+    parse_args,
+)
+
+
+def test_log_level_hides_warnings_without_verbose():
+    assert _resolve_log_level(verbose=False) == logging.ERROR
+    assert _resolve_log_level(verbose=True) == logging.DEBUG
 
 
 def test_profile_config_accepts_named_log_levels():
@@ -88,3 +100,79 @@ def test_load_config_validates_profile_shape(tmp_path, monkeypatch):
     assert cfg["services"] == ["qobuz"]
     assert cfg["quality"] == "HI_RES"
     assert cfg["embed_lyrics"] is False
+
+
+def test_js_extension_provider_initializes_base_validation_cache(monkeypatch, tmp_path):
+    from SpotiFLAC.extensions.provider import JSExtensionProvider
+
+    class DummyExtension:
+        name = "tidal-web"
+        index_js = str(tmp_path / "index.js")
+        manifest = {}
+
+        def default_settings(self):
+            return {}
+
+    class DummyManager:
+        def __init__(self, ext_dir=None):
+            self.ext_dir = ext_dir
+
+        def get_installed(self, ext_id):
+            assert ext_id == "tidal-web"
+            return DummyExtension()
+
+        def load_settings(self, ext_id):
+            assert ext_id == "tidal-web"
+            return {}
+
+    monkeypatch.setattr("SpotiFLAC.extensions.provider.ExtensionManager", DummyManager)
+    monkeypatch.setattr("SpotiFLAC.extensions.provider.signed_session_client", lambda manifest: None)
+
+    provider = JSExtensionProvider("tidal-web")
+
+    assert hasattr(provider, "_validated_flac_files")
+    assert isinstance(provider._validated_flac_files, dict)
+
+
+def test_interactive_service_options_are_deduplicated_from_installed_extensions(monkeypatch):
+    from SpotiFLAC import interactive
+
+    class DummyExt:
+        def __init__(self, name, is_download_provider=True):
+            self.name = name
+            self.is_download_provider = is_download_provider
+            self.manifest = {"type": ["download_provider"]}
+
+    class DummyManager:
+        def __init__(self, auto_install_downloads=False):
+            self.auto_install_downloads = auto_install_downloads
+
+        def list_installed(self):
+            return [
+                DummyExt("tidal-web"),
+                DummyExt("tidal-py"),
+                DummyExt("qobuz-web"),
+                DummyExt("soundcloud"),
+            ]
+
+    monkeypatch.setattr("SpotiFLAC.interactive.ExtensionManager", DummyManager)
+
+    assert interactive._installed_service_options() == ["qobuz", "soundcloud", "tidal"]
+
+
+def test_interactive_stops_when_no_download_providers_are_installed(monkeypatch, capsys):
+    from SpotiFLAC import interactive
+
+    class DummyManager:
+        def __init__(self, auto_install_downloads=False):
+            self.auto_install_downloads = auto_install_downloads
+
+        def list_installed(self):
+            return []
+
+    monkeypatch.setattr("SpotiFLAC.interactive.ExtensionManager", DummyManager)
+
+    with pytest.raises(SystemExit):
+        interactive._require_installed_service_options()
+
+    assert "No download provider found. Configure your extension registry first." in capsys.readouterr().out

@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 
 from .core.health_check import run_health_check
 from .core.quality import normalize_quality
+from .extensions.catalog import SERVICE_ALIASES
+from .extensions.manager import ExtensionManager
 
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
 
@@ -145,6 +147,69 @@ def _section(title: str) -> None:
 def _header() -> None:
     print(f"\n{BOLD(MAGENTA('SpotiFLAC — Interactive Mode'))}")
     print(DIM("=" * 40))
+
+
+def _canonical_service_name(ext_name: str) -> str | None:
+    """Normalize extension IDs such as ``tidal-web`` and ``tidal-py`` to one service name."""
+    value = (ext_name or "").lower().removeprefix("ext:")
+    if not value:
+        return None
+
+    value = value.replace("_", "-")
+    value = value.replace("-web", "").replace("-py", "")
+
+    alias_reverse = {v.lower(): k for k, v in SERVICE_ALIASES.items()}
+    if value in alias_reverse:
+        return alias_reverse[value]
+
+    if value.startswith("ytmusic"):
+        return "youtube"
+    if value.startswith("apple"):
+        return "apple"
+    if value.startswith("tidal"):
+        return "tidal"
+    if value.startswith("qobuz"):
+        return "qobuz"
+    if value.startswith("deezer"):
+        return "deezer"
+    if value.startswith("soundcloud"):
+        return "soundcloud"
+    if value.startswith("pandora"):
+        return "pandora"
+    if value.startswith("amazon"):
+        return "amazon"
+    return value
+
+
+def _installed_service_options() -> list[str]:
+    """Return the installed provider services as a deduplicated list for interactive menus."""
+    try:
+        manager = ExtensionManager(auto_install_downloads=False)
+        installed = manager.list_installed()
+    except Exception:
+        return []
+
+    services: list[str] = []
+    seen: set[str] = set()
+    for ext in installed:
+        if not getattr(ext, "is_download_provider", False):
+            continue
+        service = _canonical_service_name(ext.name)
+        if not service or service in seen:
+            continue
+        seen.add(service)
+        services.append(service)
+
+    return sorted(services)
+
+
+def _require_installed_service_options() -> list[str]:
+    """Ensure at least one download provider is available, otherwise stop the interactive flow."""
+    services = _installed_service_options()
+    if not services:
+        print("No download provider found. Configure your extension registry first.")
+        raise SystemExit(1)
+    return services
 
 
 # ---------------------------------------------------------------------------
@@ -706,11 +771,6 @@ async def run_interactive() -> dict:
     # ── 3. Services ──────────────────────────────────────────────────────────
     _section("3 · Audio Services")
 
-    if health_status:
-        unavailable = [s for s in _ALL_SERVICES if not health_status.get(s, True)]
-        if unavailable:
-            print(DIM(f"  Unavailable: {', '.join(unavailable)}"))
-
     is_soundcloud_url = (
         "soundcloud.com" in cfg["url"] or "on.soundcloud.com" in cfg["url"]
     )
@@ -722,59 +782,58 @@ async def run_interactive() -> dict:
         "pandora.com" in cfg["url"].lower() or "pandora.app.link" in cfg["url"].lower()
     )
 
+    installed_services = _require_installed_service_options()
+
     if is_soundcloud_url:
-        cfg["services"] = ["soundcloud"]
+        cfg["services"] = ["soundcloud"] if "soundcloud" in installed_services else (
+            installed_services or ["soundcloud"]
+        )
     elif is_youtube_url:
-        cfg["services"] = ["youtube"]
+        cfg["services"] = ["youtube"] if "youtube" in installed_services else (
+            installed_services or ["youtube"]
+        )
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options=["tidal", "qobuz", "deezer", "amazon", "apple", "soundcloud"],
-                defaults=["tidal"],
+                options=installed_services or ["tidal"],
+                defaults=["tidal"] if "tidal" in (installed_services or []) else ([installed_services[0]] if installed_services else ["tidal"]),
                 ordered=True,
             )
             cfg["services"] = ["youtube", *fallbacks]
     elif is_apple_url:
-        cfg["services"] = ["apple"]
+        cfg["services"] = ["apple"] if "apple" in installed_services else (
+            installed_services or ["apple"]
+        )
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options=["tidal", "qobuz", "deezer", "amazon", "youtube"],
-                defaults=["tidal"],
+                options=installed_services or ["tidal"],
+                defaults=["tidal"] if "tidal" in (installed_services or []) else ([installed_services[0]] if installed_services else ["tidal"]),
                 ordered=True,
             )
             cfg["services"] = ["apple", *fallbacks]
     elif is_pandora_url:
-        cfg["services"] = ["pandora"]
+        cfg["services"] = ["pandora"] if "pandora" in installed_services else (
+            installed_services or ["pandora"]
+        )
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options=["tidal", "qobuz", "deezer", "amazon", "apple"],
-                defaults=["tidal"],
+                options=installed_services or ["tidal"],
+                defaults=["tidal"] if "tidal" in (installed_services or []) else ([installed_services[0]] if installed_services else ["tidal"]),
                 ordered=True,
             )
             cfg["services"] = ["pandora", *fallbacks]
     else:
+        options = installed_services or ["tidal"]
+        defaults = cfg.get("services") or ["tidal"] if "tidal" in options else [options[0]]
         cfg["services"] = _ask_multi(
             "Services (order = priority):",
-            options=[
-                "deezer",
-                "tidal",
-                "qobuz",
-                "amazon",
-                "joox",
-                "netease",
-                "migu",
-                "kuwo",
-                "soundcloud",
-                "youtube",
-                "apple",
-                "pandora",
-            ],
-            defaults=cfg.get("services", ["tidal"]),
+            options=options,
+            defaults=defaults,
             ordered=True,
         )
 
@@ -996,6 +1055,12 @@ async def run_interactive() -> dict:
     )
 
     if cfg["embed_lyrics"]:
+        if health_status:
+            unavailable = [
+                s for s in _ALL_SERVICES if not health_status.get(s, True)
+            ]
+            if unavailable:
+                print(DIM(f"  Unavailable: {', '.join(unavailable)}"))
         cfg["lyrics_providers"] = _ask_multi(
             "Lyrics providers (order = priority):",
             options=[
