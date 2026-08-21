@@ -169,9 +169,50 @@
   // Minimal, safe-ish markdown -> HTML for release notes: escapes first,
   // then only re-enables a small known set of patterns. Good enough for
   // GitHub's own auto-generated release body format; not a general parser.
+  function sanitizeHTML(html) {
+    const allowedTags = ['h1', 'h2', 'h3', 'p', 'ul', 'li', 'strong', 'code', 'a'];
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+
+    function sanitizeNode(node) {
+      if (node.nodeType === 3) return node; // text node
+      if (node.nodeType !== 1) return null;
+
+      const tagName = node.tagName.toLowerCase();
+      if (!allowedTags.includes(tagName)) return null;
+
+      const newNode = document.createElement(tagName);
+
+      // Only allow href on <a> tags, validate it's safe
+      if (tagName === 'a') {
+        const href = node.getAttribute('href');
+        if (href && /^https?:\/\//i.test(href)) {
+          newNode.setAttribute('href', href);
+          newNode.setAttribute('target', '_blank');
+          newNode.setAttribute('rel', 'noopener');
+        }
+      }
+
+      Array.from(node.childNodes).forEach(child => {
+        const sanitized = sanitizeNode(child);
+        if (sanitized) newNode.appendChild(sanitized);
+      });
+
+      return newNode;
+    }
+
+    const result = document.createElement('div');
+    Array.from(temp.childNodes).forEach(child => {
+      const sanitized = sanitizeNode(child);
+      if (sanitized) result.appendChild(sanitized);
+    });
+
+    return result.innerHTML;
+  }
+
   function md(text) {
     const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return esc
+    const html = esc
       .replace(/^### (.*)$/gm, '<h3>$1</h3>')
       .replace(/^## (.*)$/gm, '<h2>$1</h2>')
       .replace(/^# (.*)$/gm, '<h1>$1</h1>')
@@ -182,6 +223,7 @@
       .replace(/(<li>.*<\/li>\n?)+/g, m => '<ul>' + m + '</ul>')
       .split('\n\n').map(p => p.trim()).filter(Boolean)
       .map(p => (/^<(h\d|ul|li)/.test(p) ? p : `<p>${p}</p>`)).join('\n');
+    return sanitizeHTML(html);
   }
 
   try {
@@ -197,56 +239,146 @@
     const latestAssets = (latest.assets || []).filter(a => !a.name.endsWith('.sha256'));
     const latestBody = md(latest.body || '');
 
-    latestEl.innerHTML = `
-      <div class="latest-card">
-        <div class="latest-header">
-          <span class="latest-tag">${latest.tag_name}</span>
-          <span class="latest-badge">${latest.prerelease ? 'Pre-release' : 'Latest release'}</span>
-          <span class="latest-date">${fmtDate(latest.published_at)}</span>
-        </div>
-        <div class="latest-assets">
-          ${latestAssets.map(a => `
-            <a class="latest-asset" href="${a.browser_download_url}" target="_blank" rel="noopener">
-              <svg class="latest-asset-icon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-              <div>
-                <div class="latest-asset-name">${a.name}</div>
-                <div class="latest-asset-meta">${fmtSize(a.size)} · ${fmtCount(a.download_count)} downloads</div>
-              </div>
-            </a>`).join('')}
-        </div>
-        ${latestBody ? `
-          <button class="latest-changelog-toggle" onclick="this.nextElementSibling.classList.toggle('show'); this.textContent = this.nextElementSibling.classList.contains('show') ? 'Hide changelog' : 'Show changelog'">Show changelog</button>
-          <div class="latest-changelog"><div class="release-body">${latestBody}</div></div>
-        ` : ''}
-      </div>`;
+    const card = document.createElement('div');
+    card.className = 'latest-card';
+
+    const header = document.createElement('div');
+    header.className = 'latest-header';
+
+    const tag = document.createElement('span');
+    tag.className = 'latest-tag';
+    tag.textContent = latest.tag_name;
+
+    const badge = document.createElement('span');
+    badge.className = 'latest-badge';
+    badge.textContent = latest.prerelease ? 'Pre-release' : 'Latest release';
+
+    const date = document.createElement('span');
+    date.className = 'latest-date';
+    date.textContent = fmtDate(latest.published_at);
+
+    header.appendChild(tag);
+    header.appendChild(badge);
+    header.appendChild(date);
+    card.appendChild(header);
+
+    const assetsDiv = document.createElement('div');
+    assetsDiv.className = 'latest-assets';
+    latestAssets.forEach(a => {
+      if (!/^https?:\/\//i.test(a.browser_download_url)) return;
+      const link = document.createElement('a');
+      link.className = 'latest-asset';
+      link.href = a.browser_download_url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.innerHTML = `<svg class="latest-asset-icon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
+      const div = document.createElement('div');
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'latest-asset-name';
+      nameDiv.textContent = a.name;
+      const metaDiv = document.createElement('div');
+      metaDiv.className = 'latest-asset-meta';
+      metaDiv.textContent = `${fmtSize(a.size)} · ${fmtCount(a.download_count)} downloads`;
+      div.appendChild(nameDiv);
+      div.appendChild(metaDiv);
+      link.appendChild(div);
+      assetsDiv.appendChild(link);
+    });
+    card.appendChild(assetsDiv);
+
+    if (latestBody) {
+      const btn = document.createElement('button');
+      btn.className = 'latest-changelog-toggle';
+      btn.textContent = 'Show changelog';
+      btn.onclick = function() {
+        this.nextElementSibling.classList.toggle('show');
+        this.textContent = this.nextElementSibling.classList.contains('show') ? 'Hide changelog' : 'Show changelog';
+      };
+      const changelogDiv = document.createElement('div');
+      changelogDiv.className = 'latest-changelog';
+      const bodyDiv = document.createElement('div');
+      bodyDiv.className = 'release-body';
+      bodyDiv.innerHTML = latestBody;
+      changelogDiv.appendChild(bodyDiv);
+      card.appendChild(btn);
+      card.appendChild(changelogDiv);
+    }
+
+    latestEl.innerHTML = '';
+    latestEl.appendChild(card);
 
     const older = releases.slice(1);
     if (older.length) {
       olderSection.style.display = '';
-      olderEl.innerHTML = older.map(r => {
+      olderEl.innerHTML = '';
+      older.forEach(r => {
         const assets = (r.assets || []).filter(a => !a.name.endsWith('.sha256'));
         const body = md(r.body || '');
-        return `
-          <details class="release-card">
-            <summary class="release-summary">
-              <span class="release-tag">${r.tag_name}</span>
-              ${r.prerelease ? '<span class="release-badge-pre">Pre-release</span>' : ''}
-              <span class="release-date">${fmtDate(r.published_at)}</span>
-              <span class="release-expand">▾</span>
-            </summary>
-            <div class="release-detail">
-              ${assets.length ? `
-                <div class="release-assets">
-                  ${assets.map(a => `
-                    <a class="release-asset" href="${a.browser_download_url}" target="_blank" rel="noopener">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-                      ${a.name}<span class="release-asset-size">${fmtSize(a.size)}</span>
-                    </a>`).join('')}
-                </div>` : ''}
-              ${body ? `<div class="release-body">${body}</div>` : ''}
-            </div>
-          </details>`;
-      }).join('');
+
+        const details = document.createElement('details');
+        details.className = 'release-card';
+
+        const summary = document.createElement('summary');
+        summary.className = 'release-summary';
+
+        const tagSpan = document.createElement('span');
+        tagSpan.className = 'release-tag';
+        tagSpan.textContent = r.tag_name;
+        summary.appendChild(tagSpan);
+
+        if (r.prerelease) {
+          const preBadge = document.createElement('span');
+          preBadge.className = 'release-badge-pre';
+          preBadge.textContent = 'Pre-release';
+          summary.appendChild(preBadge);
+        }
+
+        const dateSpan = document.createElement('span');
+        dateSpan.className = 'release-date';
+        dateSpan.textContent = fmtDate(r.published_at);
+        summary.appendChild(dateSpan);
+
+        const expand = document.createElement('span');
+        expand.className = 'release-expand';
+        expand.textContent = '▾';
+        summary.appendChild(expand);
+
+        details.appendChild(summary);
+
+        const detail = document.createElement('div');
+        detail.className = 'release-detail';
+
+        if (assets.length) {
+          const assetsDiv = document.createElement('div');
+          assetsDiv.className = 'release-assets';
+          assets.forEach(a => {
+            if (!/^https?:\/\//i.test(a.browser_download_url)) return;
+            const link = document.createElement('a');
+            link.className = 'release-asset';
+            link.href = a.browser_download_url;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
+            link.appendChild(document.createTextNode(a.name));
+            const sizeSpan = document.createElement('span');
+            sizeSpan.className = 'release-asset-size';
+            sizeSpan.textContent = fmtSize(a.size);
+            link.appendChild(sizeSpan);
+            assetsDiv.appendChild(link);
+          });
+          detail.appendChild(assetsDiv);
+        }
+
+        if (body) {
+          const bodyDiv = document.createElement('div');
+          bodyDiv.className = 'release-body';
+          bodyDiv.innerHTML = body;
+          detail.appendChild(bodyDiv);
+        }
+
+        details.appendChild(detail);
+        olderEl.appendChild(details);
+      });
     }
   } catch (e) {
     latestEl.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:40px">Couldn't load releases (${e.message}). <a href="https://github.com/${REPO}/releases" target="_blank">View on GitHub</a> instead.</p>`;

@@ -8,21 +8,13 @@ from typing import NamedTuple
 
 import httpx
 
-from . import get_amazon_endpoint
-
 _UA = "SpotiFLAC-HealthCheck/5.0"
 _TIMEOUT = httpx.Timeout(connect=2.0, read=3.0, write=2.0, pool=2.0)
-_AMAZON_LYRICS_URL = get_amazon_endpoint("spotbye1")
 _SERVERS = {
     "apple": "https://lyrics.paxsenix.org/apple-music/lyrics?id=1440650711",
     "lrclib": "https://lrclib.net/api/get?artist_name=Queen&track_name=Bohemian%20Rhapsody",
     "musixmatch": "https://lyrics.paxsenix.org/musixmatch/lyrics?type=word&t=Bohemian%20Rhapsody&a=Queen&d=355&format=lrc",
     "spotify": "https://spclient.wg.spotify.com/color-lyrics/v2/track/0UHB9METy4VCXNgkcGqHqS?format=json&market=from_token",
-    "amazon": (
-        f"{_AMAZON_LYRICS_URL.rstrip('/')}/lyrics/QM5FT1600115"
-        if _AMAZON_LYRICS_URL
-        else "https://invalid.local/amazon-lyrics"
-    ),
     "deezer": "https://lyrics.paxsenix.org/deezer/lyrics?id=3135556",
     "genius": "https://lyrics.paxsenix.org/genius/lyrics?url=https%3A%2F%2Fgenius.com%2FQueen-bohemian-rhapsody-lyrics",
     "netease": "https://lyrics.paxsenix.org/netease/search?q=Bohemian%20Rhapsody%20Queen",
@@ -70,11 +62,22 @@ async def run_health_check(
     *,
     include_all_endpoints: bool = True,
 ) -> list[HealthResult]:
-    """Check direct lyrics, Spotify and MusicBrainz server reachability."""
-    del services, include_all_endpoints
+    """Check direct lyrics server reachability for configured services."""
+    del include_all_endpoints
+
+    from . import get_amazon_endpoint
+
+    servers = dict(_SERVERS)
+    amazon_url = get_amazon_endpoint("spotbye1")
+    if amazon_url:
+        servers["amazon"] = f"{amazon_url.rstrip('/')}/lyrics/QM5FT1600115"
+
+    if services:
+        servers = {name: url for name, url in servers.items() if name in services}
+
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         results = await asyncio.gather(
-            *(_probe(client, name, url) for name, url in _SERVERS.items())
+            *(_probe(client, name, url) for name, url in servers.items())
         )
     return list(results)
 

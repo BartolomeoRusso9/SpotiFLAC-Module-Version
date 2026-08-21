@@ -308,7 +308,7 @@ async def _fetch_apple_async(
     try:
         client = await NetworkManager.get_async_client_safe()
         search_params = {
-            "term": isrc or f"{track_name} {artist_name}",
+            "term": f"{track_name} {artist_name}",
             "media": "music",
             "entity": "song",
             "limit": 5,
@@ -325,19 +325,14 @@ async def _fetch_apple_async(
         results = r.json().get("results", [])
         if not results:
             return ""
-        if isrc:
-            best = results[0]
-        else:
-            best = max(
-                results,
-                key=lambda x: _score_itunes_result(
-                    x,
-                    track_name,
-                    artist_name,
-                    duration_s,
-                ),
-            )
-        song_id = best.get("trackId")
+
+        scored = [(res, _score_itunes_result(res, track_name, artist_name, duration_s)) for res in results]
+        best_result, best_score = max(scored, key=lambda x: x[1])
+
+        if best_score < 50:
+            return ""
+
+        song_id = best_result.get("trackId")
         if not song_id:
             return ""
         r_lyr = await client.get(

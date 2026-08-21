@@ -145,7 +145,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         nargs="?",
         help="Spotify, Tidal, Apple Music, SoundCloud, YouTube or Pandora URL",
     )
-    parser.add_argument("output_dir", nargs="?", help="Destination directory")
+    parser.add_argument("output_dir", nargs="?", default=pd.get("output_dir"), help="Destination directory")
 
     # ── Multi-playlist ──────────────────────────────────────────────────────
     playlists_grp = parser.add_argument_group("Multi-Playlist")
@@ -791,6 +791,7 @@ async def amain() -> None:
             from .core.profiles import save_profile_async
 
             profile_cfg = {
+                "output_dir": args.output_dir or "./Downloads",
                 "services": args.service,
                 "quality": quality,
                 "filename_format": args.filename_format,

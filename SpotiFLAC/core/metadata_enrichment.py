@@ -104,6 +104,7 @@ _cache_lock = threading.Lock()
 
 
 def _get_cached(isrc: str) -> EnrichedMetadata | None:
+    import dataclasses
     if not isrc:
         return None
     with _cache_lock:
@@ -112,7 +113,9 @@ def _get_cached(isrc: str) -> EnrichedMetadata | None:
             return entry[0]
     persisted = get_cached_response("metadata-enrichment", isrc.upper(), 24 * 60 * 60)
     if isinstance(persisted, dict):
-        result = EnrichedMetadata(**persisted)
+        valid_fields = {f.name for f in dataclasses.fields(EnrichedMetadata)}
+        filtered = {k: v for k, v in persisted.items() if k in valid_fields}
+        result = EnrichedMetadata(**filtered)
         _put_cached_memory(isrc, result)
         return result
     return None
@@ -132,7 +135,7 @@ def _put_cached_memory(isrc: str, data: EnrichedMetadata) -> None:
 
 def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
     _put_cached_memory(isrc, data)
-    if isrc:
+    if isrc and (data.genre or data.label or data.cover_url_hd or data.upc):
         put_cached_response(
             "metadata-enrichment",
             isrc.upper(),

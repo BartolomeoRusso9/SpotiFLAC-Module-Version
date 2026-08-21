@@ -180,17 +180,31 @@ async def _query_recording_details_async(recording_id: str) -> dict:
     )
     url = f"{_MB_API_BASE}/recording/{recording_id}"
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
-    await _wait_for_request_slot_async()
+    last_err = Exception("Empty response")
     client = await NetworkManager.get_async_client_safe()
-    response = await client.get(
-        url,
-        params={"fmt": "json", "inc": inc},
-        headers=headers,
-        timeout=_MB_TIMEOUT,
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"HTTP {response.status_code}")
-    return response.json()
+
+    for attempt in range(_MB_RETRIES):
+        await _wait_for_request_slot_async()
+        try:
+            response = await client.get(
+                url,
+                params={"fmt": "json", "inc": inc},
+                headers=headers,
+                timeout=_MB_TIMEOUT,
+            )
+            if response.status_code == 200:
+                return response.json()
+            if response.status_code == 503:
+                _note_throttle()
+            last_err = Exception(f"HTTP {response.status_code}")
+            if 400 <= response.status_code < 500 and response.status_code != 429:
+                break
+        except httpx.RequestError as e:
+            last_err = e
+        if attempt < _MB_RETRIES - 1:
+            await asyncio.sleep(_MB_RETRY_WAIT)
+
+    raise last_err
 
 
 def _query_recording_details(recording_id: str) -> dict:
@@ -237,7 +251,19 @@ def _parse_mb_details(data: dict) -> dict:
 
     releases = data.get("releases", [])
     if releases:
-        release = releases[0]
+        def _release_score(r: dict) -> int:
+            score = 0
+            if r.get("barcode"):
+                score += 2
+            if r.get("label-info"):
+                score += 2
+            if r.get("country"):
+                score += 1
+            if r.get("status") == "Official":
+                score += 1
+            return score
+
+        release = max(releases, key=_release_score)
         details["album"] = release.get("title", "")
         packaging = release.get("packaging", "")
         if packaging and packaging.lower() != "none":
@@ -254,10 +280,11 @@ def _parse_mb_details(data: dict) -> dict:
             details["track_total"] = str(medium.get("track-count", ""))
             fallback_track = None
             for track in medium.get("tracks", []):
-                if track.get("id") == data.get("id"):
+                rec_id = track.get("recording", {}).get("id") if isinstance(track.get("recording"), dict) else None
+                if rec_id == data.get("id"):
                     details["track_number"] = str(track.get("number", ""))
                     break
-                if track.get("title") == data.get("title"):
+                if not fallback_track and track.get("title") == data.get("title"):
                     fallback_track = track
             if not details.get("track_number") and fallback_track:
                 details["track_number"] = str(fallback_track.get("number", ""))
@@ -432,10 +459,13 @@ def fetch_mb_metadata(isrc: str) -> dict:
         data = _query_recordings(f"isrc:{isrc}")
         set_mb_status(True)
         res = _parse_mb_response(data)
-        res.update(
-            _parse_mb_details(_query_recording_details(res.get("mbid_track", "")))
-        )
-        if res:
+        try:
+            res.update(
+                _parse_mb_details(_query_recording_details(res.get("mbid_track", "")))
+            )
+        except (RuntimeError, httpx.RequestError) as detail_err:
+            logger.debug("[musicbrainz] detail query failed, keeping search result: %s", detail_err)
+        if res and any(res.values()):
             put_cached_response("musicbrainz", cache_key, res)
     except Exception as e:
         set_mb_status(False)
@@ -499,9 +529,12 @@ async def fetch_mb_metadata_async(isrc: str) -> dict:
     try:
         data = await _query_recordings_async(f"isrc:{isrc}")
         res = _parse_mb_response(data)
-        details = await _query_recording_details_async(res.get("mbid_track", ""))
-        res.update(_parse_mb_details(details))
-        if res:
+        try:
+            details = await _query_recording_details_async(res.get("mbid_track", ""))
+            res.update(_parse_mb_details(details))
+        except (RuntimeError, httpx.RequestError) as detail_err:
+            logger.debug("[musicbrainz] async detail query failed, keeping search result: %s", detail_err)
+        if res and any(res.values()):
             put_cached_response("musicbrainz", cache_key, res)
         set_mb_status(True)
     except Exception as e:

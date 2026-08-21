@@ -400,5 +400,6 @@ class LinkResolver:
         if isrc:
             links["isrc"] = isrc
 
-        put_cached_response("link-resolver", cache_key, links)
+        if any(links.get(k) for k in ("deezer", "tidal", "amazonMusic", "appleMusic")):
+            put_cached_response("link-resolver", cache_key, links)
         return links

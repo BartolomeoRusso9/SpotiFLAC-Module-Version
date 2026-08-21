@@ -318,6 +318,14 @@ class ExtensionManager:
                         item.get("id", "<no id>"),
                     )
                     continue
+                sha256_val = item.get("sha256")
+                if sha256_val is not None and not isinstance(sha256_val, str):
+                    logger.warning(
+                        "[ExtMgr] Skipping registry entry '%s' with non-string sha256: %s",
+                        item.get("id", "<unknown>"),
+                        type(sha256_val),
+                    )
+                    continue
                 try:
                     entries.append(
                         RegistryEntry(
@@ -331,7 +339,7 @@ class ExtensionManager:
                             min_app_version=item.get("min_app_version", "0.0.0"),
                             icon_url=item.get("icon_url"),
                             updated_at=item.get("updated_at", ""),
-                            sha256=item.get("sha256"),
+                            sha256=sha256_val,
                         ),
                     )
                 except (KeyError, TypeError) as e:
@@ -512,8 +520,9 @@ class ExtensionManager:
         else:
             manifest = json.loads(zf.read("manifest.json"))
 
+        manifest = dict(manifest)
+        manifest.pop("_registry_sha256", None)
         if sha256:
-            manifest = dict(manifest)
             manifest["_registry_sha256"] = sha256.lower()
 
         if runtime_hint == "python" and python_modules:
@@ -765,10 +774,10 @@ class ExtensionManager:
             return False
         if not remote.sha256:
             return True
-        return (
-            installed.manifest.get("_registry_sha256", "").lower()
-            == remote.sha256.lower()
-        )
+        installed_sha = installed.manifest.get("_registry_sha256")
+        if not isinstance(installed_sha, str):
+            return False
+        return installed_sha.lower() == remote.sha256.lower()
 
     def preload_python_modules(self) -> None:
         """Pre-loads all installed Python extension entry points into sys.modules.

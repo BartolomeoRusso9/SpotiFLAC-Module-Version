@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 _SEED_PARTS = [b"spotif", b"lac:co", b"mmunity:url:v1"]
 _AAD = b"spotiflac|community|url|v1"
 _CLOUD_URL = "https://gist.githubusercontent.com/BartolomeoRusso9/ef9fdbbc894818aea89d25a8d99f8c77/raw"
-_CACHE_FILE = os.path.join(os.path.dirname(__file__), ".endpoints_cache.txt")
+_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "spotiflac")
+_CACHE_FILE = os.path.join(_CACHE_DIR, "endpoints_cache.txt")
 
 
 def _decrypt_base64_payload(b64_string: str) -> dict:
@@ -39,6 +41,7 @@ def _decrypt_base64_payload(b64_string: str) -> dict:
 
 
 def _load_registry() -> dict:
+    import tempfile
     try:
         fresh_url = f"{_CLOUD_URL}?t={int(time.time())}"
         response = httpx.get(
@@ -50,8 +53,18 @@ def _load_registry() -> dict:
         cloud_string = response.text
         registry = _decrypt_base64_payload(cloud_string)
         try:
-            with open(_CACHE_FILE, "w") as cache_file:
-                cache_file.write(cloud_string)
+            os.makedirs(_CACHE_DIR, exist_ok=True)
+            fd, temp_path = tempfile.mkstemp(dir=_CACHE_DIR, prefix=".endpoints_cache_", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w") as cache_file:
+                    cache_file.write(cloud_string)
+                os.replace(temp_path, _CACHE_FILE)
+            except Exception:
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
+                raise
         except Exception:
             pass
         return registry
@@ -69,16 +82,18 @@ def _load_registry() -> dict:
         return {}
 
 
-_TTL_SECONDS = 30
+_TTL_SECONDS = 3600
 _registry_cache: dict = {}
 _registry_fetched_at = 0.0
+_registry_lock = threading.Lock()
 
 
 def _get_registry() -> dict:
     global _registry_cache, _registry_fetched_at
-    if not _registry_cache or time.time() - _registry_fetched_at >= _TTL_SECONDS:
-        _registry_cache = _load_registry()
-        _registry_fetched_at = time.time()
+    with _registry_lock:
+        if time.time() - _registry_fetched_at >= _TTL_SECONDS:
+            _registry_cache = _load_registry()
+            _registry_fetched_at = time.time()
     return _registry_cache
 
 
