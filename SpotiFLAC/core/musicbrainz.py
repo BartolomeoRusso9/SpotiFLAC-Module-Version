@@ -16,6 +16,8 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from .http import NetworkManager
+from .response_cache import get as get_cached_response
+from .response_cache import put as put_cached_response
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,7 @@ _mb_status_lock = _threading.Lock()
 _mb_last_checked_at: float = 0.0
 _mb_last_online: bool = True
 _MB_STATUS_SKIP_WINDOW = 30.0
+_MB_RESPONSE_CACHE_TTL = 30 * 24 * 60 * 60
 
 
 def set_mb_status(online: bool) -> None:
@@ -155,6 +158,110 @@ async def _query_recordings_async(query: str) -> dict:
             await asyncio.sleep(_MB_RETRY_WAIT)
 
     raise last_err
+
+
+async def _query_recording_details_async(recording_id: str) -> dict:
+    if not recording_id:
+        return {}
+    inc = "+".join(
+        [
+            "artist-credits",
+            "releases",
+            "release-groups",
+            "media",
+            "artist-rels",
+            "work-rels",
+            "url-rels",
+            "genres",
+            "aliases",
+            "isrcs",
+            "tags",
+        ],
+    )
+    url = f"{_MB_API_BASE}/recording/{recording_id}"
+    headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    await _wait_for_request_slot_async()
+    client = await NetworkManager.get_async_client_safe()
+    response = await client.get(
+        url,
+        params={"fmt": "json", "inc": inc},
+        headers=headers,
+        timeout=_MB_TIMEOUT,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"HTTP {response.status_code}")
+    return response.json()
+
+
+def _query_recording_details(recording_id: str) -> dict:
+    return _run_async_sync(_query_recording_details_async(recording_id))
+
+
+def _join_relation_artists(relations: list[dict], relation_type: str) -> str:
+    names = []
+    for relation in relations:
+        if relation.get("type") != relation_type:
+            continue
+        artist = relation.get("artist") or {}
+        name = artist.get("name")
+        if name and name not in names:
+            names.append(name)
+    return "; ".join(names)
+
+
+def _parse_mb_details(data: dict) -> dict:
+    details: dict[str, str] = {}
+    if not data:
+        return details
+
+    details["title"] = data.get("title", "")
+    details["length"] = str(data.get("length", "")) if data.get("length") else ""
+    details["disambiguation"] = data.get("disambiguation", "")
+    details["video"] = str(bool(data.get("video"))).lower()
+    relations = data.get("relations", [])
+    for relation_type, tag_name in (
+        ("composer", "composer"),
+        ("lyricist", "lyricist"),
+        ("producer", "producer"),
+        ("performer", "performer"),
+        ("remixer", "remixer"),
+    ):
+        details[tag_name] = _join_relation_artists(relations, relation_type)
+
+    work_titles = []
+    for relation in relations:
+        work = relation.get("work") or {}
+        if work.get("title") and work["title"] not in work_titles:
+            work_titles.append(work["title"])
+    details["work_title"] = "; ".join(work_titles)
+
+    releases = data.get("releases", [])
+    if releases:
+        release = releases[0]
+        details["album"] = release.get("title", "")
+        packaging = release.get("packaging", "")
+        if packaging and packaging.lower() != "none":
+            details["packaging"] = packaging
+        details["quality"] = release.get("quality", "")
+        details["release_date"] = release.get("date", "")
+        details["secondary_types"] = "; ".join(
+            release.get("release-group", {}).get("secondary-types", [])
+        )
+        media = release.get("media", [])
+        if media:
+            medium = media[0]
+            details["disc_number"] = str(medium.get("position", ""))
+            details["track_total"] = str(medium.get("track-count", ""))
+            fallback_track = None
+            for track in medium.get("tracks", []):
+                if track.get("id") == data.get("id"):
+                    details["track_number"] = str(track.get("number", ""))
+                    break
+                if track.get("title") == data.get("title"):
+                    fallback_track = track
+            if not details.get("track_number") and fallback_track:
+                details["track_number"] = str(fallback_track.get("number", ""))
+    return {key: value for key, value in details.items() if value}
 
 
 def _query_recordings(query: str) -> dict:
@@ -297,6 +404,10 @@ def fetch_mb_metadata(isrc: str) -> dict:
     cached = _mb_cache.get(cache_key)
     if cached is not None:
         return {} if cached is _LOOKUP_FAILED else cached  # type: ignore
+    persisted = get_cached_response("musicbrainz", cache_key, _MB_RESPONSE_CACHE_TTL)
+    if isinstance(persisted, dict):
+        _mb_cache[cache_key] = persisted
+        return persisted
 
     if should_skip_mb():
         logger.debug("[musicbrainz] skipped (offline recently)")
@@ -321,6 +432,9 @@ def fetch_mb_metadata(isrc: str) -> dict:
         data = _query_recordings(f"isrc:{isrc}")
         set_mb_status(True)
         res = _parse_mb_response(data)
+        res.update(_parse_mb_details(_query_recording_details(res.get("mbid_track", ""))))
+        if res:
+            put_cached_response("musicbrainz", cache_key, res)
     except Exception as e:
         set_mb_status(False)
         logger.debug("[musicbrainz] lookup failed: %s", e)
@@ -358,6 +472,10 @@ async def fetch_mb_metadata_async(isrc: str) -> dict:
     cached = _mb_cache.get(cache_key)
     if cached is not None:
         return {} if cached is _LOOKUP_FAILED else cached  # type: ignore
+    persisted = get_cached_response("musicbrainz", cache_key, _MB_RESPONSE_CACHE_TTL)
+    if isinstance(persisted, dict):
+        _mb_cache[cache_key] = persisted
+        return persisted
 
     if should_skip_mb():
         logger.debug("[musicbrainz] async: skipped (offline recently)")
@@ -379,6 +497,10 @@ async def fetch_mb_metadata_async(isrc: str) -> dict:
     try:
         data = await _query_recordings_async(f"isrc:{isrc}")
         res = _parse_mb_response(data)
+        details = await _query_recording_details_async(res.get("mbid_track", ""))
+        res.update(_parse_mb_details(details))
+        if res:
+            put_cached_response("musicbrainz", cache_key, res)
         set_mb_status(True)
     except Exception as e:
         set_mb_status(False)
@@ -424,6 +546,22 @@ def mb_result_to_tags(res: dict) -> dict[str, str]:
         "catalognumber": "CATALOGNUMBER",
         "bpm": "BPM",
         "genre": "GENRE",
+        "composer": "COMPOSER",
+        "lyricist": "LYRICIST",
+        "producer": "PRODUCER",
+        "performer": "PERFORMER",
+        "remixer": "REMIXER",
+        "work_title": "WORKTITLE",
+        "album": "ALBUM",
+        "release_date": "RELEASEDATE",
+        "packaging": "PACKAGING",
+        "quality": "RELEASEQUALITY",
+        "secondary_types": "RELEASESECONDARYTYPE",
+        "disambiguation": "DISAMBIGUATION",
+        "length": "DURATIONMS",
+        "track_number": "TRACKNUMBER",
+        "disc_number": "DISCNUMBER",
+        "track_total": "TRACKTOTAL",
     }
 
     tags = {}

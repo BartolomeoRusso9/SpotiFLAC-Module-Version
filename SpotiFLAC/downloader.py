@@ -165,7 +165,6 @@ class DownloadOptions:
     post_download_command: str = ""
     tidal_custom_api: str | None = None
     timeout_s: int | None = None
-    auto_pair_extensions: bool = True
     ext_dir: str | None = None
     # Phase 2: maximum concurrent downloads managed by the semaphore
     # asyncio.Semaphore in DownloadWorker._run_downloads_async(). Previously
@@ -231,10 +230,8 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
                         e_py,
                     )
 
-        # 2. TENTATIVO JAVASCRIPT (Priorità 2: Fallback)
-        # Se l'utente NON ha digitato esplicitamente "-py", aggiunge JS (o come fallback, o come primario)
-        # Rispetta opts.auto_pair_extensions per il fallback automatico
-        if not wants_explicit_py and (wants_explicit_js or opts.auto_pair_extensions):
+        # Pair the JavaScript extension automatically unless Python was requested explicitly.
+        if not wants_explicit_py:
             try:
                 js_prov = JSExtensionProvider(
                     original_ext_id,

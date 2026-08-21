@@ -254,6 +254,12 @@ class ExtensionManager:
                 return [str(u) for u in registry_url]
             return [str(registry_url)]
 
+        # An explicit environment setting takes precedence over registry URLs
+        # persisted by the GUI or discovered in local .env files.
+        env_val = os.environ.get(REGISTRY_ENV_KEY)
+        if env_val:
+            return [u.strip() for u in env_val.split(",") if u.strip()]
+
         try:
             from . import registry_config
 

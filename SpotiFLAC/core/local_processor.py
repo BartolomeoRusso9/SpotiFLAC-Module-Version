@@ -218,7 +218,10 @@ def default_embed_options(
     """
     return EmbedOptions(
         embed_lyrics=embed_lyrics,
-        lyrics_providers=["lrclib", "musixmatch", "apple"],
+        lyrics_providers=[
+            "apple",
+            "lrclib",
+        ],
         enrich=enrich,
         enrich_providers=["deezer", "apple", "qobuz", "tidal", "soundcloud"],
         artist_separator=artist_separator,

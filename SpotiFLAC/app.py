@@ -1759,11 +1759,8 @@ class SpotiFLAC_API:
             first_artist_only = config.get("first_artist_only", False)
             artist_separator = config.get("artist_separator") or None
             lyrics_providers = config.get("lyrics_providers") or [
-                "spotify",
                 "apple",
-                "musixmatch",
                 "lrclib",
-                "amazon",
             ]
             enrich_providers = config.get("enrich_providers") or [
                 "deezer",

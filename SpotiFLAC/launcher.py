@@ -276,14 +276,6 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         help="URL of a self-hosted hifi-api instance (https://github.com/binimum/hifi-api). "
         "Takes priority over built-in API pool.",
     )
-    parser.add_argument(
-        "--no-extensions-fallback",
-        action="store_false",
-        dest="use_extensions_fallback",
-        default=pd.get("auto_pair_extensions", True),
-        help="Disable automatic fallback to JS extensions when a native "
-        "provider fails (enabled by default).",
-    )
     parser.add_argument("--loop", "-l", type=int, default=pd.get("loop", None))
     parser.add_argument(
         "--verbose",
@@ -353,9 +345,21 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     lyrics_grp.add_argument(
         "--lyrics-providers",
         nargs="+",
-        default=pd.get("lyrics_providers", ["spotify", "apple", "lrclib", "amazon"]),
+        default=pd.get("lyrics_providers", ["apple", "lrclib"]),
         dest="lyrics_providers",
-        choices=["spotify", "apple", "musixmatch", "amazon", "lrclib"],
+        choices=[
+            "spotify",
+            "apple",
+            "deezer",
+            "genius",
+            "netease",
+            "qq",
+            "youtube",
+            "kugou",
+            "musixmatch",
+            "amazon",
+            "lrclib",
+        ],
     )
 
     # ── Metadata enrichment ─────────────────────────────────────────────────
@@ -535,7 +539,6 @@ async def _run_download_async(
     post_download_action: str,
     post_download_command: str,
     timeout_s: int | None,
-    use_extensions_fallback: bool = True,
     transcode_to: str | None = None,
     transcode_bitrate: str = "320k",
     transcode_keep_original: bool = False,
@@ -580,7 +583,6 @@ async def _run_download_async(
         post_download_command=post_download_command,
         tidal_custom_api=tidal_custom_api,
         timeout_s=timeout_s,
-        auto_pair_extensions=use_extensions_fallback,
         transcode_to=transcode_to,
         transcode_bitrate=transcode_bitrate,
         transcode_keep_original=transcode_keep_original,
@@ -726,7 +728,6 @@ async def amain() -> None:
             post_download_action=cfg.get("post_download_action", "none"),
             post_download_command=cfg.get("post_download_command", ""),
             timeout_s=cfg.get("timeout_s"),
-            use_extensions_fallback=cfg.get("use_extensions_fallback", True),
             transcode_to=cfg.get("transcode_to"),
             transcode_bitrate=cfg.get("transcode_bitrate", "320k"),
             transcode_keep_original=cfg.get("transcode_keep_original", False),
@@ -838,7 +839,6 @@ async def amain() -> None:
         post_download_action=args.post_action,
         post_download_command=args.post_command,
         timeout_s=timeout_s,
-        use_extensions_fallback=args.use_extensions_fallback,
         transcode_to=args.transcode_to,
         transcode_bitrate=args.transcode_bitrate,
         transcode_keep_original=args.transcode_keep_original,

@@ -18,6 +18,8 @@ from typing import Any
 
 from .http import NetworkManager
 from .isrc_utils import normalize_isrc
+from .response_cache import get as get_cached_response
+from .response_cache import put as put_cached_response
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +110,15 @@ def _get_cached(isrc: str) -> EnrichedMetadata | None:
         entry = _enrichment_cache.get(isrc.upper())
         if entry and (time.time() - entry[1]) < _ENRICHMENT_CACHE_TTL:
             return entry[0]
+    persisted = get_cached_response("metadata-enrichment", isrc.upper(), 24 * 60 * 60)
+    if isinstance(persisted, dict):
+        result = EnrichedMetadata(**persisted)
+        _put_cached_memory(isrc, result)
+        return result
     return None
 
 
-def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
+def _put_cached_memory(isrc: str, data: EnrichedMetadata) -> None:
     if not isrc:
         return
     with _cache_lock:
@@ -121,6 +128,24 @@ def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
             oldest_key = min(_enrichment_cache.items(), key=lambda kv: kv[1][1])[0]
             with contextlib.suppress(Exception):
                 _enrichment_cache.pop(oldest_key, None)
+
+
+def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
+    _put_cached_memory(isrc, data)
+    if isrc:
+        put_cached_response(
+            "metadata-enrichment",
+            isrc.upper(),
+            {
+                "genre": data.genre,
+                "label": data.label,
+                "bpm": data.bpm,
+                "explicit": data.explicit,
+                "upc": data.upc,
+                "isrc": data.isrc,
+                "cover_url_hd": data.cover_url_hd,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

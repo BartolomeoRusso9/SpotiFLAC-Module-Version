@@ -418,9 +418,15 @@ const ALL_SERVICES = [
   { id:'pandora',     label:'Pandora',        badge:'MP3',  on:false, icon:'P',  iconClass:'pandora', iconFile:'pandora.svg' },
 ];
 const ALL_LYRICS = [
-  { id:'lrclib',     label:'LRCLib',     on:true,  iconFile:'lrclib.png', iconClass:'lrclib' },
   { id:'apple',      label:'Apple Music',on:true, iconFile:'am.png', iconClass:'apple' },
-  { id:'amazon',     label:'Amazon',     on:true, iconFile:'amzn.png', iconClass:'amazon' },
+  { id:'lrclib',     label:'LRCLib',     on:true,  iconFile:'lrclib.png', iconClass:'lrclib' },
+  { id:'amazon',     label:'Amazon',     on:false, iconFile:'amzn.png', iconClass:'amazon' },
+  { id:'deezer',     label:'Deezer',     on:false, icon:'DZ', iconClass:'deezer' },
+  { id:'genius',     label:'Genius',     on:false, icon:'G',  iconClass:'genius' },
+  { id:'netease',    label:'NetEase',    on:false, icon:'NE', iconClass:'netease' },
+  { id:'qq',         label:'QQ Music',   on:false, icon:'QQ', iconClass:'qq' },
+  { id:'youtube',    label:'YouTube',    on:false, icon:'YT', iconClass:'youtube' },
+  { id:'kugou',      label:'Kugou',      on:false, icon:'KG', iconClass:'kugou' },
   { id:'musixmatch', label:'Musixmatch', on:false, iconFile:'musixmatch.svg', iconClass:'musixmatch' },
   { id:'spotify',    label:'Spotify',    on:false, iconFile:'spotify.svg', iconClass:'spotify' },
 ];
@@ -458,7 +464,7 @@ const DEFAULT_SETTINGS = {
   loop: 0,
   log_level: 'INFO',
   services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
-  lyrics_providers: ['lrclib'],
+  lyrics_providers: ['apple', 'lrclib'],
   enrich_providers: ['deezer','apple','qobuz','tidal','soundcloud'],
 };
 
@@ -598,18 +604,17 @@ populateList('enrich-list',   ALL_ENRICH.map(x => ({ ...x, badge: null })));
 
 // ── HC chips ─────────────────────────────────────────────────────────────────
 const API_SOURCES = [
-  { id:'tidal',      type:'tidal',      name:'Tidal',         url:'' },
-  { id:'qobuz',      type:'qobuz',      name:'Qobuz',         url:'' },
-  { id:'amazon',     type:'amazon',     name:'Amazon Music',  url:'' },
-  { id:'deezer',     type:'deezer',     name:'Deezer',        url:'' },
-  { id:'joox',       type:'joox',       name:'Joox',          url:'' },
-  { id:'netease',    type:'netease',    name:'NetEase',       url:'' },
-  { id:'migu',       type:'migu',       name:'Migu',          url:'' },
-  { id:'kuwo',       type:'kuwo',       name:'Kuwo',          url:'' },
-  { id:'apple',      type:'apple',      name:'Apple Music',   url:'' },
-  { id:'soundcloud', type:'soundcloud', name:'SoundCloud',    url:'' },
-  { id:'youtube',    type:'youtube',    name:'YouTube Music', url:'' },
-  { id:'pandora',    type:'pandora',    name:'Pandora',       url:'' },
+  { id:'apple',      type:'apple',      name:'Apple Music Lyrics', url:'' },
+  { id:'lrclib',     type:'lrclib',     name:'LRCLIB',             url:'' },
+  { id:'musixmatch', type:'musixmatch', name:'Musixmatch',          url:'' },
+  { id:'spotify',    type:'spotify',    name:'Spotify Lyrics',     url:'' },
+  { id:'amazon',     type:'amazon',     name:'Amazon Lyrics',      url:'' },
+  { id:'deezer',     type:'deezer',     name:'Deezer Lyrics',      url:'' },
+  { id:'genius',     type:'genius',     name:'Genius Lyrics',      url:'' },
+  { id:'netease',    type:'netease',    name:'NetEase Lyrics',     url:'' },
+  { id:'qq',         type:'qq',         name:'QQ Music Lyrics',    url:'' },
+  { id:'youtube',    type:'youtube',    name:'YouTube Lyrics',    url:'' },
+  { id:'kugou',      type:'kugou',      name:'Kugou Lyrics',      url:'' },
 ];
 // Servizio centralizzato usato dalle estensioni SpotiFLAC, mostrato in una
 // sezione separata dai provider musicali veri e propri.

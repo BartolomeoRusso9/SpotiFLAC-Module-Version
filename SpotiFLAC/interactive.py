@@ -152,18 +152,17 @@ def _header() -> None:
 # ---------------------------------------------------------------------------
 
 _ALL_SERVICES = [
-    "tidal",
-    "qobuz",
-    "deezer",
-    "amazon",
-    "soundcloud",
     "apple",
-    "youtube",
-    "pandora",
-    "joox",
+    "lrclib",
+    "musixmatch",
+    "spotify",
+    "amazon",
+    "deezer",
+    "genius",
     "netease",
-    "migu",
-    "kuwo",
+    "qq",
+    "youtube",
+    "kugou",
 ]
 
 
@@ -201,7 +200,7 @@ async def _display_health_check() -> dict[str, bool]:
     if ext_result is not None:
         icon = GREEN("✅") if ext_result.ok else RED("❌")
         status["extensions"] = ext_result.ok
-        print(f"\n  {icon} Extensions Fallback")
+        print(f"\n  {icon} Extensions Service")
 
     return status
 
@@ -431,6 +430,7 @@ async def _profile_load_section(cfg: dict) -> dict:
                 cfg.update(
                     {k: v for k, v in profile_data.items() if not k.startswith("_")},
                 )
+                cfg["_profile_loaded"] = chosen_name
             return cfg
 
 
@@ -480,9 +480,6 @@ def _summary(cfg: dict) -> None:
             f"{cfg['transcode_to'].upper()} {cfg.get('transcode_bitrate', '320k')}{kept}",
         )
     row("Filename format", cfg["filename_format"])
-
-    if not cfg.get("use_extensions_fallback", True):
-        row("Extensions fallback", "disabled")
 
     flags = []
     if cfg["use_track_numbers"]:
@@ -617,12 +614,6 @@ async def run_interactive() -> dict:
 
     cfg: dict = {}
 
-    # ── Extension registries ────────────────────────────────────────────────
-    await _manage_registries_section()
-
-    # ── Profile load ────────────────────────────────────────────────────────
-    cfg = await _profile_load_section(cfg)
-
     # ── 1. URL ──────────────────────────────────────────────────────────────
     _section("1 · URL")
 
@@ -661,6 +652,31 @@ async def run_interactive() -> dict:
             break
 
     cfg["url"] = url
+
+    # ── Profile load ────────────────────────────────────────────────────────
+    cfg = await _profile_load_section(cfg)
+
+    # ── Extension registries ────────────────────────────────────────────────
+    await _manage_registries_section()
+
+    if cfg.get("_profile_loaded"):
+        cfg.pop("_profile_loaded", None)
+        cfg.setdefault("output_dir", "./Downloads")
+        cfg.setdefault("services", ["tidal"])
+        cfg.setdefault("filename_format", "{title} - {artist}")
+        cfg.setdefault("quality", "LOSSLESS")
+        cfg.setdefault("use_track_numbers", False)
+        cfg.setdefault("use_album_track_numbers", False)
+        cfg.setdefault("use_artist_subfolders", False)
+        cfg.setdefault("use_album_subfolders", False)
+        cfg.setdefault("first_artist_only", False)
+        cfg.setdefault("embed_lyrics", True)
+        cfg.setdefault("lyrics_providers", ["apple", "lrclib"])
+        cfg.setdefault("enrich_metadata", True)
+        cfg.setdefault("enrich_providers", ["deezer", "apple"])
+        cfg.setdefault("allow_fallback", True)
+        cfg.setdefault("max_concurrent_downloads", 2)
+        return cfg
 
     # ── 2. Output directory ─────────────────────────────────────────────────
     _section("2 · Output Directory")
@@ -789,13 +805,6 @@ async def run_interactive() -> dict:
             defaults=cfg.get("services", ["tidal"]),
             ordered=True,
         )
-
-    # ── 3.5. Extensions Fallback ─────────────────────────────────────────────
-    _section("3.5 · Extensions Fallback")
-    cfg["use_extensions_fallback"] = _ask_bool(
-        "Use installed extensions as automatic fallback?",
-        cfg.get("use_extensions_fallback", True),
-    )
 
     # ── 4. Audio Quality ─────────────────────────────────────────────────────
     _section("4 · Audio Quality")
@@ -1053,14 +1062,26 @@ async def run_interactive() -> dict:
     if cfg["embed_lyrics"]:
         cfg["lyrics_providers"] = _ask_multi(
             "Lyrics providers (order = priority):",
-            options=["spotify", "apple", "musixmatch", "lrclib", "amazon"],
-            defaults=cfg.get("lyrics_providers") or ["lrclib", "apple", "amazon"],
+            options=[
+                "spotify",
+                "apple",
+                "deezer",
+                "genius",
+                "netease",
+                "qq",
+                "youtube",
+                "kugou",
+                "musixmatch",
+                "lrclib",
+                "amazon",
+            ],
+            defaults=cfg.get("lyrics_providers") or ["apple", "lrclib"],
             ordered=True,
         )
     else:
         cfg["lyrics_providers"] = cfg.get("lyrics_providers") or [
-            "lrclib",
             "apple",
+            "lrclib",
             "amazon",
         ]
 
@@ -1196,8 +1217,6 @@ def _print_cli_command(cfg: dict) -> None:
     if cfg.get("output_path"):
         parts.append(f'-o "{cfg["output_path"]}"')
     parts.append(f"-s {' '.join(cfg['services'])}")
-    if not cfg.get("use_extensions_fallback", True):
-        parts.append("--no-extensions-fallback")
     if cfg["quality"] not in ("LOSSLESS", "BEST"):
         parts.append(f"-q {cfg['quality']}")
     if cfg["filename_format"] != "{title} - {artist}":

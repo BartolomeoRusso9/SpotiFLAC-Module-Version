@@ -10,6 +10,8 @@ import urllib.parse
 import httpx
 
 from .http import AsyncHttpClient, async_songlink_rate_limiter
+from .response_cache import get as get_cached_response
+from .response_cache import put as put_cached_response
 
 logger = logging.getLogger(__name__)
 
@@ -319,6 +321,11 @@ class LinkResolver:
         track_id: str,
         isrc: str | None = None,
     ) -> dict[str, str]:
+        cache_key = f"{track_id}|{isrc or ''}"
+        cached = get_cached_response("link-resolver", cache_key, 7 * 24 * 60 * 60)
+        if isinstance(cached, dict):
+            return {str(key): str(value) for key, value in cached.items()}
+
         platform = "spotify"
         raw_id = track_id
 
@@ -393,4 +400,5 @@ class LinkResolver:
         if isrc:
             links["isrc"] = isrc
 
+        put_cached_response("link-resolver", cache_key, links)
         return links
