@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Partners & ecosystem — SpotiFLAC Module Version</title>
+<meta name="description" content="Projects, extension authors and resources around the SpotiFLAC Module Version ecosystem.">
+<meta name="theme-color" content="#0f1115">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+	:root {
+		--ink:#0f1115; --panel:#1a1d24; --panel-hover:#21252e; --surface:#151820;
+		--hairline:#272b34; --accent:#7c5cff; --accent-bright:#9b82ff; --accent-dim:#6647e0;
+		--ok:#3ddc97; --text:#e9e9ee; --text-dim:#96979f; --text-faint:#55565f;
+		--display:'Sora',sans-serif; --body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+		--mono:'JetBrains Mono',monospace; --max-w:1080px;
+	}
+	*{margin:0;padding:0;box-sizing:border-box}
+	html{scroll-behavior:smooth;scrollbar-width:thin;scrollbar-color:#333 transparent}
+	body{font-family:var(--body);background:var(--ink);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased}
+	a{color:var(--accent-bright);text-decoration:none} a:hover{text-decoration:underline}
+	:focus-visible{outline:2px solid var(--accent-bright);outline-offset:3px}
+	::selection{background:var(--accent);color:#fff}
+	h1,h2,h3{font-family:var(--display);letter-spacing:-.01em;color:var(--text)}
+	code,.mono{font-family:var(--mono)}
+	.wrap{max-width:var(--max-w);margin:auto;padding:0 24px}
+
+	nav{position:fixed;top:0;left:0;right:0;z-index:10;background:rgba(15,17,21,.84);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.06)}
+	.nav-inner{max-width:var(--max-w);margin:auto;display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:62px}
+	.nav-brand{display:flex;align-items:center;gap:9px;font-family:var(--display);font-weight:700;font-size:1.02rem;color:var(--text)}
+	.nav-brand .dot{width:9px;height:9px;border-radius:3px;background:var(--accent);box-shadow:0 0 10px var(--accent);transform:rotate(45deg)}
+	.nav-links{display:flex;align-items:center;gap:24px;list-style:none}.nav-links a{color:var(--text-dim);font-size:.88rem}
+	.nav-links a:hover,.nav-links a.active{color:var(--text);text-decoration:none}.nav-divider{width:1px;height:18px;background:rgba(255,255,255,.1)}
+	.nav-gh{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:6px 12px}
+	.nav-gh:hover{background:rgba(255,255,255,.08);text-decoration:none}@media(max-width:760px){.nav-links{display:none}}
+
+	.hero{padding:148px 24px 70px;background:radial-gradient(ellipse at 50% 0%,rgba(124,92,255,.12),transparent 58%)}
+	.hero-inner{max-width:var(--max-w);margin:auto;text-align:center}.eyebrow{font:500 .7rem var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent-bright);margin-bottom:13px}
+	h1{font-size:clamp(2.1rem,5vw,3.55rem);line-height:1.08;font-weight:800;letter-spacing:-1px;margin-bottom:16px}h1 span{color:var(--accent-bright)}
+	.lede{max-width:650px;margin:auto;color:var(--text-dim);font-size:1.08rem}
+	.hero-meta{display:flex;justify-content:center;gap:9px;flex-wrap:wrap;margin-top:26px}.badge{padding:6px 14px;border:1px solid var(--hairline);border-radius:999px;background:var(--surface);color:var(--text-dim);font:500 .76rem var(--mono)}.badge b{color:var(--ok);font-weight:400}
+
+	section{padding:72px 24px}.section-inner{max-width:var(--max-w);margin:auto}.section-heading{text-align:center;margin-bottom:38px}.section-heading h2{font-size:1.7rem;margin-bottom:9px}.section-heading p{color:var(--text-dim);max-width:570px;margin:auto;font-size:.92rem}
+	.eyebrow + h2{margin-top:0}
+	.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}@media(max-width:780px){.grid{grid-template-columns:1fr}}
+	.card{background:var(--panel);border:1px solid var(--hairline);border-radius:14px;padding:25px 22px;transition:background .2s,border-color .2s;display:flex;flex-direction:column}.card:hover{background:var(--panel-hover);border-color:rgba(124,92,255,.35)}
+	.card-mark{width:40px;height:40px;display:grid;place-items:center;border-radius:10px;background:rgba(124,92,255,.14);color:var(--accent-bright);font:700 .78rem var(--mono);margin-bottom:17px}.card-mark.green{background:rgba(61,220,151,.12);color:var(--ok)}
+	.card h3{font-size:1.02rem;margin-bottom:7px}.card p{color:var(--text-dim);font-size:.87rem;line-height:1.7}.card-link{margin-top:auto;padding-top:20px;font:500 .78rem var(--mono);color:var(--accent-bright)}
+	.band{background:var(--surface);border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline)}
+	.split{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start}@media(max-width:760px){.split{grid-template-columns:1fr;gap:28px}}
+	.split h2{font-size:1.55rem;margin-bottom:12px}.split p{color:var(--text-dim);font-size:.9rem}.split p+p{margin-top:12px}
+	.terminal{background:var(--ink);border:1px solid var(--hairline);border-radius:12px;padding:19px 21px;font:500 .78rem/1.9 var(--mono);overflow:auto}.terminal .muted{color:var(--text-faint)}.terminal .purple{color:var(--accent-bright)}.terminal .green{color:var(--ok)}
+	.notice{display:grid;grid-template-columns:auto 1fr;gap:15px;background:var(--panel);border:1px solid rgba(124,92,255,.25);border-radius:14px;padding:21px 22px}.notice-icon{color:var(--accent-bright);font:700 1.1rem var(--mono)}.notice h3{font-size:.98rem;margin-bottom:5px}.notice p{color:var(--text-dim);font-size:.86rem}.notice code{color:var(--text);background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;font-size:.78rem}
+	footer{background:var(--surface);padding:40px 24px;text-align:center;border-top:1px solid var(--hairline)}.footer-links{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;margin-bottom:16px}.footer-links a{color:var(--text-dim);font-size:.88rem}.footer-links a:hover{color:var(--text)}.footer-copy{color:var(--text-faint);font-size:.78rem}
+</style>
+</head>
+<body>
+<nav><div class="nav-inner">
+	<a class="nav-brand" href="index.html"><span class="dot"></span>SpotiFLAC Module Version</a>
+	<ul class="nav-links">
+		<li><a href="index.html#how">How it works</a></li><li><a href="index.html#features">Features</a></li><li><a href="index.html#start">Quick start</a></li><li><a href="index.html#faq">FAQ</a></li><li><a href="download.html">Downloads</a></li><li><a class="active" href="partners.html">Partners</a></li><li class="nav-divider"></li>
+		<li><a class="nav-gh" href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub →</a></li>
+	</ul>
+</div></nav>
+
+<main>
+	<header class="hero"><div class="hero-inner">
+		<div class="eyebrow">The ecosystem around the core</div>
+		<h1>Built to connect.<br><span>Open by default.</span></h1>
+		<p class="lede">SpotiFLAC stays deliberately small: it resolves metadata, while extensions bring the services and workflows you choose to run.</p>
+		<div class="hero-meta"><span class="badge"><b>●</b> no bundled providers</span><span class="badge"><b>●</b> JavaScript + Python</span><span class="badge"><b>●</b> bring your own registry</span></div>
+	</div></header>
+
+	<section><div class="section-inner">
+		<div class="section-heading"><div class="eyebrow">Related projects</div><h2>Made by people, connected by format</h2><p>These projects share ideas, formats or community context with SpotiFLAC. They are independent and are not endorsements of any service or extension.</p></div>
+		<div class="grid">
+			<article class="card"><div class="card-mark">DESK</div><h3>SpotiFLAC Desktop</h3><p>A standalone desktop experience for Windows, macOS and Linux, maintained as a separate project.</p><a class="card-link" href="https://github.com/afkarxyz/SpotiFLAC" target="_blank" rel="noopener">Visit project →</a></article>
+			<article class="card"><div class="card-mark">MOB</div><h3>SpotiFLAC Mobile</h3><p>The Android and iOS project whose JavaScript extension format is also used by this module.</p><a class="card-link" href="https://github.com/zarzet/SpotiFLAC-Mobile" target="_blank" rel="noopener">Visit project →</a></article>
+			<article class="card"><div class="card-mark green">DEV</div><h3>Extension authors</h3><p>Build a provider for your own workflow, publish it through a registry you control, and let users review it before installing.</p><a class="card-link" href="https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/main/docs/EXTENSION_DEVELOPMENT.md" target="_blank" rel="noopener">Read the guide →</a></article>
+		</div>
+	</div></section>
+
+	<section class="band"><div class="section-inner"><div class="split">
+		<div><div class="eyebrow">A clear boundary</div><h2>The core does not pick sides.</h2><p>No provider, registry or third-party service is configured by default. The maintainer does not review, host or control extensions that users install.</p><p>That keeps the application useful for many workflows while leaving source selection, credentials and compliance in the hands of the person running it.</p></div>
+		<div class="terminal" aria-label="Registry configuration example"><span class="muted"># choose a registry you trust</span><br><span class="purple">export</span> SPOTIFLAC_REGISTRIES=<span class="green">"https://example.com/registry.json"</span><br><br><span class="muted"># install only what you choose</span><br>spotiflac URL ./out --service <span class="green">ext:your-extension</span></div>
+	</div></div></section>
+
+	<section><div class="section-inner"><div class="section-heading"><div class="eyebrow">Join the network</div><h2>Bring something useful</h2><p>There is no application process and no official provider list. Share a focused project, document its requirements, and give users enough information to make an informed choice.</p></div>
+		<div class="notice"><div class="notice-icon">↗</div><div><h3>Publishing an extension?</h3><p>Start with the repository's extension notes, then publish your own registry URL. Use the <code>ext:</code> prefix when documenting how users should select your module.</p></div></div>
+	</div></section>
+</main>
+
+<footer><div class="footer-links"><a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub</a><a href="https://pypi.org/project/SpotiFLAC/" target="_blank" rel="noopener">PyPI</a><a href="https://t.me/SpotiFLAC_Module_Version" target="_blank" rel="noopener">Telegram</a><a href="index.html">Home</a><a href="download.html">Downloads</a></div><div class="footer-copy">MIT Licensed · not affiliated with any streaming service</div></footer>
+</body>
+</html>

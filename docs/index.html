@@ -5,338 +5,239 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SpotiFLAC Module Version — a core, and the sockets you fill</title>
 <meta name="description" content="A Python module that resolves Spotify metadata and, through extensions you choose and install yourself, retrieves matching audio. No bundled providers, no default source.">
+<meta name="theme-color" content="#0f1115">
+<meta property="og:title" content="SpotiFLAC Module Version">
+<meta property="og:description" content="A Python module that resolves Spotify metadata. No bundled providers, no default source — you supply the extensions.">
+<meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --ink: #0a0a0a;
-    --panel: #1a1a1a;
-    --panel-2: #121212;
-    --panel-hover: #222222;
-    --hairline: #262626;
-    --brass: #1DB954;
-    --brass-bright: #2ee673;
-    --brass-dim: #1aa34a;
-    --signal: #1DB954;
-    --paper: #e8e8e8;
-    --paper-dim: #999999;
-    --paper-faint: #555555;
-    --danger: #C15B4A;
-    --radius: 3px;
-    --display: 'Space Grotesk', sans-serif;
-    --body: 'IBM Plex Sans', sans-serif;
-    --mono: 'IBM Plex Mono', monospace;
+    --ink: #0f1115;
+    --panel: #1a1d24;
+    --panel-hover: #21252e;
+    --surface: #151820;
+    --hairline: #272b34;
+    --accent: #7c5cff;
+    --accent-bright: #9b82ff;
+    --accent-dim: #6647e0;
+    --ok: #3ddc97;
+    --text: #e9e9ee;
+    --text-dim: #96979f;
+    --text-faint: #55565f;
+    --display: 'Sora', sans-serif;
+    --body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+    --max-w: 1080px;
   }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  html { scroll-behavior: smooth; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: #333 transparent; }
+  html::-webkit-scrollbar { width: 8px; }
+  html::-webkit-scrollbar-track { background: transparent; }
+  html::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
 
   body {
-    background: var(--ink);
-    color: var(--paper);
     font-family: var(--body);
-    line-height: 1.6;
+    background: var(--ink); color: var(--text); line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
 
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 1;
-    opacity: 0.035;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  }
-
-  a { color: inherit; }
-
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; position: relative; z-index: 2; }
-
-  ::selection { background: var(--brass); color: var(--ink); }
-
-  :focus-visible {
-    outline: 2px solid var(--brass-bright);
-    outline-offset: 3px;
-  }
-
-  .eyebrow {
-    font-family: var(--mono);
-    font-size: 12px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--brass);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .eyebrow::before {
-    content: '';
-    width: 14px;
-    height: 1px;
-    background: var(--brass);
-    display: inline-block;
-  }
-
-  h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -0.01em; color: var(--paper); }
-
+  a { color: var(--accent-bright); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 3px; }
+  ::selection { background: var(--accent); color: #fff; }
   code, .mono { font-family: var(--mono); }
+  h1, h2, h3 { font-family: var(--display); letter-spacing: -0.01em; color: var(--text); }
 
-  /* ── Top bar ─────────────────────────────────────────── */
-  .topbar {
-    position: sticky; top: 0; z-index: 40;
-    background: rgba(19,18,14,0.88);
-    backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--hairline);
-  }
-  .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
-  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--display); font-weight: 600; font-size: 15px; text-decoration: none; }
-  .brand .jack { width: 9px; height: 9px; border-radius: 50%; background: var(--brass); box-shadow: 0 0 8px var(--brass); }
-  .topnav { display: flex; gap: 26px; font-family: var(--mono); font-size: 13px; color: var(--paper-dim); }
-  .topnav a { text-decoration: none; }
-  .topnav a:hover { color: var(--brass-bright); }
-  @media (max-width: 720px) { .topnav { display: none; } }
+  .wrap { max-width: var(--max-w); margin: auto; padding: 0 24px; }
 
-  /* ── Hero ────────────────────────────────────────────── */
-  .hero { padding: 96px 0 64px; position: relative; overflow: hidden; background: radial-gradient(ellipse at 50% 0%, rgba(29,185,84,.06) 0%, transparent 55%); }
-  .hero-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 56px; align-items: center; }
-  @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; } }
+  /* ── NAV ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(15,17,21,.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .nav-inner { max-width: var(--max-w); margin: auto; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 62px; }
+  .nav-brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-weight: 700; font-size: 1.02rem; color: var(--text); }
+  .nav-brand .dot { width: 9px; height: 9px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 10px var(--accent); transform: rotate(45deg); }
+  .nav-links { display: flex; align-items: center; gap: 24px; list-style: none; }
+  .nav-links a { color: var(--text-dim); font-size: .88rem; }
+  .nav-links a:hover, .nav-links a.active { color: var(--text); text-decoration: none; }
+  .nav-links .nav-divider { width: 1px; height: 18px; background: rgba(255,255,255,.1); }
+  .nav-gh {
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 8px; padding: 6px 12px; color: var(--text-dim); font-size: .82rem;
+    transition: color .2s, border-color .2s, background .2s;
+  }
+  .nav-gh:hover { color: var(--text); border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.08); text-decoration: none; }
+  @media (max-width: 760px) { .nav-links { display: none; } }
 
-  .hero h1 {
-    font-size: clamp(34px, 5.2vw, 54px);
-    line-height: 1.05;
-    margin: 18px 0 20px;
-  }
-  .hero h1 .accent { color: var(--brass-bright); }
-  .hero p.lede {
-    font-size: 17px;
-    color: var(--paper-dim);
-    max-width: 46ch;
-    margin-bottom: 30px;
-  }
+  /* ── HERO ── */
+  .hero { padding: 148px 24px 60px; text-align: center; background: radial-gradient(ellipse at 50% 0%, rgba(124,92,255,.09) 0%, transparent 55%); }
+  .hero h1 { font-size: clamp(2.1rem, 5vw, 3.4rem); font-weight: 800; letter-spacing: -1px; margin-bottom: 14px; line-height: 1.08; }
+  .hero h1 span { color: var(--accent-bright); }
+  .hero p.lede { font-size: 1.12rem; color: var(--text-dim); max-width: 560px; margin: 0 auto 8px; }
 
-  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; }
-  .btn {
-    font-family: var(--mono);
-    font-size: 13px;
-    letter-spacing: 0.02em;
-    padding: 12px 20px;
-    border-radius: var(--radius);
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid transparent;
-    transition: transform .15s ease, border-color .15s ease, background .15s ease;
-  }
-  .btn:hover { transform: translateY(-1px); }
-  .btn-primary { background: var(--brass); color: var(--ink); font-weight: 500; }
-  .btn-primary:hover { background: var(--brass-bright); }
-  .btn-ghost { border-color: var(--hairline); color: var(--paper); }
-  .btn-ghost:hover { border-color: var(--brass); color: var(--brass-bright); }
+  .hero-badges { display: flex; gap: 8px; justify-content: center; margin: 20px 0 30px; flex-wrap: wrap; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 15px; border-radius: 999px; font-size: .78rem; font-weight: 500; background: var(--surface); color: var(--text-dim); font-family: var(--mono); border: 1px solid var(--hairline); }
+  .badge .bd { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 
-  .install-line {
-    display: flex; align-items: center; gap: 10px;
-    font-family: var(--mono); font-size: 14px;
-    background: var(--panel);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius);
-    padding: 12px 16px;
-    max-width: 340px;
-    color: var(--paper-dim);
-  }
-  .install-line .prompt { color: var(--brass); }
-  .install-line code { color: var(--paper); }
-  .install-line button {
-    margin-left: auto; background: none; border: none; color: var(--paper-faint);
-    cursor: pointer; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
-    padding: 4px 8px; border-radius: 2px;
-  }
-  .install-line button:hover { color: var(--brass-bright); background: var(--panel-2); }
+  .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 26px; border-radius: 10px; font-size: .92rem; font-weight: 600; transition: transform .15s, background .2s; cursor: pointer; border: none; }
+  .btn:hover { transform: translateY(-1px); text-decoration: none; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-dim); }
+  .btn-secondary { background: var(--panel); color: var(--text); border: 1px solid var(--hairline); }
+  .btn-secondary:hover { background: var(--panel-hover); }
 
-  /* ── Patch bay signature ─────────────────────────────── */
-  .patchbay {
-    background: var(--panel);
-    border: 1px solid var(--hairline);
-    border-radius: 6px;
-    padding: 26px 22px 22px;
-    position: relative;
-  }
-  .patchbay-label {
-    font-family: var(--mono); font-size: 11px; color: var(--paper-faint);
-    letter-spacing: .1em; text-transform: uppercase; margin-bottom: 16px;
-    display: flex; justify-content: space-between;
-  }
+  .install-line { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: .84rem; background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; padding: 10px 14px; color: var(--text-dim); }
+  .install-line .prompt { color: var(--accent-bright); }
+  .install-line code { color: var(--text); }
+  .install-line button { background: none; border: none; color: var(--text-faint); cursor: pointer; font-family: var(--mono); font-size: .66rem; letter-spacing: .06em; text-transform: uppercase; padding: 4px 8px; border-radius: 6px; }
+  .install-line button:hover { color: var(--accent-bright); background: rgba(255,255,255,.05); }
+
+  /* ── Patch bay ── */
+  .hero-visual { display: flex; justify-content: center; margin-top: 48px; }
+  .patchbay { background: var(--panel); border: 1px solid var(--hairline); border-radius: 16px; padding: 24px 22px 20px; max-width: 400px; width: 100%; box-shadow: 0 24px 60px rgba(0,0,0,.35); }
+  .patchbay-label { font-family: var(--mono); font-size: .66rem; color: var(--text-faint); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 14px; display: flex; justify-content: space-between; }
   .patchbay svg { width: 100%; height: auto; display: block; }
-
-  .jack-node circle.ring { fill: none; stroke: var(--hairline); stroke-width: 1.5; }
+  .jack-node circle.ring { fill: none; stroke: #333; stroke-width: 1.5; }
   .jack-node circle.hole { fill: var(--ink); }
-  .jack-node.core circle.ring { stroke: var(--brass); }
-  .jack-node.core circle.hole { fill: #0f2417; }
-  .jack-node.filled circle.ring { stroke: var(--signal); }
-  .jack-node.filled circle.hole { fill: #16211f; }
-  .cable { fill: none; stroke: var(--brass); stroke-width: 1.6; opacity: 0.85; stroke-dasharray: 3 4; }
-  .cable.solid { stroke-dasharray: none; stroke: var(--signal); opacity: 0.9; }
-  .node-text { font-family: var(--mono); font-size: 9.5px; fill: var(--paper-faint); }
-  .node-text.strong { fill: var(--paper); }
-
+  .jack-node.core circle.ring { stroke: var(--accent); }
+  .jack-node.core circle.hole { fill: #1c1730; }
+  .jack-node.filled circle.ring { stroke: var(--ok); }
+  .jack-node.filled circle.hole { fill: #102420; }
+  .cable { fill: none; stroke: var(--accent); stroke-width: 1.6; opacity: .5; stroke-dasharray: 3 4; }
+  .cable.solid { stroke-dasharray: none; stroke: var(--ok); opacity: .9; }
+  .node-text { font-family: var(--mono); font-size: 9.5px; fill: var(--text-faint); }
+  .node-text.strong { fill: var(--text); }
   .pulse { animation: pulse 2.6s ease-in-out infinite; }
-  @keyframes pulse {
-    0%, 100% { opacity: .55; }
-    50% { opacity: 1; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .pulse { animation: none; }
-    html { scroll-behavior: auto; }
-  }
+  @keyframes pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } html { scroll-behavior: auto; } }
 
-  /* ── Sections shared ─────────────────────────────────── */
-  section { padding: 76px 0; border-top: 1px solid var(--hairline); }
-  .section-head { max-width: 60ch; margin-bottom: 44px; }
-  .section-head h2 { font-size: clamp(24px, 3.4vw, 32px); margin-top: 14px; }
-  .section-head p { color: var(--paper-dim); margin-top: 12px; font-size: 15.5px; }
+  /* ── SECTIONS ── */
+  section { padding: 76px 24px; }
+  .section-inner { max-width: var(--max-w); margin: auto; }
+  .section-title { font-size: 1.7rem; font-weight: 700; text-align: center; margin-bottom: 12px; letter-spacing: -.5px; }
+  .section-sub { text-align: center; color: var(--text-dim); max-width: 560px; margin: 0 auto 44px; }
+  .eyebrow { font-family: var(--mono); font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-bright); text-align: center; margin-bottom: 10px; }
 
-  /* ── How it works ─────────────────────────────────────── */
-  .flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1px solid var(--hairline); border-radius: 6px; overflow: hidden; }
-  @media (max-width: 780px) { .flow { grid-template-columns: 1fr; } }
-  .flow-step {
-    padding: 28px 24px; background: var(--panel);
-    position: relative;
-    border-right: 1px solid var(--hairline);
-  }
-  .flow-step:last-child { border-right: none; }
-  .flow-step .num { font-family: var(--mono); font-size: 11px; color: var(--brass); letter-spacing: .1em; }
-  .flow-step h3 { font-size: 17px; margin: 10px 0 8px; }
-  .flow-step p { color: var(--paper-dim); font-size: 14px; }
-  .flow-step.you { background: var(--panel-2); }
-  .flow-step.you .num { color: var(--signal); }
-  .flow-arrow {
-    display: none;
-  }
-  @media (min-width: 781px) {
-    .flow-step:not(:last-child)::after {
-      content: '→';
-      position: absolute; right: -11px; top: 50%; transform: translateY(-50%);
-      width: 22px; height: 22px; line-height: 22px; text-align: center;
-      background: var(--ink); border: 1px solid var(--hairline); border-radius: 50%;
-      font-size: 12px; color: var(--brass); z-index: 3;
-    }
-  }
+  /* ── How it works ── */
+  .flow-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 780px) { .flow-grid { grid-template-columns: 1fr; } }
+  .flow-card { background: var(--panel); border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 22px; transition: background .2s; }
+  .flow-card:hover { background: var(--panel-hover); }
+  .flow-card .num { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; border-radius: 7px; background: rgba(124,92,255,.14); color: var(--accent-bright); font-family: var(--mono); font-size: .72rem; font-weight: 700; margin-bottom: 13px; }
+  .flow-card.you .num { background: rgba(61,220,151,.14); color: var(--ok); }
+  .flow-card h3 { font-size: 1.02rem; margin-bottom: 6px; }
+  .flow-card p { color: var(--text-dim); font-size: .88rem; }
 
-  /* ── Feature grid ─────────────────────────────────────── */
-  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: 6px; overflow: hidden; }
-  @media (max-width: 780px) { .grid-3 { grid-template-columns: 1fr 1fr; } }
-  @media (max-width: 520px) { .grid-3 { grid-template-columns: 1fr; } }
-  .feature {
-    background: var(--panel);
-    padding: 24px 22px;
-  }
-  .feature .tag { font-family: var(--mono); font-size: 10px; color: var(--brass); letter-spacing: .1em; text-transform: uppercase; }
-  .feature h3 { font-size: 15.5px; margin: 8px 0 6px; }
-  .feature p { color: var(--paper-dim); font-size: 13.5px; }
+  /* ── Features ── */
+  .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
+  .feature-card { background: var(--panel); border: 1px solid var(--hairline); border-radius: 14px; padding: 26px 22px; transition: background .2s; }
+  .feature-card:hover { background: var(--panel-hover); }
+  .feature-icon { width: 38px; height: 38px; border-radius: 10px; background: rgba(124,92,255,.14); color: var(--accent-bright); display: flex; align-items: center; justify-content: center; margin-bottom: 15px; font-family: var(--mono); font-size: .74rem; font-weight: 700; }
+  .feature-card h3 { font-size: 1.02rem; margin-bottom: 6px; }
+  .feature-card p { color: var(--text-dim); font-size: .88rem; }
 
-  /* ── Quick start / tabs ──────────────────────────────── */
-  .tabs { display: flex; gap: 2px; margin-bottom: 0; }
-  .tab {
-    font-family: var(--mono); font-size: 12.5px; padding: 10px 16px;
-    background: var(--panel-2); color: var(--paper-faint); cursor: pointer;
-    border: 1px solid var(--hairline); border-bottom: none;
-    border-radius: 4px 4px 0 0;
-  }
-  .tab.active { background: var(--panel); color: var(--brass-bright); }
-  .tab-panels { border: 1px solid var(--hairline); border-radius: 0 4px 4px 4px; background: var(--panel); }
+  /* ── Quick start / tabs ── */
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; justify-content: center; }
+  .tab { font-family: var(--mono); font-size: .78rem; padding: 9px 17px; background: var(--surface); color: var(--text-dim); cursor: pointer; border-radius: 999px; border: 1px solid var(--hairline); transition: background .2s, color .2s; }
+  .tab.active { background: var(--accent); color: #fff; border-color: transparent; }
+  .tab-panels { background: var(--panel); border: 1px solid var(--hairline); border-radius: 14px; padding: 4px; }
   .tab-panel { display: none; padding: 22px 24px; }
   .tab-panel.active { display: block; }
-  pre {
-    font-family: var(--mono); font-size: 13px; color: var(--paper);
-    overflow-x: auto; line-height: 1.7;
-  }
-  pre .c { color: var(--paper-faint); }
-  pre .k { color: var(--brass-bright); }
-  pre .s { color: var(--signal); }
+  pre { font-family: var(--mono); font-size: .8rem; color: var(--text); overflow-x: auto; line-height: 1.75; }
+  pre .c { color: var(--text-faint); }
+  pre .k { color: var(--accent-bright); }
+  pre .s { color: var(--ok); }
 
-  /* ── Extensions callout ──────────────────────────────── */
-  .callout {
-    display: grid; grid-template-columns: auto 1fr; gap: 18px;
-    background: var(--panel); border: 1px solid var(--hairline); border-left: 3px solid var(--brass);
-    border-radius: 4px; padding: 20px 22px; margin-top: 30px;
-  }
-  .callout .icon { font-family: var(--mono); color: var(--brass); font-size: 18px; padding-top: 2px; }
-  .callout h4 { font-size: 15px; margin-bottom: 6px; }
-  .callout p { color: var(--paper-dim); font-size: 14px; }
-  .callout code { background: var(--panel-2); padding: 1px 6px; border-radius: 2px; font-size: 12.5px; }
+  .callout { display: grid; grid-template-columns: auto 1fr; gap: 16px; background: var(--surface); border-radius: 14px; padding: 20px 22px; margin-top: 24px; border: 1px solid rgba(124,92,255,.2); }
+  .callout .icon { width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0; background: rgba(124,92,255,.16); color: var(--accent-bright); display: flex; align-items: center; justify-content: center; font-size: .95rem; font-weight: 700; }
+  .callout h4 { font-size: .95rem; margin-bottom: 6px; }
+  .callout p { color: var(--text-dim); font-size: .86rem; }
+  .callout code { background: rgba(255,255,255,.06); padding: 1px 6px; border-radius: 4px; font-size: .78rem; }
 
-  /* ── Disclaimer ──────────────────────────────────────── */
-  .disclaimer {
-    background: var(--panel-2);
-    border: 1px solid var(--hairline);
-    border-radius: 6px;
-    padding: 30px 28px;
-  }
-  .disclaimer h2 { font-size: 20px; margin-bottom: 14px; }
-  .disclaimer p, .disclaimer li { color: var(--paper-dim); font-size: 14px; }
+  /* ── FAQ ── */
+  .faq-list { max-width: 700px; margin: auto; display: flex; flex-direction: column; gap: 8px; }
+  .faq-item { background: var(--panel); border: 1px solid var(--hairline); border-radius: 12px; }
+  .faq-item summary { cursor: pointer; font-weight: 600; font-size: .96rem; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 17px 19px; }
+  .faq-item summary::-webkit-details-marker { display: none; }
+  .faq-item summary::after { content: "+"; font-size: 1.3rem; color: var(--text-dim); flex-shrink: 0; }
+  .faq-item[open] summary::after { content: "\2212"; }
+  .faq-item .faq-answer { padding: 0 19px 17px; color: var(--text-dim); font-size: .9rem; line-height: 1.75; }
+
+  /* ── Disclaimer ── */
+  .disclaimer { background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; padding: 30px 26px; }
+  .disclaimer h2 { font-size: 1.25rem; margin-bottom: 14px; }
+  .disclaimer p, .disclaimer li { color: var(--text-dim); font-size: .88rem; }
   .disclaimer ul { margin: 12px 0 12px 20px; }
   .disclaimer li { margin-bottom: 6px; }
-  .disclaimer .more { margin-top: 16px; font-family: var(--mono); font-size: 12.5px; }
-  .disclaimer .more a { color: var(--brass-bright); text-decoration: none; }
-  .disclaimer .more a:hover { text-decoration: underline; }
+  .disclaimer .more { margin-top: 16px; font-family: var(--mono); font-size: .78rem; }
 
-  /* ── Footer ──────────────────────────────────────────── */
-  footer { padding: 48px 0 60px; border-top: 1px solid var(--hairline); }
-  .foot-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 24px; align-items: center; }
-  .foot-links { display: flex; gap: 22px; font-family: var(--mono); font-size: 12.5px; flex-wrap: wrap; }
-  .foot-links a { text-decoration: none; color: var(--paper-dim); }
-  .foot-links a:hover { color: var(--brass-bright); }
-  .foot-note { font-family: var(--mono); font-size: 11.5px; color: var(--paper-faint); }
+  /* ── FOOTER ── */
+  footer { background: var(--surface); padding: 40px 24px; text-align: center; border-top: 1px solid var(--hairline); }
+  .footer-inner { max-width: var(--max-w); margin: auto; }
+  .footer-links { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+  .footer-links a { color: var(--text-dim); font-size: .88rem; }
+  .footer-links a:hover { color: var(--text); }
+  .footer-copy { color: var(--text-faint); font-size: .78rem; }
 </style>
 </head>
 <body>
 
-<div class="topbar">
-  <div class="wrap">
-    <a class="brand" href="#top"><span class="jack"></span>SpotiFLAC<span style="color:var(--paper-faint)">·module</span></a>
-    <nav class="topnav">
-      <a href="#how">How it works</a>
-      <a href="#features">Features</a>
-      <a href="#start">Quick start</a>
-      <a href="#extensions">Extensions</a>
-      <a href="#disclaimer">Disclaimer</a>
-    </nav>
+<nav>
+  <div class="nav-inner">
+    <a class="nav-brand" href="index.html"><span class="dot"></span>SpotiFLAC Module Version<span style="color:var(--text-faint)">
+    <ul class="nav-links">
+      <li><a href="index.html#how">How it works</a></li>
+      <li><a href="index.html#features">Features</a></li>
+      <li><a href="index.html#start">Quick start</a></li>
+      <li><a href="index.html#faq">FAQ</a></li>
+      <li><a href="downloads.html">Downloads</a></li>
+      <li><a href="partners.html">Partners</a></li>
+      <li class="nav-divider"></li>
+      <li><a class="nav-gh" href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub →</a></li>
+    </ul>
   </div>
-</div>
+</nav>
 
 <main id="top">
 
   <section class="hero">
-    <div class="wrap hero-grid">
-      <div>
-        <div class="eyebrow">Python module · v3.0 · MIT licensed</div>
-        <h1>An empty core.<br><span class="accent">You supply the modules.</span></h1>
-        <p class="lede">SpotiFLAC resolves Spotify track, album and playlist metadata. It ships with no bundled provider and no default extension source — every audio backend is a module you find, review, and plug in yourself.</p>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">View on GitHub →</a>
-          <a class="btn btn-ghost" href="#start">Quick start</a>
-        </div>
-        <div class="install-line">
-          <span class="prompt">$</span>
-          <code>pip install SpotiFLAC</code>
-          <button type="button" data-copy="pip install SpotiFLAC">copy</button>
-        </div>
-      </div>
+    <h1>An empty core.<br><span>You supply the modules.</span></h1>
+    <p class="lede">SpotiFLAC resolves Spotify track, album and playlist metadata. It ships with no bundled provider and no default extension source — every audio backend is a module you find, review, and plug in yourself.</p>
 
+    <div class="hero-badges">
+      <span class="badge"><span class="bd"></span>Python module</span>
+      <span class="badge"><span class="bd"></span>v3.0</span>
+      <span class="badge"><span class="bd"></span>MIT licensed</span>
+    </div>
+
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">View on GitHub</a>
+      <a class="btn btn-secondary" href="downloads.html">Downloads</a>
+    </div>
+
+    <div class="install-line">
+      <span class="prompt">$</span>
+      <code>pip install SpotiFLAC</code>
+      <button type="button" data-copy="pip install SpotiFLAC">copy</button>
+    </div>
+
+    <div class="hero-visual">
       <div class="patchbay">
         <div class="patchbay-label"><span>core.socket()</span><span id="pulse-label">awaiting connection</span></div>
         <svg viewBox="0 0 320 220" role="img" aria-label="Diagram: a core module in the center, with unfilled sockets for extensions the user has not yet connected, and one filled socket showing an extension the user has installed.">
-          <!-- cables -->
           <path class="cable" d="M160,110 L70,50" />
           <path class="cable" d="M160,110 L70,110" />
           <path class="cable solid pulse" d="M160,110 L70,170" />
           <path class="cable" d="M160,110 L250,50" />
           <path class="cable" d="M160,110 L250,170" />
 
-          <!-- core -->
           <g class="jack-node core">
             <circle class="ring" cx="160" cy="110" r="26" />
             <circle class="hole" cx="160" cy="110" r="10" />
@@ -344,36 +245,19 @@
           <text class="node-text strong" x="160" y="152" text-anchor="middle">CORE</text>
           <text class="node-text" x="160" y="163" text-anchor="middle">metadata only</text>
 
-          <!-- empty sockets -->
-          <g class="jack-node">
-            <circle class="ring" cx="70" cy="50" r="15" />
-            <circle class="hole" cx="70" cy="50" r="6" />
-          </g>
+          <g class="jack-node"><circle class="ring" cx="70" cy="50" r="15" /><circle class="hole" cx="70" cy="50" r="6" /></g>
           <text class="node-text" x="70" y="30" text-anchor="middle">tidal-web</text>
 
-          <g class="jack-node">
-            <circle class="ring" cx="70" cy="110" r="15" />
-            <circle class="hole" cx="70" cy="110" r="6" />
-          </g>
+          <g class="jack-node"><circle class="ring" cx="70" cy="110" r="15" /><circle class="hole" cx="70" cy="110" r="6" /></g>
           <text class="node-text" x="70" y="132" text-anchor="middle">— empty —</text>
 
-          <g class="jack-node">
-            <circle class="ring" cx="250" cy="50" r="15" />
-            <circle class="hole" cx="250" cy="50" r="6" />
-          </g>
+          <g class="jack-node"><circle class="ring" cx="250" cy="50" r="15" /><circle class="hole" cx="250" cy="50" r="6" /></g>
           <text class="node-text" x="250" y="30" text-anchor="middle">— empty —</text>
 
-          <g class="jack-node">
-            <circle class="ring" cx="250" cy="170" r="15" />
-            <circle class="hole" cx="250" cy="170" r="6" />
-          </g>
+          <g class="jack-node"><circle class="ring" cx="250" cy="170" r="15" /><circle class="hole" cx="250" cy="170" r="6" /></g>
           <text class="node-text" x="250" y="192" text-anchor="middle">— empty —</text>
 
-          <!-- filled socket, user-installed -->
-          <g class="jack-node filled">
-            <circle class="ring pulse" cx="70" cy="170" r="15" />
-            <circle class="hole" cx="70" cy="170" r="6" />
-          </g>
+          <g class="jack-node filled"><circle class="ring pulse" cx="70" cy="170" r="15" /><circle class="hole" cx="70" cy="170" r="6" /></g>
           <text class="node-text strong" x="70" y="192" text-anchor="middle">your-ext.py</text>
         </svg>
       </div>
@@ -381,56 +265,51 @@
   </section>
 
   <section id="how">
-    <div class="wrap">
-      <div class="section-head">
-        <div class="eyebrow">How it works</div>
-        <h2>Three sockets, in order</h2>
-        <p>Nothing about the audio backend is decided for you. The core resolves what a URL <em>means</em>; getting the actual audio is a separate, opt-in step.</p>
-      </div>
-      <div class="flow">
-        <div class="flow-step">
-          <div class="num">01 · CORE</div>
+    <div class="section-inner">
+      <div class="eyebrow">How it works</div>
+      <h2 class="section-title">Three sockets, in order</h2>
+      <p class="section-sub">Nothing about the audio backend is decided for you. The core resolves what a URL means; getting the actual audio is a separate, opt-in step.</p>
+      <div class="flow-grid">
+        <div class="flow-card">
+          <div class="num">01</div>
           <h3>Resolve the URL</h3>
           <p>Paste a Spotify track, album, playlist or artist link. The core resolves title, artist, album, and other metadata. No audio yet.</p>
         </div>
-        <div class="flow-step you">
-          <div class="num">02 · YOU</div>
+        <div class="flow-card you">
+          <div class="num">02</div>
           <h3>Point at a registry</h3>
-          <p>Set <code class="mono">SPOTIFLAC_REGISTRIES</code> to a source of extensions you've chosen — your own, or a third party's you've reviewed — or add one from Settings if you're using the GUI or web interface. Nothing is fetched until you do.</p>
+          <p>Set <code class="mono">SPOTIFLAC_REGISTRIES</code>, or add one from Settings if you're using the GUI/web interface, to a source of extensions you've chosen. Nothing is fetched until you do.</p>
         </div>
-        <div class="flow-step">
-          <div class="num">03 · EXTENSION</div>
+        <div class="flow-card">
+          <div class="num">03</div>
           <h3>Retrieve audio</h3>
-          <p>An installed extension (JavaScript or Python) handles the actual provider — Tidal, Qobuz, or anything else it implements. The core never talks to a provider directly.</p>
+          <p>An installed extension (JavaScript or Python) handles the actual provider. The core never talks to a provider directly.</p>
         </div>
       </div>
     </div>
   </section>
 
   <section id="features">
-    <div class="wrap">
-      <div class="section-head">
-        <div class="eyebrow">Features</div>
-        <h2>What the core actually does</h2>
-      </div>
-      <div class="grid-3">
-        <div class="feature"><div class="tag">API</div><h3>Sync &amp; async Python</h3><p>A blocking <code class="mono">SpotiFLAC()</code> call for scripts, or <code class="mono">AsyncSpotiFLAC</code> for bots and web backends.</p></div>
-        <div class="feature"><div class="tag">Extensions</div><h3>JS or Python modules</h3><p>Bring your own registry. Nothing bundled, nothing installed automatically, ever.</p></div>
-        <div class="feature"><div class="tag">Interfaces</div><h3>CLI, GUI, web, wizard</h3><p><code class="mono">--gui</code> for a native window, <code class="mono">--web</code> for the same interface in a browser, <code class="mono">--interactive</code> for a guided wizard.</p></div>
-        <div class="feature"><div class="tag">Metadata</div><h3>MusicBrainz enrichment</h3><p>Genre, label, BPM, UPC and ISRC tags added automatically when a match is found.</p></div>
-        <div class="feature"><div class="tag">Lyrics</div><h3>Synced lyrics embedding</h3><p>Optional, multi-provider, embedded directly into the file's tags.</p></div>
-        <div class="feature"><div class="tag">Ops</div><h3>Profiles, retries, Docker</h3><p>Save a full configuration as a named profile; automatic retry with backoff; a Docker image for headless use.</p></div>
+    <div class="section-inner">
+      <div class="eyebrow">Features</div>
+      <h2 class="section-title">What the core actually does</h2>
+      <p class="section-sub">&nbsp;</p>
+      <div class="features-grid">
+        <div class="feature-card"><div class="feature-icon">API</div><h3>Sync &amp; async Python</h3><p>A blocking <code class="mono">SpotiFLAC()</code> call for scripts, or <code class="mono">AsyncSpotiFLAC</code> for bots and web backends.</p></div>
+        <div class="feature-card"><div class="feature-icon">＋</div><h3>JS or Python extensions</h3><p>Bring your own registry. Nothing bundled, nothing installed automatically, ever.</p></div>
+        <div class="feature-card"><div class="feature-icon">◧</div><h3>CLI, GUI, web, wizard</h3><p><code class="mono">--gui</code> for a native window, <code class="mono">--web</code> for the same interface in a browser, <code class="mono">--interactive</code> for a guided wizard.</p></div>
+        <div class="feature-card"><div class="feature-icon">♫</div><h3>MusicBrainz enrichment</h3><p>Genre, label, BPM, UPC and ISRC tags added automatically when a match is found.</p></div>
+        <div class="feature-card"><div class="feature-icon">Aa</div><h3>Synced lyrics embedding</h3><p>Optional, multi-provider, embedded directly into the file's tags.</p></div>
+        <div class="feature-card"><div class="feature-icon">⟳</div><h3>Local retagger</h3><p><code class="mono">--tag-local</code> rescans and fixes tags on files you already have, with automatic backup before writing.</p></div>
       </div>
     </div>
   </section>
 
   <section id="start">
-    <div class="wrap">
-      <div class="section-head">
-        <div class="eyebrow">Quick start</div>
-        <h2>Pick an interface</h2>
-        <p>All four talk to the same core. None of them can retrieve audio until you've installed at least one extension — see below.</p>
-      </div>
+    <div class="section-inner">
+      <div class="eyebrow">Quick start</div>
+      <h2 class="section-title">Pick an interface</h2>
+      <p class="section-sub">All talk to the same core. None can retrieve audio until you've installed at least one extension — see below.</p>
 
       <div class="tabs" role="tablist">
         <div class="tab active" role="tab" data-tab="cli">CLI</div>
@@ -460,18 +339,48 @@ SpotiFLAC(
 )</pre></div>
       </div>
 
-      <div class="callout" id="extensions">
+      <div class="callout">
         <div class="icon">＋</div>
         <div>
           <h4>About that <code>ext:tidal-web</code></h4>
-          <p>It only resolves to something if you've installed an extension by that name, from a registry you configured. The maintainer doesn't ship, curate, or default to one — see <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version#extensions" target="_blank" rel="noopener" style="color:var(--brass-bright)">Extensions</a> in the README for the full mechanism, and <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version#developing-extensions" target="_blank" rel="noopener" style="color:var(--brass-bright)">Developing Extensions</a> if you want to write your own.</p>
+          <p>It only resolves to something if you've installed an extension by that name, from a registry you configured. The maintainer doesn't ship, curate, or default to one — see <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version#extensions" target="_blank" rel="noopener">Extensions</a> in the README for the full mechanism.</p>
         </div>
       </div>
     </div>
   </section>
 
+  <section id="faq">
+    <div class="section-inner">
+      <div class="eyebrow">FAQ</div>
+      <h2 class="section-title">Common questions</h2>
+      <p class="section-sub">&nbsp;</p>
+      <div class="faq-list">
+        <details class="faq-item">
+          <summary>Why doesn't anything download right after I install it?</summary>
+          <div class="faq-answer">By design. The core resolves Spotify metadata only — it has no built-in provider and no default extension source. You need to point <code class="mono">SPOTIFLAC_REGISTRIES</code> at a registry of your choosing and install at least one extension before it can retrieve audio.</div>
+        </details>
+        <details class="faq-item">
+          <summary>Can I write my own extension?</summary>
+          <div class="faq-answer">Yes — JavaScript and Python are both supported. There's no dedicated guide for this project yet; reading the loader source directly (<code class="mono">SpotiFLAC/extensions/</code>) is currently the best way to see the expected shape.</div>
+        </details>
+        <details class="faq-item">
+          <summary>GUI or web mode — which should I use?</summary>
+          <div class="faq-answer"><code class="mono">--gui</code> opens a native window. <code class="mono">--web</code> serves the identical interface as a local web server instead, useful on headless machines or inside Docker. Web mode binds to <code class="mono">127.0.0.1</code> by default — changing that exposes it, with no authentication, to anything that can reach the port.</div>
+        </details>
+        <details class="faq-item">
+          <summary>Does the maintainer review third-party extensions or registries?</summary>
+          <div class="faq-answer">No. Extensions are found, chosen, and installed entirely by you. The maintainer doesn't review, endorse, or take responsibility for what a third-party extension or registry does — treat installing one with the same care you'd apply to any other third-party code.</div>
+        </details>
+        <details class="faq-item">
+          <summary>Is this legal to use?</summary>
+          <div class="faq-answer">SpotiFLAC's core doesn't host, store, or distribute copyrighted content — it resolves metadata. What happens when you install and use a third-party extension is between you and the terms of service of whatever platform that extension talks to. See the <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version#disclaimer" target="_blank" rel="noopener">full disclaimer</a> for specifics; this isn't legal advice.</div>
+        </details>
+      </div>
+    </div>
+  </section>
+
   <section id="disclaimer">
-    <div class="wrap">
+    <div class="section-inner">
       <div class="disclaimer">
         <h2>Disclaimer</h2>
         <p>This project is intended for educational and personal use only. SpotiFLAC Module Version is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service.</p>
@@ -488,21 +397,22 @@ SpotiFLAC(
 </main>
 
 <footer>
-  <div class="wrap foot-row">
-    <div class="foot-links">
+  <div class="footer-inner">
+    <div class="footer-links">
       <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub</a>
       <a href="https://pypi.org/project/SpotiFLAC/" target="_blank" rel="noopener">PyPI</a>
       <a href="https://t.me/SpotiFLAC_Module_Version" target="_blank" rel="noopener">Telegram</a>
       <a href="https://ko-fi.com/bartolomeorusso9" target="_blank" rel="noopener">Ko-fi</a>
+      <a href="downloads.html">Downloads</a>
+      <a href="partners.html">Partners</a>
       <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
       <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/issues" target="_blank" rel="noopener">Issues</a>
     </div>
-    <div class="foot-note">MIT licensed · not affiliated with any streaming service</div>
+    <div class="footer-copy">MIT Licensed · not affiliated with any streaming service</div>
   </div>
 </footer>
 
 <script>
-  // Tabs
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -512,7 +422,6 @@ SpotiFLAC(
     });
   });
 
-  // Copy install command
   document.querySelectorAll('[data-copy]').forEach(btn => {
     btn.addEventListener('click', async () => {
       try {
@@ -520,11 +429,10 @@ SpotiFLAC(
         const original = btn.textContent;
         btn.textContent = 'copied';
         setTimeout(() => { btn.textContent = original; }, 1400);
-      } catch (e) { /* clipboard unavailable, no-op */ }
+      } catch (e) {}
     });
   });
 
-  // Patch bay label swap, purely decorative
   const label = document.getElementById('pulse-label');
   const states = ['awaiting connection', '1 module connected'];
   let i = 1;
