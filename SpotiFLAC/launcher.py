@@ -831,6 +831,12 @@ async def amain() -> None:
 
 
 def main() -> None:
+    for stream_name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is not None and hasattr(stream, "reconfigure"):
+            with contextlib.suppress(Exception):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(amain())
 
