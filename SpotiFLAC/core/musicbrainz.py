@@ -251,6 +251,7 @@ def _parse_mb_details(data: dict) -> dict:
 
     releases = data.get("releases", [])
     if releases:
+
         def _release_score(r: dict) -> int:
             score = 0
             if r.get("barcode"):
@@ -280,7 +281,11 @@ def _parse_mb_details(data: dict) -> dict:
             details["track_total"] = str(medium.get("track-count", ""))
             fallback_track = None
             for track in medium.get("tracks", []):
-                rec_id = track.get("recording", {}).get("id") if isinstance(track.get("recording"), dict) else None
+                rec_id = (
+                    track.get("recording", {}).get("id")
+                    if isinstance(track.get("recording"), dict)
+                    else None
+                )
                 if rec_id == data.get("id"):
                     details["track_number"] = str(track.get("number", ""))
                     break
@@ -464,7 +469,10 @@ def fetch_mb_metadata(isrc: str) -> dict:
                 _parse_mb_details(_query_recording_details(res.get("mbid_track", "")))
             )
         except (RuntimeError, httpx.RequestError) as detail_err:
-            logger.debug("[musicbrainz] detail query failed, keeping search result: %s", detail_err)
+            logger.debug(
+                "[musicbrainz] detail query failed, keeping search result: %s",
+                detail_err,
+            )
         if res and any(res.values()):
             put_cached_response("musicbrainz", cache_key, res)
     except Exception as e:
@@ -533,7 +541,10 @@ async def fetch_mb_metadata_async(isrc: str) -> dict:
             details = await _query_recording_details_async(res.get("mbid_track", ""))
             res.update(_parse_mb_details(details))
         except (RuntimeError, httpx.RequestError) as detail_err:
-            logger.debug("[musicbrainz] async detail query failed, keeping search result: %s", detail_err)
+            logger.debug(
+                "[musicbrainz] async detail query failed, keeping search result: %s",
+                detail_err,
+            )
         if res and any(res.values()):
             put_cached_response("musicbrainz", cache_key, res)
         set_mb_status(True)

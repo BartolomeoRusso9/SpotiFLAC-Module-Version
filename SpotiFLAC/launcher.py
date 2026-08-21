@@ -145,7 +145,12 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         nargs="?",
         help="Spotify, Tidal, Apple Music, SoundCloud, YouTube or Pandora URL",
     )
-    parser.add_argument("output_dir", nargs="?", default=pd.get("output_dir"), help="Destination directory")
+    parser.add_argument(
+        "output_dir",
+        nargs="?",
+        default=pd.get("output_dir"),
+        help="Destination directory",
+    )
 
     # ── Multi-playlist ──────────────────────────────────────────────────────
     playlists_grp = parser.add_argument_group("Multi-Playlist")

@@ -13,10 +13,10 @@ from SpotiFLAC.core import (
     tagger,
     transcode,
 )
+from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.history import HistoryManager
 from SpotiFLAC.core.isrc_utils import is_valid_isrc, normalize_isrc
 from SpotiFLAC.core.local_scanner import scan_file
-from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.models import (
     DownloadResult,
     TrackMetadata,
@@ -26,8 +26,8 @@ from SpotiFLAC.core.models import (
 from SpotiFLAC.core.quality import (
     map_amazon_community_quality,
     normalize_quality,
-    quality_for_provider,
     quality_fallback_chain,
+    quality_for_provider,
 )
 from SpotiFLAC.extensions.manager import (
     ExtensionManager,

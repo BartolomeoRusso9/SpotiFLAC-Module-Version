@@ -42,6 +42,7 @@ def _decrypt_base64_payload(b64_string: str) -> dict:
 
 def _load_registry() -> dict:
     import tempfile
+
     try:
         fresh_url = f"{_CLOUD_URL}?t={int(time.time())}"
         response = httpx.get(
@@ -54,7 +55,9 @@ def _load_registry() -> dict:
         registry = _decrypt_base64_payload(cloud_string)
         try:
             os.makedirs(_CACHE_DIR, exist_ok=True)
-            fd, temp_path = tempfile.mkstemp(dir=_CACHE_DIR, prefix=".endpoints_cache_", suffix=".tmp")
+            fd, temp_path = tempfile.mkstemp(
+                dir=_CACHE_DIR, prefix=".endpoints_cache_", suffix=".tmp"
+            )
             try:
                 with os.fdopen(fd, "w") as cache_file:
                     cache_file.write(cloud_string)
@@ -148,7 +151,6 @@ def get_community_url(provider: str) -> str:
 
 # Registry helpers must be defined before these imports to avoid the package
 # initialization cycle through health_check and lyrics.
-# ruff: noqa: E402
 from .errors import (
     AuthError,
     ErrorKind,
@@ -197,13 +199,6 @@ __all__ = [
     "embed_metadata_async",
     "enrich_metadata_async",
     "fetch_lyrics_async",
-    "max_resolution_spotify_cover",
-    "prioritize_providers_async",
-    "record_failure_async",
-    "record_success_async",
-    "run_health_check",
-    "sanitize",
-    "transcode_file_async",
     "get_amazon_endpoint",
     "get_apple_music_endpoint",
     "get_asian_provider_endpoint",
@@ -216,4 +211,11 @@ __all__ = [
     "get_tidal_endpoints",
     "get_tidal_post_endpoints",
     "get_youtube_endpoints",
+    "max_resolution_spotify_cover",
+    "prioritize_providers_async",
+    "record_failure_async",
+    "record_success_async",
+    "run_health_check",
+    "sanitize",
+    "transcode_file_async",
 ]

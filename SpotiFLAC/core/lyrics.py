@@ -326,7 +326,10 @@ async def _fetch_apple_async(
         if not results:
             return ""
 
-        scored = [(res, _score_itunes_result(res, track_name, artist_name, duration_s)) for res in results]
+        scored = [
+            (res, _score_itunes_result(res, track_name, artist_name, duration_s))
+            for res in results
+        ]
         best_result, best_score = max(scored, key=lambda x: x[1])
 
         if best_score < 50:

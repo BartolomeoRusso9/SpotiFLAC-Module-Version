@@ -105,6 +105,7 @@ _cache_lock = threading.Lock()
 
 def _get_cached(isrc: str) -> EnrichedMetadata | None:
     import dataclasses
+
     if not isrc:
         return None
     with _cache_lock:
