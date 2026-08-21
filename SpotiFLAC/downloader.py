@@ -511,6 +511,9 @@ async def download_one_async(
                     result = await download_task
 
             except asyncio.TimeoutError:
+                wait_for_idle = getattr(provider, "wait_for_idle_async", None)
+                if callable(wait_for_idle):
+                    await wait_for_idle(opts.timeout_s)
                 logger.warning(
                     "[downloader] provider '%s' timed out for track '%s'",
                     provider.name,
@@ -751,6 +754,9 @@ class DownloadWorker:
         """
         max_concurrent = max(1, getattr(self._opts, "max_concurrent_downloads", 2))
         semaphore = asyncio.Semaphore(max_concurrent)
+        initial_m4a = await asyncio.to_thread(
+            lambda: {p.resolve() for p in Path(base_out).rglob("*.m4a") if p.is_file()}
+        )
         results_queue: asyncio.Queue[tuple[TrackMetadata, object] | None] = (
             asyncio.Queue()
         )
@@ -847,16 +853,20 @@ class DownloadWorker:
                 if not t.done():
                     t.cancel()
             await asyncio.gather(consumer_task, *worker_tasks, return_exceptions=True)
-            await self._remove_partial_files_async(base_out)
+            await self._remove_partial_files_async(base_out, initial_m4a)
             raise
 
-        await self._remove_partial_files_async(base_out)
+        await self._remove_partial_files_async(base_out, initial_m4a)
         elapsed = time.perf_counter() - start
         self._print_summary(elapsed)
         await self._execute_post_action_async(base_out)
         return self._failed
 
-    async def _remove_partial_files_async(self, output_dir: str) -> None:
+    async def _remove_partial_files_async(
+        self,
+        output_dir: str,
+        initial_m4a: set[Path] | None = None,
+    ) -> None:
         """Removes leftover `.part` files and invalid temporary M4A files."""
 
         def _remove() -> int:
@@ -864,7 +874,12 @@ class DownloadWorker:
             root = Path(output_dir)
             if not root.exists():
                 return 0
-            candidates = list(root.rglob("*.part")) + list(root.rglob("*.m4a"))
+            preserved_m4a = initial_m4a or set()
+            candidates = list(root.rglob("*.part")) + [
+                path
+                for path in root.rglob("*.m4a")
+                if path.resolve() not in preserved_m4a
+            ]
             for path in candidates:
                 if not path.is_file() or (
                     path.suffix.lower() == ".m4a" and self._valid_m4a(path)
@@ -984,7 +999,13 @@ class DownloadWorker:
                 .replace("{failed}", str(failed_count))
             )
             try:
-                await asyncio.create_subprocess_shell(cmd)
+                process = await asyncio.create_subprocess_shell(cmd)
+                await process.communicate()
+                if process.returncode:
+                    logger.warning(
+                        "[post-action] command exited with status %s",
+                        process.returncode,
+                    )
             except Exception as exc:
                 logger.warning("[post-action] command failed: %s", exc)
 

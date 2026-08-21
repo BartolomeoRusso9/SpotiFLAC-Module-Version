@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .models import build_filename
+from .isrc_utils import normalize_isrc
 from .tagger import read_embedded_tags
 
 if TYPE_CHECKING:
@@ -66,8 +67,9 @@ def dedup_key(track: TrackMetadata) -> str:
     pulled from two playlists can carry two different catalogue ids, and
     downloading it twice would only produce the very same file twice.
     """
-    if track.isrc:
-        return f"isrc:{track.isrc.strip().upper()}"
+    normalized_isrc = normalize_isrc(track.isrc)
+    if normalized_isrc:
+        return f"isrc:{normalized_isrc}"
 
     title = _fold(track.title)
     artist = _fold(track.first_artist)
@@ -229,19 +231,22 @@ def index_audio_files(output_dir: Path | str) -> dict[str, list[Path]]:
                 tags = read_embedded_tags(path, include_cover=False).tags
             except Exception:
                 tags = {}
-            isrc = str(tags.get("ISRC", "")).strip().casefold()
+            isrc = normalize_isrc(str(tags.get("ISRC", "")))
             title = str(tags.get("TITLE", "")).strip()
             artist = str(tags.get("ARTIST", "")).strip()
+            album = str(tags.get("ALBUM", "")).strip()
             add(isrc_index, isrc, path)
-            add(identity_index, _identity_key(title, artist), path)
+            add(identity_index, _identity_key(title, artist, album), path)
 
     index["__isrc__"] = isrc_index
     index["__identity__"] = identity_index
     return index
 
 
-def _identity_key(title: str, artist: str) -> str:
-    return f"{_fold(artist)}|{_fold(title)}" if title and artist else ""
+def _identity_key(title: str, artist: str, album: str = "") -> str:
+    if not title or not artist:
+        return ""
+    return f"{_fold(artist)}|{_fold(title)}|{_fold(album)}"
 
 
 def _is_usable(path: Path) -> bool:
@@ -290,14 +295,11 @@ def find_existing_track(
     transcode_to: str | None = None,
 ) -> Path | None:
     """Finds a local track by ISRC, tags, then filename stem."""
-    buckets = (
-        index.get("__isrc__", {}).get(track.isrc.strip().casefold(), ())
-        if track.isrc
-        else ()
-    )
+    normalized_isrc = normalize_isrc(track.isrc)
+    buckets = index.get("__isrc__", {}).get(normalized_isrc, ())
     if not buckets:
         buckets = index.get("__identity__", {}).get(
-            _identity_key(track.title, track.artists), ()
+            _identity_key(track.title, track.artists, track.album), ()
         )
     if not buckets:
         return find_existing(index, stem, transcode_to)

@@ -25,6 +25,14 @@ from .extensions.manager import ExtensionManager
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
 
 
+class _BackRequested(Exception):
+    """Signals that the interactive wizard should restart for a new choice."""
+
+
+def _is_back_command(value: str) -> bool:
+    return value.lower() in {"b", "back", "indietro"}
+
+
 def _c(code: str, text: str) -> str:
     if _NO_COLOR:
         return text
@@ -69,6 +77,8 @@ def _ask(prompt: str, default: str = "") -> str:
         val = input(f"  {prompt}{default_hint}: ").strip()
     except (EOFError, KeyboardInterrupt):
         sys.exit(0)
+    if _is_back_command(val):
+        raise _BackRequested
     return val or default
 
 
@@ -80,6 +90,8 @@ def _ask_bool(prompt: str, default: bool = False) -> bool:
         sys.exit(0)
     if not val:
         return default
+    if _is_back_command(val):
+        raise _BackRequested
     return val in ("y", "yes", "s", "si", "1")
 
 
@@ -92,6 +104,8 @@ def _ask_choice(prompt: str, options: list[str], default: str) -> str:
         val = input("  → ").strip()
     except (EOFError, KeyboardInterrupt):
         sys.exit(0)
+    if _is_back_command(val):
+        raise _BackRequested
     if not val:
         return default
     if val.isdigit() and 1 <= int(val) <= len(options):
@@ -116,6 +130,9 @@ def _ask_multi(
         val = input("  → ").strip()
     except (EOFError, KeyboardInterrupt):
         sys.exit(0)
+
+    if _is_back_command(val):
+        raise _BackRequested
 
     if not val:
         return list(defaults)
@@ -329,6 +346,9 @@ async def _pick_from_history() -> str | None:
         except (EOFError, KeyboardInterrupt):
             sys.exit(0)
 
+        if _is_back_command(val):
+            raise _BackRequested
+
         if not val:
             return None
 
@@ -420,6 +440,9 @@ async def _manage_registries_section() -> None:
         except (EOFError, KeyboardInterrupt):
             sys.exit(0)
 
+        if _is_back_command(val):
+            raise _BackRequested
+
         if not val:
             return
 
@@ -487,6 +510,9 @@ async def _profile_load_section(cfg: dict) -> dict:
             val = input("  → ").strip()
         except (EOFError, KeyboardInterrupt):
             sys.exit(0)
+
+        if _is_back_command(val):
+            raise _BackRequested
 
         if not val:
             return cfg
@@ -636,6 +662,14 @@ def _summary(cfg: dict) -> None:
 
 
 async def run_interactive() -> dict:
+    while True:
+        try:
+            return await _run_interactive_once()
+        except _BackRequested:
+            print(DIM("\n  Returning to the start of the wizard. Enter b/back at any question to restart."))
+
+
+async def _run_interactive_once() -> dict:
     _header()
 
     # ── Health check ────────────────────────────────────────────────────────
@@ -1225,14 +1259,14 @@ def _print_cli_command(cfg: dict) -> None:
         cfg (dict): Configuration values used to construct the command.
 
     """
-    parts = [f'spotiflac "{cfg["url"]}" "{cfg["output_dir"]}"']
+    parts = ["spotiflac", cfg["url"], cfg["output_dir"]]
     if cfg.get("output_path"):
-        parts.append(f'-o "{cfg["output_path"]}"')
-    parts.append(f"-s {' '.join(cfg['services'])}")
+        parts.extend(["-o", cfg["output_path"]])
+    parts.extend(["-s", *cfg["services"]])
     if cfg["quality"] not in ("LOSSLESS", "BEST"):
-        parts.append(f"-q {cfg['quality']}")
+        parts.extend(["-q", cfg["quality"]])
     if cfg["filename_format"] != "{title} - {artist}":
-        parts.append(f'--filename-format "{cfg["filename_format"]}"')
+        parts.extend(["--filename-format", cfg["filename_format"]])
     if cfg["use_track_numbers"]:
         parts.append("--use-track-numbers")
     if cfg["use_album_track_numbers"]:
@@ -1254,33 +1288,33 @@ def _print_cli_command(cfg: dict) -> None:
     if cfg["first_artist_only"]:
         parts.append("--first-artist-only")
     if cfg.get("artist_separator"):
-        parts.append(f'--artist-separator {shlex.quote(cfg["artist_separator"])}')
+        parts.extend(["--artist-separator", cfg["artist_separator"]])
     if not cfg["embed_lyrics"]:
         parts.append("--no-lyrics")
     else:
-        parts.append(f"--lyrics-providers {' '.join(cfg['lyrics_providers'])}")
+        parts.extend(["--lyrics-providers", *cfg["lyrics_providers"]])
     if not cfg["enrich_metadata"]:
         parts.append("--no-enrich")
     else:
-        parts.append(f"--enrich-providers {' '.join(cfg['enrich_providers'])}")
+        parts.extend(["--enrich-providers", *cfg["enrich_providers"]])
     if cfg.get("track_max_retries"):
-        parts.append(f"--retries {cfg['track_max_retries']}")
+        parts.extend(["--retries", str(cfg["track_max_retries"])])
     if cfg.get("max_concurrent_downloads", 2) != 2:
-        parts.append(f"--max-concurrent {cfg['max_concurrent_downloads']}")
+        parts.extend(["--max-concurrent", str(cfg["max_concurrent_downloads"])])
     if cfg.get("timeout_s"):
-        parts.append(f"--timeout {cfg['timeout_s']}")
+        parts.extend(["--timeout", str(cfg["timeout_s"])])
     if cfg.get("post_download_action") and cfg["post_download_action"] != "none":
-        parts.append(f"--post-action {cfg['post_download_action']}")
+        parts.extend(["--post-action", cfg["post_download_action"]])
         if cfg["post_download_action"] == "command" and cfg.get(
             "post_download_command",
         ):
-            parts.append(f'--post-command "{cfg["post_download_command"]}"')
+            parts.extend(["--post-command", cfg["post_download_command"]])
     if cfg.get("qobuz_local_api_url"):
-        parts.append(f'--qobuz-local-api "{cfg["qobuz_local_api_url"]}"')
+        parts.extend(["--qobuz-local-api", cfg["qobuz_local_api_url"]])
     if cfg.get("tidal_custom_api"):
-        parts.append(f'--tidal-api "{cfg["tidal_custom_api"]}"')
+        parts.extend(["--tidal-api", cfg["tidal_custom_api"]])
     if cfg.get("loop"):
-        parts.append(f"--loop {cfg['loop']}")
+        parts.extend(["--loop", str(cfg["loop"])])
 
-    command = " \\\n    ".join(parts)
+    command = " \\\n    ".join(shlex.quote(part) for part in parts)
     print(f"\n  {command}\n")

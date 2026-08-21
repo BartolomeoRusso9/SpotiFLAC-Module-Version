@@ -788,7 +788,8 @@ async def fetch_lyrics_async(
     providers: list[str] | None = None,
 ) -> tuple[str, str]:
 
-    providers = providers or DEFAULT_LYRICS_PROVIDERS
+    if providers is None:
+        providers = DEFAULT_LYRICS_PROVIDERS
     cache_key = "|".join(
         [
             track_name,
