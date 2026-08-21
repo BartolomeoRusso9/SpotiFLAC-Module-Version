@@ -457,6 +457,11 @@ async def _manage_registries_section() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _is_playlist_url(url: str) -> bool:
+    lower_url = url.lower()
+    return "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
+
+
 async def _profile_load_section(cfg: dict) -> dict:
     try:
         from .core.profiles import (
@@ -689,9 +694,11 @@ async def run_interactive() -> dict:
             break
 
     cfg["url"] = url
+    original_url = url
 
     # ── Profile load ────────────────────────────────────────────────────────
     cfg = await _profile_load_section(cfg)
+    cfg["url"] = original_url
 
     # ── Extension registries ────────────────────────────────────────────────
     await _manage_registries_section()
@@ -713,6 +720,13 @@ async def run_interactive() -> dict:
         cfg.setdefault("enrich_providers", ["deezer", "apple"])
         cfg.setdefault("allow_fallback", True)
         cfg.setdefault("max_concurrent_downloads", 2)
+        if _is_playlist_url(cfg["url"]):
+            cfg["create_playlist_subfolders"] = _ask_bool(
+                "Create subfolders for playlists?",
+                cfg.get("create_playlist_subfolders", True),
+            )
+        _section("Equivalent CLI command")
+        _print_cli_command(cfg)
         return cfg
 
     # ── 2. Output directory ─────────────────────────────────────────────────
@@ -995,10 +1009,7 @@ async def run_interactive() -> dict:
     cfg["first_artist_only"] = cfg.get("first_artist_only", False)
 
     # Check if URL is a playlist for organization question
-    lower_url = cfg["url"].lower()
-    is_playlist = (
-        "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
-    )
+    is_playlist = _is_playlist_url(cfg["url"])
 
     if is_playlist:
         cfg["create_playlist_subfolders"] = _ask_bool(
@@ -1135,7 +1146,7 @@ async def run_interactive() -> dict:
     _section("9.5 · Download Timeout")
     default_timeout = cfg.get("timeout_s", 0)
     timeout_str = _ask(
-        "Timeout per track in seconds (0 = disabled)",
+        "Timeout per provider attempt in seconds (0 = disabled)",
         str(default_timeout),
     )
     try:
@@ -1232,10 +1243,7 @@ def _print_cli_command(cfg: dict) -> None:
         parts.append("--use-album-subfolders")
 
     # Check if URL is a playlist before appending the CLI flag
-    lower_url = cfg["url"].lower()
-    is_playlist = (
-        "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
-    )
+    is_playlist = _is_playlist_url(cfg["url"])
     if is_playlist and not cfg.get("create_playlist_subfolders", True):
         parts.append("--no-playlist-subfolders")
 

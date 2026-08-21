@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .models import build_filename
+from .tagger import read_embedded_tags
 
 if TYPE_CHECKING:
     from ..downloader import DownloadOptions
@@ -207,16 +208,40 @@ def track_stem(track: TrackMetadata, opts: DownloadOptions, position: int) -> st
 
 
 def index_audio_files(output_dir: Path | str) -> dict[str, list[Path]]:
-    """Maps every audio file under `output_dir` by case-folded filename stem."""
+    """Maps audio files by filename stem and lightweight identifying tags."""
     index: dict[str, list[Path]] = {}
+    isrc_index: dict[str, list[Path]] = {}
+    identity_index: dict[str, list[Path]] = {}
+
+    def add(bucket: dict[str, list[Path]], key: str, path: Path) -> None:
+        if key:
+            bucket.setdefault(key, []).append(path)
+
     for root, dirs, files in os.walk(output_dir):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         for name in files:
             stem, extension = os.path.splitext(name)
             if extension.lower() not in AUDIO_EXTENSIONS:
                 continue
-            index.setdefault(stem.casefold(), []).append(Path(root) / name)
+            path = Path(root) / name
+            add(index, stem.casefold(), path)
+            try:
+                tags = read_embedded_tags(path, include_cover=False).tags
+            except Exception:
+                tags = {}
+            isrc = str(tags.get("ISRC", "")).strip().casefold()
+            title = str(tags.get("TITLE", "")).strip()
+            artist = str(tags.get("ARTIST", "")).strip()
+            add(isrc_index, isrc, path)
+            add(identity_index, _identity_key(title, artist), path)
+
+    index["__isrc__"] = isrc_index
+    index["__identity__"] = identity_index
     return index
+
+
+def _identity_key(title: str, artist: str) -> str:
+    return f"{_fold(artist)}|{_fold(title)}" if title and artist else ""
 
 
 def _is_usable(path: Path) -> bool:
@@ -258,6 +283,33 @@ def find_existing(
     return min(candidates, key=lambda p: (_extension_rank(p), str(p)))
 
 
+def find_existing_track(
+    index: dict[str, list[Path]],
+    track: TrackMetadata,
+    stem: str,
+    transcode_to: str | None = None,
+) -> Path | None:
+    """Finds a local track by ISRC, tags, then filename stem."""
+    buckets = (
+        index.get("__isrc__", {}).get(track.isrc.strip().casefold(), ())
+        if track.isrc
+        else ()
+    )
+    if not buckets:
+        buckets = index.get("__identity__", {}).get(
+            _identity_key(track.title, track.artists), ()
+        )
+    if not buckets:
+        return find_existing(index, stem, transcode_to)
+
+    candidates = [p for p in buckets if _is_usable(p)]
+    if transcode_to:
+        candidates = [
+            p for p in candidates if p.suffix.lower() == f".{transcode_to.lower()}"
+        ]
+    return min(candidates, key=lambda p: (_extension_rank(p), str(p))) if candidates else None
+
+
 def mark_existing(
     plan: SyncPlan,
     index: dict[str, list[Path]],
@@ -267,8 +319,9 @@ def mark_existing(
     resolved = tuple(
         replace(
             planned,
-            existing_path=find_existing(
+            existing_path=find_existing_track(
                 index,
+                planned.track,
                 track_stem(planned.track, opts, planned.position),
                 opts.transcode_to,
             ),

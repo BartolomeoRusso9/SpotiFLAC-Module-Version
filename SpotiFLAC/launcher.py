@@ -459,8 +459,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         default=pd.get("timeout_s", None),
         dest="timeout_s",
         metavar="SECONDS",
-        help="Maximum seconds allowed per track download (default: no limit). "
-        "The track is skipped and counted as failed when the timeout expires.",
+        help="Maximum seconds allowed for each provider attempt (default: no limit). "
+        "The next provider is tried when the timeout expires.",
     )
 
     # ── Post-download ─────────────────────────────────────────────────────────
@@ -641,7 +641,8 @@ async def amain() -> None:
         print_ffmpeg_warning()
         cfg = await run_interactive()
 
-        log_level = _resolve_log_level(cfg.get("verbose", False))
+        verbose = cfg.get("verbose", False) or "--verbose" in sys.argv or "-v" in sys.argv
+        log_level = _resolve_log_level(verbose)
         _root_handler = logging.StreamHandler(sys.stdout)
         _root_handler.setFormatter(
             _CleanConsoleFormatter(

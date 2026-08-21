@@ -42,9 +42,11 @@ from .core.playlist_sync import (
     SyncPlan,
     build_plan,
     entry_for,
+    find_existing_track,
     index_audio_files,
     mark_existing,
     render_m3u,
+    track_stem,
     write_if_changed_async,
 )
 from .core.progress import (
@@ -420,9 +422,7 @@ async def download_one_async(
         )
 
     for attempt in range(opts.track_max_retries + 1):
-        if stop_event.is_set() or (
-            opts.timeout_s and time.monotonic() - started_at >= opts.timeout_s
-        ):
+        if stop_event.is_set():
             return DownloadResult.fail(
                 "none",
                 f"Download timed out after {opts.timeout_s}s",
@@ -459,11 +459,10 @@ async def download_one_async(
                     provider.set_stop_event_async(stop_event)
 
             try:
-                # Wrap inside asyncio.wait_for to enforce track timeout strictly at the IO level
-                time_elapsed = time.monotonic() - started_at
-                timeout_left = (
-                    max(1, opts.timeout_s - time_elapsed) if opts.timeout_s else None
-                )
+                # The timeout applies to each provider attempt. A JS provider
+                # may spend time obtaining a ticket before the audio transfer
+                # starts, and that startup time must not consume another
+                # provider's timeout budget.
 
                 # Check if provider supports artist_separator parameter
                 download_kwargs = {
@@ -503,23 +502,27 @@ async def download_one_async(
                     **download_kwargs,
                 )
 
-                if timeout_left:
-                    result = await asyncio.wait_for(download_task, timeout=timeout_left)
+                if opts.timeout_s:
+                    result = await asyncio.wait_for(
+                        download_task,
+                        timeout=opts.timeout_s,
+                    )
                 else:
                     result = await download_task
 
             except asyncio.TimeoutError:
-                stop_event.set()
                 logger.warning(
-                    "[downloader] timeout exceeded for track '%s'",
+                    "[downloader] provider '%s' timed out for track '%s'",
+                    provider.name,
                     metadata.title,
                 )
                 safe_tqdm_write(
-                    f"\n  ⏱  Timeout reached for '{metadata.title}' — skipping track.",
+                    f"\n  ⏱  Timeout reached for '{metadata.title}' on "
+                    f"{provider.name} — trying next provider.",
                 )
-                return DownloadResult.fail(
-                    "none",
-                    f"Download timed out after {opts.timeout_s}s",
+                result = DownloadResult.fail(
+                    provider.name,
+                    f"Provider timed out after {opts.timeout_s}s",
                 )
             except Exception as exc:
                 # A well-behaved provider never raises — it returns
@@ -643,6 +646,7 @@ class DownloadWorker:
         is_album: bool = False,
         is_playlist: bool = False,
         positions: list[int] | None = None,
+        existing_paths: dict[str, Path] | None = None,
     ) -> None:
         self._tracks = tracks
         self._opts = opts
@@ -654,6 +658,7 @@ class DownloadWorker:
         # sync that skips already-present tracks) passes original positions so
         # file names do not change between runs.
         self._positions = positions or list(range(1, len(tracks) + 1))
+        self._existing_paths = existing_paths or {}
         self._failed: list[tuple[str, str, str, str]] = []
         self._skipped: list[tuple[str, str]] = []
         self._completed: dict[str, str] = {}
@@ -762,22 +767,34 @@ class DownloadWorker:
                 )
                 await manager.start_download(track.id)
 
-                out_dir = await self._track_output_dir_async(base_out, track)
-                try:
-                    result = await download_one_async(
-                        track,
-                        out_dir,
-                        self._providers,
-                        self._opts,
-                        position,
-                        self._is_album,
-                    )
-                except Exception as exc:
-                    logger.exception(
-                        "[worker] Unexpected exception downloading '%s'",
+                existing_path = self._existing_paths.get(track.id)
+                if existing_path is not None:
+                    print_track_skipped(
                         track.title,
+                        "already in the output folder",
                     )
-                    result = DownloadResult.fail("none", f"Unexpected error: {exc}")
+                    result = DownloadResult.skipped_result(
+                        self._providers[0].name,
+                        str(existing_path),
+                        fmt=existing_path.suffix.lstrip("."),
+                    )
+                else:
+                    out_dir = await self._track_output_dir_async(base_out, track)
+                    try:
+                        result = await download_one_async(
+                            track,
+                            out_dir,
+                            self._providers,
+                            self._opts,
+                            position,
+                            self._is_album,
+                        )
+                    except Exception as exc:
+                        logger.exception(
+                            "[worker] Unexpected exception downloading '%s'",
+                            track.title,
+                        )
+                        result = DownloadResult.fail("none", f"Unexpected error: {exc}")
 
             await results_queue.put((track, result))
 
@@ -987,15 +1004,16 @@ class SpotiflacDownloader:
         again after a playlist gained a track only downloads that track.
         """
         opts = self._playlist_opts()
-        sources = await self._resolve_playlists_async(urls)
+        output_dir = Path(opts.output_dir)
+        await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
+        index = await asyncio.to_thread(index_audio_files, output_dir)
+
+        sources = await self._resolve_playlists_async(urls, index=index)
         if not sources:
             logger.warning("[playlists] No playlist could be resolved")
             return
 
         plan = build_plan(sources, m3u_format=m3u_format)
-        output_dir = Path(opts.output_dir)
-        await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
-        index = await asyncio.to_thread(index_audio_files, output_dir)
         plan = mark_existing(plan, index, opts)
         print_sync_plan(len(plan.tracks), len(plan.present), len(plan.pending))
 
@@ -1027,7 +1045,12 @@ class SpotiflacDownloader:
             )
         return opts
 
-    async def _resolve_playlists_async(self, urls: list[str]) -> list[PlaylistSource]:
+    async def _resolve_playlists_async(
+        self,
+        urls: list[str],
+        *,
+        index: dict[str, list[Path]] | None = None,
+    ) -> list[PlaylistSource]:
         """Fetches every playlist, keeping the run alive when one fails."""
         sources: list[PlaylistSource] = []
         for url in urls:
@@ -1054,7 +1077,24 @@ class SpotiflacDownloader:
                 host in lowered
                 for host in ("soundcloud.com", "pandora.com", "pandora.app.link")
             ):
-                tracks = await self._resolve_isrc_bulk_async(tracks)
+                if index is None:
+                    tracks = await self._resolve_isrc_bulk_async(tracks)
+                else:
+                    playlist_opts = self._playlist_opts()
+                    pending_isrc = [
+                        track
+                        for position, track in enumerate(tracks, 1)
+                        if find_existing_track(
+                            index,
+                            track,
+                            track_stem(track, playlist_opts, position),
+                            playlist_opts.transcode_to,
+                        )
+                        is None
+                    ]
+                    resolved = await self._resolve_isrc_bulk_async(pending_isrc)
+                    resolved_by_id = {track.id: track for track in resolved}
+                    tracks = [resolved_by_id.get(track.id, track) for track in tracks]
 
             await self._record_history_async(url, collection_name, tracks, info)
             sources.append(
@@ -1414,6 +1454,7 @@ class SpotiflacDownloader:
         is_album: bool,
         is_playlist: bool,
         opts: DownloadOptions | None = None,
+        existing_paths: dict[str, Path] | None = None,
     ) -> list[TrackMetadata]:
         effective = opts if opts is not None else self._opts
         updated_tracks = await self._register_queue_async(tracks)
@@ -1424,6 +1465,7 @@ class SpotiflacDownloader:
             collection_name=collection_name,
             is_album=is_album,
             is_playlist=is_playlist,
+            existing_paths=existing_paths,
         )
 
         failed_tuples = await worker.run_async()
@@ -1476,8 +1518,41 @@ class SpotiflacDownloader:
         is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
         is_pandora = "pandora.com" in url or "pandora.app.link" in url
 
+        existing_paths: dict[str, Path] = {}
         if not is_soundcloud and not is_pandora:
-            tracks = await self._resolve_isrc_bulk_async(tracks)
+            if is_playlist:
+                output_dir = Path(effective_opts.output_dir)
+                await asyncio.to_thread(
+                    output_dir.mkdir,
+                    parents=True,
+                    exist_ok=True,
+                )
+                index = await asyncio.to_thread(index_audio_files, output_dir)
+                for position, track in enumerate(tracks, 1):
+                    existing = find_existing_track(
+                        index,
+                        track,
+                        track_stem(track, effective_opts, position),
+                        effective_opts.transcode_to,
+                    )
+                    if existing is not None:
+                        existing_paths[track.id] = existing
+                pending_isrc = [
+                    track
+                    for position, track in enumerate(tracks, 1)
+                    if find_existing_track(
+                        index,
+                        track,
+                        track_stem(track, effective_opts, position),
+                        effective_opts.transcode_to,
+                    )
+                    is None
+                ]
+                resolved = await self._resolve_isrc_bulk_async(pending_isrc)
+                resolved_by_id = {track.id: track for track in resolved}
+                tracks = [resolved_by_id.get(track.id, track) for track in tracks]
+            else:
+                tracks = await self._resolve_isrc_bulk_async(tracks)
 
         await self._record_history_async(url, collection_name, tracks, info)
 
@@ -1488,6 +1563,7 @@ class SpotiflacDownloader:
             is_album,
             is_playlist,
             opts=effective_opts,
+            existing_paths=existing_paths,
         )
 
     @staticmethod
