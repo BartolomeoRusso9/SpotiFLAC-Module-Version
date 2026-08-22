@@ -19,8 +19,18 @@ from urllib.parse import urlparse
 
 from .core.health_check import run_health_check
 from .core.quality import normalize_quality
+from .extensions.catalog import SERVICE_ALIASES
+from .extensions.manager import ExtensionManager
 
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
+
+
+class _BackRequested(Exception):
+    """Signals that the interactive wizard should restart for a new choice."""
+
+
+def _is_back_command(value: str) -> bool:
+    return value.lower() in {"b", "back", "indietro"}
 
 
 def _c(code: str, text: str) -> str:
@@ -67,6 +77,8 @@ def _ask(prompt: str, default: str = "") -> str:
         val = input(f"  {prompt}{default_hint}: ").strip()
     except (EOFError, KeyboardInterrupt):
         sys.exit(0)
+    if _is_back_command(val):
+        raise _BackRequested
     return val or default
 
 
@@ -78,6 +90,8 @@ def _ask_bool(prompt: str, default: bool = False) -> bool:
         sys.exit(0)
     if not val:
         return default
+    if _is_back_command(val):
+        raise _BackRequested
     return val in ("y", "yes", "s", "si", "1")
 
 
@@ -90,6 +104,8 @@ def _ask_choice(prompt: str, options: list[str], default: str) -> str:
         val = input("  → ").strip()
     except (EOFError, KeyboardInterrupt):
         sys.exit(0)
+    if _is_back_command(val):
+        raise _BackRequested
     if not val:
         return default
     if val.isdigit() and 1 <= int(val) <= len(options):
@@ -114,6 +130,9 @@ def _ask_multi(
         val = input("  → ").strip()
     except (EOFError, KeyboardInterrupt):
         sys.exit(0)
+
+    if _is_back_command(val):
+        raise _BackRequested
 
     if not val:
         return list(defaults)
@@ -145,6 +164,69 @@ def _section(title: str) -> None:
 def _header() -> None:
     print(f"\n{BOLD(MAGENTA('SpotiFLAC — Interactive Mode'))}")
     print(DIM("=" * 40))
+
+
+def _canonical_service_name(ext_name: str) -> str | None:
+    """Normalize extension IDs such as ``tidal-web`` and ``tidal-py`` to one service name."""
+    value = (ext_name or "").lower().removeprefix("ext:")
+    if not value:
+        return None
+
+    value = value.replace("_", "-")
+    value = value.replace("-web", "").replace("-py", "")
+
+    alias_reverse = {v.lower(): k for k, v in SERVICE_ALIASES.items()}
+    if value in alias_reverse:
+        return alias_reverse[value]
+
+    if value.startswith("ytmusic"):
+        return "youtube"
+    if value.startswith("apple"):
+        return "apple"
+    if value.startswith("tidal"):
+        return "tidal"
+    if value.startswith("qobuz"):
+        return "qobuz"
+    if value.startswith("deezer"):
+        return "deezer"
+    if value.startswith("soundcloud"):
+        return "soundcloud"
+    if value.startswith("pandora"):
+        return "pandora"
+    if value.startswith("amazon"):
+        return "amazon"
+    return value
+
+
+def _installed_service_options() -> list[str]:
+    """Return the installed provider services as a deduplicated list for interactive menus."""
+    try:
+        manager = ExtensionManager(auto_install_downloads=False)
+        installed = manager.list_installed()
+    except Exception:
+        return []
+
+    services: list[str] = []
+    seen: set[str] = set()
+    for ext in installed:
+        if not getattr(ext, "is_download_provider", False):
+            continue
+        service = _canonical_service_name(ext.name)
+        if not service or service in seen:
+            continue
+        seen.add(service)
+        services.append(service)
+
+    return sorted(services)
+
+
+def _require_installed_service_options() -> list[str]:
+    """Ensure at least one download provider is available, otherwise stop the interactive flow."""
+    services = _installed_service_options()
+    if not services:
+        print("No download provider found. Configure your extension registry first.")
+        raise SystemExit(1)
+    return services
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +346,9 @@ async def _pick_from_history() -> str | None:
         except (EOFError, KeyboardInterrupt):
             sys.exit(0)
 
+        if _is_back_command(val):
+            raise _BackRequested
+
         if not val:
             return None
 
@@ -355,6 +440,9 @@ async def _manage_registries_section() -> None:
         except (EOFError, KeyboardInterrupt):
             sys.exit(0)
 
+        if _is_back_command(val):
+            raise _BackRequested
+
         if not val:
             return
 
@@ -392,6 +480,11 @@ async def _manage_registries_section() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _is_playlist_url(url: str) -> bool:
+    lower_url = url.lower()
+    return "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
+
+
 async def _profile_load_section(cfg: dict) -> dict:
     try:
         from .core.profiles import (
@@ -417,6 +510,9 @@ async def _profile_load_section(cfg: dict) -> dict:
             val = input("  → ").strip()
         except (EOFError, KeyboardInterrupt):
             sys.exit(0)
+
+        if _is_back_command(val):
+            raise _BackRequested
 
         if not val:
             return cfg
@@ -566,6 +662,18 @@ def _summary(cfg: dict) -> None:
 
 
 async def run_interactive() -> dict:
+    while True:
+        try:
+            return await _run_interactive_once()
+        except _BackRequested:
+            print(
+                DIM(
+                    "\n  Returning to the start of the wizard. Enter b/back at any question to restart."
+                )
+            )
+
+
+async def _run_interactive_once() -> dict:
     _header()
 
     # ── Health check ────────────────────────────────────────────────────────
@@ -624,9 +732,11 @@ async def run_interactive() -> dict:
             break
 
     cfg["url"] = url
+    original_url = url
 
     # ── Profile load ────────────────────────────────────────────────────────
     cfg = await _profile_load_section(cfg)
+    cfg["url"] = original_url
 
     # ── Extension registries ────────────────────────────────────────────────
     await _manage_registries_section()
@@ -648,6 +758,13 @@ async def run_interactive() -> dict:
         cfg.setdefault("enrich_providers", ["deezer", "apple"])
         cfg.setdefault("allow_fallback", True)
         cfg.setdefault("max_concurrent_downloads", 2)
+        if _is_playlist_url(cfg["url"]):
+            cfg["create_playlist_subfolders"] = _ask_bool(
+                "Create subfolders for playlists?",
+                cfg.get("create_playlist_subfolders", True),
+            )
+        _section("Equivalent CLI command")
+        _print_cli_command(cfg)
         return cfg
 
     # ── 2. Output directory ─────────────────────────────────────────────────
@@ -706,11 +823,6 @@ async def run_interactive() -> dict:
     # ── 3. Services ──────────────────────────────────────────────────────────
     _section("3 · Audio Services")
 
-    if health_status:
-        unavailable = [s for s in _ALL_SERVICES if not health_status.get(s, True)]
-        if unavailable:
-            print(DIM(f"  Unavailable: {', '.join(unavailable)}"))
-
     is_soundcloud_url = (
         "soundcloud.com" in cfg["url"] or "on.soundcloud.com" in cfg["url"]
     )
@@ -722,59 +834,92 @@ async def run_interactive() -> dict:
         "pandora.com" in cfg["url"].lower() or "pandora.app.link" in cfg["url"].lower()
     )
 
+    installed_services = _require_installed_service_options()
+
     if is_soundcloud_url:
-        cfg["services"] = ["soundcloud"]
+        cfg["services"] = (
+            ["soundcloud"]
+            if "soundcloud" in installed_services
+            else (installed_services or ["soundcloud"])
+        )
     elif is_youtube_url:
-        cfg["services"] = ["youtube"]
+        if "youtube" in installed_services:
+            cfg["services"] = ["youtube"]
+        else:
+            cfg["services"] = installed_services or ["youtube"]
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
+            fallback_options = [s for s in installed_services if s != "youtube"]
+            fallback_defaults = (
+                ["tidal"]
+                if "tidal" in fallback_options
+                else ([fallback_options[0]] if fallback_options else [])
+            )
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options=["tidal", "qobuz", "deezer", "amazon", "apple", "soundcloud"],
-                defaults=["tidal"],
+                options=fallback_options or ["tidal"],
+                defaults=fallback_defaults,
                 ordered=True,
             )
-            cfg["services"] = ["youtube", *fallbacks]
+            if "youtube" in installed_services:
+                cfg["services"] = ["youtube", *fallbacks]
+            else:
+                cfg["services"] = fallbacks
     elif is_apple_url:
-        cfg["services"] = ["apple"]
+        if "apple" in installed_services:
+            cfg["services"] = ["apple"]
+        else:
+            cfg["services"] = installed_services or ["apple"]
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
+            fallback_options = [s for s in installed_services if s != "apple"]
+            fallback_defaults = (
+                ["tidal"]
+                if "tidal" in fallback_options
+                else ([fallback_options[0]] if fallback_options else [])
+            )
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options=["tidal", "qobuz", "deezer", "amazon", "youtube"],
-                defaults=["tidal"],
+                options=fallback_options or ["tidal"],
+                defaults=fallback_defaults,
                 ordered=True,
             )
-            cfg["services"] = ["apple", *fallbacks]
+            if "apple" in installed_services:
+                cfg["services"] = ["apple", *fallbacks]
+            else:
+                cfg["services"] = fallbacks
     elif is_pandora_url:
-        cfg["services"] = ["pandora"]
+        if "pandora" in installed_services:
+            cfg["services"] = ["pandora"]
+        else:
+            cfg["services"] = installed_services or ["pandora"]
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
+            fallback_options = [s for s in installed_services if s != "pandora"]
+            fallback_defaults = (
+                ["tidal"]
+                if "tidal" in fallback_options
+                else ([fallback_options[0]] if fallback_options else [])
+            )
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options=["tidal", "qobuz", "deezer", "amazon", "apple"],
-                defaults=["tidal"],
+                options=fallback_options or ["tidal"],
+                defaults=fallback_defaults,
                 ordered=True,
             )
-            cfg["services"] = ["pandora", *fallbacks]
+            if "pandora" in installed_services:
+                cfg["services"] = ["pandora", *fallbacks]
+            else:
+                cfg["services"] = fallbacks
     else:
+        options = installed_services or ["tidal"]
+        defaults = (
+            cfg.get("services") or ["tidal"] if "tidal" in options else [options[0]]
+        )
         cfg["services"] = _ask_multi(
             "Services (order = priority):",
-            options=[
-                "deezer",
-                "tidal",
-                "qobuz",
-                "amazon",
-                "joox",
-                "netease",
-                "migu",
-                "kuwo",
-                "soundcloud",
-                "youtube",
-                "apple",
-                "pandora",
-            ],
-            defaults=cfg.get("services", ["tidal"]),
+            options=options,
+            defaults=defaults,
             ordered=True,
         )
 
@@ -936,10 +1081,7 @@ async def run_interactive() -> dict:
     cfg["first_artist_only"] = cfg.get("first_artist_only", False)
 
     # Check if URL is a playlist for organization question
-    lower_url = cfg["url"].lower()
-    is_playlist = (
-        "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
-    )
+    is_playlist = _is_playlist_url(cfg["url"])
 
     if is_playlist:
         cfg["create_playlist_subfolders"] = _ask_bool(
@@ -996,6 +1138,10 @@ async def run_interactive() -> dict:
     )
 
     if cfg["embed_lyrics"]:
+        if health_status:
+            unavailable = [s for s in _ALL_SERVICES if not health_status.get(s, True)]
+            if unavailable:
+                print(DIM(f"  Unavailable: {', '.join(unavailable)}"))
         cfg["lyrics_providers"] = _ask_multi(
             "Lyrics providers (order = priority):",
             options=[
@@ -1068,9 +1214,9 @@ async def run_interactive() -> dict:
 
     # ── 9.5. Timeout ───────────────────────────────────────────────────
     _section("9.5 · Download Timeout")
-    default_timeout = cfg.get("timeout_s", 0)
+    default_timeout = cfg.get("timeout_s", 180)
     timeout_str = _ask(
-        "Timeout per track in seconds (0 = disabled)",
+        "Timeout per provider attempt in seconds (0 = disabled)",
         str(default_timeout),
     )
     try:
@@ -1149,14 +1295,14 @@ def _print_cli_command(cfg: dict) -> None:
         cfg (dict): Configuration values used to construct the command.
 
     """
-    parts = [f'spotiflac "{cfg["url"]}" "{cfg["output_dir"]}"']
+    parts = ["spotiflac", cfg["url"], cfg["output_dir"]]
     if cfg.get("output_path"):
-        parts.append(f'-o "{cfg["output_path"]}"')
-    parts.append(f"-s {' '.join(cfg['services'])}")
+        parts.extend(["-o", cfg["output_path"]])
+    parts.extend(["-s", *cfg["services"]])
     if cfg["quality"] not in ("LOSSLESS", "BEST"):
-        parts.append(f"-q {cfg['quality']}")
+        parts.extend(["-q", cfg["quality"]])
     if cfg["filename_format"] != "{title} - {artist}":
-        parts.append(f'--filename-format "{cfg["filename_format"]}"')
+        parts.extend(["--filename-format", cfg["filename_format"]])
     if cfg["use_track_numbers"]:
         parts.append("--use-track-numbers")
     if cfg["use_album_track_numbers"]:
@@ -1167,43 +1313,44 @@ def _print_cli_command(cfg: dict) -> None:
         parts.append("--use-album-subfolders")
 
     # Check if URL is a playlist before appending the CLI flag
-    lower_url = cfg["url"].lower()
-    is_playlist = (
-        "/playlist/" in lower_url or "list=" in lower_url or "/sets/" in lower_url
-    )
-    if is_playlist and not cfg.get("create_playlist_subfolders", True):
-        parts.append("--no-playlist-subfolders")
+    is_playlist = _is_playlist_url(cfg["url"])
+    if is_playlist:
+        parts.append(
+            "--playlist-subfolders"
+            if cfg.get("create_playlist_subfolders", True)
+            else "--no-playlist-subfolders"
+        )
 
     if cfg["first_artist_only"]:
         parts.append("--first-artist-only")
     if cfg.get("artist_separator"):
-        parts.append(f'--artist-separator {shlex.quote(cfg["artist_separator"])}')
+        parts.extend(["--artist-separator", cfg["artist_separator"]])
     if not cfg["embed_lyrics"]:
         parts.append("--no-lyrics")
     else:
-        parts.append(f"--lyrics-providers {' '.join(cfg['lyrics_providers'])}")
+        parts.extend(["--lyrics-providers", *cfg["lyrics_providers"]])
     if not cfg["enrich_metadata"]:
         parts.append("--no-enrich")
     else:
-        parts.append(f"--enrich-providers {' '.join(cfg['enrich_providers'])}")
+        parts.extend(["--enrich-providers", *cfg["enrich_providers"]])
     if cfg.get("track_max_retries"):
-        parts.append(f"--retries {cfg['track_max_retries']}")
+        parts.extend(["--retries", str(cfg["track_max_retries"])])
     if cfg.get("max_concurrent_downloads", 2) != 2:
-        parts.append(f"--max-concurrent {cfg['max_concurrent_downloads']}")
+        parts.extend(["--max-concurrent", str(cfg["max_concurrent_downloads"])])
     if cfg.get("timeout_s"):
-        parts.append(f"--timeout {cfg['timeout_s']}")
+        parts.extend(["--timeout", str(cfg["timeout_s"])])
     if cfg.get("post_download_action") and cfg["post_download_action"] != "none":
-        parts.append(f"--post-action {cfg['post_download_action']}")
+        parts.extend(["--post-action", cfg["post_download_action"]])
         if cfg["post_download_action"] == "command" and cfg.get(
             "post_download_command",
         ):
-            parts.append(f'--post-command "{cfg["post_download_command"]}"')
+            parts.extend(["--post-command", cfg["post_download_command"]])
     if cfg.get("qobuz_local_api_url"):
-        parts.append(f'--qobuz-local-api "{cfg["qobuz_local_api_url"]}"')
+        parts.extend(["--qobuz-local-api", cfg["qobuz_local_api_url"]])
     if cfg.get("tidal_custom_api"):
-        parts.append(f'--tidal-api "{cfg["tidal_custom_api"]}"')
+        parts.extend(["--tidal-api", cfg["tidal_custom_api"]])
     if cfg.get("loop"):
-        parts.append(f"--loop {cfg['loop']}")
+        parts.extend(["--loop", str(cfg["loop"])])
 
-    command = " \\\n    ".join(parts)
+    command = " \\\n    ".join(shlex.quote(part) for part in parts)
     print(f"\n  {command}\n")

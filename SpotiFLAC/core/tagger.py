@@ -1039,7 +1039,7 @@ class EmbeddedTags:
         return bool(self.tags or self.cover_data or self.lyrics)
 
 
-def _read_flac_tags(path: Path) -> EmbeddedTags:
+def _read_flac_tags(path: Path, *, include_cover: bool = True) -> EmbeddedTags:
     audio = FLAC(str(path))
     result = EmbeddedTags()
 
@@ -1055,7 +1055,7 @@ def _read_flac_tags(path: Path) -> EmbeddedTags:
         else:
             result.tags[key_up] = values[0]
 
-    if audio.pictures:
+    if include_cover and audio.pictures:
         picture = next(
             (p for p in audio.pictures if p.type == PictureType.COVER_FRONT),
             audio.pictures[0],
@@ -1066,7 +1066,7 @@ def _read_flac_tags(path: Path) -> EmbeddedTags:
     return result
 
 
-def _read_m4a_tags(path: Path) -> EmbeddedTags:
+def _read_m4a_tags(path: Path, *, include_cover: bool = True) -> EmbeddedTags:
     from mutagen.mp4 import MP4, MP4Cover
 
     audio = MP4(str(path))
@@ -1078,7 +1078,7 @@ def _read_m4a_tags(path: Path) -> EmbeddedTags:
         if not value:
             continue
 
-        if key == "covr":
+        if key == "covr" and include_cover:
             cover = value[0]
             result.cover_data = bytes(cover)
             result.cover_mime = (
@@ -1115,7 +1115,11 @@ def _read_m4a_tags(path: Path) -> EmbeddedTags:
     return result
 
 
-def read_embedded_tags(filepath: str | Path) -> EmbeddedTags:
+def read_embedded_tags(
+    filepath: str | Path,
+    *,
+    include_cover: bool = True,
+) -> EmbeddedTags:
     """Reads back the tags a provider embedded into a downloaded file.
 
     Returns an empty `EmbeddedTags` for formats we do not need to read
@@ -1126,9 +1130,9 @@ def read_embedded_tags(filepath: str | Path) -> EmbeddedTags:
 
     try:
         if suffix in _EXT_FLAC:
-            return _read_flac_tags(path)
+            return _read_flac_tags(path, include_cover=include_cover)
         if suffix in _EXT_M4A:
-            return _read_m4a_tags(path)
+            return _read_m4a_tags(path, include_cover=include_cover)
         if suffix in _EXT_MP3:
             return _read_id3_container_tags(ID3(str(path)))
         if suffix in _EXT_WAV:

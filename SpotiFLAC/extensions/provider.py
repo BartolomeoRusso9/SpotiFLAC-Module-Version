@@ -24,6 +24,7 @@ import contextlib
 import logging
 import queue
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -55,8 +56,10 @@ class JSExtensionProvider(BaseProvider):
         settings: dict | None = None,
         ext_dir: str | None = None,
         node_executable: str = "node",
-        timeout_s: int = 120,
+        timeout_s: int = 180,
     ) -> None:
+        super().__init__(timeout_s=timeout_s)
+
         self._timeout_s = timeout_s
         self._node_executable = node_executable
         self._progress_cb = None
@@ -85,6 +88,8 @@ class JSExtensionProvider(BaseProvider):
         self._idle_runtimes = queue.Queue()
         self._all_runtimes = []
         self._runtime_lock = threading.Lock()
+        self._active_calls = 0
+        self._active_calls_condition = threading.Condition(self._runtime_lock)
 
     # ─────────────────────── BaseProvider overrides ───────────
 
@@ -172,6 +177,8 @@ class JSExtensionProvider(BaseProvider):
             self._idle_runtimes.put(rt)
 
     def _call(self, method: str, *args, **kw) -> object:
+        with self._active_calls_condition:
+            self._active_calls += 1
         try:
             # Acquire a "worker" from the Pool and assign it the task
             with self._acquire_runtime() as rt:
@@ -182,9 +189,31 @@ class JSExtensionProvider(BaseProvider):
                 message=str(e),
                 provider=self.name,
             ) from e
+        finally:
+            with self._active_calls_condition:
+                self._active_calls -= 1
+                self._active_calls_condition.notify_all()
+
+    def wait_for_idle(self, timeout: float | None = None) -> bool:
+        """Waits until timed-out background extension calls have returned."""
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with self._active_calls_condition:
+            while self._active_calls:
+                if deadline is None:
+                    self._active_calls_condition.wait()
+                    continue
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._active_calls_condition.wait(remaining)
+            return True
+
+    async def wait_for_idle_async(self, timeout: float | None = None) -> bool:
+        return await asyncio.to_thread(self.wait_for_idle, timeout)
 
     def close(self) -> None:
         """Forcefully closes all Node.js processes in the Pool."""
+        self.wait_for_idle(5.0)
         with self._runtime_lock:
             for rt in self._all_runtimes:
                 with contextlib.suppress(Exception):
@@ -835,7 +864,7 @@ def make_extension_provider(
     settings: dict | None = None,
     ext_dir: str | None = None,
     node_executable: str = "node",
-    timeout_s: int = 120,
+    timeout_s: int = 180,
 ) -> JSExtensionProvider:
     return JSExtensionProvider(
         ext_id=ext_id,

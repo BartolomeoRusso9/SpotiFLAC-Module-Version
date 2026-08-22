@@ -788,7 +788,8 @@ async def fetch_lyrics_async(
     providers: list[str] | None = None,
 ) -> tuple[str, str]:
 
-    providers = providers or DEFAULT_LYRICS_PROVIDERS
+    if providers is None:
+        providers = DEFAULT_LYRICS_PROVIDERS
     cache_key = "|".join(
         [
             track_name,
@@ -802,6 +803,12 @@ async def fetch_lyrics_async(
     )
     cached = get_cached_response("lyrics", cache_key, _LYRICS_RESPONSE_CACHE_TTL)
     if isinstance(cached, list) and len(cached) == 2:
+        logger.debug(
+            "[lyrics] Using cached lyrics provider '%s' for %s - %s",
+            cached[1],
+            artist_name,
+            track_name,
+        )
         return str(cached[0]), str(cached[1])
 
     ctx = LyricsContext(
@@ -863,6 +870,12 @@ async def fetch_lyrics_async(
                     artist_name,
                 ),
                 provider,
+            )
+            logger.debug(
+                "[lyrics] Lyrics found with provider '%s' for %s - %s",
+                provider,
+                artist_name,
+                track_name,
             )
             put_cached_response("lyrics", cache_key, list(result))
             return result

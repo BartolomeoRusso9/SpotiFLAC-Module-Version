@@ -131,6 +131,11 @@ async def _load_profile_into_defaults(profile_name: str) -> dict:
     return {}
 
 
+def _resolve_log_level(verbose: bool) -> int:
+    """Hide warnings unless the user explicitly asked for verbose logging."""
+    return logging.DEBUG if verbose else logging.ERROR
+
+
 def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     pd = profile_defaults or {}
 
@@ -241,6 +246,19 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         action="store_true",
         dest="use_album_subfolders",
         default=pd.get("use_album_subfolders", False),
+    )
+    parser.add_argument(
+        "--playlist-subfolders",
+        action="store_true",
+        dest="create_playlist_subfolders",
+        default=pd.get("create_playlist_subfolders", True),
+        help="Create a subfolder for playlist downloads (default: enabled).",
+    )
+    parser.add_argument(
+        "--no-playlist-subfolders",
+        action="store_false",
+        dest="create_playlist_subfolders",
+        help="Keep playlist downloads in the output directory.",
     )
     parser.add_argument(
         "--first-artist-only",
@@ -451,11 +469,12 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     timeout_grp.add_argument(
         "--timeout",
         type=int,
-        default=pd.get("timeout_s", None),
+        default=pd.get("timeout_s", 180),
         dest="timeout_s",
         metavar="SECONDS",
-        help="Maximum seconds allowed per track download (default: no limit). "
-        "The track is skipped and counted as failed when the timeout expires.",
+        help="Maximum seconds allowed for each provider attempt (default: 180). "
+        "Setting 0 disables the timeout. "
+        "The next provider is tried when the timeout expires.",
     )
 
     # ── Post-download ─────────────────────────────────────────────────────────
@@ -489,6 +508,7 @@ async def _run_download_async(
     use_album_track_numbers: bool,
     use_artist_subfolders: bool,
     use_album_subfolders: bool,
+    create_playlist_subfolders: bool,
     loop: int | None,
     quality: str,
     first_artist_only: bool,
@@ -537,6 +557,7 @@ async def _run_download_async(
         use_artist_subfolders=use_artist_subfolders,
         allow_fallback=allow_fallback,
         use_album_subfolders=use_album_subfolders,
+        create_playlist_subfolders=create_playlist_subfolders,
         quality=quality,
         first_artist_only=first_artist_only,
         artist_separator=artist_separator,
@@ -636,7 +657,10 @@ async def amain() -> None:
         print_ffmpeg_warning()
         cfg = await run_interactive()
 
-        log_level = logging.WARNING
+        verbose = (
+            cfg.get("verbose", False) or "--verbose" in sys.argv or "-v" in sys.argv
+        )
+        log_level = _resolve_log_level(verbose)
         _root_handler = logging.StreamHandler(sys.stdout)
         _root_handler.setFormatter(
             _CleanConsoleFormatter(
@@ -654,6 +678,7 @@ async def amain() -> None:
             use_album_track_numbers=cfg["use_album_track_numbers"],
             use_artist_subfolders=cfg["use_artist_subfolders"],
             use_album_subfolders=cfg["use_album_subfolders"],
+            create_playlist_subfolders=cfg.get("create_playlist_subfolders", True),
             loop=cfg.get("loop"),
             quality=cfg["quality"],
             first_artist_only=cfg["first_artist_only"],
@@ -746,7 +771,7 @@ async def amain() -> None:
         else merged_defaults.get("track_max_retries", 0)
     )
 
-    log_level = logging.DEBUG if args.verbose else logging.WARNING
+    log_level = _resolve_log_level(args.verbose)
     log_format = (
         "%(levelname)s:%(name)s: %(message)s"
         if args.verbose
@@ -765,6 +790,7 @@ async def amain() -> None:
         use_album_track_numbers=args.use_album_track_numbers,
         use_artist_subfolders=args.use_artist_subfolders,
         use_album_subfolders=args.use_album_subfolders,
+        create_playlist_subfolders=args.create_playlist_subfolders,
         loop=args.loop,
         quality=quality,
         first_artist_only=args.first_artist_only,
@@ -804,6 +830,7 @@ async def amain() -> None:
                 "use_album_track_numbers": args.use_album_track_numbers,
                 "use_artist_subfolders": args.use_artist_subfolders,
                 "use_album_subfolders": args.use_album_subfolders,
+                "create_playlist_subfolders": args.create_playlist_subfolders,
                 "first_artist_only": args.first_artist_only,
                 "artist_separator": args.artist_separator,
                 "include_featuring": args.include_featuring,
@@ -831,6 +858,12 @@ async def amain() -> None:
 
 
 def main() -> None:
+    for stream_name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is not None and hasattr(stream, "reconfigure"):
+            with contextlib.suppress(Exception):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(amain())
 

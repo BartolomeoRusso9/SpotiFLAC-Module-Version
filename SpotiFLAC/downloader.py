@@ -42,9 +42,11 @@ from .core.playlist_sync import (
     SyncPlan,
     build_plan,
     entry_for,
+    find_existing_track,
     index_audio_files,
     mark_existing,
     render_m3u,
+    track_stem,
     write_if_changed_async,
 )
 from .core.progress import (
@@ -236,7 +238,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
                 js_prov = JSExtensionProvider(
                     original_ext_id,
                     ext_dir=opts.ext_dir,
-                    timeout_s=opts.timeout_s or 120,
+                    timeout_s=opts.timeout_s or 180,
                 )
                 providers.append(js_prov)
                 logger.debug("Added JS provider fallback: %s", original_ext_id)
@@ -420,9 +422,7 @@ async def download_one_async(
         )
 
     for attempt in range(opts.track_max_retries + 1):
-        if stop_event.is_set() or (
-            opts.timeout_s and time.monotonic() - started_at >= opts.timeout_s
-        ):
+        if stop_event.is_set():
             return DownloadResult.fail(
                 "none",
                 f"Download timed out after {opts.timeout_s}s",
@@ -459,11 +459,10 @@ async def download_one_async(
                     provider.set_stop_event_async(stop_event)
 
             try:
-                # Wrap inside asyncio.wait_for to enforce track timeout strictly at the IO level
-                time_elapsed = time.monotonic() - started_at
-                timeout_left = (
-                    max(1, opts.timeout_s - time_elapsed) if opts.timeout_s else None
-                )
+                # The timeout applies to each provider attempt. A JS provider
+                # may spend time obtaining a ticket before the audio transfer
+                # starts, and that startup time must not consume another
+                # provider's timeout budget.
 
                 # Check if provider supports artist_separator parameter
                 download_kwargs = {
@@ -503,23 +502,30 @@ async def download_one_async(
                     **download_kwargs,
                 )
 
-                if timeout_left:
-                    result = await asyncio.wait_for(download_task, timeout=timeout_left)
+                if opts.timeout_s:
+                    result = await asyncio.wait_for(
+                        download_task,
+                        timeout=opts.timeout_s,
+                    )
                 else:
                     result = await download_task
 
             except asyncio.TimeoutError:
-                stop_event.set()
+                wait_for_idle = getattr(provider, "wait_for_idle_async", None)
+                if callable(wait_for_idle):
+                    await wait_for_idle(5.0)
                 logger.warning(
-                    "[downloader] timeout exceeded for track '%s'",
+                    "[downloader] provider '%s' timed out for track '%s'",
+                    provider.name,
                     metadata.title,
                 )
                 safe_tqdm_write(
-                    f"\n  ⏱  Timeout reached for '{metadata.title}' — skipping track.",
+                    f"\n  ⏱  Timeout reached for '{metadata.title}' on "
+                    f"{provider.name} — trying next provider.",
                 )
-                return DownloadResult.fail(
-                    "none",
-                    f"Download timed out after {opts.timeout_s}s",
+                result = DownloadResult.fail(
+                    provider.name,
+                    f"Provider timed out after {opts.timeout_s}s",
                 )
             except Exception as exc:
                 # A well-behaved provider never raises — it returns
@@ -643,6 +649,7 @@ class DownloadWorker:
         is_album: bool = False,
         is_playlist: bool = False,
         positions: list[int] | None = None,
+        existing_paths: dict[str, Path] | None = None,
     ) -> None:
         self._tracks = tracks
         self._opts = opts
@@ -654,6 +661,7 @@ class DownloadWorker:
         # sync that skips already-present tracks) passes original positions so
         # file names do not change between runs.
         self._positions = positions or list(range(1, len(tracks) + 1))
+        self._existing_paths = existing_paths or {}
         self._failed: list[tuple[str, str, str, str]] = []
         self._skipped: list[tuple[str, str]] = []
         self._completed: dict[str, str] = {}
@@ -746,6 +754,9 @@ class DownloadWorker:
         """
         max_concurrent = max(1, getattr(self._opts, "max_concurrent_downloads", 2))
         semaphore = asyncio.Semaphore(max_concurrent)
+        initial_m4a = await asyncio.to_thread(
+            lambda: {p.resolve() for p in Path(base_out).rglob("*.m4a") if p.is_file()}
+        )
         results_queue: asyncio.Queue[tuple[TrackMetadata, object] | None] = (
             asyncio.Queue()
         )
@@ -762,22 +773,34 @@ class DownloadWorker:
                 )
                 await manager.start_download(track.id)
 
-                out_dir = await self._track_output_dir_async(base_out, track)
-                try:
-                    result = await download_one_async(
-                        track,
-                        out_dir,
-                        self._providers,
-                        self._opts,
-                        position,
-                        self._is_album,
-                    )
-                except Exception as exc:
-                    logger.exception(
-                        "[worker] Unexpected exception downloading '%s'",
+                existing_path = self._existing_paths.get(track.id)
+                if existing_path is not None:
+                    print_track_skipped(
                         track.title,
+                        "already in the output folder",
                     )
-                    result = DownloadResult.fail("none", f"Unexpected error: {exc}")
+                    result = DownloadResult.skipped_result(
+                        self._providers[0].name,
+                        str(existing_path),
+                        fmt=existing_path.suffix.lstrip("."),
+                    )
+                else:
+                    out_dir = await self._track_output_dir_async(base_out, track)
+                    try:
+                        result = await download_one_async(
+                            track,
+                            out_dir,
+                            self._providers,
+                            self._opts,
+                            position,
+                            self._is_album,
+                        )
+                    except Exception as exc:
+                        logger.exception(
+                            "[worker] Unexpected exception downloading '%s'",
+                            track.title,
+                        )
+                        result = DownloadResult.fail("none", f"Unexpected error: {exc}")
 
             await results_queue.put((track, result))
 
@@ -830,12 +853,80 @@ class DownloadWorker:
                 if not t.done():
                     t.cancel()
             await asyncio.gather(consumer_task, *worker_tasks, return_exceptions=True)
+            await self._remove_partial_files_async(base_out, initial_m4a)
             raise
 
+        await self._remove_partial_files_async(base_out, initial_m4a)
         elapsed = time.perf_counter() - start
         self._print_summary(elapsed)
         await self._execute_post_action_async(base_out)
         return self._failed
+
+    async def _remove_partial_files_async(
+        self,
+        output_dir: str,
+        initial_m4a: set[Path] | None = None,
+    ) -> None:
+        """Removes leftover `.part` files and invalid temporary M4A files."""
+
+        def _remove() -> int:
+            removed = 0
+            root = Path(output_dir)
+            if not root.exists():
+                return 0
+            preserved_m4a = initial_m4a or set()
+            # Collect completed file paths to avoid deleting them
+            completed_paths = set(Path(p).resolve() for p in self._completed.values() if p)
+
+            # Always clean up .part files
+            part_candidates = list(root.rglob("*.part"))
+
+            # For .m4a files, only consider those matching temporary naming patterns
+            # (e.g., containing .tmp, .download, .temp in the stem) or not in the
+            # initial_m4a set AND not in completed downloads
+            m4a_candidates = [
+                path
+                for path in root.rglob("*.m4a")
+                if path.resolve() not in preserved_m4a
+                and path.resolve() not in completed_paths
+                and any(marker in path.stem.lower() for marker in (".tmp", ".download", ".temp", ".part"))
+            ]
+
+            candidates = part_candidates + m4a_candidates
+
+            for path in candidates:
+                if not path.is_file() or (
+                    path.suffix.lower() == ".m4a" and self._valid_m4a(path)
+                ):
+                    continue
+                try:
+                    path.unlink()
+                    removed += 1
+                except OSError as exc:
+                    logger.warning(
+                        "[downloader] Could not remove partial file %s: %s",
+                        path,
+                        exc,
+                    )
+            return removed
+
+        removed = await asyncio.to_thread(_remove)
+        if removed:
+            logger.debug(
+                "[downloader] Removed %d leftover partial/invalid audio file(s)",
+                removed,
+            )
+
+    @staticmethod
+    def _valid_m4a(path: Path) -> bool:
+        """Returns whether an M4A has a readable audio container."""
+        try:
+            from mutagen.mp4 import MP4
+
+            audio = MP4(str(path))
+            return bool(audio.info and audio.info.length > 0)
+        except Exception:
+            return False
 
     async def _resolve_output_dir_async(self) -> str:
         """Asynchronously resolves the output directory ensuring it exists."""
@@ -922,7 +1013,13 @@ class DownloadWorker:
                 .replace("{failed}", str(failed_count))
             )
             try:
-                await asyncio.create_subprocess_shell(cmd)
+                process = await asyncio.create_subprocess_shell(cmd)
+                await process.communicate()
+                if process.returncode:
+                    logger.warning(
+                        "[post-action] command exited with status %s",
+                        process.returncode,
+                    )
             except Exception as exc:
                 logger.warning("[post-action] command failed: %s", exc)
 
@@ -987,15 +1084,16 @@ class SpotiflacDownloader:
         again after a playlist gained a track only downloads that track.
         """
         opts = self._playlist_opts()
-        sources = await self._resolve_playlists_async(urls)
+        output_dir = Path(opts.output_dir)
+        await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
+        index = await asyncio.to_thread(index_audio_files, output_dir)
+
+        sources = await self._resolve_playlists_async(urls, index=index)
         if not sources:
             logger.warning("[playlists] No playlist could be resolved")
             return
 
         plan = build_plan(sources, m3u_format=m3u_format)
-        output_dir = Path(opts.output_dir)
-        await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
-        index = await asyncio.to_thread(index_audio_files, output_dir)
         plan = mark_existing(plan, index, opts)
         print_sync_plan(len(plan.tracks), len(plan.present), len(plan.pending))
 
@@ -1027,7 +1125,12 @@ class SpotiflacDownloader:
             )
         return opts
 
-    async def _resolve_playlists_async(self, urls: list[str]) -> list[PlaylistSource]:
+    async def _resolve_playlists_async(
+        self,
+        urls: list[str],
+        *,
+        index: dict[str, list[Path]] | None = None,
+    ) -> list[PlaylistSource]:
         """Fetches every playlist, keeping the run alive when one fails."""
         sources: list[PlaylistSource] = []
         for url in urls:
@@ -1054,7 +1157,24 @@ class SpotiflacDownloader:
                 host in lowered
                 for host in ("soundcloud.com", "pandora.com", "pandora.app.link")
             ):
-                tracks = await self._resolve_isrc_bulk_async(tracks)
+                if index is None:
+                    tracks = await self._resolve_isrc_bulk_async(tracks)
+                else:
+                    playlist_opts = self._playlist_opts()
+                    pending_isrc = [
+                        track
+                        for position, track in enumerate(tracks, 1)
+                        if find_existing_track(
+                            index,
+                            track,
+                            track_stem(track, playlist_opts, position),
+                            playlist_opts.transcode_to,
+                        )
+                        is None
+                    ]
+                    resolved = await self._resolve_isrc_bulk_async(pending_isrc)
+                    resolved_by_id = {track.id: track for track in resolved}
+                    tracks = [resolved_by_id.get(track.id, track) for track in tracks]
 
             await self._record_history_async(url, collection_name, tracks, info)
             sources.append(
@@ -1414,6 +1534,7 @@ class SpotiflacDownloader:
         is_album: bool,
         is_playlist: bool,
         opts: DownloadOptions | None = None,
+        existing_paths: dict[str, Path] | None = None,
     ) -> list[TrackMetadata]:
         effective = opts if opts is not None else self._opts
         updated_tracks = await self._register_queue_async(tracks)
@@ -1424,6 +1545,7 @@ class SpotiflacDownloader:
             collection_name=collection_name,
             is_album=is_album,
             is_playlist=is_playlist,
+            existing_paths=existing_paths,
         )
 
         failed_tuples = await worker.run_async()
@@ -1476,8 +1598,41 @@ class SpotiflacDownloader:
         is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
         is_pandora = "pandora.com" in url or "pandora.app.link" in url
 
+        existing_paths: dict[str, Path] = {}
         if not is_soundcloud and not is_pandora:
-            tracks = await self._resolve_isrc_bulk_async(tracks)
+            if is_playlist:
+                output_dir = Path(effective_opts.output_dir)
+                await asyncio.to_thread(
+                    output_dir.mkdir,
+                    parents=True,
+                    exist_ok=True,
+                )
+                index = await asyncio.to_thread(index_audio_files, output_dir)
+                for position, track in enumerate(tracks, 1):
+                    existing = find_existing_track(
+                        index,
+                        track,
+                        track_stem(track, effective_opts, position),
+                        effective_opts.transcode_to,
+                    )
+                    if existing is not None:
+                        existing_paths[track.id] = existing
+                pending_isrc = [
+                    track
+                    for position, track in enumerate(tracks, 1)
+                    if find_existing_track(
+                        index,
+                        track,
+                        track_stem(track, effective_opts, position),
+                        effective_opts.transcode_to,
+                    )
+                    is None
+                ]
+                resolved = await self._resolve_isrc_bulk_async(pending_isrc)
+                resolved_by_id = {track.id: track for track in resolved}
+                tracks = [resolved_by_id.get(track.id, track) for track in tracks]
+            else:
+                tracks = await self._resolve_isrc_bulk_async(tracks)
 
         await self._record_history_async(url, collection_name, tracks, info)
 
@@ -1488,6 +1643,7 @@ class SpotiflacDownloader:
             is_album,
             is_playlist,
             opts=effective_opts,
+            existing_paths=existing_paths,
         )
 
     @staticmethod

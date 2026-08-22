@@ -378,6 +378,50 @@ def test_playlist_sync_dedup_and_rendering(tmp_path):
     assert "Artist One - Song Title" in m3u
 
 
+def test_playlist_local_match_normalizes_isrc_and_checks_album(monkeypatch, tmp_path):
+    track_path = tmp_path / "renamed.flac"
+    track_path.write_bytes(b"audio")
+
+    monkeypatch.setattr(
+        playlist_sync,
+        "read_embedded_tags",
+        lambda path, include_cover=False: tagger.EmbeddedTags(
+            tags={
+                "ISRC": "US-ABC-1234567",
+                "TITLE": "Song",
+                "ARTIST": "Artist",
+                "ALBUM": "Original Album",
+            }
+        ),
+    )
+    index = playlist_sync.index_audio_files(tmp_path)
+
+    same_recording = TrackMetadata(
+        id="track-1",
+        title="Song",
+        artists="Artist",
+        album="Different Album",
+        album_artist="Artist",
+        isrc="USABC1234567",
+    )
+    assert (
+        playlist_sync.find_existing_track(index, same_recording, "missing")
+        == track_path
+    )
+
+    no_isrc_match = same_recording.model_copy(update={"isrc": ""})
+    assert playlist_sync.find_existing_track(index, no_isrc_match, "missing") is None
+
+
+def test_fetch_lyrics_respects_explicit_empty_provider_list():
+    from SpotiFLAC.core.lyrics import fetch_lyrics_async
+
+    result = asyncio.run(
+        fetch_lyrics_async("Song", "Artist", providers=[]),
+    )
+    assert result == ("", "")
+
+
 def test_tagger_helpers_cover_url_and_embedded_tags():
     base_url = "https://i.scdn.co/image/ab67616d0000abc123"
     assert tagger.max_resolution_spotify_cover(base_url) == (

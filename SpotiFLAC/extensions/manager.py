@@ -25,6 +25,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import traceback
 import zipfile
 from dataclasses import dataclass, field
@@ -303,7 +304,21 @@ class ExtensionManager:
         entries: list[RegistryEntry] = []
         for u in urls:
             try:
-                r = httpx.get(u, timeout=self.timeout, follow_redirects=True)
+                r = None
+                for attempt in range(3):
+                    try:
+                        r = httpx.get(
+                            u,
+                            timeout=self.timeout,
+                            follow_redirects=True,
+                            headers={"User-Agent": "SpotiFLAC/ExtensionManager"},
+                        )
+                        break
+                    except httpx.RequestError:
+                        if attempt == 2:
+                            raise
+                        time.sleep(0.5 * (2**attempt))
+                assert r is not None
                 r.raise_for_status()
                 data = r.json()
             except Exception as e:
