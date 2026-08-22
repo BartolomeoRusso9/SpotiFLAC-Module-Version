@@ -843,62 +843,74 @@ async def _run_interactive_once() -> dict:
             else (installed_services or ["soundcloud"])
         )
     elif is_youtube_url:
-        cfg["services"] = (
-            ["youtube"]
-            if "youtube" in installed_services
-            else (installed_services or ["youtube"])
-        )
+        if "youtube" in installed_services:
+            cfg["services"] = ["youtube"]
+        else:
+            cfg["services"] = installed_services or ["youtube"]
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
+            fallback_options = [s for s in installed_services if s != "youtube"]
+            fallback_defaults = (
+                ["tidal"]
+                if "tidal" in fallback_options
+                else ([fallback_options[0]] if fallback_options else [])
+            )
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options=installed_services or ["tidal"],
-                defaults=(
-                    ["tidal"]
-                    if "tidal" in (installed_services or [])
-                    else ([installed_services[0]] if installed_services else ["tidal"])
-                ),
+                options=fallback_options or ["tidal"],
+                defaults=fallback_defaults,
                 ordered=True,
             )
-            cfg["services"] = ["youtube", *fallbacks]
+            if "youtube" in installed_services:
+                cfg["services"] = ["youtube", *fallbacks]
+            else:
+                cfg["services"] = fallbacks
     elif is_apple_url:
-        cfg["services"] = (
-            ["apple"]
-            if "apple" in installed_services
-            else (installed_services or ["apple"])
-        )
+        if "apple" in installed_services:
+            cfg["services"] = ["apple"]
+        else:
+            cfg["services"] = installed_services or ["apple"]
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
+            fallback_options = [s for s in installed_services if s != "apple"]
+            fallback_defaults = (
+                ["tidal"]
+                if "tidal" in fallback_options
+                else ([fallback_options[0]] if fallback_options else [])
+            )
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options=installed_services or ["tidal"],
-                defaults=(
-                    ["tidal"]
-                    if "tidal" in (installed_services or [])
-                    else ([installed_services[0]] if installed_services else ["tidal"])
-                ),
+                options=fallback_options or ["tidal"],
+                defaults=fallback_defaults,
                 ordered=True,
             )
-            cfg["services"] = ["apple", *fallbacks]
+            if "apple" in installed_services:
+                cfg["services"] = ["apple", *fallbacks]
+            else:
+                cfg["services"] = fallbacks
     elif is_pandora_url:
-        cfg["services"] = (
-            ["pandora"]
-            if "pandora" in installed_services
-            else (installed_services or ["pandora"])
-        )
+        if "pandora" in installed_services:
+            cfg["services"] = ["pandora"]
+        else:
+            cfg["services"] = installed_services or ["pandora"]
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
+            fallback_options = [s for s in installed_services if s != "pandora"]
+            fallback_defaults = (
+                ["tidal"]
+                if "tidal" in fallback_options
+                else ([fallback_options[0]] if fallback_options else [])
+            )
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
-                options=installed_services or ["tidal"],
-                defaults=(
-                    ["tidal"]
-                    if "tidal" in (installed_services or [])
-                    else ([installed_services[0]] if installed_services else ["tidal"])
-                ),
+                options=fallback_options or ["tidal"],
+                defaults=fallback_defaults,
                 ordered=True,
             )
-            cfg["services"] = ["pandora", *fallbacks]
+            if "pandora" in installed_services:
+                cfg["services"] = ["pandora", *fallbacks]
+            else:
+                cfg["services"] = fallbacks
     else:
         options = installed_services or ["tidal"]
         defaults = (

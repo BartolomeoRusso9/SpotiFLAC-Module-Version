@@ -472,7 +472,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         default=pd.get("timeout_s", 180),
         dest="timeout_s",
         metavar="SECONDS",
-        help="Maximum seconds allowed for each provider attempt (default: no limit). "
+        help="Maximum seconds allowed for each provider attempt (default: 180). "
+        "Setting 0 disables the timeout. "
         "The next provider is tried when the timeout expires.",
     )
 
@@ -829,6 +830,7 @@ async def amain() -> None:
                 "use_album_track_numbers": args.use_album_track_numbers,
                 "use_artist_subfolders": args.use_artist_subfolders,
                 "use_album_subfolders": args.use_album_subfolders,
+                "create_playlist_subfolders": args.create_playlist_subfolders,
                 "first_artist_only": args.first_artist_only,
                 "artist_separator": args.artist_separator,
                 "include_featuring": args.include_featuring,

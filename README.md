@@ -118,7 +118,7 @@ spotiflac --interactive
 
 *(Or `python launcher.py --interactive` if running from source)*
 
-On launch it automatically runs a lyrics-provider health check before asking any questions, so you always know which of your installed lyric sources are reachable.
+On launch it automatically runs a lyrics-provider health check before asking any questions, so you always know which of your configured lyric sources are reachable.
 
 **What the wizard does at startup:**
 
@@ -385,7 +385,7 @@ SpotiFLAC(
 
 ### Lyrics Provider Health Check
 
-SpotiFLAC can probe the endpoints of the installed lyrics providers before embedding lyrics, to verify which lyric sources are currently reachable.
+SpotiFLAC can probe the endpoints of the configured lyrics providers before embedding lyrics, to verify which lyric sources are currently reachable.
 
 This check is specifically about lyrics sources, not audio download providers. In Interactive Mode it runs automatically at startup. In code or scripts you can call it directly:
 

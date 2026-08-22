@@ -213,7 +213,7 @@ class JSExtensionProvider(BaseProvider):
 
     def close(self) -> None:
         """Forcefully closes all Node.js processes in the Pool."""
-        self.wait_for_idle(self._timeout_s)
+        self.wait_for_idle(5.0)
         with self._runtime_lock:
             for rt in self._all_runtimes:
                 with contextlib.suppress(Exception):
