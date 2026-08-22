@@ -21,8 +21,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .models import build_filename
 from .isrc_utils import normalize_isrc
+from .models import build_filename
 from .tagger import read_embedded_tags
 
 if TYPE_CHECKING:

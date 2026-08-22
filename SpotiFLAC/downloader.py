@@ -876,7 +876,9 @@ class DownloadWorker:
                 return 0
             preserved_m4a = initial_m4a or set()
             # Collect completed file paths to avoid deleting them
-            completed_paths = set(Path(p).resolve() for p in self._completed.values() if p)
+            completed_paths = set(
+                Path(p).resolve() for p in self._completed.values() if p
+            )
 
             # Always clean up .part files
             part_candidates = list(root.rglob("*.part"))
@@ -889,7 +891,10 @@ class DownloadWorker:
                 for path in root.rglob("*.m4a")
                 if path.resolve() not in preserved_m4a
                 and path.resolve() not in completed_paths
-                and any(marker in path.stem.lower() for marker in (".tmp", ".download", ".temp", ".part"))
+                and any(
+                    marker in path.stem.lower()
+                    for marker in (".tmp", ".download", ".temp", ".part")
+                )
             ]
 
             candidates = part_candidates + m4a_candidates
