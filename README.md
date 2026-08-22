@@ -1003,15 +1003,17 @@ SpotiFLAC(
 | `--use-album-track-numbers` | | `False` | Use the track's original album number instead of queue position. |
 | `--use-artist-subfolders` | | `False` | Organize files into per-artist subfolders. |
 | `--use-album-subfolders` | | `False` | Organize files into per-album subfolders. |
+| `--playlist-subfolders` | | `True` | Create a subfolder for playlist downloads (enabled by default). |
+| `--no-playlist-subfolders` | | | Keep playlist downloads directly in the output directory instead of a subfolder. |
 | `--first-artist-only` | | `False` | Use only the first artist in tags and filename. |
 | `--artist-separator` | | `None` | Custom separator for joining multiple artists in tags (e.g. `", "` or `" / "`). Useful for Rekordbox. |
 | `--include-featuring` | | `False` | Include tracks where the artist appears as a featured artist. Only applies to artist/discography URLs. |
 | `--qobuz-local-api` | | `None` | Optional setting forwarded to the installed Qobuz extension, if it supports it. |
 | `--tidal-api` | | `None` | Optional setting forwarded to the installed Tidal extension, if it supports it. |
-| `--timeout` | | `None` | Per-track download timeout in seconds. If a track download stalls or takes longer than this limit, it is forcibly terminated and marked as failed, then SpotiFLAC moves to the next extension or retry. |
+| `--timeout` | | `180` | Maximum seconds allowed for each provider attempt. If a track download stalls or takes longer than this limit, it is forcibly terminated and marked as failed, then SpotiFLAC moves to the next extension or retry. |
 | `--loop` | `-l` | `None` | Keep retrying permanently failed tracks every N minutes. |
-| `--no-extensions-fallback` | | `False` | Disable automatic fallback to another installed extension for the same alias when one fails (fallback is enabled by default). |
 | `--retries` | | `0` | Extra per-track download attempts on failure. Cycles through all configured extensions with exponential backoff. |
+| `--max-concurrent` | | `2` | How many tracks to download at once. Each track still tries its providers in order/fallback on its own — this only controls how many tracks run simultaneously. Use `1` for fully sequential downloads with no interleaved console output. |
 | `--playlist` | `-p` | `None` | Playlist URL to sync; repeat once per playlist. All tracks go to a single destination folder, shared tracks are downloaded once, and each playlist gets its own M3U file (see [Multiple Playlists in One Folder](#multiple-playlists-in-one-folder)). |
 | `--m3u` | | `m3u8` | Playlist file written for each `--playlist`: `m3u8`, `m3u` or `none`. Rewritten only when its content changed. |
 | `--transcode` | | `none` | Convert every downloaded track to this format: `none` or `mp3`. Requires `ffmpeg`. |
@@ -1020,7 +1022,7 @@ SpotiFLAC(
 | `--keep-original` | | `False` | Keep the original lossless file alongside the transcoded one. |
 | `--verbose` | `-v` | `False` | Enable debug logging. |
 | `--no-lyrics` | | `False` | Disable lyrics embedding (lyrics are embedded by default). |
-| `--lyrics-providers` | | `spotify apple musixmatch lrclib amazon` | Lyrics provider priority order. |
+| `--lyrics-providers` | | `apple lrclib` | Lyrics provider priority order (CLI default; the Python API default is `spotify apple musixmatch lrclib amazon` when `lyrics_providers` is left unset). |
 | `--no-enrich` | | `False` | Disable multi-provider metadata enrichment (enrichment is enabled by default). |
 | `--enrich-providers` | | `deezer apple qobuz tidal soundcloud` | Metadata enrichment provider priority order. |
 | `--post-action` | | `none` | Action after all downloads finish: `none`, `open_folder`, `notify`, `command`. |
