@@ -2,6 +2,7 @@ name: Build and Release SpotiFLAC
 
 permissions:
   contents: write
+  pull-requests: read
 
 on:
   workflow_dispatch:
@@ -197,7 +198,7 @@ jobs:
             fetch-depth: 0
             ref: refs/tags/${{ needs.lint-and-bump.outputs.release_tag }}
 
-        - name: Setup Python for AI
+        - name: Setup Python for changelog script
           uses: actions/setup-python@v6
           with:
             python-version: '3.12'
@@ -209,49 +210,66 @@ jobs:
             path: release-files
             merge-multiple: true
 
-        - name: Generate AI Changelog
+        - name: Generate Changelog from CodeRabbit PR summaries
           env:
-            GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            GITHUB_REPOSITORY: ${{ github.repository }}
           run: |
-            pip install google-genai
+            pip install requests
             python -c "
-            import os, subprocess
-            from google import genai
-            
-            # Inizializza il client con il nuovo SDK
-            client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
-            
+            import os, re, subprocess, requests
+
+            repo = os.environ['GITHUB_REPOSITORY']
+            token = os.environ['GITHUB_TOKEN']
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.github+json',
+            }
+
+            # Trova la data del tag precedente per delimitare l'intervallo
+            since = None
             try:
-                # Recupera i commit effettuati dal tag precedente a quello attuale
-                cmd = 'git log \$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD --pretty=format:\"- %s\"'
-                commits = subprocess.check_output(cmd, shell=True).decode('utf-8')
+                prev_tag = subprocess.check_output(
+                    'git describe --tags --abbrev=0 HEAD^', shell=True, stderr=subprocess.DEVNULL
+                ).decode().strip()
+                since = subprocess.check_output(
+                    f'git log -1 --format=%aI {prev_tag}', shell=True
+                ).decode().strip()
             except Exception:
-                commits = subprocess.check_output('git log -10 --pretty=format:\"- %s\"', shell=True).decode('utf-8')
-                
-            if not commits.strip(): 
-                commits = '- Maintenance and minor updates'
-            
-            # Prompt avanzato per generare note di rilascio altamente tecniche
-            prompt = f'''You are an expert software engineer and technical writer. Review the following commit logs:
-            {commits}
-            
-            Generate highly technical, professional release notes in Markdown format. Organize the changelog strictly into the following sections: **New Features**, **Bug Fixes**, and **Maintenance**.
-            
-            **Guidelines for technical depth:**
-            *   **Use specific technical terminology:** Describe changes at the code, architecture, or system level (e.g., specify API endpoints modified, database schema migrations, specific design patterns used, or algorithmic optimizations).
-            *   **Do not simplify:** Avoid abstracting the changes into layman's terms or user-centric language. The target audience is senior developers and DevOps engineers. 
-            *   **Be precise:** Mention the exact libraries, variables, or system components affected if present in the commit messages.
-            *   **Filter noise:** Ignore automated system commits, merge commits, version bumps, and trivial typo fixes. 
-            *   **Tone:** Strictly professional and objective. DO NOT use emojis.'''
-            
-            # Genera il contenuto usando la nuova sintassi
-            response = client.models.generate_content(
-                model='gemini-flash-latest',
-                contents=prompt
+                pass  # primo tag: prendi tutte le PR mergiate su main
+
+            query = f'repo:{repo} is:pr is:merged base:main'
+            if since:
+                query += f' merged:>={since}'
+
+            resp = requests.get(
+                'https://api.github.com/search/issues',
+                headers=headers,
+                params={'q': query, 'per_page': 100, 'sort': 'created', 'order': 'asc'},
             )
-            
+            resp.raise_for_status()
+            prs = resp.json().get('items', [])
+
+            # Cattura tutto ciò che sta sotto '## Summary by CodeRabbit' fino
+            # alla prossima intestazione di pari livello (o fine testo)
+            pattern = re.compile(
+                r'#{1,3}\s*Summary by CodeRabbit\s*\n(.*?)(?=\n#{1,3}\s|\Z)',
+                re.DOTALL | re.IGNORECASE,
+            )
+
+            sections = []
+            for pr in prs:
+                number = pr['number']
+                title = pr['title']
+                body = pr.get('body') or ''
+                match = pattern.search(body)
+                summary = match.group(1).strip() if match else '_Nessun riepilogo CodeRabbit disponibile per questa PR._'
+                sections.append(f'### #{number} — {title}\n\n{summary}')
+
+            changelog = '\n\n'.join(sections) if sections else 'Manutenzione e aggiornamenti minori.'
+
             with open('ai_changelog.md', 'w', encoding='utf-8') as f:
-                f.write(response.text)
+                f.write(changelog)
             "
 
         - name: Prepare Final Release Body
