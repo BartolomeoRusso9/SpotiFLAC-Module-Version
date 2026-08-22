@@ -126,7 +126,9 @@ def test_js_extension_provider_initializes_base_validation_cache(monkeypatch, tm
             return {}
 
     monkeypatch.setattr("SpotiFLAC.extensions.provider.ExtensionManager", DummyManager)
-    monkeypatch.setattr("SpotiFLAC.extensions.provider.signed_session_client", lambda manifest: None)
+    monkeypatch.setattr(
+        "SpotiFLAC.extensions.provider.signed_session_client", lambda manifest: None
+    )
 
     provider = JSExtensionProvider("tidal-web")
 
@@ -134,7 +136,9 @@ def test_js_extension_provider_initializes_base_validation_cache(monkeypatch, tm
     assert isinstance(provider._validated_flac_files, dict)
 
 
-def test_interactive_service_options_are_deduplicated_from_installed_extensions(monkeypatch):
+def test_interactive_service_options_are_deduplicated_from_installed_extensions(
+    monkeypatch,
+):
     from SpotiFLAC import interactive
 
     class DummyExt:
@@ -160,7 +164,9 @@ def test_interactive_service_options_are_deduplicated_from_installed_extensions(
     assert interactive._installed_service_options() == ["qobuz", "soundcloud", "tidal"]
 
 
-def test_interactive_stops_when_no_download_providers_are_installed(monkeypatch, capsys):
+def test_interactive_stops_when_no_download_providers_are_installed(
+    monkeypatch, capsys
+):
     from SpotiFLAC import interactive
 
     class DummyManager:
@@ -175,4 +181,7 @@ def test_interactive_stops_when_no_download_providers_are_installed(monkeypatch,
     with pytest.raises(SystemExit):
         interactive._require_installed_service_options()
 
-    assert "No download provider found. Configure your extension registry first." in capsys.readouterr().out
+    assert (
+        "No download provider found. Configure your extension registry first."
+        in capsys.readouterr().out
+    )

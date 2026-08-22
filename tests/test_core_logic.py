@@ -404,7 +404,10 @@ def test_playlist_local_match_normalizes_isrc_and_checks_album(monkeypatch, tmp_
         album_artist="Artist",
         isrc="USABC1234567",
     )
-    assert playlist_sync.find_existing_track(index, same_recording, "missing") == track_path
+    assert (
+        playlist_sync.find_existing_track(index, same_recording, "missing")
+        == track_path
+    )
 
     no_isrc_match = same_recording.model_copy(update={"isrc": ""})
     assert playlist_sync.find_existing_track(index, no_isrc_match, "missing") is None

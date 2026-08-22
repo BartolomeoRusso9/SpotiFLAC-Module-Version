@@ -309,7 +309,11 @@ def find_existing_track(
         candidates = [
             p for p in candidates if p.suffix.lower() == f".{transcode_to.lower()}"
         ]
-    return min(candidates, key=lambda p: (_extension_rank(p), str(p))) if candidates else None
+    return (
+        min(candidates, key=lambda p: (_extension_rank(p), str(p)))
+        if candidates
+        else None
+    )
 
 
 def mark_existing(

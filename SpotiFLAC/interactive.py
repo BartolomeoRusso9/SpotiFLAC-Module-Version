@@ -666,7 +666,11 @@ async def run_interactive() -> dict:
         try:
             return await _run_interactive_once()
         except _BackRequested:
-            print(DIM("\n  Returning to the start of the wizard. Enter b/back at any question to restart."))
+            print(
+                DIM(
+                    "\n  Returning to the start of the wizard. Enter b/back at any question to restart."
+                )
+            )
 
 
 async def _run_interactive_once() -> dict:
@@ -833,51 +837,73 @@ async def _run_interactive_once() -> dict:
     installed_services = _require_installed_service_options()
 
     if is_soundcloud_url:
-        cfg["services"] = ["soundcloud"] if "soundcloud" in installed_services else (
-            installed_services or ["soundcloud"]
+        cfg["services"] = (
+            ["soundcloud"]
+            if "soundcloud" in installed_services
+            else (installed_services or ["soundcloud"])
         )
     elif is_youtube_url:
-        cfg["services"] = ["youtube"] if "youtube" in installed_services else (
-            installed_services or ["youtube"]
+        cfg["services"] = (
+            ["youtube"]
+            if "youtube" in installed_services
+            else (installed_services or ["youtube"])
         )
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
                 options=installed_services or ["tidal"],
-                defaults=["tidal"] if "tidal" in (installed_services or []) else ([installed_services[0]] if installed_services else ["tidal"]),
+                defaults=(
+                    ["tidal"]
+                    if "tidal" in (installed_services or [])
+                    else ([installed_services[0]] if installed_services else ["tidal"])
+                ),
                 ordered=True,
             )
             cfg["services"] = ["youtube", *fallbacks]
     elif is_apple_url:
-        cfg["services"] = ["apple"] if "apple" in installed_services else (
-            installed_services or ["apple"]
+        cfg["services"] = (
+            ["apple"]
+            if "apple" in installed_services
+            else (installed_services or ["apple"])
         )
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
                 options=installed_services or ["tidal"],
-                defaults=["tidal"] if "tidal" in (installed_services or []) else ([installed_services[0]] if installed_services else ["tidal"]),
+                defaults=(
+                    ["tidal"]
+                    if "tidal" in (installed_services or [])
+                    else ([installed_services[0]] if installed_services else ["tidal"])
+                ),
                 ordered=True,
             )
             cfg["services"] = ["apple", *fallbacks]
     elif is_pandora_url:
-        cfg["services"] = ["pandora"] if "pandora" in installed_services else (
-            installed_services or ["pandora"]
+        cfg["services"] = (
+            ["pandora"]
+            if "pandora" in installed_services
+            else (installed_services or ["pandora"])
         )
         add_fallback = _ask_bool("Add fallback providers?", False)
         if add_fallback:
             fallbacks = _ask_multi(
                 "Fallback providers (order = priority):",
                 options=installed_services or ["tidal"],
-                defaults=["tidal"] if "tidal" in (installed_services or []) else ([installed_services[0]] if installed_services else ["tidal"]),
+                defaults=(
+                    ["tidal"]
+                    if "tidal" in (installed_services or [])
+                    else ([installed_services[0]] if installed_services else ["tidal"])
+                ),
                 ordered=True,
             )
             cfg["services"] = ["pandora", *fallbacks]
     else:
         options = installed_services or ["tidal"]
-        defaults = cfg.get("services") or ["tidal"] if "tidal" in options else [options[0]]
+        defaults = (
+            cfg.get("services") or ["tidal"] if "tidal" in options else [options[0]]
+        )
         cfg["services"] = _ask_multi(
             "Services (order = priority):",
             options=options,
@@ -1101,9 +1127,7 @@ async def _run_interactive_once() -> dict:
 
     if cfg["embed_lyrics"]:
         if health_status:
-            unavailable = [
-                s for s in _ALL_SERVICES if not health_status.get(s, True)
-            ]
+            unavailable = [s for s in _ALL_SERVICES if not health_status.get(s, True)]
             if unavailable:
                 print(DIM(f"  Unavailable: {', '.join(unavailable)}"))
         cfg["lyrics_providers"] = _ask_multi(

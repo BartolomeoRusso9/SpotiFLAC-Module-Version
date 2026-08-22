@@ -656,7 +656,9 @@ async def amain() -> None:
         print_ffmpeg_warning()
         cfg = await run_interactive()
 
-        verbose = cfg.get("verbose", False) or "--verbose" in sys.argv or "-v" in sys.argv
+        verbose = (
+            cfg.get("verbose", False) or "--verbose" in sys.argv or "-v" in sys.argv
+        )
         log_level = _resolve_log_level(verbose)
         _root_handler = logging.StreamHandler(sys.stdout)
         _root_handler.setFormatter(
