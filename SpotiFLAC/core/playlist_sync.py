@@ -299,7 +299,7 @@ def find_existing_track(
     buckets = index.get("__isrc__", {}).get(normalized_isrc, ())
     if not buckets:
         buckets = index.get("__identity__", {}).get(
-            _identity_key(track.title, track.artists, track.album), ()
+            _identity_key(track.title, track.first_artist, track.album), ()
         )
     if not buckets:
         return find_existing(index, stem, transcode_to)
@@ -309,11 +309,9 @@ def find_existing_track(
         candidates = [
             p for p in candidates if p.suffix.lower() == f".{transcode_to.lower()}"
         ]
-    return (
-        min(candidates, key=lambda p: (_extension_rank(p), str(p)))
-        if candidates
-        else None
-    )
+    if not candidates:
+        return find_existing(index, stem, transcode_to)
+    return min(candidates, key=lambda p: (_extension_rank(p), str(p)))
 
 
 def mark_existing(

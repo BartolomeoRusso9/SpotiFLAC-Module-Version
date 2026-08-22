@@ -513,7 +513,7 @@ async def download_one_async(
             except asyncio.TimeoutError:
                 wait_for_idle = getattr(provider, "wait_for_idle_async", None)
                 if callable(wait_for_idle):
-                    await wait_for_idle(opts.timeout_s)
+                    await wait_for_idle(5.0)
                 logger.warning(
                     "[downloader] provider '%s' timed out for track '%s'",
                     provider.name,
@@ -875,11 +875,25 @@ class DownloadWorker:
             if not root.exists():
                 return 0
             preserved_m4a = initial_m4a or set()
-            candidates = list(root.rglob("*.part")) + [
+            # Collect completed file paths to avoid deleting them
+            completed_paths = set(Path(p).resolve() for p in self._completed.values() if p)
+
+            # Always clean up .part files
+            part_candidates = list(root.rglob("*.part"))
+
+            # For .m4a files, only consider those matching temporary naming patterns
+            # (e.g., containing .tmp, .download, .temp in the stem) or not in the
+            # initial_m4a set AND not in completed downloads
+            m4a_candidates = [
                 path
                 for path in root.rglob("*.m4a")
                 if path.resolve() not in preserved_m4a
+                and path.resolve() not in completed_paths
+                and any(marker in path.stem.lower() for marker in (".tmp", ".download", ".temp", ".part"))
             ]
+
+            candidates = part_candidates + m4a_candidates
+
             for path in candidates:
                 if not path.is_file() or (
                     path.suffix.lower() == ".m4a" and self._valid_m4a(path)
