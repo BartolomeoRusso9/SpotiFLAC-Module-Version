@@ -70,6 +70,15 @@ class AsyncSpotiFLAC:
             playlist_meta, tracks = await client.get_playlist("https://...")
 
     Se usato senza context manager, ricordarsi di chiamare `await client.aclose()`.
+
+    Il parametro `registries` permette di aggiungere URL di registry extension
+    custom senza dover impostare `SPOTIFLAC_REGISTRIES` a livello di ambiente o
+    di file `.env`: gli URL passati qui vengono persistiti tramite
+    `extensions.registry_config.add_registry()` all'ingresso del context
+    manager (`__aenter__`), prima che `ExtensionManager` venga avviato, e da
+    quel momento in poi si comportano esattamente come i registry aggiunti
+    dalla GUI (restano validi anche nei run successivi finché non vengono
+    rimossi).
     """
 
     def __init__(
@@ -105,9 +114,11 @@ class AsyncSpotiFLAC:
         timeout_s: int | None = None,
         max_concurrent_downloads: int = 2,
         sync_extensions: bool = True,
+        registries: list[str] | None = None,
     ) -> None:
         self._logger = _setup_logger(log_level)
         self._sync_extensions_on_enter = sync_extensions
+        self._registries = list(registries) if registries else []
         self._entered = False
 
         self._opts = DownloadOptions(
@@ -153,6 +164,9 @@ class AsyncSpotiFLAC:
 
     async def __aenter__(self) -> Self:
         await NetworkManager.get_async_client_safe()
+
+        if self._registries:
+            await asyncio.to_thread(self._register_extra_registries)
 
         if self._sync_extensions_on_enter:
             try:
@@ -234,6 +248,30 @@ class AsyncSpotiFLAC:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _register_extra_registries(self) -> None:
+        """Persists any extra registry URLs passed to the constructor via
+        `extensions.registry_config`, so they are picked up by
+        `ExtensionManager` (through `registry_config.effective_urls()`) the
+        same way GUI-added or `.env`/environment-sourced ones are.
+        """
+        try:
+            from .extensions import registry_config
+        except Exception as exc:
+            self._logger.warning(
+                "[client] Could not load registry_config; skipping registries=%s: %s",
+                self._registries,
+                exc,
+            )
+            return
+
+        for url in self._registries:
+            try:
+                registry_config.add_registry(url)
+            except Exception as exc:
+                self._logger.warning(
+                    "[client] Failed to register registry '%s': %s", url, exc
+                )
+
     def _get_metadata_client(self) -> SpotifyMetadataClient:
         if self._metadata_client is None:
             self._metadata_client = SpotifyMetadataClient()
@@ -286,6 +324,7 @@ def SpotiFLAC(
     timeout_s: int | None = None,
     max_concurrent_downloads: int = 2,
     sync_extensions: bool = True,
+    registries: list[str] | None = None,
 ) -> None:
     """Wrapper SINCRONO retrocompatibile.
 
@@ -328,6 +367,7 @@ def SpotiFLAC(
             timeout_s=timeout_s,
             max_concurrent_downloads=max_concurrent_downloads,
             sync_extensions=sync_extensions,
+            registries=registries,
         ) as client:
             await client.download_batch(
                 [url] if isinstance(url, str) else list(url),
