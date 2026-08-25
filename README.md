@@ -218,20 +218,54 @@ SpotiFLAC has **no built-in download provider and no default extension source**.
 - **JavaScript** — sharing the same extension format used by [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile), executed via a Node.js bridge.
 - **Python** — packaged as `.spotiflac-ext` / `.sflx` files (a ZIP containing a manifest and a Python entry point), loaded directly in-process.
 
-Extensions are never fetched or installed automatically. You must explicitly configure a registry before SpotiFLAC will contact anything:
+Extensions are never fetched or installed automatically. You must explicitly configure a registry before SpotiFLAC will contact anything. There are several equivalent ways to do it — pick whichever fits your workflow:
+
+**Environment variable:**
 
 ```bash
 # Comma-separated list of registry JSON URLs — none is set by default
 export SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json"
 ```
 
-or in a local `.env` file (see `.env.example`):
+**`.env` file** (see `.env.example`):
 
 ```env
 SPOTIFLAC_REGISTRIES=https://example.com/my-registry.json
 ```
 
-Once configured, you can install and manage extensions:
+**CLI flag** (`--registries`, repeat once per URL) — persisted to `~/.spotiflac/registry_settings.json`, so you only need to pass it once and it's picked up on every future run, exactly like a registry added from the GUI/Interactive wizard:
+
+```bash
+spotiflac --registries https://example.com/my-registry.json URL ./out
+```
+
+**Python API** (`registries` parameter on `SpotiFLAC()` / `AsyncSpotiFLAC()`) — persisted the same way as the CLI flag:
+
+```python
+from SpotiFLAC import SpotiFLAC
+
+SpotiFLAC(
+    url="https://open.spotify.com/track/...",
+    output_dir="./downloads",
+    registries=["https://example.com/my-registry.json"],
+)
+```
+
+```python
+from SpotiFLAC import AsyncSpotiFLAC
+
+async with AsyncSpotiFLAC(
+    output_dir="./downloads",
+    registries=["https://example.com/my-registry.json"],
+) as client:
+    await client.download_track("https://open.spotify.com/track/...")
+```
+
+**Interactive wizard / GUI** — both expose a registry manager (add, remove, list, and see where each URL came from) without touching environment variables or files by hand.
+
+All of these feed into the same merged, deduplicated list (`extensions.registry_config.effective_urls()`), regardless of which entry point you use — the CLI, the GUI, and the Python API all end up contacting the same registries.
+
+Once configured, you can also install and manage extensions directly:
 
 ```python
 from SpotiFLAC.extensions import ExtensionManager
@@ -562,6 +596,39 @@ SpotiFLAC(
 
 The conversion is a no-op for extensions that already deliver MP3, which are passed through untouched.
 
+### Hi-Res Verification
+
+Enable `verify_hires=True` (Python) or `--verify-hires` (CLI) to run a spectral-analysis QA check on every successful lossless download, flagging files that declare a high sample rate (e.g. 96 kHz) but whose actual audio content stops well short of it — a common fingerprint of **upsampling**: taking a CD-quality or lossy source and re-encoding it at a higher sample rate without adding any real high-frequency content, so it *looks* like Hi-Res without being one.
+
+```bash
+spotiflac https://open.spotify.com/album/... ./out --service ext:tidal-web -q HI_RES_LOSSLESS --verify-hires
+```
+
+```python
+from SpotiFLAC import SpotiFLAC
+SpotiFLAC(
+    url="https://open.spotify.com/album/...",
+    output_dir="./downloads",
+    services=["ext:tidal-web"],
+    quality="HI_RES_LOSSLESS",
+    verify_hires=True,
+)
+```
+
+**How it works:** for each finished track, a short segment (default 30s) is decoded from the middle of the file — never the whole track, to keep memory usage bounded — and its average frequency spectrum is compared against the noise floor. If the file's sample rate implies Hi-Res but no real content is found above ~24 kHz, a warning is printed and logged; nothing else happens.
+
+**Design notes worth knowing before you turn it on:**
+
+- **Off by default and fully opt-in.** It requires the optional `librosa` and `numpy` packages, which are *not* installed by default — install them with `pip install librosa numpy` or `pip install SpotiFLAC[hires]`. If they're missing, the check is silently skipped (a debug-level log line, nothing more) rather than breaking your run.
+- **Never blocks or fails a download.** The check runs as a background task *after* the file has already been saved successfully — a track download is never delayed, retried, or marked as failed because of it, and analysis errors (corrupt segment, unreadable file, etc.) are swallowed and logged at debug level, not surfaced as errors.
+- **A finding is a hint, not a certification.** Some genuine Hi-Res masters are deliberately low-pass filtered during mastering (common in pop/rock) and will still read as "no anomaly". Treat a "possibly upsampled" warning as something worth a closer listen, not definitive proof.
+- **Skipped automatically for lossy output.** If `transcode_to="mp3"` (or `--mp3`) is set, the already-lossy result is never analyzed — checking an MP3 for ultrasonic content would be meaningless.
+- **Standalone tool.** The underlying checker also ships as a CLI you can point at any file(s) you already have, independent of a download run:
+
+  ```bash
+  python -m SpotiFLAC.tools.hires_check_cli "My Track.flac" --seconds 45
+  ```
+
 ### Multiple Playlists in One Folder
 
 Pass `--playlist` (`-p`) once per playlist to sync several of them into a **single destination folder**. Repeat the flag as many times as you need — the last positional argument is the destination:
@@ -874,6 +941,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `output_dir` | `str` | Required | The destination directory path where the audio files will be saved. |
 | `output_path` | `str` | `None` | Exact destination file path for single track downloads. Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies. |
 | `services` | `list` | `["ext:tidal-web"]` | Extensions to use and their priority order, as `ext:<id>` (or a legacy alias — see [Extensions](#extensions)). Each `id` must correspond to an extension you have already installed; nothing is bundled or installed automatically. |
+| `registries` | `list` | `None` | One or more extension-registry JSON URLs to add before the run, as an alternative to `SPOTIFLAC_REGISTRIES` or a `.env` file. Must be `https://`. Persisted to `~/.spotiflac/registry_settings.json` on first use, so subsequent runs (CLI, GUI, or Python) pick it up automatically without passing it again — see [Extensions](#extensions). |
 | `filename_format` | `str` | `"{title} - {artist}"` | Format for naming downloaded files. See placeholders below. |
 | `use_track_numbers` | `bool` | `False` | Prefixes the filename with the track number. |
 | `use_album_track_numbers` | `bool` | `False` | Uses the track's original album number instead of the download queue position. |
@@ -901,6 +969,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `transcode_to` | `str` | `None` | Converts every finished track to this format. Currently only `"mp3"` (see [MP3 Transcoding](#mp3-transcoding)). `None` keeps the extension's original format. Requires `ffmpeg`. |
 | `transcode_bitrate` | `str` | `"320k"` | Bitrate used by `transcode_to`, e.g. `"320k"`, `"256k"`, `"192k"`. |
 | `transcode_keep_original` | `bool` | `False` | Keeps the original lossless file next to the converted one. By default the source is deleted once the conversion succeeds. |
+| `verify_hires` | `bool` | `False` | Runs a spectral-analysis QA check after each successful lossless download, flagging files that declare a high sample rate but lack real content above standard-definition frequencies (possible upsampling / fake Hi-Res). Requires the optional `librosa`/`numpy` packages (`pip install SpotiFLAC[hires]`); silently skipped if they're not installed. Never fails or delays a download — see [Hi-Res Verification](#hi-res-verification). |
 | `post_download_action` | `str` | `"none"` | Action after all downloads finish: `"none"`, `"open_folder"`, `"notify"`, `"command"`. |
 | `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{skipped}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 
@@ -996,6 +1065,7 @@ SpotiFLAC(
 | Flag | Short | Default | Description |
 | --- | --- | --- | --- |
 | `--service` | `-s` | `ext:tidal-web` | One or more extensions in priority order, as `ext:<id>` (or a legacy alias resolved to an installed extension — see [Extensions](#extensions)). |
+| `--registries` | | `None` | An extension-registry JSON URL to add before running; repeat the flag for each one. Alternative to `SPOTIFLAC_REGISTRIES` or a `.env` file. Must be `https://`. Persisted to `~/.spotiflac/registry_settings.json`, so you only need to pass it once — see [Extensions](#extensions). |
 | `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
 | `--output-path` | `-o` | `None` | Exact output file path for single track downloads. Ignored for albums, playlists and discographies. |
 | `--quality` | `-q` | `LOSSLESS` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. Legacy provider-specific values are accepted and normalized. |
@@ -1020,6 +1090,7 @@ SpotiFLAC(
 | `--mp3` | | | Shorthand for `--transcode mp3`. |
 | `--transcode-bitrate` | | `320k` | Bitrate used by `--transcode`, e.g. `320k`, `256k`, `192k`. |
 | `--keep-original` | | `False` | Keep the original lossless file alongside the transcoded one. |
+| `--verify-hires` | | `False` | Runs a spectral-analysis QA check after each successful lossless download, flagging files that declare a high sample rate but lack real content above standard-definition frequencies (possible upsampling / fake Hi-Res). Requires the optional `librosa`/`numpy` packages (`pip install SpotiFLAC[hires]`); silently skipped if they're not installed. Never fails or delays a download — see [Hi-Res Verification](#hi-res-verification). |
 | `--verbose` | `-v` | `False` | Enable debug logging. |
 | `--no-lyrics` | | `False` | Disable lyrics embedding (lyrics are embedded by default). |
 | `--lyrics-providers` | | `apple lrclib` | Lyrics provider priority order (CLI default; the Python API default is `spotify apple musixmatch lrclib amazon` when `lyrics_providers` is left unset). |

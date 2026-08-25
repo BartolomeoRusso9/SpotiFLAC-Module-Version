@@ -80,6 +80,10 @@ dev = [
     "black>=24.0",
     "pre-commit>=3.0",
 ]
+hires = [
+    "librosa>=0.10.0",
+    "numpy>=1.24.0",
+]
 
 [tool.black]
 line-length = 88

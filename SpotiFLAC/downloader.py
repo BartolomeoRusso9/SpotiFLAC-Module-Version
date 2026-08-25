@@ -174,6 +174,15 @@ class DownloadOptions:
     # configurable by the caller (CLI/API), while preserving the same default.
     max_concurrent_downloads: int = 2
 
+    # Optional post-download QA check: flags files that declare a high
+    # sample rate but whose actual spectral content stops at, or just
+    # above, standard-definition limits (a common fingerprint of
+    # upsampling — see core/hires_check.py). Off by default: it requires
+    # the optional 'librosa'/'numpy' dependencies and adds a few seconds
+    # of analysis per track. Never blocks or fails a download — a finding
+    # is only logged/printed as a warning.
+    verify_hires: bool = False
+
     def __post_init__(self) -> None:
         # Normalize immediately so the rest of the code can do `if opts.transcode_to`
         # and an unsupported format fails where it is configured, not midway
@@ -297,6 +306,121 @@ def _no_providers_error_message(services: list[str]) -> str:
         "extension for these services. Check your network connection, or that "
         "these services are actually listed in the registry."
     )
+
+
+# ---------------------------------------------------------------------------
+# Optional post-download Hi-Res verification (opts.verify_hires)
+# ---------------------------------------------------------------------------
+
+# Lossy formats never carry genuine ultrasonic content, so checking them for
+# a "fake Hi-Res" spectral cutoff would either be meaningless or flag the
+# format conversion itself rather than the source. Skip them outright.
+_HIRES_CHECK_SKIP_FORMATS = {"mp3", "aac", "ogg", "opus", "m4a-lossy"}
+
+# Keeps strong references to fire-and-forget background tasks so they are
+# not garbage-collected mid-flight (a well-known asyncio footgun), while
+# `add_done_callback` cleans each one up as soon as it finishes.
+_hires_check_tasks: set[asyncio.Task] = set()
+
+
+async def _run_hires_check_background(file_path: str) -> None:
+    """Runs the optional Hi-Res spectral check for one finished download.
+
+    Best-effort and completely non-fatal by design: any failure (missing
+    optional dependency, unreadable file, analysis error) is logged at
+    debug level and swallowed — this must never affect, delay, or fail a
+    download that already succeeded.
+    """
+    from .core.hires_check import HiResCheckError, check_file_async, is_available
+
+    if not is_available():
+        logger.debug(
+            "[hires-check] skipped for '%s': optional 'librosa'/'numpy' "
+            "dependencies are not installed (pip install SpotiFLAC[hires])",
+            file_path,
+        )
+        return
+
+    try:
+        result = await check_file_async(file_path)
+    except HiResCheckError as exc:
+        logger.debug("[hires-check] skipped for '%s': %s", file_path, exc)
+        return
+    except Exception as exc:  # noqa: BLE001 - a QA check must never crash the pipeline
+        logger.debug(
+            "[hires-check] unexpected error analyzing '%s': %s", file_path, exc
+        )
+        return
+
+    if result.is_suspicious:
+        safe_tqdm_write(
+            f"  \u26a0\ufe0f  Hi-Res check: '{Path(file_path).name}' declares "
+            f"{result.declared_sample_rate} Hz but active spectral content "
+            f"stops at ~{result.cutoff_frequency_hz:.0f} Hz — possibly "
+            "upsampled / fake Hi-Res.",
+            file=sys.stderr,
+        )
+        logger.warning(
+            "[hires-check] possible fake Hi-Res: %s (declared %d Hz, "
+            "cutoff ~%.0f Hz)",
+            file_path,
+            result.declared_sample_rate,
+            result.cutoff_frequency_hz,
+        )
+    else:
+        logger.debug(
+            "[hires-check] %s -> verdict=%s (declared %d Hz, cutoff ~%.0f Hz)",
+            file_path,
+            result.verdict,
+            result.declared_sample_rate,
+            result.cutoff_frequency_hz,
+        )
+
+
+def _schedule_hires_check(opts: DownloadOptions, result: DownloadResult) -> None:
+    """Fires the Hi-Res check for a successful, non-skipped download.
+
+    Scheduled as a background task rather than awaited inline: librosa's
+    analysis takes a few CPU-bound seconds, and blocking here would stall
+    this track's slot (and any progress output) for every download, opt-in
+    feature or not. Requires a running event loop — always true here, since
+    this is only ever called from within the async download pipeline.
+    """
+    if not opts.verify_hires or not result.file_path:
+        return
+
+    fmt = (result.format or "").lower()
+    if fmt in _HIRES_CHECK_SKIP_FORMATS:
+        return
+
+    try:
+        task = asyncio.create_task(_run_hires_check_background(result.file_path))
+    except RuntimeError:
+        # No running event loop (shouldn't happen in practice here) — skip
+        # rather than raise, consistent with this check's non-fatal contract.
+        logger.debug(
+            "[hires-check] could not schedule check for '%s': no running event loop",
+            result.file_path,
+        )
+        return
+
+    _hires_check_tasks.add(task)
+    task.add_done_callback(_hires_check_tasks.discard)
+
+
+async def _await_pending_hires_checks(timeout_s: float = 30.0) -> None:
+    """Waits for any in-flight background `--verify-hires` tasks.
+
+    Called once at the end of a run so their findings are printed before
+    the process exits, instead of being silently dropped when a short job
+    finishes faster than the analysis. Bounded by `timeout_s` so a stuck
+    check can never hang the whole program; never raises.
+    """
+    pending = [t for t in _hires_check_tasks if not t.done()]
+    if not pending:
+        return
+    with contextlib.suppress(Exception):
+        await asyncio.wait(pending, timeout=timeout_s)
 
 
 async def _move_file_async(src: str, dst: str) -> None:
@@ -586,6 +710,7 @@ async def download_one_async(
                     metadata.artists,
                     metadata.title,
                 )
+                _schedule_hires_check(opts, result)
                 return result
 
             errors[provider.name] = result.error or "unknown error"
@@ -725,6 +850,11 @@ class DownloadWorker:
             finally:
                 await ProgressManager.clear_all()
                 uninstall_console_interception()
+                # Give any in-flight `--verify-hires` background checks a
+                # chance to finish and print their findings before the run
+                # (and possibly the whole process) exits, instead of
+                # silently dropping them.
+                await _await_pending_hires_checks()
         finally:
             self._close_providers()
 
