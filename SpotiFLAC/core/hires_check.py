@@ -58,7 +58,9 @@ class HiResCheckResult:
     analyzed_duration_s: float
     cutoff_frequency_hz: float
     noise_floor_db: float
-    verdict: str  # "fake_hires" | "standard_definition" | "genuine_hires" | "inconclusive"
+    verdict: (
+        str  # "fake_hires" | "standard_definition" | "genuine_hires" | "inconclusive"
+    )
 
     @property
     def is_suspicious(self) -> bool:

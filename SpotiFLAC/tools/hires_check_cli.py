@@ -21,7 +21,7 @@ from pathlib import Path
 # audioread/numba) without silencing our own error reporting below.
 warnings.filterwarnings("ignore")
 
-from SpotiFLAC.core.hires_check import (  # noqa: E402
+from SpotiFLAC.core.hires_check import (
     HiResCheckError,
     check_file,
     is_available,
