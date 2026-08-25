@@ -596,6 +596,39 @@ SpotiFLAC(
 
 The conversion is a no-op for extensions that already deliver MP3, which are passed through untouched.
 
+### Hi-Res Verification
+
+Enable `verify_hires=True` (Python) or `--verify-hires` (CLI) to run a spectral-analysis QA check on every successful lossless download, flagging files that declare a high sample rate (e.g. 96 kHz) but whose actual audio content stops well short of it — a common fingerprint of **upsampling**: taking a CD-quality or lossy source and re-encoding it at a higher sample rate without adding any real high-frequency content, so it *looks* like Hi-Res without being one.
+
+```bash
+spotiflac https://open.spotify.com/album/... ./out --service ext:tidal-web -q HI_RES_LOSSLESS --verify-hires
+```
+
+```python
+from SpotiFLAC import SpotiFLAC
+SpotiFLAC(
+    url="https://open.spotify.com/album/...",
+    output_dir="./downloads",
+    services=["ext:tidal-web"],
+    quality="HI_RES_LOSSLESS",
+    verify_hires=True,
+)
+```
+
+**How it works:** for each finished track, a short segment (default 30s) is decoded from the middle of the file — never the whole track, to keep memory usage bounded — and its average frequency spectrum is compared against the noise floor. If the file's sample rate implies Hi-Res but no real content is found above ~24 kHz, a warning is printed and logged; nothing else happens.
+
+**Design notes worth knowing before you turn it on:**
+
+- **Off by default and fully opt-in.** It requires the optional `librosa` and `numpy` packages, which are *not* installed by default — install them with `pip install librosa numpy` or `pip install SpotiFLAC[hires]`. If they're missing, the check is silently skipped (a debug-level log line, nothing more) rather than breaking your run.
+- **Never blocks or fails a download.** The check runs as a background task *after* the file has already been saved successfully — a track download is never delayed, retried, or marked as failed because of it, and analysis errors (corrupt segment, unreadable file, etc.) are swallowed and logged at debug level, not surfaced as errors.
+- **A finding is a hint, not a certification.** Some genuine Hi-Res masters are deliberately low-pass filtered during mastering (common in pop/rock) and will still read as "no anomaly". Treat a "possibly upsampled" warning as something worth a closer listen, not definitive proof.
+- **Skipped automatically for lossy output.** If `transcode_to="mp3"` (or `--mp3`) is set, the already-lossy result is never analyzed — checking an MP3 for ultrasonic content would be meaningless.
+- **Standalone tool.** The underlying checker also ships as a CLI you can point at any file(s) you already have, independent of a download run:
+
+  ```bash
+  python -m SpotiFLAC.tools.hires_check_cli "My Track.flac" --seconds 45
+  ```
+
 ### Multiple Playlists in One Folder
 
 Pass `--playlist` (`-p`) once per playlist to sync several of them into a **single destination folder**. Repeat the flag as many times as you need — the last positional argument is the destination:
@@ -936,6 +969,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `transcode_to` | `str` | `None` | Converts every finished track to this format. Currently only `"mp3"` (see [MP3 Transcoding](#mp3-transcoding)). `None` keeps the extension's original format. Requires `ffmpeg`. |
 | `transcode_bitrate` | `str` | `"320k"` | Bitrate used by `transcode_to`, e.g. `"320k"`, `"256k"`, `"192k"`. |
 | `transcode_keep_original` | `bool` | `False` | Keeps the original lossless file next to the converted one. By default the source is deleted once the conversion succeeds. |
+| `verify_hires` | `bool` | `False` | Runs a spectral-analysis QA check after each successful lossless download, flagging files that declare a high sample rate but lack real content above standard-definition frequencies (possible upsampling / fake Hi-Res). Requires the optional `librosa`/`numpy` packages (`pip install SpotiFLAC[hires]`); silently skipped if they're not installed. Never fails or delays a download — see [Hi-Res Verification](#hi-res-verification). |
 | `post_download_action` | `str` | `"none"` | Action after all downloads finish: `"none"`, `"open_folder"`, `"notify"`, `"command"`. |
 | `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{skipped}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 
@@ -1056,6 +1090,7 @@ SpotiFLAC(
 | `--mp3` | | | Shorthand for `--transcode mp3`. |
 | `--transcode-bitrate` | | `320k` | Bitrate used by `--transcode`, e.g. `320k`, `256k`, `192k`. |
 | `--keep-original` | | `False` | Keep the original lossless file alongside the transcoded one. |
+| `--verify-hires` | | `False` | Runs a spectral-analysis QA check after each successful lossless download, flagging files that declare a high sample rate but lack real content above standard-definition frequencies (possible upsampling / fake Hi-Res). Requires the optional `librosa`/`numpy` packages (`pip install SpotiFLAC[hires]`); silently skipped if they're not installed. Never fails or delays a download — see [Hi-Res Verification](#hi-res-verification). |
 | `--verbose` | `-v` | `False` | Enable debug logging. |
 | `--no-lyrics` | | `False` | Disable lyrics embedding (lyrics are embedded by default). |
 | `--lyrics-providers` | | `apple lrclib` | Lyrics provider priority order (CLI default; the Python API default is `spotify apple musixmatch lrclib amazon` when `lyrics_providers` is left unset). |

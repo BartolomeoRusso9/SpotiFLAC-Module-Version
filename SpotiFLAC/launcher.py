@@ -490,6 +490,23 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "(default: the source is deleted after a successful conversion)",
     )
 
+    # ── Quality Verification ────────────────────────────────────────────────
+    verify_grp = parser.add_argument_group("Quality Verification")
+    verify_grp.add_argument(
+        "--verify-hires",
+        action="store_true",
+        dest="verify_hires",
+        default=pd.get("verify_hires", False),
+        help="After each successful lossless download, run a spectral "
+        "analysis to flag files that declare a high sample rate but whose "
+        "actual content stops at standard-definition frequencies (a common "
+        "sign of upsampling / fake Hi-Res). A finding is only logged as a "
+        "warning — it never fails or removes the download. Off by default: "
+        "requires the optional 'librosa'/'numpy' dependencies "
+        "(pip install SpotiFLAC[hires]) and adds a few seconds of analysis "
+        "per track. Skipped automatically for lossy formats (e.g. --mp3).",
+    )
+
     # ── Retry ────────────────────────────────────────────────────────────────
     retry_grp = parser.add_argument_group("Retry")
     retry_grp.add_argument(
@@ -585,6 +602,7 @@ async def _run_download_async(
     playlist_urls: list[str] | None = None,
     m3u_format: str = "m3u8",
     max_concurrent_downloads: int = 2,
+    verify_hires: bool = False,
 ) -> None:
     """Bridge async verso SpotiflacDownloader, senza passare per il wrapper
     sincrono `SpotiFLAC()` (che farebbe un `asyncio.run()` annidato e
@@ -628,6 +646,7 @@ async def _run_download_async(
         transcode_bitrate=transcode_bitrate,
         transcode_keep_original=transcode_keep_original,
         max_concurrent_downloads=max(1, max_concurrent_downloads),
+        verify_hires=verify_hires,
     )
 
     try:
@@ -755,6 +774,7 @@ async def amain() -> None:
             transcode_bitrate=cfg.get("transcode_bitrate", "320k"),
             transcode_keep_original=cfg.get("transcode_keep_original", False),
             max_concurrent_downloads=cfg.get("max_concurrent_downloads", 2),
+            verify_hires=cfg.get("verify_hires", False),
         )
         return
 
@@ -869,6 +889,7 @@ async def amain() -> None:
         playlist_urls=playlist_urls,
         m3u_format=args.m3u_format,
         max_concurrent_downloads=args.max_concurrent,
+        verify_hires=args.verify_hires,
     )
 
     if args.save_profile:
@@ -905,6 +926,7 @@ async def amain() -> None:
                 "timeout_s": timeout_s,
                 "loop": args.loop,
                 "max_concurrent_downloads": args.max_concurrent,
+                "verify_hires": args.verify_hires,
             }
             await save_profile_async(args.save_profile, profile_cfg)
         except Exception:
