@@ -36,16 +36,16 @@ def _early_registries_from_argv() -> list[str]:
     extension install, not just future ones. Mirrors the ad-hoc `--host`/
     `--port` mini-scan already used for `--web` below.
 
-    Only consumes exactly one token after each `--registries` occurrence
-    (mirroring the `action="append"` argparse definition), so it can't
-    swallow the positional `url`/`output_dir` arguments the way a greedy
-    `nargs="+"` scan would if the flag is placed before them.
+    Handles both space-separated (--registries URL) and equals-sign
+    (--registries=URL) forms, mirroring argparse behavior.
     """
     urls: list[str] = []
     argv = sys.argv[1:]
     for i, token in enumerate(argv):
         if token == "--registries" and i + 1 < len(argv):
             urls.append(argv[i + 1])
+        elif token.startswith("--registries="):
+            urls.append(token.split("=", 1)[1])
     return urls
 
 
