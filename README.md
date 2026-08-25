@@ -218,20 +218,54 @@ SpotiFLAC has **no built-in download provider and no default extension source**.
 - **JavaScript** — sharing the same extension format used by [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile), executed via a Node.js bridge.
 - **Python** — packaged as `.spotiflac-ext` / `.sflx` files (a ZIP containing a manifest and a Python entry point), loaded directly in-process.
 
-Extensions are never fetched or installed automatically. You must explicitly configure a registry before SpotiFLAC will contact anything:
+Extensions are never fetched or installed automatically. You must explicitly configure a registry before SpotiFLAC will contact anything. There are several equivalent ways to do it — pick whichever fits your workflow:
+
+**Environment variable:**
 
 ```bash
 # Comma-separated list of registry JSON URLs — none is set by default
 export SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json"
 ```
 
-or in a local `.env` file (see `.env.example`):
+**`.env` file** (see `.env.example`):
 
 ```env
 SPOTIFLAC_REGISTRIES=https://example.com/my-registry.json
 ```
 
-Once configured, you can install and manage extensions:
+**CLI flag** (`--registries`, repeat once per URL) — persisted to `~/.spotiflac/registry_settings.json`, so you only need to pass it once and it's picked up on every future run, exactly like a registry added from the GUI/Interactive wizard:
+
+```bash
+spotiflac --registries https://example.com/my-registry.json URL ./out
+```
+
+**Python API** (`registries` parameter on `SpotiFLAC()` / `AsyncSpotiFLAC()`) — persisted the same way as the CLI flag:
+
+```python
+from SpotiFLAC import SpotiFLAC
+
+SpotiFLAC(
+    url="https://open.spotify.com/track/...",
+    output_dir="./downloads",
+    registries=["https://example.com/my-registry.json"],
+)
+```
+
+```python
+from SpotiFLAC import AsyncSpotiFLAC
+
+async with AsyncSpotiFLAC(
+    output_dir="./downloads",
+    registries=["https://example.com/my-registry.json"],
+) as client:
+    await client.download_track("https://open.spotify.com/track/...")
+```
+
+**Interactive wizard / GUI** — both expose a registry manager (add, remove, list, and see where each URL came from) without touching environment variables or files by hand.
+
+All of these feed into the same merged, deduplicated list (`extensions.registry_config.effective_urls()`), regardless of which entry point you use — the CLI, the GUI, and the Python API all end up contacting the same registries.
+
+Once configured, you can also install and manage extensions directly:
 
 ```python
 from SpotiFLAC.extensions import ExtensionManager
@@ -874,6 +908,7 @@ chmod +x SpotiFLAC-Linux-arm64
 | `output_dir` | `str` | Required | The destination directory path where the audio files will be saved. |
 | `output_path` | `str` | `None` | Exact destination file path for single track downloads. Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies. |
 | `services` | `list` | `["ext:tidal-web"]` | Extensions to use and their priority order, as `ext:<id>` (or a legacy alias — see [Extensions](#extensions)). Each `id` must correspond to an extension you have already installed; nothing is bundled or installed automatically. |
+| `registries` | `list` | `None` | One or more extension-registry JSON URLs to add before the run, as an alternative to `SPOTIFLAC_REGISTRIES` or a `.env` file. Must be `https://`. Persisted to `~/.spotiflac/registry_settings.json` on first use, so subsequent runs (CLI, GUI, or Python) pick it up automatically without passing it again — see [Extensions](#extensions). |
 | `filename_format` | `str` | `"{title} - {artist}"` | Format for naming downloaded files. See placeholders below. |
 | `use_track_numbers` | `bool` | `False` | Prefixes the filename with the track number. |
 | `use_album_track_numbers` | `bool` | `False` | Uses the track's original album number instead of the download queue position. |
@@ -996,6 +1031,7 @@ SpotiFLAC(
 | Flag | Short | Default | Description |
 | --- | --- | --- | --- |
 | `--service` | `-s` | `ext:tidal-web` | One or more extensions in priority order, as `ext:<id>` (or a legacy alias resolved to an installed extension — see [Extensions](#extensions)). |
+| `--registries` | | `None` | An extension-registry JSON URL to add before running; repeat the flag for each one. Alternative to `SPOTIFLAC_REGISTRIES` or a `.env` file. Must be `https://`. Persisted to `~/.spotiflac/registry_settings.json`, so you only need to pass it once — see [Extensions](#extensions). |
 | `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
 | `--output-path` | `-o` | `None` | Exact output file path for single track downloads. Ignored for albums, playlists and discographies. |
 | `--quality` | `-q` | `LOSSLESS` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. Legacy provider-specific values are accepted and normalized. |

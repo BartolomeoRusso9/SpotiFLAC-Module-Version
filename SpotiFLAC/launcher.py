@@ -27,6 +27,44 @@ from .downloader import DownloadOptions, SpotiflacDownloader
 from .interactive import run_interactive
 
 
+def _early_registries_from_argv() -> list[str]:
+    """Best-effort scan of raw sys.argv for repeated `--registries URL` flags.
+
+    Runs before the full `argparse` parse (and before the early
+    `ExtensionManager` bootstrap in `amain()`) so that any registry passed on
+    this invocation is persisted in time to affect the same run's automatic
+    extension install, not just future ones. Mirrors the ad-hoc `--host`/
+    `--port` mini-scan already used for `--web` below.
+
+    Only consumes exactly one token after each `--registries` occurrence
+    (mirroring the `action="append"` argparse definition), so it can't
+    swallow the positional `url`/`output_dir` arguments the way a greedy
+    `nargs="+"` scan would if the flag is placed before them.
+    """
+    urls: list[str] = []
+    argv = sys.argv[1:]
+    for i, token in enumerate(argv):
+        if token == "--registries" and i + 1 < len(argv):
+            urls.append(argv[i + 1])
+    return urls
+
+
+def _register_cli_registries(urls: list[str]) -> None:
+    """Persists `--registries` URLs via `extensions.registry_config`, so they
+    are merged into `registry_config.effective_urls()` the same way
+    `SPOTIFLAC_REGISTRIES`, `.env`-file, or GUI/Interactive-added ones are.
+    """
+    if not urls:
+        return
+    from .extensions import registry_config
+
+    for url in urls:
+        try:
+            registry_config.add_registry(url)
+        except Exception as e:
+            print(f"Unable to add registry '{url}': {e}", file=sys.stderr)
+
+
 def _print_welcome_banner() -> None:
     """Prints a one-time ASCII banner with project/community links on startup.
 
@@ -297,6 +335,20 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         metavar="URL",
         help="URL of a self-hosted hifi-api instance (https://github.com/binimum/hifi-api). "
         "Takes priority over built-in API pool.",
+    )
+    parser.add_argument(
+        "--registries",
+        action="append",
+        default=None,
+        dest="registries",
+        metavar="URL",
+        help="An extension-registry JSON URL to add before running; repeat "
+        "the flag for each one (spotiflac --registries URL1 --registries "
+        "URL2 URL DEST). Equivalent to SPOTIFLAC_REGISTRIES or adding them "
+        "from the Interactive/GUI registry manager. Persisted to "
+        "~/.spotiflac/registry_settings.json, so you only need to pass this "
+        "once — subsequent runs pick it up automatically. Must be https://. "
+        "See Extensions in the README.",
     )
     parser.add_argument("--loop", "-l", type=int, default=pd.get("loop", None))
     parser.add_argument(
@@ -626,6 +678,8 @@ async def amain() -> None:
 
     with contextlib.suppress(Exception):
         await check_for_updates_async()
+
+    _register_cli_registries(_early_registries_from_argv())
 
     try:
         from .extensions.manager import ExtensionManager
