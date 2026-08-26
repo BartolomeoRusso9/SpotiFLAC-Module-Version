@@ -273,7 +273,9 @@ def create_app() -> FastAPI:
             )
         except Exception:
             logger.exception("Error browsing folder %r", path)
-            return JSONResponse({"error": "Unable to browse this folder"}, status_code=400)
+            return JSONResponse(
+                {"error": "Unable to browse this folder"}, status_code=400
+            )
         parent = str(base.parent) if base.parent != base else None
         return JSONResponse(
             {

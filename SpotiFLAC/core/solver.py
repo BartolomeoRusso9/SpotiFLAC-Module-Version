@@ -236,10 +236,12 @@ def arm_hard_watchdog(browser, profile_dir: str | None, timeout_seconds: float):
         )
         pid = None
         with contextlib.suppress(Exception):
-            pid = browser._browser_process_manager._process.pid  # noqa: SLF001
+            pid = browser._browser_process_manager._process.pid
         if pid:
             with contextlib.suppress(Exception):
-                sig = signal.SIGTERM if platform.system() == "Windows" else signal.SIGKILL
+                sig = (
+                    signal.SIGTERM if platform.system() == "Windows" else signal.SIGKILL
+                )
                 os.kill(pid, sig)
         if profile_dir:
             _kill_by_profile_dir(profile_dir)
@@ -253,6 +255,7 @@ def arm_hard_watchdog(browser, profile_dir: str | None, timeout_seconds: float):
         timer.cancel()
 
     return _cancel
+
 
 # If set to "1", the browser window stays visible and is not moved off-screen
 # or minimized. Useful for VNC debugging in Docker (see docker-entrypoint.sh + x11vnc).
@@ -773,7 +776,7 @@ async def _solve_impl(
     options: ChromiumOptions | None = None
     browser = None
     profile_dir: str | None = None
-    cancel_watchdog = lambda: None  # noqa: E731 - replaced once the browser is up
+    cancel_watchdog = lambda: None
     try:
         options, profile_dir = build_chromium_options(hidden=True)
     except Exception as exc:
@@ -802,7 +805,9 @@ async def _solve_impl(
         # eventually dies even if something inside the CDP session wedges
         # completely (dead websocket, renderer that stops responding, ...).
         _watchdog_per_attempt = (
-            min(_RELOAD_CHECK_SECONDS, float(timeout)) if timeout else _RELOAD_CHECK_SECONDS
+            min(_RELOAD_CHECK_SECONDS, float(timeout))
+            if timeout
+            else _RELOAD_CHECK_SECONDS
         )
         _watchdog_budget = (
             (

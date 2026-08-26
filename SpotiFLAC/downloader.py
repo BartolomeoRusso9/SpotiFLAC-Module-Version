@@ -59,7 +59,6 @@ from .core.progress import (
 )
 from .core.quality import normalize_quality, quality_for_provider
 from .core.spotify_metadata import SpotifyMetadataClient
-from .core.url_utils import url_host_has_label, url_host_matches
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
     ensure_ffmpeg_available,
@@ -68,6 +67,7 @@ from .core.transcode import (
     transcode_file_async,
     transcoded_file_exists,
 )
+from .core.url_utils import url_host_has_label, url_host_matches
 
 if TYPE_CHECKING:
     from .core.base import BaseProvider

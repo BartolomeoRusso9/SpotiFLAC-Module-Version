@@ -210,9 +210,15 @@ class LinkResolver:
         link = link.strip()
         if not link:
             return
-        if url_path_contains(link, "/track") and url_host_matches(link, "tidal.com") and not results.get("tidal"):
+        if (
+            url_path_contains(link, "/track")
+            and url_host_matches(link, "tidal.com")
+            and not results.get("tidal")
+        ):
             results["tidal"] = link
-        elif url_host_matches(link, "music.amazon.com") and not results.get("amazonMusic"):
+        elif url_host_matches(link, "music.amazon.com") and not results.get(
+            "amazonMusic"
+        ):
             results["amazonMusic"] = self._normalize_amazon_url(link)
         elif url_host_matches(link, "deezer.com") and not results.get("deezer"):
             results["deezer"] = self._normalize_deezer_url(link)
