@@ -8,6 +8,7 @@ import os
 import platform
 import random
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -24,6 +25,154 @@ DEFAULT_TURNSTILE_CACHE_TTL_SECONDS = 900
 _TURNSTILE_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
 _RELOAD_CHECK_SECONDS = 10.0
 _MAX_RELOAD_ATTEMPTS = 3
+
+# --- Global concurrency cap + hard watchdog -----------------------------
+#
+# Every caller (this module's own solve()/solve_with_callback(), the
+# persistent browser in signed_session_mono.py, the per-verification
+# thread in signed_session_desktop.py, the asyncio.to_thread() call in
+# signed_session_mobile.py) spins up its own independent Chrome instance
+# with no awareness of the others. Under heavy concurrent-download load
+# that means an unbounded number of Chrome processes can pile up at once,
+# each holding a chunk of RAM, until the host runs out of memory and the
+# whole process gets killed by the OS OOM killer instead of failing
+# gracefully.
+#
+# `_MAX_CONCURRENT_BROWSERS_ENV` puts a hard ceiling on that. It uses a
+# plain `threading.Semaphore` (not `asyncio.Semaphore`) on purpose: every
+# caller above runs its browser session on its *own* asyncio loop (either
+# via its own `asyncio.run()` thread or `asyncio.to_thread()`), and an
+# `asyncio.Semaphore` is only ever safe to share across a single loop.
+# A `threading.Semaphore` is a real OS-level primitive that works
+# correctly no matter how many independent event loops touch it.
+_MAX_CONCURRENT_BROWSERS_ENV = "TS_MAX_CONCURRENT_BROWSERS"
+_DEFAULT_MAX_CONCURRENT_BROWSERS = 3
+_browser_slot_semaphore: threading.Semaphore | None = None
+_browser_slot_semaphore_lock = threading.Lock()
+
+
+def _get_browser_slot_semaphore() -> threading.Semaphore:
+    """Lazily create the process-wide Chrome concurrency semaphore.
+
+    Sized once, on first use, from `TS_MAX_CONCURRENT_BROWSERS` (default 3).
+    Kept as a single module-level singleton so it's genuinely shared by
+    every caller in the process, regardless of which thread/event loop
+    they're on.
+    """
+    global _browser_slot_semaphore
+    if _browser_slot_semaphore is None:
+        with _browser_slot_semaphore_lock:
+            if _browser_slot_semaphore is None:
+                raw = os.environ.get(
+                    _MAX_CONCURRENT_BROWSERS_ENV,
+                    str(_DEFAULT_MAX_CONCURRENT_BROWSERS),
+                ).strip()
+                try:
+                    limit = int(raw)
+                except (TypeError, ValueError):
+                    limit = _DEFAULT_MAX_CONCURRENT_BROWSERS
+                limit = max(1, limit)
+                logger.info(
+                    "[solver] global browser concurrency cap = %d (env %s)",
+                    limit,
+                    _MAX_CONCURRENT_BROWSERS_ENV,
+                )
+                _browser_slot_semaphore = threading.Semaphore(limit)
+    return _browser_slot_semaphore
+
+
+@contextlib.asynccontextmanager
+async def acquire_browser_slot():
+    """Blocks until a global Chrome concurrency slot is free, then holds it.
+
+    Safe to call from any coroutine on any event loop/thread: acquiring
+    the underlying `threading.Semaphore` is done via `asyncio.to_thread`
+    so it never blocks the calling loop, only the worker thread the
+    browser session is already running on.
+    """
+    sem = _get_browser_slot_semaphore()
+    await asyncio.to_thread(sem.acquire)
+    try:
+        yield
+    finally:
+        sem.release()
+
+
+def _kill_by_profile_dir(profile_dir: str) -> None:
+    """Best-effort OS-level kill of every process tied to a Chrome profile
+    dir. Last-resort cleanup shared by every module that manages its own
+    pydoll browser session, used when a graceful `browser.stop()` failed
+    or hung.
+    """
+    if not profile_dir:
+        return
+    with contextlib.suppress(Exception):
+        if platform.system() != "Windows":
+            subprocess.run(
+                ["pkill", "-f", profile_dir],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+
+def arm_hard_watchdog(browser, profile_dir: str | None, timeout_seconds: float):
+    """Arms a background OS-thread timer that force-kills `browser`'s
+    process after `timeout_seconds`, no matter what the asyncio side of
+    the program is doing.
+
+    Why this exists: a stuck CDP websocket, a renderer that stops
+    responding, or any other kind of internal hang means an
+    `asyncio.wait_for()`/cancellation-based timeout can itself get stuck —
+    cancellation still has to propagate through an `await`, and if that
+    await is the thing that's wedged (e.g. inside `browser.stop()` itself
+    talking to a dead websocket), nothing ever unblocks. A
+    `threading.Timer` runs on its own OS thread and can always deliver a
+    real kill signal to the process by PID, independent of the event
+    loop's state.
+
+    Returns a zero-argument `cancel()` callable. Call it as soon as the
+    guarded operation finishes normally so the timer doesn't fire later
+    for no reason.
+    """
+    fired = threading.Event()
+
+    def _kill() -> None:
+        if fired.is_set():
+            return
+        fired.set()
+        logger.warning(
+            "[solver] hard watchdog fired after %.0fs — force-killing browser "
+            "(profile_dir=%s)",
+            timeout_seconds,
+            profile_dir,
+        )
+        pid = None
+        with contextlib.suppress(Exception):
+            pid = browser._browser_process_manager._process.pid  # noqa: SLF001
+        if pid:
+            with contextlib.suppress(Exception):
+                sig = signal.SIGTERM if platform.system() == "Windows" else signal.SIGKILL
+                os.kill(pid, sig)
+        if profile_dir:
+            _kill_by_profile_dir(profile_dir)
+
+    timer = threading.Timer(timeout_seconds, _kill)
+    timer.daemon = True
+    timer.start()
+
+    def _cancel() -> None:
+        fired.set()  # blocks a race where the timer fires right after this check
+        timer.cancel()
+
+    return _cancel
 
 # If set to "1", the browser window stays visible and is not moved off-screen
 # or minimized. Useful for VNC debugging in Docker (see docker-entrypoint.sh + x11vnc).
@@ -544,6 +693,7 @@ async def _solve_impl(
     options: ChromiumOptions | None = None
     browser = None
     profile_dir: str | None = None
+    cancel_watchdog = lambda: None  # noqa: E731 - replaced once the browser is up
     try:
         options, profile_dir = build_chromium_options(hidden=True)
     except Exception as exc:
@@ -554,6 +704,8 @@ async def _solve_impl(
             "the pydoll startup watchdog timed out or the browser process never became discoverable. "
             "See the logs for the configured binary/profile/display details.",
         ) from exc
+    slot_cm = acquire_browser_slot()
+    await slot_cm.__aenter__()
     try:
         logger.info(
             "[solver] launching browser through pydoll: binary=%s start_timeout=%ss",
@@ -562,6 +714,23 @@ async def _solve_impl(
         )
         browser = Chrome(options=options)
         tab = await browser.start()
+
+        # Hard ceiling on the whole solve (all reload attempts + cleanup),
+        # armed the moment we have a real PID to kill. Sized generously
+        # above the normal solve budget so it never fires during legitimate
+        # operation — it exists purely to guarantee this browser process
+        # eventually dies even if something inside the CDP session wedges
+        # completely (dead websocket, renderer that stops responding, ...).
+        _watchdog_per_attempt = (
+            min(_RELOAD_CHECK_SECONDS, float(timeout)) if timeout else _RELOAD_CHECK_SECONDS
+        )
+        _watchdog_budget = (
+            _watchdog_per_attempt * _MAX_RELOAD_ATTEMPTS
+            + 10.0 * (_MAX_RELOAD_ATTEMPTS - 1)
+            + max(0.0, hold_open_seconds)
+            + 60.0  # buffer for browser.stop()/cleanup itself
+        )
+        cancel_watchdog = arm_hard_watchdog(browser, profile_dir, _watchdog_budget)
     except Exception as exc:
         message = _describe_browser_start_error(exc, options)
         logger.error("[solver] %s", message)
@@ -573,6 +742,8 @@ async def _solve_impl(
         if browser is not None:
             with contextlib.suppress(Exception):
                 await browser.stop()
+        with contextlib.suppress(Exception):
+            await slot_cm.__aexit__(None, None, None)
         raise RuntimeError(
             "Browser failed to start. Verify the Chromium binary and Docker/host runtime; "
             "the pydoll startup watchdog timed out or the browser process never became discoverable. "
@@ -854,7 +1025,12 @@ async def _solve_impl(
     finally:
         stopped_cleanly = False
         try:
-            await browser.stop()
+            # Bounded wait: if browser.stop() itself hangs (e.g. the CDP
+            # websocket is dead), don't block this coroutine forever —
+            # fall through to the OS-level kill below. The hard watchdog
+            # armed above is the final backstop in case even *this* await
+            # never returns control.
+            await asyncio.wait_for(browser.stop(), timeout=15.0)
             stopped_cleanly = True
         except Exception as exc:
             logger.warning("[solver] browser.stop() failed, forcing cleanup: %s", exc)
@@ -863,24 +1039,10 @@ async def _solve_impl(
             # the solver window open indefinitely (e.g. after the download
             # already finished). Scoped to this solver's own profile dir so
             # it doesn't touch unrelated Chrome windows the user has open.
-            with contextlib.suppress(Exception):
-                import subprocess as _subprocess
-
-                # Use the actual profile_dir from browser launch, not a recomputed one
-                if profile_dir and platform.system() != "Windows":
-                    _subprocess.run(
-                        ["pkill", "-f", profile_dir],
-                        check=False,
-                        stdout=_subprocess.DEVNULL,
-                        stderr=_subprocess.DEVNULL,
-                    )
-                elif platform.system() == "Windows":
-                    _subprocess.run(
-                        ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
-                        check=False,
-                        stdout=_subprocess.DEVNULL,
-                        stderr=_subprocess.DEVNULL,
-                    )
+            _kill_by_profile_dir(profile_dir)
+        cancel_watchdog()
+        with contextlib.suppress(Exception):
+            await slot_cm.__aexit__(None, None, None)
 
     if not token and not (capture_callback and callback_grant):
         msg = (

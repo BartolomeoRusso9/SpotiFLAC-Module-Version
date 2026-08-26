@@ -141,8 +141,8 @@ class _MonochromeBrowserSession:
         if self._browser is not None and self._tab is not None:
             return
         _ensure_xvfb()
-
-        options = build_chromium_options(hidden=False)
+        
+        options = build_chromium_options(hidden=False)[0] 
         options.add_argument("--incognito")
         options.add_argument("--disable-background-timer-throttling")
         options.add_argument("--disable-backgrounding-occluded-windows")
