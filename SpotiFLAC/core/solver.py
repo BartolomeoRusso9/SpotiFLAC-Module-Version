@@ -802,6 +802,24 @@ async def _solve_impl(
         except Exception:
             pass
 
+    # Substrings from pydoll/CDP exceptions that mean the browser/tab itself
+    # is gone (killed externally, websocket dropped, process died) rather
+    # than a normal solve hiccup. Reload-retrying in that case is pointless
+    # busywork — it just silently tries to "reopen" a browser that no
+    # longer exists — so this is used to fail fast instead.
+    _BROWSER_DEAD_MARKERS = (
+        "closed",
+        "disconnected",
+        "connection is closed",
+        "target closed",
+        "no such execution context",
+        "websocket",
+    )
+
+    def _looks_like_dead_browser(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return any(marker in message for marker in _BROWSER_DEAD_MARKERS)
+
     async def _navigate_with_turnstile_bypass() -> None:
         """Navigate to ``siteurl`` letting pydoll's native Turnstile helper
         handle the click for us (shadow-DOM traversal + realistic click).
@@ -820,6 +838,15 @@ async def _solve_impl(
                 # Older pydoll version without this helper
                 await tab.go_to(siteurl)
             except Exception as exc:
+                if _looks_like_dead_browser(exc):
+                    # Don't swallow this one: the browser/tab is actually
+                    # gone (e.g. killed externally), so let it propagate
+                    # instead of being treated as a normal skip-and-retry.
+                    logger.warning(
+                        "[solver] browser/tab appears to be closed, aborting navigate: %s",
+                        exc,
+                    )
+                    raise
                 logger.debug(
                     "[solver] expect_and_bypass_cloudflare_captcha failed/skipped: %s",
                     exc,
@@ -831,6 +858,12 @@ async def _solve_impl(
         # Poll continuously to see whether auto-verification succeeded
         for _ in range(100):  # max 10 seconds
             if nav_task.done():
+                if nav_task.exception() is not None:
+                    # Propagate a dead-browser failure immediately instead
+                    # of falling through to the token-polling loop below,
+                    # which would just hang/fail against a browser that no
+                    # longer exists.
+                    raise nav_task.exception()
                 break
 
             # If the network already captured the grant, we can stop waiting for pydoll's click
@@ -1004,10 +1037,22 @@ async def _solve_impl(
         await _navigate_with_turnstile_bypass()
 
         for attempt in range(1, max_attempts + 1):
-            if attempt > 1:
-                await _open_fresh_page()
+            try:
+                if attempt > 1:
+                    await _open_fresh_page()
 
-            token = await _try_solve_within(per_attempt_seconds)
+                token = await _try_solve_within(per_attempt_seconds)
+            except Exception as exc:
+                if _looks_like_dead_browser(exc):
+                    # The browser/tab is gone — further reload attempts
+                    # would just try to "reopen" a dead window. Stop
+                    # retrying and fall through to cleanup/TimeoutError.
+                    logger.warning(
+                        "[solver] aborting reload attempts, browser/tab closed: %s",
+                        exc,
+                    )
+                    break
+                raise
 
             if token or (capture_callback and callback_grant):
                 break

@@ -341,31 +341,19 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 grant = grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
                 if grant:
                     logger.info("Automated verification successful! Grant received.")
-                    with contextlib.suppress(Exception):
-                        import platform
-                        import subprocess
-
-                        if platform.system() == "Windows":
-                            # Cerca brutalmente qualsiasi processo Chrome aperto con flag di debug
-                            # da pydoll e lo distrugge, permettendo al thread di terminare istantaneamente
-                            subprocess.run(
-                                [
-                                    "powershell",
-                                    "-NoProfile",
-                                    "-Command",
-                                    "Get-WmiObject Win32_Process -Filter \"Name='chrome.exe'\" | Where-Object {$_.CommandLine -match '--remote-debugging-port='} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }",
-                                ],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-                            )
-                        else:
-                            subprocess.run(
-                                ["pkill", "-f", "remote-debugging-port"],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                            )
-
+                    # NOTE: previously this force-killed every Chrome process
+                    # matching "--remote-debugging-port" system-wide to make
+                    # the solver thread exit instantly. That's unscoped: with
+                    # up to _DEFAULT_MAX_CONCURRENT_BROWSERS browsers allowed
+                    # to run at once (mono/mobile/other concurrent desktop
+                    # verifications), it killed *their* browsers too,
+                    # producing the "window closed abruptly, tries to
+                    # reopen" symptom on unrelated in-flight solves. The
+                    # solver thread's own solve_with_callback() already
+                    # closes its own browser gracefully (bounded 15s
+                    # browser.stop() + a per-instance hard watchdog scoped to
+                    # its own profile_dir), so no extra cleanup is needed
+                    # here — just let it finish on its own.
                     return grant
 
             except queue.Empty:
