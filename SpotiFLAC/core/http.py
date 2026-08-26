@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from tenacity import AsyncRetrying, RetryCallState, retry_if_exception_type, stop_after_attempt
 
 from .errors import (
     AuthError,
@@ -167,11 +168,13 @@ class AsyncHttpClient:
         timeout_s: int = 30,
         rate_limiter: AsyncRateLimiter | None = None,
         headers: dict[str, str] | None = None,
+        retry: RetryConfig | None = None,
     ) -> None:
         self._provider = provider
         self._timeout = timeout_s
         self._limiter = rate_limiter
         self._headers = headers or {}
+        self._retry = retry or RetryConfig()
         self._stop_event: asyncio.Event | None = None
 
     async def _client(self) -> httpx.AsyncClient:
@@ -194,19 +197,40 @@ class AsyncHttpClient:
         headers = {**self._headers, **kwargs.pop("headers", {})}
         req_timeout = kwargs.pop("timeout", self._timeout)
 
-        if self._limiter:
-            await self._limiter.wait_for_slot()
+        async def _attempt() -> httpx.Response:
+            if self._limiter:
+                await self._limiter.wait_for_slot()
+            client = await self._client()
+            try:
+                resp = await client.request(
+                    method,
+                    url,
+                    headers=headers,
+                    timeout=req_timeout,
+                    **kwargs,
+                )
+            except httpx.TransportError as exc:
+                raise NetworkError(self._provider, f"Request failed: {exc}") from exc
+            self._raise_for_status(resp)
+            return resp
 
-        client = await self._client()
-        resp = await client.request(
-            method,
-            url,
-            headers=headers,
-            timeout=req_timeout,
-            **kwargs,
+        retryer = AsyncRetrying(
+            stop=stop_after_attempt(self._retry.max_attempts),
+            retry=retry_if_exception_type((RateLimitedError, NetworkError)),
+            wait=self._wait_strategy,
+            reraise=True,
         )
-        self._raise_for_status(resp)
-        return resp
+        return await retryer(_attempt)
+
+    def _wait_strategy(self, retry_state: RetryCallState) -> float:
+        """Retry-After for 429s; otherwise exponential backoff from RetryConfig."""
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        if isinstance(exc, RateLimitedError):
+            return min(exc.retry_after, self._retry.max_delay_s)
+        delay = self._retry.base_delay_s * (
+            self._retry.backoff_factor ** (retry_state.attempt_number - 1)
+        )
+        return min(delay, self._retry.max_delay_s)
 
     def _raise_for_status(self, resp: httpx.Response) -> None:
         sc = resp.status_code

@@ -417,13 +417,22 @@ class ExtensionManager:
         # runtime_hint explicit parameter overrides fragment
         if runtime_hint:
             parsed_runtime = runtime_hint
-        try:
-            r = httpx.get(url, timeout=self.timeout * 3, follow_redirects=True)
-            r.raise_for_status()
-            raw = r.content
-        except Exception as e:
-            msg = f"Error downloading extension: {e}"
-            raise RuntimeError(msg) from e
+        raw = None
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                r = httpx.get(url, timeout=self.timeout * 3, follow_redirects=True)
+                r.raise_for_status()
+                raw = r.content
+                break
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                last_err = e
+                if attempt == 2:
+                    break
+                time.sleep(0.5 * (2**attempt))
+        if raw is None:
+            msg = f"Error downloading extension: {last_err}"
+            raise RuntimeError(msg) from last_err
 
         return self._install_from_bytes(
             raw, settings=settings, sha256=sha256, runtime_hint=parsed_runtime
@@ -563,6 +572,15 @@ class ExtensionManager:
             Path(member).is_absolute() or ".." in Path(member).parts for member in names
         ):
             raise ValueError("Extension archive contains an unsafe path")
+
+        # Reject symlink entries (zip-slip via a symlink pointing outside the
+        # extraction dir, written before the target it "points to" exists).
+        # A symlink's mode bits are stored in the top 4 bits of external_attr.
+        for info in zf.infolist():
+            unix_mode = info.external_attr >> 16
+            if unix_mode and (unix_mode & 0o170000) == 0o120000:
+                msg = f"Extension archive contains a symlink entry: {info.filename}"
+                raise ValueError(msg)
 
         previous_settings = target / "settings.json"
         saved_settings = (

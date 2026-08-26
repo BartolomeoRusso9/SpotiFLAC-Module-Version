@@ -776,7 +776,8 @@ async def _solve_impl(
     options: ChromiumOptions | None = None
     browser = None
     profile_dir: str | None = None
-    cancel_watchdog = lambda: None
+    def cancel_watchdog() -> None:
+        return None
     try:
         options, profile_dir = build_chromium_options(hidden=True)
     except Exception as exc:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "3.1.0"
+version = "3.1.1"
 description = "Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -91,3 +91,11 @@ target-version = ["py310"]
 
 [tool.ruff]
 line-length = 88
+
+[tool.ruff.lint.per-file-ignores]
+# Imports deliberately placed after module-level setup code (see the
+# comments at each site): a circular-import guard in core/__init__.py,
+# and a warnings.filterwarnings() call that must run before the import
+# it's silencing in tools/hires_check_cli.py.
+"SpotiFLAC/core/__init__.py" = ["E402"]
+"SpotiFLAC/tools/hires_check_cli.py" = ["E402"]

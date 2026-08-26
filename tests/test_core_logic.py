@@ -29,6 +29,7 @@ from SpotiFLAC.core.quality import (
     quality_fallback_chain,
     quality_for_provider,
 )
+from SpotiFLAC.extensions import registry_config
 from SpotiFLAC.extensions.manager import (
     ExtensionManager,
     InstalledExtension,
@@ -479,6 +480,14 @@ def test_transcode_helpers_and_conversion(monkeypatch, tmp_path):
 def test_extension_manager_deduplicates_registry_checks_in_one_process(
     monkeypatch, tmp_path
 ):
+    # Isolate from whatever real .env / registry_settings.json happen to
+    # exist on the machine running the test (e.g. a local dev .env copied
+    # from .env.example, per the README) — otherwise this test's outcome
+    # depends on the contributor's own filesystem instead of only on the
+    # env var it sets below.
+    monkeypatch.setattr(registry_config, "ENV_FILES_TO_CHECK", ())
+    monkeypatch.setattr(registry_config, "CONFIG_FILE", tmp_path / "registry_settings.json")
+
     # Snapshot original state and restore in finally block
     original_checks = ExtensionManager._startup_registry_checks.copy()
     try:

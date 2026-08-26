@@ -38,6 +38,7 @@ class BaseProvider(ABC):
             timeout_s=timeout_s,
             rate_limiter=rate_limiter,
             headers=headers,
+            retry=retry,
         )
         # Type hint aggiornato per supportare sia callback sincroni (None) che asincroni (Awaitable)
         self._progress_cb: Callable[[int, int], Awaitable[None] | None] | None = None

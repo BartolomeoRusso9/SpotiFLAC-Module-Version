@@ -390,6 +390,14 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         default=8000,
         help="Port to bind --web to (default: 8000)",
     )
+    parser.add_argument(
+        "--health-check",
+        action="store_true",
+        dest="health_check",
+        default=False,
+        help="Probe direct lyrics-provider servers for reachability and exit "
+        "(no download). Optionally narrow the check with --lyrics-providers.",
+    )
 
     # ── Profile ─────────────────────────────────────────────────────────────
     profile_grp = parser.add_argument_group("Profile")
@@ -724,6 +732,21 @@ async def amain() -> None:
         from .webapp import run_async as run_web
 
         await run_web(host=web_args.host, port=web_args.port)
+        return
+
+    if "--health-check" in sys.argv:
+        # --lyrics-providers narrows which servers get probed, same as for
+        # --host/--port above: needs the parsed value, not a raw sys.argv scan.
+        hc_parser = argparse.ArgumentParser(add_help=False)
+        hc_parser.add_argument("--lyrics-providers", nargs="+", default=None)
+        hc_args, _ = hc_parser.parse_known_args(sys.argv[1:])
+
+        from .core.health_check import print_health_report, run_health_check
+
+        results = await run_health_check(hc_args.lyrics_providers)
+        print_health_report(results)
+        if not all(r.ok for r in results):
+            sys.exit(1)
         return
 
     if "--interactive" in sys.argv:
