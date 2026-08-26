@@ -920,20 +920,19 @@ window.updateFolderLabel = (path) => {
         if (isDownloading) {
           const activeItem = queue.find(q => q.status === 'active');
           if (activeItem) {
-            const msg = `
-              <div style="display:flex; justify-content:space-between; margin-top:4px;">
-                <span>${escHtml(activeItem.title)}</span>
-                <span>${activeItem.progress}%</span>
-              </div>
-              <div style="font-size:11px; color:var(--muted); margin-top:4px;">Speed: ${queueStats.speed}</div>
-            `;
-            
+            // Plain text, not an HTML fragment: toastMgr's rendering path
+            // escapes the message (see toast-system.js escapeHtml), so
+            // markup passed here would show up as literal tags instead of
+            // being rendered.
+            const msg = `${activeItem.title} — ${activeItem.progress}% · Speed: ${queueStats.speed}`;
+
             if (!currentDownloadToastId) {
               currentDownloadToastId = toastMgr.loading(msg, { title: 'Downloading Tracks...' });
             } else {
               // Update il testo del toast esistente
               const toastEl = document.getElementById(currentDownloadToastId);
-              if (toastEl) toastEl.querySelector('.toast-message').innerHTML = msg;
+              const toastMsgEl = toastEl && toastEl.querySelector('.toast-message');
+              if (toastMsgEl) toastMsgEl.textContent = msg;
             }
           }
         }

@@ -25,6 +25,14 @@ DEFAULT_TURNSTILE_CACHE_TTL_SECONDS = 900
 _TURNSTILE_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
 _RELOAD_CHECK_SECONDS = 10.0
 _MAX_RELOAD_ATTEMPTS = 3
+# Fixed per-attempt overhead the hard watchdog budget must also cover, on
+# top of _watchdog_per_attempt (the token-polling window itself): the
+# navigation-poll loop in _navigate_with_turnstile_bypass() (100 * 0.1s)
+# and the iframe-rectangle discovery loop in _try_solve_within() (20 *
+# 0.5s) each run once per attempt and can legitimately take their full
+# duration before the token-polling window even starts.
+_MAX_NAV_POLL_SECONDS = 100 * 0.1
+_MAX_IFRAME_RECT_POLL_SECONDS = 20 * 0.5
 
 # --- Global concurrency cap + hard watchdog -----------------------------
 #
@@ -49,6 +57,14 @@ _MAX_CONCURRENT_BROWSERS_ENV = "TS_MAX_CONCURRENT_BROWSERS"
 _DEFAULT_MAX_CONCURRENT_BROWSERS = 3
 _browser_slot_semaphore: threading.Semaphore | None = None
 _browser_slot_semaphore_lock = threading.Lock()
+
+# How long a caller is willing to wait for a free Chrome concurrency slot
+# before giving up. Without a bound, a caller stuck behind a wedged/hung
+# browser session that never releases its slot (see arm_hard_watchdog for
+# why sessions can wedge) would block forever instead of surfacing a
+# reportable error the caller can retry/log.
+_BROWSER_SLOT_TIMEOUT_ENV = "TS_BROWSER_SLOT_TIMEOUT"
+_DEFAULT_BROWSER_SLOT_TIMEOUT_SECONDS = 120.0
 
 
 def _get_browser_slot_semaphore() -> threading.Semaphore:
@@ -81,6 +97,17 @@ def _get_browser_slot_semaphore() -> threading.Semaphore:
     return _browser_slot_semaphore
 
 
+def _get_browser_slot_timeout_seconds() -> float:
+    raw = os.environ.get(
+        _BROWSER_SLOT_TIMEOUT_ENV, str(_DEFAULT_BROWSER_SLOT_TIMEOUT_SECONDS)
+    ).strip()
+    try:
+        timeout = float(raw)
+    except (TypeError, ValueError):
+        timeout = _DEFAULT_BROWSER_SLOT_TIMEOUT_SECONDS
+    return timeout if timeout > 0 else _DEFAULT_BROWSER_SLOT_TIMEOUT_SECONDS
+
+
 @contextlib.asynccontextmanager
 async def acquire_browser_slot():
     """Blocks until a global Chrome concurrency slot is free, then holds it.
@@ -89,9 +116,19 @@ async def acquire_browser_slot():
     the underlying `threading.Semaphore` is done via `asyncio.to_thread`
     so it never blocks the calling loop, only the worker thread the
     browser session is already running on.
+
+    Bounded by `TS_BROWSER_SLOT_TIMEOUT` (default 120s): a caller stuck
+    behind a wedged session that never releases its slot gets a reportable
+    `TimeoutError` instead of hanging forever.
     """
     sem = _get_browser_slot_semaphore()
-    await asyncio.to_thread(sem.acquire)
+    timeout = _get_browser_slot_timeout_seconds()
+    acquired = await asyncio.to_thread(sem.acquire, True, timeout)
+    if not acquired:
+        raise TimeoutError(
+            f"Timed out after {timeout:.0f}s waiting for a free browser "
+            f"concurrency slot (env {_BROWSER_SLOT_TIMEOUT_ENV})"
+        )
     try:
         yield
     finally:
@@ -115,12 +152,55 @@ def _kill_by_profile_dir(profile_dir: str) -> None:
                 stderr=subprocess.DEVNULL,
             )
         else:
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Killing every chrome.exe (as a plain "/IM chrome.exe" would)
+            # would also take down any Chrome windows the user has open
+            # unrelated to this solver session. Scope the kill to PIDs
+            # whose command line references this solver's profile dir,
+            # falling back to the unscoped kill only if none are found
+            # (e.g. WMIC unavailable, or the command line couldn't be
+            # matched for some other reason).
+            matched_pids: list[str] = []
+            try:
+                wmic_out = subprocess.run(
+                    [
+                        "wmic",
+                        "process",
+                        "where",
+                        "name='chrome.exe'",
+                        "get",
+                        "ProcessId,CommandLine",
+                    ],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=10,
+                )
+                for line in wmic_out.stdout.splitlines():
+                    line = line.strip()
+                    if not line or profile_dir not in line:
+                        continue
+                    pid = line.split()[-1]
+                    if pid.isdigit():
+                        matched_pids.append(pid)
+            except Exception:
+                matched_pids = []
+
+            if matched_pids:
+                for pid in matched_pids:
+                    subprocess.run(
+                        ["taskkill", "/F", "/PID", pid, "/T"],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+            else:
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
 
 def arm_hard_watchdog(browser, profile_dir: str | None, timeout_seconds: float):
@@ -725,7 +805,12 @@ async def _solve_impl(
             min(_RELOAD_CHECK_SECONDS, float(timeout)) if timeout else _RELOAD_CHECK_SECONDS
         )
         _watchdog_budget = (
-            _watchdog_per_attempt * _MAX_RELOAD_ATTEMPTS
+            (
+                _watchdog_per_attempt
+                + _MAX_NAV_POLL_SECONDS
+                + _MAX_IFRAME_RECT_POLL_SECONDS
+            )
+            * _MAX_RELOAD_ATTEMPTS
             + 10.0 * (_MAX_RELOAD_ATTEMPTS - 1)
             + max(0.0, hold_open_seconds)
             + 60.0  # buffer for browser.stop()/cleanup itself
@@ -835,8 +920,24 @@ async def _solve_impl(
                 ):
                     await tab.go_to(siteurl)
             except AttributeError:
-                # Older pydoll version without this helper
-                await tab.go_to(siteurl)
+                # Older pydoll version without this helper. Same dead-browser
+                # handling as the native path below: a dead browser/tab must
+                # still propagate instead of falling through to token-polling
+                # against a browser that no longer exists, but any other
+                # navigation hiccup is logged and swallowed.
+                try:
+                    await tab.go_to(siteurl)
+                except Exception as exc:
+                    if _looks_like_dead_browser(exc):
+                        logger.warning(
+                            "[solver] browser/tab appears to be closed, aborting navigate: %s",
+                            exc,
+                        )
+                        raise
+                    logger.debug(
+                        "[solver] tab.go_to fallback failed/skipped: %s",
+                        exc,
+                    )
             except Exception as exc:
                 if _looks_like_dead_browser(exc):
                     # Don't swallow this one: the browser/tab is actually

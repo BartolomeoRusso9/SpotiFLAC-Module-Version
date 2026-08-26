@@ -63,12 +63,12 @@ def url_host_has_label(url: str, *labels: str) -> bool:
 
 
 def url_path_contains(url: str, *segments: str) -> bool:
-    """Return True if the URL's *path* contains any of ``segments`` as a
-    proper path component check (still substring-based, but scoped to the
-    path only rather than the full URL string) — used for things like
-    ``listen.tidal.com/track`` where the check is really "host + path
-    prefix" together. Prefer :func:`url_host_matches` when only the host
-    matters.
+    """Return True if the URL's *path* contains any of ``segments`` as an
+    exact path component (e.g. ``listen.tidal.com/track/123`` matches
+    segment ``"track"``, but ``/track-preview`` or ``/tracklist`` do not) —
+    used for things like ``listen.tidal.com/track`` where the check is
+    really "host + path prefix" together. Prefer :func:`url_host_matches`
+    when only the host matters.
     """
     if not url:
         return False
@@ -76,5 +76,18 @@ def url_path_contains(url: str, *segments: str) -> bool:
         parsed = urlparse(url)
     except Exception:
         return False
-    haystack = f"{(parsed.hostname or '').lower()}{parsed.path.lower()}"
-    return any(segment.lower() in haystack for segment in segments)
+    host = (parsed.hostname or "").lower()
+    parts = [p.lower() for p in parsed.path.split("/") if p]
+    for segment in segments:
+        segment = segment.lower().strip("/")
+        if not segment:
+            continue
+        seg_parts = segment.split("/")
+        if segment in host:
+            return True
+        if any(
+            parts[i : i + len(seg_parts)] == seg_parts
+            for i in range(len(parts) - len(seg_parts) + 1)
+        ):
+            return True
+    return False
