@@ -5,6 +5,8 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from SpotiFLAC.core.url_utils import url_host_matches, url_path_contains
+
 if TYPE_CHECKING:
     from SpotiFLAC.core.http import AsyncHttpClient
 
@@ -75,12 +77,16 @@ class SongstatsProvider:
         if not link:
             return
 
-        if "listen.tidal.com/track" in link and not results["tidal"]:
+        if (
+            url_path_contains(link, "/track")
+            and url_host_matches(link, "tidal.com")
+            and not results["tidal"]
+        ):
             results["tidal"] = link
             logger.debug("✓ Tidal URL found via Songstats")
-        elif "music.amazon.com" in link and not results["amazon"]:
+        elif url_host_matches(link, "music.amazon.com") and not results["amazon"]:
             results["amazon"] = link
             logger.debug("✓ Amazon URL found via Songstats")
-        elif "deezer.com" in link and not results["deezer"]:
+        elif url_host_matches(link, "deezer.com") and not results["deezer"]:
             results["deezer"] = link
             logger.debug("✓ Deezer URL found via Songstats")

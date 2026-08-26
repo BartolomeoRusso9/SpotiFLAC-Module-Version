@@ -223,13 +223,21 @@ def create_app() -> FastAPI:
             # which would raise if called directly inside this async route —
             # running them in a worker thread avoids that).
             result = await run_in_threadpool(fn, *args, **kwargs)
-        except TypeError as e:
+        except TypeError:
+            # Log the real exception (may include argument values/internal
+            # details) server-side only; the client gets a generic message
+            # so internals (paths, types, library versions, ...) aren't
+            # exposed to whatever is calling this HTTP API.
+            logger.exception("Bad arguments calling %s", method_name)
             return JSONResponse(
-                {"error": f"Bad arguments for {method_name}: {e}"}, status_code=400
+                {"error": f"Bad arguments for {method_name}"}, status_code=400
             )
-        except Exception as e:
+        except Exception:
             logger.exception("Error calling %s", method_name)
-            return JSONResponse({"error": str(e)}, status_code=500)
+            return JSONResponse(
+                {"error": f"Internal error while calling {method_name}"},
+                status_code=500,
+            )
 
         return JSONResponse({"result": result})
 
@@ -263,8 +271,9 @@ def create_app() -> FastAPI:
                 ),
                 key=str.lower,
             )
-        except Exception as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception:
+            logger.exception("Error browsing folder %r", path)
+            return JSONResponse({"error": "Unable to browse this folder"}, status_code=400)
         parent = str(base.parent) if base.parent != base else None
         return JSONResponse(
             {

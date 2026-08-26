@@ -19,6 +19,7 @@ from typing_extensions import Self
 from SpotiFLAC.core.errors import AuthError, ErrorKind, InvalidUrlError, SpotiflacError
 from SpotiFLAC.core.http import AsyncHttpClient
 from SpotiFLAC.core.models import TrackMetadata
+from SpotiFLAC.core.url_utils import url_host_matches
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def _extract_jwt_from_string(text: str) -> str | None:
 
 
 def is_apple_music_url(url: str) -> bool:
-    return "music.apple.com" in url.lower()
+    return url_host_matches(url, "music.apple.com")
 
 
 def parse_apple_music_url(url: str) -> dict[str, str]:

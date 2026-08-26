@@ -140,6 +140,34 @@
 
   // ── WebSocket push channel: mirrors what pywebview's evaluate_js does
   //    for real desktop windows. See SpotiFLAC/app.py's _push().
+  //
+  // `fn` below names the global function to invoke and travels over the
+  // WebSocket message, so it's dispatched only against this explicit
+  // allowlist (kept in sync with every `self._push("...")` call site in
+  // app.py) rather than an unrestricted `window[fn](...)` — that keeps a
+  // compromised/malicious message from invoking arbitrary global functions.
+  const ALLOWED_PUSH_FNS = new Set([
+    '__set_version_label',
+    'app_cover_download_finished',
+    'app_download_finished',
+    'app_handle_provider_search_error',
+    'app_handle_provider_search_results',
+    'app_local_apply_error',
+    'app_local_apply_finished',
+    'app_local_apply_progress',
+    'app_local_scan_error',
+    'app_local_scan_results',
+    'app_log',
+    'app_set_metadata',
+    'app_set_progress',
+    'app_update_download_stats',
+    'loadHistoryAndProfiles',
+    'showFfmpegWarning',
+    'showTracklist',
+    'updateFolderLabel',
+    'updateHealthResults',
+  ]);
+
   function connectWs() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(proto + '//' + location.host + '/ws');
@@ -158,12 +186,14 @@
         }
         return;
       }
-      if (typeof window[fn] === 'function') {
+      if (typeof fn === 'string' && ALLOWED_PUSH_FNS.has(fn) && typeof window[fn] === 'function') {
         try {
           window[fn](...args);
         } catch (e) {
           console.error('web-shim: error dispatching', fn, e);
         }
+      } else if (fn) {
+        console.warn('web-shim: ignoring push for non-allowlisted function', fn);
       }
     };
     ws.onclose = () => {

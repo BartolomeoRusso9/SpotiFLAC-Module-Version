@@ -59,6 +59,7 @@ from .core.progress import (
 )
 from .core.quality import normalize_quality, quality_for_provider
 from .core.spotify_metadata import SpotifyMetadataClient
+from .core.url_utils import url_host_has_label, url_host_matches
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
     ensure_ffmpeg_available,
@@ -1425,18 +1426,18 @@ class SpotiflacDownloader:
 
         is_tidal = is_tidal_url(url)
         is_apple = is_apple_music_url(url)
-        is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
-        is_youtube = "youtube.com" in url or "youtu.be" in url
-        is_pandora = "pandora.com" in url or "pandora.app.link" in url
+        is_soundcloud = url_host_matches(url, "soundcloud.com")
+        is_youtube = url_host_matches(url, "youtube.com", "youtu.be")
+        is_pandora = url_host_matches(url, "pandora.com", "pandora.app.link")
 
-        if "deezer.com" in url or "deezer.page.link" in url:
+        if url_host_matches(url, "deezer.com", "deezer.page.link"):
             raise SpotiflacError(
                 ErrorKind.INVALID_URL,
                 "Providing Deezer URLs as primary input is not yet fully supported. "
                 "Use a Spotify link and set 'deezer' as the download provider.",
             )
 
-        if "amazon." in url.lower():
+        if url_host_has_label(url, "amazon"):
             raise SpotiflacError(
                 ErrorKind.INVALID_URL,
                 "Amazon links cannot be inserted.",
@@ -1730,8 +1731,8 @@ class SpotiflacDownloader:
             )
             effective_opts = replace(effective_opts, output_path=None)
 
-        is_soundcloud = "soundcloud.com" in url or "on.soundcloud.com" in url
-        is_pandora = "pandora.com" in url or "pandora.app.link" in url
+        is_soundcloud = url_host_matches(url, "soundcloud.com")
+        is_pandora = url_host_matches(url, "pandora.com", "pandora.app.link")
 
         existing_paths: dict[str, Path] = {}
         if not is_soundcloud and not is_pandora:

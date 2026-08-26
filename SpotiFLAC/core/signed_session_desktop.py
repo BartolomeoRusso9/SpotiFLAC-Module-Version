@@ -29,22 +29,17 @@ COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
 # open past that budget rather than timing out at 45s and aborting the whole
 # flow while the background solver is still trying to complete.
 COMMUNITY_VERIFY_TIMEOUT = 90  # seconds
-DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS = 10
-
-
-def wait_before_desktop_solver_start() -> None:
-    """Desktop verification waits for Cloudflare/solver page to render.
-
-    Some challenge pages do not expose the Turnstile iframe immediately; the
-    browser can need a few seconds to settle before the Cloudflare helper is
-    ready to solve. We intentionally keep the delay explicit and configurable
-    rather than hardcoding it inside the solver thread launch.
-    """
-    logger.info(
-        "[desktop verification] waiting %.0f seconds before starting solver.py",
-        DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS,
-    )
-    time.sleep(DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS)
+# Absolute safety ceiling for MODE 2 (automated verification via solver.py)
+# only. solve_with_callback() now first blocks on solver.py's process-wide
+# acquire_browser_slot() semaphore (TS_MAX_CONCURRENT_BROWSERS, default 3)
+# before it even starts solving, and under heavy concurrent download load
+# that wait alone can exceed COMMUNITY_VERIFY_TIMEOUT — a single blocking
+# `grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)` would then report a
+# false timeout while the solver thread is still legitimately queued/
+# working. The polling loop in run_community_verification() uses this as
+# its outer bound instead, giving up early only once the solver thread has
+# actually exited without producing a grant.
+COMMUNITY_VERIFY_ABSOLUTE_TIMEOUT = 240  # seconds
 
 
 def fetch_latest_version() -> str:
@@ -224,7 +219,6 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 self.send_error(404)
                 return
 
-            # Errore di battitura corretto qui: parse_qs
             qs = urllib.parse.parse_qs(parsed_path.query)
             state = qs.get("state", [""])[0]
 
@@ -335,13 +329,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             # =========================================================================
             # FIX: Run the solver in a separate daemon thread so the main thread
             # can listen to the grant_queue without blocking!
-            #
-            # Desktop verification waits for the Cloudflare challenge page to render
-            # its iframe and to expose the expected quadratini after a short page load
-            # budget. The solver starts only after that stable delay.
             # =========================================================================
-            wait_before_desktop_solver_start()
-
             def _run_solver_thread():
                 try:
                     _token, grant_res = solve_with_callback(
@@ -359,28 +347,47 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             solver_thread = threading.Thread(target=_run_solver_thread, daemon=True)
             solver_thread.start()
 
-            # The main thread waits for the grant to arrive from the local server
-            try:
-                grant = grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
-                if grant:
-                    logger.info("Automated verification successful! Grant received.")
-                    with contextlib.suppress(Exception):
-                        import platform
-                        import subprocess
+            # The main thread waits for the grant to arrive from the local
+            # server. Poll instead of a single blocking get(timeout=...): the
+            # solver thread can legitimately still be queued on solver.py's
+            # global browser-slot semaphore well past COMMUNITY_VERIFY_TIMEOUT
+            # (see COMMUNITY_VERIFY_ABSOLUTE_TIMEOUT above), so give up only
+            # once the thread has actually exited without producing a grant,
+            # or the absolute ceiling is reached.
+            grant = None
+            deadline = time.monotonic() + COMMUNITY_VERIFY_ABSOLUTE_TIMEOUT
+            while time.monotonic() < deadline:
+                try:
+                    grant = grant_queue.get(timeout=1.0)
+                    break
+                except queue.Empty:
+                    if not solver_thread.is_alive():
+                        # Solver thread exited (error, or its own internal
+                        # timeout) without ever producing a grant — waiting
+                        # further is pointless.
+                        break
+                    continue
 
-                        if platform.system() != "Windows":
-                            subprocess.run(
-                                ["pkill", "-f", "remote-debugging-port"],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                            )
+            if grant:
+                logger.info("Automated verification successful! Grant received.")
+                # NOTE: previously this force-killed every Chrome process
+                # matching "--remote-debugging-port" system-wide to make
+                # the solver thread exit instantly. That's unscoped: with
+                # up to _DEFAULT_MAX_CONCURRENT_BROWSERS browsers allowed
+                # to run at once (mono/mobile/other concurrent desktop
+                # verifications), it killed *their* browsers too,
+                # producing the "window closed abruptly, tries to
+                # reopen" symptom on unrelated in-flight solves. The
+                # solver thread's own solve_with_callback() already
+                # closes its own browser gracefully (bounded 15s
+                # browser.stop() + a per-instance hard watchdog scoped to
+                # its own profile_dir), so no extra cleanup is needed
+                # here — just let it finish on its own.
+                return grant
 
-                    return grant
-
-            except queue.Empty:
-                msg = "Automated verification timed out (no grant received in time)."
-                logger.warning(msg)
-                raise RuntimeError(msg)
+            msg = "Automated verification timed out (no grant received in time)."
+            logger.warning(msg)
+            raise RuntimeError(msg)
 
         except ImportError:
             logger.info("solver.py not found or Playwright dependencies missing.")

@@ -12,6 +12,7 @@ import httpx
 from .http import AsyncHttpClient, async_songlink_rate_limiter
 from .response_cache import get as get_cached_response
 from .response_cache import put as put_cached_response
+from .url_utils import url_host_matches, url_path_contains
 
 logger = logging.getLogger(__name__)
 
@@ -99,9 +100,9 @@ class LinkResolver:
 
     def identify_provider(self, url: str) -> str:
         url = url.lower()
-        if "soundcloud.com" in url or "on.soundcloud.com" in url:
+        if url_host_matches(url, "soundcloud.com"):
             return "soundcloud"
-        if "spotify.com" in url:
+        if url_host_matches(url, "spotify.com"):
             return "spotify"
         return "unknown"
 
@@ -209,11 +210,11 @@ class LinkResolver:
         link = link.strip()
         if not link:
             return
-        if "listen.tidal.com/track" in link and not results.get("tidal"):
+        if url_path_contains(link, "/track") and url_host_matches(link, "tidal.com") and not results.get("tidal"):
             results["tidal"] = link
-        elif "music.amazon.com" in link and not results.get("amazonMusic"):
+        elif url_host_matches(link, "music.amazon.com") and not results.get("amazonMusic"):
             results["amazonMusic"] = self._normalize_amazon_url(link)
-        elif "deezer.com" in link and not results.get("deezer"):
+        elif url_host_matches(link, "deezer.com") and not results.get("deezer"):
             results["deezer"] = self._normalize_deezer_url(link)
 
     async def _get_isrc_from_deezer_async(self, deezer_url: str) -> str:

@@ -29,7 +29,9 @@ from pydoll.protocol.network.events import NetworkEvent
 from SpotiFLAC.core import get_amazon_endpoint
 from SpotiFLAC.core.solver import (
     _ensure_xvfb,
+    _kill_by_profile_dir,
     _try_minimize_window,
+    acquire_browser_slot,
     build_chromium_options,
 )
 
@@ -38,6 +40,10 @@ logger = logging.getLogger(__name__)
 MONOCHROME_SESSION_SKEW = timedelta(minutes=2)
 MONOCHROME_VERIFY_TIMEOUT = 60.0
 MONOCHROME_PAGE_URL = "https://monochrome.tf/"
+# Bound on browser.start() + initial navigation when spinning up the
+# persistent mono browser, so a hang there can't hold the global browser
+# slot (see acquire_browser_slot() below) forever.
+MONOCHROME_BROWSER_START_TIMEOUT = 45.0
 
 
 @dataclass
@@ -136,22 +142,55 @@ class _MonochromeBrowserSession:
         self._lock = asyncio.Lock()
         self._record = load_monochrome_session()
         self._ever_solved = False
+        self._profile_dir: str | None = None
+        # Holds the process-wide browser-slot semaphore (see solver.py) for
+        # as long as this persistent browser is alive. Entered/exited
+        # manually (not via `async with`) because the slot needs to stay
+        # held across many fetch_track() calls, not just one.
+        self._slot_cm = None
 
     async def _ensure_browser(self) -> None:
         if self._browser is not None and self._tab is not None:
             return
         _ensure_xvfb()
 
-        options = build_chromium_options(hidden=False)
+        options, profile_dir = build_chromium_options(hidden=False)
         options.add_argument("--incognito")
-        options.add_argument("--disable-background-timer-throttling")
-        options.add_argument("--disable-backgrounding-occluded-windows")
-        options.add_argument("--disable-renderer-backgrounding")
 
-        self._browser = Chrome(options=options)
-        self._tab = await self._browser.start()
-        await self._tab.go_to(MONOCHROME_PAGE_URL)
-        await _try_minimize_window(self._browser)
+        # solver.py's own callers (solver.py itself, signed_session_desktop.py,
+        # signed_session_mobile.py) all bound the number of concurrently-open
+        # Chrome instances via this same semaphore (TS_MAX_CONCURRENT_BROWSERS,
+        # default 3). This session used to spin up its own browser outside
+        # that accounting, so under heavy concurrent download load it could
+        # push the real number of live Chrome processes past the configured
+        # cap, reintroducing the OOM risk the semaphore exists to prevent.
+        slot_cm = acquire_browser_slot()
+        await slot_cm.__aenter__()
+        try:
+            self._browser = Chrome(options=options)
+            # Bounded: a hang here must not hold the slot forever.
+            self._tab = await asyncio.wait_for(
+                self._browser.start(),
+                timeout=MONOCHROME_BROWSER_START_TIMEOUT,
+            )
+            await asyncio.wait_for(
+                self._tab.go_to(MONOCHROME_PAGE_URL),
+                timeout=MONOCHROME_BROWSER_START_TIMEOUT,
+            )
+            await _try_minimize_window(self._browser)
+        except Exception:
+            if self._browser is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(self._browser.stop(), timeout=15.0)
+            _kill_by_profile_dir(profile_dir)
+            self._browser = None
+            self._tab = None
+            with contextlib.suppress(Exception):
+                await slot_cm.__aexit__(None, None, None)
+            raise
+
+        self._profile_dir = profile_dir
+        self._slot_cm = slot_cm
 
     async def _solve_turnstile_on_page(self, timeout: float) -> str:
         result: dict = {}
@@ -332,23 +371,38 @@ class _MonochromeBrowserSession:
             msg = f"mono API returned invalid JSON: {exc}"
             raise RuntimeError(msg) from exc
 
-    async def _hard_reset(self) -> None:
-        """Chiude il browser e resetta il token: forza un browser nuovo di zecca al prossimo tentativo."""
+    async def _release_browser(self) -> None:
+        """Stops the browser (best-effort, with a hard kill fallback) and
+        releases the global browser-slot semaphore acquired in
+        `_ensure_browser()`. Shared by `_hard_reset()` and `close()` so the
+        slot is never left held by a browser that's no longer running.
+        """
         if self._browser is not None:
-            with contextlib.suppress(Exception):
-                await self._browser.stop()
+            stopped_cleanly = False
+            try:
+                await asyncio.wait_for(self._browser.stop(), timeout=15.0)
+                stopped_cleanly = True
+            except Exception:
+                pass
+            if not stopped_cleanly and self._profile_dir:
+                _kill_by_profile_dir(self._profile_dir)
         self._browser = None
         self._tab = None
+        self._profile_dir = None
+        if self._slot_cm is not None:
+            with contextlib.suppress(Exception):
+                await self._slot_cm.__aexit__(None, None, None)
+            self._slot_cm = None
+
+    async def _hard_reset(self) -> None:
+        """Chiude il browser e resetta il token: forza un browser nuovo di zecca al prossimo tentativo."""
+        await self._release_browser()
         self._ever_solved = False
         self._record = MonochromeSessionRecord()
 
     async def close(self) -> None:
         async with self._lock:
-            if self._browser is not None:
-                with contextlib.suppress(Exception):
-                    await self._browser.stop()
-            self._browser = None
-            self._tab = None
+            await self._release_browser()
 
 
 _mono_browser_session: _MonochromeBrowserSession | None = None

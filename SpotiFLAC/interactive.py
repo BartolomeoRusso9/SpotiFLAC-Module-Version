@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 
 from .core.health_check import run_health_check
 from .core.quality import normalize_quality
+from .core.url_utils import url_host_matches
 from .extensions.catalog import SERVICE_ALIASES
 from .extensions.manager import ExtensionManager
 
@@ -164,6 +165,7 @@ def _section(title: str) -> None:
 def _header() -> None:
     print(f"\n{BOLD(MAGENTA('SpotiFLAC — Interactive Mode'))}")
     print(DIM("=" * 40))
+    print(DIM("  Tip: enter b/back/indietro at any question to restart the wizard."))
 
 
 def _canonical_service_name(ext_name: str) -> str | None:
@@ -713,7 +715,7 @@ async def _run_interactive_once() -> dict:
         lower_url = url.lower()
         is_blocked = False
 
-        if ("youtube.com" in lower_url or "youtu.be" in lower_url) and (
+        if url_host_matches(url, "youtube.com", "youtu.be") and (
             "/channel/" in lower_url
             or "/user/" in lower_url
             or "/c/" in lower_url
@@ -722,7 +724,7 @@ async def _run_interactive_once() -> dict:
         ):
             is_blocked = True
 
-        elif "soundcloud.com" in lower_url:
+        elif url_host_matches(url, "soundcloud.com"):
             path = urlparse(url).path.strip("/")
             parts = [p for p in path.split("/") if p]
             if len(parts) == 1 and parts[0] not in ("discover", "stream", "upload"):
@@ -790,18 +792,15 @@ async def _run_interactive_once() -> dict:
     is_single_track = (
         "/track/" in lower_url
         or ("watch?v=" in lower_url and "list=" not in lower_url)
-        or ("youtu.be" in lower_url)
-        or ("music.apple.com" in lower_url and "?i=" in lower_url)
+        or url_host_matches(url, "youtu.be")
+        or (url_host_matches(url, "music.apple.com") and "?i=" in lower_url)
+        or (url_host_matches(url, "soundcloud.com") and "/sets/" not in lower_url)
         or (
-            ("soundcloud.com" in lower_url or "on.soundcloud.com" in lower_url)
-            and "/sets/" not in lower_url
-        )
-        or (
-            "pandora.com" in lower_url
+            url_host_matches(url, "pandora.com")
             and "/artist/" in lower_url
             and lower_url.count("/") >= 5
         )
-        or ("pandora.app.link" in lower_url)
+        or url_host_matches(url, "pandora.app.link")
     )
     if is_single_track:
         _section("2.5 · Custom Output Path")
@@ -823,16 +822,10 @@ async def _run_interactive_once() -> dict:
     # ── 3. Services ──────────────────────────────────────────────────────────
     _section("3 · Audio Services")
 
-    is_soundcloud_url = (
-        "soundcloud.com" in cfg["url"] or "on.soundcloud.com" in cfg["url"]
-    )
-    is_apple_url = "music.apple.com" in cfg["url"]
-    is_youtube_url = (
-        "youtube.com" in cfg["url"].lower() or "youtu.be" in cfg["url"].lower()
-    )
-    is_pandora_url = (
-        "pandora.com" in cfg["url"].lower() or "pandora.app.link" in cfg["url"].lower()
-    )
+    is_soundcloud_url = url_host_matches(cfg["url"], "soundcloud.com")
+    is_apple_url = url_host_matches(cfg["url"], "music.apple.com")
+    is_youtube_url = url_host_matches(cfg["url"], "youtube.com", "youtu.be")
+    is_pandora_url = url_host_matches(cfg["url"], "pandora.com", "pandora.app.link")
 
     installed_services = _require_installed_service_options()
 

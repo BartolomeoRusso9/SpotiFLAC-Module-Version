@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import secrets
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -105,6 +106,13 @@ class SignedSessionClient:
         self.refresh_skew_seconds = refresh_skew_seconds
         self.data_dir = Path(os.path.expanduser(data_dir))
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        # Unlike the previous suppress(OSError), a failure to lock this
+        # directory down to owner-only access must not be swallowed: the
+        # session file written into it holds a live HMAC secret (see
+        # _save() below), so a permission failure here has to abort
+        # persistence rather than silently leave the directory world/group
+        # readable.
+        os.chmod(self.data_dir, 0o700)
         self._path = self._session_path()
         # Origin is ONLY scheme://host (no path): as confirmed by
         # DevTools screenshot, for base_url "https://api.zarz.moe/v2"
@@ -213,7 +221,28 @@ class SignedSessionClient:
             "refresh_after": self.refresh_after,
             "capabilities": self.capabilities,
         }
-        self._path.write_text(json.dumps(record, indent=2))
+        # session_secret is sensitive (it's used to HMAC-sign every
+        # request — see _sign_headers): write it out with owner-only
+        # permissions instead of the platform-default (world/group
+        # readable on some setups), matching the other signed-session
+        # stores (see signed_session_mono.save_monochrome_session).
+        #
+        # Write through a temp file created with 0o600 from the start (so
+        # the secret is never briefly world/group readable) and atomically
+        # replace the real target, so a crash mid-write can't leave a
+        # truncated/corrupt session file in place.
+        fd, tmp_name = tempfile.mkstemp(
+            dir=self._path.parent, prefix=f".{self._path.name}.", suffix=".tmp"
+        )
+        try:
+            os.chmod(tmp_name, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(json.dumps(record, indent=2))
+            os.replace(tmp_name, self._path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.remove(tmp_name)
+            raise
 
     def clear(self) -> None:
         self.session_id = None
