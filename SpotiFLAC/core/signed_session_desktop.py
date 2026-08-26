@@ -29,22 +29,6 @@ COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
 # open past that budget rather than timing out at 45s and aborting the whole
 # flow while the background solver is still trying to complete.
 COMMUNITY_VERIFY_TIMEOUT = 90  # seconds
-DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS = 10
-
-
-def wait_before_desktop_solver_start() -> None:
-    """Desktop verification waits for Cloudflare/solver page to render.
-
-    Some challenge pages do not expose the Turnstile iframe immediately; the
-    browser can need a few seconds to settle before the Cloudflare helper is
-    ready to solve. We intentionally keep the delay explicit and configurable
-    rather than hardcoding it inside the solver thread launch.
-    """
-    logger.info(
-        "[desktop verification] waiting %.0f seconds before starting solver.py",
-        DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS,
-    )
-    time.sleep(DESKTOP_VERIFICATION_SOLVER_STARTUP_DELAY_SECONDS)
 
 
 def fetch_latest_version() -> str:
@@ -224,7 +208,6 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 self.send_error(404)
                 return
 
-            # Errore di battitura corretto qui: parse_qs
             qs = urllib.parse.parse_qs(parsed_path.query)
             state = qs.get("state", [""])[0]
 
@@ -335,13 +318,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             # =========================================================================
             # FIX: Run the solver in a separate daemon thread so the main thread
             # can listen to the grant_queue without blocking!
-            #
-            # Desktop verification waits for the Cloudflare challenge page to render
-            # its iframe and to expose the expected quadratini after a short page load
-            # budget. The solver starts only after that stable delay.
             # =========================================================================
-            wait_before_desktop_solver_start()
-
             def _run_solver_thread():
                 try:
                     _token, grant_res = solve_with_callback(
@@ -368,7 +345,21 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                         import platform
                         import subprocess
 
-                        if platform.system() != "Windows":
+                        if platform.system() == "Windows":
+                            # Cerca brutalmente qualsiasi processo Chrome aperto con flag di debug
+                            # da pydoll e lo distrugge, permettendo al thread di terminare istantaneamente
+                            subprocess.run(
+                                [
+                                    "powershell",
+                                    "-NoProfile",
+                                    "-Command",
+                                    "Get-WmiObject Win32_Process -Filter \"Name='chrome.exe'\" | Where-Object {$_.CommandLine -match '--remote-debugging-port='} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }",
+                                ],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                            )
+                        else:
                             subprocess.run(
                                 ["pkill", "-f", "remote-debugging-port"],
                                 stdout=subprocess.DEVNULL,
