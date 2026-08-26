@@ -6,6 +6,7 @@
 <title>Partners & ecosystem — SpotiFLAC Module Version</title>
 <meta name="description" content="Projects, extension authors and resources around the SpotiFLAC Module Version ecosystem.">
 <meta name="theme-color" content="#0f1115">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='7' y='7' width='10' height='10' rx='2.4' fill='%237c5cff' transform='rotate(45 12 12)'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -28,13 +29,27 @@
 	.wrap{max-width:var(--max-w);margin:auto;padding:0 24px}
 
 	nav{position:fixed;top:0;left:0;right:0;z-index:10;background:rgba(15,17,21,.84);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.06)}
-	.nav-inner{max-width:var(--max-w);margin:auto;display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:62px}
+	.nav-inner{max-width:var(--max-w);margin:auto;position:relative;display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:62px}
 	.nav-brand{display:flex;align-items:center;gap:9px;font-family:var(--display);font-weight:700;font-size:1.02rem;color:var(--text)}
 	.nav-brand .dot{width:9px;height:9px;border-radius:3px;background:var(--accent);box-shadow:0 0 10px var(--accent);transform:rotate(45deg)}
 	.nav-links{display:flex;align-items:center;gap:24px;list-style:none}.nav-links a{color:var(--text-dim);font-size:.88rem}
 	.nav-links a:hover,.nav-links a.active{color:var(--text);text-decoration:none}.nav-divider{width:1px;height:18px;background:rgba(255,255,255,.1)}
 	.nav-gh{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:6px 12px}
-	.nav-gh:hover{background:rgba(255,255,255,.08);text-decoration:none}@media(max-width:760px){.nav-links{display:none}}
+	.nav-gh:hover{background:rgba(255,255,255,.08);text-decoration:none}
+	.nav-toggle{display:none;flex-direction:column;justify-content:center;gap:5px;width:34px;height:34px;background:none;border:none;cursor:pointer;padding:0}
+	.nav-toggle span{display:block;width:20px;height:2px;background:var(--text-dim);border-radius:2px;transition:transform .2s,opacity .2s}
+	.nav-toggle[aria-expanded="true"] span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+	.nav-toggle[aria-expanded="true"] span:nth-child(2){opacity:0}
+	.nav-toggle[aria-expanded="true"] span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+	@media(max-width:760px){
+		.nav-toggle{display:flex}
+		.nav-links{display:flex;flex-direction:column;align-items:stretch;gap:0;position:absolute;top:62px;left:0;right:0;background:rgba(15,17,21,.98);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.08);max-height:0;overflow:hidden;visibility:hidden;transition:max-height .25s ease}
+		.nav-links.open{max-height:420px;visibility:visible}
+		.nav-links li{width:100%}
+		.nav-links a,.nav-links .nav-gh{display:block;padding:14px 24px;width:100%}
+		.nav-links .nav-gh{justify-content:center;border-radius:0;border:none;background:none}
+		.nav-divider{display:none}
+	}
 
 	.hero{padding:148px 24px 70px;background:radial-gradient(ellipse at 50% 0%,rgba(124,92,255,.12),transparent 58%)}
 	.hero-inner{max-width:var(--max-w);margin:auto;text-align:center}.eyebrow{font:500 .7rem var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent-bright);margin-bottom:13px}
@@ -59,8 +74,11 @@
 <body>
 <nav><div class="nav-inner">
 	<a class="nav-brand" href="index.html"><span class="dot"></span>SpotiFLAC Module Version</a>
-	<ul class="nav-links">
-		<li><a href="index.html#how">How it works</a></li><li><a href="index.html#features">Features</a></li><li><a href="index.html#start">Quick start</a></li><li><a href="index.html#faq">FAQ</a></li><li><a href="download.html">Downloads</a></li><li><a class="active" href="partners.html">Partners</a></li><li class="nav-divider"></li>
+	<button class="nav-toggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
+		<span></span><span></span><span></span>
+	</button>
+	<ul class="nav-links" id="nav-links">
+		<li><a href="index.html#how">How it works</a></li><li><a href="index.html#features">Features</a></li><li><a href="index.html#start">Quick start</a></li><li><a href="index.html#faq">FAQ</a></li><li><a href="downloads.html">Downloads</a></li><li><a class="active" href="partners.html">Partners</a></li><li class="nav-divider"></li>
 		<li><a class="nav-gh" href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub →</a></li>
 	</ul>
 </div></nav>
@@ -92,6 +110,20 @@
 	</div></section>
 </main>
 
-<footer><div class="footer-links"><a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub</a><a href="https://pypi.org/project/SpotiFLAC/" target="_blank" rel="noopener">PyPI</a><a href="https://t.me/SpotiFLAC_Module_Version" target="_blank" rel="noopener">Telegram</a><a href="index.html">Home</a><a href="download.html">Downloads</a></div><div class="footer-copy">MIT Licensed · not affiliated with any streaming service</div></footer>
+<footer><div class="footer-links"><a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub</a><a href="https://pypi.org/project/SpotiFLAC/" target="_blank" rel="noopener">PyPI</a><a href="https://t.me/SpotiFLAC_Module_Version" target="_blank" rel="noopener">Telegram</a><a href="index.html">Home</a><a href="downloads.html">Downloads</a></div><div class="footer-copy">MIT Licensed · not affiliated with any streaming service</div></footer>
+<script>
+  const navToggle = document.querySelector('.nav-toggle');
+  const navLinks = document.getElementById('nav-links');
+  if (navToggle && navLinks) {
+    navToggle.addEventListener('click', () => {
+      const open = navLinks.classList.toggle('open');
+      navToggle.setAttribute('aria-expanded', String(open));
+    });
+    navLinks.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
+      navLinks.classList.remove('open');
+      navToggle.setAttribute('aria-expanded', 'false');
+    }));
+  }
+</script>
 </body>
 </html>

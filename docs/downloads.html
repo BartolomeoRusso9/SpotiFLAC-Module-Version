@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Downloads — SpotiFLAC Module Version</title>
 <meta name="theme-color" content="#0f1115">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='7' y='7' width='10' height='10' rx='2.4' fill='%237c5cff' transform='rotate(45 12 12)'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -30,7 +31,7 @@
     background: rgba(15,17,21,.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
     border-bottom: 1px solid rgba(255,255,255,.06);
   }
-  .nav-inner { max-width: var(--max-w); margin: auto; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 62px; }
+  .nav-inner { max-width: var(--max-w); margin: auto; position: relative; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 62px; }
   .nav-brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-weight: 700; font-size: 1.02rem; color: var(--text); }
   .nav-brand .dot { width: 9px; height: 9px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 10px var(--accent); transform: rotate(45deg); }
   .nav-links { display: flex; align-items: center; gap: 24px; list-style: none; }
@@ -39,10 +40,32 @@
   .nav-links .nav-divider { width: 1px; height: 18px; background: rgba(255,255,255,.1); }
   .nav-gh { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 6px 12px; color: var(--text-dim); font-size: .82rem; }
   .nav-gh:hover { color: var(--text); border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.08); text-decoration: none; }
-  @media (max-width: 760px) { .nav-links { display: none; } }
+  .nav-toggle { display: none; flex-direction: column; justify-content: center; gap: 5px; width: 34px; height: 34px; background: none; border: none; cursor: pointer; padding: 0; }
+  .nav-toggle span { display: block; width: 20px; height: 2px; background: var(--text-dim); border-radius: 2px; transition: transform .2s, opacity .2s; }
+  .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+  .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+  .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+  @media (max-width: 760px) {
+    .nav-toggle { display: flex; }
+    .nav-links {
+      display: flex; flex-direction: column; align-items: stretch; gap: 0;
+      position: absolute; top: 62px; left: 0; right: 0;
+      background: rgba(15,17,21,.98); backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      max-height: 0; overflow: hidden; visibility: hidden;
+      transition: max-height .25s ease;
+    }
+    .nav-links.open { max-height: 420px; visibility: visible; }
+    .nav-links li { width: 100%; }
+    .nav-links a, .nav-links .nav-gh { display: block; padding: 14px 24px; width: 100%; }
+    .nav-links .nav-gh { justify-content: center; border-radius: 0; border: none; background: none; }
+    .nav-divider { display: none; }
+  }
 
-  .page-header { max-width: var(--max-w); margin: auto; padding: 140px 24px 40px; text-align: center; }
-  .page-header h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; margin-bottom: 10px; }
+  .page-header { padding: 140px 24px 40px; text-align: center; background: radial-gradient(ellipse at 50% 0%, rgba(124,92,255,.1) 0%, transparent 55%); }
+  .page-header-inner { max-width: var(--max-w); margin: auto; }
+  .eyebrow { font-family: var(--mono); font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-bright); margin-bottom: 12px; }
+  .page-header h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; letter-spacing: -.5px; margin-bottom: 10px; }
   .page-header p { color: var(--text-dim); font-size: 1rem; }
 
   .section-inner { max-width: var(--max-w); margin: auto; padding: 0 24px 80px; }
@@ -103,8 +126,11 @@
 
 <nav>
   <div class="nav-inner">
-    <a class="nav-brand" href="index.html"><span class="dot"></span>SpotiFLAC Module Version<span style="color:var(--text-faint)">
-    <ul class="nav-links">
+    <a class="nav-brand" href="index.html"><span class="dot"></span>SpotiFLAC Module Version</a>
+    <button class="nav-toggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links" id="nav-links">
       <li><a href="index.html#how">How it works</a></li>
       <li><a href="index.html#features">Features</a></li>
       <li><a href="index.html#start">Quick start</a></li>
@@ -118,8 +144,11 @@
 </nav>
 
 <div class="page-header">
-  <h1>Downloads</h1>
-  <p>Standalone builds for Windows, macOS and Linux — pulled live from GitHub Releases.</p>
+  <div class="page-header-inner">
+    <div class="eyebrow">Releases</div>
+    <h1>Downloads</h1>
+    <p>Standalone builds for Windows, macOS and Linux — pulled live from GitHub Releases.</p>
+  </div>
 </div>
 
 <div class="section-inner">
@@ -146,6 +175,20 @@
   <div class="footer-copy">MIT Licensed · not affiliated with any streaming service</div>
 </footer>
 
+<script>
+  const navToggle = document.querySelector('.nav-toggle');
+  const navLinks = document.getElementById('nav-links');
+  if (navToggle && navLinks) {
+    navToggle.addEventListener('click', () => {
+      const open = navLinks.classList.toggle('open');
+      navToggle.setAttribute('aria-expanded', String(open));
+    });
+    navLinks.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
+      navLinks.classList.remove('open');
+      navToggle.setAttribute('aria-expanded', 'false');
+    }));
+  }
+</script>
 <script>
 (async () => {
   // Public repo, unauthenticated GitHub API — fine for occasional page loads,
