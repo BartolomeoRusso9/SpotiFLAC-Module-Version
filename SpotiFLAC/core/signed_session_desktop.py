@@ -29,6 +29,17 @@ COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
 # open past that budget rather than timing out at 45s and aborting the whole
 # flow while the background solver is still trying to complete.
 COMMUNITY_VERIFY_TIMEOUT = 90  # seconds
+# Absolute safety ceiling for MODE 2 (automated verification via solver.py)
+# only. solve_with_callback() now first blocks on solver.py's process-wide
+# acquire_browser_slot() semaphore (TS_MAX_CONCURRENT_BROWSERS, default 3)
+# before it even starts solving, and under heavy concurrent download load
+# that wait alone can exceed COMMUNITY_VERIFY_TIMEOUT — a single blocking
+# `grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)` would then report a
+# false timeout while the solver thread is still legitimately queued/
+# working. The polling loop in run_community_verification() uses this as
+# its outer bound instead, giving up early only once the solver thread has
+# actually exited without producing a grant.
+COMMUNITY_VERIFY_ABSOLUTE_TIMEOUT = 240  # seconds
 
 
 def fetch_latest_version() -> str:
@@ -336,30 +347,47 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             solver_thread = threading.Thread(target=_run_solver_thread, daemon=True)
             solver_thread.start()
 
-            # The main thread waits for the grant to arrive from the local server
-            try:
-                grant = grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
-                if grant:
-                    logger.info("Automated verification successful! Grant received.")
-                    # NOTE: previously this force-killed every Chrome process
-                    # matching "--remote-debugging-port" system-wide to make
-                    # the solver thread exit instantly. That's unscoped: with
-                    # up to _DEFAULT_MAX_CONCURRENT_BROWSERS browsers allowed
-                    # to run at once (mono/mobile/other concurrent desktop
-                    # verifications), it killed *their* browsers too,
-                    # producing the "window closed abruptly, tries to
-                    # reopen" symptom on unrelated in-flight solves. The
-                    # solver thread's own solve_with_callback() already
-                    # closes its own browser gracefully (bounded 15s
-                    # browser.stop() + a per-instance hard watchdog scoped to
-                    # its own profile_dir), so no extra cleanup is needed
-                    # here — just let it finish on its own.
-                    return grant
+            # The main thread waits for the grant to arrive from the local
+            # server. Poll instead of a single blocking get(timeout=...): the
+            # solver thread can legitimately still be queued on solver.py's
+            # global browser-slot semaphore well past COMMUNITY_VERIFY_TIMEOUT
+            # (see COMMUNITY_VERIFY_ABSOLUTE_TIMEOUT above), so give up only
+            # once the thread has actually exited without producing a grant,
+            # or the absolute ceiling is reached.
+            grant = None
+            deadline = time.monotonic() + COMMUNITY_VERIFY_ABSOLUTE_TIMEOUT
+            while time.monotonic() < deadline:
+                try:
+                    grant = grant_queue.get(timeout=1.0)
+                    break
+                except queue.Empty:
+                    if not solver_thread.is_alive():
+                        # Solver thread exited (error, or its own internal
+                        # timeout) without ever producing a grant — waiting
+                        # further is pointless.
+                        break
+                    continue
 
-            except queue.Empty:
-                msg = "Automated verification timed out (no grant received in time)."
-                logger.warning(msg)
-                raise RuntimeError(msg)
+            if grant:
+                logger.info("Automated verification successful! Grant received.")
+                # NOTE: previously this force-killed every Chrome process
+                # matching "--remote-debugging-port" system-wide to make
+                # the solver thread exit instantly. That's unscoped: with
+                # up to _DEFAULT_MAX_CONCURRENT_BROWSERS browsers allowed
+                # to run at once (mono/mobile/other concurrent desktop
+                # verifications), it killed *their* browsers too,
+                # producing the "window closed abruptly, tries to
+                # reopen" symptom on unrelated in-flight solves. The
+                # solver thread's own solve_with_callback() already
+                # closes its own browser gracefully (bounded 15s
+                # browser.stop() + a per-instance hard watchdog scoped to
+                # its own profile_dir), so no extra cleanup is needed
+                # here — just let it finish on its own.
+                return grant
+
+            msg = "Automated verification timed out (no grant received in time)."
+            logger.warning(msg)
+            raise RuntimeError(msg)
 
         except ImportError:
             logger.info("solver.py not found or Playwright dependencies missing.")

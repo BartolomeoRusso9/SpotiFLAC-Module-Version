@@ -19,6 +19,7 @@ import webview
 
 from .core.http import AsyncHttpClient
 from .core.spotify_metadata import _maximize_cover_url
+from .core.url_utils import url_host_matches
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
 
@@ -1480,11 +1481,11 @@ class SpotiFLAC_API:
 
             if is_url:
                 # ── Scelta client in base al dominio ───────────────────────────
-                if "tidal.com" in url:
+                if url_host_matches(url, "tidal.com"):
                     from .core.tidal_metadata import TidalMetadataClient
 
                     client = TidalMetadataClient()
-                elif "music.apple.com" in url:
+                elif url_host_matches(url, "music.apple.com"):
                     from .core.apple_music_metadata import AppleMusicMetadataClient
 
                     client = AppleMusicMetadataClient()
@@ -1530,7 +1531,7 @@ class SpotiFLAC_API:
 
             # Retrieve playcount from Spotify if applicable (non-blocking)
             playcount_map = {}
-            if "spotify.com" in url:
+            if url_host_matches(url, "spotify.com"):
                 try:
                     from .core.spotfetch import SpotifyWebClient
 

@@ -2513,8 +2513,12 @@ function normalizeHistoryUrl(url) {
     }
     // If it already looks like an http(s) link, return as-is
     if (u.startsWith('http://') || u.startsWith('https://')) return u;
-    // Support bare open.spotify.com/... without protocol
-    if (u.startsWith('open.spotify.com') || u.startsWith('play.spotify.com')) return `https://${u}`;
+    // Support bare open.spotify.com/... without protocol. Match the host
+    // exactly (end of string, or followed by '/', ':' or '?') so a hostile
+    // value like "open.spotify.com.evil.com" isn't mistaken for the real
+    // domain by a plain prefix check.
+    const bareHostMatch = /^(open|play)\.spotify\.com(?:[/:?]|$)/.exec(u);
+    if (bareHostMatch) return `https://${u}`;
     return u;
   } catch (e) {
     return url;

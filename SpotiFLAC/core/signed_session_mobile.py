@@ -105,6 +105,8 @@ class SignedSessionClient:
         self.refresh_skew_seconds = refresh_skew_seconds
         self.data_dir = Path(os.path.expanduser(data_dir))
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            os.chmod(self.data_dir, 0o700)
         self._path = self._session_path()
         # Origin is ONLY scheme://host (no path): as confirmed by
         # DevTools screenshot, for base_url "https://api.zarz.moe/v2"
@@ -213,7 +215,14 @@ class SignedSessionClient:
             "refresh_after": self.refresh_after,
             "capabilities": self.capabilities,
         }
+        # session_secret is sensitive (it's used to HMAC-sign every
+        # request — see _sign_headers): write it out with owner-only
+        # permissions instead of the platform-default (world/group
+        # readable on some setups), matching the other signed-session
+        # stores (see signed_session_mono.save_monochrome_session).
         self._path.write_text(json.dumps(record, indent=2))
+        with contextlib.suppress(OSError):
+            os.chmod(self._path, 0o600)
 
     def clear(self) -> None:
         self.session_id = None
