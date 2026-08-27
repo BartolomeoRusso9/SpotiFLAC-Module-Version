@@ -204,7 +204,7 @@ class TidalMetadataClient:
                     msg = "tidal_metadata"
                     raise NetworkError(
                         msg,
-                        f"Rate limit persistente dopo {_MAX_RETRIES} tentativi su {path}",
+                        f"Persistent rate limit after {_MAX_RETRIES} attempts on {path}",
                     )
                 wait = int(getattr(exc, "retry_after", 5)) + 1
                 logger.warning(

@@ -505,8 +505,8 @@ class ProgressManager:
 
     @classmethod
     def start_worker(cls) -> None:
-        """Avvia il task consumer in modo idempotente. Deve essere chiamato da
-        dentro l'event loop attivo (create_task lo richiede).
+        """Starts the consumer task idempotently. Must be called from
+        inside the active event loop (create_task requires it).
         """
         if cls._event_queue is None:
             cls._event_queue = asyncio.Queue()

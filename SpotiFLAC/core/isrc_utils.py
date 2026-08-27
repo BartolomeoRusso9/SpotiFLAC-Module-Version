@@ -57,7 +57,7 @@ async def confirm_isrc_with_qobuz_async(
         return False, None
 
     try:
-        # Se il provider è quello nativo Python, avrà questo metodo
+        # If the provider is the native Python one, it will have this method
         track = await prov._search_by_isrc_async(isrc)
     except Exception:
         return False, None

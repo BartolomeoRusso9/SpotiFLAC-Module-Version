@@ -115,7 +115,7 @@ class TrackMetadata(BaseModel):
         return tags
 
     def with_enrichment(self, extra: Any) -> TrackMetadata:
-        """Returns una nuova istanza aggiornata con i dati dell'enrichment.
+        """Returns a new instance updated with the enrichment data.
 
         FIX: previously used direct assignment (self.field = value),
         which is an anti-pattern for Pydantic v2. Now uses model_copy(update={})
@@ -167,7 +167,7 @@ class DownloadResult(BaseModel):
     def _check_consistency(self) -> DownloadResult:
         """Validates that if the download succeeded, the path is present."""
         if self.success and not self.file_path:
-            msg = "success=True richiede un file_path"
+            msg = "success=True requires a file_path"
             raise ValueError(msg)
         return self
 
@@ -228,10 +228,10 @@ def build_filename(
     platform: str = "",
     native_id: str = "",
 ) -> str:
-    """Costruisce il filename finale applicando i placeholder, i formati legacy,
-    o una funzione fornita dall'utente.
+    """Builds the final filename applying placeholders, legacy formats,
+    or a user-supplied function.
 
-    Placeholder supportati: {title}, {artist}, {album}, {album_artist}, {year},
+    Supported placeholders: {title}, {artist}, {album}, {album_artist}, {year},
     {date}, {disc}, {isrc}, {track}, {position}, {platform}, {id}.
 
     {platform} is the name of the provider/extension that will serve this file

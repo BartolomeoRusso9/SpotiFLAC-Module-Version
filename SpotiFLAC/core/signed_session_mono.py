@@ -131,9 +131,9 @@ def monochrome_session_valid(record: MonochromeSessionRecord) -> bool:
 
 
 class _MonochromeBrowserSession:
-    """Mantiene un browser CDP persistente (pydoll) per instradare le
-    richieste all'API mono (amz.geeked.wtf) DENTRO la sessione TLS/fingerprint
-    reale del browser, aggirando le restrizioni WAF di Cloudflare.
+    """Keeps a persistent CDP browser (pydoll) around to route requests to
+    the mono API (amz.geeked.wtf) INSIDE the browser's real TLS/fingerprint
+    session, working around Cloudflare's WAF restrictions.
     """
 
     def __init__(self) -> None:
@@ -257,7 +257,7 @@ class _MonochromeBrowserSession:
                     break
 
         if "access_token" not in result:
-            msg = f"Timeout: nessun access_token JWT catturato entro {timeout:.0f}s"
+            msg = f"Timeout: no access_token JWT captured within {timeout:.0f}s"
             raise Exception(
                 msg,
             )
@@ -336,7 +336,7 @@ class _MonochromeBrowserSession:
             return await self._fetch_track_with_restart(params, allow_restart=False)
 
         if not outer.get("ok") and outer.get("status") == 401:
-            # Sessione invalidata lato server: forza un nuovo solve e riprova UNA volta.
+            # Session invalidated server-side: force a new solve and retry ONCE.
             self._record = MonochromeSessionRecord()
             token = await self._ensure_token()
             try:
@@ -395,7 +395,7 @@ class _MonochromeBrowserSession:
             self._slot_cm = None
 
     async def _hard_reset(self) -> None:
-        """Chiude il browser e resetta il token: forza un browser nuovo di zecca al prossimo tentativo."""
+        """Closes the browser and resets the token: forces a brand-new browser on the next attempt."""
         await self._release_browser()
         self._ever_solved = False
         self._record = MonochromeSessionRecord()
@@ -417,7 +417,7 @@ def _get_mono_browser_session() -> _MonochromeBrowserSession:
 
 
 async def fetch_mono_track_via_browser(params: dict) -> dict:
-    """Esegue la GET /api/track/ instradata dentro la sessione CDP del browser."""
+    """Performs the GET /api/track/ routed inside the browser's CDP session."""
     return await _get_mono_browser_session().fetch_track(params)
 
 

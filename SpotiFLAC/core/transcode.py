@@ -28,7 +28,7 @@ MP3 = "mp3"
 SUPPORTED_FORMATS: tuple[str, ...] = (MP3,)
 DEFAULT_MP3_BITRATE = "320k"
 
-# Valori che disabilitano la conversione (utili quando arrivano da GUI/config)
+# Values that disable conversion (useful when they come from GUI/config)
 _DISABLED_VALUES = {"", "none", "off", "no", "original", "source", "keep"}
 
 
@@ -87,17 +87,19 @@ def transcoded_file_exists(path: Path | str) -> bool:
 
 
 def ensure_ffmpeg_available(fmt: str) -> None:
-    """Raises SpotiflacError when ffmpeg — required for transcoding — is missing."""
-    from .ffmpeg_check import check_ffmpeg
+    """Raises SpotiflacError when ffmpeg — required for transcoding — is
+    still missing after a best-effort automatic install attempt (see
+    ffmpeg_check.ensure_ffmpeg_installed()).
+    """
+    from .ffmpeg_check import ensure_ffmpeg_installed
 
-    result = check_ffmpeg()
+    result = ensure_ffmpeg_installed()
     if result.get("available"):
         return
 
     msg = (
-        f"Transcoding to {fmt.upper()} requires ffmpeg, which is not available "
-        f"({result.get('error') or 'unknown error'}). "
-        "Install it from https://ffmpeg.org/download.html or disable transcoding."
+        f"Transcoding to {fmt.upper()} requires ffmpeg, and automatic "
+        f"installation didn't work: {result.get('error') or 'unknown error'}"
     )
     raise SpotiflacError(ErrorKind.FILE_IO, msg)
 

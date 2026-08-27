@@ -96,7 +96,7 @@ class ToastManager {
   show(message, options = {}) {
     const opts = {
       type: 'info',
-      duration: options.type === 'loading' ? 0 : 3500, // loading non si chiude da solo
+      duration: options.type === 'loading' ? 0 : 3500, // loading doesn't auto-close
       position: 'bottom-right',
       dismissible: true,
       title: '',
@@ -167,7 +167,7 @@ class ToastManager {
       const exitClass = position.includes('left') ? 'slideOutLeft' : 'slideOutRight';
       
       toast.classList.add(exitClass);
-      // Rimuovi dopo l'animazione di uscita
+      // Remove after the exit animation
       setTimeout(() => {
         if (toast.parentNode) toast.parentNode.removeChild(toast);
       }, 300);

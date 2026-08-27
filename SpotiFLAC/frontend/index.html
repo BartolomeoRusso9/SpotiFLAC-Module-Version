@@ -4,8 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SpotiFLAC</title>
+  <!-- Installability (Add to Home Screen / standalone window) for --web
+       mode only — see sw.js's own comment for why it's network-first, and
+       web-shim.js / __SPOTIFLAC_WEB_MODE__ for how desktop mode already
+       tells itself apart from --web. Harmless to load in the desktop
+       pywebview window too: manifest/theme-color are simply unused there,
+       and the registration script below no-ops without that flag. -->
+  <link rel="manifest" href="manifest.json?v=20260817">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="SpotiFLAC">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260817">  
+  <link rel="stylesheet" href="styles.css?v=20260817">
 </head>
 <body>
 
@@ -21,7 +32,7 @@
   <div id="tb-logo">
     <span>SpotiFLAC</span>
     <span id="tb-version" class="clickable-version" onclick="openReleasePage()">v...</span>
-    <span id="tb-update-badge" class="update-badge hidden" title="Aggiornamento disponibile" onclick="openReleasePage()">⬆️</span>
+    <span id="tb-update-badge" class="update-badge hidden" title="Update available" onclick="openReleasePage()">⬆️</span>
   </div>
 </div>
 
@@ -62,7 +73,7 @@
             <div class="hero-main">
               <div class="hero-title">SpotiFLAC</div>
               <span id="hero-version" class="hero-version clickable-version" onclick="openReleasePage()">v...</span>
-              <span id="hero-update-badge" class="hero-update-badge hidden" title="Aggiornamento disponibile" onclick="openReleasePage()">Nuova versione</span>
+              <span id="hero-update-badge" class="hero-update-badge hidden" title="Update available" onclick="openReleasePage()">New version</span>
             </div>
           </div>
           <div class="hero-subtitle">Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends.</div>
@@ -277,6 +288,10 @@
       <div class="s-header">
         <h1>Local Auto-Tagger</h1>
         <div class="s-actions">
+          <button class="act-btn secondary" onclick="startDedupScan()" id="btn-scan-dedup" title="Find files that are the same recording by acoustic fingerprint, independent of tags/ISRC">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3z"/><path d="M20 20l-2.5-2.5"/></svg>
+            Find Duplicates
+          </button>
           <button class="act-btn primary" onclick="startLocalScan()" id="btn-scan-local">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
             Scan Folder
@@ -332,6 +347,15 @@
             <div>New Tags (SpotiFLAC)</div>
           </div>
           <div id="local-track-rows" style="display:flex; flex-direction:column; gap:6px; overflow-y:auto; padding-right: 4px;"></div>
+        </div>
+
+        <div id="dedup-results-wrap" class="hidden s-section" style="padding:16px 20px;">
+          <div class="s-title">Duplicate Groups</div>
+          <p style="font-size:11.5px;color:var(--muted);margin:-4px 0 12px;line-height:1.5;">
+            Files in the same group are acoustically the same recording — review before deleting
+            anything; a match is a strong hint, not a certification.
+          </p>
+          <div id="dedup-groups" class="sort-list"></div>
         </div>
       </div>
 
@@ -398,11 +422,9 @@
             <div class="s-row">
               <span class="s-label">Audio Quality</span>
               <select id="config-quality">
-                <option value="DOLBY_ATMOS">DOLBY ATMOS</option>
                 <option value="HI_RES_LOSSLESS">HI-RES-LOSSLESS</option>
                 <option value="LOSSLESS">LOSSLESS</option>
-                <option value="HIGH">HIGH</option>
-                <option value="LOW">NORMAL</option>
+                <option value="DOLBY_ATMOS">DOLBY ATMOS (Tidal only)</option>
               </select>
             </div>
             <div class="s-row">
@@ -436,6 +458,13 @@
             </div>
             <div class="s-row">
               <span class="s-label" style="font-size:11px;color:var(--muted);">Preview: The quick brown fox jumps over the lazy dog.</span>
+            </div>
+          </div>
+          <div class="s-section hidden" id="account-signout-row">
+            <div class="s-title">Account</div>
+            <div class="s-row">
+              <span class="s-label">This instance requires --web-multiuser sign-in.</span>
+              <button class="act-btn secondary" type="button" onclick="doLogout()">Sign Out</button>
             </div>
           </div>
         </div>
@@ -667,6 +696,44 @@
               <div class="s-label" style="font-size:11.5px;">Loading registries…</div>
             </div>
           </div>
+
+          <div class="s-section">
+            <div class="s-title">Discover Registries</div>
+            <p style="font-size:12px;color:var(--muted);margin:-4px 0 12px;line-height:1.6;">
+              A <em>directory</em> lists registries (not extensions directly) for you to review.
+              Nothing here is bundled either — add a directory URL someone shared with you, then
+              click Discover to probe each registry it lists for reachability before deciding
+              whether to add it above.
+            </p>
+            <div class="s-row" style="align-items:stretch;gap:8px;">
+              <input type="text" id="directory-url-input" class="full" placeholder="https://example.com/my-directory.json" style="flex:1;">
+              <button class="act-btn primary" type="button" onclick="addDirectoryLink()" style="padding:8px 16px;font-size:12px;white-space:nowrap;">Add Link</button>
+            </div>
+            <div id="directory-list" class="sort-list" style="margin-top:12px;">
+              <div class="s-label" style="font-size:11.5px;">Loading directories…</div>
+            </div>
+            <div class="s-row" style="margin-top:12px;">
+              <button class="act-btn secondary" type="button" onclick="runDiscovery()" id="btn-run-discovery" style="font-size:12px;">Discover Registries</button>
+            </div>
+            <div id="discovery-results" class="sort-list" style="margin-top:12px;"></div>
+          </div>
+
+          <div class="s-section">
+            <div class="s-title">Trusted Signing Keys</div>
+            <p style="font-size:12px;color:var(--muted);margin:-4px 0 12px;line-height:1.6;">
+              A registry's sha256 checksum proves a package wasn't corrupted in transit — it says
+              nothing about who published it. Trust a maintainer's public key here to verify their
+              signed entries too; unsigned entries are exactly as trusted as they are today.
+            </p>
+            <div class="s-row" style="align-items:stretch;gap:8px;flex-wrap:wrap;">
+              <input type="text" id="trust-key-name-input" placeholder="Key name (e.g. a maintainer's handle)" style="flex:1;min-width:140px;">
+              <input type="text" id="trust-key-value-input" class="full" placeholder="Base64 Ed25519 public key" style="flex:2;min-width:200px;">
+              <button class="act-btn primary" type="button" onclick="addTrustedKeyLink()" style="padding:8px 16px;font-size:12px;white-space:nowrap;">Add Key</button>
+            </div>
+            <div id="trust-key-list" class="sort-list" style="margin-top:12px;">
+              <div class="s-label" style="font-size:11.5px;">Loading trusted keys…</div>
+            </div>
+          </div>
         </div>
 
         <div class="s-footer">
@@ -700,7 +767,49 @@
       </div>
     </div>
   </div>
+
+  <!-- --web-multiuser login gate. No backdrop click / close button on
+       purpose: this exists to block the app, not to be dismissed. Shown
+       only when GET /api/auth/status reports {multiuser: true, logged_in:
+       false} — see checkAuthStatus() in app.js. Never shown in desktop
+       mode or when --web-multiuser isn't in use. -->
+  <div id="login-modal" class="api-modal hidden">
+    <div class="api-modal-backdrop"></div>
+    <div class="api-modal-card">
+      <div class="api-modal-header">
+        <div>
+          <div class="s-title">Sign in</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px;">This SpotiFLAC instance requires an account.</div>
+        </div>
+      </div>
+      <div class="api-modal-body">
+        <input type="text" id="login-username" placeholder="Username" autocomplete="username">
+        <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" style="margin-top:8px;" onkeydown="if(event.key==='Enter') doLogin();">
+        <div id="login-error" style="font-size:12px;color:var(--red);margin-top:8px;min-height:16px;"></div>
+      </div>
+      <div class="api-modal-actions">
+        <div></div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="act-btn primary" type="button" onclick="doLogin()" id="login-submit-btn">Sign in</button>
+        </div>
+      </div>
+    </div>
+  </div>
   </div><script src="toast-system.js?v=20260817"></script>
   <script src="app.js?v=20260817"></script>
+  <script>
+    // --web mode only (see sw.js's own comment for what the service worker
+    // actually does — installability, not offline caching of live data).
+    // window.__SPOTIFLAC_WEB_MODE__ is set by webapp.py's index() route
+    // before this script runs; the desktop pywebview window never sets it,
+    // so this is a no-op there.
+    if (window.__SPOTIFLAC_WEB_MODE__ && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {
+        // Registration failing (e.g. served over plain http:// on a LAN
+        // address, where service workers require a secure context) should
+        // never block the app itself from working.
+      });
+    }
+  </script>
 </body>
 </html>

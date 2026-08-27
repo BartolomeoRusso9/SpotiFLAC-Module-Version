@@ -83,13 +83,26 @@ class JSRuntime:
 
     def start(self) -> None:
         if not shutil.which(self.node_executable):
-            msg = (
-                f"Node.js not found ('{self.node_executable}'). "
-                "Install Node.js ≥ 16 to use JS extensions."
-            )
-            raise ExtensionRuntimeError(
-                msg,
-            )
+            # First time a JS extension actually runs and Node isn't there —
+            # try a best-effort install via whatever system package manager
+            # is on PATH (see README > Extensions) before giving up. This
+            # runs on whatever thread is creating this runtime (the pool in
+            # extensions/provider.py does this off the main thread), and can
+            # take a few minutes the first time — see core/node_check.py for
+            # why that's an acceptable, printed, bounded wait rather than a
+            # silent hang.
+            from ..core.node_check import ensure_node_installed
+
+            install_result = ensure_node_installed(self.node_executable)
+            if not install_result["available"]:
+                msg = (
+                    f"Node.js not found ('{self.node_executable}'), and "
+                    f"automatic installation didn't work: "
+                    f"{install_result['error']}"
+                )
+                raise ExtensionRuntimeError(
+                    msg,
+                )
         if not _BRIDGE_JS.exists():
             msg = f"Bridge JS not found: {_BRIDGE_JS}"
             raise ExtensionRuntimeError(msg)

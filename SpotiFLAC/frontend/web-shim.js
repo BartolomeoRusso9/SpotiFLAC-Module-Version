@@ -36,7 +36,7 @@
   }
 
   const REMOTE_METHODS = [
-    'get_version', 'get_latest_version', 'get_artist_images', 'get_ffmpeg_status',
+    'get_version', 'get_latest_version', 'get_artist_images', 'get_ffmpeg_status', 'get_node_status',
     'save_settings', 'load_settings', 'get_registries', 'add_registry', 'remove_registry',
     'get_history', 'get_profiles', 'load_profile_data', 'cache_image', 'get_spotify_home_feed',
     'search_provider', 'search_provider_async', 'search_code', 'remove_history_item',
@@ -45,6 +45,9 @@
     'download_track_cover', 'download_cover', 'download_album_cover', 'download_all_covers',
     'download_all_lyrics', 'get_track_preview', 'fetch_metadata', 'download_tracks',
     'run_health_check', 'scan_local', 'apply_local_tags', 'set_download_dir',
+    'get_registry_directories', 'add_registry_directory', 'remove_registry_directory',
+    'discover_registries', 'get_dedup_status', 'scan_for_duplicates',
+    'get_trusted_keys', 'add_trusted_key', 'remove_trusted_key',
   ];
 
   const api = {};

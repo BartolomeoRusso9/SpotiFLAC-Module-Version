@@ -13,12 +13,14 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-import aiofiles
-import httpx
 import webview
 
+from .api_mixins.covers_lyrics import CoversLyricsMixin
+from .api_mixins.dedup import DedupMixin
+from .api_mixins.discovery import DiscoveryMixin
+from .api_mixins.local_tagging import LocalTaggingMixin
+from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
-from .core.spotify_metadata import _maximize_cover_url
 from .core.url_utils import url_host_matches
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
@@ -39,7 +41,24 @@ class UILogHandler(logging.Handler):
             pass
 
 
-class SpotiFLAC_API:
+class SpotiFLAC_API(
+    LocalTaggingMixin, CoversLyricsMixin, DiscoveryMixin, DedupMixin, TrustMixin
+):
+    """pywebview/`--web` bridge — every method here (plus the two mixins
+    above) becomes a callable the frontend invokes as `pywebview.api.<name>`
+    (desktop) or `POST /api/<name>` (web mode, see webapp.py's
+    ALLOWED_METHODS). Both entry points bind to *this one object*, which is
+    why splitting it means moving method bodies into mixins rather than into
+    separate top-level objects — see api_mixins/__init__.py for the reasoning
+    and api_mixins/local_tagging.py + api_mixins/covers_lyrics.py for what's
+    moved out so far. What's still here (search, metadata fetch, the actual
+    download orchestration, settings/profiles/registries, window/folder
+    plumbing) is intentionally left in place for now rather than split in
+    the same pass — those are the highest-traffic, most interdependent
+    methods, and this environment can't launch the real pywebview window or
+    click through the web GUI to fully exercise a move that size.
+    """
+
     def __init__(self) -> None:
         self._window = None
         # Optional callable set by webapp.py in web mode: fn(event_name, args_list).
@@ -103,6 +122,7 @@ class SpotiFLAC_API:
         self.log("Python Backend connected.", "info")
         self.log(f"Default download folder: {self.download_dir}", "info")
         self._check_ffmpeg_startup()
+        self._check_node_startup()
         try:
             from .extensions.manager import ExtensionManager
 
@@ -112,7 +132,7 @@ class SpotiFLAC_API:
                 daemon=True,
             ).start()
         except Exception as e:
-            self.log(f"Errore avvio estensioni: {e}", "warn")
+            self.log(f"Error starting extensions: {e}", "warn")
         app_version = self.app_version
         try:
             self._push("loadHistoryAndProfiles")
@@ -161,7 +181,9 @@ class SpotiFLAC_API:
             else:
                 self.log(
                     "⚠  ffmpeg not found — Tidal FLAC muxing and Amazon "
-                    "decryption will fail. Install: https://ffmpeg.org/download.html",
+                    "decryption will fail. MP3 transcoding will try to install "
+                    "it automatically the first time you use it; otherwise "
+                    "install: https://ffmpeg.org/download.html",
                     "error",
                 )
                 try:
@@ -171,8 +193,36 @@ class SpotiFLAC_API:
         except Exception as exc:
             self.log(f"ffmpeg check error: {exc}", "warn")
 
+    def _check_node_startup(self) -> None:
+        # Informational only — this never attempts to install Node itself;
+        # that only happens lazily, the first time a JS extension actually
+        # runs (see extensions/runtime.py's JSRuntime.start() /
+        # core/node_check.py's ensure_node_installed()).
+        try:
+            from .core.node_check import check_node
+
+            result = check_node()
+            if result["available"]:
+                self.log(f"Node.js: {result['version']}", "ok")
+            else:
+                self.log(
+                    "⚠  Node.js not found — JavaScript extensions won't work "
+                    "until it's installed. SpotiFLAC will try to install it "
+                    "automatically the first time you use one; see the "
+                    "Extensions section of the README for the supported "
+                    "package managers, or install it yourself: "
+                    "https://nodejs.org/en/download",
+                    "error",
+                )
+                try:
+                    self._push("showNodeWarning", result)
+                except Exception:
+                    pass
+        except Exception as exc:
+            self.log(f"Node.js check error: {exc}", "warn")
+
     def get_artist_images(self, url):
-        # Non implementato: ritorna lista vuota per far scattare il fallback JS
+        # Not implemented: returns an empty list to trigger the JS fallback
         return []
 
     # ── Optional public method (JS can query it later as well) ─────────────
@@ -180,6 +230,11 @@ class SpotiFLAC_API:
         from .core.ffmpeg_check import check_ffmpeg
 
         return check_ffmpeg()
+
+    def get_node_status(self) -> dict:
+        from .core.node_check import check_node
+
+        return check_node()
 
     # ── UI communication ──────────────────────────────────────────────────────
 
@@ -576,208 +631,6 @@ class SpotiFLAC_API:
         ).start()
         return {"status": "started"}
 
-    # ── Local Auto-Tagger (Phase 5: GUI/Web) ────────────────────────────────
-
-    def _serialize_scan_entry(self, entry) -> dict:
-        info = entry.info
-        candidates = [
-            {
-                "confidence": c.confidence,
-                "is_safe": c.is_safe,
-                # first_artist is a computed property on TrackMetadata, not a
-                # stored field — model_dump() only includes real fields, so
-                # it has to be added back in explicitly or the frontend
-                # (which reads best.metadata.first_artist) gets undefined.
-                "metadata": {
-                    **c.metadata.model_dump(),
-                    "first_artist": c.metadata.first_artist,
-                },
-            }
-            for c in entry.candidates
-        ]
-        return {
-            "file_path": info.file_path,
-            "old_title": info.old_title,
-            "old_artist": info.old_artist,
-            "old_album": info.old_album,
-            "old_year": info.old_year,
-            "old_genre": info.old_genre,
-            "old_cover_base64": info.old_cover_base64,
-            "has_tags": info.has_tags,
-            "guessed_title": info.guessed_title,
-            "guessed_artist": info.guessed_artist,
-            "error": info.error,
-            "candidates": candidates,
-        }
-
-    def _scan_local_thread(self, path) -> None:
-        try:
-            from .core.local_processor import scan_and_match_async
-
-            entries = asyncio.run(scan_and_match_async(path))
-            payload = [self._serialize_scan_entry(e) for e in entries]
-            self._push("app_local_scan_results", {"path": path, "files": payload})
-        except Exception as e:
-            self.log(f"[local-tagger] scan failed: {e}", "error")
-            self._push("app_local_scan_error", str(e))
-
-    def scan_local(self, path: str) -> dict:
-        """Phase 5, Task 2: scans `path` (file or folder) and matches every
-        track found, in a background thread. Results arrive via the
-        'app_local_scan_results' push event — see _serialize_scan_entry()
-        for the exact shape (a list of {file_path, old_*, candidates: [...]}).
-        """
-        if not path:
-            return {"status": "error", "error": "No path given"}
-
-        # Clean up path: remove leading/trailing quotes and expand ~ to home
-        path = path.strip().strip("'\"")
-        path = os.path.expanduser(path)
-
-        # Validate that the path exists
-        if not os.path.exists(path):
-            return {
-                "status": "error",
-                "error": f"Path does not exist: {path}",
-            }
-
-        # Path traversal protection
-        from pathlib import Path
-
-        try:
-            resolved = Path(path).resolve()
-            approved_roots = [
-                Path(self.download_dir).resolve(),
-                Path.home().resolve(),
-            ]
-            is_safe = False
-            for root in approved_roots:
-                try:
-                    resolved.relative_to(root)
-                    is_safe = True
-                    break
-                except ValueError:
-                    continue
-            if not is_safe:
-                return {
-                    "status": "error",
-                    "error": "Access denied: path is outside approved directories",
-                }
-        except Exception as e:
-            return {
-                "status": "error",
-                "error": f"Path validation failed: {e}",
-            }
-
-        threading.Thread(
-            target=self._scan_local_thread,
-            args=(path,),
-            daemon=True,
-        ).start()
-        return {"status": "started"}
-
-    def _apply_local_tags_thread(self, items) -> None:
-        try:
-            from pathlib import Path
-
-            from .core.local_processor import (
-                default_embed_options,
-                retag_local_file_async,
-            )
-            from .core.models import TrackMetadata
-
-            opts = default_embed_options(
-                artist_separator=self.load_settings().get("artist_separator") or None,
-            )
-            results = []
-            total = len(items)
-
-            # Approved roots for path traversal protection
-            approved_roots = [
-                Path(self.download_dir).resolve(),
-                Path.home().resolve(),
-            ]
-
-            def _is_path_safe(candidate_path: str) -> bool:
-                try:
-                    resolved = Path(candidate_path).resolve()
-                    for root in approved_roots:
-                        try:
-                            resolved.relative_to(root)
-                            return True
-                        except ValueError:
-                            continue
-                    return False
-                except Exception:
-                    return False
-
-            for idx, item in enumerate(items, start=1):
-                file_path = item.get("file_path", "")
-                metadata_dict = item.get("metadata") or {}
-                backup = item.get("backup", True)
-
-                # Path traversal protection
-                if not _is_path_safe(file_path):
-                    results.append(
-                        {
-                            "file_path": file_path,
-                            "success": False,
-                            "error": "Access denied: path is outside approved directories",
-                        }
-                    )
-                    self._push(
-                        "app_local_apply_progress",
-                        {"done": idx, "total": total, "last": results[-1]},
-                    )
-                    continue
-
-                try:
-                    metadata = TrackMetadata.model_validate(metadata_dict)
-                    result = asyncio.run(
-                        retag_local_file_async(
-                            file_path, metadata, opts, backup=backup
-                        ),
-                    )
-                    results.append(
-                        {
-                            "file_path": result.file_path,
-                            "success": result.success,
-                            "error": result.error,
-                        },
-                    )
-                except Exception as e:
-                    results.append(
-                        {"file_path": file_path, "success": False, "error": str(e)},
-                    )
-
-                self._push(
-                    "app_local_apply_progress",
-                    {"done": idx, "total": total, "last": results[-1]},
-                )
-
-            self._push("app_local_apply_finished", {"results": results})
-        except Exception as e:
-            self.log(f"[local-tagger] apply failed: {e}", "error")
-            self._push("app_local_apply_error", str(e))
-
-    def apply_local_tags(self, items: list) -> dict:
-        """Phase 5, Task 5: applies the chosen match for each item in
-        `items` — a list of {file_path, metadata, backup?} dicts, where
-        `metadata` is one of the `candidates[i].metadata` dicts a prior
-        scan_local() call pushed. Runs in a background thread; per-file
-        progress arrives via 'app_local_apply_progress', the final summary
-        via 'app_local_apply_finished' (both pushed — see set_window()/
-        webapp.py for how push reaches the frontend in each mode).
-        """
-        if not items:
-            return {"status": "error", "error": "Nothing to apply"}
-        threading.Thread(
-            target=self._apply_local_tags_thread,
-            args=(items,),
-            daemon=True,
-        ).start()
-        return {"status": "started"}
-
     def search_code(self, query, path=".", limit=200):
         """Search repository codebase (substring case-insensitive).
 
@@ -1040,402 +893,6 @@ class SpotiFLAC_API:
 
         webbrowser.open(url)
 
-    # ── Lyrics download (separate .lrc file) ──────────────────────────────────
-
-    def download_track_lyrics(self, track_data) -> None:
-        """Download and save lyrics as a separate .lrc file for a single track."""
-        threading.Thread(
-            target=self._download_lyrics_task,
-            args=(track_data,),
-            daemon=True,
-        ).start()
-
-    def _download_lyrics_task(self, track_data) -> None:
-        asyncio.run(self._download_lyrics_task_async(track_data))
-
-    async def _download_lyrics_task_async(self, track_data) -> None:
-        try:
-            title = track_data.get("title", "Unknown")
-            artist = track_data.get("artist", "")
-            isrc = track_data.get("isrc", "")
-            dur_ms = track_data.get("duration_ms", 0)
-            track_id = track_data.get("id", "")
-
-            from .core.lyrics import fetch_lyrics_async
-
-            lyrics_text, provider = await fetch_lyrics_async(
-                track_name=title,
-                artist_name=artist,
-                duration_s=dur_ms // 1000 if dur_ms else 0,
-                track_id=track_id,
-                isrc=isrc,
-            )
-
-            if not lyrics_text:
-                self.log(f"No lyrics found for: {title}", "error")
-                return
-
-            safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
-            safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-            filename = (
-                f"{safe_artist} - {safe_title}.lrc"
-                if safe_artist
-                else f"{safe_title}.lrc"
-            )
-            out_path = os.path.join(self.download_dir, filename)
-
-            os.makedirs(self.download_dir, exist_ok=True)
-            async with aiofiles.open(out_path, "w", encoding="utf-8") as f:
-                await f.write(lyrics_text)
-
-            self.log(f"Lyrics saved: {filename} (via {provider})", "ok")
-
-        except Exception as e:
-            self.log(f"Lyrics download error: {e}", "error")
-
-    # ── Cover download (separate .jpg file) ───────────────────────────────────
-
-    def download_track_cover(self, track_data) -> None:
-        """Download and save album cover as a separate .jpg file."""
-        threading.Thread(
-            target=self._download_cover_task,
-            args=(track_data,),
-            daemon=True,
-        ).start()
-
-    def _download_cover_task(self, track_data) -> None:
-        asyncio.run(self._download_cover_task_async(track_data))
-
-    async def _download_cover_task_async(self, track_data) -> None:
-        track_id = ""
-        try:
-            if isinstance(track_data, list) and len(track_data) > 0:
-                track_data = track_data[0]
-
-            title = track_data.get("title", "Unknown")
-            artist = track_data.get("artist", "")
-            track_id = track_data.get("id", "")
-
-            raw_url = track_data.get("cover") or track_data.get("images", "")
-            cover_url = _maximize_cover_url(raw_url)
-
-            if not cover_url:
-                self.log(f"No cover URL available for: {title}", "error")
-                self._push(
-                    "app_cover_download_finished", {"id": track_id, "success": False}
-                )
-                return
-
-            self.log(f"Downloading HQ cover for: {title}…", "info")
-
-            import httpx
-
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(cover_url, timeout=15, follow_redirects=True)
-                resp.raise_for_status()
-
-            safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
-            safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-            filename = (
-                f"{safe_artist} - {safe_title}.jpg"
-                if safe_artist
-                else f"{safe_title}.jpg"
-            )
-            out_path = os.path.join(self.download_dir, filename)
-
-            os.makedirs(self.download_dir, exist_ok=True)
-            import aiofiles
-
-            async with aiofiles.open(out_path, "wb") as f:
-                await f.write(resp.content)
-
-            self.log(f"Cover saved: {filename}", "ok")
-            # Notifica successo al Frontend
-            self._push("app_cover_download_finished", {"id": track_id, "success": True})
-
-        except Exception as e:
-            self.log(f"Cover download error: {e}", "error")
-            # Notifica errore al Frontend
-            self._push(
-                "app_cover_download_finished", {"id": track_id, "success": False}
-            )
-
-    def download_cover(self, cover_data) -> None:
-        """Download and save cover with appropriate folder structure based on type."""
-        threading.Thread(
-            target=self._download_cover_task_typed,
-            args=(cover_data,),
-            daemon=True,
-        ).start()
-
-    def _download_cover_task_typed(self, cover_data) -> None:
-        asyncio.run(self._download_cover_task_typed_async(cover_data))
-
-    async def _download_cover_task_typed_async(self, cover_data) -> None:
-        try:
-            title = cover_data.get("title", "Unknown")
-            artist = cover_data.get("artist", "")
-            item_type = cover_data.get("type", "ALBUM").upper()
-
-            raw_url = cover_data.get("cover", "")
-            cover_url = _maximize_cover_url(raw_url)
-
-            if not cover_url:
-                self.log(f"No cover URL available for: {title}", "error")
-                return
-
-            safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
-            safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(cover_url, timeout=15, follow_redirects=True)
-                resp.raise_for_status()
-
-            if item_type == "PLAYLIST":
-                folder_path = os.path.join(self.download_dir, safe_title)
-                folder_display = safe_title
-            elif item_type == "ARTIST":
-                folder_path = os.path.join(self.download_dir, safe_artist)
-                folder_display = safe_artist
-            else:
-                folder_path = os.path.join(self.download_dir, safe_artist, safe_title)
-                folder_display = f"{safe_artist}/{safe_title}"
-
-            os.makedirs(folder_path, exist_ok=True)
-            out_path = os.path.join(folder_path, "cover.jpg")
-
-            async with aiofiles.open(out_path, "wb") as f:
-                await f.write(resp.content)
-
-            self.log(f"Cover saved: {folder_display}/cover.jpg", "ok")
-        except Exception as e:
-            self.log(f"Cover download error: {e}", "error")
-
-    def download_album_cover(self, album_data) -> None:
-        """Download and save album cover with Artist/Album folder structure."""
-        threading.Thread(
-            target=self._download_album_cover_task,
-            args=(album_data,),
-            daemon=True,
-        ).start()
-
-    def _download_album_cover_task(self, album_data) -> None:
-        asyncio.run(self._download_album_cover_task_async(album_data))
-
-    async def _download_album_cover_task_async(self, album_data) -> None:
-        try:
-            title = album_data.get("title", "Unknown")
-            artist = album_data.get("artist", "Unknown Artist")
-
-            raw_url = album_data.get("cover", "")
-            cover_url = _maximize_cover_url(raw_url)
-
-            if not cover_url:
-                self.log(f"No cover URL available for: {title}", "error")
-                return
-
-            self.log(f"Downloading HQ album cover: {artist} - {title}…", "info")
-
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(cover_url, timeout=15, follow_redirects=True)
-                resp.raise_for_status()
-
-            safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-            safe_album = re.sub(r'[\\/*?:"<>|]', "", title).strip()
-
-            folder_path = os.path.join(self.download_dir, safe_artist, safe_album)
-            os.makedirs(folder_path, exist_ok=True)
-            out_path = os.path.join(folder_path, "cover.jpg")
-
-            async with aiofiles.open(out_path, "wb") as f:
-                await f.write(resp.content)
-
-            self.log(f"Album cover saved: {safe_artist}/{safe_album}/cover.jpg", "ok")
-        except Exception as e:
-            self.log(f"Album cover download error: {e}", "error")
-
-    # ── Bulk: cover di tutte le tracks ───────────────────────────────────────────
-
-    def _download_all_covers_task(self, tracks_data) -> None:
-        asyncio.run(self._async_download_all_covers(tracks_data))
-
-    async def _download_all_covers_task_async(self, tracks_data) -> None:
-        total = len(tracks_data)
-        success = 0
-        skipped = 0
-
-        self.log(f"Saving covers for {total} tracks…", "info")
-        os.makedirs(self.download_dir, exist_ok=True)
-
-        for i, track_data in enumerate(tracks_data, 1):
-            title = track_data.get("title", "Unknown")
-            artist = track_data.get("artist", "")
-            cover_url = track_data.get("cover", "")
-
-            if not cover_url:
-                self.log(f"[{i}/{total}] No cover URL: {title} — skipped", "warn")
-                skipped += 1
-                continue
-
-            try:
-                client = AsyncHttpClient("cover", timeout_s=15)
-                resp = await client.get(cover_url, timeout=15)
-                resp.raise_for_status()
-
-                safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
-                safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-                filename = (
-                    f"{safe_artist} - {safe_title}.jpg"
-                    if safe_artist
-                    else f"{safe_title}.jpg"
-                )
-                out_path = os.path.join(self.download_dir, filename)
-
-                async with aiofiles.open(out_path, "wb") as f:
-                    await f.write(resp.content)
-
-                self.log(f"[{i}/{total}] Cover saved: {filename}", "ok")
-                success += 1
-
-            except Exception as e:
-                self.log(f"[{i}/{total}] Cover error for '{title}': {e}", "error")
-
-        self.log(f"All covers done — {success} saved, {skipped} skipped.", "ok")
-
-    # ── Bulk: cover di tutte le tracks (VERSION ASINCRONA ULTRA-VELOCE) ──
-    def download_all_covers(self, tracks_data) -> None:
-        threading.Thread(
-            target=self._run_async_covers,
-            args=(tracks_data,),
-            daemon=True,
-        ).start()
-
-    def _run_async_covers(self, tracks_data) -> None:
-        asyncio.run(self._async_download_all_covers(tracks_data))
-
-    async def _async_download_all_covers(self, tracks_data) -> None:
-        total = len(tracks_data)
-        success, skipped = 0, 0
-
-        self.log(f"Saving covers for {total} tracks at warp speed…", "info")
-        os.makedirs(self.download_dir, exist_ok=True)
-
-        async def fetch_and_save(client, track_data, idx) -> None:
-            nonlocal success, skipped
-            title = track_data.get("title", "Unknown")
-            artist = track_data.get("artist", "")
-
-            raw_url = track_data.get("cover", "")
-            cover_url = _maximize_cover_url(raw_url)
-
-            if not cover_url:
-                skipped += 1
-                return
-
-            try:
-                resp = await client.get(cover_url, timeout=15)
-                resp.raise_for_status()
-
-                safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
-                safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-                filename = (
-                    f"{safe_artist} - {safe_title}.jpg"
-                    if safe_artist
-                    else f"{safe_title}.jpg"
-                )
-                out_path = os.path.join(self.download_dir, filename)
-
-                async with aiofiles.open(out_path, "wb") as f:
-                    await f.write(resp.content)
-
-                success += 1
-                self.log(f"[{idx}/{total}] HQ Cover saved: {filename}", "ok")
-            except Exception as e:
-                self.log(f"[{idx}/{total}] Cover error for '{title}': {e}", "error")
-
-        # Create an async client and start all downloads together!
-        async with httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=50), follow_redirects=True
-        ) as client:
-            tasks = [
-                fetch_and_save(client, track, i)
-                for i, track in enumerate(tracks_data, 1)
-            ]
-            await asyncio.gather(*tasks)
-
-        self.log(f"All covers done — {success} saved, {skipped} skipped.", "ok")
-
-    # ── Bulk: lyrics di tutte le tracks (VERSION ASINCRONA) ──
-    def download_all_lyrics(self, tracks_data) -> None:
-        threading.Thread(
-            target=self._run_async_lyrics,
-            args=(tracks_data,),
-            daemon=True,
-        ).start()
-
-    def _run_async_lyrics(self, tracks_data) -> None:
-        asyncio.run(self._async_download_all_lyrics(tracks_data))
-
-    async def _async_download_all_lyrics(self, tracks_data) -> None:
-        import aiofiles
-
-        from .core.lyrics import fetch_lyrics_async
-
-        total = len(tracks_data)
-        success, skipped = 0, 0
-
-        self.log(f"Fetching lyrics for {total} tracks concurrently…", "info")
-        os.makedirs(self.download_dir, exist_ok=True)
-
-        async def fetch_and_save_lyric(track_data, idx) -> None:
-            nonlocal success, skipped
-            title = track_data.get("title", "Unknown")
-            artist = track_data.get("artist", "")
-            isrc = track_data.get("isrc", "")
-            dur_ms = track_data.get("duration_ms", 0)
-            track_id = track_data.get("id", "")
-
-            try:
-                lyrics_text, provider = await fetch_lyrics_async(
-                    track_name=title,
-                    artist_name=artist,
-                    duration_s=dur_ms // 1000 if dur_ms else 0,
-                    track_id=track_id,
-                    isrc=isrc,
-                )
-
-                if not lyrics_text:
-                    skipped += 1
-                    return
-
-                safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
-                safe_artist = re.sub(r'[\\/*?:"<>|]', "", artist).strip()
-                filename = (
-                    f"{safe_artist} - {safe_title}.lrc"
-                    if safe_artist
-                    else f"{safe_title}.lrc"
-                )
-                out_path = os.path.join(self.download_dir, filename)
-
-                async with aiofiles.open(out_path, "w", encoding="utf-8") as f:
-                    await f.write(lyrics_text)
-
-                success += 1
-                self.log(
-                    f"[{idx}/{total}] Lyrics saved: {filename} (via {provider})",
-                    "ok",
-                )
-            except Exception as e:
-                self.log(f"[{idx}/{total}] Lyrics error for '{title}': {e}", "error")
-
-        # Download all lyrics concurrently
-        tasks = [
-            fetch_and_save_lyric(track, i) for i, track in enumerate(tracks_data, 1)
-        ]
-        await asyncio.gather(*tasks)
-
-        self.log(f"All lyrics done — {success} saved, {skipped} skipped.", "ok")
-
     # ── Lazy Loading - Track preview ──────────────────────────────────────
 
     def get_track_preview(self, track_id: str) -> str:
@@ -1472,8 +929,8 @@ class SpotiFLAC_API:
 
     async def _fetch_metadata_task(self, url) -> None:
         try:
-            self.set_progress("Recupero metadati…")
-            self.log(f"Analisi input: {url}", "info")
+            self.set_progress("Retrieving metadata…")
+            self.log(f"Analyzing input: {url}", "info")
 
             # ── Detection: is it a URL or a search query? ──────────────────
             stripped = url.strip()
@@ -1498,15 +955,22 @@ class SpotiFLAC_API:
                 from .core.spotify_metadata import SpotifyMetadataClient
 
                 client = SpotifyMetadataClient()
-            # Dopo aver scelto il client, prima di client.get_url()
             if not is_url:
-                self.log("Ricerca testuale: usa search_provider_async.", "error")
+                self.log("Text search: use search_provider_async.", "error")
                 self.set_progress("")
                 return
 
-            # ── Chiamata universale ────────────────────────────────────────────
-            # get_url ora restituisce (nome, tracks) OPPURE (nome, tracks, cover)
-            result = client.get_url(stripped)
+            # ── Universal call ──────────────────────────────────────────────────
+            # get_url() is sync on SpotifyMetadataClient but async on
+            # TidalMetadataClient/AppleMusicMetadataClient — calling it directly
+            # here would hand back an un-awaited coroutine for the latter two
+            # (crashing on the very next line, `result[0]`). Reuse the same
+            # sync/async dispatch helper the real download path already relies
+            # on instead of duplicating (and re-diverging from) that logic.
+            # Returns (name, tracks) OR (name, tracks, cover) OR (name, tracks, cover, meta).
+            from .downloader import _call_metadata_get_url
+
+            result = await _call_metadata_get_url(client, stripped)
             collection_name = result[0]
             tracks = result[1]
             collection_cover = result[2] if len(result) > 2 else ""
@@ -1581,7 +1045,7 @@ class SpotiFLAC_API:
                 except Exception:
                     pass  # Silently skip playcount on any error
 
-            # ── Ciclo estrazione metadati potenziato ──
+            # ── Enhanced metadata-extraction loop ──
             for i, t in enumerate(tracks):
                 track_id = getattr(t, "id", "")
 

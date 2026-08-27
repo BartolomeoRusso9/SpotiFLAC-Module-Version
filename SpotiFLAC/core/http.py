@@ -1,8 +1,8 @@
-"""HTTP client centralizzato con Connection Pooling globale.
+"""Centralized HTTP client with global connection pooling.
 
-=== FASE 3 — Migrazione async completata ===
-Rimosso tutto il codice sync (RateLimiter, HttpClient, NetworkManager.get_sync_client,
-NetworkManager.get_async_client legacy) ora che tutti i provider usano AsyncHttpClient.
+=== Phase 3 — async migration complete ===
+Removed all sync code (RateLimiter, HttpClient, NetworkManager.get_sync_client,
+legacy NetworkManager.get_async_client) now that every provider uses AsyncHttpClient.
 """
 
 from __future__ import annotations
@@ -19,6 +19,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from tenacity import (
+    AsyncRetrying,
+    RetryCallState,
+    retry_if_exception_type,
+    stop_after_attempt,
+)
 
 from .errors import (
     AuthError,
@@ -50,8 +56,8 @@ logger = logging.getLogger(__name__)
 
 # --- CONNECTION POOL MANAGER ---
 class NetworkManager:
-    """Mantiene vive le connessioni (Keep-Alive) per azzerare i tempi di handshake SSL.
-    Ogni event loop ottiene la propria istanza di httpx.AsyncClient (loop-safe).
+    """Keeps connections alive (Keep-Alive) to eliminate SSL handshake time.
+    Each event loop gets its own httpx.AsyncClient instance (loop-safe).
     """
 
     _async_clients: dict[int, httpx.AsyncClient] = {}
@@ -80,7 +86,7 @@ class NetworkManager:
 
     @classmethod
     async def aclose_loop_client(cls) -> None:
-        """Chiude e rimuove dal registro il client async del loop corrente."""
+        """Closes and removes the current loop's async client from the registry."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -157,8 +163,8 @@ class RetryConfig:
 
 # --- HTTP CLIENT ASINCRONO ---
 class AsyncHttpClient:
-    """Unico client HTTP usato da tutti i provider.
-    Usa NetworkManager.get_async_client_safe() per sicurezza multi-loop.
+    """Single HTTP client used by every provider.
+    Uses NetworkManager.get_async_client_safe() for multi-loop safety.
     """
 
     def __init__(
@@ -167,11 +173,13 @@ class AsyncHttpClient:
         timeout_s: int = 30,
         rate_limiter: AsyncRateLimiter | None = None,
         headers: dict[str, str] | None = None,
+        retry: RetryConfig | None = None,
     ) -> None:
         self._provider = provider
         self._timeout = timeout_s
         self._limiter = rate_limiter
         self._headers = headers or {}
+        self._retry = retry or RetryConfig()
         self._stop_event: asyncio.Event | None = None
 
     async def _client(self) -> httpx.AsyncClient:
@@ -194,19 +202,40 @@ class AsyncHttpClient:
         headers = {**self._headers, **kwargs.pop("headers", {})}
         req_timeout = kwargs.pop("timeout", self._timeout)
 
-        if self._limiter:
-            await self._limiter.wait_for_slot()
+        async def _attempt() -> httpx.Response:
+            if self._limiter:
+                await self._limiter.wait_for_slot()
+            client = await self._client()
+            try:
+                resp = await client.request(
+                    method,
+                    url,
+                    headers=headers,
+                    timeout=req_timeout,
+                    **kwargs,
+                )
+            except httpx.TransportError as exc:
+                raise NetworkError(self._provider, f"Request failed: {exc}") from exc
+            self._raise_for_status(resp)
+            return resp
 
-        client = await self._client()
-        resp = await client.request(
-            method,
-            url,
-            headers=headers,
-            timeout=req_timeout,
-            **kwargs,
+        retryer = AsyncRetrying(
+            stop=stop_after_attempt(self._retry.max_attempts),
+            retry=retry_if_exception_type((RateLimitedError, NetworkError)),
+            wait=self._wait_strategy,
+            reraise=True,
         )
-        self._raise_for_status(resp)
-        return resp
+        return await retryer(_attempt)
+
+    def _wait_strategy(self, retry_state: RetryCallState) -> float:
+        """Retry-After for 429s; otherwise exponential backoff from RetryConfig."""
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        if isinstance(exc, RateLimitedError):
+            return min(exc.retry_after, self._retry.max_delay_s)
+        delay = self._retry.base_delay_s * (
+            self._retry.backoff_factor ** (retry_state.attempt_number - 1)
+        )
+        return min(delay, self._retry.max_delay_s)
 
     def _raise_for_status(self, resp: httpx.Response) -> None:
         sc = resp.status_code

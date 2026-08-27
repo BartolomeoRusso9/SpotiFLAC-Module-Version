@@ -1,8 +1,8 @@
 """SpotiFLAC/__main__.py.
 
-Alias per `python -m SpotiFLAC`: delega interamente a launcher.py in modo che
-`python -m SpotiFLAC ...` e il comando `spotiflac ...` (console_script)
-eseguano esattamente lo stesso codice, senza logica duplicata.
+Alias for `python -m SpotiFLAC`: delegates entirely to launcher.py so that
+`python -m SpotiFLAC ...` and the `spotiflac ...` command (console_script)
+run exactly the same code, with no duplicated logic.
 """
 
 from __future__ import annotations

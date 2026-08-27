@@ -27,7 +27,7 @@ class IsrcHelper:
         isrc = None
         search_id = track_id
 
-        # 1.5. Traduzione ID
+        # 1.5. ID translation
         if not track_id.startswith("spotify_") and "_" in track_id:
             try:
                 links = await self.resolver.resolve_all_async(track_id)

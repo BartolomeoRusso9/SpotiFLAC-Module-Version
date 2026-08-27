@@ -80,6 +80,25 @@ def test_delete_missing_profile_returns_false(tmp_path, monkeypatch):
     asyncio.run(_run())
 
 
+def test_watch_round_trips_through_a_saved_profile(tmp_path, monkeypatch):
+    """Regression test: ProfileConfig's `extra: ignore` means a field with
+    no matching attribute on the model is silently dropped, not saved —
+    `watch` was added to --save-profile's dict before it existed on
+    ProfileConfig, which would have made it vanish on every save.
+    """
+    monkeypatch.setattr(profiles, "_PROFILES_FILE", tmp_path / "profiles.json")
+
+    async def _run():
+        await profiles.save_profile_async(
+            "watching", {"services": ["tidal"], "watch": 60}
+        )
+        stored = await profiles.get_profile_async("watching")
+        assert stored is not None
+        assert stored["watch"] == 60
+
+    asyncio.run(_run())
+
+
 def test_profile_config_model_accepts_known_aliases(tmp_path, monkeypatch):
     monkeypatch.setattr(profiles, "_PROFILES_FILE", tmp_path / "profiles.json")
 

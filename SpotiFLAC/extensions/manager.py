@@ -61,6 +61,19 @@ class RegistryEntry:
     icon_url: str | None = None
     updated_at: str = ""
     sha256: str | None = None
+    # Optional Ed25519 signature over (id, version, sha256, download_url) —
+    # see extensions/trust.py. None is the common case (checksum-only,
+    # exactly like today) and is never treated as a problem on its own.
+    signature: str | None = None
+
+    @property
+    def trust_tier(self) -> str:
+        """ "signed" / "checksum-only" / "unverified" — see extensions/trust.py."""
+        from .trust import trust_tier
+
+        return trust_tier(
+            self.id, self.version, self.sha256, self.download_url, self.signature
+        )
 
 
 @dataclass
@@ -190,13 +203,13 @@ class ExtensionManager:
         with self.__class__._startup_registry_checks_lock:
             self.__class__._startup_registry_checks.add(registry_key)
 
-        # ORDINE CRITICO: Mettiamo prima le utility, così vengono scaricate prima dei provider
+        # CRITICAL ORDER: put utilities first, so they're downloaded before the providers
         entries.sort(
             key=lambda e: 0 if e.category in ("utility", "runtime_utility") else 1
         )
 
         for entry in entries:
-            # FIX: Aggiungiamo 'utility' e 'runtime_utility' tra le categorie consentite
+            # FIX: add 'utility' and 'runtime_utility' to the allowed categories
             is_target = (
                 entry.category
                 in {"download", "download_provider", "utility", "runtime_utility"}
@@ -349,6 +362,7 @@ class ExtensionManager:
                             icon_url=item.get("icon_url"),
                             updated_at=item.get("updated_at", ""),
                             sha256=sha256_val,
+                            signature=item.get("signature"),
                         ),
                     )
                 except (KeyError, TypeError) as e:
@@ -417,13 +431,22 @@ class ExtensionManager:
         # runtime_hint explicit parameter overrides fragment
         if runtime_hint:
             parsed_runtime = runtime_hint
-        try:
-            r = httpx.get(url, timeout=self.timeout * 3, follow_redirects=True)
-            r.raise_for_status()
-            raw = r.content
-        except Exception as e:
-            msg = f"Error downloading extension: {e}"
-            raise RuntimeError(msg) from e
+        raw = None
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                r = httpx.get(url, timeout=self.timeout * 3, follow_redirects=True)
+                r.raise_for_status()
+                raw = r.content
+                break
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                last_err = e
+                if attempt == 2:
+                    break
+                time.sleep(0.5 * (2**attempt))
+        if raw is None:
+            msg = f"Error downloading extension: {last_err}"
+            raise RuntimeError(msg) from last_err
 
         return self._install_from_bytes(
             raw, settings=settings, sha256=sha256, runtime_hint=parsed_runtime
@@ -563,6 +586,15 @@ class ExtensionManager:
             Path(member).is_absolute() or ".." in Path(member).parts for member in names
         ):
             raise ValueError("Extension archive contains an unsafe path")
+
+        # Reject symlink entries (zip-slip via a symlink pointing outside the
+        # extraction dir, written before the target it "points to" exists).
+        # A symlink's mode bits are stored in the top 4 bits of external_attr.
+        for info in zf.infolist():
+            unix_mode = info.external_attr >> 16
+            if unix_mode and (unix_mode & 0o170000) == 0o120000:
+                msg = f"Extension archive contains a symlink entry: {info.filename}"
+                raise ValueError(msg)
 
         previous_settings = target / "settings.json"
         saved_settings = (

@@ -48,19 +48,19 @@ class ArtistSimple:
 
 
 # ---------------------------------------------------------------------------
-# Helper interni — evitano ripetizioni nei metodi del client
+# Internal helpers — avoid repetition across the client's methods
 # ---------------------------------------------------------------------------
 
 
 def _safe_playcount(raw: Any) -> str:
-    """Legge il playcount sia da dict che da valore scalare."""
+    """Reads the playcount from either a dict or a scalar value."""
     if isinstance(raw, dict):
         return str(raw.get("value") or "0")
     return str(raw or "0")
 
 
 def _safe_duration_ms(raw: Any) -> int:
-    """Legge la durata in ms sia da dict che da valore scalare."""
+    """Reads the duration in ms from either a dict or a scalar value."""
     if isinstance(raw, dict):
         return int(raw.get("totalMilliseconds") or 0)
     return int(raw or 0)
@@ -224,7 +224,7 @@ def _track_url(track_id: str) -> str:
 def parse_spotify_url(uri: str) -> dict[str, str]:
     u = urlparse(uri)
 
-    # embed.spotify.com → redirect tramite query param ?uri=
+    # embed.spotify.com → redirect via the ?uri= query param
     if u.netloc == "embed.spotify.com":
         qs = parse_qs(u.query)
         if not qs.get("uri"):
@@ -350,11 +350,11 @@ class SpotifyMetadataClient:
         )
 
     # ------------------------------------------------------------------
-    # Track singola
+    # Single track
     # ------------------------------------------------------------------
 
     async def _get_album_artists_async(self, album_id: str) -> str:
-        """Query leggera: solo metadati album, nessuna track."""
+        """Lightweight query: album metadata only, no track."""
         payload = {
             "operationName": "getAlbum",
             "variables": {
@@ -379,7 +379,7 @@ class SpotifyMetadataClient:
             return ""
 
     async def get_track_async(self, track_id: str) -> TrackMetadata:
-        """Retrieves metadati completi per una singola track, compositore incluso."""
+        """Retrieves complete metadata for a single track, composer included."""
         payload = {
             "operationName": "getTrack",
             "variables": {"uri": f"spotify:track:{track_id}"},
@@ -414,17 +414,17 @@ class SpotifyMetadataClient:
         # ------------------------------------------------------------------
         artists_list = []
 
-        # 1. Estrai il primo artista
+        # 1. Extract the first artist
         first = track_union.get("firstArtist")
         if first:
             artists_list.extend(_extract_artist_names(first))
 
-        # 2. Estrai gli altri artisti
+        # 2. Extract the other artists
         others = track_union.get("otherArtists")
         if others:
             artists_list.extend(_extract_artist_names(others))
 
-        # 3. Supporto aggiuntivo per la struttura standard degli artisti
+        # 3. Additional support for the standard artists structure
         if not artists_list:
             artists_list.extend(_extract_artist_names(track_union.get("artists", {})))
 
@@ -527,7 +527,7 @@ class SpotifyMetadataClient:
             data = await asyncio.to_thread(self.web_client.query, payload)
             au = data.get("data", {}).get("albumUnion", {})
 
-            # Salva i metadati dell'album solo al primo giro
+            # Save the album metadata only on the first pass
             if not album_union:
                 album_union = au
 
@@ -813,7 +813,7 @@ class SpotifyMetadataClient:
                 # La GraphQL di Spotify non espone sempre un campo `id` diretto su
                 # album/artist/playlist: the ID is embedded in the URI
                 # (es. "spotify:album:4aawyAB9vmqN3uQ7FjRGTy").
-                # Proviamo prima il campo diretto, poi estraiamo dall'URI.
+                # Try the direct field first, then extract it from the URI.
                 node_id: str = node.get("id") or ""
                 if not node_id:
                     uri = node.get("uri", "")
@@ -1350,7 +1350,7 @@ def parse_home_feed(raw_data: dict) -> dict:
 
 
 def _maximize_cover_url(url: str) -> str:
-    """Modifica l'URL della cover per richiederne la versione alla massima qualità."""
+    """Modifies the cover URL to request its highest-quality version."""
     if not url:
         return ""
 
@@ -1373,7 +1373,7 @@ def _maximize_cover_url(url: str) -> str:
     if "dzcdn.net/images" in url:
         url = re.sub(r"/\d+x\d+-", "/1000x1000-", url)
 
-    # Qobuz (Risoluzione originale max)
+    # Qobuz (max original resolution)
     if "static.qobuz.com/images" in url:
         url = re.sub(r"_\d+\.jpg", "_max.jpg", url)
 

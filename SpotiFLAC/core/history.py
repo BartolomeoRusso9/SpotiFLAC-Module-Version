@@ -6,7 +6,7 @@ from .models import TrackMetadata
 
 
 class HistoryManager:
-    """Gestisce la cronologia delle ricerche (recent-fetches)."""
+    """Manages the search history (recent-fetches)."""
 
     def __init__(self) -> None:
         self.path = Path.home() / ".cache" / "spotiflac" / "recent-fetches.json"

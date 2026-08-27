@@ -50,9 +50,9 @@ async def validate_downloaded_track_async(
     filepath: str,
     expected_seconds: int,
 ) -> tuple[bool, str]:
-    """Check che il file sloaded non sia una preview da 30s.
-    Returns (valido, messaggio_errore).
-    Equivalent a ValidateDownloadedTrackDuration() del Go.
+    """Check that the downloaded file isn't a 30s preview.
+    Returns (valid, error_message).
+    Equivalent to the Go ValidateDownloadedTrackDuration().
     """
     if not filepath or expected_seconds <= 0:
         return True, ""
@@ -63,23 +63,23 @@ async def validate_downloaded_track_async(
 
     actual_s = round(actual)
 
-    # Caso 1: preview da 30s su brano lungo
+    # Case 1: 30s preview on a long track
     if expected_seconds >= _PREVIEW_EXPECTED_MIN and actual_s <= _PREVIEW_MAX_SECONDS:
         msg = (
             f"Preview: file is {actual_s}s, "
-            f"expected ~{expected_seconds}s — file rimosso"
+            f"expected ~{expected_seconds}s — file removed"
         )
         await _remove_file_async(filepath)
         return False, msg
 
-    # Caso 2: mismatch grande su brani lunghi
+    # Case 2: large mismatch on long tracks
     if expected_seconds >= _LARGE_MISMATCH_MIN:
         allowed = max(_MIN_ALLOWED_DIFF, round(expected_seconds * _DURATION_DIFF_RATIO))
         diff = abs(actual_s - expected_seconds)
         if diff > allowed:
             msg = (
-                f"Durata errata: file is {actual_s}s, "
-                f"expected ~{expected_seconds}s — file rimosso"
+                f"Wrong duration: file is {actual_s}s, "
+                f"expected ~{expected_seconds}s — file removed"
             )
             await _remove_file_async(filepath)
             return False, msg
@@ -87,8 +87,8 @@ async def validate_downloaded_track_async(
     if expected_seconds > 0 and expected_seconds < _PREVIEW_EXPECTED_MIN:
         if actual_s < (expected_seconds * 0.6):
             msg = (
-                f"Durata errata (brano corto troncato): file is {actual_s}s, "
-                f"expected ~{expected_seconds}s — file rimosso"
+                f"Wrong duration (short track truncated): file is {actual_s}s, "
+                f"expected ~{expected_seconds}s — file removed"
             )
             await _remove_file_async(filepath)
             return False, msg

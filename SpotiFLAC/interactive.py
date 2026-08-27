@@ -656,6 +656,8 @@ def _summary(cfg: dict) -> None:
         row("Custom Tidal API", cfg["tidal_custom_api"])
     if cfg.get("loop"):
         row("Loop", f"every {cfg['loop']} minutes")
+    if cfg.get("watch"):
+        row("Watch", f"re-sync every {cfg['watch']} minutes, forever")
 
 
 # ---------------------------------------------------------------------------
@@ -965,12 +967,16 @@ async def _run_interactive_once() -> dict:
             )
             cfg["quality"] = normalize_quality(q_choice.split(" ")[0])
         elif has_tidal and not (has_qobuz or has_deezer or has_apple):
+            # DOLBY_ATMOS is only ever offered here, in the Tidal-exclusive
+            # branch — core/quality.py's quality_for_provider() would
+            # downgrade it to HI_RES_LOSSLESS for any other provider anyway,
+            # so it would be misleading to present it as a choice elsewhere.
             tidal_default = str(cfg.get("quality", "LOSSLESS") or "LOSSLESS").upper()
-            if tidal_default not in ["HI_RES_LOSSLESS", "LOSSLESS"]:
+            if tidal_default not in ["HI_RES_LOSSLESS", "LOSSLESS", "DOLBY_ATMOS"]:
                 tidal_default = "LOSSLESS"
             q = _ask_choice(
                 "Tidal Quality:",
-                options=["HI_RES_LOSSLESS", "LOSSLESS"],
+                options=["HI_RES_LOSSLESS", "LOSSLESS", "DOLBY_ATMOS"],
                 default=tidal_default,
             )
             cfg["quality"] = normalize_quality(q)
@@ -1083,7 +1089,7 @@ async def _run_interactive_once() -> dict:
         )
     else:
         cfg["create_playlist_subfolders"] = (
-            True  # Mantieni il default se non è una playlist
+            True  # Keep the default when this isn't a playlist
         )
 
     cfg["use_track_numbers"] = _ask_bool(
@@ -1170,9 +1176,10 @@ async def _run_interactive_once() -> dict:
     if cfg["enrich_metadata"]:
         cfg["enrich_providers"] = _ask_multi(
             "Enrichment providers (order = priority):",
+            # SoundCloud stays selectable but isn't pre-checked below.
             options=["deezer", "apple", "qobuz", "tidal", "soundcloud"],
             defaults=cfg.get("enrich_providers")
-            or ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
+            or ["deezer", "apple", "qobuz", "tidal"],
             ordered=True,
         )
     else:
@@ -1181,7 +1188,6 @@ async def _run_interactive_once() -> dict:
             "apple",
             "qobuz",
             "tidal",
-            "soundcloud",
         ]
 
     # ── 9. Retry ────────────────────────────────────────────────────────────
@@ -1266,6 +1272,13 @@ async def _run_interactive_once() -> dict:
     )
     cfg["loop"] = int(loop_str) if loop_str.isdigit() else None
 
+    # ── 12.5. Watch ──────────────────────────────────────────────────────────
+    watch_str = _ask(
+        "Keep syncing this URL every N minutes, forever (leave blank to run once)",
+        str(cfg.get("watch", "")),
+    )
+    cfg["watch"] = int(watch_str) if watch_str.isdigit() else None
+
     # ── Profile save ────────────────────────────────────────────────────────
     await _profile_save_section(cfg)
 
@@ -1344,6 +1357,8 @@ def _print_cli_command(cfg: dict) -> None:
         parts.extend(["--tidal-api", cfg["tidal_custom_api"]])
     if cfg.get("loop"):
         parts.extend(["--loop", str(cfg["loop"])])
+    if cfg.get("watch"):
+        parts.extend(["--watch", str(cfg["watch"])])
 
     command = " \\\n    ".join(shlex.quote(part) for part in parts)
     print(f"\n  {command}\n")

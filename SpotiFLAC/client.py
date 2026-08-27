@@ -61,24 +61,23 @@ def _setup_logger(level: int) -> logging.Logger:
 
 
 class AsyncSpotiFLAC:
-    """Client asincrono nativo per SpotiFLAC.
+    """Native asynchronous client for SpotiFLAC.
 
-    Uso consigliato (garantisce chiusura pulita delle risorse HTTP):
+    Recommended usage (guarantees clean shutdown of HTTP resources):
 
         async with AsyncSpotiFLAC(output_dir="./downloads") as client:
             await client.download_track("https://open.spotify.com/track/...")
             playlist_meta, tracks = await client.get_playlist("https://...")
 
-    Se usato senza context manager, ricordarsi di chiamare `await client.aclose()`.
+    If used without a context manager, remember to call `await client.aclose()`.
 
-    Il parametro `registries` permette di aggiungere URL di registry extension
-    custom senza dover impostare `SPOTIFLAC_REGISTRIES` a livello di ambiente o
-    di file `.env`: gli URL passati qui vengono persistiti tramite
-    `extensions.registry_config.add_registry()` all'ingresso del context
-    manager (`__aenter__`), prima che `ExtensionManager` venga avviato, e da
-    quel momento in poi si comportano esattamente come i registry aggiunti
-    dalla GUI (restano validi anche nei run successivi finché non vengono
-    rimossi).
+    The `registries` parameter lets you add custom extension registry URLs
+    without having to set `SPOTIFLAC_REGISTRIES` at the environment or `.env`
+    file level: the URLs passed here are persisted via
+    `extensions.registry_config.add_registry()` on context manager entry
+    (`__aenter__`), before `ExtensionManager` is started, and from that point
+    on behave exactly like registries added from the GUI (they remain valid
+    on subsequent runs until removed).
     """
 
     def __init__(
@@ -141,8 +140,7 @@ class AsyncSpotiFLAC:
             lyrics_providers=lyrics_providers
             or ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
             enrich_metadata=enrich_metadata,
-            enrich_providers=enrich_providers
-            or ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
+            enrich_providers=enrich_providers or ["deezer", "apple", "qobuz", "tidal"],
             qobuz_token=qobuz_token,
             qobuz_local_api_url=qobuz_local_api_url,
             track_max_retries=track_max_retries,
@@ -288,7 +286,7 @@ class AsyncSpotiFLAC:
 
 
 # ---------------------------------------------------------------------------
-# Wrapper sincrono retrocompatibile
+# Backwards-compatible synchronous wrapper
 # ---------------------------------------------------------------------------
 
 
@@ -329,12 +327,12 @@ def SpotiFLAC(
     registries: list[str] | None = None,
     verify_hires: bool = False,
 ) -> None:
-    """Wrapper SINCRONO retrocompatibile.
+    """Backwards-compatible SYNCHRONOUS wrapper.
 
-    Firma e comportamento osservabile identici alla vecchia `SpotiFLAC()`:
-    chi la chiama da codice sincrono non deve cambiare nulla. Internamente
-    istanzia `AsyncSpotiFLAC` e la esegue con `asyncio.run()`, garantendo un
-    unico event loop pulito per l'esecuzione.
+    Signature and observable behavior identical to the old `SpotiFLAC()`:
+    callers from synchronous code need to change nothing. Internally it
+    instantiates `AsyncSpotiFLAC` and runs it with `asyncio.run()`, guaranteeing
+    a single clean event loop for the execution.
     """
 
     async def _run() -> None:

@@ -611,7 +611,7 @@ async def _soundcloud_fetch_async(
 
 
 # ---------------------------------------------------------------------------
-# Async enrich_metadata — Phase 2 (nuovo)
+# Async enrich_metadata — Phase 2 (new)
 # ---------------------------------------------------------------------------
 
 
