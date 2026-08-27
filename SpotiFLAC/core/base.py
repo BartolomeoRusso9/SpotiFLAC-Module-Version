@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 class BaseProvider(ABC):
-    """Contratto che ogni provider DEVE rispettare.
-    I metodi concreti (stream_download, build_path) evitano
-    la duplicazione presente nei file originali.
+    """Contract every provider MUST honor.
+    The concrete methods (stream_download, build_path) avoid
+    the duplication present in the original files.
     """
 
     name: str = "base"
@@ -40,7 +40,7 @@ class BaseProvider(ABC):
             headers=headers,
             retry=retry,
         )
-        # Type hint aggiornato per supportare sia callback sincroni (None) che asincroni (Awaitable)
+        # Type hint updated to support both sync (None) and async (Awaitable) callbacks
         self._progress_cb: Callable[[int, int], Awaitable[None] | None] | None = None
         self._validated_flac_files: dict[str, tuple[int, int]] = {}
 
@@ -53,8 +53,8 @@ class BaseProvider(ABC):
             self._progress_cb = None
             return
 
-        # Catturiamo il riferimento all'event loop principale
-        # nel momento in cui il provider viene inizializzato.
+        # Capture the reference to the main event loop
+        # at the moment the provider is initialized.
         try:
             main_loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -68,8 +68,8 @@ class BaseProvider(ABC):
                     asyncio.get_running_loop()
                     asyncio.create_task(res)
                 except RuntimeError:
-                    # RuntimeError significa che siamo in un worker thread (es. yt-dlp).
-                    # "Teletrasportiamo" l'esecuzione nel loop principale in modo sicuro.
+                    # RuntimeError means we're in a worker thread (e.g. yt-dlp).
+                    # Safely "teleport" execution back onto the main loop.
                     if main_loop and main_loop.is_running():
                         asyncio.run_coroutine_threadsafe(res, main_loop)
 

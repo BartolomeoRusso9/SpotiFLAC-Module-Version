@@ -1,0 +1,49 @@
+# Example compose file for SpotiFLAC's --web mode (see the "Web Mode in
+# Docker" section of README.md). Named *.example.yml — plain docker-compose.yml
+# is in .gitignore, presumably for a maintainer-local one — so this can be
+# committed and reviewed like any other file. Copy/rename it, adjust the
+# bind mount paths and SPOTIFLAC_REGISTRIES, and run:
+#   docker compose -f docker-compose.example.yml up
+#
+# --web mode needs none of the Xvfb/VNC machinery the CLI/--gui paths use,
+# so this is the lightest way to run SpotiFLAC as a always-on service.
+#
+# No registry is bundled by design (see README > Extensions): set
+# SPOTIFLAC_REGISTRIES yourself, either below or in a sibling .env file
+# compose picks up automatically.
+services:
+  spotiflac-web:
+    # Swap for the published image if you don't want to build locally:
+    # image: ghcr.io/bartolomeorusso9/spotiflac-module-version:latest
+    build: .
+    command: ["--web", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    environment:
+      # Comma-separated registry JSON URLs — required, nothing is bundled.
+      SPOTIFLAC_REGISTRIES: "${SPOTIFLAC_REGISTRIES:-}"
+      # Optional shared-secret gate for the web GUI (see README > Web Mode).
+      # Leave unset only if this port is never reachable from outside a
+      # network you fully trust.
+      SPOTIFLAC_WEB_TOKEN: "${SPOTIFLAC_WEB_TOKEN:-}"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./.spotiflac_docker:/root/.spotiflac
+      - ./.cache_docker:/root/.cache/spotiflac
+    restart: unless-stopped
+    healthcheck:
+      # --web is the one run mode this compose file commits to, so (unlike
+      # the image's other modes — a one-shot CLI download, or --gui behind
+      # VNC) an HTTP check here is actually meaningful. No curl/wget in the
+      # base image, so this uses Python's own stdlib instead of adding one.
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

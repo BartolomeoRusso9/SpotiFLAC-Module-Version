@@ -34,7 +34,7 @@ class LyricsContext:
 
 
 DEFAULT_LYRICS_PROVIDERS = ["apple", "lrclib"]
-DEFAULT_ENRICH_PROVIDERS = ["deezer", "apple", "qobuz", "tidal", "soundcloud"]
+DEFAULT_ENRICH_PROVIDERS = ["deezer", "apple", "qobuz", "tidal"]
 
 
 # ---------------------------------------------------------------------------

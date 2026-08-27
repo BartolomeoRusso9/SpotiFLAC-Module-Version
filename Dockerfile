@@ -54,6 +54,13 @@ VOLUME ["/app/downloads", "/root/.spotiflac", "/root/.cache/spotiflac"]
 # ==============================================================================
 EXPOSE 6080 5900 8000
 
+# No blanket HEALTHCHECK here on purpose: this same image runs three very
+# different things depending on the CMD it's given — a one-shot CLI download
+# that's *supposed* to exit, a VNC-backed --gui session, and a long-running
+# --web server — and a check written for one of those would be meaningless
+# (or actively misleading) for the other two. docker-compose.example.yml
+# commits to --web specifically and defines a real HTTP healthcheck there.
+
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 

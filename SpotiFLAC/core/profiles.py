@@ -1,7 +1,7 @@
-"""Profile management — salva/carica preset di configurazione con nome.
+"""Profile management — save/load named configuration presets.
 File: ~/.cache/spotiflac/profiles.json.
 
-Uso asincrono:
+Async usage:
     await save_profile_async("tidal-hires", cfg)
     cfg = await get_profile_async("tidal-hires")
     names = await list_profiles_async()
@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 logger = logging.getLogger(__name__)
 
-# Sostituiamo threading.Lock con asyncio.Lock per non bloccare l'event loop
+# Using asyncio.Lock instead of threading.Lock so it doesn't block the event loop
 _io_lock = asyncio.Lock()
 _PROFILES_FILE = Path.home() / ".cache" / "spotiflac" / "profiles.json"
 
@@ -42,7 +42,7 @@ class ProfileConfig(BaseModel):
     )
     enrich_metadata: bool = True
     enrich_providers: list[str] = Field(
-        default_factory=lambda: ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
+        default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"],
     )
     transcode_to: str | None = None
     transcode_bitrate: str = "320k"
@@ -55,6 +55,7 @@ class ProfileConfig(BaseModel):
     tidal_custom_api: str | None = None
     timeout_s: int | None = None
     loop: int | None = None
+    watch: int | None = None
     log_level: int | None = None
     output_path: str | None = None
     include_featuring: bool = True
@@ -146,7 +147,7 @@ async def _write_async(profiles: dict) -> None:
 
 
 async def list_profiles_async() -> list[str]:
-    """Returns i nomi di tutti i profili salvati, in ordine alfabetico."""
+    """Returns the names of all saved profiles, in alphabetical order."""
     profiles = await _load_async()
     return sorted(profiles.keys())
 
@@ -160,8 +161,8 @@ async def get_profile_async(name: str) -> dict | None:
 
 
 async def save_profile_async(name: str, cfg: dict) -> None:
-    """Salva l'intera configurazione come profilo nominato, escludendo i dati di runtime.
-    Sovrascrive eventuali profili preesistenti con lo stesso nome.
+    """Saves the entire configuration as a named profile, excluding runtime data.
+    Overwrites any pre-existing profile with the same name.
     """
     profiles = await _load_async()
     validated = ProfileConfig.model_validate(cfg)
@@ -174,8 +175,8 @@ async def save_profile_async(name: str, cfg: dict) -> None:
 
 
 async def delete_profile_async(name: str) -> bool:
-    """Elimina un profilo per nome.
-    Returns True se il profilo esisteva, False altrimenti.
+    """Deletes a profile by name.
+    Returns True if the profile existed, False otherwise.
     """
     profiles = await _load_async()
     if name not in profiles:
@@ -186,7 +187,7 @@ async def delete_profile_async(name: str) -> bool:
 
 
 async def rename_profile_async(old_name: str, new_name: str) -> bool:
-    """Rinomina un profilo. Returns True se l'operazione riesce."""
+    """Renames a profile. Returns True if the operation succeeds."""
     profiles = await _load_async()
     if old_name not in profiles or new_name in profiles:
         return False

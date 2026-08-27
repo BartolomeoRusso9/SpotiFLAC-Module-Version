@@ -463,7 +463,7 @@ class JSExtensionProvider(BaseProvider):
             codec = await _get_codec_async(actual_path)
             if codec == "flac":
                 logger.info(
-                    "[%s] FLAC nascosto in contenitore M4A rilevato. Avvio estrazione (remux)...",
+                    "[%s] FLAC hidden inside M4A container detected. Starting extraction (remux)...",
                     self.name,
                 )
                 flac_path = str(Path(actual_path).with_suffix(".flac"))
@@ -479,12 +479,12 @@ class JSExtensionProvider(BaseProvider):
                         os.remove(actual_path)
                     actual_path = flac_path
                     logger.info(
-                        "[%s] Estrazione FLAC completata con successo.",
+                        "[%s] FLAC extraction completed successfully.",
                         self.name,
                     )
                 else:
                     logger.warning(
-                        "[%s] Estrazione FLAC fallita, mantengo il file originale.",
+                        "[%s] FLAC extraction failed, keeping the original file.",
                         self.name,
                     )
 

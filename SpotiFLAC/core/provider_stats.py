@@ -31,7 +31,7 @@ def _ensure_cache_dir() -> None:
     _get_cache_file().parent.mkdir(parents=True, exist_ok=True)
 
 
-# Funzioni di supporto sincrone per i thread worker
+# Sync helper functions for the worker threads
 def _load_cache_sync() -> dict[str, dict]:
     try:
         cache_file = _get_cache_file()
@@ -85,8 +85,8 @@ class _ProviderStats:
 
 
 class ProviderScorer:
-    """Gestore thread-safe asincrono che traccia successi/fallimenti per API URL.
-    Usa l'inizializzazione lazy per supportare operazioni asyncio.
+    """Async thread-safe manager that tracks successes/failures per API URL.
+    Uses lazy initialization to support asyncio operations.
     """
 
     def __init__(self) -> None:
@@ -96,7 +96,7 @@ class ProviderScorer:
         self._init_lock = asyncio.Lock()
 
     async def _ensure_initialized(self) -> None:
-        """Carica il database solo la prima volta che viene richiesto."""
+        """Loads the database only the first time it's requested."""
         if not self._initialized:
             async with self._init_lock:
                 if not self._initialized:

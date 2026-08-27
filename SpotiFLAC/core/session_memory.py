@@ -14,14 +14,14 @@ _MAX_HISTORY = 20
 
 
 def _read_file_sync() -> dict:
-    """Helper sincrono eseguito nei thread pool per la lettura su disco."""
+    """Sync helper run in the thread pool for reading from disk."""
     if _SESSION_FILE.exists():
         return json.loads(_SESSION_FILE.read_text(encoding="utf-8"))
     return {"last_folder": "", "url_history": []}
 
 
 def _write_file_sync(data: dict) -> None:
-    """Helper sincrono eseguito nei thread pool per la scrittura su disco."""
+    """Sync helper run in the thread pool for writing to disk."""
     _SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
     _SESSION_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 

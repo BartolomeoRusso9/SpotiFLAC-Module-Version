@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CLI entry point for SpotiFLAC.
 
-=== Migrazione async ===
+=== Async migration ===
 The entire entry point now runs on a single shared event loop instead of
 delegating to `SpotiFLAC(...)` (a sync wrapper that opens its own
 asyncio.run() internally). It uses `SpotiflacDownloader` directly, which is
@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Awaitable, Callable
 
 from .check_update import check_for_updates_async
 from .client import _CleanConsoleFormatter
@@ -27,26 +28,35 @@ from .downloader import DownloadOptions, SpotiflacDownloader
 from .interactive import run_interactive
 
 
-def _early_registries_from_argv() -> list[str]:
-    """Best-effort scan of raw sys.argv for repeated `--registries URL` flags.
+def _early_urls_from_argv(flag: str) -> list[str]:
+    """Best-effort scan of raw sys.argv for repeated `flag URL` occurrences.
 
     Runs before the full `argparse` parse (and before the early
-    `ExtensionManager` bootstrap in `amain()`) so that any registry passed on
-    this invocation is persisted in time to affect the same run's automatic
-    extension install, not just future ones. Mirrors the ad-hoc `--host`/
-    `--port` mini-scan already used for `--web` below.
+    `ExtensionManager` bootstrap in `amain()`) so that any registry/directory
+    passed on this invocation is persisted in time to affect the same run's
+    automatic extension install, not just future ones. Mirrors the ad-hoc
+    `--host`/`--port` mini-scan already used for `--web` below.
 
-    Handles both space-separated (--registries URL) and equals-sign
-    (--registries=URL) forms, mirroring argparse behavior.
+    Handles both space-separated (`flag URL`) and equals-sign (`flag=URL`)
+    forms, mirroring argparse behavior. Shared by `--registries` and
+    `--registry-directories`, which persist the same way.
     """
     urls: list[str] = []
     argv = sys.argv[1:]
     for i, token in enumerate(argv):
-        if token == "--registries" and i + 1 < len(argv):
+        if token == flag and i + 1 < len(argv):
             urls.append(argv[i + 1])
-        elif token.startswith("--registries="):
+        elif token.startswith(f"{flag}="):
             urls.append(token.split("=", 1)[1])
     return urls
+
+
+def _early_registries_from_argv() -> list[str]:
+    return _early_urls_from_argv("--registries")
+
+
+def _early_registry_directories_from_argv() -> list[str]:
+    return _early_urls_from_argv("--registry-directories")
 
 
 def _register_cli_registries(urls: list[str]) -> None:
@@ -65,6 +75,22 @@ def _register_cli_registries(urls: list[str]) -> None:
             print(f"Unable to add registry '{url}': {e}", file=sys.stderr)
 
 
+def _register_cli_registry_directories(urls: list[str]) -> None:
+    """Persists `--registry-directories` URLs the same way
+    `_register_cli_registries` does for `--registries` — see
+    extensions/directories.py.
+    """
+    if not urls:
+        return
+    from .extensions import directories
+
+    for url in urls:
+        try:
+            directories.add_directory(url)
+        except Exception as e:
+            print(f"Unable to add registry directory '{url}': {e}", file=sys.stderr)
+
+
 def _print_welcome_banner() -> None:
     """Prints a one-time ASCII banner with project/community links on startup.
 
@@ -79,7 +105,7 @@ def _print_welcome_banner() -> None:
         return text if no_color else f"\033[{code}m{text}\033[0m"
 
     def format_link(url: str) -> str:
-        # Rende l'URL cliccabile con OSC 8 e lo formatta in ciano sottolineato (4;36)
+        # Makes the URL clickable via OSC 8 and styles it underlined cyan (4;36)
         styled_url = url if no_color else f"\033[4;36m{url}\033[0m"
         return url if no_color else f"\033]8;;{url}\033\\{styled_url}\033]8;;\033\\"
 
@@ -259,6 +285,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "-q",
         default=pd.get("quality", "LOSSLESS"),
         help="Quality: HI_RES_LOSSLESS (best available) or LOSSLESS. "
+        "DOLBY_ATMOS is also accepted but is Tidal-exclusive — any other "
+        "provider falls back to HI_RES_LOSSLESS instead of using it. "
         "Legacy provider-specific values remain accepted. Default: LOSSLESS",
     )
     parser.add_argument(
@@ -350,7 +378,40 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "once — subsequent runs pick it up automatically. Must be https://. "
         "See Extensions in the README.",
     )
+    parser.add_argument(
+        "--registry-directories",
+        action="append",
+        default=None,
+        dest="registry_directories",
+        metavar="URL",
+        help="A directory JSON URL to add before running — a directory "
+        "lists *registries* (for you to review and add yourself), rather "
+        "than extensions directly; repeat the flag for each one. Equivalent "
+        "to SPOTIFLAC_REGISTRY_DIRECTORIES or adding one from the GUI's "
+        "Discover screen. Persisted to ~/.spotiflac/directory_settings.json. "
+        "Must be https://. See Extensions in the README.",
+    )
     parser.add_argument("--loop", "-l", type=int, default=pd.get("loop", None))
+    parser.add_argument(
+        "--watch",
+        type=int,
+        default=pd.get("watch", None),
+        metavar="MINUTES",
+        help="Re-run this exact command every MINUTES, forever (until "
+        "interrupted), instead of exiting after one pass. Since already-"
+        "downloaded tracks are always skipped (by ISRC/tags for --playlist, "
+        "by filename otherwise), each cycle after the first only fetches "
+        "what's new — a simple way to keep a playlist/album/artist folder "
+        "in sync without a separate scheduler. Unlike --loop (which retries "
+        "*failed* tracks for a bounded time after one session), --watch "
+        "re-runs the whole sync indefinitely. Combine both if you want "
+        "each cycle to also retry transient failures. Not available in "
+        "--interactive mode. Does NOT cover Spotify 'Liked Songs' — that "
+        "needs an authenticated Spotify session, which this project "
+        "deliberately doesn't implement (see the 'no-account' design goal "
+        "in the README); point --watch at a public playlist/album/artist "
+        "URL instead.",
+    )
     parser.add_argument(
         "--verbose",
         "-v",
@@ -458,9 +519,12 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         nargs="+",
         default=pd.get(
             "enrich_providers",
-            ["deezer", "apple", "qobuz", "tidal", "soundcloud"],
+            ["deezer", "apple", "qobuz", "tidal"],
         ),
         dest="enrich_providers",
+        # SoundCloud isn't in the default above but stays a valid choice —
+        # pass it explicitly (--enrich-providers deezer apple qobuz tidal
+        # soundcloud) if you want it.
         choices=["deezer", "apple", "qobuz", "tidal", "soundcloud"],
     )
 
@@ -575,6 +639,35 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     return parser.parse_args()
 
 
+async def watch_forever(
+    run_once: Callable[[], Awaitable[None]],
+    minutes: int,
+    *,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
+    """Calls `run_once()` again every `minutes`, forever, until interrupted.
+
+    Backs `--watch`: every download path it's used with (a single URL, or
+    --playlist multi-sync) already indexes what's on disk and skips
+    existing tracks — see BaseProvider._file_exists() and
+    playlist_sync.find_existing_track() — so each cycle after the first is
+    cheap, only fetching what's actually new. `run_once` has already run
+    once (the plain, --watch-less pass) by the time this is called; this
+    only owns the *repeat* — never returns on its own.
+
+    `sleep` is overridable so tests can drive this without a real delay.
+    """
+    unit = "minute" if minutes == 1 else "minutes"
+    while True:
+        print(
+            f"[watch] Sync complete. Sleeping {minutes} {unit} "
+            f"before the next pass — Ctrl+C to stop.",
+        )
+        await sleep(minutes * 60)
+        print("[watch] Re-syncing now…")
+        await run_once()
+
+
 async def _run_download_async(
     url: str | list[str],
     *,
@@ -612,8 +705,8 @@ async def _run_download_async(
     max_concurrent_downloads: int = 2,
     verify_hires: bool = False,
 ) -> None:
-    """Bridge async verso SpotiflacDownloader, senza passare per il wrapper
-    sincrono `SpotiFLAC()` (che farebbe un `asyncio.run()` annidato e
+    """Async bridge to SpotiflacDownloader, bypassing the synchronous
+    `SpotiFLAC()` wrapper (which would do a nested `asyncio.run()` and
     fallirebbe).
     """
     logger = logging.getLogger("SpotiFLAC")
@@ -707,6 +800,7 @@ async def amain() -> None:
         await check_for_updates_async()
 
     _register_cli_registries(_early_registries_from_argv())
+    _register_cli_registry_directories(_early_registry_directories_from_argv())
 
     try:
         from .extensions.manager import ExtensionManager
@@ -727,11 +821,62 @@ async def amain() -> None:
         web_parser = argparse.ArgumentParser(add_help=False)
         web_parser.add_argument("--host", default="127.0.0.1")
         web_parser.add_argument("--port", type=int, default=8000)
+        web_parser.add_argument("--web-token", dest="token", default=None)
+        web_parser.add_argument(
+            "--web-multiuser", dest="multiuser", action="store_true"
+        )
         web_args, _ = web_parser.parse_known_args(sys.argv[1:])
 
+        from .webapp import resolve_web_token
         from .webapp import run_async as run_web
 
-        await run_web(host=web_args.host, port=web_args.port)
+        await run_web(
+            host=web_args.host,
+            port=web_args.port,
+            token=resolve_web_token(web_args.token),
+            multiuser=web_args.multiuser,
+        )
+        return
+
+    if "--web-user-add" in sys.argv:
+        user_parser = argparse.ArgumentParser(add_help=False)
+        user_parser.add_argument(
+            "--web-user-add", dest="creds", nargs=2, metavar=("USERNAME", "PASSWORD")
+        )
+        user_args, _ = user_parser.parse_known_args(sys.argv[1:])
+
+        from .core.web_users import WebUserError, create_user
+
+        try:
+            create_user(*user_args.creds)
+        except WebUserError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Web user '{user_args.creds[0]}' created.")
+        return
+
+    if "--web-user-remove" in sys.argv:
+        user_rm_parser = argparse.ArgumentParser(add_help=False)
+        user_rm_parser.add_argument(
+            "--web-user-remove", dest="username", metavar="USERNAME"
+        )
+        user_rm_args, _ = user_rm_parser.parse_known_args(sys.argv[1:])
+
+        from .core.web_users import delete_user
+
+        found = delete_user(user_rm_args.username)
+        print(
+            f"Web user '{user_rm_args.username}' removed."
+            if found
+            else f"No web user named '{user_rm_args.username}'."
+        )
+        return
+
+    if "--web-user-list" in sys.argv:
+        from .core.web_users import list_usernames
+
+        users = list_usernames()
+        print("\n".join(users) if users else "No web users configured.")
         return
 
     if "--health-check" in sys.argv:
@@ -747,6 +892,85 @@ async def amain() -> None:
         print_health_report(results)
         if not all(r.ok for r in results):
             sys.exit(1)
+        return
+
+    if "--ext-scaffold" in sys.argv:
+        scaffold_parser = argparse.ArgumentParser(add_help=False)
+        scaffold_parser.add_argument("--ext-scaffold", dest="name", required=True)
+        scaffold_parser.add_argument(
+            "--runtime", choices=["python", "javascript"], default="python"
+        )
+        scaffold_parser.add_argument("--output-dir", default=None)
+        scaffold_args, _ = scaffold_parser.parse_known_args(sys.argv[1:])
+
+        from .tools.ext_scaffold import scaffold_extension
+
+        try:
+            target = scaffold_extension(
+                scaffold_args.name,
+                runtime=scaffold_args.runtime,
+                output_dir=scaffold_args.output_dir,
+            )
+        except (ValueError, FileExistsError) as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Created {scaffold_args.runtime} extension skeleton at: {target}")
+        print(f"Next: see {target / 'README.md'}")
+        return
+
+    if "--ext-dry-run" in sys.argv:
+        dryrun_parser = argparse.ArgumentParser(add_help=False)
+        dryrun_parser.add_argument("--ext-dry-run", dest="path", required=True)
+        dryrun_args, _ = dryrun_parser.parse_known_args(sys.argv[1:])
+
+        from .tools.ext_dryrun import dry_run
+
+        report = dry_run(dryrun_args.path)
+        print(report.summary())
+        if not report.passed:
+            sys.exit(1)
+        return
+
+    if "--trust-key-add" in sys.argv:
+        trust_parser = argparse.ArgumentParser(add_help=False)
+        trust_parser.add_argument(
+            "--trust-key-add", dest="key", nargs=2, metavar=("NAME", "PUBLIC_KEY_B64")
+        )
+        trust_args, _ = trust_parser.parse_known_args(sys.argv[1:])
+
+        from .extensions.trust import TrustKeyError, add_trusted_key
+
+        try:
+            add_trusted_key(*trust_args.key)
+        except TrustKeyError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Trusted key '{trust_args.key[0]}' added.")
+        return
+
+    if "--trust-key-remove" in sys.argv:
+        trust_rm_parser = argparse.ArgumentParser(add_help=False)
+        trust_rm_parser.add_argument("--trust-key-remove", dest="name", metavar="NAME")
+        trust_rm_args, _ = trust_rm_parser.parse_known_args(sys.argv[1:])
+
+        from .extensions.trust import remove_trusted_key
+
+        found = remove_trusted_key(trust_rm_args.name)
+        print(
+            f"Trusted key '{trust_rm_args.name}' removed."
+            if found
+            else f"No trusted key named '{trust_rm_args.name}'."
+        )
+        return
+
+    if "--trust-key-list" in sys.argv:
+        from .extensions.trust import list_trusted_keys
+
+        keys = list_trusted_keys()
+        if not keys:
+            print("No trusted keys configured.")
+        for k in keys:
+            print(f"{k['name']}: {k['public_key_b64']}")
         return
 
     if "--interactive" in sys.argv:
@@ -765,40 +989,46 @@ async def amain() -> None:
         )
         logging.basicConfig(level=log_level, handlers=[_root_handler])
 
-        await _run_download_async(
-            cfg["url"],
-            output_dir=cfg["output_dir"],
-            services=cfg["services"],
-            filename_format=cfg["filename_format"],
-            use_track_numbers=cfg["use_track_numbers"],
-            use_album_track_numbers=cfg["use_album_track_numbers"],
-            use_artist_subfolders=cfg["use_artist_subfolders"],
-            use_album_subfolders=cfg["use_album_subfolders"],
-            create_playlist_subfolders=cfg.get("create_playlist_subfolders", True),
-            loop=cfg.get("loop"),
-            quality=cfg["quality"],
-            first_artist_only=cfg["first_artist_only"],
-            artist_separator=cfg.get("artist_separator"),
-            include_featuring=cfg.get("include_featuring", True),
-            log_level=log_level,
-            output_path=cfg.get("output_path"),
-            allow_fallback=cfg.get("allow_fallback", True),
-            embed_lyrics=cfg["embed_lyrics"],
-            lyrics_providers=cfg["lyrics_providers"],
-            enrich_metadata=cfg["enrich_metadata"],
-            enrich_providers=cfg["enrich_providers"],
-            qobuz_local_api_url=cfg.get("qobuz_local_api_url"),
-            tidal_custom_api=cfg.get("tidal_custom_api") or None,
-            track_max_retries=cfg.get("track_max_retries", 0),
-            post_download_action=cfg.get("post_download_action", "none"),
-            post_download_command=cfg.get("post_download_command", ""),
-            timeout_s=cfg.get("timeout_s"),
-            transcode_to=cfg.get("transcode_to"),
-            transcode_bitrate=cfg.get("transcode_bitrate", "320k"),
-            transcode_keep_original=cfg.get("transcode_keep_original", False),
-            max_concurrent_downloads=cfg.get("max_concurrent_downloads", 2),
-            verify_hires=cfg.get("verify_hires", False),
-        )
+        async def _run_once() -> None:
+            await _run_download_async(
+                cfg["url"],
+                output_dir=cfg["output_dir"],
+                services=cfg["services"],
+                filename_format=cfg["filename_format"],
+                use_track_numbers=cfg["use_track_numbers"],
+                use_album_track_numbers=cfg["use_album_track_numbers"],
+                use_artist_subfolders=cfg["use_artist_subfolders"],
+                use_album_subfolders=cfg["use_album_subfolders"],
+                create_playlist_subfolders=cfg.get("create_playlist_subfolders", True),
+                loop=cfg.get("loop"),
+                quality=cfg["quality"],
+                first_artist_only=cfg["first_artist_only"],
+                artist_separator=cfg.get("artist_separator"),
+                include_featuring=cfg.get("include_featuring", True),
+                log_level=log_level,
+                output_path=cfg.get("output_path"),
+                allow_fallback=cfg.get("allow_fallback", True),
+                embed_lyrics=cfg["embed_lyrics"],
+                lyrics_providers=cfg["lyrics_providers"],
+                enrich_metadata=cfg["enrich_metadata"],
+                enrich_providers=cfg["enrich_providers"],
+                qobuz_local_api_url=cfg.get("qobuz_local_api_url"),
+                tidal_custom_api=cfg.get("tidal_custom_api") or None,
+                track_max_retries=cfg.get("track_max_retries", 0),
+                post_download_action=cfg.get("post_download_action", "none"),
+                post_download_command=cfg.get("post_download_command", ""),
+                timeout_s=cfg.get("timeout_s"),
+                transcode_to=cfg.get("transcode_to"),
+                transcode_bitrate=cfg.get("transcode_bitrate", "320k"),
+                transcode_keep_original=cfg.get("transcode_keep_original", False),
+                max_concurrent_downloads=cfg.get("max_concurrent_downloads", 2),
+                verify_hires=cfg.get("verify_hires", False),
+            )
+
+        await _run_once()
+
+        if cfg.get("watch"):
+            await watch_forever(_run_once, cfg["watch"])
         return
 
     if len(sys.argv) == 1:
@@ -878,42 +1108,45 @@ async def amain() -> None:
     _cli_handler.setFormatter(_CleanConsoleFormatter(log_format))
     logging.basicConfig(level=log_level, handlers=[_cli_handler])
 
-    await _run_download_async(
-        args.url or "",
-        output_dir=output_dir,
-        services=args.service,
-        filename_format=args.filename_format,
-        use_track_numbers=args.use_track_numbers,
-        use_album_track_numbers=args.use_album_track_numbers,
-        use_artist_subfolders=args.use_artist_subfolders,
-        use_album_subfolders=args.use_album_subfolders,
-        create_playlist_subfolders=args.create_playlist_subfolders,
-        loop=args.loop,
-        quality=quality,
-        first_artist_only=args.first_artist_only,
-        artist_separator=args.artist_separator,
-        include_featuring=args.include_featuring,
-        log_level=log_level,
-        output_path=args.output_path,
-        allow_fallback=True,
-        embed_lyrics=args.embed_lyrics,
-        lyrics_providers=args.lyrics_providers,
-        enrich_metadata=args.enrich,
-        enrich_providers=args.enrich_providers,
-        qobuz_local_api_url=qobuz_local_api_url,
-        tidal_custom_api=tidal_custom_api,
-        track_max_retries=track_max_retries,
-        post_download_action=args.post_action,
-        post_download_command=args.post_command,
-        timeout_s=timeout_s,
-        transcode_to=args.transcode_to,
-        transcode_bitrate=args.transcode_bitrate,
-        transcode_keep_original=args.transcode_keep_original,
-        playlist_urls=playlist_urls,
-        m3u_format=args.m3u_format,
-        max_concurrent_downloads=args.max_concurrent,
-        verify_hires=args.verify_hires,
-    )
+    async def _run_once() -> None:
+        await _run_download_async(
+            args.url or "",
+            output_dir=output_dir,
+            services=args.service,
+            filename_format=args.filename_format,
+            use_track_numbers=args.use_track_numbers,
+            use_album_track_numbers=args.use_album_track_numbers,
+            use_artist_subfolders=args.use_artist_subfolders,
+            use_album_subfolders=args.use_album_subfolders,
+            create_playlist_subfolders=args.create_playlist_subfolders,
+            loop=args.loop,
+            quality=quality,
+            first_artist_only=args.first_artist_only,
+            artist_separator=args.artist_separator,
+            include_featuring=args.include_featuring,
+            log_level=log_level,
+            output_path=args.output_path,
+            allow_fallback=True,
+            embed_lyrics=args.embed_lyrics,
+            lyrics_providers=args.lyrics_providers,
+            enrich_metadata=args.enrich,
+            enrich_providers=args.enrich_providers,
+            qobuz_local_api_url=qobuz_local_api_url,
+            tidal_custom_api=tidal_custom_api,
+            track_max_retries=track_max_retries,
+            post_download_action=args.post_action,
+            post_download_command=args.post_command,
+            timeout_s=timeout_s,
+            transcode_to=args.transcode_to,
+            transcode_bitrate=args.transcode_bitrate,
+            transcode_keep_original=args.transcode_keep_original,
+            playlist_urls=playlist_urls,
+            m3u_format=args.m3u_format,
+            max_concurrent_downloads=args.max_concurrent,
+            verify_hires=args.verify_hires,
+        )
+
+    await _run_once()
 
     if args.save_profile:
         try:
@@ -948,12 +1181,16 @@ async def amain() -> None:
                 "tidal_custom_api": tidal_custom_api,
                 "timeout_s": timeout_s,
                 "loop": args.loop,
+                "watch": args.watch,
                 "max_concurrent_downloads": args.max_concurrent,
                 "verify_hires": args.verify_hires,
             }
             await save_profile_async(args.save_profile, profile_cfg)
         except Exception:
             pass
+
+    if args.watch:
+        await watch_forever(_run_once, args.watch)
 
 
 def main() -> None:

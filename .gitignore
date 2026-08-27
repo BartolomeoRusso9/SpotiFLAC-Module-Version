@@ -24,3 +24,6 @@ docker-compose.yml
 /.spotiflac_docker
 /.test_extensions
 /scripts
+.coverage
+.coverage.*
+htmlcov/

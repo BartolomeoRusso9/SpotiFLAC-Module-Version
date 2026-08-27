@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class SoundplateProvider:
-    """Risolve ISRC tramite l'endpoint HTML di Soundplate."""
+    """Resolves ISRC via Soundplate's HTML endpoint."""
 
     API_URL = "https://soundplate.com/isrc-finder?track="
 

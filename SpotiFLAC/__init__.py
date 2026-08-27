@@ -6,7 +6,7 @@ Minimum use:
 
 Advanced use:
     from SpotiFLAC import AsyncSpotiFLAC
-    # Vedi documentazione per l'uso asincrono avanzato
+    # See the documentation for advanced async usage
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 import importlib.metadata
 import warnings
 
-# Unica implementazione canonica del client (sia sincrono che asincrono)
+# Single canonical client implementation (both sync and async)
 from .client import AsyncSpotiFLAC, SpotiFLAC
 from .core import DownloadResult, TrackMetadata
 from .downloader import DownloadOptions, SpotiflacDownloader

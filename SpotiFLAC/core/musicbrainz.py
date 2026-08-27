@@ -1,5 +1,5 @@
-"""MusicBrainz API Client — versione originale sync + nuova variante async (Phase 2).
-La variante async usa asyncio.Event per deduplicazione in-flight invece di threading.Event.
+"""MusicBrainz API Client — original sync version + new async variant (Phase 2).
+The async variant uses asyncio.Event for in-flight deduplication instead of threading.Event.
 """
 
 from __future__ import annotations
@@ -496,14 +496,14 @@ def fetch_mb_metadata(isrc: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Async fetch_mb_metadata_async (Phase 2 — nuovo)
+# Async fetch_mb_metadata_async (Phase 2 — new)
 # ---------------------------------------------------------------------------
 
 
 async def fetch_mb_metadata_async(isrc: str) -> dict:
-    """Versione async di fetch_mb_metadata.
-    Usa asyncio.Event per deduplicazione in-flight invece di threading.Event.
-    Stessa logica di caching della versione sync.
+    """Async version of fetch_mb_metadata.
+    Uses asyncio.Event for in-flight deduplication instead of threading.Event.
+    Same caching logic as the sync version.
     """
     if not isrc:
         return {}
@@ -626,7 +626,7 @@ def mb_result_to_tags(res: dict) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# AsyncMBFetch — helper che wrappa ThreadPoolExecutor (backward compat)
+# AsyncMBFetch — helper wrapping ThreadPoolExecutor (backward compat)
 # For providers already migrated to async, use fetch_mb_metadata_async directly.
 # ---------------------------------------------------------------------------
 

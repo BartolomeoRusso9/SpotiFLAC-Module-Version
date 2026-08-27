@@ -55,11 +55,21 @@ def quality_fallback_chain(quality: str) -> list[str]:
 
 
 def quality_for_provider(provider: str, quality: str) -> str:
-    """Translate a canonical quality into the provider's native token."""
+    """Translate a canonical quality into the provider's native token.
+
+    DOLBY_ATMOS is a Tidal-exclusive tier: no other provider actually
+    serves an Atmos stream, so a DOLBY_ATMOS request against anything but
+    Tidal is treated as HI_RES_LOSSLESS instead — the best lossless tier
+    that provider *does* have — rather than being passed through as a
+    token the provider wouldn't understand.
+    """
     normalized = normalize_quality(quality)
     name = str(provider or "").lower().replace("ext:", "")
     for suffix in ("-native", "-web", "-py", "_native", "_web", "_py"):
         name = name.removesuffix(suffix)
+
+    if normalized == "DOLBY_ATMOS" and name != "tidal":
+        normalized = "HI_RES_LOSSLESS"
 
     if name == "qobuz":
         if normalized == "HI_RES":
@@ -112,11 +122,14 @@ def map_musicdl_quality(q: str) -> str:
 
 
 def map_amazon_community_quality(q: str) -> str:
-    """Map generic quality to Amazon Community 'quality' strings (16, 24, atmos)."""
+    """Map generic quality to Amazon Community 'quality' strings (16, 24).
+
+    Amazon never gets "atmos" here — Dolby Atmos is Tidal-exclusive (see
+    quality_for_provider()) — so a DOLBY_ATMOS input is treated the same
+    as HI_RES_LOSSLESS/HI_RES, same as everywhere else that isn't Tidal.
+    """
     n = normalize_quality(q)
-    if n == "DOLBY_ATMOS":
-        return "atmos"
     if n in ("LOSSLESS", "HIGH", "LOW"):
         return "16"
-    # Copre HI_RES_LOSSLESS e HI_RES
+    # Covers HI_RES_LOSSLESS, HI_RES, and DOLBY_ATMOS (Tidal-only elsewhere)
     return "24"

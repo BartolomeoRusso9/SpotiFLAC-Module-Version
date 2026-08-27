@@ -45,6 +45,9 @@
     'download_track_cover', 'download_cover', 'download_album_cover', 'download_all_covers',
     'download_all_lyrics', 'get_track_preview', 'fetch_metadata', 'download_tracks',
     'run_health_check', 'scan_local', 'apply_local_tags', 'set_download_dir',
+    'get_registry_directories', 'add_registry_directory', 'remove_registry_directory',
+    'discover_registries', 'get_dedup_status', 'scan_for_duplicates',
+    'get_trusted_keys', 'add_trusted_key', 'remove_trusted_key',
   ];
 
   const api = {};

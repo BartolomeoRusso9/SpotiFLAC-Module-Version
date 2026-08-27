@@ -1,8 +1,8 @@
-"""HTTP client centralizzato con Connection Pooling globale.
+"""Centralized HTTP client with global connection pooling.
 
-=== FASE 3 — Migrazione async completata ===
-Rimosso tutto il codice sync (RateLimiter, HttpClient, NetworkManager.get_sync_client,
-NetworkManager.get_async_client legacy) ora che tutti i provider usano AsyncHttpClient.
+=== Phase 3 — async migration complete ===
+Removed all sync code (RateLimiter, HttpClient, NetworkManager.get_sync_client,
+legacy NetworkManager.get_async_client) now that every provider uses AsyncHttpClient.
 """
 
 from __future__ import annotations
@@ -19,7 +19,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from tenacity import AsyncRetrying, RetryCallState, retry_if_exception_type, stop_after_attempt
+from tenacity import (
+    AsyncRetrying,
+    RetryCallState,
+    retry_if_exception_type,
+    stop_after_attempt,
+)
 
 from .errors import (
     AuthError,
@@ -51,8 +56,8 @@ logger = logging.getLogger(__name__)
 
 # --- CONNECTION POOL MANAGER ---
 class NetworkManager:
-    """Mantiene vive le connessioni (Keep-Alive) per azzerare i tempi di handshake SSL.
-    Ogni event loop ottiene la propria istanza di httpx.AsyncClient (loop-safe).
+    """Keeps connections alive (Keep-Alive) to eliminate SSL handshake time.
+    Each event loop gets its own httpx.AsyncClient instance (loop-safe).
     """
 
     _async_clients: dict[int, httpx.AsyncClient] = {}
@@ -81,7 +86,7 @@ class NetworkManager:
 
     @classmethod
     async def aclose_loop_client(cls) -> None:
-        """Chiude e rimuove dal registro il client async del loop corrente."""
+        """Closes and removes the current loop's async client from the registry."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -158,8 +163,8 @@ class RetryConfig:
 
 # --- HTTP CLIENT ASINCRONO ---
 class AsyncHttpClient:
-    """Unico client HTTP usato da tutti i provider.
-    Usa NetworkManager.get_async_client_safe() per sicurezza multi-loop.
+    """Single HTTP client used by every provider.
+    Uses NetworkManager.get_async_client_safe() for multi-loop safety.
     """
 
     def __init__(

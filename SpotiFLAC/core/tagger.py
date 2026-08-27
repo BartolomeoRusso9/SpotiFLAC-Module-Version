@@ -123,10 +123,10 @@ _FLAC_TO_ID3: dict[str, tuple | None] = {
     "ALBUMARTISTSORT": (TSO2, {}),
     # URL → WXXX con desc vuota
     "URL": None,
-    # Tutto il resto → TXXX
+    # Everything else → TXXX
 }
 
-# Vorbis tag  →  chiave MP4/M4A (usata sia in scrittura che in lettura)
+# Vorbis tag  →  MP4/M4A key (used for both writing and reading)
 _M4A_MAP: dict[str, str] = {
     "TITLE": "\xa9nam",
     "ARTIST": "\xa9ART",
@@ -178,7 +178,7 @@ _APEV2_MAP: dict[str, str] = {
     "ORIGINALDATE": "Original Release Year",
 }
 
-# Tag che finiscono in TXXX con la chiave come desc
+# Tags that end up in TXXX with the key as desc
 _TXXX_TAGS = {
     "MUSICBRAINZ_TRACKID",
     "MUSICBRAINZ_ALBUMID",
@@ -278,7 +278,7 @@ _ID3_FRAME_MAP: dict[str, type] = {
     "COPYRIGHT": TCOP,
     "COMPOSER": TCOM,
     "ORGANIZATION": TPUB,
-    "LABEL": TPUB,  # alias — uno sovrascrive l'altro (ok)
+    "LABEL": TPUB,  # alias — one overwrites the other (ok)
     "GENRE": TCON,
     "BPM": TBPM,
     "ORIGINALDATE": TDOR,
@@ -420,7 +420,7 @@ def _embed_id3(
     lyrics_prov: str,
     cover_mime: str = "image/jpeg",
 ) -> None:
-    """Scrive tutti i tag ID3 su un file MP3."""
+    """Writes all ID3 tags to an MP3 file."""
     try:
         audio = ID3(str(path))
         audio.delete()
@@ -500,7 +500,7 @@ def _embed_flac(
     lyrics_prov: str,
     multi_artist: bool,
 ) -> None:
-    """Scrive tutti i tag Vorbis Comment su un file FLAC."""
+    """Writes all Vorbis Comment tags to a FLAC file."""
     audio = FLAC(str(path))
     audio.delete()
 
@@ -541,12 +541,12 @@ def _embed_vorbis_comment(
     multi_artist: bool,
     file_cls: type,
 ) -> None:
-    """Scrive tag Vorbis Comment su un file OGG Vorbis o Opus.
+    """Writes Vorbis Comment tags to an OGG Vorbis or Opus file.
 
-    Il container OGG non ha un blocco immagine nativo come FLAC: la cover
-    viene incorporata secondo lo standard `METADATA_BLOCK_PICTURE`
-    (blocco FLAC Picture codificato in base64), riconosciuto da tutti i
-    player e tagger moderni (foobar2000, VLC, MusicBee, Picard, ecc.).
+    The OGG container has no native image block like FLAC: the cover is
+    embedded following the `METADATA_BLOCK_PICTURE` standard (a base64-encoded
+    FLAC Picture block), recognized by all modern players and taggers
+    (foobar2000, VLC, MusicBee, Picard, etc.).
     """
     audio = file_cls(str(path))
     audio.delete()
@@ -973,7 +973,7 @@ def _embed_m4a(
     lyrics: str | None,
     lyrics_prov: str,
 ) -> None:
-    """Scrive tag su file M4A/AAC tramite mutagen.mp4.MP4."""
+    """Writes tags to an M4A/AAC file via mutagen.mp4.MP4."""
     from mutagen.mp4 import MP4, MP4Cover
 
     audio = MP4(str(path))
@@ -1071,7 +1071,7 @@ def _read_m4a_tags(path: Path, *, include_cover: bool = True) -> EmbeddedTags:
 
     audio = MP4(str(path))
     result = EmbeddedTags()
-    # LABEL e ORGANIZATION condividono lo stesso atom: in lettura vince ORGANIZATION
+    # LABEL and ORGANIZATION share the same atom: ORGANIZATION wins on read
     reverse_map = {v: k for k, v in _M4A_MAP.items() if k != "LABEL"}
 
     for key, value in (audio.tags or {}).items():
@@ -1314,7 +1314,7 @@ async def embed_metadata_async(
         except Exception as exc:
             logger.warning("[tagger] lyrics fetch failed: %s", exc)
 
-    # ── 4. Costruzione dizionario tag base ─────────────────────────────────
+    # ── 4. Build the base tag dict ──────────────────────────────────────────
     tags = metadata.as_flac_tags(first_artist_only=opts.first_artist_only)
     tags["DESCRIPTION"] = SOURCE_TAG
 
@@ -1397,10 +1397,10 @@ async def _fetch_cover_async(url: str, session: Any | None = None) -> bytes | No
 
     for attempt in range(3):
         try:
-            # Se la sessione è stata iniettata (es. dal downloader o da un test), usala.
+            # If the session was injected (e.g. by the downloader or a test), use it.
             if session is not None:
                 resp = await session.get(url, follow_redirects=True, timeout=15)
-            # Altrimenti, crea un client temporaneo e chiudilo subito dopo.
+            # Otherwise, create a temporary client and close it right after.
             else:
                 async with httpx.AsyncClient() as client:
                     resp = await client.get(url, follow_redirects=True, timeout=15)

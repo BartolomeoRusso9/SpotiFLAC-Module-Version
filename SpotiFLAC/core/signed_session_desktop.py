@@ -444,8 +444,8 @@ def sign_community_request(
     body: bytes,
     record: CommunitySessionRecord,
 ) -> dict:
-    """Ritorna un dizionario di header da aggiungere alla richiesta.
-    (Non modifica un oggetto http.Request in-place come in Go, ma restituisce gli header).
+    """Returns a dict of headers to add to the request.
+    (Doesn't modify an http.Request object in-place like in Go, but returns the headers instead).
     """
     body_hash = hashlib.sha256(body or b"").hexdigest()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -477,7 +477,7 @@ def sign_community_request(
     signing_input = "\n".join(signing_parts).encode("utf-8")
 
     signature_bytes = community_hmac(rolling_key, signing_input)
-    # Codifica Base64 Raw URLEncoding (senza padding '=')
+    # Base64 Raw URLEncoding encoding (no '=' padding)
     signature = base64.urlsafe_b64encode(signature_bytes).decode("utf-8").rstrip("=")
 
     return {
@@ -505,7 +505,7 @@ def community_random_hex(size: int) -> str:
     try:
         return secrets.token_hex(size)
     except Exception:
-        # Fallback come nel codice Go in caso rand fallisca (raro in Python)
+        # Fallback matching the Go code in case rand fails (rare in Python)
         return str(time.time_ns())
 
 

@@ -325,6 +325,9 @@
         <div class="feature-card"><div class="feature-icon">♫</div><h3>MusicBrainz enrichment</h3><p>Genre, label, BPM, UPC and ISRC tags added automatically when a match is found.</p></div>
         <div class="feature-card"><div class="feature-icon">Aa</div><h3>Synced lyrics embedding</h3><p>Optional, multi-provider, embedded directly into the file's tags.</p></div>
         <div class="feature-card"><div class="feature-icon">⟳</div><h3>Local retagger</h3><p>The GUI rescans and fixes tags on files you already have, with automatic backup before writing.</p></div>
+        <div class="feature-card"><div class="feature-icon">∞</div><h3>Watch mode</h3><p><code class="mono">--watch</code> re-syncs a playlist, album, or artist on an interval, indefinitely — only what's new gets fetched.</p></div>
+        <div class="feature-card"><div class="feature-icon">≈</div><h3>Duplicate detection</h3><p>Finds the same recording across your library by acoustic fingerprint, independent of tags or ISRC.</p></div>
+        <div class="feature-card"><div class="feature-icon">✓</div><h3>Discovery &amp; signed registries</h3><p>Browse community registries before adding one, and verify Ed25519-signed extension entries on top of the usual checksum.</p></div>
       </div>
     </div>
   </section>
@@ -385,11 +388,11 @@ SpotiFLAC(
         </details>
         <details class="faq-item">
           <summary>Can I write my own extension?</summary>
-          <div class="faq-answer">Yes — JavaScript and Python are both supported. There's no dedicated guide for this project yet; reading the loader source directly (<code class="mono">SpotiFLAC/extensions/</code>) is currently the best way to see the expected shape.</div>
+          <div class="faq-answer">Yes — JavaScript and Python are both supported. <code class="mono">spotiflac --ext-scaffold NAME</code> generates a working starting point for either, and <code class="mono">spotiflac --ext-dry-run PATH</code> validates it (manifest, entry point, exposes the right shape) without installing it or contacting any registry. Reading the loader source directly (<code class="mono">SpotiFLAC/extensions/</code>) still helps for anything beyond the basics.</div>
         </details>
         <details class="faq-item">
           <summary>GUI or web mode — which should I use?</summary>
-          <div class="faq-answer"><code class="mono">--gui</code> opens a native window. <code class="mono">--web</code> serves the identical interface as a local web server instead, useful on headless machines or inside Docker. Web mode binds to <code class="mono">127.0.0.1</code> by default — changing that exposes it, with no authentication, to anything that can reach the port.</div>
+          <div class="faq-answer"><code class="mono">--gui</code> opens a native window. <code class="mono">--web</code> serves the identical interface as a local web server instead, useful on headless machines or inside Docker. Web mode binds to <code class="mono">127.0.0.1</code> by default — changing that exposes it to anything that can reach the port, unless you also set <code class="mono">--web-token</code> (a shared secret) or <code class="mono">--web-multiuser</code> (per-account login).</div>
         </details>
         <details class="faq-item">
           <summary>Does the maintainer review third-party extensions or registries?</summary>

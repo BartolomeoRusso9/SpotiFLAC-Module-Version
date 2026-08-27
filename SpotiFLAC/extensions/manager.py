@@ -61,6 +61,19 @@ class RegistryEntry:
     icon_url: str | None = None
     updated_at: str = ""
     sha256: str | None = None
+    # Optional Ed25519 signature over (id, version, sha256, download_url) —
+    # see extensions/trust.py. None is the common case (checksum-only,
+    # exactly like today) and is never treated as a problem on its own.
+    signature: str | None = None
+
+    @property
+    def trust_tier(self) -> str:
+        """ "signed" / "checksum-only" / "unverified" — see extensions/trust.py."""
+        from .trust import trust_tier
+
+        return trust_tier(
+            self.id, self.version, self.sha256, self.download_url, self.signature
+        )
 
 
 @dataclass
@@ -190,13 +203,13 @@ class ExtensionManager:
         with self.__class__._startup_registry_checks_lock:
             self.__class__._startup_registry_checks.add(registry_key)
 
-        # ORDINE CRITICO: Mettiamo prima le utility, così vengono scaricate prima dei provider
+        # CRITICAL ORDER: put utilities first, so they're downloaded before the providers
         entries.sort(
             key=lambda e: 0 if e.category in ("utility", "runtime_utility") else 1
         )
 
         for entry in entries:
-            # FIX: Aggiungiamo 'utility' e 'runtime_utility' tra le categorie consentite
+            # FIX: add 'utility' and 'runtime_utility' to the allowed categories
             is_target = (
                 entry.category
                 in {"download", "download_provider", "utility", "runtime_utility"}
@@ -349,6 +362,7 @@ class ExtensionManager:
                             icon_url=item.get("icon_url"),
                             updated_at=item.get("updated_at", ""),
                             sha256=sha256_val,
+                            signature=item.get("signature"),
                         ),
                     )
                 except (KeyError, TypeError) as e:

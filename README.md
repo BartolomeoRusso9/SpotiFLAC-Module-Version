@@ -67,6 +67,12 @@ If you just want a GUI for personal use, with no code involved, the [Desktop](ht
 - MusicBrainz metadata enrichment
 - Embedded synchronized lyrics
 - Optional MP3 320 kbps transcoding
+- Watch mode: re-sync a playlist/album/artist/URL on an interval, indefinitely
+- Optional shared-secret or per-account authentication for `--web`, plus a queued, per-user download history in multi-user mode
+- Extension discovery directories, and optional Ed25519 signature verification on top of registry checksums
+- Local-library duplicate detection by acoustic fingerprint, independent of tags/ISRC
+- Extension scaffolding + dry-run validation for developing your own
+- Installable as a PWA in `--web` mode (Add to Home Screen / standalone window)
 
 ---
 
@@ -106,7 +112,40 @@ spotiflac --web
 
 Binds to `127.0.0.1` (this machine only) by default. Override with `--host`/`--port` if needed — see the [CLI Flag Reference](#cli-flag-reference) below. Useful for running the GUI on a headless machine, inside Docker without a virtual display, or just preferring a browser tab over a native window.
 
-> **Security note:** binding `--host` to anything other than `127.0.0.1`/`localhost` (e.g. `0.0.0.0`, or a LAN address) exposes the GUI — including endpoints that trigger downloads — to anyone who can reach that address, with no authentication of any kind. Only do this deliberately, on a network you trust, and consider putting it behind your own authentication (a reverse proxy, VPN, etc.) if you do.
+> **Security note:** binding `--host` to anything other than `127.0.0.1`/`localhost` (e.g. `0.0.0.0`, or a LAN address) exposes the GUI — including endpoints that trigger downloads — to anyone who can reach that address, with no authentication of any kind, *unless* you set up `--web-token` or `--web-multiuser` below. Only bind beyond localhost deliberately, on a network you trust, and consider putting it behind your own authentication (a reverse proxy, VPN, etc.) regardless.
+
+#### Authentication (`--web-token`)
+
+Off by default (today's behavior, unchanged). Set a shared secret and every request — page, static asset, or API call — needs it, either as `?token=...` on the first visit or a cookie from then on:
+
+```bash
+spotiflac --web --host 0.0.0.0 --web-token "some-long-random-string"
+# or: export SPOTIFLAC_WEB_TOKEN="some-long-random-string"
+```
+
+Then open `http://your-host:8000/?token=some-long-random-string` once; the browser remembers it after that. This travels as a plain query param/cookie with no HTTPS here, so treat it as basic access control on a network you already trust, not a substitute for real TLS.
+
+#### Multi-user mode (`--web-multiuser`)
+
+An alternative to (or combined with) `--web-token`: per-account login instead of one shared secret, plus a small per-user download queue and history.
+
+```bash
+# One-time: create an account
+spotiflac --web-user-add alice "a real password"
+spotiflac --web-user-list
+spotiflac --web-user-remove alice
+
+# Then run the server with accounts required
+spotiflac --web --web-multiuser
+```
+
+The web GUI shows a sign-in screen automatically when it detects `--web-multiuser` is on (via `GET /api/auth/status`); a "Sign Out" option then appears under Settings → General. You can also call the endpoints directly — `POST /api/auth/login {"username", "password"}` to get a session cookie, `POST /api/auth/logout` to clear it — from a script or a frontend of your own. `POST /api/queue/submit-download {"selected_indices", "config"}` and `GET /api/queue/mine` submit and list a user's own queued downloads.
+
+**What this does and doesn't isolate:** accounts gate *who can act*, and downloads get tagged with an owner for history/filtering — but every account still shares the same underlying instance (`download_dir`, current search results, etc.), the same way every browser tab already does in single-user mode. Good for a household or small team who'd otherwise just share one login; not multi-tenant isolation for people who shouldn't see each other's search results.
+
+#### Installable as an app (PWA)
+
+`--web` mode is installable — "Add to Home Screen" on a phone, or a standalone window from a desktop browser's install prompt. This needs a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts): it works out of the box at `127.0.0.1`/`localhost` (browsers treat those as secure even over plain HTTP), but a LAN address (`--host 0.0.0.0` and a phone visiting `http://192.168.x.x:8000`) needs HTTPS in front of it — the same reverse-proxy setup the security note above already recommends for auth. The service worker behind this only exists for installability and a same-page-reload fallback; it's deliberately network-first for everything so it can never make you look at stale frontend code, and it never touches `/api/*` or the WebSocket.
 
 ### Interactive Mode (step-by-step wizard)
 
@@ -131,7 +170,7 @@ On launch it automatically runs a lyrics-provider health check before asking any
 
 **Smart File Paths:** If you input a Single Track URL, it will ask if you want to set a specific `.flac` output path. If you do, it intelligently skips all questions about filename formatting and subfolder organization.
 
-**Unified Quality Profiles:** Choose `HI_RES_LOSSLESS` for the best available lossless tier or `LOSSLESS` for standard lossless audio. SpotiFLAC translates either profile into each provider's native quality token; lossy-only services use their best available audio.
+**Unified Quality Profiles:** Choose `HI_RES_LOSSLESS` for the best available lossless tier or `LOSSLESS` for standard lossless audio. SpotiFLAC translates either profile into each provider's native quality token; lossy-only services use their best available audio. If Tidal is your only configured service, the wizard also offers `DOLBY_ATMOS` — it's Tidal-exclusive, so it isn't offered when other providers are involved (they'd just fall back to `HI_RES_LOSSLESS`).
 
 **CLI Generator:** At the end of the configuration, it generates and prints the exact CLI command for your specific setup, so you can copy and reuse it in your automated scripts.
 
@@ -293,10 +332,79 @@ spotiflac URL ./out \
 
 The maintainer does not review, endorse, or take responsibility for the content or behavior of any third-party registry or extension. Choose your sources with the same care you would apply to installing any other third-party code.
 
+### Extension Discovery (Directories)
+
+Finding a registry in the first place is still on you — a **directory** is just a JSON file that lists *registries* (name, URL, description), for you to review and add yourself the normal way. Nothing is bundled here either: no default directory ships with SpotiFLAC.
+
+```bash
+export SPOTIFLAC_REGISTRY_DIRECTORIES="https://example.com/my-directory.json"
+# or: spotiflac --registry-directories https://example.com/my-directory.json URL ./out
+```
+
+A directory JSON looks like:
+
+```json
+{
+  "registries": [
+    {
+      "name": "Example Community Registry",
+      "url": "https://example.com/registry.json",
+      "description": "A few extra extensions",
+      "maintainer": "someone"
+    }
+  ]
+}
+```
+
+Once you've added one, Settings → Extensions in the GUI (or `get_registry_directories()` / `add_registry_directory()` / `remove_registry_directory()` / `discover_registries()` in the Python/web API) fetches it and probes each listed registry for reachability, so you see a "reachable, N extensions" badge *before* deciding to add it as a registry of your own via the normal `--registries` flow. Probing is read-only and never installs anything on its own.
+
+### Registry Trust (Signed Extensions)
+
+The sha256 checksum a registry provides (see above) proves a package wasn't corrupted or swapped *in transit* — it says nothing about who put it in the registry in the first place. Ed25519 signatures close that gap: a registry maintainer signs each entry with their own private key, and you decide whose public key you're willing to trust, once, up front. Nothing is trusted by default — an unsigned entry is exactly as trusted as it is today (checksum-only, if the registry provides one at all).
+
+```bash
+# Add a maintainer's public key you've decided to trust
+spotiflac --trust-key-add "some-maintainer" "<base64 Ed25519 public key>"
+spotiflac --trust-key-list
+spotiflac --trust-key-remove "some-maintainer"
+```
+
+Or from Settings → Extensions in the GUI ("Trusted Signing Keys"), backed by `get_trusted_keys()` / `add_trusted_key()` / `remove_trusted_key()` in the Python/web API.
+
+Once added, any installed extension's `RegistryEntry` gets a `.trust_tier` of `"signed"` (verified against a trusted key), `"checksum-only"`, or `"unverified"`.
+
+**For registry maintainers** — generate a keypair and sign your own entries with the bundled tool:
+
+```bash
+python -m SpotiFLAC.tools.registry_signing_cli keygen
+# publish the printed public key however you publish your registry;
+# keep the private key secret
+
+python -m SpotiFLAC.tools.registry_signing_cli sign \
+  --private-key <base64> --id tidal-web --version 1.2.0 \
+  --sha256 <hex> --download-url https://example.com/tidal-web.spotiflac-ext
+# paste the printed "signature" into that entry in your registry.json
+```
+
 ### Developing Extensions
 
 - **JavaScript extensions** reuse the format built for [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile). Its [Extension Development Guide](https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/main/docs/EXTENSION_DEVELOPMENT.md) is the closest available reference, but it was written for Mobile — some details (packaging, available runtime capabilities) may not match this project exactly. Verify against this repository's own loader (`SpotiFLAC/extensions/runtime.py`) before relying on it.
 - **Python extensions** are ZIP packages (`.spotiflac-ext` / `.sflx`) containing a manifest and a Python module, loaded directly by `SpotiFLAC/extensions/python_provider.py`. There's no separate guide yet — reading that file, and an existing extension's manifest, is currently the best way to see the expected shape.
+
+**Scaffolding a new extension** generates a starting point that already satisfies this repo's own loader, instead of reverse-engineering the shape from an existing extension:
+
+```bash
+spotiflac --ext-scaffold my-provider --runtime python      # or --runtime javascript
+# writes ./my-provider/{manifest.json, my_provider.py, README.md}
+```
+
+**Validating it** — without installing into your real `~/.spotiflac/extensions` or contacting any registry — checks the manifest, confirms the entry point exists and imports/parses cleanly, and (Python) that it exposes exactly one `BaseProvider` subclass, or (JavaScript, if `node` is on `PATH`) that it's syntactically valid and calls `registerExtension(...)`:
+
+```bash
+spotiflac --ext-dry-run ./my-provider
+# or against an already-packaged ZIP:
+spotiflac --ext-dry-run ./my-provider.spotiflac-ext
+```
 
 If you build something reusable, consider publishing it to your own registry rather than asking the maintainer to bundle or endorse it — see [Extensions](#extensions) above for why nothing is bundled by design.
 
@@ -348,7 +456,9 @@ docker run --rm -it \
 
 Open `http://localhost:8000` in a browser.
 
-> **Note:** `--host 0.0.0.0` is required here — the CLI default (`127.0.0.1`) would only accept connections from inside the container itself, unreachable from the host. This also means the GUI is reachable by anything that can reach the mapped port, with no authentication (see the security note under [Web Mode](#web-mode-same-gui-in-your-browser)). Only publish the port on a network you trust, or put it behind your own authentication/reverse proxy.
+> **Note:** `--host 0.0.0.0` is required here — the CLI default (`127.0.0.1`) would only accept connections from inside the container itself, unreachable from the host. This also means the GUI is reachable by anything that can reach the mapped port, with no authentication unless you add `--web-token` / `--web-multiuser` (see [Authentication](#authentication---web-token)). Only publish the port on a network you trust, or put it behind your own authentication/reverse proxy.
+
+`docker-compose.example.yml` in the repo root does the above as a compose file, plus a real HTTP healthcheck for this specific mode (`docker compose -f docker-compose.example.yml up`).
 
 ### Published Image (GHCR)
 
@@ -658,6 +768,25 @@ With `--mp3` a playlist entry points at the converted file, and a track already 
 
 > **Note:** avoid `--use-track-numbers` (and `{position}` in `--filename-format`) here: the number depends on the merged playlist order, so filenames would change whenever any playlist does — and previously downloaded tracks would be fetched again under the new name. SpotiFLAC warns when you do.
 
+### Watch Mode (keep syncing on an interval)
+
+Add `--watch MINUTES` to any run — a single URL, or one or more `--playlist` — to re-run the exact same sync every N minutes, forever, instead of exiting after one pass:
+
+```bash
+# Re-check this playlist every hour for new tracks
+spotiflac https://open.spotify.com/playlist/... ./Music --service ext:tidal-web --watch 60
+```
+
+Every download path already indexes what's on disk and skips it (by ISRC/tags for `--playlist`, by filename otherwise — see [Multiple Playlists in One Folder](#multiple-playlists-in-one-folder) above and the download flow in general), so each cycle after the first is cheap: it only fetches tracks that are actually new. Stop it with Ctrl+C.
+
+`--watch` is a different tool from `--loop`: `--loop` retries *failed* tracks for a bounded time after one session ends; `--watch` re-runs the *whole* sync indefinitely. Combine both if you want each cycle to also retry transient failures:
+
+```bash
+spotiflac https://open.spotify.com/album/... ./Music --watch 1440 --loop 30
+```
+
+`--watch` is saved/restored by `--save-profile`/`--profile` like any other flag. Not available in `--interactive` mode, and it does not cover Spotify's "Liked Songs" — that's a private, per-account list that would need a full Spotify login (OAuth) to read, which this project deliberately doesn't implement (see the "no-account" design goal throughout this README). Point `--watch` at a public playlist, album, or artist URL instead.
+
 ### Post-Download Actions
 
 | Action | Description |
@@ -861,6 +990,45 @@ result = await retag_local_file_async(
 )
 ```
 
+### Duplicate Detection (acoustic fingerprint)
+
+Local Tagging's own dedup (above) matches by ISRC or by normalized title+artist text — cheap and usually right, but blind to a re-rip with wrong or missing tags, or the same recording pulled from two different providers with slightly different metadata. This is a second, independent signal that looks at the *audio itself* instead: [Chromaprint](https://acoustid.org/chromaprint) acoustic fingerprints, compared locally — no network call, no AcoustID lookup, no API key.
+
+Off by default and fully opt-in (same posture as [Hi-Res Verification](#hi-res-verification)): needs the optional `pyacoustid` package and the `fpcalc` binary it wraps.
+
+```bash
+pip install SpotiFLAC[dedup]
+# then install fpcalc — most package managers ship it as "chromaprint" or
+# "libchromaprint-tools" (see https://acoustid.org/chromaprint)
+
+python -m SpotiFLAC.tools.dedup_check_cli ~/Music/MyLibrary
+```
+
+```text
+Fingerprinting 340 file(s)…
+
+Found 2 duplicate group(s):
+
+Group 1 (2 files):
+  - /Users/you/Music/MyLibrary/Artist - Song.flac
+  - /Users/you/Music/MyLibrary/Compilation/Artist - Song (re-rip).mp3
+```
+
+Also available as a "Find Duplicates" button in the GUI's Fix Local Files tab (same folder path as a normal scan), backed by `get_dedup_status()` (whether it can run at all on this machine) and `scan_for_duplicates(path, recursive=True, threshold=0.95)` (runs in a background thread; results arrive via the `app_dedup_results` push event, `app_dedup_error` on failure — same shape as `scan_local()`), or directly in Python:
+
+```python
+from SpotiFLAC.core.audio_fingerprint import (
+    compute_fingerprint, find_duplicate_groups, is_available,
+)
+
+if is_available():
+    fingerprints = [compute_fingerprint(f) for f in my_files]
+    for group in find_duplicate_groups(fingerprints):
+        print("Duplicates:", group)
+```
+
+A duration pre-filter (`duration_tolerance_s`, default 3.0) skips the (more expensive) fingerprint comparison for any pair that couldn't plausibly match, so this stays practical for a real, varied library. Like Hi-Res Verification, treat a match as a strong hint, not a certification — review before deleting anything.
+
 ---
 
 ## CLI Usage (standalone executables)
@@ -887,7 +1055,7 @@ result = await retag_local_file_async(
                         [--no-lyrics]
                         [--lyrics-providers spotify apple musixmatch amazon lrclib]
                         [--no-enrich]
-                        [--enrich-providers deezer apple qobuz tidal soundcloud]
+                        [--enrich-providers deezer apple qobuz tidal]
                         [--retries N]
                         [--post-action none|open_folder|notify|command]
                         [--post-command "CMD with {folder} {succeeded} {skipped} {failed}"]
@@ -917,7 +1085,7 @@ chmod +x SpotiFLAC-Linux-arm64
                         [--no-lyrics]
                         [--lyrics-providers spotify apple musixmatch amazon lrclib]
                         [--no-enrich]
-                        [--enrich-providers deezer apple qobuz tidal soundcloud]
+                        [--enrich-providers deezer apple qobuz tidal]
                         [--retries N]
                         [--post-action none|open_folder|notify|command]
                         [--post-command "CMD with {folder} {succeeded} {skipped} {failed}"]
@@ -956,13 +1124,13 @@ chmod +x SpotiFLAC-Linux-arm64
 | `timeout_s` | `int` | `None` | Per-track download timeout in seconds. If a single track download does not complete within this time, the process is terminated and the track is marked as failed. SpotiFLAC then moves on to the next extension or retry. Set to `None` (default) to disable the timeout. |
 | `loop` | `int` | `None` | Duration in minutes to keep retrying permanently failed tracks after a full session completes. |
 | `track_max_retries` | `int` | `0` | Extra download attempts per track when all extensions fail on the first try. Each retry cycles through all configured extensions again with exponential backoff (2 s → 4 s → 8 s …, capped at 30 s). |
-| `quality` | `str` | `"LOSSLESS"` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. Legacy provider-specific values are accepted and normalized. |
+| `quality` | `str` | `"LOSSLESS"` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. `DOLBY_ATMOS` is also accepted but is Tidal-exclusive — any other provider falls back to `HI_RES_LOSSLESS` instead. Legacy provider-specific values are accepted and normalized. |
 | `allow_fallback` | `bool` | `True` | For `HI_RES_LOSSLESS`, allows fallback to `LOSSLESS` when the higher-resolution tier is unavailable. It never downgrades lossless requests to compressed audio. |
 | `log_level` | `int` | `logging.WARNING` | Python logging level. |
 | `embed_lyrics` | `bool` | `True` | Whether to fetch and embed synchronized lyrics (LRC) into the audio file. |
 | `lyrics_providers` | `list` | `["spotify", "apple", "musixmatch", "lrclib", "amazon"]` | Priority order of lyrics providers to attempt. |
 | `enrich_metadata` | `bool` | `True` | Enables multi-provider metadata enrichment (HD covers, BPM, labels, etc.). |
-| `enrich_providers` | `list` | `["deezer", "apple", "qobuz", "tidal", "soundcloud"]` | Priority order of metadata providers to attempt. |
+| `enrich_providers` | `list` | `["deezer", "apple", "qobuz", "tidal"]` | Priority order of metadata providers to attempt. `soundcloud` is also accepted but isn't on by default. |
 | `qobuz_token` | `str` | `None` | Optional setting forwarded to the installed Qobuz extension, if it supports it. Has no built-in behavior of its own. |
 | `qobuz_local_api_url` | `str` | `None` | Optional setting forwarded to the installed `qobuz-web`-family extension, if it supports it. Has no effect on its own — see [Passing Settings to an Extension](#passing-settings-to-an-extension-eg-a-self-hosted-api-instance). |
 | `use_extensions_fallback` | `bool` | `True` | Whether to automatically fall back to another installed extension for the same alias if one fails. Set to `False` to use only the extensions explicitly listed in `services`. |
@@ -1068,7 +1236,7 @@ SpotiFLAC(
 | `--registries` | | `None` | An extension-registry JSON URL to add before running; repeat the flag for each one. Alternative to `SPOTIFLAC_REGISTRIES` or a `.env` file. Must be `https://`. Persisted to `~/.spotiflac/registry_settings.json`, so you only need to pass it once — see [Extensions](#extensions). |
 | `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
 | `--output-path` | `-o` | `None` | Exact output file path for single track downloads. Ignored for albums, playlists and discographies. |
-| `--quality` | `-q` | `LOSSLESS` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. Legacy provider-specific values are accepted and normalized. |
+| `--quality` | `-q` | `LOSSLESS` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. `DOLBY_ATMOS` is also accepted but is Tidal-exclusive — any other provider falls back to `HI_RES_LOSSLESS` instead. Legacy provider-specific values are accepted and normalized. |
 | `--use-track-numbers` | | `False` | Prefix filenames with track numbers. |
 | `--use-album-track-numbers` | | `False` | Use the track's original album number instead of queue position. |
 | `--use-artist-subfolders` | | `False` | Organize files into per-artist subfolders. |
@@ -1082,6 +1250,7 @@ SpotiFLAC(
 | `--tidal-api` | | `None` | Optional setting forwarded to the installed Tidal extension, if it supports it. |
 | `--timeout` | | `180` | Maximum seconds allowed for each provider attempt. If a track download stalls or takes longer than this limit, it is forcibly terminated and marked as failed, then SpotiFLAC moves to the next extension or retry. |
 | `--loop` | `-l` | `None` | Keep retrying permanently failed tracks every N minutes. |
+| `--watch` | | `None` | Re-run this exact command every N minutes, forever, instead of exiting after one pass. See [Watch Mode](#watch-mode-keep-syncing-on-an-interval). |
 | `--retries` | | `0` | Extra per-track download attempts on failure. Cycles through all configured extensions with exponential backoff. |
 | `--max-concurrent` | | `2` | How many tracks to download at once. Each track still tries its providers in order/fallback on its own — this only controls how many tracks run simultaneously. Use `1` for fully sequential downloads with no interleaved console output. |
 | `--playlist` | `-p` | `None` | Playlist URL to sync; repeat once per playlist. All tracks go to a single destination folder, shared tracks are downloaded once, and each playlist gets its own M3U file (see [Multiple Playlists in One Folder](#multiple-playlists-in-one-folder)). |
@@ -1095,7 +1264,7 @@ SpotiFLAC(
 | `--no-lyrics` | | `False` | Disable lyrics embedding (lyrics are embedded by default). |
 | `--lyrics-providers` | | `apple lrclib` | Lyrics provider priority order (CLI default; the Python API default is `spotify apple musixmatch lrclib amazon` when `lyrics_providers` is left unset). |
 | `--no-enrich` | | `False` | Disable multi-provider metadata enrichment (enrichment is enabled by default). |
-| `--enrich-providers` | | `deezer apple qobuz tidal soundcloud` | Metadata enrichment provider priority order. |
+| `--enrich-providers` | | `deezer apple qobuz tidal` | Metadata enrichment provider priority order. `soundcloud` is also accepted but isn't on by default. |
 | `--post-action` | | `none` | Action after all downloads finish: `none`, `open_folder`, `notify`, `command`. |
 | `--post-command` | | `""` | Shell command for `--post-action=command`. Placeholders: `{folder}`, `{succeeded}`, `{skipped}`, `{failed}`; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
 | `--profile` | | `None` | Load a saved profile. CLI flags override profile values. |
@@ -1104,7 +1273,18 @@ SpotiFLAC(
 | `--web` | | `False` | Launch the same GUI as a local web server instead of a native window. See [Web Mode](#web-mode-same-gui-in-your-browser). |
 | `--host` | | `127.0.0.1` | Host to bind `--web` to. Only change this deliberately — see the security note under [Web Mode](#web-mode-same-gui-in-your-browser). |
 | `--port` | | `8000` | Port to bind `--web` to. |
+| `--web-token` | | `None` | Shared secret required on every `--web` request. Falls back to `SPOTIFLAC_WEB_TOKEN`. See [Authentication](#authentication---web-token). |
+| `--web-multiuser` | | `False` | Require per-account login for `--web` instead of/alongside `--web-token`. See [Multi-user mode](#multi-user-mode---web-multiuser). |
+| `--web-user-add` | | | Create a `--web-multiuser` account: `--web-user-add USERNAME PASSWORD`. |
+| `--web-user-remove` | | | Delete a `--web-multiuser` account by username. |
+| `--web-user-list` | | | List configured `--web-multiuser` usernames. |
 | `--interactive` | | `False` | Launch the interactive step-by-step wizard. See [Interactive Mode](#interactive-mode-step-by-step-wizard). |
+| `--registry-directories` | | `None` | A directory JSON URL to add before running (lists registries, not extensions — repeat once per URL). Alternative to `SPOTIFLAC_REGISTRY_DIRECTORIES`. See [Extension Discovery](#extension-discovery-directories). |
+| `--trust-key-add` | | | Trust a registry-signing public key: `--trust-key-add NAME PUBLIC_KEY_B64`. See [Registry Trust](#registry-trust-signed-extensions). |
+| `--trust-key-remove` | | | Remove a trusted key by name. |
+| `--trust-key-list` | | | List trusted key names/public keys. |
+| `--ext-scaffold` | | | Generate a new extension skeleton: `--ext-scaffold NAME [--runtime python\|javascript] [--output-dir DIR]`. See [Developing Extensions](#developing-extensions). |
+| `--ext-dry-run` | | | Validate an extension (directory or packaged ZIP) without installing it or contacting any registry: `--ext-dry-run PATH`. |
 
 ---
 

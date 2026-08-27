@@ -1,5 +1,5 @@
-"""Gerarchia di errori tipati per SpotiFLAC.
-Ispirato al pattern Go: sentinel errors + errors.As/Is.
+"""Typed error hierarchy for SpotiFLAC.
+Inspired by the Go pattern: sentinel errors + errors.As/Is.
 """
 
 from __future__ import annotations

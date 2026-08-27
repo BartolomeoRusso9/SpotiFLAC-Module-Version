@@ -399,7 +399,7 @@ class SignedSessionClient:
         timeout: float = 60,
         hold_open_seconds: float = 3.0,
     ) -> None:
-        """Autenticazione automatica tramite browser reale (core.turnstile).
+        """Automatic authentication via a real browser (core.turnstile).
 
         UPDATE: turnstile.py now captures the grant directly from
         network traffic via CDP (the same technique as grant_token.py /
@@ -780,7 +780,7 @@ class SignedSessionClient:
         resource_type: str = "track",
         tickets_path: str = "/tickets",
     ) -> httpx.Response:
-        """Ottiene un ticket per (provider, resource_id) e lo usa immediatamente
+        """Gets a ticket for (provider, resource_id) and uses it immediately
         for a signed POST to `dl_path`, adding the header
         "X-Zarz-Ticket: <ticket_id>" like the JS does (postDownloadAPI()):
 
@@ -873,13 +873,13 @@ async def perform_signed_fetch(
 
     """
     try:
-        # Se non siamo autenticati, richiediamo il Lock asincrono
+        # If we're not authenticated, acquire the async Lock
         if not client.authenticated:
             lock = _get_auth_lock(client.namespace)
             async with lock:
-                # DOUBLE-CHECK: Una volta dentro al blocco, ricarichiamo i dati dal disco.
-                # Se un altro brano in parallelo ha appena fatto l'accesso al posto nostro,
-                # troveremo la sessione aggiornata e salteremo l'autenticazione!
+                # DOUBLE-CHECK: once inside the lock, reload the data from disk.
+                # If another track running in parallel just authenticated in our
+                # place, we'll see the refreshed session and skip authenticating!
                 client._load()
 
                 if not client.authenticated:

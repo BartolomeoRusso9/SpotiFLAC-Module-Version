@@ -151,7 +151,11 @@ function switchTab(name, btn) {
   document.querySelectorAll('.tc').forEach(c => c.classList.remove('active'));
   btn.classList.add('active');
   $('tc-' + name).classList.add('active');
-  if (name === 'extensions') loadRegistries();
+  if (name === 'extensions') {
+    loadRegistries();
+    loadDirectories();
+    loadTrustedKeys();
+  }
 }
 
 // ── Appearance ───────────────────────────────────────────────────────────────
@@ -205,13 +209,15 @@ function changeFont() {
 
 function qualityFallbackChain(q) {
   const n = (q || '').toString().toUpperCase();
+  // Dolby Atmos is Tidal-exclusive (see core/quality.py's
+  // quality_for_provider()): on Tidal it falls back through hi-res to
+  // plain lossless like shown here; on every other provider it's treated
+  // as HI_RES_LOSSLESS from the start, which is still a fair chain to
+  // show since this tooltip isn't provider-specific.
   const chains = {
-      'DOLBY_ATMOS': ['DOLBY_ATMOS','HI_RES_LOSSLESS','LOSSLESS','HIGH','LOW'],
-      'HI_RES_LOSSLESS': ['HI_RES_LOSSLESS','LOSSLESS','HIGH','LOW'],
-      'LOSSLESS': ['LOSSLESS','HIGH','LOW'],
-      'HI_RES': ['HI_RES','LOSSLESS','HIGH','LOW'],
-      'HIGH': ['HIGH','LOW'],
-      'LOW': ['LOW']
+      'DOLBY_ATMOS': ['DOLBY_ATMOS', 'HI_RES_LOSSLESS', 'LOSSLESS'],
+      'HI_RES_LOSSLESS': ['HI_RES_LOSSLESS', 'LOSSLESS'],
+      'LOSSLESS': ['LOSSLESS'],
   };
   return chains[n] || [n || 'LOSSLESS'];
 }
@@ -435,7 +441,7 @@ const ALL_ENRICH = [
   { id:'apple',      label:'Apple Music',on:true, iconFile:'am.png', iconClass:'apple' },
   { id:'qobuz',      label:'Qobuz',      on:true, iconFile:'qbz.png', iconClass:'qobuz' },
   { id:'tidal',      label:'Tidal',      on:true, iconFile:'tidal_l.png', iconClass:'tidal' },
-  { id:'soundcloud', label:'SoundCloud', on:true, iconFile:'soundcloud.svg', iconClass:'soundcloud' },
+  { id:'soundcloud', label:'SoundCloud', on:false, iconFile:'soundcloud.svg', iconClass:'soundcloud' },
 ];
 
 const SETTINGS_STORAGE_KEY = 'spotiflac-settings';
@@ -465,7 +471,7 @@ const DEFAULT_SETTINGS = {
   log_level: 'INFO',
   services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
   lyrics_providers: ['apple', 'lrclib'],
-  enrich_providers: ['deezer','apple','qobuz','tidal','soundcloud'],
+  enrich_providers: ['deezer','apple','qobuz','tidal'],
 };
 
 // Ensure the version is populated even if pywebview API isn't ready yet
@@ -570,7 +576,7 @@ function buildSortItem(item, index) {
     ? `<span class="svc-icon ${item.iconClass} icon-image"><img src="assets/icons/${item.iconFile}" alt="${item.label}" onerror="this.onerror=null; this.src='assets/icons/${item.id}.png';"></span>`
     : item.icon ? `<span class="svc-icon ${item.iconClass}">${item.icon}</span>` : '';
   
-  // Aggiungiamo il numero (index + 1) e il checkbox
+  // Add the number (index + 1) and the checkbox
   d.innerHTML = `
     <span class="priority-num">${index + 1}</span>
     <span class="drag-h">⠿</span>
@@ -637,7 +643,7 @@ function copyLogs() {
         return;
     }
 
-    // Estraiamo solo il testo puro (senza i tag HTML)
+    // Extract just the plain text (without the HTML tags)
     const logsText = logArea.innerText;
 
     if (navigator.clipboard) {
@@ -1104,7 +1110,7 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   const metaDetails = $('album-meta-details');
   const avatarEl = $('album-owner-avatar');
   
-  // Crea un contenitore sicuro per le statistiche artista senza rompere l'HTML originale
+  // Create a safe container for artist stats without breaking the original HTML
   let artistStatsRow = $('artist-stats-row');
   if (!artistStatsRow) {
     artistStatsRow = document.createElement('div');
@@ -1261,7 +1267,7 @@ function updateAlbumMeta(trackCount) {
     trackCountEl.textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
   }
   $('album-meta').style.display = '';
-  // Update anche l'etichetta dell'intestazione della tabella tracks
+  // Also update the tracks table header label
   setPlaycountHeaderLabel(badgeType === 'PLAYLIST' ? 'Album' : 'Playcount');
 }
 
@@ -1459,7 +1465,7 @@ function injectArtistTabs(tracks) {
   galleryPanel.innerHTML = `<div class="artist-gallery-empty">⏳ Loading gallery…</div>`;
   section.appendChild(galleryPanel);
 
-  // Inserisci prima di track-controls
+  // Insert before track-controls
   const listContainer = document.querySelector('.list-container');
   listContainer.insertBefore(section, $('track-controls'));
 
@@ -1772,7 +1778,7 @@ function downloadCover(i) {
   // Select both the hidden table button and the visible card button
   const btns = document.querySelectorAll(`#track-row-${i} .ta-btn.ta-cover, .ta-cover[data-track-index="${i}"]`);
   
-  // Se è già in caricamento, ignora ulteriori click
+  // If already loading, ignore further clicks
   if (btns[0] && btns[0].classList.contains('ta-loading')) return;
 
   // Cancel any previously scheduled reset timers before setting loading state
@@ -1787,8 +1793,8 @@ function downloadCover(i) {
   logMessage(`Fetching cover: ${t.title}…`, 'info');
   
   if (window.pywebview?.api) {
-    // Avvia solo il processo. Lo stato 'success' o 'error' verrà impostato 
-    // dal listener app_cover_download_finished qui sotto.
+    // Only starts the process. The 'success'/'error' state gets set
+    // by the app_cover_download_finished listener below.
     window.pywebview.api.download_track_cover(t).catch((err) => {
         btns.forEach(btn => { setTaBtnState(btn, 'error'); resetTaBtnAfter(btn, 2200); });
         logMessage('Error starting cover download: ' + err, 'error');
@@ -2465,9 +2471,9 @@ function reverseTracks() {
 }
 function sortTracks() {
   const val = $('sort-select').value;
-  const sorted = [...currentTracks]; // Lavora sempre su una copia
+  const sorted = [...currentTracks]; // Always works on a copy
   
-  // Ripristina l'array usando l'indice nascosto saved in precedenza
+  // Restore the array using the hidden index saved previously
   if (val === 'default') { 
     sorted.sort((a, b) => a._originalIndex - b._originalIndex);
     renderTracks(sorted, 1); 
@@ -3313,7 +3319,7 @@ function renderHealthResults(data) {
   const extRows  = data.filter(r => r.provider === 'extensions');
   const provRows = data.filter(r => r.provider !== 'extensions');
 
-  // Raggruppiamo prima per provider
+  // Group by provider first
   const provMap = {};
   provRows.forEach(r => { if (!provMap[r.provider]) provMap[r.provider] = []; provMap[r.provider].push(r); });
 
@@ -3470,6 +3476,392 @@ async function removeRegistryLink(encodedUrl) {
   }
 }
 
+// ── Registry Discovery (Directories) ─────────────────────────────────────────
+// A directory lists *registries* (for review), not extensions directly —
+// see extensions/directories.py. Same shape/conventions as the registry
+// functions just above, on purpose.
+async function loadDirectories() {
+  const list = $('directory-list');
+  if (!list) return;
+  if (!window.pywebview?.api?.get_registry_directories) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;">Directory management is unavailable in this build.</div>';
+    return;
+  }
+  try {
+    const directories = await window.pywebview.api.get_registry_directories();
+    renderDirectories(directories);
+  } catch (e) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Unable to load directories.</div>';
+  }
+}
+
+function renderDirectories(directories) {
+  const list = $('directory-list');
+  if (!list) return;
+
+  if (directories?.error) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Failed to load directories: ' + regEscapeHtml(directories.error) + '</div>';
+    return;
+  }
+  if (!directories || !directories.length) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;">No directory links configured yet.</div>';
+    return;
+  }
+
+  list.innerHTML = directories.map((d) => {
+    const badges = (d.sources || []).map((s) =>
+      `<span class="reg-badge reg-badge-${regEscapeHtml(s)}">${regEscapeHtml(REGISTRY_SOURCE_LABELS[s] || s)}</span>`
+    ).join('');
+    const disabledCls = d.enabled ? '' : ' reg-item-disabled';
+    return `
+      <div class="sort-item reg-item${disabledCls}">
+        <div class="reg-item-main">
+          <span class="reg-url" title="${regEscapeHtml(d.url)}">${regEscapeHtml(d.url)}</span>
+          <div class="reg-badges">${badges}${d.enabled ? '' : '<span class="reg-badge reg-badge-off">Removed</span>'}</div>
+        </div>
+        <button class="act-btn secondary reg-remove-btn" type="button" onclick="removeDirectoryLink('${encodeURIComponent(d.url)}')" title="Remove this directory link">
+          Remove
+        </button>
+      </div>`;
+  }).join('');
+}
+
+async function addDirectoryLink() {
+  const input = $('directory-url-input');
+  const url = (input?.value || '').trim();
+  if (!url) return;
+  if (!window.pywebview?.api?.add_registry_directory) {
+    showToast('Directory management is unavailable in this build.', 'error');
+    return;
+  }
+  try {
+    const result = await window.pywebview.api.add_registry_directory(url);
+    if (result?.ok) {
+      input.value = '';
+      renderDirectories(result.directories || []);
+      logMessage(`Directory added: ${url}`, 'ok');
+      showToast('Directory link added.');
+    } else {
+      showToast(result?.error || 'Unable to add directory link.', 'error');
+    }
+  } catch (e) {
+    showToast('Unable to add directory link.', 'error');
+  }
+}
+
+async function removeDirectoryLink(encodedUrl) {
+  const url = decodeURIComponent(encodedUrl);
+  if (!window.pywebview?.api?.remove_registry_directory) return;
+  try {
+    const result = await window.pywebview.api.remove_registry_directory(url);
+    if (result?.ok) {
+      renderDirectories(result.directories || []);
+      logMessage(`Directory removed: ${url}`, 'ok');
+      showToast('Directory link removed.');
+    } else {
+      showToast(result?.error || 'Unable to remove directory link.', 'error');
+    }
+  } catch (e) {
+    showToast('Unable to remove directory link.', 'error');
+  }
+}
+
+async function runDiscovery() {
+  const btn = $('btn-run-discovery');
+  const results = $('discovery-results');
+  if (!results) return;
+  if (!window.pywebview?.api?.discover_registries) {
+    showToast('Discovery is unavailable in this build.', 'error');
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = 'Discovering…'; }
+  results.innerHTML = '<div class="s-label" style="font-size:11.5px;">Probing registries…</div>';
+  try {
+    const byDirectory = await window.pywebview.api.discover_registries();
+    renderDiscoveryResults(byDirectory);
+  } catch (e) {
+    results.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Discovery failed.</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Discover Registries'; }
+  }
+}
+
+function renderDiscoveryResults(byDirectory) {
+  const results = $('discovery-results');
+  if (!results) return;
+
+  if (byDirectory?.error) {
+    results.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">' + regEscapeHtml(byDirectory.error) + '</div>';
+    return;
+  }
+
+  const directoryUrls = Object.keys(byDirectory || {});
+  if (!directoryUrls.length) {
+    results.innerHTML = '<div class="s-label" style="font-size:11.5px;">No directories configured, or none reachable.</div>';
+    return;
+  }
+
+  results.innerHTML = directoryUrls.map((dirUrl) => {
+    const rows = (byDirectory[dirUrl] || []).map((r) => {
+      const health = r.health || {};
+      const badge = health.reachable
+        ? `<span class="reg-badge reg-badge-reachable">Reachable · ${health.extension_count} ext.</span>`
+        : `<span class="reg-badge reg-badge-unreachable">Unreachable</span>`;
+      return `
+        <div class="sort-item reg-item">
+          <div class="reg-item-main">
+            <span class="reg-url" title="${regEscapeHtml(r.url)}">${regEscapeHtml(r.name)} — ${regEscapeHtml(r.url)}</span>
+            <div class="reg-badges">${badge}</div>
+          </div>
+          <button class="act-btn secondary reg-remove-btn" type="button" onclick="addDiscoveredAsRegistry('${encodeURIComponent(r.url)}')">
+            Add as Registry
+          </button>
+        </div>`;
+    }).join('');
+    return `<div class="s-label" style="font-size:11px;margin:8px 0 4px;">${regEscapeHtml(dirUrl)}</div>${rows}`;
+  }).join('');
+}
+
+async function addDiscoveredAsRegistry(encodedUrl) {
+  const url = decodeURIComponent(encodedUrl);
+  if (!window.pywebview?.api?.add_registry) return;
+  try {
+    const result = await window.pywebview.api.add_registry(url);
+    if (result?.ok) {
+      renderRegistries(result.registries || []);
+      showToast('Registry added.');
+    } else {
+      showToast(result?.error || 'Unable to add registry.', 'error');
+    }
+  } catch (e) {
+    showToast('Unable to add registry.', 'error');
+  }
+}
+
+// ── Trusted Signing Keys ──────────────────────────────────────────────────────
+// See extensions/trust.py: an Ed25519 signature check layered on top of the
+// sha256 checksum ExtensionManager already enforces. Nothing trusted by
+// default — an unsigned entry is exactly as trusted as it was before.
+async function loadTrustedKeys() {
+  const list = $('trust-key-list');
+  if (!list) return;
+  if (!window.pywebview?.api?.get_trusted_keys) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;">Trust management is unavailable in this build.</div>';
+    return;
+  }
+  try {
+    const keys = await window.pywebview.api.get_trusted_keys();
+    renderTrustedKeys(keys);
+  } catch (e) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Unable to load trusted keys.</div>';
+  }
+}
+
+function renderTrustedKeys(keys) {
+  const list = $('trust-key-list');
+  if (!list) return;
+
+  if (keys?.error) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Failed to load trusted keys: ' + regEscapeHtml(keys.error) + '</div>';
+    return;
+  }
+  if (!keys || !keys.length) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;">No trusted keys yet.</div>';
+    return;
+  }
+
+  list.innerHTML = keys.map((k) => `
+    <div class="sort-item reg-item">
+      <div class="reg-item-main">
+        <span class="reg-url">${regEscapeHtml(k.name)}</span>
+        <div class="reg-badges"><span class="reg-badge">${regEscapeHtml((k.public_key_b64 || '').slice(0, 16))}…</span></div>
+      </div>
+      <button class="act-btn secondary reg-remove-btn" type="button" onclick="removeTrustedKeyLink('${encodeURIComponent(k.name)}')">
+        Remove
+      </button>
+    </div>`).join('');
+}
+
+async function addTrustedKeyLink() {
+  const nameInput = $('trust-key-name-input');
+  const keyInput = $('trust-key-value-input');
+  const name = (nameInput?.value || '').trim();
+  const key = (keyInput?.value || '').trim();
+  if (!name || !key) {
+    showToast('Enter both a name and a public key.', 'error');
+    return;
+  }
+  if (!window.pywebview?.api?.add_trusted_key) {
+    showToast('Trust management is unavailable in this build.', 'error');
+    return;
+  }
+  try {
+    const result = await window.pywebview.api.add_trusted_key(name, key);
+    if (result?.ok) {
+      nameInput.value = '';
+      keyInput.value = '';
+      renderTrustedKeys(result.keys || []);
+      showToast('Trusted key added.');
+    } else {
+      showToast(result?.error || 'Unable to add trusted key.', 'error');
+    }
+  } catch (e) {
+    showToast('Unable to add trusted key.', 'error');
+  }
+}
+
+async function removeTrustedKeyLink(encodedName) {
+  const name = decodeURIComponent(encodedName);
+  if (!window.pywebview?.api?.remove_trusted_key) return;
+  try {
+    const result = await window.pywebview.api.remove_trusted_key(name);
+    if (result?.ok) {
+      loadTrustedKeys();
+      showToast('Trusted key removed.');
+    } else {
+      showToast(result?.error || 'Unable to remove trusted key.', 'error');
+    }
+  } catch (e) {
+    showToast('Unable to remove trusted key.', 'error');
+  }
+}
+
+// ── Duplicate Detection (acoustic fingerprint) ───────────────────────────────
+// See core/audio_fingerprint.py. Off by default on the backend (needs the
+// optional pyacoustid + fpcalc) — get_dedup_status() lets us say so
+// up front instead of just failing after the user waits for a scan.
+async function startDedupScan() {
+  const path = $('local-path-input').value.trim();
+  if (!path) {
+    toastMgr.error('Please enter a valid folder or file path.');
+    return;
+  }
+
+  if (window.pywebview?.api?.get_dedup_status) {
+    try {
+      const status = await window.pywebview.api.get_dedup_status();
+      if (status && status.available === false) {
+        toastMgr.error(status.install_hint || 'Duplicate detection is not available on this machine.');
+        return;
+      }
+    } catch (e) {
+      // Fall through and let scan_for_duplicates report the real error.
+    }
+  }
+
+  setTaBtnState($('btn-scan-dedup'), 'loading');
+  $('dedup-results-wrap')?.classList.add('hidden');
+
+  try {
+    if (window.pywebview?.api && typeof window.pywebview.api.scan_for_duplicates === 'function') {
+      const result = await window.pywebview.api.scan_for_duplicates(path);
+      if (result && result.status === 'error') {
+        throw new Error(result.error || 'Scan failed');
+      }
+    }
+    toastMgr.info('Fingerprinting files for duplicates... this can take a while for a large library.');
+  } catch (err) {
+    console.error('[Dedup] start failed:', err);
+    setTaBtnState($('btn-scan-dedup'), 'error');
+    setTimeout(() => setTaBtnState($('btn-scan-dedup'), 'default'), 2500);
+    toastMgr.error(err.message || 'Failed to start duplicate scan');
+  }
+}
+
+// Called by backend when the fingerprint scan finishes
+window.app_dedup_results = function (payload) {
+  setTaBtnState($('btn-scan-dedup'), 'default');
+  renderDuplicateGroups(payload.groups || []);
+};
+
+// Called by backend on scan error
+window.app_dedup_error = function (err) {
+  setTaBtnState($('btn-scan-dedup'), 'error');
+  setTimeout(() => setTaBtnState($('btn-scan-dedup'), 'default'), 2500);
+  toastMgr.error('Duplicate scan failed: ' + err);
+};
+
+function renderDuplicateGroups(groups) {
+  const wrap = $('dedup-results-wrap');
+  const container = $('dedup-groups');
+  if (!wrap || !container) return;
+
+  if (!groups.length) {
+    container.innerHTML = '<div class="s-label" style="font-size:11.5px;">No duplicates found.</div>';
+    wrap.classList.remove('hidden');
+    toastMgr.success('No duplicates found.');
+    return;
+  }
+
+  container.innerHTML = groups.map((group, i) => `
+    <div class="sort-item" style="flex-direction:column;align-items:stretch;gap:6px;cursor:default;">
+      <div class="s-label" style="font-size:11px;">Group ${i + 1} (${group.length} files)</div>
+      ${group.map((path) => `<span class="reg-url" title="${regEscapeHtml(path)}">${regEscapeHtml(path)}</span>`).join('')}
+    </div>`).join('');
+  wrap.classList.remove('hidden');
+  toastMgr.success(`Found ${groups.length} duplicate group(s).`);
+}
+
+// ── Multi-user auth (--web-multiuser; web mode only) ─────────────────────────
+// Desktop/pywebview mode has no concept of accounts, so all of this is a
+// no-op there — gated on __SPOTIFLAC_WEB_MODE__, set only by webapp.py's
+// index() route (see web-shim.js / sw.js for the same gate elsewhere).
+async function checkAuthStatus() {
+  if (!window.__SPOTIFLAC_WEB_MODE__) return;
+  try {
+    const res = await fetch('/api/auth/status');
+    const status = await res.json();
+    $('account-signout-row')?.classList.toggle('hidden', !status.multiuser);
+    if (status.multiuser && !status.logged_in) {
+      $('login-modal')?.classList.remove('hidden');
+    }
+  } catch (e) {
+    // Can't reach the server at all — the rest of the app will surface
+    // its own connection errors; nothing useful to add here.
+  }
+}
+
+async function doLogin() {
+  const username = ($('login-username')?.value || '').trim();
+  const password = $('login-password')?.value || '';
+  const errorEl = $('login-error');
+  if (errorEl) errorEl.textContent = '';
+  if (!username || !password) {
+    if (errorEl) errorEl.textContent = 'Enter a username and password.';
+    return;
+  }
+  const btn = $('login-submit-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (errorEl) errorEl.textContent = data.error || 'Invalid username or password.';
+      return;
+    }
+    $('login-modal')?.classList.add('hidden');
+    $('login-password').value = '';
+    $('account-signout-row')?.classList.remove('hidden');
+  } catch (e) {
+    if (errorEl) errorEl.textContent = 'Could not reach the server.';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+  }
+}
+
+async function doLogout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (e) {
+    // Best-effort — reload regardless so the login screen reappears.
+  }
+  location.reload();
+}
+
 // --- EXPLORE LOGIC ---
 async function loadExploreData() {
   const sectionsContainer = $('explore-sections');
@@ -3559,7 +3951,8 @@ function renderHomeSections(sections) {
 window.addEventListener('pywebviewready', async () => {
   logMessage('Python backend connected.', 'ok');
   loadHistoryAndProfiles();
-  
+  checkAuthStatus();
+
   await loadSettingsFromStorage();
   initSettingsTracking();
   updateSearchMode();
@@ -3650,7 +4043,7 @@ window.showFfmpegWarning = function(result) {
     <button class="ffmpeg-banner-close" onclick="this.closest('.ffmpeg-banner').remove()" title="Dismiss">✕</button>
   `;
 
-  // Inserisci subito dopo la search bar
+  // Insert right after the search bar
   const searchBar = $('search-bar');
   if (searchBar && searchBar.parentNode) {
     searchBar.parentNode.insertBefore(banner, searchBar.nextSibling);

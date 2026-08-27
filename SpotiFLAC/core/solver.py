@@ -623,8 +623,8 @@ def build_chromium_options(*, hidden: bool = True) -> tuple[ChromiumOptions, str
         try:
             shutil.rmtree(profile_dir)
         except Exception:
-            # FIX: Se l'eliminazione fallisce perché un processo zombie di Chrome
-            # tiene i file bloccati, crea al volo una nuova cartella per aggirare il blocco (Errno 13).
+            # FIX: If deletion fails because a zombie Chrome process
+            # is holding the files locked, create a new folder on the fly to work around the lock (Errno 13).
             profile_dir = f"{profile_dir}_{int(time.time() * 1000)}"
 
     # A persistent profile dir. pydoll doesn't have a first-class...
@@ -776,8 +776,10 @@ async def _solve_impl(
     options: ChromiumOptions | None = None
     browser = None
     profile_dir: str | None = None
+
     def cancel_watchdog() -> None:
         return None
+
     try:
         options, profile_dir = build_chromium_options(hidden=True)
     except Exception as exc:
@@ -1080,7 +1082,7 @@ async def _solve_impl(
         await tab.mouse.click(cx, cy)
 
     async def _try_solve_within(window_seconds: float) -> str | None:
-        """Tenta di ottenere il token entro `window_seconds`.
+        """Attempts to obtain the token within `window_seconds`.
 
         The native Turnstile click already happened (if available) during
         `_navigate_with_turnstile_bypass()`/`_open_fresh_page()`, so this
@@ -1198,8 +1200,8 @@ async def _solve_impl(
 
     if not token and not (capture_callback and callback_grant):
         msg = (
-            f"Turnstile token non ottenuto dopo {max_attempts} tentativi "
-            f"({per_attempt_seconds:.0f}s ciascuno)"
+            f"Turnstile token not obtained after {max_attempts} attempts "
+            f"({per_attempt_seconds:.0f}s each)"
         )
         raise TimeoutError(
             msg,

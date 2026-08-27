@@ -28,7 +28,7 @@ MP3 = "mp3"
 SUPPORTED_FORMATS: tuple[str, ...] = (MP3,)
 DEFAULT_MP3_BITRATE = "320k"
 
-# Valori che disabilitano la conversione (utili quando arrivano da GUI/config)
+# Values that disable conversion (useful when they come from GUI/config)
 _DISABLED_VALUES = {"", "none", "off", "no", "original", "source", "keep"}
 
 

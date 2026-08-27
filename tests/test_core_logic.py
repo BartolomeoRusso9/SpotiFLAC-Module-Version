@@ -13,6 +13,8 @@ from SpotiFLAC.core import (
     tagger,
     transcode,
 )
+from SpotiFLAC.core.profiles import ProfileConfig
+from SpotiFLAC.downloader import DownloadOptions
 from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.history import HistoryManager
 from SpotiFLAC.core.isrc_utils import is_valid_isrc, normalize_isrc
@@ -56,8 +58,47 @@ def test_quality_helpers_normalize_and_fallbacks():
     assert quality_for_provider("qobuz", "HI_RES") == "7"
     assert quality_for_provider("tidal", "LOSSLESS") == "LOSSLESS"
     assert quality_for_provider("pandora_native", "LOSSLESS") == "mp3_192"
-    assert map_amazon_community_quality("DOLBY_ATMOS") == "atmos"
+    # Dolby Atmos is Tidal-exclusive: Tidal gets it as-is, everyone else is
+    # treated as HI_RES_LOSSLESS instead (never a token they can't use).
+    assert map_amazon_community_quality("DOLBY_ATMOS") == "24"
     assert map_amazon_community_quality("HI_RES_LOSSLESS") == "24"
+
+
+def test_dolby_atmos_is_exclusive_to_tidal():
+    assert quality_for_provider("tidal", "DOLBY_ATMOS") == "DOLBY_ATMOS"
+    assert quality_for_provider("ext:tidal-web", "DOLBY_ATMOS") == "DOLBY_ATMOS"
+
+    # Every other provider is treated as HI_RES_LOSSLESS instead — same
+    # token that provider's own quality_for_provider branch would produce
+    # for an actual HI_RES_LOSSLESS request.
+    assert quality_for_provider("qobuz", "DOLBY_ATMOS") == quality_for_provider(
+        "qobuz", "HI_RES_LOSSLESS"
+    )
+    assert quality_for_provider("amazon", "DOLBY_ATMOS") == quality_for_provider(
+        "amazon", "HI_RES_LOSSLESS"
+    )
+    assert quality_for_provider("apple", "DOLBY_ATMOS") == quality_for_provider(
+        "apple", "HI_RES_LOSSLESS"
+    )
+    assert quality_for_provider("deezer", "DOLBY_ATMOS") == quality_for_provider(
+        "deezer", "HI_RES_LOSSLESS"
+    )
+    assert quality_for_provider("soundcloud", "DOLBY_ATMOS") == quality_for_provider(
+        "soundcloud", "HI_RES_LOSSLESS"
+    )
+
+
+def test_soundcloud_is_not_a_default_metadata_enrichment_provider():
+    """SoundCloud remains a selectable enrichment provider (CLI --enrich-
+    providers choices, the interactive wizard's options, the GUI checklist
+    item) but is no longer checked/included by default anywhere.
+    """
+    default_providers = DownloadOptions(output_dir=".").enrich_providers
+    assert "soundcloud" not in default_providers
+    assert default_providers == ["deezer", "apple", "qobuz", "tidal"]
+
+    assert "soundcloud" not in ProfileConfig().enrich_providers
+    assert ProfileConfig().enrich_providers == ["deezer", "apple", "qobuz", "tidal"]
 
 
 def test_track_metadata_strips_artists_and_builds_tags():
@@ -486,7 +527,9 @@ def test_extension_manager_deduplicates_registry_checks_in_one_process(
     # depends on the contributor's own filesystem instead of only on the
     # env var it sets below.
     monkeypatch.setattr(registry_config, "ENV_FILES_TO_CHECK", ())
-    monkeypatch.setattr(registry_config, "CONFIG_FILE", tmp_path / "registry_settings.json")
+    monkeypatch.setattr(
+        registry_config, "CONFIG_FILE", tmp_path / "registry_settings.json"
+    )
 
     # Snapshot original state and restore in finally block
     original_checks = ExtensionManager._startup_registry_checks.copy()

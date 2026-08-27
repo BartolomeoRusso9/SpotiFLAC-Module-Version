@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-# Utilizza il path relativo corretto in base a dove hai saved spotfetch.py
+# Uses the relative import path matching spotfetch.py's actual location
 from SpotiFLAC.core.spotify_totp import generate_spotify_totp
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ class SpotifyWebClient:
     """Client per interagire con le API interne (Web Player/GraphQL v2) di Spotify."""
 
     def __init__(self) -> None:
-        # Usiamo httpx.Client al posto di requests.Session per connessioni istantanee
+        # We use httpx.Client instead of requests.Session for instant connections
         limits = httpx.Limits(max_keepalive_connections=15, max_connections=30)
         self._session = httpx.Client(limits=limits, timeout=15.0)
         self._session.headers.update(
@@ -66,7 +66,7 @@ class SpotifyWebClient:
         logger.debug(f"[spotfetch] _get_session_info: device_id={self.device_id}")
 
     def _get_access_token(self) -> None:
-        """Genera il TOTP e ottiene il primo access token (endpoint: /api/token)."""
+        """Generates the TOTP and obtains the first access token (endpoint: /api/token)."""
         code, ver = generate_spotify_totp()
 
         params = {
@@ -77,7 +77,7 @@ class SpotifyWebClient:
             "totpServer": code,
         }
 
-        # Headers come nel codice Go
+        # Headers matching the Go code
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
             "Content-Type": "application/json;charset=UTF-8",
@@ -108,7 +108,7 @@ class SpotifyWebClient:
             raise
 
     def _get_client_token(self) -> None:
-        """Esegue il binding del dispositivo e ottiene il Client-Token definitivo."""
+        """Performs device binding and obtains the final Client-Token."""
         if not (self.client_id and self.device_id and self.client_version):
             self._get_session_info()
             self._get_access_token()
@@ -311,7 +311,7 @@ class SpotifyWebClient:
         return self.query(payload)
 
     def get_track_composer(self, track_id: str) -> str:
-        """Query nativa GraphQL per ottenere i compositori senza scraping HTML."""
+        """Native GraphQL query to get composers without HTML scraping."""
         payload = {
             "variables": {
                 "trackUri": f"spotify:track:{track_id}",
@@ -395,10 +395,10 @@ class SpotifyWebClient:
             logger.error(
                 f"[spotfetch] GraphQL query failed: HTTP {resp.status_code} | {resp.text[:500]}",
             )
-            # Alcune risposte (es. 412 Invalid query hash) contengono un body JSON
-            # che i chiamanti possono interpretare per fare un fallback; non
-            # trasformiamo immediatamente tutto in un'eccezione per semplificare
-            # la logica di fallback a livello superiore.
+            # Some responses (e.g. 412 Invalid query hash) carry a JSON body
+            # that callers can interpret to fall back; we don't immediately
+            # turn everything into an exception, to keep the higher-level
+            # fallback logic simple.
             if resp.status_code == 412:
                 try:
                     return resp.json()
@@ -411,7 +411,7 @@ class SpotifyWebClient:
         return result
 
     def get_track_stats(self, track_id: str) -> dict:
-        """Retrieves il playcount di una singola track tramite API GraphQL interna Spotify."""
+        """Retrieves the playcount of a single track via Spotify's internal GraphQL API."""
         payload = {
             "operationName": "getTrack",
             "variables": {"uri": f"spotify:track:{track_id}"},
@@ -429,7 +429,7 @@ class SpotifyWebClient:
                 f"[spotfetch] Full response for track {track_id}: {json.dumps(data)[:500]}",
             )
 
-            # Estrazione diretta in stile Go
+            # Direct extraction, Go-style
             track_data = data.get("data", {}).get("trackUnion", {})
             playcount = track_data.get("playcount", "")
 
@@ -529,8 +529,8 @@ class SpotifyWebClient:
             return {}
 
     def get_album_stats(self, album_id: str, offset: int = 0, limit: int = 100) -> dict:
-        """Retrieves il playcount di tutte le tracks di un album in un'unica richiesta GraphQL.
-        Returns un dizionario con track_id come chiave.
+        """Retrieves the playcount of every track in an album in a single GraphQL request.
+        Returns a dict keyed by track_id.
         """
         payload = {
             "operationName": "getAlbum",
@@ -670,7 +670,7 @@ class SpotifyWebClient:
         return "".join(f"{b:02x}" for b in reversed(bytes_))
 
     def get_isrc_from_metadata(self, track_id: str) -> str:
-        """Retrieves l'ISRC dall'endpoint binario spclient (stesso approccio del JS)."""
+        """Retrieves the ISRC from spclient's binary endpoint (same approach as the JS)."""
         try:
             gid = self.spotify_id_to_hex_gid(track_id)
             resp = self._session.get(
