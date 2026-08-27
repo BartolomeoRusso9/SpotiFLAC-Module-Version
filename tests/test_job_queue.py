@@ -50,7 +50,6 @@ def test_jobs_run_in_submission_order_with_one_worker():
     def handler(payload):
         with lock:
             order.append(payload["n"])
-        return None
 
     q = JobQueue(handler=handler, workers=1)
     jobs = [q.submit("alice", {"n": i}) for i in range(10)]
@@ -115,7 +114,6 @@ def test_multiple_workers_process_concurrently():
         release.wait(timeout=2.0)
         with lock:
             concurrent_count["value"] -= 1
-        return None
 
     q = JobQueue(handler=handler, workers=3)
     jobs = [q.submit("alice", {}) for _ in range(3)]

@@ -139,8 +139,7 @@ def fingerprint_similarity(a: tuple[int, ...], b: tuple[int, ...]) -> float:
             continue
         bit_errors = sum(_popcount(x ^ y) for x, y in pairs)
         similarity = 1.0 - (bit_errors / (len(pairs) * 32))
-        if similarity > best:
-            best = similarity
+        best = max(best, similarity)
 
     return best
 

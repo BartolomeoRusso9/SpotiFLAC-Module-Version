@@ -13,8 +13,6 @@ from SpotiFLAC.core import (
     tagger,
     transcode,
 )
-from SpotiFLAC.core.profiles import ProfileConfig
-from SpotiFLAC.downloader import DownloadOptions
 from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.history import HistoryManager
 from SpotiFLAC.core.isrc_utils import is_valid_isrc, normalize_isrc
@@ -25,12 +23,14 @@ from SpotiFLAC.core.models import (
     build_filename,
     sanitize,
 )
+from SpotiFLAC.core.profiles import ProfileConfig
 from SpotiFLAC.core.quality import (
     map_amazon_community_quality,
     normalize_quality,
     quality_fallback_chain,
     quality_for_provider,
 )
+from SpotiFLAC.downloader import DownloadOptions
 from SpotiFLAC.extensions import registry_config
 from SpotiFLAC.extensions.manager import (
     ExtensionManager,

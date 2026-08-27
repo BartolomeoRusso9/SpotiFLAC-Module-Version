@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-import SpotiFLAC.core.node_check as node_check
+from SpotiFLAC.core import node_check
 from SpotiFLAC.extensions.runtime import ExtensionRuntimeError, JSRuntime
 
 

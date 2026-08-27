@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import subprocess
 
-
 from SpotiFLAC.core import node_check
 
 

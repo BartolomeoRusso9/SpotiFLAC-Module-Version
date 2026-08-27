@@ -97,7 +97,7 @@ def test_find_duplicate_groups_is_transitive_via_union_find():
 
 def test_find_duplicate_groups_returns_nothing_for_all_unique_files():
     fingerprints = [
-        _fp("a.flac", 100.0, tuple(range(0, 100))),
+        _fp("a.flac", 100.0, tuple(range(100))),
         _fp("b.flac", 150.0, tuple(range(1000, 1100))),
     ]
     assert af.find_duplicate_groups(fingerprints) == []

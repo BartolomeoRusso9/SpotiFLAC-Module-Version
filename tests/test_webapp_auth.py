@@ -57,13 +57,11 @@ def test_websocket_rejects_missing_or_wrong_token() -> None:
     app = webapp.create_app(token="s3cret")
     client = TestClient(app)
 
-    with pytest.raises(Exception):
-        with client.websocket_connect("/ws"):
-            pass
+    with pytest.raises(Exception), client.websocket_connect("/ws"):
+        pass
 
-    with pytest.raises(Exception):
-        with client.websocket_connect("/ws?token=wrong"):
-            pass
+    with pytest.raises(Exception), client.websocket_connect("/ws?token=wrong"):
+        pass
 
 
 def test_websocket_accepts_correct_query_token() -> None:

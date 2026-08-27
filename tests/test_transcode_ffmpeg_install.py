@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-import SpotiFLAC.core.ffmpeg_check as ffmpeg_check
-from SpotiFLAC.core import transcode
+from SpotiFLAC.core import ffmpeg_check, transcode
 from SpotiFLAC.core.errors import SpotiflacError
 
 
