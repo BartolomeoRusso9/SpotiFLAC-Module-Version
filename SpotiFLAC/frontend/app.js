@@ -4023,8 +4023,14 @@ setTimeout(() => {
 }, 500);
 
 // ── ffmpeg warning banner ─────────────────────────────────────────────────
+// Informational only — SpotiFLAC will still try to install ffmpeg itself
+// the first time MP3 transcoding is actually used (see
+// core/ffmpeg_check.py's ensure_ffmpeg_installed()); this banner just means
+// that hasn't happened/worked yet, not that nothing will be attempted. Tidal
+// FLAC muxing and Amazon decryption have no such auto-install and will keep
+// failing until ffmpeg is available one way or another.
 window.showFfmpegWarning = function(result) {
-  // Evita banner duplicati
+  // Avoid duplicate banners
   if ($('ffmpeg-warning-banner')) return;
 
   const banner = document.createElement('div');
@@ -4034,7 +4040,7 @@ window.showFfmpegWarning = function(result) {
     <span class="ffmpeg-banner-icon">⚠</span>
     <div class="ffmpeg-banner-body">
       <strong>ffmpeg not found</strong>
-      <span>Tidal FLAC muxing and Amazon decryption will be unavailable.</span>
+      <span>Tidal FLAC muxing and Amazon decryption will be unavailable. MP3 transcoding will try to install ffmpeg automatically the first time you use it.</span>
       <a href="#" class="ffmpeg-banner-link"
         onclick="event.preventDefault(); pyWin('open_url', 'https://ffmpeg.org/download.html')">
         Download ffmpeg
@@ -4044,6 +4050,36 @@ window.showFfmpegWarning = function(result) {
   `;
 
   // Insert right after the search bar
+  const searchBar = $('search-bar');
+  if (searchBar && searchBar.parentNode) {
+    searchBar.parentNode.insertBefore(banner, searchBar.nextSibling);
+  }
+};
+
+// ── Node.js warning banner ───────────────────────────────────────────────────
+// Informational only, like the ffmpeg one above — SpotiFLAC still tries to
+// install Node itself the first time a JS extension actually runs (see
+// core/node_check.py); this banner just means that hasn't happened/worked
+// yet, not that nothing will be attempted.
+window.showNodeWarning = function(result) {
+  if ($('node-warning-banner')) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'node-warning-banner';
+  banner.className = 'ffmpeg-banner';
+  banner.innerHTML = `
+    <span class="ffmpeg-banner-icon">⚠</span>
+    <div class="ffmpeg-banner-body">
+      <strong>Node.js not found</strong>
+      <span>JavaScript extensions won't work until it's installed — SpotiFLAC will try to install it automatically the first time you use one.</span>
+      <a href="#" class="ffmpeg-banner-link"
+        onclick="event.preventDefault(); pyWin('open_url', 'https://nodejs.org/en/download')">
+        Download Node.js
+      </a>
+    </div>
+    <button class="ffmpeg-banner-close" onclick="this.closest('.ffmpeg-banner').remove()" title="Dismiss">✕</button>
+  `;
+
   const searchBar = $('search-bar');
   if (searchBar && searchBar.parentNode) {
     searchBar.parentNode.insertBefore(banner, searchBar.nextSibling);

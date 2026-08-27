@@ -1,20 +1,13 @@
-"""ffmpeg availability check + best-effort auto-install for transcoding.
+"""Node.js availability check + best-effort auto-install for JS extensions.
 
-Mirrors core/node_check.py's shape (check_ffmpeg() / print_ffmpeg_warning()
-for the startup check, plus ensure_ffmpeg_installed()): a best-effort install
-via whatever system package manager is actually on PATH. Unlike Node.js,
-ffmpeg is only ever auto-installed for one specific, opt-in workflow —
-MP3 transcoding (see core/transcode.py's ensure_ffmpeg_available(), the sole
-caller) — so it stays lazy in the exact same sense: nothing is attempted
-until a run actually asks for it.
+Mirrors core/ffmpeg_check.py's shape (check_node() / print_node_warning())
+for the startup check, plus ensure_node_installed(): a best-effort install
+via whatever system package manager is actually on PATH, matching the
+README's documented behavior ("the first time a JavaScript extension is
+used") — called lazily from extensions/runtime.py's JSRuntime.start(),
+not eagerly at every app startup.
 
-Tidal-style segment muxing and Amazon-style decryption also depend on
-ffmpeg (see extensions/provider.py), but those run deep inside a per-track
-pipeline with no single "about to start" gate to hook into, so they are
-intentionally left as before: a missing ffmpeg still fails those the same
-way it always did, reported via the startup check below.
-
-Design choices worth knowing (identical reasoning to node_check.py):
+Design choices worth knowing:
   - Never escalates privileges itself (no sudo/runas is ever prepended).
     On Linux the plain package-manager command is attempted as-is; if that
     fails because it needs root, the failure is reported with the exact
@@ -28,8 +21,8 @@ Design choices worth knowing (identical reasoning to node_check.py):
     nothing attached to answer it.
   - Bounded by a timeout (install can be slow — first-time apt-get update,
     a cold winget cache, ...) so a stuck installer can't hang the caller
-    forever; the caller (ensure_ffmpeg_available()) already accepts this
-    may take a while as the cost of "first transcode of the run".
+    forever; the caller (JSRuntime.start()) already accepts this may take
+    a while as the cost of "first extension run".
 """
 
 from __future__ import annotations
@@ -42,36 +35,38 @@ import subprocess
 
 logger = logging.getLogger(__name__)
 
-_DOWNLOAD_URL = "https://ffmpeg.org/download.html"
+_DOWNLOAD_URL = "https://nodejs.org/en/download"
 _INSTALL_TIMEOUT_S = 300  # 5 minutes — package installs can be genuinely slow
 
 
-def check_ffmpeg() -> dict:
-    """Returns dict with keys: available (bool), version (str), error (str)."""
+def check_node(node_executable: str = "node") -> dict:
+    """Returns dict with keys: available (bool), version (str), error (str).
+    Mirrors ffmpeg_check.check_ffmpeg()'s shape exactly.
+    """
     result = {"available": False, "version": "", "error": ""}
     try:
         proc = subprocess.run(
-            ["ffmpeg", "-version"],
+            [node_executable, "-v"],
             capture_output=True,
             text=True,
             timeout=5,
         )
         if proc.returncode == 0:
             result["available"] = True
-            result["version"] = proc.stdout.split("\n")[0].strip()
+            result["version"] = proc.stdout.strip().split("\n")[0].strip()
         else:
-            result["error"] = "ffmpeg returned non-zero exit code"
+            result["error"] = "node returned non-zero exit code"
     except FileNotFoundError:
-        result["error"] = "ffmpeg not found in PATH"
+        result["error"] = "node not found in PATH"
     except subprocess.TimeoutExpired:
-        result["error"] = "ffmpeg check timed out"
+        result["error"] = "node check timed out"
     except Exception as exc:
         result["error"] = str(exc)
 
     if result["available"]:
-        logger.debug("[ffmpeg] Found: %s", result["version"])
+        logger.debug("[node] Found: %s", result["version"])
     else:
-        logger.warning("[ffmpeg] Not available: %s", result["error"])
+        logger.warning("[node] Not available: %s", result["error"])
 
     return result
 
@@ -80,19 +75,19 @@ def _package_manager_command() -> tuple[str, list[str]] | None:
     """Returns (manager_name, install_argv) for the first package manager
     found on PATH for the current OS, or None if none of the documented
     ones are available. Every command is non-interactive on purpose — see
-    the module docstring. Mirrors node_check._package_manager_command().
+    the module docstring.
     """
     system = platform.system()
 
     if system == "Linux":
         candidates = [
-            ("apt-get", ["apt-get", "install", "-y", "ffmpeg"]),
-            ("dnf", ["dnf", "install", "-y", "ffmpeg"]),
-            ("yum", ["yum", "install", "-y", "ffmpeg"]),
-            ("pacman", ["pacman", "-Sy", "--noconfirm", "ffmpeg"]),
+            ("apt-get", ["apt-get", "install", "-y", "nodejs"]),
+            ("dnf", ["dnf", "install", "-y", "nodejs"]),
+            ("yum", ["yum", "install", "-y", "nodejs"]),
+            ("pacman", ["pacman", "-Sy", "--noconfirm", "nodejs"]),
         ]
     elif system == "Darwin":
-        candidates = [("brew", ["brew", "install", "ffmpeg"])]
+        candidates = [("brew", ["brew", "install", "node"])]
     elif system == "Windows":
         candidates = [
             (
@@ -101,13 +96,13 @@ def _package_manager_command() -> tuple[str, list[str]] | None:
                     "winget",
                     "install",
                     "--id",
-                    "Gyan.FFmpeg",
+                    "OpenJS.NodeJS",
                     "-e",
                     "--accept-package-agreements",
                     "--accept-source-agreements",
                 ],
             ),
-            ("choco", ["choco", "install", "ffmpeg", "-y"]),
+            ("choco", ["choco", "install", "nodejs", "-y"]),
         ]
     else:
         candidates = []
@@ -122,43 +117,42 @@ def _manual_install_hint() -> str:
     system = platform.system()
     if system == "Linux":
         return (
-            "Install ffmpeg yourself, e.g. one of:\n"
-            "    sudo apt-get install -y ffmpeg   (Debian/Ubuntu)\n"
-            "    sudo dnf install -y ffmpeg        (Fedora — may need RPM Fusion)\n"
-            "    sudo yum install -y ffmpeg        (RHEL/CentOS — may need EPEL/RPM Fusion)\n"
-            "    sudo pacman -Sy ffmpeg            (Arch)\n"
+            "Install Node.js yourself, e.g. one of:\n"
+            "    sudo apt-get install -y nodejs   (Debian/Ubuntu)\n"
+            "    sudo dnf install -y nodejs        (Fedora)\n"
+            "    sudo yum install -y nodejs        (RHEL/CentOS)\n"
+            "    sudo pacman -Sy nodejs            (Arch)\n"
             f"or download it from {_DOWNLOAD_URL}"
         )
     if system == "Darwin":
         return (
-            "Install ffmpeg yourself, e.g.:\n"
-            "    brew install ffmpeg\n"
+            "Install Node.js yourself, e.g.:\n"
+            "    brew install node\n"
             f"or download it from {_DOWNLOAD_URL}"
         )
     if system == "Windows":
         return (
-            "Install ffmpeg yourself, e.g. one of:\n"
-            "    winget install --id Gyan.FFmpeg -e\n"
-            "    choco install ffmpeg\n"
+            "Install Node.js yourself, e.g. one of:\n"
+            "    winget install --id OpenJS.NodeJS -e\n"
+            "    choco install nodejs\n"
             f"or download it from {_DOWNLOAD_URL}"
         )
-    return f"Install ffmpeg from {_DOWNLOAD_URL}"
+    return f"Install Node.js ≥ 16 from {_DOWNLOAD_URL}"
 
 
-def ensure_ffmpeg_installed(*, print_progress: bool = True) -> dict:
-    """If ffmpeg isn't found, attempts a best-effort install via whatever
-    system package manager is on PATH for this OS (see the MP3 Transcoding
-    section of the README for the supported list), printing progress the
-    whole way through since this can take a while and would otherwise look
-    like SpotiFLAC hanging.
+def ensure_node_installed(
+    node_executable: str = "node", *, print_progress: bool = True
+) -> dict:
+    """If `node_executable` isn't found, attempts a best-effort install via
+    whatever system package manager is on PATH for this OS (see the
+    README's Extensions section for the supported list), printing progress
+    the whole way through since this can take a while and would otherwise
+    look like SpotiFLAC hanging.
 
-    Always returns the same shape as check_ffmpeg() — call it again after
+    Always returns the same shape as check_node() — call it again after
     this to see whether it actually worked. Never raises: a failed install
     attempt is reported in the returned dict's "error", not as an exception,
     so the caller can fall back to its own error message either way.
-
-    Mirrors node_check.ensure_node_installed() exactly, including every
-    safety guarantee described in the module docstring.
     """
 
     def _say(msg: str) -> None:
@@ -166,21 +160,21 @@ def ensure_ffmpeg_installed(*, print_progress: bool = True) -> dict:
             print(msg)
         logger.info(msg)
 
-    result = check_ffmpeg()
+    result = check_node(node_executable)
     if result["available"]:
         return result
 
     picked = _package_manager_command()
     if picked is None:
         result["error"] = (
-            f"ffmpeg not found and no supported package manager is on "
+            f"Node.js not found and no supported package manager is on "
             f"PATH for this OS. {_manual_install_hint()}"
         )
         return result
 
     manager_name, argv = picked
     _say(
-        f"[ffmpeg] ffmpeg not found — attempting to install it automatically "
+        f"[node] Node.js not found — attempting to install it automatically "
         f"via {manager_name} (this can take a few minutes the first time)…"
     )
 
@@ -194,15 +188,15 @@ def ensure_ffmpeg_installed(*, print_progress: bool = True) -> dict:
     except subprocess.TimeoutExpired:
         result["error"] = (
             f"Timed out after {_INSTALL_TIMEOUT_S}s waiting for `{manager_name}` "
-            f"to install ffmpeg. {_manual_install_hint()}"
+            f"to install Node.js. {_manual_install_hint()}"
         )
-        _say(f"[ffmpeg] {result['error']}")
+        _say(f"[node] {result['error']}")
         return result
     except Exception as exc:
         result["error"] = (
             f"Failed to run {manager_name}: {exc}. {_manual_install_hint()}"
         )
-        _say(f"[ffmpeg] {result['error']}")
+        _say(f"[node] {result['error']}")
         return result
 
     if proc.returncode != 0:
@@ -217,39 +211,41 @@ def ensure_ffmpeg_installed(*, print_progress: bool = True) -> dict:
             f"{manager_name} exited with code {proc.returncode}: "
             f"{stderr_tail[0]}.{sudo_hint} {_manual_install_hint()}"
         )
-        _say(f"[ffmpeg] Automatic install failed. {result['error']}")
+        _say(f"[node] Automatic install failed. {result['error']}")
         return result
 
-    _say(f"[ffmpeg] {manager_name} finished. Verifying ffmpeg is now available…")
-    result = check_ffmpeg()
+    _say(f"[node] {manager_name} finished. Verifying Node.js is now available…")
+    result = check_node(node_executable)
     if result["available"]:
-        _say(f"[ffmpeg] ffmpeg installed successfully: {result['version']}")
+        _say(f"[node] Node.js installed successfully: {result['version']}")
     else:
         result["error"] = (
-            f"{manager_name} reported success but `ffmpeg` still isn't on "
-            f"PATH — you may need to restart your terminal/shell for the "
-            f"change to take effect. {_manual_install_hint()}"
+            f"{manager_name} reported success but `{node_executable}` still "
+            f"isn't on PATH — you may need to restart your terminal/shell "
+            f"for the change to take effect. {_manual_install_hint()}"
         )
-        _say(f"[ffmpeg] {result['error']}")
+        _say(f"[node] {result['error']}")
     return result
 
 
-def print_ffmpeg_warning(result: dict | None = None) -> dict:
-    """Prints a CLI warning if ffmpeg is missing. Returns the check dict."""
+def print_node_warning(result: dict | None = None) -> dict:
+    """Prints a CLI warning if Node.js is missing. Returns the check dict.
+    Mirrors ffmpeg_check.print_ffmpeg_warning()'s shape exactly.
+    """
     if result is None:
-        result = check_ffmpeg()
+        result = check_node()
 
     if result["available"]:
         return result
 
     lines = [
-        "⚠  ffmpeg NOT FOUND  ⚠",
+        "⚠  Node.js NOT FOUND  ⚠",
         "",
-        f"   Error:    {result['error']}",
-        "   Tidal FLAC muxing and Amazon decryption will fail until it's",
-        "   installed. MP3 transcoding (--mp3) will try to install it",
-        "   automatically when you first use it; otherwise install it",
-        "   yourself:",
+        f"   Error:   {result['error']}",
+        "   JavaScript extensions won't work until Node.js is installed —",
+        "   SpotiFLAC will try to install it automatically the first time",
+        "   you use one (see the Extensions section of the README for the",
+        "   supported package managers), or install it yourself:",
         f"   {_DOWNLOAD_URL}",
     ]
     for _line in lines:

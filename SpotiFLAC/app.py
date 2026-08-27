@@ -122,6 +122,7 @@ class SpotiFLAC_API(
         self.log("Python Backend connected.", "info")
         self.log(f"Default download folder: {self.download_dir}", "info")
         self._check_ffmpeg_startup()
+        self._check_node_startup()
         try:
             from .extensions.manager import ExtensionManager
 
@@ -180,7 +181,9 @@ class SpotiFLAC_API(
             else:
                 self.log(
                     "⚠  ffmpeg not found — Tidal FLAC muxing and Amazon "
-                    "decryption will fail. Install: https://ffmpeg.org/download.html",
+                    "decryption will fail. MP3 transcoding will try to install "
+                    "it automatically the first time you use it; otherwise "
+                    "install: https://ffmpeg.org/download.html",
                     "error",
                 )
                 try:
@@ -189,6 +192,34 @@ class SpotiFLAC_API(
                     pass
         except Exception as exc:
             self.log(f"ffmpeg check error: {exc}", "warn")
+
+    def _check_node_startup(self) -> None:
+        # Informational only — this never attempts to install Node itself;
+        # that only happens lazily, the first time a JS extension actually
+        # runs (see extensions/runtime.py's JSRuntime.start() /
+        # core/node_check.py's ensure_node_installed()).
+        try:
+            from .core.node_check import check_node
+
+            result = check_node()
+            if result["available"]:
+                self.log(f"Node.js: {result['version']}", "ok")
+            else:
+                self.log(
+                    "⚠  Node.js not found — JavaScript extensions won't work "
+                    "until it's installed. SpotiFLAC will try to install it "
+                    "automatically the first time you use one; see the "
+                    "Extensions section of the README for the supported "
+                    "package managers, or install it yourself: "
+                    "https://nodejs.org/en/download",
+                    "error",
+                )
+                try:
+                    self._push("showNodeWarning", result)
+                except Exception:
+                    pass
+        except Exception as exc:
+            self.log(f"Node.js check error: {exc}", "warn")
 
     def get_artist_images(self, url):
         # Not implemented: returns an empty list to trigger the JS fallback
@@ -199,6 +230,11 @@ class SpotiFLAC_API(
         from .core.ffmpeg_check import check_ffmpeg
 
         return check_ffmpeg()
+
+    def get_node_status(self) -> dict:
+        from .core.node_check import check_node
+
+        return check_node()
 
     # ── UI communication ──────────────────────────────────────────────────────
 

@@ -320,7 +320,7 @@ spotiflac URL ./out \
   --service ext:tidal-web ext:qobuz-web
 ```
 
-> **Note:** If Node.js is not installed, SpotiFLAC automatically attempts to install it the first time a JavaScript extension is used.
+> **Note:** If Node.js is not installed, SpotiFLAC automatically attempts to install it the first time a JavaScript extension is used, printing progress as it goes (`core/node_check.py`) — it never escalates privileges itself (no `sudo`/`runas` is ever added on your behalf), so on Linux this works out of the box when already running as root (e.g. inside the Docker image) and otherwise falls back to telling you the exact command to run yourself. A startup check (same idea as the ffmpeg one) also warns upfront if Node.js is missing, independent of whether the auto-install ends up working.
 >
 > Supported package managers:
 >
@@ -680,7 +680,7 @@ SpotiFLAC(
 
 Downloads use the selected quality profile: `HI_RES_LOSSLESS` requests the best available lossless tier, while `LOSSLESS` requests standard lossless audio. Set `transcode_to="mp3"` (Python) or `--mp3` / `--transcode mp3` (CLI) to convert every finished track to MP3 — 320 kbps by default — for players or car stereos that cannot handle lossless files. Tags, cover art and lyrics are carried over to the MP3, and the original file is deleted once the conversion succeeds unless `transcode_keep_original` / `--keep-original` is set.
 
-Requires `ffmpeg` on your `PATH`: the run stops immediately with a clear error if it is missing, so you never download a whole album only to fail at the conversion step.
+Requires `ffmpeg`. Checked upfront — before any track downloads — so you never download a whole album only to fail at the conversion step. If it's not on your `PATH`, SpotiFLAC automatically attempts to install it right there, printing progress as it goes (`core/ffmpeg_check.py`), using the same package managers and privilege rules as the Node.js auto-install described above (never escalates privileges itself); the run only fails if that attempt doesn't work out. Tidal FLAC muxing and Amazon decryption also need ffmpeg but have no such auto-install — they just fail if it's missing, same as before.
 
 ```bash
 # CLI — every track ends up as a 320 kbps MP3

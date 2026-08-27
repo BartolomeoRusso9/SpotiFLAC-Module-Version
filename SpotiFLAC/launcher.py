@@ -793,6 +793,7 @@ async def amain() -> None:
     Handles startup checks, extension installation, configuration loading, profile management, argument parsing, and download execution across the supported application modes.
     """
     from .core.ffmpeg_check import print_ffmpeg_warning
+    from .core.node_check import print_node_warning
 
     _print_welcome_banner()
 
@@ -975,6 +976,7 @@ async def amain() -> None:
 
     if "--interactive" in sys.argv:
         print_ffmpeg_warning()
+        print_node_warning()
         cfg = await run_interactive()
 
         verbose = (
@@ -1051,6 +1053,7 @@ async def amain() -> None:
         return
 
     print_ffmpeg_warning()
+    print_node_warning()
     profile_defaults: dict = {}
     if "--profile" in sys.argv:
         idx = sys.argv.index("--profile")

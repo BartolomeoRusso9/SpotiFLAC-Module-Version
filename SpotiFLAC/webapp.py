@@ -115,6 +115,7 @@ ALLOWED_METHODS: set[str] = {
     "get_latest_version",
     "get_artist_images",
     "get_ffmpeg_status",
+    "get_node_status",
     "save_settings",
     "load_settings",
     "get_registries",
@@ -242,6 +243,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             "info",
         )
         await run_in_threadpool(api._check_ffmpeg_startup)
+        await run_in_threadpool(api._check_node_startup)
         try:
             from .extensions.manager import ExtensionManager
 

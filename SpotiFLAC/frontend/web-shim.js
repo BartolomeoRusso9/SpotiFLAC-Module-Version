@@ -36,7 +36,7 @@
   }
 
   const REMOTE_METHODS = [
-    'get_version', 'get_latest_version', 'get_artist_images', 'get_ffmpeg_status',
+    'get_version', 'get_latest_version', 'get_artist_images', 'get_ffmpeg_status', 'get_node_status',
     'save_settings', 'load_settings', 'get_registries', 'add_registry', 'remove_registry',
     'get_history', 'get_profiles', 'load_profile_data', 'cache_image', 'get_spotify_home_feed',
     'search_provider', 'search_provider_async', 'search_code', 'remove_history_item',
