@@ -418,6 +418,30 @@ def _print_registries(registries: list[dict]) -> None:
         print(f"     {DIM(f'source: {sources}  ·  {state}')}")
 
 
+async def _sync_extensions_from_registries() -> None:
+    """Install/update download extensions right after the user edits the
+    registry list, instead of waiting for the next launch.
+
+    On the very first run the startup auto-setup runs before any registry is
+    configured and does nothing, so a registry added later in this same wizard
+    would otherwise only take effect on the next launch. Building a fresh
+    manager here re-runs the check now that a registry exists (the per-process
+    dedup key includes the registry URLs, so this is not skipped).
+    """
+    print(DIM("  Fetching extensions from registry..."))
+    try:
+        await asyncio.to_thread(lambda: ExtensionManager(auto_install_downloads=True))
+    except Exception as e:
+        print(f"  {RED('Unable to install extensions:')} {e}")
+        return
+
+    services = _installed_service_options()
+    if services:
+        print(f"  {GREEN('Installed providers:')} {', '.join(services)}")
+    else:
+        print(DIM("  No download providers found in the configured registries."))
+
+
 async def _manage_registries_section() -> None:
     """Lets the user inspect, add, or remove extension-registry links.
 
@@ -429,6 +453,8 @@ async def _manage_registries_section() -> None:
         from .extensions import registry_config
     except Exception:
         return
+
+    registries_changed = False
 
     while True:
         registries = await asyncio.to_thread(registry_config.list_registries)
@@ -446,6 +472,8 @@ async def _manage_registries_section() -> None:
             raise _BackRequested
 
         if not val:
+            if registries_changed:
+                await _sync_extensions_from_registries()
             return
 
         val_lower = val.lower()
@@ -455,6 +483,7 @@ async def _manage_registries_section() -> None:
             if url:
                 try:
                     await asyncio.to_thread(registry_config.add_registry, url)
+                    registries_changed = True
                 except Exception as e:
                     print(f"  {RED('Unable to add registry:')} {e}")
             continue
@@ -469,6 +498,7 @@ async def _manage_registries_section() -> None:
                         await asyncio.to_thread(
                             registry_config.remove_registry, url_to_remove
                         )
+                        registries_changed = True
                     except Exception as e:
                         print(f"  {RED('Unable to remove registry:')} {e}")
                     continue
