@@ -343,4 +343,4 @@ def test_print_node_warning_prints_guidance_when_missing(capsys) -> None:
     out = capsys.readouterr().out
     assert "Node.js NOT FOUND" in out
     assert "node not found in PATH" in out
-    assert "nodejs.org" in out
+    assert node_check._DOWNLOAD_URL in out

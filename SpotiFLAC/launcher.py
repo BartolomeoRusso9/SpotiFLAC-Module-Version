@@ -971,7 +971,11 @@ async def amain() -> None:
         if not keys:
             print("No trusted keys configured.")
         for k in keys:
-            print(f"{k['name']}: {k['public_key_b64']}")
+            key_b64 = k.get("public_key_b64", "") or ""
+            masked_key = (
+                f"{key_b64[:8]}...{key_b64[-8:]}" if len(key_b64) > 16 else "***"
+            )
+            print(f"{k['name']}: {masked_key}")
         return
 
     if "--interactive" in sys.argv:

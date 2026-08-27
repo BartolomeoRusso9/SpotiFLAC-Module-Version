@@ -303,4 +303,4 @@ def test_print_ffmpeg_warning_mentions_transcode_auto_install(capsys) -> None:
     out = capsys.readouterr().out
     assert "ffmpeg NOT FOUND" in out
     assert "automatically" in out
-    assert "ffmpeg.org" in out
+    assert ffmpeg_check._DOWNLOAD_URL in out
