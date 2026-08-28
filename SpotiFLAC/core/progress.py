@@ -284,17 +284,15 @@ class DownloadManager:
         self.session_start = 0.0
 
     def get_stats_sync(self) -> dict:
-        """Sync wrapper for callers (e.g. pywebview) that can't await."""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self.get_stats())
-        if loop.is_running():
-            import concurrent.futures
+        """Sync wrapper for callers (e.g. pywebview) that can't await.
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                return ex.submit(asyncio.run, self.get_stats()).result()
-        return loop.run_until_complete(self.get_stats())
+        This one is polled on a timer while a download runs (see app.py's
+        _download_stats_monitor), so the old version's "spin up a loop per
+        call" was a steady drip of loop churn for the life of every download.
+        """
+        from .loop_runner import run_sync
+
+        return run_sync(self.get_stats())
 
     async def add_to_queue(
         self,

@@ -29,6 +29,127 @@
     return data.result;
   }
 
+
+  // ── Login (multi-user mode only) ───────────────────────────────────────
+  //
+  // Until now `--web-multiuser` had no way in from a browser at all: the
+  // README's instruction was to POST /api/auth/login with curl and let the
+  // cookie carry you. This puts a form in front of the app when the server
+  // says one is needed, and gets out of the way entirely when it isn't —
+  // single-user instances never see any of it.
+
+  function buildLoginOverlay() {
+    const overlay = document.createElement('div');
+    overlay.id = 'sf-login-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'sf-login-title');
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:99999',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'background:rgba(8,12,14,.86)', 'backdrop-filter:blur(6px)',
+      'font-family:system-ui,-apple-system,Segoe UI,sans-serif',
+    ].join(';');
+
+    const card = document.createElement('form');
+    card.style.cssText = [
+      'background:#141a1d', 'color:#e6edee', 'padding:28px 30px',
+      'border:1px solid #263238', 'border-radius:10px',
+      'min-width:min(340px,90vw)', 'display:flex', 'flex-direction:column',
+      'gap:14px', 'box-shadow:0 24px 60px -20px rgba(0,0,0,.8)',
+    ].join(';');
+
+    const title = document.createElement('h2');
+    title.id = 'sf-login-title';
+    title.textContent = 'Sign in to SpotiFLAC';
+    title.style.cssText = 'margin:0;font-size:1.15rem;font-weight:600';
+
+    const user = document.createElement('input');
+    user.type = 'text';
+    user.name = 'username';
+    user.placeholder = 'Username';
+    user.autocomplete = 'username';
+    user.required = true;
+
+    const pass = document.createElement('input');
+    pass.type = 'password';
+    pass.name = 'password';
+    pass.placeholder = 'Password';
+    pass.autocomplete = 'current-password';
+    pass.required = true;
+
+    for (const field of [user, pass]) {
+      field.style.cssText = [
+        'padding:10px 12px', 'border-radius:6px', 'border:1px solid #2d3a40',
+        'background:#0e1417', 'color:inherit', 'font-size:.95rem',
+      ].join(';');
+    }
+
+    const submit = document.createElement('button');
+    submit.type = 'submit';
+    submit.textContent = 'Sign in';
+    submit.style.cssText = [
+      'padding:10px 12px', 'border-radius:6px', 'border:0', 'cursor:pointer',
+      'background:#1db954', 'color:#062313', 'font-weight:600',
+      'font-size:.95rem',
+    ].join(';');
+
+    const error = document.createElement('p');
+    error.setAttribute('role', 'alert');
+    error.style.cssText = 'margin:0;min-height:1.2em;color:#f0685b;font-size:.85rem';
+
+    card.append(title, user, pass, submit, error);
+    overlay.appendChild(card);
+
+    card.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      submit.disabled = true;
+      error.textContent = '';
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user.value, password: pass.value }),
+        });
+        if (res.ok) {
+          // Reload rather than patch state in place: the whole app boots
+          // against one account, and this way it boots against the right one.
+          window.location.reload();
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        // 429 carries the backoff from LoginRateLimiter; say how long rather
+        // than leaving the button looking broken.
+        const retry = res.headers.get('Retry-After');
+        error.textContent = res.status === 429 && retry
+          ? `Too many attempts. Try again in ${retry}s.`
+          : (data.error || 'Sign-in failed.');
+      } catch {
+        error.textContent = 'Could not reach the server.';
+      } finally {
+        submit.disabled = false;
+        pass.value = '';
+      }
+    });
+
+    return { overlay, user };
+  }
+
+  async function ensureSignedIn() {
+    let status;
+    try {
+      status = await (await fetch('/api/auth/status')).json();
+    } catch {
+      return true;  // server unreachable: let the app show its own error
+    }
+    if (!status.multiuser || status.logged_in) return true;
+
+    const { overlay, user } = buildLoginOverlay();
+    document.body.appendChild(overlay);
+    user.focus();
+    return false;
+  }
+
   function makeMethod(name) {
     return function (...args) {
       return callApi(name, args);
@@ -212,11 +333,21 @@
       setTimeout(connectWs, 2000);
     };
   }
-  connectWs();
-
-  // pywebview normally fires this once its bridge is ready; app.js may
-  // listen for it, so we fire it too, once the DOM is ready.
-  document.addEventListener('DOMContentLoaded', () => {
+  // Gate the WebSocket on being signed in: an unauthenticated /ws is closed
+  // with 1008 by the server anyway, and retrying it every 2s behind a login
+  // form is just noise in the console.
+  document.addEventListener('DOMContentLoaded', async () => {
+    const signedIn = await ensureSignedIn();
+    if (!signedIn) return;
+    connectWs();
+    // pywebview normally fires this once its bridge is ready; app.js may
+    // listen for it, so we fire it too.
     window.dispatchEvent(new Event('pywebviewready'));
   });
+
+  // Logout, for a UI that wants to offer it.
+  api.logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.reload();
+  };
 })();

@@ -60,6 +60,10 @@ class ProfileConfig(BaseModel):
     output_path: str | None = None
     include_featuring: bool = True
     max_concurrent_downloads: int = 2
+    # `extra: ignore` below means a field missing here is silently dropped
+    # when a profile is saved, so anything the CLI can set has to be listed.
+    resume: bool = True
+    post_download_hooks: list[str] = Field(default_factory=list)
 
     model_config = {"extra": "ignore"}
 

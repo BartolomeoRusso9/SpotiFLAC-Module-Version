@@ -35,6 +35,7 @@ from .core.console import (
     print_track_skipped,
 )
 from .core.errors import ErrorKind, SpotiflacError
+from .core.hooks import load_hooks, run_hooks
 from .core.http import AsyncHttpClient
 from .core.isrc_helper import IsrcHelper
 from .core.models import DownloadResult, TrackMetadata, build_filename
@@ -85,7 +86,9 @@ async def _call_metadata_get_url(client, url: str, **kwargs):
     if fn is None:
         fn = client.get_url
 
-    if asyncio.iscoroutinefunction(fn):
+    # inspect, not asyncio: asyncio.iscoroutinefunction is deprecated and
+    # slated for removal in 3.16.
+    if inspect.iscoroutinefunction(fn):
         return await fn(url, **kwargs)
     return await asyncio.to_thread(fn, url, **kwargs)
 
@@ -177,6 +180,20 @@ class DownloadOptions:
     # this was a hardcoded constant (MAX_CONCURRENT_DOWNLOADS = 2) — now it is
     # configurable by the caller (CLI/API), while preserving the same default.
     max_concurrent_downloads: int = 2
+
+    # Resume interrupted downloads instead of restarting them. The HTTP side
+    # sends a Range header when a .part file survives (see
+    # AsyncHttpClient.stream_to_file); this flag also stops the end-of-run
+    # cleanup from deleting the .part files that make that possible. Turn it
+    # off (--no-resume) to get the previous behaviour: every run starts each
+    # file from zero and leaves nothing behind.
+    resume: bool = True
+
+    # Dotted "module:function" specs called after every finished track, with
+    # the DownloadResult and TrackMetadata as typed objects. The safe,
+    # structured counterpart to post_download_action="command" — see
+    # core/hooks.py for why a shell string is a poor interface for this.
+    post_download_hooks: list[str] = field(default_factory=list)
 
     # Optional post-download QA check: flags files that declare a high
     # sample rate but whose actual spectral content stops at, or just
@@ -906,6 +923,9 @@ class DownloadWorker:
         """
         max_concurrent = max(1, getattr(self._opts, "max_concurrent_downloads", 2))
         semaphore = asyncio.Semaphore(max_concurrent)
+        # Resolved once, before the first track: a typo in a hook name should
+        # fail the run immediately rather than after an hour of downloading.
+        track_hooks = load_hooks(getattr(self._opts, "post_download_hooks", None))
         initial_m4a = await asyncio.to_thread(
             lambda: {p.resolve() for p in Path(base_out).rglob("*.m4a") if p.is_file()}
         )
@@ -962,6 +982,13 @@ class DownloadWorker:
 
                 if result.success and result.file_path:
                     self._completed[track.id] = result.file_path
+
+                # After the file is in its final place (the rename already
+                # happened), and for failures too — a hook that reports
+                # what went wrong is as reasonable as one that reports
+                # success. Never raises; see core/hooks.run_hooks.
+                if track_hooks:
+                    await run_hooks(track_hooks, result, track)
 
                 if result.success and result.skipped:
                     await manager.skip_download(track.id)
@@ -1032,8 +1059,21 @@ class DownloadWorker:
                 Path(p).resolve() for p in self._completed.values() if p
             )
 
-            # Always clean up .part files
-            part_candidates = list(root.rglob("*.part"))
+            # A .part file is either debris or resume state, and which one it
+            # is depends entirely on whether the download it belongs to
+            # finished. With resume on (the default), keep the ones that did
+            # not: deleting them is what used to make an interrupted
+            # discography restart every track from zero on the next run.
+            # See AsyncHttpClient.stream_to_file(resume=...).
+            if self._opts.resume:
+                part_candidates = [
+                    path
+                    for path in root.rglob("*.part")
+                    # `foo.flac.part` belongs to `foo.flac`
+                    if Path(str(path)[: -len(".part")]).resolve() in completed_paths
+                ]
+            else:
+                part_candidates = list(root.rglob("*.part"))
 
             # For .m4a files, only consider those matching temporary naming patterns
             # (e.g., containing .tmp, .download, .temp in the stem) or not in the

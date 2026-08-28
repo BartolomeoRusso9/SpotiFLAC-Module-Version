@@ -205,3 +205,37 @@ async def prioritize_async(provider_type: str, api_urls: list[str]) -> list[str]
 
 # Alias for global async compatibility
 prioritize_providers_async = prioritize_async
+
+
+def snapshot() -> dict:
+    """Everything the scorer has learned, as plain data.
+
+    Read straight off disk rather than through the async scorer: this backs
+    the /metrics endpoint, which must not have to reach into another
+    component's event loop just to read a JSON file it already owns.
+    """
+    raw = _load_cache_sync()
+    providers: dict[str, dict] = {}
+    totals = {"successes": 0, "failures": 0}
+
+    for key, entry in raw.items():
+        # Keys are f"{provider_type}:{api_url}" (see _record_async), and the
+        # URL contains colons of its own — so split on the first one only.
+        provider_type, _, api_url = key.partition(":")
+        stats = _ProviderStats.from_dict(entry)
+        totals["successes"] += stats.successes
+        totals["failures"] += stats.failures
+        providers.setdefault(provider_type or key, {})[api_url or key] = {
+            **stats.to_dict(),
+            "score": stats.score(),
+        }
+
+    attempts = totals["successes"] + totals["failures"]
+    return {
+        "providers": providers,
+        "totals": {
+            **totals,
+            "attempts": attempts,
+            "success_rate": (totals["successes"] / attempts) if attempts else None,
+        },
+    }

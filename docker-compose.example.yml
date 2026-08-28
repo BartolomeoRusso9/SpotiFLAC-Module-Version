@@ -36,12 +36,17 @@ services:
       # the image's other modes — a one-shot CLI download, or --gui behind
       # VNC) an HTTP check here is actually meaningful. No curl/wget in the
       # base image, so this uses Python's own stdlib instead of adding one.
+      #
+      # /healthz rather than /: it answers the yes/no question directly
+      # instead of rendering the whole frontend to do it, and it is exempt
+      # from --web-token, so enabling authentication doesn't make the
+      # container report itself unhealthy.
       test:
         [
           "CMD",
           "python3",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)",
         ]
       interval: 30s
       timeout: 5s

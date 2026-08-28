@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import importlib.metadata
 import json
@@ -21,6 +20,7 @@ from .api_mixins.discovery import DiscoveryMixin
 from .api_mixins.local_tagging import LocalTaggingMixin
 from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
+from .core.loop_runner import run_sync
 from .core.url_utils import url_host_matches
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
@@ -198,7 +198,7 @@ class SpotiFLAC_API(
             except Exception:
                 return {"latest_version": "", "published_at": ""}
 
-        return asyncio.run(_inner())
+        return run_sync(_inner())
 
     def _check_ffmpeg_startup(self) -> None:
         try:
@@ -418,7 +418,7 @@ class SpotiFLAC_API(
         try:
             from .core.session_memory import get_url_history_async
 
-            return asyncio.run(get_url_history_async())
+            return run_sync(get_url_history_async())
         except Exception:
             return []
 
@@ -426,7 +426,7 @@ class SpotiFLAC_API(
         try:
             from .core.profiles import list_profiles_async
 
-            return asyncio.run(list_profiles_async())
+            return run_sync(list_profiles_async())
         except Exception:
             return []
 
@@ -434,7 +434,7 @@ class SpotiFLAC_API(
         try:
             from .core.profiles import get_profile_async
 
-            return asyncio.run(get_profile_async(name)) or {}
+            return run_sync(get_profile_async(name)) or {}
         except Exception:
             return {}
 
@@ -693,7 +693,7 @@ class SpotiFLAC_API(
         try:
             from .core.session_memory import remove_url_from_history_async
 
-            asyncio.run(remove_url_from_history_async(url))
+            run_sync(remove_url_from_history_async(url))
         except Exception:
             pass
 
@@ -715,13 +715,13 @@ class SpotiFLAC_API(
                     "country_code": "",
                 }
 
-        return asyncio.run(_inner())
+        return run_sync(_inner())
 
     def save_profile_data(self, name, cfg) -> bool | None:
         try:
             from .core.profiles import save_profile_async
 
-            asyncio.run(save_profile_async(name, cfg))
+            run_sync(save_profile_async(name, cfg))
             self.log(f"Profile '{name}' saved successfully.", "ok")
             return True
         except Exception as e:
@@ -732,7 +732,7 @@ class SpotiFLAC_API(
         try:
             from .core.profiles import delete_profile_async
 
-            deleted = asyncio.run(delete_profile_async(name))
+            deleted = run_sync(delete_profile_async(name))
             self.log(
                 f"Profile '{name}' deleted: {deleted}.",
                 "ok" if deleted else "warn",
@@ -768,7 +768,7 @@ class SpotiFLAC_API(
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
-        return asyncio.run(_inner())
+        return run_sync(_inner())
 
     # ── Window controls ───────────────────────────────────────────────────────
 
@@ -977,7 +977,7 @@ class SpotiFLAC_API(
             from .core.spotify_metadata import SpotifyMetadataClient
 
             client = SpotifyMetadataClient()
-            preview_url = asyncio.run(client.get_track_preview_async(track_id))
+            preview_url = run_sync(client.get_track_preview_async(track_id))
             return preview_url or ""
         except Exception as e:
             self.log(f"Failed to fetch preview for track {track_id}: {e}", "debug")
@@ -988,7 +988,7 @@ class SpotiFLAC_API(
     def fetch_metadata(self, url) -> None:
         self.current_url = url
         threading.Thread(
-            target=lambda: asyncio.run(self._fetch_metadata_task(url)),
+            target=lambda: run_sync(self._fetch_metadata_task(url)),
             daemon=True,
         ).start()
 
@@ -1471,7 +1471,7 @@ class SpotiFLAC_API(
             from .core.health_check import run_health_check
 
             self.log(f"Health check started for: {', '.join(services)}", "info")
-            results = asyncio.run(run_health_check(services))
+            results = run_sync(run_health_check(services))
             data = [
                 {
                     "provider": r.provider,

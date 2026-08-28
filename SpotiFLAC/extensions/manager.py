@@ -34,7 +34,23 @@ from pathlib import Path
 
 import httpx
 
+from .trust import (
+    DEFAULT_MIN_TRUST,
+    meets_min_trust,
+    resolve_min_trust,
+)
+
 logger = logging.getLogger(__name__)
+
+
+class TrustRejectedError(ValueError):
+    """A registry entry did not meet the configured minimum trust tier.
+
+    Its own type rather than a bare ValueError so callers can tell "you asked
+    me to refuse this" apart from "this archive is broken" — the bootstrap
+    loop in ensure_download_providers() reports the two very differently.
+    """
+
 
 # Registry configuration: no hardcoded URLs here — read from environment or .env
 REGISTRY_URL = None
@@ -190,13 +206,57 @@ class ExtensionManager:
         ext_dir: str | Path | None = None,
         timeout: float = 20.0,
         auto_install_downloads: bool = True,  # Enabled by default
+        min_trust_tier: str | None = None,
     ) -> None:
+        """`min_trust_tier`: refuse registry entries below this assurance
+        level — one of "unverified" (default, install anything),
+        "checksum-only", "signed". Falls back to $SPOTIFLAC_MIN_TRUST.
+        See extensions/trust.py and enforce_trust().
+        """
         self.ext_dir = Path(ext_dir) if ext_dir else DEFAULT_EXT_DIR
         self.timeout = timeout
+        self.min_trust_tier = resolve_min_trust(min_trust_tier)
         self.ext_dir.mkdir(parents=True, exist_ok=True)
 
         if auto_install_downloads:
             self.ensure_download_providers()
+
+    # ── Trust enforcement ────────────────────────────────────
+
+    def enforce_trust(self, entry: RegistryEntry) -> None:
+        """Raises TrustRejectedError if `entry` sits below `min_trust_tier`.
+
+        Called on every registry-driven install. Deliberately *not* called by
+        install_from_file(): a local file has no registry entry to be signed
+        against, so it can only ever score "unverified" — gating it would
+        make the floor mean "you may no longer install your own extension
+        from disk", which is not what anyone asks for by raising it.
+        """
+        tier = entry.trust_tier
+        if meets_min_trust(tier, self.min_trust_tier):
+            if tier != "signed" and self.min_trust_tier != DEFAULT_MIN_TRUST:
+                logger.info(
+                    "[ExtMgr] '%s' accepted at tier '%s' (floor '%s')",
+                    entry.id,
+                    tier,
+                    self.min_trust_tier,
+                )
+            return
+
+        detail = ""
+        if entry.signature and tier != "signed":
+            # Worth calling out separately: the entry *claims* a signature and
+            # it did not verify. That is either the wrong key in the trust
+            # store, or something the operator should want to know about.
+            detail = (
+                " Its signature did not verify against any trusted key "
+                "(see `spotiflac --trust-key-list`)."
+            )
+        msg = (
+            f"Extension '{entry.id}' is '{tier}' but this instance requires "
+            f"'{self.min_trust_tier}' or better.{detail}"
+        )
+        raise TrustRejectedError(msg)
 
     # ── Auto Setup ───────────────────────────────────────────
 
@@ -276,7 +336,13 @@ class ExtensionManager:
                 entry.version,
             )
             try:
+                self.enforce_trust(entry)
                 self.install_from_url(entry.download_url, sha256=entry.sha256)
+            except TrustRejectedError as e:
+                # Not an error: the operator asked for this. Skip it and carry
+                # on with the rest of the registry rather than aborting the
+                # whole bootstrap, and say so at a level they will actually see.
+                logger.warning("[ExtMgr] Skipped '%s' — %s", entry.id, e)
             except Exception as e:
                 logger.exception(
                     "[ExtMgr] Error during %s of '%s': %s",
@@ -427,6 +493,8 @@ class ExtensionManager:
             raise ValueError(
                 msg,
             )
+
+        self.enforce_trust(entry)
 
         # Check if already installed and up-to-date
         existing = self.get_installed(ext_id)
@@ -884,6 +952,7 @@ class ExtensionManager:
             remote = entries[name]
             if not self._matches_registry_entry(ext, remote):
                 try:
+                    self.enforce_trust(remote)
                     self.install_from_url(remote.download_url, sha256=remote.sha256)
                     status[name] = f"updated → {remote.version}"
                 except Exception as e:

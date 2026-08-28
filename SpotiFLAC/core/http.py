@@ -43,15 +43,69 @@ except ImportError:
 
 
 class _RedactUrlFilter(logging.Filter):
+    """Replaces URLs in httpx's own log records with `[endpoint]`.
+
+    httpx logs the full request URL at INFO, and provider URLs here routinely
+    carry tokens and signed query strings — that is what the CodeQL
+    "clear-text logging of sensitive information" finding was about. Redacting
+    at the source keeps them out of terminals, log files and pasted bug
+    reports alike.
+    """
+
     _url_re = re.compile(r"https?://\S+")
 
     def filter(self, record: logging.LogRecord) -> bool:
+        # Destructive by necessity: a filter cannot hand a *copy* downstream,
+        # and leaving the original intact would defeat the point the moment
+        # another handler formats it.
         record.msg = self._url_re.sub("[endpoint]", record.getMessage())
         record.args = ()
         return True
 
 
-logging.getLogger("httpx").addFilter(_RedactUrlFilter())
+REDACTION_DISABLE_ENV = "SPOTIFLAC_NO_LOG_REDACTION"
+
+_redaction_filter: _RedactUrlFilter | None = None
+
+
+def install_log_redaction(force: bool = False) -> bool:
+    """Attaches the URL-redacting filter to httpx's logger. Idempotent.
+
+    Called once at import, which is a real liberty for a library to take with
+    someone else's logging config — so it is at least named, documented,
+    reversible (`remove_log_redaction()`), and skippable by setting
+    $SPOTIFLAC_NO_LOG_REDACTION. It stays on by default anyway because the
+    alternative default is "leak provider tokens into the user's logs", and
+    a security control that has to be switched on is not one most people get.
+
+    `force=True` ignores the environment variable. Returns whether the filter
+    is attached afterwards.
+    """
+    global _redaction_filter
+    if not force and os.environ.get(REDACTION_DISABLE_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    ):
+        return False
+    if _redaction_filter is None:
+        _redaction_filter = _RedactUrlFilter()
+        logging.getLogger("httpx").addFilter(_redaction_filter)
+    return True
+
+
+def remove_log_redaction() -> None:
+    """Detaches the filter — for an application that does its own redaction,
+    or a test that needs to assert on a real URL.
+    """
+    global _redaction_filter
+    if _redaction_filter is not None:
+        logging.getLogger("httpx").removeFilter(_redaction_filter)
+        _redaction_filter = None
+
+
+install_log_redaction()
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +373,20 @@ class AsyncHttpClient:
         chunk_size: int = 256 * 1024,
         extra_headers: dict | None = None,
         stop_event: asyncio.Event | None = None,
+        resume: bool = True,
     ) -> None:
+        """Streams `url` to `dest_path`, via a `.part` file.
+
+        `resume=True` (default) picks up where an interrupted download left
+        off: if a `.part` file survives, its size is sent as a `Range: bytes=
+        N-` header and the response is appended rather than restarted. On a
+        flaky connection, or a discography interrupted halfway, this is the
+        difference between losing the last chunk and losing the whole file.
+
+        Servers that ignore Range and answer 200 are handled correctly — the
+        partial file is discarded and the download restarts from zero — so
+        this is safe against providers with no Range support.
+        """
         if aiofiles is None:
             msg = (
                 "aiofiles non installato — richiesto da AsyncHttpClient.stream_to_file(). "
@@ -330,7 +397,17 @@ class AsyncHttpClient:
             )
 
         temp = dest_path + ".part"
-        headers = extra_headers or {}
+        headers = dict(extra_headers or {})
+
+        resume_from = 0
+        if resume and "Range" not in headers and "range" not in headers:
+            try:
+                resume_from = os.path.getsize(temp)
+            except OSError:
+                resume_from = 0
+            if resume_from > 0:
+                headers["Range"] = f"bytes={resume_from}-"
+
         if self._limiter:
             await self._limiter.wait_for_slot()
 
@@ -343,14 +420,48 @@ class AsyncHttpClient:
                 headers=headers,
                 timeout=self._timeout,
             ) as resp:
+                if resume_from and resp.status_code == 416:
+                    # "Range Not Satisfiable": the .part is already at or past
+                    # the resource length — almost always a complete file from
+                    # a run that died between the last chunk and the rename.
+                    # Start over rather than guess; one wasted download beats
+                    # a silently truncated FLAC.
+                    _remove_quietly(temp)
+                    await self.stream_to_file(
+                        url,
+                        dest_path,
+                        progress_cb=progress_cb,
+                        chunk_size=chunk_size,
+                        extra_headers=extra_headers,
+                        stop_event=stop_event,
+                        resume=False,
+                    )
+                    return
+
                 self._raise_for_status(resp)
-                total = int(resp.headers.get("Content-Length") or 0)
-                downloaded = 0
+
+                # A server free to ignore Range answers 200 with the whole
+                # body. Appending that to the partial file would corrupt it.
+                resuming = resume_from > 0 and resp.status_code == 206
+                if resume_from and not resuming:
+                    logger.debug(
+                        "[%s] Server ignored Range (HTTP %s); restarting download",
+                        self._provider,
+                        resp.status_code,
+                    )
+                    resume_from = 0
+
+                content_length = int(resp.headers.get("Content-Length") or 0)
+                # Content-Length on a 206 is the length of *this* slice, so
+                # the progress callback needs the whole-resource size added
+                # back or the bar restarts from a fraction.
+                total = content_length + resume_from if content_length else 0
+                downloaded = resume_from
                 os.makedirs(os.path.dirname(os.path.abspath(dest_path)), exist_ok=True)
 
                 evt = stop_event or self._stop_event
 
-                async with aiofiles.open(temp, "wb") as f:
+                async with aiofiles.open(temp, "ab" if resuming else "wb") as f:
                     async for chunk in resp.aiter_bytes(chunk_size):
                         if evt is not None and evt.is_set():
                             raise NetworkError(
@@ -367,16 +478,22 @@ class AsyncHttpClient:
             os.replace(temp, dest_path)
 
         except httpx.RequestError as exc:
-            _remove_quietly(temp)
+            if not resume:
+                _remove_quietly(temp)
             raise NetworkError(self._provider, f"Stream failed: {exc}") from exc
         except BaseException:
             # BaseException, not Exception: cancelling a download raises
             # asyncio.CancelledError, which since 3.8 does NOT derive from
-            # Exception. The narrower `except (OSError, NetworkError)` here
-            # meant every cancelled download — the stop button, a timeout, a
-            # gather() tearing down its siblings — left its .part file behind
-            # to accumulate in the output folder.
-            _remove_quietly(temp)
+            # Exception, so the old `except (OSError, NetworkError)` never
+            # ran for the most common interruption of all.
+            #
+            # What happens next depends on `resume`. With it on, the bytes on
+            # disk are exactly what the next attempt needs, so they stay — the
+            # end-of-run sweep in downloader._remove_partial_files_async()
+            # clears the ones belonging to downloads that did finish. With it
+            # off, the old contract holds: leave nothing behind.
+            if not resume:
+                _remove_quietly(temp)
             raise
 
 

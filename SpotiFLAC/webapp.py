@@ -13,17 +13,19 @@ actual work (metadata, downloads, extensions, profiles, ...) is the same
 SpotiFLAC_API code the desktop app already uses and that has already been
 exercised in that form.
 
-IMPORTANT — untested: this module was written without the ability to
-install dependencies or run the server in this environment. Review and
-exercise it (at minimum: import the app, hit each endpoint once, open the
-WebSocket, do one real download) before relying on it.
+Covered by tests/test_webapp_*.py: auth (token and per-account), the
+WebSocket gate, the ops endpoints, and the method allowlist. What no test
+here covers is a real download through a real provider — that needs an
+installed extension and a network.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -54,17 +56,23 @@ WEB_TOKEN_QUERY_PARAM = "token"
 
 # ── Optional multi-user accounts (off by default — see --web-multiuser) ────
 #
-# What this does and doesn't do, in plain terms: a session cookie identifies
-# *who is asking*, and gates /api/* + /ws behind having logged in as
-# somebody. It does NOT give each account its own SpotiFLAC_API state —
-# `api` above is one shared instance, so `current_tracks`, `download_dir`,
-# and everything else on it is shared by every logged-in account, and the
-# download-queue endpoints tag jobs with an owner for history/filtering
-# without changing where the download itself writes to. Good enough for a
-# household or small team who'd otherwise just share one login; not
-# multi-tenant isolation for people who shouldn't see each other's search
-# results or download folder.
+# A session cookie identifies who is asking, gates /api/* and /ws behind
+# being logged in, and selects that account's own SpotiFLAC_API instance
+# (see ApiRegistry). Each account therefore gets its own search results, its
+# own download folder under the shared root, and its own event stream: one
+# person's progress and file paths no longer scroll past in everybody's
+# browser.
+#
+# What remains shared is what is genuinely machine-wide — installed
+# extensions, the registry configuration, the Ed25519 trust store, the HTTP
+# connection pool, and the ffmpeg/Node availability checks. This is
+# household or small-team separation, not hostile-tenant isolation: accounts
+# still run in one process, as one OS user, and anyone who can install an
+# extension can affect everyone.
 SESSION_COOKIE = "spotiflac_session"
+
+#: Unauthenticated liveness probe — see the endpoint for why.
+HEALTH_PATH = "/healthz"
 
 
 def resolve_web_token(explicit: str | None) -> str | None:
@@ -242,57 +250,152 @@ class LoginRateLimiter:
 class ConnectionManager:
     """Tracks connected WebSocket clients and lets worker threads (where
     SpotiFLAC_API methods actually run) push events to them safely.
+
+    Each connection remembers who opened it. In single-user mode that is
+    None and every event goes to everyone, exactly as before; in multi-user
+    mode it is the logged-in account, and an event addressed to one owner
+    reaches only their sockets. Without that, "isolated" accounts would
+    still watch each other's logs, progress and file paths scroll past.
     """
 
     def __init__(self) -> None:
-        self._connections: set[WebSocket] = set()
+        self._connections: dict[WebSocket, str | None] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
 
-    async def connect(self, ws: WebSocket) -> None:
+    async def connect(self, ws: WebSocket, owner: str | None = None) -> None:
         await ws.accept()
-        self._connections.add(ws)
+        self._connections[ws] = owner
 
     def disconnect(self, ws: WebSocket) -> None:
-        self._connections.discard(ws)
+        self._connections.pop(ws, None)
 
-    async def _send_all(self, message: dict) -> None:
+    def count(self, owner: str | None = None) -> int:
+        if owner is None:
+            return len(self._connections)
+        return sum(1 for value in self._connections.values() if value == owner)
+
+    async def _send_all(self, message: dict, owner: str | None) -> None:
         dead = []
-        for ws in list(self._connections):
+        for ws, ws_owner in list(self._connections.items()):
+            if owner is not None and ws_owner != owner:
+                continue
             try:
                 await ws.send_json(message)
             except Exception:
                 dead.append(ws)
         for ws in dead:
-            self._connections.discard(ws)
+            self._connections.pop(ws, None)
 
-    def broadcast(self, fn_name: str, args: list) -> None:
+    def broadcast(self, fn_name: str, args: list, owner: str | None = None) -> None:
         """Thread-safe: callable from any thread, including the worker
         threads download_tracks()/fetch_metadata()/etc. run in. Schedules
         the actual send onto the server's asyncio event loop.
+
+        `owner=None` means everyone — the single-user default. A per-user Api
+        instance passes its own username (see ApiRegistry).
         """
         if self._loop is None:
             return
         message = {"fn": fn_name, "args": args}
         try:
-            asyncio.run_coroutine_threadsafe(self._send_all(message), self._loop)
+            asyncio.run_coroutine_threadsafe(self._send_all(message, owner), self._loop)
         except Exception:
             logger.debug("WebSocket broadcast failed", exc_info=True)
 
 
-def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
-    """`multiuser=True` layers per-account login on top of the same single
-    SpotiFLAC_API instance every mode already shares — see the "Multi-user
-    mode" note on SESSION_COOKIE below for exactly what that does and does
-    not isolate between accounts before enabling it for anyone but
-    yourself and people you'd hand raw shell access to anyway.
+class ApiRegistry:
+    """One SpotiFLAC_API per account, created on first use.
+
+    Before this, `--web-multiuser` shared a single Api instance across every
+    session: accounts had separate logins but one `current_tracks`, one
+    `download_dir`, and one event stream. Logging in as someone else changed
+    who a job was attributed to and nothing else, which is a thin enough
+    notion of "multi-user" that webapp.py's own docstring warned people off
+    using it for anyone they wouldn't hand a shell to.
+
+    Each account now gets its own instance, its own search results and its
+    own download folder underneath the shared root. What is still shared is
+    everything that is genuinely machine-wide: installed extensions, the
+    registry configuration, the trust store, the HTTP connection pool.
     """
-    api = SpotiFLAC_API()
+
+    def __init__(self, manager: ConnectionManager, base_download_dir: str) -> None:
+        self._manager = manager
+        self._base = base_download_dir
+        self._apis: dict[str, SpotiFLAC_API] = {}
+        self._lock = threading.Lock()
+
+    def get(self, username: str | None) -> SpotiFLAC_API:
+        key = username or ""
+        with self._lock:
+            existing = self._apis.get(key)
+            if existing is not None:
+                return existing
+            api = self._build(username)
+            self._apis[key] = api
+            return api
+
+    def _build(self, username: str | None) -> SpotiFLAC_API:
+        api = SpotiFLAC_API()
+        api._ws_broadcast = lambda fn, args: self._manager.broadcast(
+            fn, args, owner=username
+        )
+        if username:
+            # A per-account subfolder of the same root, not an unrelated
+            # path: an operator who bind-mounted one downloads volume still
+            # gets one downloads volume, just with a folder each.
+            api.download_dir = os.path.join(self._base, _safe_username(username))
+            with contextlib.suppress(OSError):
+                os.makedirs(api.download_dir, exist_ok=True)
+        return api
+
+    def known(self) -> list[str]:
+        with self._lock:
+            return [k for k in self._apis if k]
+
+
+def _safe_username(username: str) -> str:
+    """A username reduced to something safe to use as a directory name.
+
+    Accounts are created locally by the operator, so this is not the last
+    line of defence — but a username is still user-supplied text on its way
+    into a filesystem path, and `..` should not be spellable there.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", username).strip("._") or "user"
+    return cleaned[:64]
+
+
+def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
+    """`multiuser=True` gives every account its own SpotiFLAC_API instance,
+    download folder and event stream — see the note on SESSION_COOKIE above
+    for what is isolated and what is still shared machine-wide.
+    """
     manager = ConnectionManager()
+    # The shared instance. In single-user mode it is the only one, and its
+    # events go to every connected browser (owner=None), exactly as before.
+    api = SpotiFLAC_API()
     api._ws_broadcast = manager.broadcast
 
+    registry = ApiRegistry(manager, api.download_dir)
+
+    def api_for(request: Request) -> SpotiFLAC_API:
+        """The Api instance a request should act on.
+
+        Single-user mode has exactly one; multi-user mode has one per
+        account, so two people searching at the same time no longer
+        overwrite each other's `current_tracks`.
+        """
+        if not multiuser:
+            return api
+        return registry.get(getattr(request.state, "username", None))
+
+    # Exposed on app.state so tests (and anything embedding this app) can
+    # observe which instance a request actually reached, rather than having
+    # to infer it from a response that would look identical either way.
+    app_state_api = api
     sessions = None
     job_queue = None
     login_limiter = LoginRateLimiter()
@@ -303,7 +406,11 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         sessions = SessionStore()
 
         def _run_queued_download(payload: dict) -> dict:
-            api.download_tracks(payload["selected_indices"], payload["config"])
+            # The owner rides in the payload so the worker downloads into
+            # *their* folder and their browser gets the progress events —
+            # the queue thread has no request to read it from.
+            owner_api = registry.get(payload.get("owner"))
+            owner_api.download_tracks(payload["selected_indices"], payload["config"])
             return {"status": "dispatched"}
 
         job_queue = JobQueue(handler=_run_queued_download, workers=1)
@@ -344,6 +451,8 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         # process anyway.
 
     app = FastAPI(title="SpotiFLAC Web", lifespan=_lifespan)
+    app.state.shared_api = app_state_api
+    app.state.api_registry = registry
 
     @app.middleware("http")
     async def _no_cache_frontend(request, call_next):
@@ -366,6 +475,12 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         # (the default), so this changes nothing unless explicitly enabled.
         @app.middleware("http")
         async def _require_web_token(request: Request, call_next):
+            # /healthz is exempt on purpose: an orchestrator's health probe
+            # has no token, and a check that 401s reports "unhealthy" for a
+            # reason that has nothing to do with health. It discloses only
+            # that the process is answering.
+            if request.url.path == HEALTH_PATH:
+                return await call_next(request)
             supplied = request.query_params.get(
                 WEB_TOKEN_QUERY_PARAM
             ) or request.cookies.get(WEB_TOKEN_COOKIE)
@@ -456,6 +571,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                 job = job_queue.submit(
                     request.state.username,
                     {
+                        "owner": request.state.username,
                         "selected_indices": payload.get("selected_indices", []),
                         "config": payload.get("config", {}),
                     },
@@ -469,6 +585,62 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             assert job_queue is not None  # always set together with multiuser=True
             jobs = job_queue.list_for(request.state.username)
             return JSONResponse({"jobs": [j.to_dict() for j in jobs]})
+
+    # ── Operations: liveness and metrics ──────────────────────────────────
+    #
+    # /healthz is deliberately outside /api/, and therefore outside the
+    # session gate: a container orchestrator has no cookie, and a health
+    # check that needs credentials is one that reports "unhealthy" for the
+    # wrong reason. It returns no data about the instance beyond "the process
+    # is answering", so there is nothing there to protect.
+    #
+    # /metrics does expose real information (which providers are failing, how
+    # much has been downloaded), so it sits under /api/ and inherits whatever
+    # auth is configured.
+    @app.get(HEALTH_PATH)
+    async def healthz() -> JSONResponse:
+        """Liveness. docker-compose.example.yml used to poll `/` for this,
+        which downloads and renders the whole frontend to answer a yes/no
+        question — and would go on succeeding if every backend component
+        behind it were broken.
+        """
+        return JSONResponse(
+            {
+                "status": "ok",
+                "version": api.app_version,
+                "websocket_clients": manager.count(),
+                "multiuser": multiuser,
+                "auth": bool(token) or multiuser,
+            }
+        )
+
+    @app.get("/api/metrics")
+    async def metrics() -> JSONResponse:
+        """Counters worth watching on a long-running instance.
+
+        provider_stats has been recording per-API successes and failures all
+        along, purely to order providers by reliability; nothing ever showed
+        it to anyone.
+        """
+        from .core import provider_stats
+        from .core.progress import DownloadManager
+
+        payload: dict[str, Any] = {
+            "providers": await run_in_threadpool(provider_stats.snapshot),
+            "websocket_clients": manager.count(),
+        }
+
+        with contextlib.suppress(Exception):
+            payload["downloads"] = await DownloadManager().get_stats()
+
+        if job_queue is not None:
+            jobs = job_queue.list_all()
+            counts: dict[str, int] = {}
+            for job in jobs:
+                counts[job.status.value] = counts.get(job.status.value, 0) + 1
+            payload["queue"] = {"total": len(jobs), "by_status": counts}
+
+        return JSONResponse(payload)
 
     @app.get("/api/auth/status")
     async def auth_status(request: Request) -> JSONResponse:
@@ -485,14 +657,17 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # ── Dynamic dispatcher for every whitelisted Api method ────────────────
     @app.post("/api/{method_name}")
     async def call_method(
-        method_name: str, payload: Any = Body(default=None)
+        request: Request, method_name: str, payload: Any = Body(default=None)
     ) -> JSONResponse:
         if method_name not in ALLOWED_METHODS:
             return JSONResponse(
                 {"error": f"Unknown or disallowed method: {method_name}"},
                 status_code=404,
             )
-        fn = getattr(api, method_name, None)
+        # Per-account in multi-user mode, so two people searching at once no
+        # longer overwrite each other's current_tracks.
+        target = api_for(request)
+        fn = getattr(target, method_name, None)
         if fn is None:
             return JSONResponse(
                 {"error": f"No such method: {method_name}"}, status_code=404
@@ -533,7 +708,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
 
     # ── Server-side folder browser (replaces the native folder dialog) ─────
     @app.get("/api/browse-folder")
-    async def browse_folder(path: str | None = None) -> JSONResponse:
+    async def browse_folder(request: Request, path: str | None = None) -> JSONResponse:
         try:
             # Resolve the requested path to a canonical, absolute form and
             # confirm it sits under an approved root *before* it is ever used
@@ -542,7 +717,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             requested = os.path.realpath(
                 os.path.expanduser(path) if path else str(Path.home())
             )
-            if not _is_path_safe(Path(requested), api):
+            if not _is_path_safe(Path(requested), api_for(request)):
                 return JSONResponse(
                     {"error": "Access denied: path is outside approved directories"},
                     status_code=403,
@@ -601,12 +776,17 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             if not _token_matches(supplied, token):
                 await ws.close(code=1008)  # 1008 = Policy Violation
                 return
+        ws_owner: str | None = None
         if multiuser:
             assert sessions is not None  # always set together with multiuser=True
-            if sessions.username_for(ws.cookies.get(SESSION_COOKIE)) is None:
+            ws_owner = sessions.username_for(ws.cookies.get(SESSION_COOKIE))
+            if ws_owner is None:
                 await ws.close(code=1008)
                 return
-        await manager.connect(ws)
+            # Make sure the account's Api exists now, so events it emits have
+            # somewhere to be addressed even before its first API call.
+            registry.get(ws_owner)
+        await manager.connect(ws, owner=ws_owner)
         try:
             while True:
                 # The frontend doesn't need to send anything; this just
