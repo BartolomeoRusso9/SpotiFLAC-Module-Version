@@ -17,7 +17,9 @@ import webview
 from .api_mixins.covers_lyrics import CoversLyricsMixin
 from .api_mixins.dedup import DedupMixin
 from .api_mixins.discovery import DiscoveryMixin
+from .api_mixins.extension_health import ExtensionHealthMixin
 from .api_mixins.local_tagging import LocalTaggingMixin
+from .api_mixins.subscriptions import SubscriptionsMixin
 from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
 from .core.loop_runner import run_sync
@@ -72,7 +74,13 @@ class UILogHandler(logging.Handler):
 
 
 class SpotiFLAC_API(
-    LocalTaggingMixin, CoversLyricsMixin, DiscoveryMixin, DedupMixin, TrustMixin
+    LocalTaggingMixin,
+    CoversLyricsMixin,
+    DiscoveryMixin,
+    DedupMixin,
+    TrustMixin,
+    SubscriptionsMixin,
+    ExtensionHealthMixin,
 ):
     """pywebview/`--web` bridge — every method here (plus the two mixins
     above) becomes a callable the frontend invokes as `pywebview.api.<name>`

@@ -61,3 +61,20 @@ def pytest_configure(config):
         "uses_real_ext_dir: test needs the configured extension directory "
         "rather than a temporary one",
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_database(monkeypatch, tmp_path_factory):
+    """Points core/db.py at a throwaway file for every test.
+
+    Without this the suite would read and write ~/.spotiflac/spotiflac.db —
+    the developer's real queue, download log and subscriptions — for the same
+    reasons _isolated_extension_dir exists.
+    """
+    from SpotiFLAC.core import db
+
+    db_file = tmp_path_factory.mktemp("db") / "spotiflac.db"
+    monkeypatch.setenv(db.DB_PATH_ENV, str(db_file))
+    db.reset_for_tests()
+    yield
+    db.reset_for_tests()

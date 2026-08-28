@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "3.6.0"
+version = "3.7.0"
 description = "Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends."
 readme = "README.md"
 # 3.10, not 3.9: core/models.py declares PEP 604 unions (`str | None`) on
@@ -117,10 +117,14 @@ line-length = 88
 [tool.ruff.lint.per-file-ignores]
 # Imports deliberately placed after module-level setup code (see the
 # comments at each site): a circular-import guard in core/__init__.py,
-# and a warnings.filterwarnings() call that must run before the import
-# it's silencing in tools/hires_check_cli.py.
+# a warnings.filterwarnings() call that must run before the import it's
+# silencing in tools/hires_check_cli.py, and a pytest.importorskip()
+# guard that must run before `from SpotiFLAC import launcher` in the
+# web-flags test (an inline `# noqa` there gets stripped by the release
+# workflow's `ruff check --fix`).
 "SpotiFLAC/core/__init__.py" = ["E402"]
 "SpotiFLAC/tools/hires_check_cli.py" = ["E402"]
+"tests/test_launcher_web_flags.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.10"

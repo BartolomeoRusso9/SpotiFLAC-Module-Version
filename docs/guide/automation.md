@@ -85,6 +85,58 @@ shell — but it is refused from the GUI and web API unless
 
 ---
 
+## Notifications (`--notify`)
+
+A headless instance finishing a run at 3am tells nobody. `library_notify`
+asks a *media server* to rescan, which is one specific errand; this is the
+general one.
+
+```bash
+# One message per run, to a Discord webhook (the default: --notify-on summary)
+spotiflac <url> ~/Music --notify discord --notify-url "https://discord.com/api/webhooks/…"
+
+# A message for every failed track, to a self-hosted ntfy
+spotiflac <url> ~/Music --notify ntfy --notify-url "http://nas.local:8080/music" \
+                        --notify-on failure
+
+# Telegram takes a bot token and a chat id rather than a URL
+spotiflac <url> ~/Music --notify telegram --notify-token "$BOT_TOKEN" \
+                        --notify-chat-id 123456
+
+# A plain webhook receives the structured JSON, not a sentence
+spotiflac <url> ~/Music --notify webhook --notify-url https://example.com/hook
+```
+
+| Flag | Values |
+| --- | --- |
+| `--notify` | `webhook`, `discord`, `telegram`, `ntfy` |
+| `--notify-url` | Destination. Falls back to `$SPOTIFLAC_NOTIFY_URL`. |
+| `--notify-token` | Bearer token (ntfy, webhook) or bot token (Telegram). Falls back to `$SPOTIFLAC_NOTIFY_TOKEN`. |
+| `--notify-chat-id` | Telegram only. |
+| `--notify-on` | `summary` (default), `success`, `failure`, `both` |
+
+`summary` sends one message for the whole run, listing only the failures —
+which is what you want for a 300-track discography. The other three send one
+message per track.
+
+A misconfigured notifier fails **before** anything is downloaded, rather than
+after a two-hour run finishes and says nothing.
+
+### What is sent, and what isn't
+
+Title, artist, album, provider, format, and success/failure. **Not the file
+path** — it leaks the server's directory layout, and the receiving end can do
+nothing with a path on another host.
+
+Like the library token, the destination is read from the CLI or the
+environment and **never** from the GUI/web config. This sends data off the
+machine to a host of someone's choosing, and an HTTP request must not get to
+pick which host that is.
+
+A notifier that is down is logged and ignored: the files are on disk either
+way, and a failed notification must not turn a completed run into a failed
+one.
+
 ## Playlists and music libraries
 
 Write an M3U of everything a run downloaded:

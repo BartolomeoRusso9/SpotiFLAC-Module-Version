@@ -34,7 +34,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Body,
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -173,6 +180,19 @@ ALLOWED_METHODS: set[str] = {
     "get_dedup_status",
     "scan_for_duplicates",
     "get_trusted_keys",
+    # Subscriptions (see core/subscriptions.py). Read and write, but every
+    # write here only edits a list of URLs to follow — the same category of
+    # operation as add_registry, and unlike add_trusted_key it grants no new
+    # ability to whoever can reach the port.
+    "get_subscriptions",
+    "add_subscription",
+    "remove_subscription",
+    "set_subscription_enabled",
+    "reset_subscription",
+    "check_subscriptions",
+    # Extension health (read-only, plus a counter reset).
+    "get_extension_health",
+    "reset_extension_health",
 }
 
 # Deliberately absent from ALLOWED_METHODS, even though they exist on the Api
@@ -414,19 +434,48 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     login_limiter = LoginRateLimiter()
     if multiuser:
         from .core.job_queue import JobQueue, QueueFullError
-        from .core.web_users import SessionStore
+        from .core.web_users import SessionStore, check_quota
 
         sessions = SessionStore()
+
+        def _quota_check(owner: str) -> None:
+            """Refuses a submission that would exceed the account's quota.
+
+            Injected into JobQueue rather than implemented there: the queue
+            deliberately knows nothing about accounts (see its docstring), and
+            "how much may this person download" is a question about accounts.
+            """
+            check_quota(owner)
 
         def _run_queued_download(payload: dict) -> dict:
             # The owner rides in the payload so the worker downloads into
             # *their* folder and their browser gets the progress events —
             # the queue thread has no request to read it from.
             owner_api = registry.get(payload.get("owner"))
-            owner_api.download_tracks(payload["selected_indices"], payload["config"])
+
+            # Two shapes reach this handler. The frontend submits tracks it
+            # has already fetched, by index into the account's current_tracks
+            # (`selected_indices`); /api/v1/downloads submits a bare URL,
+            # because a REST client has no notion of a fetch that happened
+            # earlier in someone's browser session. Resolving a URL is the
+            # same fetch_metadata() the GUI runs, so both end up on one path.
+            if "selected_indices" in payload:
+                owner_api.download_tracks(
+                    payload["selected_indices"], payload.get("config", {})
+                )
+            else:
+                owner_api.fetch_metadata(payload["url"])
             return {"status": "dispatched"}
 
-        job_queue = JobQueue(handler=_run_queued_download, workers=1)
+        job_queue = JobQueue(
+            handler=_run_queued_download,
+            workers=1,
+            # Survives a restart — see core/job_queue.py's docstring. This is
+            # the deployment the queue exists for (headless, on a NAS), and
+            # the one where a lost backlog is least likely to be noticed.
+            persist=True,
+            quota_check=_quota_check,
+        )
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
@@ -618,6 +667,94 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             jobs = job_queue.list_for(request.state.username)
             return JSONResponse({"jobs": [j.to_dict() for j in jobs]})
 
+        @app.get("/api/quota/mine")
+        async def quota_mine(request: Request) -> JSONResponse:
+            """This account's own usage against its own limits.
+
+            Not admin-gated: it is about the caller, and being refused a
+            download without being able to see why is the kind of opacity
+            that generates support requests.
+            """
+            from .core.web_users import quota_usage
+
+            usage = await run_in_threadpool(quota_usage, request.state.username)
+            return JSONResponse(usage)
+
+        # ── Administration ────────────────────────────────────────────────
+        #
+        # Everything below needs the `admin` role. Accounts were flat until
+        # now, which is why /api/metrics hides instance-wide counters in
+        # multi-user mode — there was nobody to show them to. There is now,
+        # so an admin sees them and an ordinary account still does not.
+        async def _require_admin(request: Request) -> str:
+            from .core.web_users import is_admin
+
+            username = request.state.username
+            if not await run_in_threadpool(is_admin, username):
+                # 404, not 403: whether an admin API exists on this instance
+                # is not something an ordinary account needs to learn.
+                raise HTTPException(status_code=404, detail="Not found")
+            return username
+
+        @app.get("/api/admin/users")
+        async def admin_list_users(request: Request) -> JSONResponse:
+            from .core.web_users import list_users, quota_usage
+
+            await _require_admin(request)
+            users = await run_in_threadpool(list_users)
+            for user in users:
+                user["usage"] = await run_in_threadpool(quota_usage, user["username"])
+            return JSONResponse({"users": users})
+
+        @app.post("/api/admin/quota")
+        async def admin_set_quota(
+            request: Request, payload: dict = Body(...)
+        ) -> JSONResponse:
+            from .core.web_users import set_quota
+
+            await _require_admin(request)
+            username = str(payload.get("username", ""))
+            tracks = payload.get("daily_track_quota")
+            size = payload.get("daily_byte_quota")
+            updated = await run_in_threadpool(
+                lambda: set_quota(
+                    username,
+                    daily_track_quota=None if tracks is None else int(tracks),
+                    daily_byte_quota=None if size is None else int(size),
+                )
+            )
+            if not updated:
+                return JSONResponse({"error": "No such user"}, status_code=404)
+            return JSONResponse({"ok": True})
+
+        @app.post("/api/admin/role")
+        async def admin_set_role(
+            request: Request, payload: dict = Body(...)
+        ) -> JSONResponse:
+            from .core.web_users import WebUserError, set_role
+
+            await _require_admin(request)
+            try:
+                updated = await run_in_threadpool(
+                    set_role,
+                    str(payload.get("username", "")),
+                    str(payload.get("role", "")),
+                )
+            except WebUserError as exc:
+                # This one *is* safe to surface: every WebUserError raised by
+                # set_role is a message written for the operator ("unknown
+                # role", "that is the only admin"), with no internals in it.
+                return JSONResponse({"error": str(exc)}, status_code=400)
+            if not updated:
+                return JSONResponse({"error": "No such user"}, status_code=404)
+            return JSONResponse({"ok": True})
+
+        @app.get("/api/admin/queue")
+        async def admin_queue(request: Request) -> JSONResponse:
+            await _require_admin(request)
+            assert job_queue is not None
+            return JSONResponse({"jobs": [j.to_dict() for j in job_queue.list_all()]})
+
     # ── Operations: liveness and metrics ──────────────────────────────────
     #
     # /healthz is deliberately outside /api/, and therefore outside the
@@ -644,7 +781,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         return JSONResponse({"status": "ok"})
 
     @app.get("/api/metrics")
-    async def metrics() -> JSONResponse:
+    async def metrics(request: Request) -> JSONResponse:
         """Counters worth watching on a long-running instance.
 
         provider_stats has been recording per-API successes and failures all
@@ -664,12 +801,19 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         # and queue depth aggregate every account's activity, and the client
         # count says how many other people are connected. In single-user mode
         # that is the operator looking at their own instance. In multi-user
-        # mode it is one account being told how much the others are doing —
-        # and there is no administrator role here to grant it to (see
-        # core/web_users.py: accounts are flat), so the honest answer is to
-        # leave it out rather than show it to everybody. The counters keep
-        # being recorded either way; only this projection is narrowed.
-        if not multiuser:
+        # mode it is one account being told how much the others are doing, so
+        # it is shown only to an admin (see core/web_users.py, which grew
+        # roles for exactly this). The counters keep being recorded either
+        # way; only this projection is narrowed.
+        visible = not multiuser
+        if multiuser:
+            from .core.web_users import is_admin
+
+            visible = await run_in_threadpool(
+                is_admin, getattr(request.state, "username", None)
+            )
+
+        if visible:
             payload["providers"] = await run_in_threadpool(provider_stats.snapshot)
             payload["websocket_clients"] = manager.count()
 
@@ -866,6 +1010,29 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             manager.disconnect(ws)
         except Exception:
             manager.disconnect(ws)
+
+    # ── The versioned REST API (/api/v1) ──────────────────────────────────
+    #
+    # Additive: the RPC bridge above is untouched and the frontend still uses
+    # it. This is the surface for everything that is *not* our frontend —
+    # bots, scripts, other services — which needs a declared schema rather
+    # than a list of GUI method names. See webapi/__init__.py.
+    #
+    # Mounted after the middleware that gates /api/*, so it inherits the same
+    # token and session auth rather than reimplementing either.
+    from .webapi import ApiDeps, build_v1_router
+
+    app.include_router(
+        build_v1_router(
+            ApiDeps(
+                api_for=api_for,
+                multiuser=multiuser,
+                token_required=bool(token),
+                job_queue=job_queue,
+                username_for=lambda request: getattr(request.state, "username", None),
+            )
+        )
+    )
 
     # ── Frontend: same static files the desktop build uses, with a small
     #    script injected so window.pywebview.api exists in a plain browser.

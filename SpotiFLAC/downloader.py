@@ -533,6 +533,26 @@ async def _transcode_result_async(
     return DownloadResult.ok(result.provider, str(dest), opts.transcode_to)
 
 
+async def _record_provider_outcome(
+    provider_name: str,
+    success: bool,
+    duration_s: float,
+    error: str = "",
+) -> None:
+    """Feeds core/provider_stats so /api/metrics and the extension health
+    panel have something to show. Never raises — see that module's
+    record_provider_attempt_async().
+    """
+    try:
+        from .core.provider_stats import record_provider_attempt_async
+
+        await record_provider_attempt_async(provider_name, success, duration_s, error)
+    except Exception:
+        logger.debug(
+            "[stats] could not record %s outcome", provider_name, exc_info=True
+        )
+
+
 async def download_one_async(
     metadata: TrackMetadata,
     output_dir: str,
@@ -598,6 +618,12 @@ async def download_one_async(
             )
             cb = ProgressCallback(item_id=metadata.id, track_name=metadata.title)
             provider.set_progress_callback(cb)
+            # Per-provider, not per-track: `started_at` above covers the whole
+            # track including every provider that failed before this one, and
+            # attributing that to whichever provider happened to succeed last
+            # would make the slowest-looking extension the one that rescued
+            # the download.
+            provider_started_at = time.monotonic()
 
             # Cooperative shutdown propagation
             if hasattr(provider, "set_stop_event_async"):
@@ -711,6 +737,12 @@ async def download_one_async(
                         metadata.artists,
                         metadata.title,
                     )
+                    # Counted as a success — the provider did resolve the
+                    # track — but with no duration: nothing was transferred,
+                    # and folding a near-zero sample into the latency average
+                    # would make a re-run of an already-complete album look
+                    # like the provider had got dramatically faster.
+                    await _record_provider_outcome(provider.name, True, 0.0)
                     return result
                 if opts.output_path and result.file_path:
                     _, ext = os.path.splitext(result.file_path)
@@ -738,9 +770,18 @@ async def download_one_async(
                     metadata.title,
                 )
                 _schedule_hires_check(opts, result)
+                await _record_provider_outcome(
+                    provider.name, True, time.monotonic() - provider_started_at
+                )
                 return result
 
             errors[provider.name] = result.error or "unknown error"
+            await _record_provider_outcome(
+                provider.name,
+                False,
+                time.monotonic() - provider_started_at,
+                errors[provider.name],
+            )
             safe_tqdm_write(
                 f"  ✗  [#{position}] {provider.name}  ·  {result.error}",
                 file=sys.stderr,

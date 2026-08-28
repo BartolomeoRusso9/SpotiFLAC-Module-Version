@@ -9,6 +9,12 @@ from pathlib import Path
 
 from .atomic_io import write_json_atomic
 
+#: Key prefix used by the download path (see downloader.download_one_async),
+#: as opposed to the per-API-URL keys a provider uses internally for its own
+#: endpoint rotation. Both live in the same file; the prefix is what tells
+#: the health view which is which.
+PROVIDER_KIND = "provider"
+
 _CACHE_DIR_NAME = "spotiflac"
 _CACHE_FILE_NAME = "provider_priority.json"
 
@@ -63,6 +69,51 @@ class _ProviderStats:
     last_failure: float = 0.0
     last_attempt: float = 0.0
     last_outcome: str = ""
+    #: Exponential moving average of successful-attempt duration, in seconds.
+    #: A moving average rather than a total/count pair because what anyone
+    #: looking at this wants to know is "is it slow *now*" — an endpoint that
+    #: was fast for a thousand downloads last month and is timing out today
+    #: should not read as fast.
+    avg_duration_s: float = 0.0
+    last_duration_s: float = 0.0
+    #: Truncated: this is written to a JSON file under $HOME and rendered in
+    #: a UI, and a provider can put anything in an error string.
+    last_error: str = ""
+
+    #: Weight of the newest sample in avg_duration_s.
+    _EMA_ALPHA = 0.3
+
+    def observe(self, success: bool, duration_s: float, error: str = "") -> None:
+        now = time.time()
+        if success:
+            self.successes += 1
+            self.last_success = now
+            self.last_outcome = "success"
+            self.last_error = ""
+            if duration_s > 0:
+                self.last_duration_s = duration_s
+                self.avg_duration_s = (
+                    duration_s
+                    if self.avg_duration_s <= 0
+                    else (
+                        self._EMA_ALPHA * duration_s
+                        + (1 - self._EMA_ALPHA) * self.avg_duration_s
+                    )
+                )
+        else:
+            self.failures += 1
+            self.last_failure = now
+            self.last_outcome = "failure"
+            if error:
+                self.last_error = str(error)[:300]
+        self.last_attempt = now
+
+    @property
+    def attempts(self) -> int:
+        return self.successes + self.failures
+
+    def success_rate(self) -> float | None:
+        return (self.successes / self.attempts) if self.attempts else None
 
     def score(self) -> float:
         base = self.successes - (self.failures * 2)
@@ -82,6 +133,9 @@ class _ProviderStats:
             last_failure=float(data.get("last_failure", 0.0)),
             last_attempt=float(data.get("last_attempt", 0.0)),
             last_outcome=str(data.get("last_outcome", "")) or "",
+            avg_duration_s=float(data.get("avg_duration_s", 0.0)),
+            last_duration_s=float(data.get("last_duration_s", 0.0)),
+            last_error=str(data.get("last_error", "")) or "",
         )
 
     def to_dict(self) -> dict:
@@ -121,31 +175,32 @@ class ProviderScorer:
         provider_type: str,
         api_url: str,
         success: bool,
+        duration_s: float = 0.0,
+        error: str = "",
     ) -> None:
         await self._ensure_initialized()
         key = f"{provider_type}:{api_url}"
-        now = time.time()
 
         async with self._stats_lock:
-            s = self._stats.setdefault(key, _ProviderStats())
-            if success:
-                s.successes += 1
-                s.last_success = now
-                s.last_outcome = "success"
-            else:
-                s.failures += 1
-                s.last_failure = now
-                s.last_outcome = "failure"
-            s.last_attempt = now
+            stats = self._stats.setdefault(key, _ProviderStats())
+            stats.observe(success, duration_s, error)
 
             # Scrittura su disco delegata a un worker
             await self._persist_to_disk_async()
 
-    async def record_success_async(self, provider_type: str, api_url: str) -> None:
-        await self._record_async(provider_type, api_url, True)
+    async def record_success_async(
+        self, provider_type: str, api_url: str, duration_s: float = 0.0
+    ) -> None:
+        await self._record_async(provider_type, api_url, True, duration_s)
 
-    async def record_failure_async(self, provider_type: str, api_url: str) -> None:
-        await self._record_async(provider_type, api_url, False)
+    async def record_failure_async(
+        self,
+        provider_type: str,
+        api_url: str,
+        duration_s: float = 0.0,
+        error: str = "",
+    ) -> None:
+        await self._record_async(provider_type, api_url, False, duration_s, error)
 
     async def prioritize_async(
         self,
@@ -191,12 +246,40 @@ class ProviderScorer:
 _scorer = ProviderScorer()
 
 
-async def record_success_async(provider_type: str, api_url: str) -> None:
-    await _scorer.record_success_async(provider_type, api_url)
+async def record_success_async(
+    provider_type: str, api_url: str, duration_s: float = 0.0
+) -> None:
+    await _scorer.record_success_async(provider_type, api_url, duration_s)
 
 
-async def record_failure_async(provider_type: str, api_url: str) -> None:
-    await _scorer.record_failure_async(provider_type, api_url)
+async def record_failure_async(
+    provider_type: str, api_url: str, duration_s: float = 0.0, error: str = ""
+) -> None:
+    await _scorer.record_failure_async(provider_type, api_url, duration_s, error)
+
+
+async def record_provider_attempt_async(
+    provider_name: str,
+    success: bool,
+    duration_s: float = 0.0,
+    error: str = "",
+) -> None:
+    """Records one download attempt against a named provider/extension.
+
+    This is what the download path calls (see downloader.download_one_async).
+    Until it existed, this module recorded nothing at all unless a
+    third-party Python extension happened to call it directly — so
+    /api/metrics reported an empty `providers` map on every ordinary install,
+    and the ordering in prioritize_async() had nothing to order by.
+
+    Never raises: bookkeeping must not be able to fail a download.
+    """
+    try:
+        await _scorer._record_async(
+            PROVIDER_KIND, provider_name, success, duration_s, error
+        )
+    except Exception:
+        pass
 
 
 async def prioritize_async(provider_type: str, api_urls: list[str]) -> list[str]:
@@ -239,3 +322,51 @@ def snapshot() -> dict:
             "success_rate": (totals["successes"] / attempts) if attempts else None,
         },
     }
+
+
+def health() -> list[dict]:
+    """One row per download provider/extension, worst first.
+
+    A projection of the same file `snapshot()` reads, narrowed to the keys the
+    download path writes (see PROVIDER_KIND) and shaped for a person rather
+    than for a metrics scraper: which extension is failing, how often, how
+    slow it is, and what it said last time it broke.
+
+    Ordered by success rate ascending so whatever is actually broken is at the
+    top — a health panel sorted alphabetically makes you hunt for the problem
+    it exists to show you. Providers never attempted sit at the end.
+    """
+    rows: list[dict] = []
+    for key, entry in _load_cache_sync().items():
+        kind, _, name = key.partition(":")
+        if kind != PROVIDER_KIND or not name:
+            continue
+        stats = _ProviderStats.from_dict(entry)
+        rows.append(
+            {
+                "provider": name,
+                "attempts": stats.attempts,
+                "successes": stats.successes,
+                "failures": stats.failures,
+                "success_rate": stats.success_rate(),
+                "avg_duration_s": round(stats.avg_duration_s, 2),
+                "last_duration_s": round(stats.last_duration_s, 2),
+                "last_outcome": stats.last_outcome,
+                "last_success": stats.last_success,
+                "last_failure": stats.last_failure,
+                "last_attempt": stats.last_attempt,
+                "last_error": stats.last_error,
+                "score": stats.score(),
+            }
+        )
+
+    rows.sort(
+        key=lambda r: (
+            # Never-attempted last, then worst success rate first, then the
+            # busiest of equally-healthy providers.
+            r["attempts"] == 0,
+            r["success_rate"] if r["success_rate"] is not None else 1.0,
+            -r["attempts"],
+        )
+    )
+    return rows

@@ -73,6 +73,13 @@ If you just want a GUI for personal use, with no code involved, the [Desktop](ht
 - Local-library duplicate detection by acoustic fingerprint, independent of tags/ISRC
 - Extension scaffolding + dry-run validation for developing your own
 - Installable as a PWA in `--web` mode (Add to Home Screen / standalone window)
+- **Follow artists** — check for new releases and fetch only what came out since
+- **Library upgrade** — find files below a target quality (including fake Hi-Res) and re-fetch them
+- **Outbound notifications** — webhook, Discord, Telegram or ntfy, per track or one summary per run
+- **Versioned REST API** at `/api/v1`, with an OpenAPI document at `/docs`
+- **Durable queue and download log** (SQLite): a restart no longer loses queued work
+- **Per-account quotas and an admin role** in `--web-multiuser`
+- **Extension health panel** — success rate, latency and last error per provider
 
 ---
 
@@ -99,7 +106,9 @@ renders it usefully. Every page below is the same text that used to be here.
 | [Configuration](docs/guide/configuration.md) | Every option: naming, quality, lyrics, enrichment, transcoding, watch mode, profiles |
 | [API Reference](docs/guide/api-reference.md) | `SpotiFLAC` and `AsyncSpotiFLAC`, and the objects they return |
 | [Local Tagging](docs/guide/local-tagging.md) | Retagging an existing library, MusicBrainz enrichment, download validation |
-| [Automation & Operations](docs/guide/automation.md) | JSON output, post-download hooks, M3U, library rescan, cache maintenance, running the web server |
+| [Automation & Operations](docs/guide/automation.md) | JSON output, post-download hooks, notifications, M3U, library rescan, cache maintenance, running the web server |
+| [Following Artists](docs/guide/subscriptions.md) | Subscriptions, new-release checks, and the library-upgrade pass |
+| [REST API](docs/guide/rest-api.md) | The versioned `/api/v1` surface, quotas and the admin endpoints |
 | [Docker](docs/guide/docker.md) | Headless and NAS setups |
 | [CLI](docs/guide/cli.md) | The standalone executables |
 

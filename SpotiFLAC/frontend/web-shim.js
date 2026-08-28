@@ -169,6 +169,9 @@
     'get_registry_directories', 'add_registry_directory', 'remove_registry_directory',
     'discover_registries', 'get_dedup_status', 'scan_for_duplicates',
     'get_trusted_keys',
+    'get_subscriptions', 'add_subscription', 'remove_subscription',
+    'set_subscription_enabled', 'reset_subscription', 'check_subscriptions',
+    'get_extension_health', 'reset_extension_health',
   ];
 
   // Deliberately NOT here (and not in webapp.py's ALLOWED_METHODS):
@@ -307,6 +310,7 @@
     'loadHistoryAndProfiles',
     'showFfmpegWarning',
     'showTracklist',
+    'subscriptionsChecked',
     'updateFolderLabel',
     'updateHealthResults',
   ]);

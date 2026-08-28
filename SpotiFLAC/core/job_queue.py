@@ -12,6 +12,21 @@ a closure that calls the existing, unmodified SpotiFLAC_API.download_tracks()).
 That keeps this an additive wrapper around the download path rather than a
 rewrite of it: everything this module knows how to do is "run this
 callable, later, in order, and remember what happened."
+
+Persistence (`persist=True`)
+----------------------------
+In-memory remains the default and the whole behaviour of the class is
+unchanged without the flag. With it, every state transition is mirrored into
+`core/db.py`, and the constructor restores whatever was left unfinished by
+the previous process — which is the case this queue exists for: a headless
+instance restarted (a container update, a NAS reboot) used to silently drop
+every download somebody had queued.
+
+A job found in RUNNING at startup is put back to QUEUED rather than left
+where it was: the thread that was running it died with the process, so the
+only honest reading of that row is "started, outcome unknown". Handlers must
+therefore tolerate being run twice for the same payload — the download path
+does, because every provider skips a track whose file is already on disk.
 """
 
 from __future__ import annotations
@@ -109,26 +124,154 @@ class JobQueue:
         workers: int = 1,
         max_history: int = DEFAULT_MAX_HISTORY,
         max_pending_per_owner: int = DEFAULT_MAX_PENDING_PER_OWNER,
+        persist: bool = False,
+        quota_check: Callable[[str], None] | None = None,
     ) -> None:
         self._handler = handler
         self._queue: queue.Queue[str] = queue.Queue()
         self._jobs: dict[str, Job] = {}
         self._max_history = max_history
         self._max_pending_per_owner = max_pending_per_owner
+        self._persist = persist
+        # Called with the owner just before a job is accepted; it raises to
+        # refuse. Injected rather than imported so this module keeps knowing
+        # nothing about accounts — see webapp.py, which passes the
+        # web_users-backed check.
+        self._quota_check = quota_check
         self._lock = threading.Lock()
+
+        # Restore before the workers start, so a recovered job cannot be
+        # picked up while the rest of the backlog is still being read.
+        restored: list[str] = []
+        if persist:
+            restored = self._restore()
+
         self._threads = [
             threading.Thread(target=self._worker_loop, daemon=True)
             for _ in range(max(1, workers))
         ]
         for t in self._threads:
             t.start()
+        for job_id in restored:
+            self._queue.put(job_id)
+
+    # ── Persistence ───────────────────────────────────────────────────────
+
+    def _restore(self) -> list[str]:
+        """Reads back everything the previous process left behind.
+
+        Returns the ids that need re-queueing, oldest first. Never raises: a
+        database that cannot be read costs the backlog, and that is strictly
+        better than refusing to start the queue at all.
+        """
+        from . import db
+
+        try:
+            rows = (
+                db.connection()
+                .execute("SELECT * FROM jobs ORDER BY created_at")
+                .fetchall()
+            )
+        except Exception:
+            logger.warning("[JobQueue] Could not restore jobs", exc_info=True)
+            return []
+
+        to_run: list[str] = []
+        for row in rows:
+            try:
+                status = JobStatus(row["status"])
+            except ValueError:
+                status = JobStatus.QUEUED
+            job = Job(
+                id=row["id"],
+                owner=row["owner"] or "",
+                payload=db.loads(row["payload"], {}) or {},
+                status=status,
+                created_at=float(row["created_at"] or 0.0),
+                started_at=row["started_at"],
+                finished_at=row["finished_at"],
+                error=row["error"],
+            )
+            if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
+                # See the module docstring: RUNNING means "the process died
+                # mid-job", which is indistinguishable from queued as far as
+                # what still has to happen.
+                job.status = JobStatus.QUEUED
+                job.started_at = None
+                to_run.append(job.id)
+            self._jobs[job.id] = job
+
+        if to_run:
+            logger.info("[JobQueue] Restored %d unfinished job(s)", len(to_run))
+            self._write_many(to_run)
+        return to_run
+
+    def _write(self, job: Job) -> None:
+        """Mirrors one job's current state into the store. Never raises."""
+        if not self._persist:
+            return
+        from . import db
+
+        try:
+            with db.transaction() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO jobs (
+                        id, owner, payload, status,
+                        created_at, started_at, finished_at, error
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        status      = excluded.status,
+                        started_at  = excluded.started_at,
+                        finished_at = excluded.finished_at,
+                        error       = excluded.error
+                    """,
+                    (
+                        job.id,
+                        job.owner,
+                        db.dumps(job.payload),
+                        job.status.value,
+                        job.created_at,
+                        job.started_at,
+                        job.finished_at,
+                        job.error,
+                    ),
+                )
+        except Exception:
+            logger.debug("[JobQueue] Could not persist job %s", job.id, exc_info=True)
+
+    def _write_many(self, job_ids: list[str]) -> None:
+        for job_id in job_ids:
+            job = self._jobs.get(job_id)
+            if job is not None:
+                self._write(job)
+
+    def _forget(self, job_ids: list[str]) -> None:
+        if not self._persist or not job_ids:
+            return
+        from . import db
+
+        try:
+            with db.transaction() as conn:
+                conn.executemany(
+                    "DELETE FROM jobs WHERE id = ?", [(i,) for i in job_ids]
+                )
+        except Exception:
+            logger.debug("[JobQueue] Could not evict persisted jobs", exc_info=True)
 
     def submit(self, owner: str, payload: dict) -> Job:
         """Queues a job for `owner`.
 
         Raises QueueFullError if that owner already has
-        `max_pending_per_owner` jobs waiting to start.
+        `max_pending_per_owner` jobs waiting to start, or whatever
+        `quota_check` raises if one was supplied and refuses.
         """
+        if self._quota_check is not None:
+            # Deliberately outside the lock: the check may read the database,
+            # and holding the queue lock across that would block every worker
+            # transition for the duration.
+            self._quota_check(owner)
+
         job = Job(id=uuid.uuid4().hex, owner=owner, payload=payload)
         with self._lock:
             pending = sum(
@@ -145,24 +288,31 @@ class JobQueue:
                     msg, pending=pending, limit=self._max_pending_per_owner
                 )
             self._jobs[job.id] = job
-            self._evict_finished_locked()
+            evicted = self._evict_finished_locked()
+        self._write(job)
+        self._forget(evicted)
         self._queue.put(job.id)
         return job
 
-    def _evict_finished_locked(self) -> None:
+    def _evict_finished_locked(self) -> list[str]:
         """Drops the oldest finished jobs once history exceeds the cap.
 
         Only DONE/FAILED entries are eligible: anything queued or running is
         still live state, however old it is. Caller must hold `_lock`.
+        Returns the evicted ids so the caller can drop them from the store
+        too — outside the lock, since that is I/O.
         """
         if len(self._jobs) <= self._max_history:
-            return
+            return []
         finished = sorted(
             (j for j in self._jobs.values() if j.status in _FINISHED_STATUSES),
             key=lambda j: j.finished_at or j.created_at,
         )
+        evicted: list[str] = []
         for job in finished[: len(self._jobs) - self._max_history]:
             self._jobs.pop(job.id, None)
+            evicted.append(job.id)
+        return evicted
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -199,6 +349,7 @@ class JobQueue:
                 with self._lock:
                     job.status = JobStatus.RUNNING
                     job.started_at = time.time()
+                self._write(job)
 
                 result = error = None
                 status = JobStatus.DONE
@@ -220,6 +371,8 @@ class JobQueue:
                     job.error = error
                     job.status = status
                     job.finished_at = time.time()
-                    self._evict_finished_locked()
+                    evicted = self._evict_finished_locked()
+                self._write(job)
+                self._forget(evicted)
             finally:
                 self._queue.task_done()
