@@ -971,11 +971,11 @@ async def amain() -> None:
         if not keys:
             print("No trusted keys configured.")
         for idx, k in enumerate(keys, start=1):
-            key_b64 = k.get("public_key_b64", "") or ""
-            masked_key = (
-                f"{key_b64[:8]}...{key_b64[-8:]}" if len(key_b64) > 16 else "***"
-            )
-            print(f"key-{idx}: {masked_key}")
+            name = k.get("name", "") or "(unnamed)"
+            # Only the human-assigned name is shown; the key material itself
+            # is never written to the console. Use trusted_keys.json directly
+            # if you need to inspect or export the public key bytes.
+            print(f"key-{idx}: {name}")
         return
 
     if "--interactive" in sys.argv:

@@ -88,17 +88,18 @@ def _is_path_safe(candidate: Path, api) -> bool:
     at least one approved root. Returns False otherwise (path traversal attempt).
     """
     try:
-        resolved = candidate.resolve()
+        resolved = os.path.realpath(str(candidate))
         # Approved roots: download_dir and user home
         approved_roots = [
-            Path(api.download_dir).resolve(),
-            Path.home().resolve(),
+            os.path.realpath(str(api.download_dir)),
+            os.path.realpath(str(Path.home())),
         ]
         for root in approved_roots:
             try:
-                resolved.relative_to(root)
-                return True
+                if os.path.commonpath([resolved, root]) == root:
+                    return True
             except ValueError:
+                # Different drives / mixed absolute-relative — not under root.
                 continue
         return False
     except Exception:
@@ -431,17 +432,22 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # ── Server-side folder browser (replaces the native folder dialog) ─────
     @app.get("/api/browse-folder")
     async def browse_folder(path: str | None = None) -> JSONResponse:
-        base = Path(path).expanduser() if path else Path.home()
         try:
-            base = base.resolve()
-            # Path traversal protection
-            if not _is_path_safe(base, api):
+            # Resolve the requested path to a canonical, absolute form and
+            # confirm it sits under an approved root *before* it is ever used
+            # to touch the filesystem. Everything downstream operates on the
+            # sanitized `safe_root` string, never on the raw `path` input.
+            requested = os.path.realpath(
+                os.path.expanduser(path) if path else str(Path.home())
+            )
+            if not _is_path_safe(Path(requested), api):
                 return JSONResponse(
                     {"error": "Access denied: path is outside approved directories"},
                     status_code=403,
                 )
+            base = Path(requested)
             if not base.is_dir():
-                base = Path.home().resolve()
+                base = Path(os.path.realpath(str(Path.home())))
             directories = sorted(
                 (
                     p.name

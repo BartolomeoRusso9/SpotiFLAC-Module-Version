@@ -145,48 +145,76 @@ def _kill_by_profile_dir(profile_dir: str) -> None:
         return
     with contextlib.suppress(Exception):
         if platform.system() != "Windows":
-            subprocess.run(
-                ["pkill", "-f", profile_dir],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # SIGTERM first, then SIGKILL — Chromium/Brave can be slow to act
+            # on (or briefly ignore) SIGTERM, which on macOS left the window
+            # visibly on screen. The profile dir is a throwaway, so a hard
+            # kill is safe here.
+            for sig in ("-TERM", "-KILL"):
+                subprocess.run(
+                    ["pkill", sig, "-f", profile_dir],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
         else:
-            # Killing every chrome.exe (as a plain "/IM chrome.exe" would)
-            # would also take down any Chrome windows the user has open
-            # unrelated to this solver session. Scope the kill to PIDs
-            # whose command line references this solver's profile dir,
-            # falling back to the unscoped kill only if none are found
-            # (e.g. WMIC unavailable, or the command line couldn't be
-            # matched for some other reason).
-            matched_pids: list[str] = []
+            # Windows: scope the kill to processes whose command line
+            # references THIS solver's profile dir, so we never touch the
+            # user's own browser windows. Works for whatever Chromium-based
+            # exe pydoll launched (chrome.exe / msedge.exe / brave.exe /
+            # chromium.exe).
+            #
+            # Preferred path is a PowerShell CIM query — `wmic` is
+            # deprecated and absent on Windows 11 24H2+.
+            ps_script = (
+                "Get-CimInstance Win32_Process | "
+                f"Where-Object {{ $_.CommandLine -like '*{profile_dir}*' }} | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
+                "-ErrorAction SilentlyContinue }"
+            )
+            killed = False
             try:
-                wmic_out = subprocess.run(
+                result = subprocess.run(
                     [
-                        "wmic",
-                        "process",
-                        "where",
-                        "name='chrome.exe'",
-                        "get",
-                        "ProcessId,CommandLine",
+                        "powershell",
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-Command",
+                        ps_script,
                     ],
                     check=False,
-                    stdout=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    text=True,
-                    timeout=10,
+                    timeout=15,
                 )
-                for line in wmic_out.stdout.splitlines():
-                    line = line.strip()
-                    if not line or profile_dir not in line:
-                        continue
-                    pid = line.split()[-1]
-                    if pid.isdigit():
-                        matched_pids.append(pid)
+                killed = result.returncode == 0
             except Exception:
-                matched_pids = []
+                killed = False
 
-            if matched_pids:
+            if not killed:
+                # Legacy fallback: wmic, still scoped to the profile dir and
+                # to the known Chromium-based exe names. No unscoped
+                # "/IM chrome.exe" kill — that would nuke the user's own
+                # Chrome windows.
+                matched_pids: list[str] = []
+                try:
+                    wmic_out = subprocess.run(
+                        ["wmic", "process", "get", "ProcessId,CommandLine"],
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        text=True,
+                        timeout=10,
+                    )
+                    for line in wmic_out.stdout.splitlines():
+                        line = line.strip()
+                        if not line or profile_dir not in line:
+                            continue
+                        pid = line.split()[-1]
+                        if pid.isdigit():
+                            matched_pids.append(pid)
+                except Exception:
+                    matched_pids = []
+
                 for pid in matched_pids:
                     subprocess.run(
                         ["taskkill", "/F", "/PID", pid, "/T"],
@@ -194,13 +222,6 @@ def _kill_by_profile_dir(profile_dir: str) -> None:
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                     )
-            else:
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
 
 
 def arm_hard_watchdog(browser, profile_dir: str | None, timeout_seconds: float):
@@ -772,16 +793,53 @@ async def _solve_impl(
     timeout: int,
     capture_callback: bool = False,
     hold_open_seconds: float = 0.0,
+    cancel_event: threading.Event | None = None,
+    browser_info: dict | None = None,
 ) -> str | tuple[str, str | None]:
     options: ChromiumOptions | None = None
     browser = None
     profile_dir: str | None = None
+
+    _hard_killed = {"done": False}
+
+    class _SolverCancelled(Exception):
+        """Raised to unwind _solve_impl immediately once the caller has
+        cancelled — no further CDP calls against the (now dead) browser."""
+
+    def _cancelled() -> bool:
+        # The caller already has what it needs (e.g. the grant arrived on its
+        # own local callback server) and wants this browser gone now.
+        return cancel_event is not None and cancel_event.is_set()
+
+    def _shutdown_now() -> None:
+        """Synchronous, event-loop-independent teardown for the cancel path,
+        then unwind via _SolverCancelled.
+
+        `browser.stop()` is async and, once we're unwinding, may not get a
+        chance to run; go straight to the OS-level kill scoped to this
+        solver's own profile dir so the (visible, on macOS) window closes
+        immediately instead of lingering until the hard watchdog. Raising
+        afterwards stops any further CDP calls against the now-dead browser
+        (which otherwise spin pydoll on "No healthy WebSocket connection").
+        """
+        if not _hard_killed["done"]:
+            _hard_killed["done"] = True
+            logger.info(
+                "[solver] cancel requested — force-closing browser (profile_dir=%s)",
+                profile_dir,
+            )
+            _kill_by_profile_dir(profile_dir)
+        raise _SolverCancelled
 
     def cancel_watchdog() -> None:
         return None
 
     try:
         options, profile_dir = build_chromium_options(hidden=True)
+        if browser_info is not None:
+            # Let the caller kill this browser directly (OS-level, scoped to
+            # this profile dir) if the cooperative cancel path can't run.
+            browser_info["profile_dir"] = profile_dir
     except Exception as exc:
         message = _describe_browser_start_error(exc, options)
         logger.error("[solver] %s", message)
@@ -963,9 +1021,14 @@ async def _solve_impl(
 
         # Run navigation and captcha detection in a separate background task
         nav_task = asyncio.create_task(_do_navigate())
+        # Never let an orphaned nav_task raise "exception never retrieved"
+        # (it will, once the browser is killed on the cancel path).
+        nav_task.add_done_callback(lambda t: t.cancelled() or t.exception())
 
         # Poll continuously to see whether auto-verification succeeded
         for _ in range(100):  # max 10 seconds
+            if _cancelled():
+                _shutdown_now()
             if nav_task.done():
                 if nav_task.exception() is not None:
                     # Propagate a dead-browser failure immediately instead
@@ -997,6 +1060,13 @@ async def _solve_impl(
                 pass
 
             await asyncio.sleep(0.1)
+
+        # We stopped polling (grant captured, "Verified", cancelled, or the
+        # 10s ceiling). nav_task (pydoll's bypass context manager) is left
+        # detached on purpose — cancel() would raise CancelledError up
+        # through the finally and skip browser teardown; instead the browser
+        # teardown/kill below makes its next CDP call fail. Its result is
+        # already swallowed by the done-callback attached at creation.
 
     async def _open_fresh_page() -> None:
         """Reloads siteurl from scratch — used for retry with reload."""
@@ -1109,6 +1179,9 @@ async def _solve_impl(
         last_click = 0.0
 
         while asyncio.get_event_loop().time() < deadline:
+            if _cancelled():
+                _shutdown_now()
+                return token
             token = await get_token()
             if capture_callback:
                 try:
@@ -1146,6 +1219,9 @@ async def _solve_impl(
         await _navigate_with_turnstile_bypass()
 
         for attempt in range(1, max_attempts + 1):
+            if _cancelled():
+                _shutdown_now()
+                break
             try:
                 if attempt > 1:
                     await _open_fresh_page()
@@ -1167,7 +1243,11 @@ async def _solve_impl(
                 break
 
             if attempt < max_attempts:
-                await asyncio.sleep(10.0)
+                for _ in range(100):  # 10s, but bail out promptly if cancelled
+                    if _cancelled():
+                        _shutdown_now()
+                        break
+                    await asyncio.sleep(0.1)
 
         if token and hold_open_seconds > 0:
             await asyncio.sleep(hold_open_seconds)
@@ -1176,18 +1256,34 @@ async def _solve_impl(
             with contextlib.suppress(Exception):
                 await capture_callback_grant()
 
+    except _SolverCancelled:
+        logger.info("[solver] cancelled by caller — browser killed, unwinding")
+        return ("", callback_grant) if capture_callback else ""
+
     finally:
-        stopped_cleanly = False
-        try:
-            # Bounded wait: if browser.stop() itself hangs (e.g. the CDP
-            # websocket is dead), don't block this coroutine forever —
-            # fall through to the OS-level kill below. The hard watchdog
-            # armed above is the final backstop in case even *this* await
-            # never returns control.
-            await asyncio.wait_for(browser.stop(), timeout=15.0)
-            stopped_cleanly = True
-        except Exception as exc:
-            logger.warning("[solver] browser.stop() failed, forcing cleanup: %s", exc)
+        stopped_cleanly = _hard_killed["done"]
+        if not stopped_cleanly:
+            try:
+                # Bounded wait: if browser.stop() itself hangs (e.g. the CDP
+                # websocket is dead), don't block this coroutine forever —
+                # fall through to the OS-level kill below. The hard watchdog
+                # armed above is the final backstop in case even *this* await
+                # never returns control.
+                await asyncio.wait_for(browser.stop(), timeout=15.0)
+                stopped_cleanly = True
+            except Exception as exc:
+                # "not running" / dead-websocket just means the browser was
+                # already gone (e.g. killed on the cancel path, or the
+                # challenge page closed its own tab) — expected, not a
+                # problem. Only a genuine stop() failure is warn-worthy.
+                already_gone = _looks_like_dead_browser(exc) or (
+                    "not running" in str(exc).lower()
+                )
+                logger.log(
+                    logging.DEBUG if already_gone else logging.WARNING,
+                    "[solver] browser.stop() skipped/failed, forcing cleanup: %s",
+                    exc,
+                )
         if not stopped_cleanly:
             # Best-effort hard kill so a browser.stop() failure never leaves
             # the solver window open indefinitely (e.g. after the download
@@ -1254,6 +1350,8 @@ def solve_with_callback(
     siteurl: str,
     timeout: int = 45,
     hold_open_seconds: float = 0.0,
+    cancel_event: threading.Event | None = None,
+    browser_info: dict | None = None,
 ) -> tuple[str, str | None]:
     import warnings
 
@@ -1268,6 +1366,8 @@ def solve_with_callback(
                 timeout,
                 capture_callback=True,
                 hold_open_seconds=hold_open_seconds,
+                cancel_event=cancel_event,
+                browser_info=browser_info,
             ),
         )
 
