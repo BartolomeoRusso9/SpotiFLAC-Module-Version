@@ -31,12 +31,18 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .atomic_io import write_private_json
+
 logger = logging.getLogger(__name__)
 
 USERS_FILE = Path.home() / ".spotiflac" / "web_users.json"
 
 _PBKDF2_ITERATIONS = 600_000  # OWASP's 2023 recommendation for PBKDF2-SHA256
 _SESSION_TTL_S = 7 * 24 * 3600  # 7 days
+
+# Fixed, non-secret: only ever used to spend the same CPU on a login for an
+# account that doesn't exist as on one that does. See verify_password().
+_DUMMY_SALT = b"\x00" * 16
 
 
 class WebUserError(ValueError):
@@ -73,7 +79,6 @@ def _load() -> list[WebUser]:
 
 
 def _save(users: list[WebUser]) -> None:
-    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "users": [
             {
@@ -85,7 +90,7 @@ def _save(users: list[WebUser]) -> None:
             for u in users
         ]
     }
-    USERS_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_private_json(USERS_FILE, payload)
 
 
 def has_any_users() -> bool:
@@ -132,15 +137,26 @@ def delete_user(username: str) -> bool:
 
 
 def verify_password(username: str, password: str) -> bool:
-    """Constant-time-safe by construction: hashlib.pbkdf2_hmac + comparing
-    two hex digests of equal, fixed length via secrets.compare_digest.
+    """Whether `password` is correct for `username`.
+
+    The hash comparison is constant-time (secrets.compare_digest over two
+    equal-length hex digests), but that only hides *which* password was
+    wrong. Hiding *whether the account exists* takes the dummy hash below:
+    returning early for an unknown username answered in microseconds, while
+    a known one took 600k PBKDF2 iterations first — a difference any client
+    can measure, turning the login form into a "does this user exist?"
+    oracle for enumerating accounts before attacking them.
     """
-    for u in _load():
-        if u.username != username:
-            continue
-        candidate = _hash_password(password, bytes.fromhex(u.salt))
-        return secrets.compare_digest(candidate, u.password_hash)
-    return False
+    match = next((u for u in _load() if u.username == username), None)
+
+    if match is None:
+        # Same work, discarded. The salt is fixed and the result is unused;
+        # it exists purely so both branches cost the same.
+        _hash_password(password, _DUMMY_SALT)
+        return False
+
+    candidate = _hash_password(password, bytes.fromhex(match.salt))
+    return secrets.compare_digest(candidate, match.password_hash)
 
 
 def change_password(username: str, new_password: str) -> bool:

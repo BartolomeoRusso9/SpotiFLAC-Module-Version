@@ -7,6 +7,8 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .atomic_io import write_json_atomic
+
 _CACHE_DIR_NAME = "spotiflac"
 _CACHE_FILE_NAME = "provider_priority.json"
 
@@ -44,9 +46,11 @@ def _load_cache_sync() -> dict[str, dict]:
 
 def _save_cache_sync(data: dict[str, dict]) -> None:
     try:
-        cache_file = _get_cache_file()
         _ensure_cache_dir()
-        cache_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # Atomic: this is written from worker threads as downloads complete,
+        # so a plain write_text() could be truncating the file at the moment
+        # another thread reads it.
+        write_json_atomic(_get_cache_file(), data)
     except OSError:
         pass
 

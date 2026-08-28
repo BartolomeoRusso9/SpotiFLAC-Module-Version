@@ -25,6 +25,8 @@ import asyncio
 import logging
 import os
 import secrets
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -133,7 +135,6 @@ ALLOWED_METHODS: set[str] = {
     "get_spotify_home_feed",
     "search_provider",
     "search_provider_async",
-    "search_code",
     "remove_history_item",
     "get_network_status",
     "save_profile_data",
@@ -158,9 +159,84 @@ ALLOWED_METHODS: set[str] = {
     "get_dedup_status",
     "scan_for_duplicates",
     "get_trusted_keys",
-    "add_trusted_key",
-    "remove_trusted_key",
 }
+
+# Deliberately absent from ALLOWED_METHODS, even though they exist on the Api
+# object (keep this list next to the allowlist so a future "why isn't X
+# exposed?" has an answer here rather than in a commit message):
+#
+#   add_trusted_key / remove_trusted_key
+#       These write ~/.spotiflac/trusted_keys.json — the Ed25519 root of trust
+#       that decides which registry entries count as "signed" (see
+#       extensions/trust.py). Reachable over HTTP, they let whoever can reach
+#       the port install their own key and then sign their own extensions,
+#       which is the one thing the signing scheme exists to prevent. Reading
+#       the list (get_trusted_keys) is fine; writing it is CLI-only, via
+#       tools/registry_signing_cli.py.
+#
+#   search_code
+#       A development helper: greps a caller-supplied path and returns the
+#       matching *lines*, which over HTTP is an arbitrary file-content read of
+#       anything the process can open. The frontend never called it.
+#
+#   choose_folder and the window-chrome methods
+#       See the note above the allowlist — those are native-window only.
+
+
+class LoginRateLimiter:
+    """Exponential backoff per client address after failed logins.
+
+    Two things make an unthrottled /api/auth/login worse than it looks. It's
+    in _EXEMPT_PATHS, so it is the one endpoint reachable without a session —
+    and every attempt costs 600k PBKDF2 iterations (see core/web_users.py),
+    run in Starlette's bounded threadpool. So the same endpoint that lets a
+    password be guessed at full speed also lets a few dozen concurrent
+    requests saturate the pool and stall every other request in the process.
+
+    Deliberately in-memory and per-process, like SessionStore: this is a
+    small self-hosted server, not a fleet behind a shared cache.
+    """
+
+    _BASE_DELAY_S = 1.0
+    _MAX_DELAY_S = 60.0
+    _FREE_ATTEMPTS = 3  # fat-finger allowance before any delay kicks in
+    _FORGET_AFTER_S = 900.0
+
+    def __init__(self) -> None:
+        self._failures: dict[str, tuple[int, float]] = {}  # key -> (count, last_try)
+        self._lock = threading.Lock()
+
+    def retry_after(self, key: str) -> int | None:
+        """Seconds the caller must wait, or None if it may try now."""
+        now = time.monotonic()
+        with self._lock:
+            entry = self._failures.get(key)
+            if entry is None:
+                return None
+            count, last = entry
+            if now - last > self._FORGET_AFTER_S:
+                del self._failures[key]
+                return None
+            if count <= self._FREE_ATTEMPTS:
+                return None
+            delay = min(
+                self._BASE_DELAY_S * (2 ** (count - self._FREE_ATTEMPTS - 1)),
+                self._MAX_DELAY_S,
+            )
+            remaining = (last + delay) - now
+            return max(1, int(remaining + 0.999)) if remaining > 0 else None
+
+    def record_failure(self, key: str) -> None:
+        now = time.monotonic()
+        with self._lock:
+            count, last = self._failures.get(key, (0, now))
+            if now - last > self._FORGET_AFTER_S:
+                count = 0
+            self._failures[key] = (count + 1, now)
+
+    def reset(self, key: str) -> None:
+        with self._lock:
+            self._failures.pop(key, None)
 
 
 class ConnectionManager:
@@ -219,8 +295,9 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
 
     sessions = None
     job_queue = None
+    login_limiter = LoginRateLimiter()
     if multiuser:
-        from .core.job_queue import JobQueue
+        from .core.job_queue import JobQueue, QueueFullError
         from .core.web_users import SessionStore
 
         sessions = SessionStore()
@@ -248,7 +325,15 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         try:
             from .extensions.manager import ExtensionManager
 
-            await run_in_threadpool(ExtensionManager)  # no auto-install by default
+            # Explicit, because the comment that used to sit here said "no
+            # auto-install by default" while the constructor's default is
+            # True — so it did bootstrap, and had done all along. Behaviour
+            # unchanged; only the claim about it was wrong. In practice this
+            # is a no-op under `spotiflac --web`: launcher.amain() has already
+            # run the bootstrap, and ExtensionManager dedupes it per-process
+            # (_startup_registry_checks). It matters when webapp is started
+            # directly, e.g. `python -m SpotiFLAC.webapp`.
+            await run_in_threadpool(ExtensionManager, auto_install_downloads=True)
         except Exception as e:
             await run_in_threadpool(api.log, f"Extension init error: {e}", "warn")
         api._push("loadHistoryAndProfiles")
@@ -305,10 +390,11 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             return response
 
     if multiuser:
-        # Gates /api/* and /ws behind a logged-in session — see the
-        # "Multi-user mode" note on SESSION_COOKIE above for what this does
-        # and doesn't isolate between accounts. The frontend doesn't have a
-        # login form yet: call POST /api/auth/login directly (curl, a
+        # Gates /api/* behind a logged-in session — see the "Multi-user mode"
+        # note on SESSION_COOKIE above for what this does and doesn't isolate
+        # between accounts. /ws is gated separately, inside ws_endpoint: HTTP
+        # middleware never runs for WebSocket upgrades. The frontend doesn't
+        # have a login form yet: call POST /api/auth/login directly (curl, a
         # future UI, ...) to obtain the session cookie.
         _EXEMPT_PATHS = {"/api/auth/login", "/api/auth/status"}
 
@@ -324,16 +410,29 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             return await call_next(request)
 
         @app.post("/api/auth/login")
-        async def auth_login(payload: dict = Body(...)) -> JSONResponse:
+        async def auth_login(
+            request: Request, payload: dict = Body(...)
+        ) -> JSONResponse:
             from .core.web_users import verify_password
+
+            client_ip = request.client.host if request.client else "unknown"
+            retry_after = login_limiter.retry_after(client_ip)
+            if retry_after is not None:
+                return JSONResponse(
+                    {"error": "Too many failed logins. Try again shortly."},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                )
 
             username = str(payload.get("username", ""))
             password = str(payload.get("password", ""))
             valid = await run_in_threadpool(verify_password, username, password)
             if not valid:
+                login_limiter.record_failure(client_ip)
                 return JSONResponse(
                     {"error": "Invalid username or password"}, status_code=401
                 )
+            login_limiter.reset(client_ip)
             session_token = sessions.create(username)
             response = JSONResponse({"status": "ok", "username": username})
             response.set_cookie(
@@ -353,13 +452,16 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             request: Request, payload: dict = Body(...)
         ) -> JSONResponse:
             assert job_queue is not None  # always set together with multiuser=True
-            job = job_queue.submit(
-                request.state.username,
-                {
-                    "selected_indices": payload.get("selected_indices", []),
-                    "config": payload.get("config", {}),
-                },
-            )
+            try:
+                job = job_queue.submit(
+                    request.state.username,
+                    {
+                        "selected_indices": payload.get("selected_indices", []),
+                        "config": payload.get("config", {}),
+                    },
+                )
+            except QueueFullError as exc:
+                return JSONResponse({"error": str(exc)}, status_code=429)
             return JSONResponse({"job_id": job.id, "status": job.status.value})
 
         @app.get("/api/queue/mine")
@@ -487,14 +589,22 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # ── WebSocket: push channel for log/progress/metadata/etc. ─────────────
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
+        # Neither middleware above runs for WebSocket upgrades — @app.middleware
+        # ("http") only sees scope["type"] == "http" — so *both* gates have to be
+        # repeated here. This channel carries every push event the app emits
+        # (logs, progress, metadata, on-disk paths), so leaving either one out
+        # means an unauthenticated client can watch everything the instance does.
         if token:
-            # The http middleware above never runs for WebSocket upgrades
-            # (Starlette limitation), so the same check is repeated here.
             supplied = ws.query_params.get(WEB_TOKEN_QUERY_PARAM) or ws.cookies.get(
                 WEB_TOKEN_COOKIE
             )
             if not _token_matches(supplied, token):
                 await ws.close(code=1008)  # 1008 = Policy Violation
+                return
+        if multiuser:
+            assert sessions is not None  # always set together with multiuser=True
+            if sessions.username_for(ws.cookies.get(SESSION_COOKIE)) is None:
+                await ws.close(code=1008)
                 return
         await manager.connect(ws)
         try:

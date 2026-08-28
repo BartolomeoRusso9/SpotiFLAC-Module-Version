@@ -12,6 +12,7 @@ fastapi_testclient = pytest.importorskip("fastapi.testclient")
 webapp = pytest.importorskip("SpotiFLAC.webapp")
 
 TestClient = fastapi_testclient.TestClient
+WebSocketDisconnect = pytest.importorskip("starlette.websockets").WebSocketDisconnect
 
 
 @pytest.fixture(autouse=True)
@@ -168,3 +169,76 @@ def test_multiuser_disabled_by_default_has_no_auth_routes() -> None:
     # to the static-files mount) isn't the point; either proves the login
     # endpoint was never registered.
     assert client.post("/api/auth/login", json={}).status_code in (404, 405)
+
+
+def test_websocket_requires_a_session_when_multiuser_enabled() -> None:
+    """Regression: the session gate is HTTP middleware, and Starlette never
+    runs @app.middleware("http") for a WebSocket upgrade. /ws carries every
+    push event the instance emits (logs, progress, metadata, on-disk paths),
+    so without its own check an unauthenticated client could watch
+    everything every logged-in account does.
+
+    Asserted on the *connect*, never on a receive: the check runs before
+    ws.accept(), so an unauthenticated upgrade is refused outright. Waiting
+    for a message instead would hang forever the day this regresses, which
+    in CI is worse than a red test.
+    """
+    app = webapp.create_app(multiuser=True)
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws"):
+            pass
+
+
+def test_websocket_accepts_a_logged_in_session() -> None:
+    app = webapp.create_app(multiuser=True)
+    client = TestClient(app)
+    client.post(
+        "/api/auth/login", json={"username": "alice", "password": "alice-password"}
+    )
+    with client.websocket_connect("/ws"):
+        pass  # connecting without being closed is the assertion
+
+
+def test_repeated_failed_logins_get_rate_limited() -> None:
+    """/api/auth/login is the one endpoint reachable without a session, and
+    each attempt burns 600k PBKDF2 iterations in Starlette's bounded
+    threadpool — so unthrottled it is both a password oracle and a way to
+    stall every other request in the process.
+    """
+    app = webapp.create_app(multiuser=True)
+    client = TestClient(app)
+    bad = {"username": "alice", "password": "wrong"}
+
+    codes = [client.post("/api/auth/login", json=bad).status_code for _ in range(6)]
+
+    assert codes[0] == 401, "the first attempt must not be throttled"
+    assert 429 in codes, f"never rate limited after 6 failures: {codes}"
+    throttled = client.post("/api/auth/login", json=bad)
+    assert throttled.status_code == 429
+    assert int(throttled.headers["Retry-After"]) >= 1
+
+
+def test_login_backoff_is_per_client_and_cleared_by_success() -> None:
+    """Unit-level: the endpoint test above proves the wiring, this proves the
+    policy — one client's failures must not lock out another, and a correct
+    password must clear the penalty rather than leaving it to expire.
+    """
+    limiter = webapp.LoginRateLimiter()
+
+    for _ in range(6):
+        limiter.record_failure("10.0.0.1")
+
+    assert limiter.retry_after("10.0.0.1") is not None
+    assert limiter.retry_after("10.0.0.2") is None, "backoff leaked across clients"
+
+    limiter.reset("10.0.0.1")
+    assert limiter.retry_after("10.0.0.1") is None
+
+
+def test_a_few_typos_are_not_punished() -> None:
+    limiter = webapp.LoginRateLimiter()
+    for _ in range(webapp.LoginRateLimiter._FREE_ATTEMPTS):
+        limiter.record_failure("10.0.0.1")
+        assert limiter.retry_after("10.0.0.1") is None

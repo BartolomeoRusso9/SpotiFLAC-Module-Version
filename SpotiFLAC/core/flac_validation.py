@@ -57,9 +57,10 @@ def validate_flac_file(filepath: str) -> tuple[bool, str]:
 
         if result.returncode != 0:
             error_msg = result.stderr.strip()
+            tail = error_msg[-200:] if error_msg else "no ffmpeg output"
             if "FLAC__STREAM_DECODER_ERROR" in error_msg or "sync" in error_msg.lower():
-                return False, f"FLAC sync error: {error_msg[:100]}"
-            return False, f"FLAC validation failed: {error_msg[:100]}"
+                return False, f"FLAC sync error: {tail}"
+            return False, f"FLAC validation failed: {tail}"
 
         flac_binary = shutil.which("flac")
         # The external `flac` utility is required for a full integrity check.
@@ -126,12 +127,19 @@ def repair_flac_file(
         result = subprocess.run(
             [
                 _ffmpeg_path(),
+                "-hide_banner",
+                "-loglevel",
+                "error",
                 "-y",
+                "-err_detect",
+                "ignore_err",
                 "-i",
                 input_path,
+                "-map",
+                "0:a:0",
                 "-c:a",
                 "flac",
-                "-q:a",
+                "-compression_level",
                 "8",
                 output_path,
             ],
@@ -142,11 +150,13 @@ def repair_flac_file(
         )
 
         if result.returncode != 0:
+            # ffmpeg writes the real error at the END of stderr, so keep the tail.
             error_msg = result.stderr.strip()
-            logger.warning("[flac_validation] Repair failed: %s", error_msg[:200])
+            tail = error_msg[-300:] if error_msg else "no ffmpeg output"
+            logger.warning("[flac_validation] Repair failed: %s", tail)
             if os.path.exists(output_path):
                 os.remove(output_path)
-            return False, f"Repair failed: {error_msg[:100]}"
+            return False, f"Repair failed: {tail}"
 
         # Validate the repaired file
         is_valid, _ = validate_flac_file(output_path)

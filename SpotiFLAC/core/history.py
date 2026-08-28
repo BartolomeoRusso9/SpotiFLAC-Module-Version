@@ -2,6 +2,7 @@ import json
 import time
 from pathlib import Path
 
+from .atomic_io import write_json_atomic
 from .models import TrackMetadata
 
 
@@ -20,8 +21,7 @@ class HistoryManager:
         entry["fetched_at"] = int(time.time())
         history.insert(0, entry)
 
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(history[:50], f, indent=2)
+        write_json_atomic(self.path, history[:50])
 
     def get_all(self) -> list[dict]:
         if not self.path.exists():
@@ -32,8 +32,7 @@ class HistoryManager:
             return []
 
     def clear(self) -> None:
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump([], f, indent=2)
+        write_json_atomic(self.path, [])
 
 
 def get_recent_fetches() -> list[dict]:

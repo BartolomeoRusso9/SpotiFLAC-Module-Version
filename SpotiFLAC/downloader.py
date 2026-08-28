@@ -15,6 +15,7 @@ import inspect
 import logging
 import os
 import re
+import shlex
 import shutil
 import sys
 import time
@@ -763,6 +764,25 @@ async def _open_folder_async(path: str) -> None:
         logger.warning("[post-action] open_folder failed: %s", exc)
 
 
+def _quote_for_shell(value: str) -> str:
+    """Quotes a value being substituted into --post-command's template.
+
+    The template itself is the operator's own shell snippet and is left
+    alone, but the values interpolated into it are not: {folder} carries
+    artist/album names straight from remote metadata (see
+    use_artist_subfolders / use_album_subfolders), so an album literally
+    titled `; rm -rf ~ #` would otherwise run as shell code inside an
+    otherwise perfectly benign template.
+    """
+    if os.name == "nt":
+        # cmd.exe doesn't understand POSIX single-quoting. Double quotes are
+        # the only universal grouping there, and a value containing one can't
+        # be escaped reliably across cmd.exe/PowerShell — so drop them along
+        # with the other characters cmd.exe expands inside double quotes.
+        return '"' + re.sub(r'[";%!^&|<>]', "", value) + '"'
+    return shlex.quote(value)
+
+
 # ---------------------------------------------------------------------------
 # DownloadWorker
 # ---------------------------------------------------------------------------
@@ -1143,8 +1163,11 @@ class DownloadWorker:
                     "[post-action] action=command but post_download_command is empty",
                 )
                 return
+            # Counts are ints rendered by us, so only {folder} can carry
+            # anything hostile — quote every substitution anyway rather than
+            # relying on that staying true. See _quote_for_shell().
             cmd = (
-                cmd_template.replace("{folder}", output_dir)
+                cmd_template.replace("{folder}", _quote_for_shell(output_dir))
                 .replace("{succeeded}", str(succeeded))
                 .replace("{skipped}", str(skipped_count))
                 .replace("{failed}", str(failed_count))

@@ -25,6 +25,36 @@ from .core.url_utils import url_host_matches
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
 
+# Opt-in required before the GUI/web bridge may run post_download_action
+# ="command" (see _post_command_allowed / _download_task).
+POST_COMMAND_ENV = "SPOTIFLAC_ALLOW_POST_COMMAND"
+
+
+def _post_command_allowed() -> bool:
+    """Whether this process will let a *bridge* caller run a shell command
+    as a post-download action.
+
+    Off by default, and deliberately not something the caller can turn on
+    for itself. Every method on this class is reachable two ways: from the
+    desktop window via pywebview, and — in `--web` mode — as an HTTP
+    endpoint (see webapp.py's ALLOWED_METHODS), where the "caller" may be
+    anyone who can reach the port and the config dict is just a JSON body.
+    Reading a shell command out of that dict makes the two indistinguishable,
+    so the decision is moved somewhere only whoever started the process can
+    reach: this environment variable.
+
+    The CLI is unaffected — `--post-action command` there goes straight to
+    client.SpotiFLAC() without passing through this class, and someone who
+    can already type a shell command into their own shell gains nothing by
+    typing it into ours.
+    """
+    return os.environ.get(POST_COMMAND_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    )
+
 
 class UILogHandler(logging.Handler):
     def __init__(self, api) -> None:
@@ -632,14 +662,29 @@ class SpotiFLAC_API(
         return {"status": "started"}
 
     def search_code(self, query, path=".", limit=200):
-        """Search repository codebase (substring case-insensitive).
+        """Search the SpotiFLAC package source (substring, case-insensitive).
 
         Returns list of {path, line, snippet}.
+
+        `path` is confined to the installed package directory. This returns
+        matching *lines*, not just filenames, so an unconstrained path would
+        make it a general "read any file the process can open" primitive —
+        and every public method here is callable from whatever JS is running
+        in the window (pywebview binds the whole object as js_api).
         """
         try:
             from .core.code_search import search_code
 
-            return search_code(query, path=path or ".", limit=limit or 200)
+            root = Path(__file__).resolve().parent
+            requested = (root / (path or ".")).resolve()
+            if requested != root and root not in requested.parents:
+                self.log(
+                    f"search_code: '{path}' is outside the package directory",
+                    "error",
+                )
+                return []
+
+            return search_code(query, path=str(requested), limit=limit or 200)
         except Exception as e:
             self.log(f"search_code error: {e}", "error")
             return []
@@ -889,7 +934,27 @@ class SpotiFLAC_API(
             self.log(f"Failed opening config folder: {e}", "error")
 
     def open_url(self, url) -> None:
+        """Opens an http(s) URL in the user's browser.
+
+        The scheme check is not cosmetic: webbrowser.open() delegates to
+        `open` on macOS and `xdg-open` on Linux, both of which resolve every
+        scheme the desktop has a handler registered for — file://, and
+        whatever custom scheme any installed application claimed. Passing
+        those through would turn "open a link" into "launch an arbitrary
+        local handler", reachable from any JS running in the window.
+        """
         import webbrowser
+        from urllib.parse import urlparse
+
+        try:
+            scheme = urlparse(str(url)).scheme.lower()
+        except Exception:
+            scheme = ""
+        if scheme not in ("http", "https"):
+            self.log(
+                f"Refused to open a non-web URL (scheme: {scheme or 'none'})", "error"
+            )
+            return
 
         webbrowser.open(url)
 
@@ -1245,6 +1310,18 @@ class SpotiFLAC_API(
             track_max_retries = int(config.get("track_max_retries", 0))
             post_download_action = config.get("post_download_action", "none")
             post_download_command = config.get("post_download_command", "")
+            if post_download_action == "command" and not _post_command_allowed():
+                # See _post_command_allowed(): "open_folder" and "notify" stay
+                # available to the GUI unconditionally — only the shell action
+                # needs the operator to have opted in when starting the process.
+                self.log(
+                    "Post-download command ignored: running a shell command from "
+                    f"the interface is disabled. Set {POST_COMMAND_ENV}=1 before "
+                    "starting SpotiFLAC to enable it.",
+                    "error",
+                )
+                post_download_action = "none"
+                post_download_command = ""
             qobuz_local_api_url = config.get("qobuz_local_api_url") or None
             tidal_custom_api = config.get("tidal_custom_api") or None
             loop_val = config.get("loop", None)

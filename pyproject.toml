@@ -7,7 +7,13 @@ name = "SpotiFLAC"
 version = "3.5.1"
 description = "Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends."
 readme = "README.md"
-requires-python = ">=3.9"
+# 3.10, not 3.9: core/models.py declares PEP 604 unions (`str | None`) on
+# pydantic BaseModels under `from __future__ import annotations`, and pydantic
+# resolves those annotations at runtime — on 3.9 that raises unless the
+# optional eval-type-backport package is installed, so `import SpotiFLAC`
+# fails outright. 3.10 is also what the classifiers, black, mypy and the CI
+# matrix have always targeted; only this line said otherwise.
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     { name=" BartolomeoRusso9, ShuKurenais" }
@@ -62,12 +68,15 @@ packages = { find = { include = ["SpotiFLAC*"] } }
 include-package-data = true
 
 [tool.setuptools.package-data]
-"SpotiFLAC" = ["extensions/*.js", "extensions/**/*.js"]
-
-[tool.setuptools.data-files]
-"frontend" = [
+# py.typed is the PEP 561 marker: without it type checkers ignore every
+# annotation in this package for anyone who installs it, which for a library
+# meant to be imported into other projects is most of the value of having
+# written them.
+"SpotiFLAC" = [
+    "py.typed",
+    "extensions/*.js",
+    "extensions/**/*.js",
     "frontend/*",
-    "frontend/assets/*",
     "frontend/assets/icons/*",
 ]
 
@@ -81,6 +90,14 @@ dev = [
     "black>=24.0",
     "mypy>=1.10",
     "pre-commit>=3.0",
+]
+web = [
+    # Needed by `spotiflac --web` (webapp.py imports FastAPI at module level).
+    # These used to live only in requirements.txt, so Docker — which installs
+    # from both files — worked while `pip install SpotiFLAC && spotiflac --web`
+    # died on ImportError. Keep this extra and requirements.txt in agreement.
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
 ]
 hires = [
     "librosa>=0.10.0",

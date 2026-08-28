@@ -36,12 +36,32 @@ RUN python3 -m pip install --upgrade pip setuptools wheel \
 COPY . .
 RUN python3 -m pip install --no-cache-dir .
 
-RUN mkdir -p /app/downloads \
-             /root/.spotiflac/extensions \
-             /root/.cache/spotiflac \
-             /root/.spotiflac/signed_sessions
+# Runs as a normal user, not root. This image installs and then executes
+# third-party extensions (Node and Python) fetched from whatever registry the
+# operator configured, and — in --web mode — does so behind a server that is
+# unauthenticated unless a token is set. Root inside the container is a much
+# larger blast radius than that combination deserves, and it is also what
+# makes bind-mounted downloads come out owned by root on the host.
+#
+# UID 1000 matches the first non-system user on most Linux hosts, so mounted
+# volumes line up without a chown. Override at build time if yours differs:
+#   docker build --build-arg APP_UID=1234 --build-arg APP_GID=1234 .
+ARG APP_UID=1000
+ARG APP_GID=1000
+ENV HOME=/home/spotiflac
 
-VOLUME ["/app/downloads", "/root/.spotiflac", "/root/.cache/spotiflac"]
+RUN groupadd --gid "${APP_GID}" spotiflac \
+    && useradd --uid "${APP_UID}" --gid "${APP_GID}" \
+        --create-home --home-dir "${HOME}" spotiflac \
+    && mkdir -p /app/downloads \
+                "${HOME}/.spotiflac/extensions" \
+                "${HOME}/.spotiflac/signed_sessions" \
+                "${HOME}/.cache/spotiflac" \
+    && chown -R spotiflac:spotiflac /app "${HOME}"
+
+VOLUME ["/app/downloads", "/home/spotiflac/.spotiflac", "/home/spotiflac/.cache/spotiflac"]
+
+USER spotiflac
 
 # ==============================================================================
 # [VNC/WEB SCREEN] — desktop GUI over VNC (default `spotiflac --gui` path):

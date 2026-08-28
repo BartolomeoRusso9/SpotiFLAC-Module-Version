@@ -819,7 +819,13 @@ async def amain() -> None:
     if "--web" in sys.argv:
         # --host/--port need the parsed args (argparse), not a raw sys.argv
         # scan like the flags above, since they take a value.
-        web_parser = argparse.ArgumentParser(add_help=False)
+        # allow_abbrev=False is load-bearing, not tidiness: argparse expands
+        # unambiguous prefixes by default, and `--web` — the flag that got us
+        # into this branch and is therefore always present — is a prefix of
+        # both --web-token and --web-multiuser. With abbreviation on, argparse
+        # calls that ambiguous and exits(2), so plain `spotiflac --web` could
+        # never start the server at all.
+        web_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
         web_parser.add_argument("--host", default="127.0.0.1")
         web_parser.add_argument("--port", type=int, default=8000)
         web_parser.add_argument("--web-token", dest="token", default=None)
@@ -828,8 +834,22 @@ async def amain() -> None:
         )
         web_args, _ = web_parser.parse_known_args(sys.argv[1:])
 
-        from .webapp import resolve_web_token
-        from .webapp import run_async as run_web
+        try:
+            from .webapp import resolve_web_token
+            from .webapp import run_async as run_web
+        except ImportError as exc:
+            # webapp.py imports FastAPI at module level, and FastAPI/uvicorn
+            # ship in the optional `web` extra rather than the base install —
+            # web mode is one of several, and most users of the module never
+            # start a server. Say which command fixes it instead of handing
+            # over a bare traceback.
+            print(
+                f"--web needs the web extra, which isn't installed ({exc}).\n"
+                "Install it with:\n"
+                "    pip install 'SpotiFLAC[web]'",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from exc
 
         await run_web(
             host=web_args.host,

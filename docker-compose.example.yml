@@ -28,8 +28,8 @@ services:
       SPOTIFLAC_WEB_TOKEN: "${SPOTIFLAC_WEB_TOKEN:-}"
     volumes:
       - ./downloads:/app/downloads
-      - ./.spotiflac_docker:/root/.spotiflac
-      - ./.cache_docker:/root/.cache/spotiflac
+      - ./.spotiflac_docker:/home/spotiflac/.spotiflac
+      - ./.cache_docker:/home/spotiflac/.cache/spotiflac
     restart: unless-stopped
     healthcheck:
       # --web is the one run mode this compose file commits to, so (unlike

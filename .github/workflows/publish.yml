@@ -1,29 +1,83 @@
 name: Publish to PyPI
 
+# Releases are cut from a tag, never from a branch. The previous trigger was
+# `push: branches: [main]`, which meant every merge attempted an upload: it
+# succeeded whenever the version had been bumped (publishing whatever main
+# happened to contain at that moment, tested or not) and failed with "file
+# already exists" the rest of the time — so a red run stopped meaning
+# anything. Tags make publishing an explicit act.
 on:
+  release:
+    types: [published]
   push:
-    branches: ["main"]
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  publish:
+  # Publishing is irreversible: PyPI does not allow re-uploading a version,
+  # even after a delete. So the suite runs here rather than relying on the
+  # separate CI workflow — GitHub cannot express `needs:` across workflows,
+  # and a tag can be pushed to a commit CI never ran on.
+  test:
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v5
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[web]'
+          pip install -r requirements-dev.txt
+
+      - name: Pytest
+        run: pytest -q
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
 
       - name: Install build tools
         run: |
           python -m pip install --upgrade pip
           python -m pip install build twine
+
+      - name: Check the tag matches the version in pyproject.toml
+        # Catches the tag/version mismatch that used to surface only as an
+        # opaque "file already exists" from PyPI, after the build had run.
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match pyproject version $VERSION"
+            exit 1
+          fi
+          echo "Tag and pyproject version agree: $VERSION"
 
       - name: Build package
         run: python -m build
@@ -32,4 +86,16 @@ jobs:
         run: python -m twine check dist/*
 
       - name: Publish package to PyPI
-        run: python -m twine upload dist/* -u __token__ -p "${{ secrets.PYPI_API_TOKEN }}" --verbose
+        # The token is passed as an env var by the action rather than as a
+        # `twine upload -p` argument, where it was visible to anything that
+        # could read the runner's process list.
+        #
+        # NEXT STEP — switch to Trusted Publishing (OIDC) and drop the secret
+        # entirely: add a publisher for this repo + workflow at
+        # https://pypi.org/manage/project/spotiflac/settings/publishing/, then
+        # add `id-token: write` to this job's permissions and delete the
+        # `password:` line below. Left on the token until that is configured,
+        # so releases keep working in the meantime.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

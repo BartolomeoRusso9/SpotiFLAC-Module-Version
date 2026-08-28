@@ -11,8 +11,8 @@ set -e
 #   -p 8000:8000 \
 #   -e SPOTIFLAC_REGISTRIES=https://example.com/my-registry.json \
 #   -v "$(pwd)/downloads:/app/downloads" \
-#   -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
-#   -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
+#   -v "$(pwd)/.spotiflac_docker:/home/spotiflac/.spotiflac" \
+#   -v "$(pwd)/.cache_docker:/home/spotiflac/.cache/spotiflac" \
 #   spotiflac --web --host 0.0.0.0 --port 8000
 #
 # Note: --host 0.0.0.0 is required here (not the CLI default 127.0.0.1),
@@ -42,8 +42,8 @@ sleep 1
 # docker run --rm -it \
 #   -p 6080:6080 \
 #   -v "$(pwd)/downloads:/app/downloads" \
-#   -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
-#   -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
+#   -v "$(pwd)/.spotiflac_docker:/home/spotiflac/.spotiflac" \
+#   -v "$(pwd)/.cache_docker:/home/spotiflac/.cache/spotiflac" \
 #   --shm-size=1g \
 #   spotiflac "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" \
 #   /app/downloads -s amazon -v
@@ -74,8 +74,8 @@ if [ "$#" -eq 0 ]; then
   echo "  docker run --rm -it \\"
   echo "    -p 6080:6080 \\"
   echo "    -v \"\$(pwd)/downloads:/app/downloads\" \\"
-  echo "    -v \"\$(pwd)/.spotiflac_docker:/root/.spotiflac\" \\"
-  echo "    -v \"\$(pwd)/.cache_docker:/root/.cache/spotiflac\" \\"
+  echo "    -v \"\$(pwd)/.spotiflac_docker:/home/spotiflac/.spotiflac\" \\"
+  echo "    -v \"\$(pwd)/.cache_docker:/home/spotiflac/.cache/spotiflac\" \\"
   echo "    --shm-size=1g \\"
   echo "    spotiflac \"https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT\" \\"
   echo "    /app/downloads -s amazon -v"

@@ -39,7 +39,7 @@
     'get_version', 'get_latest_version', 'get_artist_images', 'get_ffmpeg_status', 'get_node_status',
     'save_settings', 'load_settings', 'get_registries', 'add_registry', 'remove_registry',
     'get_history', 'get_profiles', 'load_profile_data', 'cache_image', 'get_spotify_home_feed',
-    'search_provider', 'search_provider_async', 'search_code', 'remove_history_item',
+    'search_provider', 'search_provider_async', 'remove_history_item',
     'get_network_status', 'save_profile_data', 'delete_profile_data', 'check_qobuz_api',
     'check_tidal_api', 'open_config_folder', 'open_url', 'download_track_lyrics',
     'download_track_cover', 'download_cover', 'download_album_cover', 'download_all_covers',
@@ -47,8 +47,16 @@
     'run_health_check', 'scan_local', 'apply_local_tags', 'set_download_dir',
     'get_registry_directories', 'add_registry_directory', 'remove_registry_directory',
     'discover_registries', 'get_dedup_status', 'scan_for_duplicates',
-    'get_trusted_keys', 'add_trusted_key', 'remove_trusted_key',
+    'get_trusted_keys',
   ];
+
+  // Deliberately NOT here (and not in webapp.py's ALLOWED_METHODS):
+  //   add_trusted_key / remove_trusted_key — these write the Ed25519 trust
+  //     store that decides which extension registry entries count as signed.
+  //     Editing the root of trust must not be reachable from the same channel
+  //     an untrusted caller can reach. Use tools/registry_signing_cli.py.
+  //   search_code — a development helper that greps an arbitrary path and
+  //     returns matching lines; the UI never called it.
 
   const api = {};
   for (const name of REMOTE_METHODS) {

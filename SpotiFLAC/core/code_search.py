@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import functools
 import os
 import subprocess
 
 
+@functools.lru_cache(maxsize=1)
 def _has_rg() -> bool:
+    """Whether ripgrep is on PATH. Cached: this used to spawn a process on
+    every single search just to ask the same question again.
+    """
     try:
         subprocess.run(
             ["rg", "--version"],

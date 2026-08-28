@@ -53,31 +53,33 @@ def test_discovery_directory_add_list_remove_round_trip_over_http(client) -> Non
     assert removed["ok"] is True
 
 
-def test_trust_key_add_list_remove_round_trip_over_http(client) -> None:
-    import base64
+def test_trusted_keys_are_readable_over_http(client) -> None:
+    resp = client.post("/api/get_trusted_keys", json=[])
+    assert resp.status_code == 200
+    assert isinstance(resp.json()["result"], list)
 
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-    pub_b64 = base64.b64encode(
-        Ed25519PrivateKey.generate()
-        .public_key()
-        .public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw,
-        )
-    ).decode()
+def test_writing_the_trust_store_is_not_reachable_over_http(client) -> None:
+    """Adding a trusted key is what makes an extension signature verify, so
+    it must not be reachable from the HTTP API — otherwise anyone who can
+    reach the port installs their own key and signs their own extensions.
+    """
+    for method, args in (
+        ("add_trusted_key", ["alice", "AAAA"]),
+        ("remove_trusted_key", ["alice"]),
+    ):
+        resp = client.post(f"/api/{method}", json=args)
+        assert resp.status_code == 404, method
+        assert "result" not in resp.json()
 
-    added = client.post("/api/add_trusted_key", json=["alice", pub_b64]).json()[
-        "result"
-    ]
-    assert added["ok"] is True
 
-    listed = client.post("/api/get_trusted_keys", json=[]).json()["result"]
-    assert listed == [{"name": "alice", "public_key_b64": pub_b64}]
-
-    removed = client.post("/api/remove_trusted_key", json=["alice"]).json()["result"]
-    assert removed["ok"] is True
+def test_search_code_is_not_reachable_over_http(client) -> None:
+    """It returns matching *lines* from a caller-supplied path — an arbitrary
+    file read if exposed. The UI never used it.
+    """
+    resp = client.post("/api/search_code", json=["password", "/"])
+    assert resp.status_code == 404
+    assert "result" not in resp.json()
 
 
 def test_dedup_status_reachable_over_http(client) -> None:

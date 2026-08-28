@@ -35,6 +35,13 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
+_FINISHED_STATUSES = frozenset({JobStatus.DONE, JobStatus.FAILED})
+
+
+class QueueFullError(RuntimeError):
+    """Raised by submit() when an owner is over their pending-job limit."""
+
+
 @dataclass
 class Job:
     id: str
@@ -73,15 +80,28 @@ class JobQueue:
     status FAILED) rather than killing the worker thread.
     """
 
+    #: Finished jobs kept for history, oldest evicted first. Without a bound,
+    #: `_jobs` is a dict that only ever grows — fine for a session, a slow
+    #: leak for the long-running server this exists to serve.
+    DEFAULT_MAX_HISTORY = 500
+    #: Queued-but-not-yet-started jobs a single account may have outstanding.
+    #: Anyone logged in can call submit-download in a loop; this keeps one
+    #: account from filling the queue for everybody else.
+    DEFAULT_MAX_PENDING_PER_OWNER = 50
+
     def __init__(
         self,
         handler: Callable[[dict], object],
         *,
         workers: int = 1,
+        max_history: int = DEFAULT_MAX_HISTORY,
+        max_pending_per_owner: int = DEFAULT_MAX_PENDING_PER_OWNER,
     ) -> None:
         self._handler = handler
         self._queue: queue.Queue[str] = queue.Queue()
         self._jobs: dict[str, Job] = {}
+        self._max_history = max_history
+        self._max_pending_per_owner = max_pending_per_owner
         self._lock = threading.Lock()
         self._threads = [
             threading.Thread(target=self._worker_loop, daemon=True)
@@ -91,11 +111,43 @@ class JobQueue:
             t.start()
 
     def submit(self, owner: str, payload: dict) -> Job:
+        """Queues a job for `owner`.
+
+        Raises QueueFullError if that owner already has
+        `max_pending_per_owner` jobs waiting to start.
+        """
         job = Job(id=uuid.uuid4().hex, owner=owner, payload=payload)
         with self._lock:
+            pending = sum(
+                1
+                for j in self._jobs.values()
+                if j.owner == owner and j.status is JobStatus.QUEUED
+            )
+            if pending >= self._max_pending_per_owner:
+                msg = (
+                    f"{owner} already has {pending} downloads queued "
+                    f"(limit {self._max_pending_per_owner}); wait for some to finish."
+                )
+                raise QueueFullError(msg)
             self._jobs[job.id] = job
+            self._evict_finished_locked()
         self._queue.put(job.id)
         return job
+
+    def _evict_finished_locked(self) -> None:
+        """Drops the oldest finished jobs once history exceeds the cap.
+
+        Only DONE/FAILED entries are eligible: anything queued or running is
+        still live state, however old it is. Caller must hold `_lock`.
+        """
+        if len(self._jobs) <= self._max_history:
+            return
+        finished = sorted(
+            (j for j in self._jobs.values() if j.status in _FINISHED_STATUSES),
+            key=lambda j: j.finished_at or j.created_at,
+        )
+        for job in finished[: len(self._jobs) - self._max_history]:
+            self._jobs.pop(job.id, None)
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:

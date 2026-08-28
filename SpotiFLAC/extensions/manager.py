@@ -21,6 +21,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -137,6 +138,40 @@ class InstalledExtension:
 # ─────────────────────────────────────────────────────────────
 #  ExtensionManager
 # ─────────────────────────────────────────────────────────────
+
+
+_EXT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+# 200 MB compressed, 500 MB unpacked. Extensions are a manifest plus a script;
+# anything near these numbers is a mistake or a zip bomb, and both limits exist
+# because the archive comes from whichever registry the user pointed us at.
+MAX_EXT_DOWNLOAD_BYTES = 200 * 1024 * 1024
+MAX_EXT_UNPACKED_BYTES = 500 * 1024 * 1024
+
+
+def _safe_ext_target(ext_dir: Path, ext_name: str) -> Path:
+    """Resolves `ext_name` to a directory inside `ext_dir`, or raises.
+
+    Used for both installing and uninstalling: one is an os.replace() onto
+    the returned path, the other a shutil.rmtree() of it, so an unvalidated
+    name is a write-anywhere and a delete-anywhere primitive respectively.
+    """
+    name = str(ext_name).strip()
+    if not _EXT_NAME_RE.match(name) or name in (".", ".."):
+        msg = (
+            f"Unsafe extension name {ext_name!r}: expected letters, digits, "
+            "'.', '_' or '-' only."
+        )
+        raise ValueError(msg)
+
+    root = ext_dir.resolve()
+    target = (root / name).resolve()
+    # Belt and braces: the regex already excludes separators, but this also
+    # catches a symlinked ext_dir entry resolving somewhere unexpected.
+    if target.parent != root:
+        msg = f"Unsafe extension name {ext_name!r}: escapes {root}"
+        raise ValueError(msg)
+    return target
 
 
 class ExtensionManager:
@@ -435,9 +470,34 @@ class ExtensionManager:
         last_err: Exception | None = None
         for attempt in range(3):
             try:
-                r = httpx.get(url, timeout=self.timeout * 3, follow_redirects=True)
-                r.raise_for_status()
-                raw = r.content
+                # Streamed with a running total rather than r.content, which
+                # buffers the whole body first: the URL comes from whichever
+                # registry the user configured, so "how big is this" is not a
+                # question we get to answer after the fact.
+                with httpx.stream(
+                    "GET", url, timeout=self.timeout * 3, follow_redirects=True
+                ) as r:
+                    r.raise_for_status()
+                    declared = r.headers.get("Content-Length")
+                    if declared and int(declared) > MAX_EXT_DOWNLOAD_BYTES:
+                        msg = (
+                            f"Extension archive is too large: {declared} bytes "
+                            f"(limit {MAX_EXT_DOWNLOAD_BYTES})"
+                        )
+                        raise ValueError(msg)
+
+                    chunks: list[bytes] = []
+                    total = 0
+                    for chunk in r.iter_bytes():
+                        total += len(chunk)
+                        if total > MAX_EXT_DOWNLOAD_BYTES:
+                            msg = (
+                                "Extension archive exceeded "
+                                f"{MAX_EXT_DOWNLOAD_BYTES} bytes; aborted."
+                            )
+                            raise ValueError(msg)
+                        chunks.append(chunk)
+                    raw = b"".join(chunks)
                 break
             except (httpx.RequestError, httpx.HTTPStatusError) as e:
                 last_err = e
@@ -580,7 +640,13 @@ class ExtensionManager:
             msg = "manifest.json must have the 'name' field."
             raise ValueError(msg)
 
-        target = self.ext_dir / ext_name
+        # The member paths inside the archive are validated just below, but
+        # this name — which alone decides *where* the archive is unpacked to
+        # — comes from the same untrusted manifest and was not. pathlib does
+        # not normalise, so `self.ext_dir / "../../x"` really does escape:
+        # os.replace() would land the extension outside ext_dir, and
+        # uninstall() would hand the same value to shutil.rmtree().
+        target = _safe_ext_target(self.ext_dir, ext_name)
 
         if any(
             Path(member).is_absolute() or ".." in Path(member).parts for member in names
@@ -590,10 +656,22 @@ class ExtensionManager:
         # Reject symlink entries (zip-slip via a symlink pointing outside the
         # extraction dir, written before the target it "points to" exists).
         # A symlink's mode bits are stored in the top 4 bits of external_attr.
+        # Also sum the declared uncompressed sizes: the download is capped, but
+        # compression ratios are not, so a few MB of zip can still ask to
+        # become tens of GB on disk. Checked from the header before extracting
+        # anything, so nothing is written and then rolled back.
+        unpacked_total = 0
         for info in zf.infolist():
             unix_mode = info.external_attr >> 16
             if unix_mode and (unix_mode & 0o170000) == 0o120000:
                 msg = f"Extension archive contains a symlink entry: {info.filename}"
+                raise ValueError(msg)
+            unpacked_total += info.file_size
+            if unpacked_total > MAX_EXT_UNPACKED_BYTES:
+                msg = (
+                    f"Extension archive unpacks to more than "
+                    f"{MAX_EXT_UNPACKED_BYTES} bytes; refusing to extract."
+                )
                 raise ValueError(msg)
 
         previous_settings = target / "settings.json"
@@ -647,7 +725,13 @@ class ExtensionManager:
 
     def uninstall(self, ext_id: str) -> bool:
         """Removes an installed extension. Returns True if found and removed."""
-        target = self.ext_dir / ext_id
+        # rmtree on a caller-supplied name: validated for the same reason the
+        # install path is (see _safe_ext_target).
+        try:
+            target = _safe_ext_target(self.ext_dir, ext_id)
+        except ValueError as exc:
+            logger.warning("[ExtMgr] Refusing to uninstall '%s': %s", ext_id, exc)
+            return False
         if target.exists():
             shutil.rmtree(target)
             logger.info("[ExtMgr] Uninstalled '%s'", ext_id)
@@ -673,7 +757,10 @@ class ExtensionManager:
 
     def get_installed(self, ext_id: str) -> InstalledExtension | None:
         """Returns an installed extension by ID, or None if not found."""
-        target = self.ext_dir / ext_id
+        try:
+            target = _safe_ext_target(self.ext_dir, ext_id)
+        except ValueError:
+            return None
         if target.exists() and (target / "manifest.json").exists():
             try:
                 return self._load_installed(target)

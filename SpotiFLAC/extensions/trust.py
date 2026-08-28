@@ -37,6 +37,8 @@ from pathlib import Path
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+from ..core.atomic_io import write_private_json
+
 logger = logging.getLogger(__name__)
 
 TRUSTED_KEYS_FILE = Path.home() / ".spotiflac" / "trusted_keys.json"
@@ -78,11 +80,10 @@ def _load() -> list[TrustedKey]:
 
 
 def _save(keys: list[TrustedKey]) -> None:
-    TRUSTED_KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TRUSTED_KEYS_FILE.write_text(
-        json.dumps({"keys": [k.to_dict() for k in keys]}, indent=2),
-        encoding="utf-8",
-    )
+    # Atomic + owner-only: this file decides which extension signatures are
+    # accepted, so a half-written one must never be able to silently empty
+    # the trust list, and it has no business being world-readable.
+    write_private_json(TRUSTED_KEYS_FILE, {"keys": [k.to_dict() for k in keys]})
 
 
 def _validate_public_key(public_key_b64: str) -> None:
