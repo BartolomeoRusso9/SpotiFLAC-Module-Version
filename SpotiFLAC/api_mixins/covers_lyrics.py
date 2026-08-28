@@ -17,8 +17,8 @@ import threading
 import aiofiles
 import httpx
 
-from ..core.spotify_metadata import _maximize_cover_url
 from ..core.loop_runner import run_sync
+from ..core.spotify_metadata import _maximize_cover_url
 
 
 class CoversLyricsMixin:

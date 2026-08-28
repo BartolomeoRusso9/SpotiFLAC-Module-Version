@@ -4,8 +4,9 @@ import asyncio
 import asyncio.subprocess as _subproc
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from SpotiFLAC.core.flac_validation import validate_flac_file
 from SpotiFLAC.core.http import AsyncHttpClient, AsyncRateLimiter, RetryConfig

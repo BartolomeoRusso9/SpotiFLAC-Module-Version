@@ -16,10 +16,9 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from .http import NetworkManager
+from .loop_runner import run_sync
 from .response_cache import get as get_cached_response
 from .response_cache import put as put_cached_response
-
-from .loop_runner import run_sync
 
 logger = logging.getLogger(__name__)
 

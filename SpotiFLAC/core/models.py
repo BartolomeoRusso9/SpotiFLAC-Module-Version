@@ -5,7 +5,8 @@ Replace raw dicts to guarantee validation, coercion, and zero KeyError.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 

@@ -17,10 +17,9 @@ from typing import Any
 
 from .http import NetworkManager
 from .isrc_utils import normalize_isrc
+from .loop_runner import run_sync
 from .response_cache import get as get_cached_response
 from .response_cache import put as put_cached_response
-
-from .loop_runner import run_sync
 
 logger = logging.getLogger(__name__)
 

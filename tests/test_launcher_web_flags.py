@@ -21,7 +21,7 @@ import pytest
 pytest.importorskip("fastapi")
 webapp = pytest.importorskip("SpotiFLAC.webapp")
 
-from SpotiFLAC import launcher  # noqa: E402
+from SpotiFLAC import launcher
 
 
 @pytest.fixture

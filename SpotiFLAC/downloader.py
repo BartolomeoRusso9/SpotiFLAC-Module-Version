@@ -20,9 +20,10 @@ import shutil
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from .core.console import (
     print_playlist_resolved,

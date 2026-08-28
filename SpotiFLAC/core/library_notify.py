@@ -193,9 +193,7 @@ def _subsonic_auth(password: str) -> dict[str, str]:
     """
     salt = secrets.token_hex(8)
     return {
-        "t": hashlib.md5(  # noqa: S324 - Subsonic protocol, see docstring
-            (password + salt).encode("utf-8")
-        ).hexdigest(),
+        "t": hashlib.md5((password + salt).encode("utf-8")).hexdigest(),
         "s": salt,
     }
 

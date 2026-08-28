@@ -110,7 +110,7 @@ install_log_redaction()
 logger = logging.getLogger(__name__)
 
 
-_CONTENT_RANGE_RE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(?:\d+|\*)\s*$", re.I)
+_CONTENT_RANGE_RE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(?:\d+|\*)\s*$", re.IGNORECASE)
 
 
 def _content_range_starts_at(resp: httpx.Response, expected_start: int) -> bool:

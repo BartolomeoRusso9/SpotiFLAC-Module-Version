@@ -24,14 +24,12 @@ from collections.abc import Awaitable, Callable
 
 from .check_update import check_for_updates_async
 from .client import _CleanConsoleFormatter
-from .downloader import DownloadOptions, SpotiflacDownloader
 from .core.library_notify import LIBRARY_TOKEN_ENV, LIBRARY_USER_ENV
 from .core.library_notify import SUPPORTED as LIBRARY_SUPPORTED
 from .core.report import RunReport
-from .interactive import run_interactive
-
-
+from .downloader import DownloadOptions, SpotiflacDownloader
 from .extensions.trust import TRUST_TIERS
+from .interactive import run_interactive
 
 
 def _early_urls_from_argv(flag: str) -> list[str]:
