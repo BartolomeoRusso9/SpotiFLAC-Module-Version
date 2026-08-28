@@ -184,6 +184,17 @@
     api[name] = makeMethod(name);
   }
 
+  // The trust panel can still *read* the key list in web mode, but writing it
+  // is CLI-only (see the note above). Answer with the shape the panel already
+  // handles — {ok:false, error} — so it shows why, instead of falling into its
+  // "unavailable in this build" branch, which would send someone looking at
+  // the wrong thing entirely.
+  const TRUST_WRITE_MESSAGE =
+    'Adding or removing trusted keys is not available over the web interface. ' +
+    'Use: spotiflac --trust-key-add <name> <public-key>';
+  api.add_trusted_key = async () => ({ ok: false, error: TRUST_WRITE_MESSAGE });
+  api.remove_trusted_key = async () => ({ ok: false, error: TRUST_WRITE_MESSAGE });
+
   // Window-chrome: no-op. The browser tab already has its own chrome.
   api.window_minimize = () => Promise.resolve();
   api.window_restore = () => Promise.resolve();
