@@ -31,7 +31,7 @@ class _BackRequested(Exception):
 
 
 def _is_back_command(value: str) -> bool:
-    return value.lower() in {"b", "back", "indietro"}
+    return value.lower() in {"b", "back"}
 
 
 def _c(code: str, text: str) -> str:
@@ -165,7 +165,7 @@ def _section(title: str) -> None:
 def _header() -> None:
     print(f"\n{BOLD(MAGENTA('SpotiFLAC — Interactive Mode'))}")
     print(DIM("=" * 40))
-    print(DIM("  Tip: enter b/back/indietro at any question to restart the wizard."))
+    print(DIM("  Tip: enter b/back at any question to restart the wizard."))
 
 
 def _canonical_service_name(ext_name: str) -> str | None:
