@@ -53,6 +53,17 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      contents: read
+      # Lets GitHub mint the short-lived OIDC token that PyPI exchanges for a
+      # ~15-minute, project-scoped upload token. This is the whole credential:
+      # there is no PyPI secret in this repository any more.
+      #
+      # The trusted publisher registered on PyPI pins owner + repo + this
+      # filename + this environment, so renaming publish.yml or dropping the
+      # `environment:` line above breaks publishing until PyPI is updated to
+      # match. Another workflow in this repo cannot publish at all.
+      id-token: write
     steps:
       - uses: actions/checkout@v5
 
@@ -86,16 +97,18 @@ jobs:
         run: python -m twine check dist/*
 
       - name: Publish package to PyPI
-        # The token is passed as an env var by the action rather than as a
-        # `twine upload -p` argument, where it was visible to anything that
-        # could read the runner's process list.
-        #
-        # NEXT STEP — switch to Trusted Publishing (OIDC) and drop the secret
-        # entirely: add a publisher for this repo + workflow at
-        # https://pypi.org/manage/project/spotiflac/settings/publishing/, then
-        # add `id-token: write` to this job's permissions and delete the
-        # `password:` line below. Left on the token until that is configured,
-        # so releases keep working in the meantime.
+        # No `password:` — authentication is Trusted Publishing (OIDC), via
+        # the `id-token: write` permission on this job. The action detects the
+        # OIDC token itself and exchanges it with PyPI.
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          # Absorbs the one duplicate this workflow's two triggers can produce:
+          # push a v* tag (build-release.yml does) and it publishes, then cut a
+          # GitHub Release from that same tag and `release: published` fires a
+          # second run for a version PyPI already has. Without this, that second
+          # run goes red for no real reason — the exact "a failed publish stops
+          # meaning anything" problem this workflow was rewritten to avoid.
+          #
+          # It does NOT hide a forgotten version bump: the tag/version check
+          # above fails loudly for that, before anything is even built.
+          skip-existing: true
