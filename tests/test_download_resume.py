@@ -14,6 +14,7 @@ import threading
 
 import pytest
 
+from SpotiFLAC.core.errors import NetworkError
 from SpotiFLAC.core.http import AsyncHttpClient
 from SpotiFLAC.core.loop_runner import run_sync
 
@@ -27,11 +28,28 @@ class _RangeHandler(http.server.BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.1"
 
-    def do_GET(self):  # noqa: N802 - stdlib naming
+    def do_GET(self):
         mode = self.server.range_mode  # type: ignore[attr-defined]
         self.server.requests.append(self.headers.get("Range"))  # type: ignore[attr-defined]
 
         rng = self.headers.get("Range")
+        if rng and mode == "wrong-offset":
+            # A 206 that ignores the requested offset and sends the whole
+            # body anyway. Real servers and proxies do this.
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes 0-{len(BODY) - 1}/{len(BODY)}")
+            self.send_header("Content-Length", str(len(BODY)))
+            self.end_headers()
+            self.wfile.write(BODY)
+            return
+
+        if rng and mode == "no-content-range":
+            self.send_response(206)
+            self.send_header("Content-Length", str(len(BODY)))
+            self.end_headers()
+            self.wfile.write(BODY)
+            return
+
         if rng and mode == "honour":
             start = int(rng.removeprefix("bytes=").split("-")[0])
             if start >= len(BODY):
@@ -121,7 +139,7 @@ def test_the_part_file_survives_a_failure_so_the_next_run_can_resume(
             if done > 0:
                 stop.set()
 
-        with pytest.raises(Exception):
+        with pytest.raises(NetworkError):
             await client.stream_to_file(
                 server.url,
                 str(dest),
@@ -153,6 +171,24 @@ def test_a_server_that_ignores_range_restarts_cleanly(client, server, tmp_path) 
 
     assert server.requests == ["bytes=4000-"], "Range should still be attempted"
     assert dest.read_bytes() == BODY, "partial was appended to instead of replaced"
+
+
+@pytest.mark.parametrize("mode", ["wrong-offset", "no-content-range"])
+def test_a_206_that_does_not_match_the_request_restarts_instead_of_appending(
+    client, server, tmp_path, mode
+) -> None:
+    """The status code only says "partial", not "the partial you asked for".
+    A server that clamps the range, ignores the offset, or omits
+    Content-Range would otherwise have its bytes appended at the wrong
+    position — producing a file that decodes far enough to look fine.
+    """
+    server.range_mode = mode
+    dest = tmp_path / "audio.flac"
+    (tmp_path / "audio.flac.part").write_bytes(BODY[:4000])
+
+    _fetch(client, server, dest)
+
+    assert dest.read_bytes() == BODY, "partial was appended to at the wrong offset"
 
 
 def test_a_complete_part_file_gets_a_416_and_restarts(client, server, tmp_path) -> None:

@@ -28,8 +28,8 @@ docker run --rm -it \
   --shm-size=1g \
   -e SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json" \
   -v "$(pwd)/downloads:/app/downloads" \
-  -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
-  -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
+  -v "$(pwd)/.spotiflac_docker:/home/spotiflac/.spotiflac" \
+  -v "$(pwd)/.cache_docker:/home/spotiflac/.cache/spotiflac" \
   spotiflac "https://open.spotify.com/track/TRACK_ID" \
   /app/downloads -s ext:deezer-web -q LOSSLESS
 ```
@@ -45,8 +45,8 @@ docker run --rm -it \
   -p 8000:8000 \
   -e SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json" \
   -v "$(pwd)/downloads:/app/downloads" \
-  -v "$(pwd)/.spotiflac_docker:/root/.spotiflac" \
-  -v "$(pwd)/.cache_docker:/root/.cache/spotiflac" \
+  -v "$(pwd)/.spotiflac_docker:/home/spotiflac/.spotiflac" \
+  -v "$(pwd)/.cache_docker:/home/spotiflac/.cache/spotiflac" \
   spotiflac --web --host 0.0.0.0 --port 8000
 ```
 

@@ -123,7 +123,12 @@ the strongest of the three options Subsonic accepts (the other two send the
 password in the query string), but it means the value on the wire is
 derived from your password and can be attacked offline if captured. Use
 `https://`, and give SpotiFLAC an account you use for nothing else.
-SpotiFLAC warns when a Subsonic target is plain HTTP.
+
+SpotiFLAC warns whenever a library URL is plain `http://` and not loopback —
+for every server type, because a Plex or Jellyfin token is equally readable
+on the path and stays valid until you revoke it. It warns rather than
+refuses: a NAS on a home LAN is the deployment this feature exists for, and
+HTTPS there usually means a self-signed certificate.
 
 ---
 

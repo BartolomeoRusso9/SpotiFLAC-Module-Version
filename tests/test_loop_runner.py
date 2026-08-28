@@ -95,14 +95,17 @@ def test_calling_from_inside_the_loop_raises_instead_of_deadlocking() -> None:
 
 
 def test_timeout_cancels_and_raises() -> None:
-    with pytest.raises(Exception) as exc:
+    # concurrent.futures.TimeoutError is an alias of the builtin since 3.11,
+    # so the builtin is the portable way to name what run_coro raises.
+    with pytest.raises(TimeoutError):
         loop_runner.run_coro(_echo("slow", delay=5), timeout=0.1)
-    assert "TimeoutError" in type(exc.value).__name__ or isinstance(
-        exc.value, TimeoutError
-    )
 
 
 def test_submit_does_not_block() -> None:
+    # Prime the loop first: otherwise the measurement includes starting the
+    # background thread, which is exactly the sort of one-off cost that
+    # makes a timing assertion flake on a loaded machine.
+    loop_runner.run_coro(_echo("warm"))
     started = time.monotonic()
     future = loop_runner.submit(_echo("later", delay=0.3))
     assert time.monotonic() - started < 0.2, "submit() blocked"

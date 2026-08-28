@@ -79,7 +79,7 @@ def test_plex_sends_its_token_as_a_query_parameter() -> None:
 
 @pytest.mark.parametrize("kind", ["jellyfin", "emby"])
 def test_jellyfin_family_posts_with_a_header(kind) -> None:
-    method, url, params, headers = ln.build_request(
+    method, url, _params, headers = ln.build_request(
         ln.build_target(kind, "http://x:8096", token="api-key")
     )
     assert method == "POST"
@@ -224,9 +224,9 @@ def test_failed_tracks_are_not_listed(tmp_path) -> None:
 
 
 def test_plain_http_subsonic_warns_about_the_password_derivation(caplog) -> None:
-    """Plex and Jellyfin send a revocable API token. Subsonic sends a digest
-    of the account password, so a plaintext connection is a different class
-    of exposure and deserves saying so.
+    """Every server here is authenticated, so plain HTTP always exposes the
+    credential. What differs is the cost of a capture, and the message says
+    which: Subsonic's derives from the account password.
     """
     import logging
 
@@ -248,12 +248,37 @@ def test_https_subsonic_says_nothing(caplog) -> None:
     assert "plain HTTP" not in caplog.text
 
 
-def test_plain_http_is_not_flagged_for_token_based_servers(caplog) -> None:
-    """A Plex token is revocable and carries no password material, so the
-    warning would be noise there.
+@pytest.mark.parametrize("kind", ["plex", "jellyfin", "emby"])
+def test_plain_http_also_warns_for_token_based_servers(caplog, kind) -> None:
+    """A revocable token is still readable by anything on the path, and
+    being revocable only helps if you find out it leaked. The warning fires
+    for every server type; only the reason differs.
     """
     import logging
 
     with caplog.at_level(logging.WARNING):
-        ln.build_target("plex", "http://nas.local:32400", token="t")
+        ln.build_target(kind, "http://nas.local:32400", token="t")
+
+    assert "plain HTTP" in caplog.text
+    assert "revoke" in caplog.text
+    assert "password" not in caplog.text, "token servers must not claim otherwise"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:8096",
+        "http://127.0.0.1:8096",
+        "http://[::1]:8096",
+    ],
+)
+def test_loopback_is_never_flagged(caplog, url) -> None:
+    """Traffic to localhost has no network path for anyone to observe, so a
+    warning there is pure noise — and noise is what teaches people to ignore
+    the warning that matters.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        ln.build_target("jellyfin", url, token="t")
     assert "plain HTTP" not in caplog.text

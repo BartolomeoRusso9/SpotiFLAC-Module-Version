@@ -15,11 +15,8 @@ import zipfile
 
 import pytest
 
-from SpotiFLAC.extensions.manager import (
-    MAX_EXT_UNPACKED_BYTES,
-    ExtensionManager,
-    _safe_ext_target,
-)
+from SpotiFLAC.extensions import manager as manager_module
+from SpotiFLAC.extensions.manager import ExtensionManager, _safe_ext_target
 
 
 def _archive(name: str, extra: dict[str, bytes] | None = None) -> bytes:
@@ -112,15 +109,27 @@ def test_uninstall_refuses_a_traversing_id(manager, tmp_path) -> None:
 
 
 def test_an_archive_that_unpacks_too_large_is_refused_before_extracting(
-    manager, install
+    manager, install, monkeypatch
 ) -> None:
     """A highly compressible payload: small on the wire, enormous on disk.
     Rejected from the ZIP header, so nothing is written and rolled back.
+
+    The limit is lowered rather than the payload raised: building a real
+    500 MB buffer to prove a header check works costs half a gigabyte of RAM
+    in every test run, on every machine, forever.
     """
-    bomb = _archive("bomb", {"payload.bin": b"\0" * (MAX_EXT_UNPACKED_BYTES + 1)})
-    assert len(bomb) < 1_000_000, "the point of the test is a small archive"
+    monkeypatch.setattr(manager_module, "MAX_EXT_UNPACKED_BYTES", 4096)
+    bomb = _archive("bomb", {"payload.bin": b"\0" * 8192})
 
     with pytest.raises(ValueError, match="unpacks to more than"):
         install(bomb)
 
     assert not (manager.ext_dir / "bomb").exists()
+
+
+def test_an_archive_within_the_limit_still_installs(install, monkeypatch) -> None:
+    """Guards the other side of the check: the cap must not reject ordinary
+    extensions.
+    """
+    monkeypatch.setattr(manager_module, "MAX_EXT_UNPACKED_BYTES", 4096)
+    assert install(_archive("small", {"payload.bin": b"\0" * 512})).name == "small"

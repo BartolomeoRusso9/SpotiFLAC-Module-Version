@@ -141,7 +141,15 @@ async def run_hooks(
             if inspect.iscoroutinefunction(hook):
                 await hook(result, metadata)
             else:
-                await asyncio.to_thread(hook, result, metadata)
+                # Checking the *result* as well as the function covers the
+                # shapes iscoroutinefunction says no to but which are still
+                # async: functools.partial around a coroutine function, and
+                # a class with `async def __call__`. Without this they went
+                # to a thread, returned an un-awaited coroutine, and the
+                # hook silently never ran.
+                outcome = await asyncio.to_thread(hook, result, metadata)
+                if inspect.isawaitable(outcome):
+                    await outcome
         except Exception:
             # Logged, not raised: the download already happened, and a
             # failing notifier must not turn a completed track into a failed

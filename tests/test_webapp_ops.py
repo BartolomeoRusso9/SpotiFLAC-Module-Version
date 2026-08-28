@@ -26,10 +26,10 @@ def test_healthz_answers_without_rendering_the_frontend() -> None:
     resp = client.get("/healthz")
     assert resp.status_code == 200
 
-    body = resp.json()
-    assert body["status"] == "ok"
-    assert "version" in body
-    assert body["auth"] is False
+    # Liveness only: no version, no client count, no "is auth on" — this is
+    # the one endpoint outside the auth gate, so anything it adds is a free
+    # fingerprint for whoever can reach the port.
+    assert resp.json() == {"status": "ok"}
 
 
 def test_healthz_is_reachable_without_the_web_token() -> None:
@@ -40,9 +40,11 @@ def test_healthz_is_reachable_without_the_web_token() -> None:
     assert client.get("/healthz").status_code == 200
 
 
-def test_healthz_reports_that_auth_is_configured() -> None:
+def test_instance_details_live_behind_auth_on_metrics_instead() -> None:
     client = TestClient(webapp.create_app(token="s3cret"))
-    assert client.get("/healthz").json()["auth"] is True
+    body = client.get("/api/metrics?token=s3cret").json()
+    assert body["auth"] is True
+    assert "version" in body
 
 
 def test_the_token_gate_still_covers_everything_else() -> None:

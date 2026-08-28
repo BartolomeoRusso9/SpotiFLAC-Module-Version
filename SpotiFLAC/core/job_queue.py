@@ -184,16 +184,30 @@ class JobQueue:
                 if job is None:
                     continue
 
-                job.status = JobStatus.RUNNING
-                job.started_at = time.time()
+                with self._lock:
+                    job.status = JobStatus.RUNNING
+                    job.started_at = time.time()
+
+                result = error = None
+                status = JobStatus.DONE
                 try:
-                    job.result = self._handler(job.payload)
-                    job.status = JobStatus.DONE
+                    result = self._handler(job.payload)
                 except Exception as exc:
-                    job.status = JobStatus.FAILED
-                    job.error = str(exc)
+                    status = JobStatus.FAILED
+                    error = str(exc)
                     logger.exception("[JobQueue] Job %s failed", job_id)
-                finally:
+
+                # The transition to a terminal state happens under the lock
+                # that list_all() reads under, so a reader can never observe
+                # a job that is DONE but has no finished_at. Eviction runs
+                # here as well as in submit(): a queue that is drained and
+                # then goes quiet would otherwise keep every completed job
+                # until somebody happened to submit another one.
+                with self._lock:
+                    job.result = result
+                    job.error = error
+                    job.status = status
                     job.finished_at = time.time()
+                    self._evict_finished_locked()
             finally:
                 self._queue.task_done()

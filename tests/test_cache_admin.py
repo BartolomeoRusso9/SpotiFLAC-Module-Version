@@ -159,3 +159,20 @@ def test_human_bytes(value, expected) -> None:
 def test_json_output_is_parseable(cache) -> None:
     _write(cache / "isrc-cache.json")
     assert json.loads(cache_admin.to_json(cache_admin.stats()))["exists"] is True
+
+
+@pytest.mark.parametrize("bad", [-1, -0.5, float("nan"), float("inf")])
+def test_prune_rejects_an_age_it_cannot_act_on_sensibly(cache, bad) -> None:
+    """A negative age puts the cutoff in the future and deletes everything;
+    NaN makes every comparison false and deletes nothing. Both come from a
+    --cache-max-age-days the user typed, so neither should happen quietly.
+    """
+    _write(cache / "responses" / "spotify" / "a.json", age_days=30)
+    with pytest.raises(ValueError, match="non-negative"):
+        cache_admin.prune(max_age_s=bad)
+    assert (cache / "responses" / "spotify" / "a.json").exists()
+
+
+def test_prune_accepts_zero_meaning_everything_is_stale(cache) -> None:
+    _write(cache / "responses" / "spotify" / "a.json")
+    assert cache_admin.prune(max_age_s=0)["removed_files"] == 1

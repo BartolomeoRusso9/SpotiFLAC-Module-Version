@@ -8,6 +8,8 @@ everybody's browser saw everybody's progress and file paths.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
@@ -48,25 +50,27 @@ def test_each_account_gets_its_own_api_instance() -> None:
     assert registry.get("alice") is alice, "instance not reused for the same account"
 
 
-def test_each_account_downloads_into_its_own_folder() -> None:
-    registry = webapp.ApiRegistry(webapp.ConnectionManager(), "/downloads")
-    assert registry.get("alice").download_dir.endswith("/alice")
-    assert registry.get("bob").download_dir.endswith("/bob")
+def test_each_account_downloads_into_its_own_folder(tmp_path) -> None:
+    registry = webapp.ApiRegistry(webapp.ConnectionManager(), str(tmp_path))
+    # Compared as path components, not string suffixes: os.path.join uses a
+    # backslash on Windows, where the CI job also runs.
+    assert Path(registry.get("alice").download_dir).name.startswith("alice-")
+    assert Path(registry.get("bob").download_dir).name.startswith("bob-")
 
 
-def test_per_account_folders_stay_under_the_shared_root() -> None:
+def test_per_account_folders_stay_under_the_shared_root(tmp_path) -> None:
     """A username is user-supplied text on its way into a filesystem path.
     Accounts are created locally, so this is not the last line of defence,
     but `..` should not be spellable there.
     """
-    registry = webapp.ApiRegistry(webapp.ConnectionManager(), "/downloads")
-    path = registry.get("../../etc").download_dir
-    assert ".." not in path
-    assert path.startswith("/downloads/")
+    registry = webapp.ApiRegistry(webapp.ConnectionManager(), str(tmp_path))
+    path = Path(registry.get("../../etc").download_dir)
+    assert ".." not in path.parts
+    assert path.parent == tmp_path
 
 
 @pytest.mark.parametrize(
-    ("username", "expected"),
+    ("username", "readable"),
     [
         ("alice", "alice"),
         ("a b", "a_b"),
@@ -74,8 +78,18 @@ def test_per_account_folders_stay_under_the_shared_root() -> None:
         ("Ann-Marie_1", "Ann-Marie_1"),
     ],
 )
-def test_username_to_folder_name(username, expected) -> None:
-    assert webapp._safe_username(username) == expected
+def test_username_to_folder_name_keeps_a_readable_prefix(username, readable) -> None:
+    assert webapp._safe_username(username).startswith(f"{readable}-")
+
+
+def test_names_that_sanitise_alike_still_get_separate_folders() -> None:
+    """Sanitising alone is lossy: "a b", "a_b" and "a/b" all reduce to the
+    same string, so three accounts would have silently shared one download
+    folder — the exact thing per-account directories exist to prevent.
+    """
+    names = ["a b", "a_b", "a/b", "a.b", "a-b"]
+    folders = {webapp._safe_username(n) for n in names}
+    assert len(folders) == len(names)
 
 
 # ── request routing ────────────────────────────────────────────────────────
@@ -201,3 +215,45 @@ def test_a_full_queue_answers_with_structured_fields_not_an_exception_string() -
     # The username and the internal phrasing stay in the log, not the body.
     assert "alice" not in body["error"]
     assert "wait for some to finish" not in body["error"]
+
+
+# ── folder browser ─────────────────────────────────────────────────────────
+
+
+def test_the_folder_browser_cannot_leave_the_callers_own_root() -> None:
+    """With $HOME approved, any account could browse to the shared download
+    root and read every other account's folder name — and the rest of $HOME
+    besides.
+    """
+    app = webapp.create_app(multiuser=True)
+    alice = _login(app, "alice", "alice-password")
+    bob_dir = app.state.api_registry.get("bob").download_dir
+
+    denied = alice.get("/api/browse-folder", params={"path": bob_dir})
+    assert denied.status_code == 403
+
+    assert (
+        alice.get("/api/browse-folder", params={"path": str(Path.home())}).status_code
+        == 403
+    )
+
+
+def test_the_folder_browser_starts_in_the_callers_own_folder() -> None:
+    app = webapp.create_app(multiuser=True)
+    alice = _login(app, "alice", "alice-password")
+    alice_dir = app.state.api_registry.get("alice").download_dir
+
+    assert alice.get("/api/get-home-dir").json()["home_dir"] == alice_dir
+    assert alice.get("/api/browse-folder").json()["path"] == alice_dir
+
+
+def test_single_user_mode_can_still_browse_home() -> None:
+    """There the "other account" is the same person, so confining the
+    browser to the download folder would only remove a working feature.
+    """
+    client = TestClient(webapp.create_app())
+    assert (
+        client.get("/api/browse-folder", params={"path": str(Path.home())}).status_code
+        == 200
+    )
+    assert client.get("/api/get-home-dir").json()["home_dir"] == str(Path.home())

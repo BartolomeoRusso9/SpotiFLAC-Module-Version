@@ -21,10 +21,12 @@ host it is sent to.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import os
 import secrets
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from .http import AsyncHttpClient
 
@@ -96,21 +98,63 @@ def build_target(
 
     target = LibraryTarget(kind, url.strip(), resolved_token, resolved_user)
 
-    if target.kind in ("navidrome", "subsonic") and target.base.startswith("http://"):
-        # Worth a warning specifically here. Plex and Jellyfin send an API
-        # token — revoke it and it's over. Subsonic sends md5(password+salt)
-        # derived from the account password itself, so anyone watching a
-        # plaintext connection gets something they can grind offline. On a
-        # LAN behind a router this is a small risk; over anything else it
-        # isn't.
-        logger.warning(
-            "[library] %s is plain HTTP. Subsonic auth derives from your "
-            "account password, so it can be captured and attacked offline — "
-            "use https://, or an account you use for nothing else.",
-            target.base,
-        )
-
+    _warn_if_cleartext(target)
     return target
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether the request never leaves this machine.
+
+    Traffic to localhost has no network path for anyone to observe, so a
+    cleartext warning there is pure noise — and noise is what teaches people
+    to ignore the warning that matters.
+    """
+    host = (host or "").strip("[]").lower()
+    if host in ("localhost", "127.0.0.1", "::1"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _warn_if_cleartext(target: LibraryTarget) -> None:
+    """Says so when a credential is about to travel in the clear.
+
+    Every one of these servers is authenticated, so on plain HTTP the
+    credential is readable by anything on the path — that part does not
+    depend on which server it is. What differs is what a capture costs, so
+    the message says which:
+
+      - Subsonic/Navidrome derive the value from the account password, so a
+        captured request can be attacked offline and the damage outlives
+        the connection.
+      - Plex/Jellyfin/Emby send an API token. It is revocable, which helps
+        only if you find out it leaked.
+
+    A warning rather than a refusal, deliberately. The deployment this
+    feature exists for is a NAS on a home LAN at `http://nas.local:8096`,
+    where HTTPS means a self-signed certificate and no public DNS. Refusing
+    would remove the feature from its main use case to prevent a risk the
+    operator is usually already accepting on that network.
+    """
+    parsed = urlparse(target.base)
+    if parsed.scheme != "http" or _is_loopback(parsed.hostname or ""):
+        return
+
+    if target.kind in ("navidrome", "subsonic"):
+        detail = (
+            "Subsonic auth derives from your account password, so a captured "
+            "request can be attacked offline — use https://, or an account "
+            "you use for nothing else."
+        )
+    else:
+        detail = (
+            f"Your {target.kind} API token is readable by anything on the "
+            "path, and stays valid until you revoke it — use https:// if the "
+            "connection leaves a network you control."
+        )
+    logger.warning("[library] %s is plain HTTP. %s", target.base, detail)
 
 
 def _subsonic_auth(password: str) -> dict[str, str]:
@@ -133,7 +177,8 @@ def _subsonic_auth(password: str) -> dict[str, str]:
     not a preference. What it *does* mean, and what the caller should know:
     the digest is offline-crackable for a weak password, so use a dedicated
     account for SpotiFLAC rather than one whose password you reuse, and
-    reach the server over HTTPS (see request_rescan, which warns otherwise).
+    reach the server over HTTPS (see _warn_if_cleartext, which says so
+    when you don't).
 
     If this alert is triaged again: it is accurate about MD5 and wrong about
     the remedy. Dismiss it as "won't fix" against this docstring, or drop

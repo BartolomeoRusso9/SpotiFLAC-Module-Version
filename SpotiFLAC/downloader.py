@@ -611,6 +611,11 @@ async def download_one_async(
 
                 # Check if provider supports artist_separator parameter
                 download_kwargs = {
+                    # Providers stream via AsyncHttpClient.stream_to_file,
+                    # which resumes by default; this lets --no-resume reach
+                    # them. BaseProvider takes **kwargs, so a provider that
+                    # doesn't know the option simply ignores it.
+                    "resume": opts.resume,
                     "filename_format": opts.filename_format,
                     "position": position,
                     "include_track_num": opts.use_track_numbers,

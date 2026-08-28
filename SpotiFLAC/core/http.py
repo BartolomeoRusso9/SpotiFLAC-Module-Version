@@ -110,6 +110,23 @@ install_log_redaction()
 logger = logging.getLogger(__name__)
 
 
+_CONTENT_RANGE_RE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(?:\d+|\*)\s*$", re.I)
+
+
+def _content_range_starts_at(resp: httpx.Response, expected_start: int) -> bool:
+    """Whether a 206's Content-Range really begins where we asked.
+
+    A missing or unparseable header is treated as "no" — restarting costs
+    one wasted download, appending to the wrong offset costs a silently
+    corrupt file.
+    """
+    header = resp.headers.get("Content-Range", "")
+    match = _CONTENT_RANGE_RE.match(header)
+    if not match:
+        return False
+    return int(match.group(1)) == expected_start
+
+
 def _remove_quietly(path: str) -> None:
     """Deletes `path` if present, never raising — used on cleanup paths that
     are already unwinding an exception and must not mask it with a second one.
@@ -441,13 +458,26 @@ class AsyncHttpClient:
                 self._raise_for_status(resp)
 
                 # A server free to ignore Range answers 200 with the whole
-                # body. Appending that to the partial file would corrupt it.
-                resuming = resume_from > 0 and resp.status_code == 206
+                # body. Appending that to the partial file would corrupt it —
+                # and so would trusting a 206 blindly: the status only says
+                # "partial", not "the partial you asked for". A server may
+                # clamp the range, ignore the offset, or answer
+                # multipart/byteranges, and every one of those appended to a
+                # .part file produces a corrupt FLAC that decodes far enough
+                # to look fine.
+                resuming = (
+                    resume_from > 0
+                    and resp.status_code == 206
+                    and _content_range_starts_at(resp, resume_from)
+                    and "multipart" not in resp.headers.get("Content-Type", "").lower()
+                )
                 if resume_from and not resuming:
                     logger.debug(
-                        "[%s] Server ignored Range (HTTP %s); restarting download",
+                        "[%s] Range not honoured as asked (HTTP %s, "
+                        "Content-Range %r); restarting the download",
                         self._provider,
                         resp.status_code,
+                        resp.headers.get("Content-Range", ""),
                     )
                     resume_from = 0
 

@@ -61,8 +61,6 @@ RUN groupadd --gid "${APP_GID}" spotiflac \
 
 VOLUME ["/app/downloads", "/home/spotiflac/.spotiflac", "/home/spotiflac/.cache/spotiflac"]
 
-USER spotiflac
-
 # ==============================================================================
 # [VNC/WEB SCREEN] — desktop GUI over VNC (default `spotiflac --gui` path):
 # - 6080: Web Browser access (noVNC) -> http://localhost:6080/vnc.html
@@ -83,6 +81,10 @@ EXPOSE 6080 5900 8000
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Last, and after the chmod above: /usr/local/bin is root-owned, so dropping
+# privileges any earlier makes that RUN fail and the image fail to build.
+USER spotiflac
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["--help"]

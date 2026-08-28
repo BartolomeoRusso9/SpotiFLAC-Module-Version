@@ -118,11 +118,20 @@ def _register_cli_registry_directories(urls: list[str]) -> None:
 def _print_welcome_banner() -> None:
     """Prints a one-time ASCII banner with project/community links on startup.
 
+    Suppressed entirely under --json: it goes to stdout, which in that mode
+    carries the report document and nothing else. `spotiflac ... --json | jq`
+    would otherwise be fed an ASCII logo before the JSON. Console output from
+    core/console._write already goes to stderr; this was the one thing that
+    didn't.
+
     Shown for every launch mode (CLI, --interactive, --gui, --web) since it
     runs as the very first thing in amain(), before any mode-specific setup.
     Colors and links are skipped for non-tty output (piped/redirected) or when
     NO_COLOR is set, matching the convention used elsewhere (interactive.py).
     """
+    if "--json" in sys.argv:
+        return
+
     no_color = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
 
     def c(code: str, text: str) -> str:
@@ -1251,7 +1260,7 @@ async def amain() -> None:
     if "--interactive" in sys.argv:
         print_ffmpeg_warning()
         print_node_warning()
-        cfg = await run_interactive()
+        cfg = await run_interactive(_early_min_trust_from_argv())
 
         verbose = (
             cfg.get("verbose", False) or "--verbose" in sys.argv or "-v" in sys.argv

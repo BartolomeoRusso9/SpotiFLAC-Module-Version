@@ -21,6 +21,7 @@ They are reported for completeness and never pruned, not even by
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import time
@@ -130,6 +131,14 @@ def prune(max_age_s: float = DEFAULT_MAX_AGE_S, dry_run: bool = False) -> dict:
     go without removing it, because "delete things under $HOME" deserves a
     way to look first.
     """
+    # A negative age puts the cutoff in the future and deletes the whole
+    # cache; NaN makes every comparison false and deletes nothing, silently.
+    # Both come from a --cache-max-age-days the user typed, so say which it
+    # was rather than doing something surprising.
+    if not math.isfinite(max_age_s) or max_age_s < 0:
+        msg = f"max_age_s must be a non-negative number, got {max_age_s!r}"
+        raise ValueError(msg)
+
     root = cache_root()
     responses = root / RESPONSES_DIR
     removed = freed = 0

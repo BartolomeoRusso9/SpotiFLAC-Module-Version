@@ -76,7 +76,7 @@ spotiflac URL ./out \
   --service ext:tidal-web ext:qobuz-web
 ```
 
-> **Note:** If Node.js is not installed, SpotiFLAC automatically attempts to install it the first time a JavaScript extension is used, printing progress as it goes (`core/node_check.py`) — it never escalates privileges itself (no `sudo`/`runas` is ever added on your behalf), so on Linux this works out of the box when already running as root (e.g. inside the Docker image) and otherwise falls back to telling you the exact command to run yourself. A startup check (same idea as the ffmpeg one) also warns upfront if Node.js is missing, independent of whether the auto-install ends up working.
+> **Note:** If Node.js is not installed, SpotiFLAC automatically attempts to install it the first time a JavaScript extension is used, printing progress as it goes (`core/node_check.py`) — it never escalates privileges itself (no `sudo`/`runas` is ever added on your behalf), so on Linux it works out of the box only when already running as root, and otherwise tells you the exact command to run yourself. (The Docker image needs neither: Node.js is installed at build time, and the container runs as a non-root user.) A startup check (same idea as the ffmpeg one) also warns upfront if Node.js is missing, independent of whether the auto-install ends up working.
 >
 > Supported package managers:
 >

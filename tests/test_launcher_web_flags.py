@@ -75,3 +75,28 @@ def test_web_token_and_multiuser_still_parse(run_web_calls) -> None:
     kwargs = run_web_calls(["--web", "--web-token", "s3cret", "--web-multiuser"])
     assert kwargs["token"] == "s3cret"
     assert kwargs["multiuser"] is True
+
+
+# ── --json and stdout ──────────────────────────────────────────────────────
+
+
+def test_the_welcome_banner_is_suppressed_under_json(capsys) -> None:
+    """--json puts the report on stdout, so nothing else may go there.
+    Console output already went to stderr; the ASCII banner did not, which
+    made `spotiflac ... --json | jq` fail on the first byte.
+    """
+    import sys
+
+    from SpotiFLAC.launcher import _print_welcome_banner
+
+    original = sys.argv
+    try:
+        sys.argv = ["spotiflac", "--json", "https://example.invalid", "/tmp"]
+        _print_welcome_banner()
+        assert capsys.readouterr().out == ""
+
+        sys.argv = ["spotiflac", "https://example.invalid", "/tmp"]
+        _print_welcome_banner()
+        assert "SpotiFLAC" in capsys.readouterr().out
+    finally:
+        sys.argv = original

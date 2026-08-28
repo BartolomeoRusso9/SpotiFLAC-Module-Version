@@ -60,6 +60,58 @@ def test_what_a_network_client_actually_needs_is_kept(monkeypatch) -> None:
     assert env["NODE_EXTRA_CA_CERTS"] == "/etc/ssl/corp.pem"
 
 
+def test_a_proxy_url_with_credentials_is_withheld(monkeypatch, caplog) -> None:
+    """`http://user:pass@proxy:3128` is valid syntax and common in corporate
+    setups. Forwarding it hands an extension exactly the kind of credential
+    the allowlist exists to withhold.
+    """
+    import logging
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://alice:hunter2@proxy.corp:3128")
+    with caplog.at_level(logging.WARNING):
+        env = sandbox.build_env()
+
+    assert "HTTPS_PROXY" not in env
+    assert "hunter2" not in "".join(env.values())
+    assert sandbox.PASSTHROUGH_ENV in caplog.text
+
+
+def test_a_proxy_url_without_credentials_still_works(monkeypatch) -> None:
+    """Withholding every proxy would break extensions on the networks that
+    need one most. Only the ones carrying userinfo are dropped.
+    """
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.corp:3128")
+    assert sandbox.build_env()["HTTPS_PROXY"] == "http://proxy.corp:3128"
+
+
+def test_no_proxy_is_never_withheld(monkeypatch) -> None:
+    """It is a host list, not a URL — there is no credential to leak."""
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
+    assert sandbox.build_env()["NO_PROXY"] == "localhost,127.0.0.1"
+
+
+def test_an_authenticated_proxy_can_be_passed_through_explicitly(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://alice:hunter2@proxy.corp:3128")
+    monkeypatch.setenv(sandbox.PASSTHROUGH_ENV, "HTTPS_PROXY")
+    assert "hunter2" in sandbox.build_env()["HTTPS_PROXY"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("http://proxy:3128", False),
+        ("proxy.corp:3128", False),
+        ("http://user@proxy:3128", True),
+        ("http://user:pw@proxy:3128", True),
+        ("http://:pw@proxy:3128", True),
+    ],
+)
+def test_proxy_credential_detection(value, expected) -> None:
+    assert sandbox._has_proxy_credentials(value) is expected
+
+
 def test_absent_variables_are_simply_absent(monkeypatch) -> None:
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
     assert "HTTPS_PROXY" not in sandbox.build_env()
@@ -117,6 +169,20 @@ def test_a_preexec_hook_is_provided_on_posix() -> None:
     assert callable(sandbox.build_preexec())
 
 
+def test_the_extension_launch_does_not_use_preexec_fn() -> None:
+    """preexec_fn runs between fork and exec in a process that always has
+    threads here, where CPython documents it as unsafe — and a child that
+    deadlocks there does so before any timeout is armed. Asserted on the
+    source because the failure mode is a hang, not an exception.
+    """
+    import pathlib
+
+    source = (pathlib.Path(sandbox.__file__).parent / "runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "preexec_fn=" not in source
+
+
 def _in_subprocess(body: str) -> int:
     """Runs `body` in a fresh interpreter and returns its exit code.
 
@@ -133,6 +199,7 @@ def _in_subprocess(body: str) -> int:
         [sys.executable, "-c", textwrap.dedent(body)],
         cwd=str(pathlib.Path(__file__).resolve().parent.parent),
         capture_output=True,
+        check=False,  # the return code *is* the assertion
     ).returncode
 
 

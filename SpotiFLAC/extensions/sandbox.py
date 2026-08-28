@@ -16,17 +16,19 @@ which `process.env` hands over for free.
 
 What this does
 --------------
-Builds the child environment from an allowlist instead of by inheritance,
-and — on POSIX — applies address-space, CPU and file-size limits so a
-runaway extension exhausts its own budget rather than the machine's.
+Builds the child environment from an allowlist instead of by inheritance.
+
+Resource limits are *not* currently applied: see build_preexec() for why
+the obvious way to do that (subprocess's preexec_fn) is unsafe in a
+threaded process, and what the safe version would need.
 
 What this is not
 ----------------
 Not a security boundary. The extension still runs as the same OS user, can
 still open sockets and write files, and a genuinely hostile one is limited
 only by what that user can do. This removes the accidental handover of
-credentials and caps obvious resource exhaustion; it does not contain an
-attacker. Real isolation needs a container or a separate user account, and
+credentials; it does not contain an attacker and does not currently cap
+resource use at all. Real isolation needs a container or a separate user account, and
 saying otherwise would be worse than saying nothing.
 
 Python extensions get none of this: they are imported into this process
@@ -38,6 +40,7 @@ from __future__ import annotations
 
 import logging
 import os
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -56,19 +59,28 @@ _BASE_ALLOWLIST = (
     "NODE_OPTIONS",
     "NODE_EXTRA_CA_CERTS",
     "NODE_PATH",
-    # Corporate proxies and custom CA bundles: without these, an extension
-    # simply cannot reach the internet on a lot of real networks.
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "ALL_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "all_proxy",
-    "no_proxy",
+    # Custom CA bundles: without these, an extension simply cannot reach the
+    # internet on a lot of real networks. These carry a path, never a secret.
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     "REQUESTS_CA_BUNDLE",
+    # NO_PROXY is a host list, not a credential — always safe to pass.
+    "NO_PROXY",
+    "no_proxy",
+)
+
+#: Proxy URLs, handled separately from the list above: the syntax allows
+#: `http://user:password@proxy:3128`, and forwarding that would hand an
+#: extension the very kind of credential this module exists to withhold. A
+#: proxy URL with no userinfo is passed through as usual; one with userinfo
+#: is dropped unless the operator named it in SPOTIFLAC_EXT_ENV_PASSTHROUGH.
+_PROXY_VARS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
 )
 
 #: Windows falls over without these — they are how the OS locates its own
@@ -133,8 +145,36 @@ def build_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     allowed.extend(_passthrough_names())
 
     env = {name: os.environ[name] for name in allowed if name in os.environ}
+
+    explicit = set(_passthrough_names())
+    for name in _PROXY_VARS:
+        value = os.environ.get(name)
+        if value is None or name in explicit:
+            if value is not None:
+                env[name] = value
+            continue
+        if _has_proxy_credentials(value):
+            logger.warning(
+                "[sandbox] %s contains credentials and was withheld from the "
+                "extension. Name it in $%s to pass it through anyway.",
+                name,
+                PASSTHROUGH_ENV,
+            )
+            continue
+        env[name] = value
+
     env.update(extra or {})
     return env
+
+
+def _has_proxy_credentials(value: str) -> bool:
+    """Whether a proxy URL carries a username/password in its userinfo."""
+    try:
+        parsed = urlparse(value if "://" in value else f"http://{value}")
+    except ValueError:
+        # Unparseable: withhold rather than guess.
+        return True
+    return bool(parsed.username or parsed.password)
 
 
 def dropped_names() -> list[str]:
@@ -147,11 +187,21 @@ def build_preexec(
     cpu_seconds: int = DEFAULT_CPU_SECONDS,
     file_size_mb: int = DEFAULT_FILE_SIZE_MB,
 ):
-    """A `preexec_fn` applying rlimits, or None where unsupported.
+    """Applies rlimits to the *current* process. Returns None where
+    unsupported (Windows has no `resource` module).
 
-    Returns None on Windows (no `resource` module) and wherever the limits
-    can't be set — a missing cap is not a reason to refuse to run the
-    extension at all.
+    NOT wired into the extension launch, and deliberately so. It is shaped
+    like a `subprocess.preexec_fn` and would be the obvious thing to pass
+    there — but preexec_fn runs between fork() and exec() in the child, and
+    CPython documents it as unsafe in a process with threads. SpotiFLAC
+    always has threads (the shared event loop, the extension reader threads,
+    uvicorn's pool), and a child that deadlocks there does so silently,
+    before any timeout is armed.
+
+    Kept because it is the right building block for the safe version of
+    this: a tiny single-threaded launcher process that sets its own limits
+    and then execs node. Until that exists, extensions run unlimited — see
+    the module docstring on what this sandbox is and is not.
     """
     if os.name == "nt":
         return None

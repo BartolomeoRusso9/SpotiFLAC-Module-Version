@@ -61,7 +61,7 @@ spotiflac --web --web-multiuser
 
 The web GUI shows a sign-in screen automatically when it detects `--web-multiuser` is on (via `GET /api/auth/status`); a "Sign Out" option then appears under Settings → General. You can also call the endpoints directly — `POST /api/auth/login {"username", "password"}` to get a session cookie, `POST /api/auth/logout` to clear it — from a script or a frontend of your own. `POST /api/queue/submit-download {"selected_indices", "config"}` and `GET /api/queue/mine` submit and list a user's own queued downloads.
 
-**What this does and doesn't isolate:** accounts gate *who can act*, and downloads get tagged with an owner for history/filtering — but every account still shares the same underlying instance (`download_dir`, current search results, etc.), the same way every browser tab already does in single-user mode. Good for a household or small team who'd otherwise just share one login; not multi-tenant isolation for people who shouldn't see each other's search results.
+**What this does and doesn't isolate:** each account gets its own application state — its own search results, its own download folder underneath the shared root, and its own event stream, so one person's progress and file paths no longer appear in everybody's browser. What stays shared is what is genuinely machine-wide: installed extensions, the registry configuration, the Ed25519 trust store, and the HTTP connection pool. Accounts still run in one process as one OS user, and anyone who can install an extension can affect everyone — so this is household or small-team separation, not hostile-tenant isolation.
 
 #### Installable as an app (PWA)
 

@@ -11,6 +11,7 @@ umask happened to be.
 from __future__ import annotations
 
 import json
+import os
 import stat
 import time
 
@@ -31,6 +32,13 @@ def _isolated_stores(tmp_path, monkeypatch):
 
 def _mode(path):
     return stat.S_IMODE(path.stat().st_mode)
+
+
+#: Windows has no POSIX mode bits — chmod there is a no-op, and the file
+#: comes back 0o666. The previous guard tested `hasattr(stat, "S_IMODE")`,
+#: which is true on Windows too, so it never fired and these failed in the
+#: Windows CI job. What is being checked is the *filesystem*, not the stdlib.
+_posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
 
 
 # ── atomic_io ──────────────────────────────────────────────────────────────
@@ -57,7 +65,7 @@ def test_a_failed_write_leaves_no_temp_files_behind(tmp_path) -> None:
     assert [p.name for p in tmp_path.iterdir()] == ["state.json"]
 
 
-@pytest.mark.skipif(not hasattr(stat, "S_IMODE"), reason="POSIX modes only")
+@_posix_only
 def test_private_writes_are_owner_only_and_public_ones_are_not(tmp_path) -> None:
     private = tmp_path / "secret.json"
     public = tmp_path / "cache.json"
@@ -74,6 +82,7 @@ def test_private_writes_are_owner_only_and_public_ones_are_not(tmp_path) -> None
 # ── web_users ──────────────────────────────────────────────────────────────
 
 
+@_posix_only
 def test_user_store_is_not_world_readable() -> None:
     web_users.create_user("alice", "alice-password")
     assert _mode(web_users.USERS_FILE) == 0o600
@@ -113,7 +122,7 @@ def test_unknown_username_costs_the_same_as_a_known_one() -> None:
 # ── trust store ────────────────────────────────────────────────────────────
 
 
-def test_trust_store_is_not_world_readable() -> None:
+def _add_a_trusted_key() -> str:
     import base64
 
     from cryptography.hazmat.primitives import serialization
@@ -127,7 +136,19 @@ def test_trust_store_is_not_world_readable() -> None:
             format=serialization.PublicFormat.Raw,
         )
     ).decode()
-
     trust.add_trusted_key("alice", pub_b64)
-    assert _mode(trust.TRUSTED_KEYS_FILE) == 0o600
+    return pub_b64
+
+
+def test_the_trust_store_round_trips() -> None:
+    """Functional, so it runs everywhere — only the mode check below is
+    POSIX-specific.
+    """
+    pub_b64 = _add_a_trusted_key()
     assert trust.list_trusted_keys() == [{"name": "alice", "public_key_b64": pub_b64}]
+
+
+@_posix_only
+def test_trust_store_is_not_world_readable() -> None:
+    _add_a_trusted_key()
+    assert _mode(trust.TRUSTED_KEYS_FILE) == 0o600

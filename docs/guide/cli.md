@@ -8,7 +8,11 @@
 
 ## CLI Usage (standalone executables)
 
-```bash
+The blocks below are usage synopses, not commands to copy: the `[...]`
+brackets mark optional arguments, and each option is on its own line for
+readability. Marked `text` rather than `bash` so nothing suggests otherwise.
+
+```text
 ./SpotiFLAC-Windows.exe url
                         output_dir
                         [--service ext:<id> [ext:<id> ...]]

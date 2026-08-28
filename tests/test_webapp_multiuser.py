@@ -186,9 +186,8 @@ def test_websocket_requires_a_session_when_multiuser_enabled() -> None:
     app = webapp.create_app(multiuser=True)
     client = TestClient(app)
 
-    with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect("/ws"):
-            pass
+    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/ws"):
+        pass
 
 
 def test_websocket_accepts_a_logged_in_session() -> None:
@@ -211,13 +210,21 @@ def test_repeated_failed_logins_get_rate_limited() -> None:
     client = TestClient(app)
     bad = {"username": "alice", "password": "wrong"}
 
-    codes = [client.post("/api/auth/login", json=bad).status_code for _ in range(6)]
+    # A long base delay makes the assertion independent of how fast the
+    # machine runs: with the real 1s, six PBKDF2 logins can outlast the
+    # first backoff window and the 429 disappears on a slow runner.
+    monkeypatch_delay = 3600.0
+    webapp.LoginRateLimiter._BASE_DELAY_S = monkeypatch_delay
+    try:
+        codes = [client.post("/api/auth/login", json=bad).status_code for _ in range(6)]
 
-    assert codes[0] == 401, "the first attempt must not be throttled"
-    assert 429 in codes, f"never rate limited after 6 failures: {codes}"
-    throttled = client.post("/api/auth/login", json=bad)
-    assert throttled.status_code == 429
-    assert int(throttled.headers["Retry-After"]) >= 1
+        assert codes[0] == 401, "the first attempt must not be throttled"
+        assert 429 in codes, f"never rate limited after 6 failures: {codes}"
+        throttled = client.post("/api/auth/login", json=bad)
+        assert throttled.status_code == 429
+        assert int(throttled.headers["Retry-After"]) >= 1
+    finally:
+        webapp.LoginRateLimiter._BASE_DELAY_S = 1.0
 
 
 def test_login_backoff_is_per_client_and_cleared_by_success() -> None:

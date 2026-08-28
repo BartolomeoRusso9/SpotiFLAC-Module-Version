@@ -47,7 +47,11 @@ from SpotiFLAC.core.health_check import (
 )
 
 async def main():
-    results = await run_health_check(["ext:tidal-web", "ext:qobuz-web", "ext:deezer-web"])
+    # Lyrics providers, not audio ones: run_health_check probes the
+    # servers listed in core/health_check.py (apple, lrclib,
+    # musixmatch, spotify, deezer, genius, netease, qq, youtube,
+    # kugou). An "ext:..." id matches nothing there.
+    results = await run_health_check(["apple", "lrclib", "musixmatch"])
     print_health_report(results)
 
     working = get_working_providers(results)

@@ -15,6 +15,7 @@ each one open-coding it (or not).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -68,9 +69,33 @@ def write_json_atomic(path: Path, data: Any, *, private: bool = False) -> None:
             # exact outcome the temp-file dance is meant to prevent.
             os.fsync(handle.fileno())
         os.replace(tmp, path)
+        _fsync_directory(path.parent)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Persists the rename itself, not just the file's contents.
+
+    fsync on the file guarantees the bytes are on disk; it says nothing
+    about the *directory entry* that now points at them. On a hard power
+    loss the rename can still be lost, leaving the old file — or, worse, a
+    name pointing at nothing. Directory fsync is POSIX-only; Windows has no
+    equivalent and raises, which is why this is best-effort.
+    """
+    if os.name == "nt":
+        return
+    fd = None
+    try:
+        fd = os.open(str(directory), os.O_RDONLY)
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
 
 
 def write_private_json(path: Path, data: Any) -> None:

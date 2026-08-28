@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import os
 import re
@@ -91,19 +92,24 @@ def _token_matches(candidate: str | None, expected: str) -> bool:
     return secrets.compare_digest(candidate, expected)
 
 
-def _is_path_safe(candidate: Path, api) -> bool:
-    """Check if candidate path is within approved roots (download_dir, home).
+def _is_path_safe(candidate: Path, api, allow_home: bool = True) -> bool:
+    """Check if candidate path is within approved roots.
 
     Returns True if the resolved canonical path is a descendant of (or equal to)
     at least one approved root. Returns False otherwise (path traversal attempt).
+
+    `allow_home=False` drops the home directory from the approved roots,
+    leaving only this caller's own download_dir. That is what multi-user mode
+    needs: with home approved, any account could browse to the shared
+    download root and read every other account's folder name — and anything
+    else under $HOME besides. Single-user mode keeps home, because there the
+    "other account" is the same person.
     """
     try:
         resolved = os.path.realpath(str(candidate))
-        # Approved roots: download_dir and user home
-        approved_roots = [
-            os.path.realpath(str(api.download_dir)),
-            os.path.realpath(str(Path.home())),
-        ]
+        approved_roots = [os.path.realpath(str(api.download_dir))]
+        if allow_home:
+            approved_roots.append(os.path.realpath(str(Path.home())))
         for root in approved_roots:
             try:
                 if os.path.commonpath([resolved, root]) == root:
@@ -363,9 +369,16 @@ def _safe_username(username: str) -> str:
     Accounts are created locally by the operator, so this is not the last
     line of defence — but a username is still user-supplied text on its way
     into a filesystem path, and `..` should not be spellable there.
+
+    The suffix is not decoration. Sanitising alone is lossy: "a b", "a_b"
+    and "a/b" all reduce to "a_b", so three separate accounts would have
+    silently shared one download folder — the exact thing per-account
+    directories exist to prevent. A short digest of the *original* name
+    keeps distinct accounts distinct while the readable part stays readable.
     """
     cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", username).strip("._") or "user"
-    return cleaned[:64]
+    digest = hashlib.sha256(username.encode("utf-8")).hexdigest()[:8]
+    return f"{cleaned[:55]}-{digest}"
 
 
 def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
@@ -623,15 +636,12 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         question — and would go on succeeding if every backend component
         behind it were broken.
         """
-        return JSONResponse(
-            {
-                "status": "ok",
-                "version": api.app_version,
-                "websocket_clients": manager.count(),
-                "multiuser": multiuser,
-                "auth": bool(token) or multiuser,
-            }
-        )
+        # Status and nothing else. Everything this used to add — version,
+        # whether auth is on, how many clients are connected — is a free
+        # fingerprint of the instance for anyone who can reach the port, and
+        # this is the one endpoint deliberately outside the auth gate. The
+        # same fields are in /api/metrics, behind whatever auth is set.
+        return JSONResponse({"status": "ok"})
 
     @app.get("/api/metrics")
     async def metrics() -> JSONResponse:
@@ -647,6 +657,9 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         payload: dict[str, Any] = {
             "providers": await run_in_threadpool(provider_stats.snapshot),
             "websocket_clients": manager.count(),
+            "version": api.app_version,
+            "multiuser": multiuser,
+            "auth": bool(token) or multiuser,
         }
 
         with contextlib.suppress(Exception):
@@ -728,22 +741,25 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # ── Server-side folder browser (replaces the native folder dialog) ─────
     @app.get("/api/browse-folder")
     async def browse_folder(request: Request, path: str | None = None) -> JSONResponse:
+        target_api = api_for(request)
+        # In multi-user mode the only approved root is the caller's own
+        # download folder, and it is also where browsing starts — landing
+        # someone in $HOME would show them the other accounts by name.
+        root = str(Path.home()) if not multiuser else target_api.download_dir
         try:
             # Resolve the requested path to a canonical, absolute form and
             # confirm it sits under an approved root *before* it is ever used
             # to touch the filesystem. Everything downstream operates on the
             # sanitized `safe_root` string, never on the raw `path` input.
-            requested = os.path.realpath(
-                os.path.expanduser(path) if path else str(Path.home())
-            )
-            if not _is_path_safe(Path(requested), api_for(request)):
+            requested = os.path.realpath(os.path.expanduser(path) if path else root)
+            if not _is_path_safe(Path(requested), target_api, allow_home=not multiuser):
                 return JSONResponse(
                     {"error": "Access denied: path is outside approved directories"},
                     status_code=403,
                 )
             base = Path(requested)
             if not base.is_dir():
-                base = Path(os.path.realpath(str(Path.home())))
+                base = Path(os.path.realpath(root))
             directories = sorted(
                 (
                     p.name
@@ -776,8 +792,16 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         )
 
     @app.get("/api/get-home-dir")
-    async def get_home_dir() -> JSONResponse:
-        """Returns the user's home directory path."""
+    async def get_home_dir(request: Request) -> JSONResponse:
+        """Where the folder browser should start.
+
+        Named for what the frontend calls it. In multi-user mode it is the
+        account's own download folder, not the OS home — the browser is only
+        allowed inside that root there, so handing back $HOME would just
+        start people somewhere they cannot open.
+        """
+        if multiuser:
+            return JSONResponse({"home_dir": api_for(request).download_dir})
         return JSONResponse({"home_dir": str(Path.home())})
 
     # ── WebSocket: push channel for log/progress/metadata/etc. ─────────────
