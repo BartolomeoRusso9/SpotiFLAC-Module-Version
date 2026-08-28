@@ -74,13 +74,22 @@ def _early_min_trust_from_argv() -> str | None:
     executes third-party code. Reading it late would enforce it everywhere
     except where it matters most.
     """
+    # Last occurrence wins, because that is what argparse does with a
+    # repeated option: stopping at the first one would bootstrap under
+    # `--min-trust-tier unverified --min-trust-tier signed` with no floor at
+    # all, while the parse further down reported "signed" — the bootstrap
+    # being exactly the step that installs and runs the extension. An
+    # unknown tier needs no check here: ExtensionManager rejects it (see
+    # extensions/trust.py normalise_min_trust), the bootstrap is skipped,
+    # and argparse's own `choices` reports it.
     argv = sys.argv[1:]
+    found: str | None = None
     for i, token in enumerate(argv):
         if token == "--min-trust-tier" and i + 1 < len(argv):
-            return argv[i + 1]
-        if token.startswith("--min-trust-tier="):
-            return token.split("=", 1)[1]
-    return None
+            found = argv[i + 1]
+        elif token.startswith("--min-trust-tier="):
+            found = token.split("=", 1)[1]
+    return found
 
 
 def _register_cli_registries(urls: list[str]) -> None:

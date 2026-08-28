@@ -247,6 +247,24 @@ def test_the_folder_browser_starts_in_the_callers_own_folder() -> None:
     assert alice.get("/api/browse-folder").json()["path"] == alice_dir
 
 
+def test_the_folder_browsers_answers_are_not_cacheable_in_multiuser_mode() -> None:
+    """A listing of one account's download folder is not something to leave
+    in a shared browser cache for whoever logs in next.
+    """
+    app = webapp.create_app(multiuser=True)
+    alice = _login(app, "alice", "alice-password")
+    bob_dir = app.state.api_registry.get("bob").download_dir
+
+    for resp in (
+        alice.get("/api/get-home-dir"),
+        alice.get("/api/browse-folder"),
+        # The denial names no path, but it still answers a question about
+        # one, so it gets the same treatment.
+        alice.get("/api/browse-folder", params={"path": bob_dir}),
+    ):
+        assert resp.headers["cache-control"] == "no-store", resp.url
+
+
 def test_single_user_mode_can_still_browse_home() -> None:
     """There the "other account" is the same person, so confining the
     browser to the download folder would only remove a working feature.

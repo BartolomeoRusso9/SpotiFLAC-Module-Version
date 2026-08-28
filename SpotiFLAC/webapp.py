@@ -750,6 +750,15 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         return JSONResponse({"result": result})
 
     # ── Server-side folder browser (replaces the native folder dialog) ─────
+    #
+    # Both handlers below answer with one account's private view of the
+    # filesystem: the folder it downloads into, and what is inside it.
+    # Neither response carries a validator, which leaves a browser or an
+    # intermediary free to reuse it heuristically — and on a shared machine
+    # in multi-user mode, the next reuse can be for a different account. In
+    # single-user mode there is nobody to reuse it for, so nothing is added.
+    _private_headers = {"Cache-Control": "no-store"} if multiuser else None
+
     @app.get("/api/browse-folder")
     async def browse_folder(request: Request, path: str | None = None) -> JSONResponse:
         target_api = api_for(request)
@@ -767,6 +776,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                 return JSONResponse(
                     {"error": "Access denied: path is outside approved directories"},
                     status_code=403,
+                    headers=_private_headers,
                 )
             base = Path(requested)
             if not base.is_dir():
@@ -790,7 +800,9 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         except Exception:
             logger.exception("Error browsing folder %r", path)
             return JSONResponse(
-                {"error": "Unable to browse this folder"}, status_code=400
+                {"error": "Unable to browse this folder"},
+                status_code=400,
+                headers=_private_headers,
             )
         parent = str(base.parent) if base.parent != base else None
         return JSONResponse(
@@ -800,6 +812,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                 "directories": directories,
                 "files": files,
             },
+            headers=_private_headers,
         )
 
     @app.get("/api/get-home-dir")
@@ -812,7 +825,10 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         start people somewhere they cannot open.
         """
         if multiuser:
-            return JSONResponse({"home_dir": api_for(request).download_dir})
+            return JSONResponse(
+                {"home_dir": api_for(request).download_dir},
+                headers=_private_headers,
+            )
         return JSONResponse({"home_dir": str(Path.home())})
 
     # ── WebSocket: push channel for log/progress/metadata/etc. ─────────────
