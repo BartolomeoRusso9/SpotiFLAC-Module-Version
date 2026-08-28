@@ -26,7 +26,7 @@ import logging
 import os
 import secrets
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from .http import AsyncHttpClient
 
@@ -154,7 +154,14 @@ def _warn_if_cleartext(target: LibraryTarget) -> None:
             "path, and stays valid until you revoke it — use https:// if the "
             "connection leaves a network you control."
         )
-    logger.warning("[library] %s is plain HTTP. %s", target.base, detail)
+    # The base URL is logged, so any `user:password@` in it would be too —
+    # into a log file that outlives the run and is the first thing someone
+    # pastes into a bug report. urlunparse with the credentials stripped from
+    # netloc keeps the part of the URL the warning is about (scheme, host,
+    # port, path) and drops the part nobody needs to see.
+    safe_netloc = parsed.netloc.rsplit("@", 1)[-1]
+    safe_base = urlunparse(parsed._replace(netloc=safe_netloc))
+    logger.warning("[library] %s is plain HTTP. %s", safe_base, detail)
 
 
 def _subsonic_auth(password: str) -> dict[str, str]:

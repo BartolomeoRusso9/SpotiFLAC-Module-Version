@@ -166,12 +166,18 @@ re-fetch. Add `--json` to any of these for parseable output.
 | Endpoint | Auth | For |
 | --- | --- | --- |
 | `GET /healthz` | none | Container health checks |
-| `GET /api/metrics` | same as the rest of `/api/` | Provider success rates, queue depth, connected clients |
+| `GET /api/metrics` | same as the rest of `/api/` | Provider success rates, queue depth, connected clients (single-user only — see below) |
 
 `/healthz` is deliberately unauthenticated: an orchestrator has no token,
 and a probe that 401s reports "unhealthy" for a reason unrelated to health.
 It discloses only that the process is answering. `/metrics` does expose real
 information, so it sits behind whatever auth is configured.
+
+Under `--web-multiuser` it reports only the version and the auth
+configuration. The rest of the counters are instance-wide — every account's
+downloads, the shared queue, how many clients are connected — and accounts
+are flat, with no administrator role to show them to, so they are omitted
+rather than shown to whoever logs in first.
 
 ### Multi-user
 

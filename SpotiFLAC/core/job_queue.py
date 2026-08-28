@@ -22,7 +22,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -166,11 +166,23 @@ class JobQueue:
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
-            return self._jobs.get(job_id)
+            job = self._jobs.get(job_id)
+            return replace(job) if job is not None else None
 
     def list_all(self) -> list[Job]:
+        # Snapshots, not the live Job objects. Holding the lock only for the
+        # duration of the sort would hand the caller references a worker is
+        # still writing to, so a reader that looked at `status` and then at
+        # `finished_at` could see a job that is DONE with no finish time —
+        # exactly the tear the worker takes the lock to avoid. Copying under
+        # the lock makes each returned Job internally consistent. `payload`
+        # is shared rather than deep-copied: it is written once in submit()
+        # and never mutated afterwards.
         with self._lock:
-            return sorted(self._jobs.values(), key=lambda j: j.created_at)
+            return [
+                replace(job)
+                for job in sorted(self._jobs.values(), key=lambda j: j.created_at)
+            ]
 
     def list_for(self, owner: str) -> list[Job]:
         return [j for j in self.list_all() if j.owner == owner]

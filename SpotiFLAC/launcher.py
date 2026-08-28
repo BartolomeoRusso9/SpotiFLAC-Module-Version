@@ -1131,10 +1131,18 @@ async def amain() -> None:
                 if result["preserved"]:
                     print(f"Kept (configuration): {', '.join(result['preserved'])}")
         elif cache_args.cache_prune:
-            result = cache_admin.prune(
-                max_age_s=cache_args.cache_max_age_days * 86400,
-                dry_run=cache_args.dry_run,
-            )
+            # --cache-max-age-days is a float, so argparse happily accepts
+            # -1, nan and inf; prune() rejects them rather than silently
+            # deleting everything or nothing. A bad flag value is a usage
+            # error, so report it the way argparse reports every other one
+            # (message on stderr, exit 2) instead of a traceback.
+            try:
+                result = cache_admin.prune(
+                    max_age_s=cache_args.cache_max_age_days * 86400,
+                    dry_run=cache_args.dry_run,
+                )
+            except ValueError as exc:
+                cache_parser.error(str(exc))
             if cache_args.as_json:
                 print(cache_admin.to_json(result))
             else:
@@ -1304,12 +1312,19 @@ async def amain() -> None:
                 post_download_command=cfg.get("post_download_command", ""),
                 resume=cfg.get("resume", True),
                 post_download_hooks=cfg.get("post_download_hooks", []),
-                json_report=getattr(args, "json_report", False),
-                library_type=getattr(args, "library_type", None),
-                library_url=getattr(args, "library_url", None),
-                library_token=getattr(args, "library_token", None),
-                library_user=getattr(args, "library_user", None),
-                write_m3u=getattr(args, "write_m3u", None),
+                # These are CLI-only flags, and `args` does not exist yet on
+                # this path — it is parsed further down, in the branch this
+                # one returns before reaching, so reading it here raised
+                # NameError as soon as an interactive run started
+                # downloading. The wizard does not ask about any of them, so
+                # the interactive defaults are simply "off"; cfg.get() leaves
+                # room for it to start asking.
+                json_report=cfg.get("json_report", False),
+                library_type=cfg.get("library_type"),
+                library_url=cfg.get("library_url"),
+                library_token=cfg.get("library_token"),
+                library_user=cfg.get("library_user"),
+                write_m3u=cfg.get("write_m3u"),
                 timeout_s=cfg.get("timeout_s"),
                 transcode_to=cfg.get("transcode_to"),
                 transcode_bitrate=cfg.get("transcode_bitrate", "320k"),

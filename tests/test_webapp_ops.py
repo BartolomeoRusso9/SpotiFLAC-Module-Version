@@ -111,7 +111,11 @@ def test_metrics_requires_a_session_in_multiuser_mode() -> None:
     assert client.get("/api/metrics").status_code == 200
 
 
-def test_metrics_includes_queue_depth_in_multiuser_mode() -> None:
+def test_metrics_omits_instance_wide_counters_in_multiuser_mode() -> None:
+    """Every account is an ordinary account — there is no administrator role
+    to show whole-instance activity to, so nobody is shown it. What is left
+    is the configuration the frontend needs to render itself.
+    """
     from SpotiFLAC.core import web_users
 
     web_users.create_user("alice", "alice-password")
@@ -121,8 +125,10 @@ def test_metrics_includes_queue_depth_in_multiuser_mode() -> None:
     )
 
     body = client.get("/api/metrics").json()
-    assert "queue" in body
-    assert body["queue"]["total"] == 0
+    for field in ("providers", "downloads", "websocket_clients", "queue"):
+        assert field not in body, field
+    assert body["multiuser"] is True
+    assert "version" in body
 
 
 def test_metrics_has_no_queue_section_without_multiuser() -> None:

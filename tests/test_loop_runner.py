@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import threading
 import time
 
@@ -95,9 +96,10 @@ def test_calling_from_inside_the_loop_raises_instead_of_deadlocking() -> None:
 
 
 def test_timeout_cancels_and_raises() -> None:
-    # concurrent.futures.TimeoutError is an alias of the builtin since 3.11,
-    # so the builtin is the portable way to name what run_coro raises.
-    with pytest.raises(TimeoutError):
+    # Only an alias of the builtin from 3.11 on; on 3.10 (which this project
+    # still supports) it is a separate class that does not inherit from it,
+    # so naming the builtin here would miss what run_coro actually re-raises.
+    with pytest.raises(concurrent.futures.TimeoutError):
         loop_runner.run_coro(_echo("slow", delay=5), timeout=0.1)
 
 

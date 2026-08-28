@@ -655,22 +655,33 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         from .core.progress import DownloadManager
 
         payload: dict[str, Any] = {
-            "providers": await run_in_threadpool(provider_stats.snapshot),
-            "websocket_clients": manager.count(),
             "version": api.app_version,
             "multiuser": multiuser,
             "auth": bool(token) or multiuser,
         }
 
-        with contextlib.suppress(Exception):
-            payload["downloads"] = await DownloadManager().get_stats()
+        # Everything below is instance-wide: provider stats, download totals
+        # and queue depth aggregate every account's activity, and the client
+        # count says how many other people are connected. In single-user mode
+        # that is the operator looking at their own instance. In multi-user
+        # mode it is one account being told how much the others are doing —
+        # and there is no administrator role here to grant it to (see
+        # core/web_users.py: accounts are flat), so the honest answer is to
+        # leave it out rather than show it to everybody. The counters keep
+        # being recorded either way; only this projection is narrowed.
+        if not multiuser:
+            payload["providers"] = await run_in_threadpool(provider_stats.snapshot)
+            payload["websocket_clients"] = manager.count()
 
-        if job_queue is not None:
-            jobs = job_queue.list_all()
-            counts: dict[str, int] = {}
-            for job in jobs:
-                counts[job.status.value] = counts.get(job.status.value, 0) + 1
-            payload["queue"] = {"total": len(jobs), "by_status": counts}
+            with contextlib.suppress(Exception):
+                payload["downloads"] = await DownloadManager().get_stats()
+
+            if job_queue is not None:
+                jobs = job_queue.list_all()
+                counts: dict[str, int] = {}
+                for job in jobs:
+                    counts[job.status.value] = counts.get(job.status.value, 0) + 1
+                payload["queue"] = {"total": len(jobs), "by_status": counts}
 
         return JSONResponse(payload)
 
