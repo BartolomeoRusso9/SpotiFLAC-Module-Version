@@ -17,19 +17,13 @@ logger = logging.getLogger(__name__)
 
 
 def _run_async_sync(func, *args, **kwargs):
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(func(*args, **kwargs))
-    if loop.is_running():
-        from concurrent.futures import ThreadPoolExecutor
+    """Thin alias for loop_runner.run_sync() — see that function for why the
+    old three-branch shim (which created a fresh loop in every branch) went
+    away. Kept as a name so the many call sites below read unchanged.
+    """
+    from .loop_runner import run_sync
 
-        def _worker():
-            return asyncio.run(func(*args, **kwargs))
-
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(_worker).result()
-    return loop.run_until_complete(func(*args, **kwargs))
+    return run_sync(func(*args, **kwargs))
 
 
 _FEATURING_GROUPS = frozenset({"appears_on", "compilation"})

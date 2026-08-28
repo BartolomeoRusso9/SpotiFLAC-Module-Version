@@ -90,9 +90,14 @@ jobs:
           
           # 3. Creazione e Push del Tag
           if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
-            echo "Tag $NEW_TAG already exists. Moving it to the current commit..."
-            git tag -f "$NEW_TAG"
-            git push origin -f "$NEW_TAG"
+            # Deliberately a hard stop, not a force-push. A tag that already
+            # exists has been fetched by users, packaged by build-release and
+            # (once publish.yml is tag-driven) shipped to PyPI: moving it
+            # changes what "v1.2.3" means for everyone who already has it,
+            # while PyPI still serves the artifact built from the old commit.
+            # Pick the next version, or delete the tag deliberately by hand.
+            echo "::error::Tag $NEW_TAG already exists. Bump the version or remove the tag explicitly; this workflow will not move a published tag."
+            exit 1
           else
             echo "Creating new tag: $NEW_TAG"
             git tag "$NEW_TAG"

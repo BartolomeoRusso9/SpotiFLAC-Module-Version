@@ -10,11 +10,22 @@ from SpotiFLAC.extensions import trust
 from SpotiFLAC.webapp import ALLOWED_METHODS
 
 
-def test_trust_methods_are_web_allowed_and_resolve_to_the_mixin() -> None:
+def test_trust_methods_resolve_to_the_mixin() -> None:
     for name in ("get_trusted_keys", "add_trusted_key", "remove_trusted_key"):
-        assert name in ALLOWED_METHODS
         assert name in TrustMixin.__dict__
         assert getattr(SpotiFLAC_API, name).__qualname__.startswith("TrustMixin.")
+
+
+def test_only_reading_the_trust_store_is_exposed_over_http() -> None:
+    """The trust store is the root of trust for extension signatures: a
+    caller who can add a key can sign their own extensions and have them
+    verify. Reading the list is harmless; writing it must stay CLI-only
+    (tools/registry_signing_cli.py), so it is not reachable through the
+    same channel an untrusted caller can reach.
+    """
+    assert "get_trusted_keys" in ALLOWED_METHODS
+    assert "add_trusted_key" not in ALLOWED_METHODS
+    assert "remove_trusted_key" not in ALLOWED_METHODS
 
 
 def test_add_get_remove_trusted_key_round_trip(tmp_path, monkeypatch) -> None:

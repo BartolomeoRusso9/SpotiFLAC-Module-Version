@@ -19,6 +19,8 @@ from .http import NetworkManager
 from .response_cache import get as get_cached_response
 from .response_cache import put as put_cached_response
 
+from .loop_runner import run_sync
+
 logger = logging.getLogger(__name__)
 
 _MB_API_BASE = "https://musicbrainz.org/ws/2"
@@ -113,14 +115,11 @@ async def _wait_for_request_slot_async() -> None:
 
 
 def _run_async_sync(coro):
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    if loop.is_running():
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(asyncio.run, coro).result()
-    return loop.run_until_complete(coro)
+    """Thin alias for loop_runner.run_sync() — see that function for why the
+    old three-branch shim (which created a fresh loop in every branch) went
+    away. Kept as a name so the many call sites below read unchanged.
+    """
+    return run_sync(coro)
 
 
 def _note_throttle() -> None:

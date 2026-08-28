@@ -25,6 +25,8 @@ from typing_extensions import Self
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
+from .sandbox import build_env, describe
+
 logger = logging.getLogger(__name__)
 
 _BRIDGE_JS = Path(__file__).parent / "_bridge.js"
@@ -119,17 +121,33 @@ class JSRuntime:
 
         # --- FIX OPENSSL 3.0 (NODE 17+) ---
         # Checks Node version and enables legacy algorithms (Blowfish) if needed
-        env = os.environ.copy()
+        node_options = os.environ.get("NODE_OPTIONS", "")
         try:
             v_out = subprocess.check_output([self.node_executable, "-v"], text=True)
             v_major = int(v_out.strip().lstrip("v").split(".")[0])
             if v_major >= 17:
-                env["NODE_OPTIONS"] = (
-                    env.get("NODE_OPTIONS", "") + " --openssl-legacy-provider"
-                ).strip()
+                node_options = (node_options + " --openssl-legacy-provider").strip()
         except Exception:
             pass
         # ----------------------------------
+
+        # Built from an allowlist rather than os.environ.copy(): the child is
+        # third-party code from whatever registry the operator configured, and
+        # inheriting the whole environment handed it every token the host had
+        # ever exported. See extensions/sandbox.py — including what this does
+        # and does not actually protect against.
+        #
+        # No preexec_fn here, deliberately. sandbox.build_preexec() applies
+        # rlimits, but preexec_fn runs between fork() and exec() in the child,
+        # and CPython documents it as unsafe in a process with threads — which
+        # this one always has (the shared loop thread, the reader and stderr
+        # drain threads below, uvicorn's pool in web mode). If a lock happened
+        # to be held at fork time the child can hang there, before
+        # startup_timeout is armed, and the deadlock is silent. Losing the
+        # rlimits is the lesser cost; the environment allowlist is the part
+        # that was actually protecting something.
+        env = build_env({"NODE_OPTIONS": node_options} if node_options else None)
+        logger.debug("[ExtRuntime] %s", describe())
 
         self._proc = subprocess.Popen(
             cmd,
@@ -138,7 +156,10 @@ class JSRuntime:
             stderr=subprocess.PIPE,
             text=False,
             bufsize=0,
-            env=env,  # <-- Injects modified environment variables
+            env=env,
+            # The extension's own directory, so a relative path it writes
+            # lands next to it instead of wherever SpotiFLAC was started.
+            cwd=str(self.ext_path.parent) if self.ext_path.parent.is_dir() else None,
         )
 
         # Thread that reads Node stdout and routes responses

@@ -1095,7 +1095,13 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
 
   if (isArtistCard) {
     const bio = artistBiography || description || '';
-    subtitle.innerHTML = bio;
+    // textContent, not innerHTML: the bio comes from whichever metadata
+    // provider (or third-party extension) answered, and the server-side
+    // `re.sub(r"<[^>]+>", "", ...)` in spotify_metadata.py is a tag stripper,
+    // not a sanitiser — it doesn't cover every provider and doesn't survive
+    // an unterminated tag. Nothing renders differently here: .artist-bio is
+    // a -webkit-box line clamp, so markup never contributed anything anyway.
+    subtitle.textContent = bio;
     subtitle.className = bio ? 'artist-bio' : '';
     subtitle.style.display = bio ? '' : 'none';
   } else {
@@ -1185,14 +1191,34 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   }
 
   const coverEl = $('album-cover');
-  if (coverUrl) {
+  const safeCover = httpUrlOrNull(coverUrl);
+  if (safeCover) {
     const displayArtist = artist || title || 'Unknown';
-    coverEl.innerHTML = `<img src="${coverUrl}" alt="cover" onerror="this.parentElement.innerHTML='🎵'">
-    <button id="cover-download-btn" class="cover-download-btn" onclick="downloadAlbumCover(this, '${coverUrl}', '${escHtml(title || 'album')}', '${escHtml(displayArtist)}', '${escHtml(owner || '')}')" title="Download cover" style="left: 50%; top: 50%; transform: translate(-50%, -50%);">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-    </button>`;
+    // Built with DOM calls rather than a template string: coverUrl is remote
+    // metadata, and the old markup dropped it unescaped into both a src=""
+    // attribute and a JS string literal inside onclick="" — one apostrophe in
+    // a cover URL was enough to break out and run as script.
+    coverEl.textContent = '';
+
+    const img = document.createElement('img');
+    img.alt = 'cover';
+    img.src = safeCover;
+    img.addEventListener('error', () => { coverEl.textContent = '🎵'; });
+    coverEl.appendChild(img);
+
+    const btn = document.createElement('button');
+    btn.id = 'cover-download-btn';
+    btn.className = 'cover-download-btn';
+    btn.title = 'Download cover';
+    btn.style.cssText = 'left: 50%; top: 50%; transform: translate(-50%, -50%);';
+    // Static markup, no interpolation.
+    btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+    btn.addEventListener('click', () => {
+      downloadAlbumCover(btn, safeCover, title || 'album', displayArtist, owner || '');
+    });
+    coverEl.appendChild(btn);
   } else {
-    coverEl.innerHTML = '🎵';
+    coverEl.textContent = '🎵';
   }
   $('album-card').classList.remove('hidden');
   $('text-search-container')?.classList.add('hidden');
@@ -1388,6 +1414,22 @@ function escHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// Returns the URL only if it's an ordinary http(s) one, otherwise null.
+// Cover/avatar URLs arrive from whichever metadata provider answered, and
+// they end up in src attributes and in fetches — neither should ever be
+// handed a javascript:, data: or file: URL.
+function httpUrlOrNull(u) {
+  if (!u) return null;
+  try {
+    const parsed = new URL(String(u), window.location.href);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      ? parsed.href
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function formatDuration(ms) {

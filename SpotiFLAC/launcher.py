@@ -25,7 +25,13 @@ from collections.abc import Awaitable, Callable
 from .check_update import check_for_updates_async
 from .client import _CleanConsoleFormatter
 from .downloader import DownloadOptions, SpotiflacDownloader
+from .core.library_notify import LIBRARY_TOKEN_ENV, LIBRARY_USER_ENV
+from .core.library_notify import SUPPORTED as LIBRARY_SUPPORTED
+from .core.report import RunReport
 from .interactive import run_interactive
+
+
+from .extensions.trust import TRUST_TIERS
 
 
 def _early_urls_from_argv(flag: str) -> list[str]:
@@ -57,6 +63,33 @@ def _early_registries_from_argv() -> list[str]:
 
 def _early_registry_directories_from_argv() -> list[str]:
     return _early_urls_from_argv("--registry-directories")
+
+
+def _early_min_trust_from_argv() -> str | None:
+    """Reads --min-trust-tier before argparse runs.
+
+    The extension bootstrap happens near the top of amain(), well before the
+    full parser is built — and the whole point of a trust floor is that it
+    applies to that bootstrap, which is the code path that installs and then
+    executes third-party code. Reading it late would enforce it everywhere
+    except where it matters most.
+    """
+    # Last occurrence wins, because that is what argparse does with a
+    # repeated option: stopping at the first one would bootstrap under
+    # `--min-trust-tier unverified --min-trust-tier signed` with no floor at
+    # all, while the parse further down reported "signed" — the bootstrap
+    # being exactly the step that installs and runs the extension. An
+    # unknown tier needs no check here: ExtensionManager rejects it (see
+    # extensions/trust.py normalise_min_trust), the bootstrap is skipped,
+    # and argparse's own `choices` reports it.
+    argv = sys.argv[1:]
+    found: str | None = None
+    for i, token in enumerate(argv):
+        if token == "--min-trust-tier" and i + 1 < len(argv):
+            found = argv[i + 1]
+        elif token.startswith("--min-trust-tier="):
+            found = token.split("=", 1)[1]
+    return found
 
 
 def _register_cli_registries(urls: list[str]) -> None:
@@ -94,11 +127,20 @@ def _register_cli_registry_directories(urls: list[str]) -> None:
 def _print_welcome_banner() -> None:
     """Prints a one-time ASCII banner with project/community links on startup.
 
+    Suppressed entirely under --json: it goes to stdout, which in that mode
+    carries the report document and nothing else. `spotiflac ... --json | jq`
+    would otherwise be fed an ASCII logo before the JSON. Console output from
+    core/console._write already goes to stderr; this was the one thing that
+    didn't.
+
     Shown for every launch mode (CLI, --interactive, --gui, --web) since it
     runs as the very first thing in amain(), before any mode-specific setup.
     Colors and links are skipped for non-tty output (piped/redirected) or when
     NO_COLOR is set, matching the convention used elsewhere (interactive.py).
     """
+    if "--json" in sys.argv:
+        return
+
     no_color = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
 
     def c(code: str, text: str) -> str:
@@ -461,6 +503,20 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     )
 
     # ── Profile ─────────────────────────────────────────────────────────────
+    trust_grp = parser.add_argument_group("Extension trust")
+    trust_grp.add_argument(
+        "--min-trust-tier",
+        choices=list(TRUST_TIERS),
+        default=None,
+        metavar="TIER",
+        help="Refuse registry extensions below this assurance level: "
+        "'unverified' (default — install anything, as before), "
+        "'checksum-only' (registry must publish a sha256), or 'signed' "
+        "(entry must carry an Ed25519 signature that verifies against a key "
+        "you added with --trust-key-add). Falls back to $SPOTIFLAC_MIN_TRUST. "
+        "Does not apply to extensions you install from a local file.",
+    )
+
     profile_grp = parser.add_argument_group("Profile")
     profile_grp.add_argument(
         "--profile",
@@ -580,6 +636,85 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     )
 
     # ── Retry ────────────────────────────────────────────────────────────────
+    library_grp = parser.add_argument_group("Music library")
+    library_grp.add_argument(
+        "--library-rescan",
+        dest="library_type",
+        choices=list(LIBRARY_SUPPORTED),
+        default=None,
+        metavar="TYPE",
+        help="Ask a music server to rescan once the run finishes, so new "
+        "files show up without waiting for its own scheduled scan. "
+        "Requires --library-url.",
+    )
+    library_grp.add_argument(
+        "--library-url",
+        dest="library_url",
+        default=None,
+        metavar="URL",
+        help="Base URL of the music server, e.g. http://nas.local:8096",
+    )
+    library_grp.add_argument(
+        "--library-token",
+        dest="library_token",
+        default=None,
+        metavar="TOKEN",
+        help=f"API token (Plex/Jellyfin/Emby) or password "
+        f"(Navidrome/Subsonic). Falls back to ${LIBRARY_TOKEN_ENV}.",
+    )
+    library_grp.add_argument(
+        "--library-user",
+        dest="library_user",
+        default=None,
+        metavar="USERNAME",
+        help=f"Username, for Navidrome/Subsonic only. Falls back to "
+        f"${LIBRARY_USER_ENV}.",
+    )
+    library_grp.add_argument(
+        "--write-m3u",
+        dest="write_m3u",
+        default=None,
+        metavar="PATH",
+        help="Write an extended M3U of everything downloaded in this run. "
+        "Paths are relative to the playlist file, so the folder stays "
+        "portable.",
+    )
+
+    output_grp = parser.add_argument_group("Output")
+    output_grp.add_argument(
+        "--json",
+        dest="json_report",
+        action="store_true",
+        help="Print a machine-readable report of the run to stdout when it "
+        "finishes: one record per track with status, provider, format, path "
+        "and error. Human-readable output already goes to stderr, so "
+        "`spotiflac ... --json | jq` works unchanged.",
+    )
+
+    hooks_grp = parser.add_argument_group("Post-download hooks")
+    hooks_grp.add_argument(
+        "--post-hook",
+        dest="post_hooks",
+        action="append",
+        default=pd.get("post_download_hooks", None),
+        metavar="MODULE:FUNCTION",
+        help="Call your own Python after every finished track, with the "
+        "DownloadResult and TrackMetadata as objects — e.g. "
+        "'mylib.hooks:on_track'. Repeatable. The typed alternative to "
+        "--post-action=command; see SpotiFLAC/core/hooks.py.",
+    )
+
+    resume_grp = parser.add_argument_group("Resume")
+    resume_grp.add_argument(
+        "--no-resume",
+        dest="resume",
+        action="store_false",
+        default=pd.get("resume", True),
+        help="Restart every interrupted download from zero instead of "
+        "continuing it, and delete leftover .part files at the end of the "
+        "run. Resuming is on by default.",
+    )
+
     retry_grp = parser.add_argument_group("Retry")
     retry_grp.add_argument(
         "--retries",
@@ -668,6 +803,47 @@ async def watch_forever(
         await run_once()
 
 
+async def _write_run_m3u_async(report, destination: str) -> None:
+    """Writes an M3U of everything the run downloaded. Never raises."""
+    from pathlib import Path
+
+    from .core.playlist_sync import write_if_changed_async
+
+    logger = logging.getLogger("SpotiFLAC")
+    paths = report.downloaded_paths()
+    if not paths:
+        logger.info("[m3u] Nothing was downloaded; no playlist written")
+        return
+    try:
+        target = Path(destination).expanduser()
+        await write_if_changed_async(target, report.to_m3u(target))
+        logger.info("[m3u] Wrote %d track(s) to %s", len(paths), target)
+    except Exception as exc:
+        # The files are on disk regardless; a playlist that could not be
+        # written is not a reason to report the run as failed.
+        logger.warning("[m3u] Could not write %s: %s", destination, exc)
+
+
+async def _notify_library_async(
+    kind: str,
+    url: str,
+    token: str | None,
+    username: str | None,
+) -> None:
+    """Asks a music server to rescan. Never raises."""
+    from .core.library_notify import LibraryNotifyError, build_target, request_rescan
+
+    logger = logging.getLogger("SpotiFLAC")
+    try:
+        target = build_target(kind, url, token, username)
+    except LibraryNotifyError as exc:
+        # A configuration mistake, so say so plainly rather than logging a
+        # connection error the user would then go and debug on the server.
+        logger.error("[library] %s", exc)
+        return
+    await request_rescan(target)
+
+
 async def _run_download_async(
     url: str | list[str],
     *,
@@ -704,6 +880,14 @@ async def _run_download_async(
     m3u_format: str = "m3u8",
     max_concurrent_downloads: int = 2,
     verify_hires: bool = False,
+    resume: bool = True,
+    post_download_hooks: list[str] | None = None,
+    json_report: bool = False,
+    library_type: str | None = None,
+    library_url: str | None = None,
+    library_token: str | None = None,
+    library_user: str | None = None,
+    write_m3u: str | None = None,
 ) -> None:
     """Async bridge to SpotiflacDownloader, bypassing the synchronous
     `SpotiFLAC()` wrapper (which would do a nested `asyncio.run()` and
@@ -711,13 +895,25 @@ async def _run_download_async(
     """
     logger = logging.getLogger("SpotiFLAC")
     if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
+        # stderr under --json: stdout carries the report document and
+        # nothing else, so the output stays pipeable into jq.
+        handler = logging.StreamHandler(sys.stderr if json_report else sys.stdout)
         handler.setFormatter(
             _CleanConsoleFormatter("[%(levelname)s] %(name)s: %(message)s")
         )
         logger.addHandler(handler)
         logger.propagate = False
     logger.setLevel(log_level)
+
+    # The report is just another post-download hook, so it observes exactly
+    # the same per-track events a user-supplied --post-hook does.
+    # The report backs three separate features now (--json, --write-m3u, and
+    # the count in the library-rescan log line), so it is built whenever any
+    # of them is on rather than for --json alone.
+    report = RunReport() if (json_report or write_m3u) else None
+    hooks: list = list(post_download_hooks or [])
+    if report is not None:
+        hooks.append(report)
 
     opts = DownloadOptions(
         output_dir=output_dir,
@@ -748,6 +944,8 @@ async def _run_download_async(
         transcode_keep_original=transcode_keep_original,
         max_concurrent_downloads=max(1, max_concurrent_downloads),
         verify_hires=verify_hires,
+        resume=resume,
+        post_download_hooks=hooks,
     )
 
     try:
@@ -768,6 +966,21 @@ async def _run_download_async(
             "Critical error during execution: %s",
             e,
         )
+    finally:
+        # All three run in `finally` so an interrupted run still writes the
+        # playlist for what it did fetch, still tells the library server, and
+        # still emits a valid document. A script parsing this should never
+        # have to distinguish "no JSON" from "no tracks".
+        if write_m3u and report is not None:
+            await _write_run_m3u_async(report, write_m3u)
+
+        if library_type and library_url:
+            await _notify_library_async(
+                library_type, library_url, library_token, library_user
+            )
+
+        if json_report and report is not None:
+            print(report.to_json(), flush=True)
 
 
 def _split_positionals(args: argparse.Namespace) -> tuple[list[str], str | None]:
@@ -806,7 +1019,11 @@ async def amain() -> None:
     try:
         from .extensions.manager import ExtensionManager
 
-        await asyncio.to_thread(ExtensionManager, auto_install_downloads=True)
+        await asyncio.to_thread(
+            ExtensionManager,
+            auto_install_downloads=True,
+            min_trust_tier=_early_min_trust_from_argv(),
+        )
     except Exception:
         pass
 
@@ -819,7 +1036,13 @@ async def amain() -> None:
     if "--web" in sys.argv:
         # --host/--port need the parsed args (argparse), not a raw sys.argv
         # scan like the flags above, since they take a value.
-        web_parser = argparse.ArgumentParser(add_help=False)
+        # allow_abbrev=False is load-bearing, not tidiness: argparse expands
+        # unambiguous prefixes by default, and `--web` — the flag that got us
+        # into this branch and is therefore always present — is a prefix of
+        # both --web-token and --web-multiuser. With abbreviation on, argparse
+        # calls that ambiguous and exits(2), so plain `spotiflac --web` could
+        # never start the server at all.
+        web_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
         web_parser.add_argument("--host", default="127.0.0.1")
         web_parser.add_argument("--port", type=int, default=8000)
         web_parser.add_argument("--web-token", dest="token", default=None)
@@ -828,8 +1051,22 @@ async def amain() -> None:
         )
         web_args, _ = web_parser.parse_known_args(sys.argv[1:])
 
-        from .webapp import resolve_web_token
-        from .webapp import run_async as run_web
+        try:
+            from .webapp import resolve_web_token
+            from .webapp import run_async as run_web
+        except ImportError as exc:
+            # webapp.py imports FastAPI at module level, and FastAPI/uvicorn
+            # ship in the optional `web` extra rather than the base install —
+            # web mode is one of several, and most users of the module never
+            # start a server. Say which command fixes it instead of handing
+            # over a bare traceback.
+            print(
+                f"--web needs the web extra, which isn't installed ({exc}).\n"
+                "Install it with:\n"
+                "    pip install 'SpotiFLAC[web]'",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from exc
 
         await run_web(
             host=web_args.host,
@@ -871,6 +1108,65 @@ async def amain() -> None:
             if found
             else f"No web user named '{user_rm_args.username}'."
         )
+        return
+
+    if any(
+        flag in sys.argv for flag in ("--cache-stats", "--cache-prune", "--cache-clear")
+    ):
+        from .core import cache_admin
+
+        cache_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        cache_parser.add_argument("--cache-stats", action="store_true")
+        cache_parser.add_argument("--cache-prune", action="store_true")
+        cache_parser.add_argument("--cache-clear", action="store_true")
+        cache_parser.add_argument(
+            "--cache-max-age-days",
+            type=float,
+            default=cache_admin.DEFAULT_MAX_AGE_S / 86400,
+        )
+        cache_parser.add_argument("--dry-run", action="store_true")
+        cache_parser.add_argument("--json", dest="as_json", action="store_true")
+        cache_args, _ = cache_parser.parse_known_args(sys.argv[1:])
+
+        if cache_args.cache_clear:
+            result = cache_admin.clear(dry_run=cache_args.dry_run)
+            if cache_args.as_json:
+                print(cache_admin.to_json(result))
+            else:
+                verb = "Would remove" if result["dry_run"] else "Removed"
+                items = ", ".join(result["removed"]) or "nothing"
+                print(f"{verb}: {items}")
+                print(f"Freed: {cache_admin.human_bytes(result['freed_bytes'])}")
+                if result["preserved"]:
+                    print(f"Kept (configuration): {', '.join(result['preserved'])}")
+        elif cache_args.cache_prune:
+            # --cache-max-age-days is a float, so argparse happily accepts
+            # -1, nan and inf; prune() rejects them rather than silently
+            # deleting everything or nothing. A bad flag value is a usage
+            # error, so report it the way argparse reports every other one
+            # (message on stderr, exit 2) instead of a traceback.
+            try:
+                result = cache_admin.prune(
+                    max_age_s=cache_args.cache_max_age_days * 86400,
+                    dry_run=cache_args.dry_run,
+                )
+            except ValueError as exc:
+                cache_parser.error(str(exc))
+            if cache_args.as_json:
+                print(cache_admin.to_json(result))
+            else:
+                verb = "Would remove" if result["dry_run"] else "Removed"
+                print(
+                    f"{verb} {result['removed_files']} cached response(s), "
+                    f"{cache_admin.human_bytes(result['freed_bytes'])}"
+                )
+        else:
+            data = cache_admin.stats()
+            print(
+                cache_admin.to_json(data)
+                if cache_args.as_json
+                else cache_admin.format_stats(data)
+            )
         return
 
     if "--web-user-list" in sys.argv:
@@ -971,17 +1267,17 @@ async def amain() -> None:
         if not keys:
             print("No trusted keys configured.")
         for idx, k in enumerate(keys, start=1):
-            key_b64 = k.get("public_key_b64", "") or ""
-            masked_key = (
-                f"{key_b64[:8]}...{key_b64[-8:]}" if len(key_b64) > 16 else "***"
-            )
-            print(f"key-{idx}: {masked_key}")
+            name = k.get("name", "") or "(unnamed)"
+            # Only the human-assigned name is shown; the key material itself
+            # is never written to the console. Use trusted_keys.json directly
+            # if you need to inspect or export the public key bytes.
+            print(f"key-{idx}: {name}")
         return
 
     if "--interactive" in sys.argv:
         print_ffmpeg_warning()
         print_node_warning()
-        cfg = await run_interactive()
+        cfg = await run_interactive(_early_min_trust_from_argv())
 
         verbose = (
             cfg.get("verbose", False) or "--verbose" in sys.argv or "-v" in sys.argv
@@ -1023,6 +1319,21 @@ async def amain() -> None:
                 track_max_retries=cfg.get("track_max_retries", 0),
                 post_download_action=cfg.get("post_download_action", "none"),
                 post_download_command=cfg.get("post_download_command", ""),
+                resume=cfg.get("resume", True),
+                post_download_hooks=cfg.get("post_download_hooks", []),
+                # These are CLI-only flags, and `args` does not exist yet on
+                # this path — it is parsed further down, in the branch this
+                # one returns before reaching, so reading it here raised
+                # NameError as soon as an interactive run started
+                # downloading. The wizard does not ask about any of them, so
+                # the interactive defaults are simply "off"; cfg.get() leaves
+                # room for it to start asking.
+                json_report=cfg.get("json_report", False),
+                library_type=cfg.get("library_type"),
+                library_url=cfg.get("library_url"),
+                library_token=cfg.get("library_token"),
+                library_user=cfg.get("library_user"),
+                write_m3u=cfg.get("write_m3u"),
                 timeout_s=cfg.get("timeout_s"),
                 transcode_to=cfg.get("transcode_to"),
                 transcode_bitrate=cfg.get("transcode_bitrate", "320k"),
@@ -1143,6 +1454,14 @@ async def amain() -> None:
             track_max_retries=track_max_retries,
             post_download_action=args.post_action,
             post_download_command=args.post_command,
+            resume=args.resume,
+            post_download_hooks=args.post_hooks or [],
+            json_report=args.json_report,
+            library_type=args.library_type,
+            library_url=args.library_url,
+            library_token=args.library_token,
+            library_user=args.library_user,
+            write_m3u=args.write_m3u,
             timeout_s=timeout_s,
             transcode_to=args.transcode_to,
             transcode_bitrate=args.transcode_bitrate,
@@ -1184,6 +1503,8 @@ async def amain() -> None:
                 "track_max_retries": track_max_retries,
                 "post_download_action": args.post_action,
                 "post_download_command": args.post_command,
+                "resume": args.resume,
+                "post_download_hooks": args.post_hooks or [],
                 "qobuz_local_api_url": qobuz_local_api_url,
                 "tidal_custom_api": tidal_custom_api,
                 "timeout_s": timeout_s,

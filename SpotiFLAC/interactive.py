@@ -31,7 +31,7 @@ class _BackRequested(Exception):
 
 
 def _is_back_command(value: str) -> bool:
-    return value.lower() in {"b", "back", "indietro"}
+    return value.lower() in {"b", "back"}
 
 
 def _c(code: str, text: str) -> str:
@@ -165,7 +165,7 @@ def _section(title: str) -> None:
 def _header() -> None:
     print(f"\n{BOLD(MAGENTA('SpotiFLAC — Interactive Mode'))}")
     print(DIM("=" * 40))
-    print(DIM("  Tip: enter b/back/indietro at any question to restart the wizard."))
+    print(DIM("  Tip: enter b/back at any question to restart the wizard."))
 
 
 def _canonical_service_name(ext_name: str) -> str | None:
@@ -418,7 +418,39 @@ def _print_registries(registries: list[dict]) -> None:
         print(f"     {DIM(f'source: {sources}  ·  {state}')}")
 
 
-async def _manage_registries_section() -> None:
+async def _sync_extensions_from_registries(min_trust_tier: str | None = None) -> None:
+    """Install/update download extensions right after the user edits the
+    registry list, instead of waiting for the next launch.
+
+    On the very first run the startup auto-setup runs before any registry is
+    configured and does nothing, so a registry added later in this same wizard
+    would otherwise only take effect on the next launch. Building a fresh
+    manager here re-runs the check now that a registry exists (the per-process
+    dedup key includes the registry URLs, so this is not skipped).
+    """
+    print(DIM("  Fetching extensions from registry..."))
+    try:
+        # The floor has to be passed explicitly: ExtensionManager falls back
+        # to $SPOTIFLAC_MIN_TRUST otherwise, so a --min-trust-tier typed on
+        # this same command line would silently not apply to the one install
+        # path the wizard triggers.
+        await asyncio.to_thread(
+            lambda: ExtensionManager(
+                auto_install_downloads=True, min_trust_tier=min_trust_tier
+            )
+        )
+    except Exception as e:
+        print(f"  {RED('Unable to install extensions:')} {e}")
+        return
+
+    services = _installed_service_options()
+    if services:
+        print(f"  {GREEN('Installed providers:')} {', '.join(services)}")
+    else:
+        print(DIM("  No download providers found in the configured registries."))
+
+
+async def _manage_registries_section(min_trust_tier: str | None = None) -> None:
     """Lets the user inspect, add, or remove extension-registry links.
 
     Mirrors the same management available from the GUI Settings → Extensions
@@ -429,6 +461,8 @@ async def _manage_registries_section() -> None:
         from .extensions import registry_config
     except Exception:
         return
+
+    registries_changed = False
 
     while True:
         registries = await asyncio.to_thread(registry_config.list_registries)
@@ -446,6 +480,8 @@ async def _manage_registries_section() -> None:
             raise _BackRequested
 
         if not val:
+            if registries_changed:
+                await _sync_extensions_from_registries(min_trust_tier)
             return
 
         val_lower = val.lower()
@@ -455,6 +491,7 @@ async def _manage_registries_section() -> None:
             if url:
                 try:
                     await asyncio.to_thread(registry_config.add_registry, url)
+                    registries_changed = True
                 except Exception as e:
                     print(f"  {RED('Unable to add registry:')} {e}")
             continue
@@ -469,6 +506,7 @@ async def _manage_registries_section() -> None:
                         await asyncio.to_thread(
                             registry_config.remove_registry, url_to_remove
                         )
+                        registries_changed = True
                     except Exception as e:
                         print(f"  {RED('Unable to remove registry:')} {e}")
                     continue
@@ -665,10 +703,15 @@ def _summary(cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def run_interactive() -> dict:
+async def run_interactive(min_trust_tier: str | None = None) -> dict:
+    """`min_trust_tier`: the floor from --min-trust-tier, forwarded to the
+    extension install the registry menu can trigger. Without it that one
+    install path would fall back to $SPOTIFLAC_MIN_TRUST and ignore what the
+    operator typed on this very command line.
+    """
     while True:
         try:
-            return await _run_interactive_once()
+            return await _run_interactive_once(min_trust_tier)
         except _BackRequested:
             print(
                 DIM(
@@ -677,7 +720,7 @@ async def run_interactive() -> dict:
             )
 
 
-async def _run_interactive_once() -> dict:
+async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
     _header()
 
     # ── Health check ────────────────────────────────────────────────────────
@@ -743,7 +786,7 @@ async def _run_interactive_once() -> dict:
     cfg["url"] = original_url
 
     # ── Extension registries ────────────────────────────────────────────────
-    await _manage_registries_section()
+    await _manage_registries_section(min_trust_tier)
 
     if cfg.get("_profile_loaded"):
         cfg.pop("_profile_loaded", None)

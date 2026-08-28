@@ -15,6 +15,7 @@ import inspect
 import logging
 import os
 import re
+import shlex
 import shutil
 import sys
 import time
@@ -34,6 +35,7 @@ from .core.console import (
     print_track_skipped,
 )
 from .core.errors import ErrorKind, SpotiflacError
+from .core.hooks import load_hooks, run_hooks
 from .core.http import AsyncHttpClient
 from .core.isrc_helper import IsrcHelper
 from .core.models import DownloadResult, TrackMetadata, build_filename
@@ -84,7 +86,9 @@ async def _call_metadata_get_url(client, url: str, **kwargs):
     if fn is None:
         fn = client.get_url
 
-    if asyncio.iscoroutinefunction(fn):
+    # inspect, not asyncio: asyncio.iscoroutinefunction is deprecated and
+    # slated for removal in 3.16.
+    if inspect.iscoroutinefunction(fn):
         return await fn(url, **kwargs)
     return await asyncio.to_thread(fn, url, **kwargs)
 
@@ -176,6 +180,20 @@ class DownloadOptions:
     # this was a hardcoded constant (MAX_CONCURRENT_DOWNLOADS = 2) — now it is
     # configurable by the caller (CLI/API), while preserving the same default.
     max_concurrent_downloads: int = 2
+
+    # Resume interrupted downloads instead of restarting them. The HTTP side
+    # sends a Range header when a .part file survives (see
+    # AsyncHttpClient.stream_to_file); this flag also stops the end-of-run
+    # cleanup from deleting the .part files that make that possible. Turn it
+    # off (--no-resume) to get the previous behaviour: every run starts each
+    # file from zero and leaves nothing behind.
+    resume: bool = True
+
+    # Dotted "module:function" specs called after every finished track, with
+    # the DownloadResult and TrackMetadata as typed objects. The safe,
+    # structured counterpart to post_download_action="command" — see
+    # core/hooks.py for why a shell string is a poor interface for this.
+    post_download_hooks: list[str] = field(default_factory=list)
 
     # Optional post-download QA check: flags files that declare a high
     # sample rate but whose actual spectral content stops at, or just
@@ -593,6 +611,11 @@ async def download_one_async(
 
                 # Check if provider supports artist_separator parameter
                 download_kwargs = {
+                    # Providers stream via AsyncHttpClient.stream_to_file,
+                    # which resumes by default; this lets --no-resume reach
+                    # them. BaseProvider takes **kwargs, so a provider that
+                    # doesn't know the option simply ignores it.
+                    "resume": opts.resume,
                     "filename_format": opts.filename_format,
                     "position": position,
                     "include_track_num": opts.use_track_numbers,
@@ -763,6 +786,25 @@ async def _open_folder_async(path: str) -> None:
         logger.warning("[post-action] open_folder failed: %s", exc)
 
 
+def _quote_for_shell(value: str) -> str:
+    """Quotes a value being substituted into --post-command's template.
+
+    The template itself is the operator's own shell snippet and is left
+    alone, but the values interpolated into it are not: {folder} carries
+    artist/album names straight from remote metadata (see
+    use_artist_subfolders / use_album_subfolders), so an album literally
+    titled `; rm -rf ~ #` would otherwise run as shell code inside an
+    otherwise perfectly benign template.
+    """
+    if os.name == "nt":
+        # cmd.exe doesn't understand POSIX single-quoting. Double quotes are
+        # the only universal grouping there, and a value containing one can't
+        # be escaped reliably across cmd.exe/PowerShell — so drop them along
+        # with the other characters cmd.exe expands inside double quotes.
+        return '"' + re.sub(r'[";%!^&|<>]', "", value) + '"'
+    return shlex.quote(value)
+
+
 # ---------------------------------------------------------------------------
 # DownloadWorker
 # ---------------------------------------------------------------------------
@@ -886,6 +928,9 @@ class DownloadWorker:
         """
         max_concurrent = max(1, getattr(self._opts, "max_concurrent_downloads", 2))
         semaphore = asyncio.Semaphore(max_concurrent)
+        # Resolved once, before the first track: a typo in a hook name should
+        # fail the run immediately rather than after an hour of downloading.
+        track_hooks = load_hooks(getattr(self._opts, "post_download_hooks", None))
         initial_m4a = await asyncio.to_thread(
             lambda: {p.resolve() for p in Path(base_out).rglob("*.m4a") if p.is_file()}
         )
@@ -942,6 +987,13 @@ class DownloadWorker:
 
                 if result.success and result.file_path:
                     self._completed[track.id] = result.file_path
+
+                # After the file is in its final place (the rename already
+                # happened), and for failures too — a hook that reports
+                # what went wrong is as reasonable as one that reports
+                # success. Never raises; see core/hooks.run_hooks.
+                if track_hooks:
+                    await run_hooks(track_hooks, result, track)
 
                 if result.success and result.skipped:
                     await manager.skip_download(track.id)
@@ -1012,8 +1064,21 @@ class DownloadWorker:
                 Path(p).resolve() for p in self._completed.values() if p
             )
 
-            # Always clean up .part files
-            part_candidates = list(root.rglob("*.part"))
+            # A .part file is either debris or resume state, and which one it
+            # is depends entirely on whether the download it belongs to
+            # finished. With resume on (the default), keep the ones that did
+            # not: deleting them is what used to make an interrupted
+            # discography restart every track from zero on the next run.
+            # See AsyncHttpClient.stream_to_file(resume=...).
+            if self._opts.resume:
+                part_candidates = [
+                    path
+                    for path in root.rglob("*.part")
+                    # `foo.flac.part` belongs to `foo.flac`
+                    if Path(str(path)[: -len(".part")]).resolve() in completed_paths
+                ]
+            else:
+                part_candidates = list(root.rglob("*.part"))
 
             # For .m4a files, only consider those matching temporary naming patterns
             # (e.g., containing .tmp, .download, .temp in the stem) or not in the
@@ -1143,8 +1208,11 @@ class DownloadWorker:
                     "[post-action] action=command but post_download_command is empty",
                 )
                 return
+            # Counts are ints rendered by us, so only {folder} can carry
+            # anything hostile — quote every substitution anyway rather than
+            # relying on that staying true. See _quote_for_shell().
             cmd = (
-                cmd_template.replace("{folder}", output_dir)
+                cmd_template.replace("{folder}", _quote_for_shell(output_dir))
                 .replace("{succeeded}", str(succeeded))
                 .replace("{skipped}", str(skipped_count))
                 .replace("{failed}", str(failed_count))

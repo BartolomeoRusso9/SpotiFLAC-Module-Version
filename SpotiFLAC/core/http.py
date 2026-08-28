@@ -14,6 +14,8 @@ import logging
 import os
 import re
 import threading
+import time
+import weakref
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
@@ -41,26 +43,125 @@ except ImportError:
 
 
 class _RedactUrlFilter(logging.Filter):
+    """Replaces URLs in httpx's own log records with `[endpoint]`.
+
+    httpx logs the full request URL at INFO, and provider URLs here routinely
+    carry tokens and signed query strings — that is what the CodeQL
+    "clear-text logging of sensitive information" finding was about. Redacting
+    at the source keeps them out of terminals, log files and pasted bug
+    reports alike.
+    """
+
     _url_re = re.compile(r"https?://\S+")
 
     def filter(self, record: logging.LogRecord) -> bool:
+        # Destructive by necessity: a filter cannot hand a *copy* downstream,
+        # and leaving the original intact would defeat the point the moment
+        # another handler formats it.
         record.msg = self._url_re.sub("[endpoint]", record.getMessage())
         record.args = ()
         return True
 
 
-logging.getLogger("httpx").addFilter(_RedactUrlFilter())
+REDACTION_DISABLE_ENV = "SPOTIFLAC_NO_LOG_REDACTION"
+
+_redaction_filter: _RedactUrlFilter | None = None
+
+
+def install_log_redaction(force: bool = False) -> bool:
+    """Attaches the URL-redacting filter to httpx's logger. Idempotent.
+
+    Called once at import, which is a real liberty for a library to take with
+    someone else's logging config — so it is at least named, documented,
+    reversible (`remove_log_redaction()`), and skippable by setting
+    $SPOTIFLAC_NO_LOG_REDACTION. It stays on by default anyway because the
+    alternative default is "leak provider tokens into the user's logs", and
+    a security control that has to be switched on is not one most people get.
+
+    `force=True` ignores the environment variable. Returns whether the filter
+    is attached afterwards.
+    """
+    global _redaction_filter
+    if not force and os.environ.get(REDACTION_DISABLE_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    ):
+        return False
+    if _redaction_filter is None:
+        _redaction_filter = _RedactUrlFilter()
+        logging.getLogger("httpx").addFilter(_redaction_filter)
+    return True
+
+
+def remove_log_redaction() -> None:
+    """Detaches the filter — for an application that does its own redaction,
+    or a test that needs to assert on a real URL.
+    """
+    global _redaction_filter
+    if _redaction_filter is not None:
+        logging.getLogger("httpx").removeFilter(_redaction_filter)
+        _redaction_filter = None
+
+
+install_log_redaction()
 
 logger = logging.getLogger(__name__)
+
+
+_CONTENT_RANGE_RE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(?:\d+|\*)\s*$", re.I)
+
+
+def _content_range_starts_at(resp: httpx.Response, expected_start: int) -> bool:
+    """Whether a 206's Content-Range really begins where we asked.
+
+    A missing or unparseable header is treated as "no" — restarting costs
+    one wasted download, appending to the wrong offset costs a silently
+    corrupt file.
+    """
+    header = resp.headers.get("Content-Range", "")
+    match = _CONTENT_RANGE_RE.match(header)
+    if not match:
+        return False
+    return int(match.group(1)) == expected_start
+
+
+def _remove_quietly(path: str) -> None:
+    """Deletes `path` if present, never raising — used on cleanup paths that
+    are already unwinding an exception and must not mask it with a second one.
+    """
+    with contextlib.suppress(OSError):
+        os.remove(path)
 
 
 # --- CONNECTION POOL MANAGER ---
 class NetworkManager:
     """Keeps connections alive (Keep-Alive) to eliminate SSL handshake time.
     Each event loop gets its own httpx.AsyncClient instance (loop-safe).
+
+    Keyed by the loop *object*, in a WeakKeyDictionary, rather than by
+    id(loop). Two reasons, and the first is a correctness bug rather than
+    housekeeping:
+
+      - CPython reuses the memory address of a collected object, so
+        successive asyncio.run() calls hand out colliding ids — in a tight
+        loop, almost always (measured: 197 collisions in 200 runs). An
+        id-keyed registry therefore returns a client bound to an
+        already-closed loop to a brand-new one, which fails later and
+        intermittently, wherever the pool first touches loop-bound state.
+      - The entry disappears with the loop instead of accumulating one dead
+        client per asyncio.run() for the life of the process.
+
+    Note this restores correctness, not the pooling itself: a caller that
+    opens a fresh loop per call still gets a fresh client, and pays for a
+    fresh TLS handshake. Reusing one long-lived loop is what makes the
+    keep-alive above do anything.
     """
 
-    _async_clients: dict[int, httpx.AsyncClient] = {}
+    _async_clients: weakref.WeakKeyDictionary[
+        asyncio.AbstractEventLoop, httpx.AsyncClient
+    ] = weakref.WeakKeyDictionary()
     _async_clients_lock = threading.Lock()
 
     @classmethod
@@ -69,19 +170,22 @@ class NetworkManager:
         Creates a new client if the loop does not already have one.
         """
         loop = asyncio.get_running_loop()
-        loop_id = id(loop)
 
         # Fast path without a lock for the common case (client already exists)
-        client = cls._async_clients.get(loop_id)
+        client = cls._async_clients.get(loop)
         if client is not None:
             return client
 
         with cls._async_clients_lock:
-            client = cls._async_clients.get(loop_id)
+            client = cls._async_clients.get(loop)
             if client is None:
                 limits = httpx.Limits(max_keepalive_connections=30, max_connections=100)
-                client = httpx.AsyncClient(limits=limits, timeout=30.0)
-                cls._async_clients[loop_id] = client
+                # http2 is what the httpx[http2] dependency is for; it was
+                # never switched on, so the h2 package was being installed and
+                # not used. Negotiated over ALPN, so servers that don't speak
+                # HTTP/2 transparently stay on 1.1.
+                client = httpx.AsyncClient(limits=limits, timeout=30.0, http2=True)
+                cls._async_clients[loop] = client
         return client
 
     @classmethod
@@ -91,9 +195,8 @@ class NetworkManager:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop_id = id(loop)
         with cls._async_clients_lock:
-            client = cls._async_clients.pop(loop_id, None)
+            client = cls._async_clients.pop(loop, None)
         if client is not None:
             with contextlib.suppress(Exception):
                 await client.aclose()
@@ -112,40 +215,64 @@ class NetworkManager:
 
 # --- RATE LIMITER ASINCRONO ---
 class AsyncRateLimiter:
-    """Rate limiter asyncio-safe.
-    Uses asyncio.Lock and asyncio.sleep so it does not block the event loop.
-    The asyncio.Lock is created lazily (on the first wait_for_slot())
-    because it cannot be instantiated outside of an active event loop.
+    """Sliding-window rate limiter, safe across both loops and threads.
+
+    The instances that matter are module-level singletons (see below), and
+    the GUI runs each API call in its own thread with its own asyncio.run()
+    — so "one limiter, one loop, one thread" is exactly the situation this
+    class is never in. Three things follow from that:
+
+      - The window is protected by a threading.Lock, not only an
+        asyncio.Lock. An asyncio.Lock serialises coroutines within a single
+        loop and offers no protection at all against a second thread
+        mutating the same deque.
+      - Timestamps come from time.monotonic(), not loop.time(). Loop clocks
+        have no defined relationship to each other, so comparing a
+        timestamp recorded under one loop against `now` from another was
+        meaningless.
+      - The asyncio.Lock is per-loop. A single cached lock, first awaited
+        under one loop and then reused under another, is precisely the
+        cross-loop reuse asyncio warns about.
     """
 
     def __init__(self, max_requests: int, window_seconds: float) -> None:
         self.max_requests = max_requests
         self.window = window_seconds
         self.timestamps: deque = deque()
-        self._lock: asyncio.Lock | None = None
+        # Guards `timestamps`. Only ever held for a few statements, never
+        # across an await, so it cannot block the event loop.
+        self._state_lock = threading.Lock()
+        self._loop_locks: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, asyncio.Lock
+        ] = weakref.WeakKeyDictionary()
 
     def _get_lock(self) -> asyncio.Lock:
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
+        loop = asyncio.get_running_loop()
+        lock = self._loop_locks.get(loop)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._loop_locks[loop] = lock
+        return lock
 
     async def wait_for_slot(self) -> None:
-        lock = self._get_lock()
-        async with lock:
-            now = asyncio.get_event_loop().time()
-            cutoff = now - self.window
-            while self.timestamps and self.timestamps[0] <= cutoff:
-                self.timestamps.popleft()
-            if len(self.timestamps) < self.max_requests:
-                self.timestamps.append(now)
-                return
-            wait_duration = (self.timestamps[0] + self.window) - now
+        # Held across the sleep on purpose: it lets one waiter per loop
+        # re-check at a time. The previous version released the lock, slept,
+        # then appended unconditionally — so N coroutines that had all queued
+        # up woke together and every one of them took a slot, overshooting
+        # max_requests exactly when the limit was already binding.
+        async with self._get_lock():
+            while True:
+                with self._state_lock:
+                    now = time.monotonic()
+                    cutoff = now - self.window
+                    while self.timestamps and self.timestamps[0] <= cutoff:
+                        self.timestamps.popleft()
+                    if len(self.timestamps) < self.max_requests:
+                        self.timestamps.append(now)
+                        return
+                    wait_duration = (self.timestamps[0] + self.window) - now
 
-        if wait_duration > 0:
-            await asyncio.sleep(wait_duration)
-
-        async with lock:
-            self.timestamps.append(asyncio.get_event_loop().time())
+                await asyncio.sleep(max(wait_duration, 0.0))
 
 
 # Rate limiters globali async
@@ -263,7 +390,20 @@ class AsyncHttpClient:
         chunk_size: int = 256 * 1024,
         extra_headers: dict | None = None,
         stop_event: asyncio.Event | None = None,
+        resume: bool = True,
     ) -> None:
+        """Streams `url` to `dest_path`, via a `.part` file.
+
+        `resume=True` (default) picks up where an interrupted download left
+        off: if a `.part` file survives, its size is sent as a `Range: bytes=
+        N-` header and the response is appended rather than restarted. On a
+        flaky connection, or a discography interrupted halfway, this is the
+        difference between losing the last chunk and losing the whole file.
+
+        Servers that ignore Range and answer 200 are handled correctly — the
+        partial file is discarded and the download restarts from zero — so
+        this is safe against providers with no Range support.
+        """
         if aiofiles is None:
             msg = (
                 "aiofiles non installato — richiesto da AsyncHttpClient.stream_to_file(). "
@@ -274,7 +414,17 @@ class AsyncHttpClient:
             )
 
         temp = dest_path + ".part"
-        headers = extra_headers or {}
+        headers = dict(extra_headers or {})
+
+        resume_from = 0
+        if resume and "Range" not in headers and "range" not in headers:
+            try:
+                resume_from = os.path.getsize(temp)
+            except OSError:
+                resume_from = 0
+            if resume_from > 0:
+                headers["Range"] = f"bytes={resume_from}-"
+
         if self._limiter:
             await self._limiter.wait_for_slot()
 
@@ -287,14 +437,61 @@ class AsyncHttpClient:
                 headers=headers,
                 timeout=self._timeout,
             ) as resp:
+                if resume_from and resp.status_code == 416:
+                    # "Range Not Satisfiable": the .part is already at or past
+                    # the resource length — almost always a complete file from
+                    # a run that died between the last chunk and the rename.
+                    # Start over rather than guess; one wasted download beats
+                    # a silently truncated FLAC.
+                    _remove_quietly(temp)
+                    await self.stream_to_file(
+                        url,
+                        dest_path,
+                        progress_cb=progress_cb,
+                        chunk_size=chunk_size,
+                        extra_headers=extra_headers,
+                        stop_event=stop_event,
+                        resume=False,
+                    )
+                    return
+
                 self._raise_for_status(resp)
-                total = int(resp.headers.get("Content-Length") or 0)
-                downloaded = 0
+
+                # A server free to ignore Range answers 200 with the whole
+                # body. Appending that to the partial file would corrupt it —
+                # and so would trusting a 206 blindly: the status only says
+                # "partial", not "the partial you asked for". A server may
+                # clamp the range, ignore the offset, or answer
+                # multipart/byteranges, and every one of those appended to a
+                # .part file produces a corrupt FLAC that decodes far enough
+                # to look fine.
+                resuming = (
+                    resume_from > 0
+                    and resp.status_code == 206
+                    and _content_range_starts_at(resp, resume_from)
+                    and "multipart" not in resp.headers.get("Content-Type", "").lower()
+                )
+                if resume_from and not resuming:
+                    logger.debug(
+                        "[%s] Range not honoured as asked (HTTP %s, "
+                        "Content-Range %r); restarting the download",
+                        self._provider,
+                        resp.status_code,
+                        resp.headers.get("Content-Range", ""),
+                    )
+                    resume_from = 0
+
+                content_length = int(resp.headers.get("Content-Length") or 0)
+                # Content-Length on a 206 is the length of *this* slice, so
+                # the progress callback needs the whole-resource size added
+                # back or the bar restarts from a fraction.
+                total = content_length + resume_from if content_length else 0
+                downloaded = resume_from
                 os.makedirs(os.path.dirname(os.path.abspath(dest_path)), exist_ok=True)
 
                 evt = stop_event or self._stop_event
 
-                async with aiofiles.open(temp, "wb") as f:
+                async with aiofiles.open(temp, "ab" if resuming else "wb") as f:
                     async for chunk in resp.aiter_bytes(chunk_size):
                         if evt is not None and evt.is_set():
                             raise NetworkError(
@@ -311,12 +508,22 @@ class AsyncHttpClient:
             os.replace(temp, dest_path)
 
         except httpx.RequestError as exc:
-            if os.path.exists(temp):
-                os.remove(temp)
+            if not resume:
+                _remove_quietly(temp)
             raise NetworkError(self._provider, f"Stream failed: {exc}") from exc
-        except (OSError, NetworkError):
-            if os.path.exists(temp):
-                os.remove(temp)
+        except BaseException:
+            # BaseException, not Exception: cancelling a download raises
+            # asyncio.CancelledError, which since 3.8 does NOT derive from
+            # Exception, so the old `except (OSError, NetworkError)` never
+            # ran for the most common interruption of all.
+            #
+            # What happens next depends on `resume`. With it on, the bytes on
+            # disk are exactly what the next attempt needs, so they stay — the
+            # end-of-run sweep in downloader._remove_partial_files_async()
+            # clears the ones belonging to downloads that did finish. With it
+            # off, the old contract holds: leave nothing behind.
+            if not resume:
+                _remove_quietly(temp)
             raise
 
 

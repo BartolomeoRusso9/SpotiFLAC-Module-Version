@@ -21,6 +21,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -33,7 +34,23 @@ from pathlib import Path
 
 import httpx
 
+from .trust import (
+    DEFAULT_MIN_TRUST,
+    meets_min_trust,
+    resolve_min_trust,
+)
+
 logger = logging.getLogger(__name__)
+
+
+class TrustRejectedError(ValueError):
+    """A registry entry did not meet the configured minimum trust tier.
+
+    Its own type rather than a bare ValueError so callers can tell "you asked
+    me to refuse this" apart from "this archive is broken" — the bootstrap
+    loop in ensure_download_providers() reports the two very differently.
+    """
+
 
 # Registry configuration: no hardcoded URLs here — read from environment or .env
 REGISTRY_URL = None
@@ -139,6 +156,40 @@ class InstalledExtension:
 # ─────────────────────────────────────────────────────────────
 
 
+_EXT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+# 200 MB compressed, 500 MB unpacked. Extensions are a manifest plus a script;
+# anything near these numbers is a mistake or a zip bomb, and both limits exist
+# because the archive comes from whichever registry the user pointed us at.
+MAX_EXT_DOWNLOAD_BYTES = 200 * 1024 * 1024
+MAX_EXT_UNPACKED_BYTES = 500 * 1024 * 1024
+
+
+def _safe_ext_target(ext_dir: Path, ext_name: str) -> Path:
+    """Resolves `ext_name` to a directory inside `ext_dir`, or raises.
+
+    Used for both installing and uninstalling: one is an os.replace() onto
+    the returned path, the other a shutil.rmtree() of it, so an unvalidated
+    name is a write-anywhere and a delete-anywhere primitive respectively.
+    """
+    name = str(ext_name).strip()
+    if not _EXT_NAME_RE.match(name) or name in (".", ".."):
+        msg = (
+            f"Unsafe extension name {ext_name!r}: expected letters, digits, "
+            "'.', '_' or '-' only."
+        )
+        raise ValueError(msg)
+
+    root = ext_dir.resolve()
+    target = (root / name).resolve()
+    # Belt and braces: the regex already excludes separators, but this also
+    # catches a symlinked ext_dir entry resolving somewhere unexpected.
+    if target.parent != root:
+        msg = f"Unsafe extension name {ext_name!r}: escapes {root}"
+        raise ValueError(msg)
+    return target
+
+
 class ExtensionManager:
     """Central point for managing SpotiFLAC JS and Python extensions.
 
@@ -155,13 +206,57 @@ class ExtensionManager:
         ext_dir: str | Path | None = None,
         timeout: float = 20.0,
         auto_install_downloads: bool = True,  # Enabled by default
+        min_trust_tier: str | None = None,
     ) -> None:
+        """`min_trust_tier`: refuse registry entries below this assurance
+        level — one of "unverified" (default, install anything),
+        "checksum-only", "signed". Falls back to $SPOTIFLAC_MIN_TRUST.
+        See extensions/trust.py and enforce_trust().
+        """
         self.ext_dir = Path(ext_dir) if ext_dir else DEFAULT_EXT_DIR
         self.timeout = timeout
+        self.min_trust_tier = resolve_min_trust(min_trust_tier)
         self.ext_dir.mkdir(parents=True, exist_ok=True)
 
         if auto_install_downloads:
             self.ensure_download_providers()
+
+    # ── Trust enforcement ────────────────────────────────────
+
+    def enforce_trust(self, entry: RegistryEntry) -> None:
+        """Raises TrustRejectedError if `entry` sits below `min_trust_tier`.
+
+        Called on every registry-driven install. Deliberately *not* called by
+        install_from_file(): a local file has no registry entry to be signed
+        against, so it can only ever score "unverified" — gating it would
+        make the floor mean "you may no longer install your own extension
+        from disk", which is not what anyone asks for by raising it.
+        """
+        tier = entry.trust_tier
+        if meets_min_trust(tier, self.min_trust_tier):
+            if tier != "signed" and self.min_trust_tier != DEFAULT_MIN_TRUST:
+                logger.info(
+                    "[ExtMgr] '%s' accepted at tier '%s' (floor '%s')",
+                    entry.id,
+                    tier,
+                    self.min_trust_tier,
+                )
+            return
+
+        detail = ""
+        if entry.signature and tier != "signed":
+            # Worth calling out separately: the entry *claims* a signature and
+            # it did not verify. That is either the wrong key in the trust
+            # store, or something the operator should want to know about.
+            detail = (
+                " Its signature did not verify against any trusted key "
+                "(see `spotiflac --trust-key-list`)."
+            )
+        msg = (
+            f"Extension '{entry.id}' is '{tier}' but this instance requires "
+            f"'{self.min_trust_tier}' or better.{detail}"
+        )
+        raise TrustRejectedError(msg)
 
     # ── Auto Setup ───────────────────────────────────────────
 
@@ -241,7 +336,13 @@ class ExtensionManager:
                 entry.version,
             )
             try:
+                self.enforce_trust(entry)
                 self.install_from_url(entry.download_url, sha256=entry.sha256)
+            except TrustRejectedError as e:
+                # Not an error: the operator asked for this. Skip it and carry
+                # on with the rest of the registry rather than aborting the
+                # whole bootstrap, and say so at a level they will actually see.
+                logger.warning("[ExtMgr] Skipped '%s' — %s", entry.id, e)
             except Exception as e:
                 logger.exception(
                     "[ExtMgr] Error during %s of '%s': %s",
@@ -393,6 +494,8 @@ class ExtensionManager:
                 msg,
             )
 
+        self.enforce_trust(entry)
+
         # Check if already installed and up-to-date
         existing = self.get_installed(ext_id)
         if existing and self._matches_registry_entry(existing, entry):
@@ -435,9 +538,34 @@ class ExtensionManager:
         last_err: Exception | None = None
         for attempt in range(3):
             try:
-                r = httpx.get(url, timeout=self.timeout * 3, follow_redirects=True)
-                r.raise_for_status()
-                raw = r.content
+                # Streamed with a running total rather than r.content, which
+                # buffers the whole body first: the URL comes from whichever
+                # registry the user configured, so "how big is this" is not a
+                # question we get to answer after the fact.
+                with httpx.stream(
+                    "GET", url, timeout=self.timeout * 3, follow_redirects=True
+                ) as r:
+                    r.raise_for_status()
+                    declared = r.headers.get("Content-Length")
+                    if declared and int(declared) > MAX_EXT_DOWNLOAD_BYTES:
+                        msg = (
+                            f"Extension archive is too large: {declared} bytes "
+                            f"(limit {MAX_EXT_DOWNLOAD_BYTES})"
+                        )
+                        raise ValueError(msg)
+
+                    chunks: list[bytes] = []
+                    total = 0
+                    for chunk in r.iter_bytes():
+                        total += len(chunk)
+                        if total > MAX_EXT_DOWNLOAD_BYTES:
+                            msg = (
+                                "Extension archive exceeded "
+                                f"{MAX_EXT_DOWNLOAD_BYTES} bytes; aborted."
+                            )
+                            raise ValueError(msg)
+                        chunks.append(chunk)
+                    raw = b"".join(chunks)
                 break
             except (httpx.RequestError, httpx.HTTPStatusError) as e:
                 last_err = e
@@ -580,7 +708,13 @@ class ExtensionManager:
             msg = "manifest.json must have the 'name' field."
             raise ValueError(msg)
 
-        target = self.ext_dir / ext_name
+        # The member paths inside the archive are validated just below, but
+        # this name — which alone decides *where* the archive is unpacked to
+        # — comes from the same untrusted manifest and was not. pathlib does
+        # not normalise, so `self.ext_dir / "../../x"` really does escape:
+        # os.replace() would land the extension outside ext_dir, and
+        # uninstall() would hand the same value to shutil.rmtree().
+        target = _safe_ext_target(self.ext_dir, ext_name)
 
         if any(
             Path(member).is_absolute() or ".." in Path(member).parts for member in names
@@ -590,10 +724,22 @@ class ExtensionManager:
         # Reject symlink entries (zip-slip via a symlink pointing outside the
         # extraction dir, written before the target it "points to" exists).
         # A symlink's mode bits are stored in the top 4 bits of external_attr.
+        # Also sum the declared uncompressed sizes: the download is capped, but
+        # compression ratios are not, so a few MB of zip can still ask to
+        # become tens of GB on disk. Checked from the header before extracting
+        # anything, so nothing is written and then rolled back.
+        unpacked_total = 0
         for info in zf.infolist():
             unix_mode = info.external_attr >> 16
             if unix_mode and (unix_mode & 0o170000) == 0o120000:
                 msg = f"Extension archive contains a symlink entry: {info.filename}"
+                raise ValueError(msg)
+            unpacked_total += info.file_size
+            if unpacked_total > MAX_EXT_UNPACKED_BYTES:
+                msg = (
+                    f"Extension archive unpacks to more than "
+                    f"{MAX_EXT_UNPACKED_BYTES} bytes; refusing to extract."
+                )
                 raise ValueError(msg)
 
         previous_settings = target / "settings.json"
@@ -647,7 +793,13 @@ class ExtensionManager:
 
     def uninstall(self, ext_id: str) -> bool:
         """Removes an installed extension. Returns True if found and removed."""
-        target = self.ext_dir / ext_id
+        # rmtree on a caller-supplied name: validated for the same reason the
+        # install path is (see _safe_ext_target).
+        try:
+            target = _safe_ext_target(self.ext_dir, ext_id)
+        except ValueError as exc:
+            logger.warning("[ExtMgr] Refusing to uninstall '%s': %s", ext_id, exc)
+            return False
         if target.exists():
             shutil.rmtree(target)
             logger.info("[ExtMgr] Uninstalled '%s'", ext_id)
@@ -673,7 +825,10 @@ class ExtensionManager:
 
     def get_installed(self, ext_id: str) -> InstalledExtension | None:
         """Returns an installed extension by ID, or None if not found."""
-        target = self.ext_dir / ext_id
+        try:
+            target = _safe_ext_target(self.ext_dir, ext_id)
+        except ValueError:
+            return None
         if target.exists() and (target / "manifest.json").exists():
             try:
                 return self._load_installed(target)
@@ -797,6 +952,7 @@ class ExtensionManager:
             remote = entries[name]
             if not self._matches_registry_entry(ext, remote):
                 try:
+                    self.enforce_trust(remote)
                     self.install_from_url(remote.download_url, sha256=remote.sha256)
                     status[name] = f"updated → {remote.version}"
                 except Exception as e:

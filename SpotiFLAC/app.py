@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import importlib.metadata
 import json
@@ -21,9 +20,40 @@ from .api_mixins.discovery import DiscoveryMixin
 from .api_mixins.local_tagging import LocalTaggingMixin
 from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
+from .core.loop_runner import run_sync
 from .core.url_utils import url_host_matches
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
+
+# Opt-in required before the GUI/web bridge may run post_download_action
+# ="command" (see _post_command_allowed / _download_task).
+POST_COMMAND_ENV = "SPOTIFLAC_ALLOW_POST_COMMAND"
+
+
+def _post_command_allowed() -> bool:
+    """Whether this process will let a *bridge* caller run a shell command
+    as a post-download action.
+
+    Off by default, and deliberately not something the caller can turn on
+    for itself. Every method on this class is reachable two ways: from the
+    desktop window via pywebview, and — in `--web` mode — as an HTTP
+    endpoint (see webapp.py's ALLOWED_METHODS), where the "caller" may be
+    anyone who can reach the port and the config dict is just a JSON body.
+    Reading a shell command out of that dict makes the two indistinguishable,
+    so the decision is moved somewhere only whoever started the process can
+    reach: this environment variable.
+
+    The CLI is unaffected — `--post-action command` there goes straight to
+    client.SpotiFLAC() without passing through this class, and someone who
+    can already type a shell command into their own shell gains nothing by
+    typing it into ours.
+    """
+    return os.environ.get(POST_COMMAND_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    )
 
 
 class UILogHandler(logging.Handler):
@@ -168,7 +198,7 @@ class SpotiFLAC_API(
             except Exception:
                 return {"latest_version": "", "published_at": ""}
 
-        return asyncio.run(_inner())
+        return run_sync(_inner())
 
     def _check_ffmpeg_startup(self) -> None:
         try:
@@ -388,7 +418,7 @@ class SpotiFLAC_API(
         try:
             from .core.session_memory import get_url_history_async
 
-            return asyncio.run(get_url_history_async())
+            return run_sync(get_url_history_async())
         except Exception:
             return []
 
@@ -396,7 +426,7 @@ class SpotiFLAC_API(
         try:
             from .core.profiles import list_profiles_async
 
-            return asyncio.run(list_profiles_async())
+            return run_sync(list_profiles_async())
         except Exception:
             return []
 
@@ -404,7 +434,7 @@ class SpotiFLAC_API(
         try:
             from .core.profiles import get_profile_async
 
-            return asyncio.run(get_profile_async(name)) or {}
+            return run_sync(get_profile_async(name)) or {}
         except Exception:
             return {}
 
@@ -632,14 +662,29 @@ class SpotiFLAC_API(
         return {"status": "started"}
 
     def search_code(self, query, path=".", limit=200):
-        """Search repository codebase (substring case-insensitive).
+        """Search the SpotiFLAC package source (substring, case-insensitive).
 
         Returns list of {path, line, snippet}.
+
+        `path` is confined to the installed package directory. This returns
+        matching *lines*, not just filenames, so an unconstrained path would
+        make it a general "read any file the process can open" primitive —
+        and every public method here is callable from whatever JS is running
+        in the window (pywebview binds the whole object as js_api).
         """
         try:
             from .core.code_search import search_code
 
-            return search_code(query, path=path or ".", limit=limit or 200)
+            root = Path(__file__).resolve().parent
+            requested = (root / (path or ".")).resolve()
+            if requested != root and root not in requested.parents:
+                self.log(
+                    f"search_code: '{path}' is outside the package directory",
+                    "error",
+                )
+                return []
+
+            return search_code(query, path=str(requested), limit=limit or 200)
         except Exception as e:
             self.log(f"search_code error: {e}", "error")
             return []
@@ -648,7 +693,7 @@ class SpotiFLAC_API(
         try:
             from .core.session_memory import remove_url_from_history_async
 
-            asyncio.run(remove_url_from_history_async(url))
+            run_sync(remove_url_from_history_async(url))
         except Exception:
             pass
 
@@ -670,13 +715,13 @@ class SpotiFLAC_API(
                     "country_code": "",
                 }
 
-        return asyncio.run(_inner())
+        return run_sync(_inner())
 
     def save_profile_data(self, name, cfg) -> bool | None:
         try:
             from .core.profiles import save_profile_async
 
-            asyncio.run(save_profile_async(name, cfg))
+            run_sync(save_profile_async(name, cfg))
             self.log(f"Profile '{name}' saved successfully.", "ok")
             return True
         except Exception as e:
@@ -687,7 +732,7 @@ class SpotiFLAC_API(
         try:
             from .core.profiles import delete_profile_async
 
-            deleted = asyncio.run(delete_profile_async(name))
+            deleted = run_sync(delete_profile_async(name))
             self.log(
                 f"Profile '{name}' deleted: {deleted}.",
                 "ok" if deleted else "warn",
@@ -723,7 +768,7 @@ class SpotiFLAC_API(
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
-        return asyncio.run(_inner())
+        return run_sync(_inner())
 
     # ── Window controls ───────────────────────────────────────────────────────
 
@@ -889,7 +934,27 @@ class SpotiFLAC_API(
             self.log(f"Failed opening config folder: {e}", "error")
 
     def open_url(self, url) -> None:
+        """Opens an http(s) URL in the user's browser.
+
+        The scheme check is not cosmetic: webbrowser.open() delegates to
+        `open` on macOS and `xdg-open` on Linux, both of which resolve every
+        scheme the desktop has a handler registered for — file://, and
+        whatever custom scheme any installed application claimed. Passing
+        those through would turn "open a link" into "launch an arbitrary
+        local handler", reachable from any JS running in the window.
+        """
         import webbrowser
+        from urllib.parse import urlparse
+
+        try:
+            scheme = urlparse(str(url)).scheme.lower()
+        except Exception:
+            scheme = ""
+        if scheme not in ("http", "https"):
+            self.log(
+                f"Refused to open a non-web URL (scheme: {scheme or 'none'})", "error"
+            )
+            return
 
         webbrowser.open(url)
 
@@ -912,7 +977,7 @@ class SpotiFLAC_API(
             from .core.spotify_metadata import SpotifyMetadataClient
 
             client = SpotifyMetadataClient()
-            preview_url = asyncio.run(client.get_track_preview_async(track_id))
+            preview_url = run_sync(client.get_track_preview_async(track_id))
             return preview_url or ""
         except Exception as e:
             self.log(f"Failed to fetch preview for track {track_id}: {e}", "debug")
@@ -923,7 +988,7 @@ class SpotiFLAC_API(
     def fetch_metadata(self, url) -> None:
         self.current_url = url
         threading.Thread(
-            target=lambda: asyncio.run(self._fetch_metadata_task(url)),
+            target=lambda: run_sync(self._fetch_metadata_task(url)),
             daemon=True,
         ).start()
 
@@ -1245,6 +1310,18 @@ class SpotiFLAC_API(
             track_max_retries = int(config.get("track_max_retries", 0))
             post_download_action = config.get("post_download_action", "none")
             post_download_command = config.get("post_download_command", "")
+            if post_download_action == "command" and not _post_command_allowed():
+                # See _post_command_allowed(): "open_folder" and "notify" stay
+                # available to the GUI unconditionally — only the shell action
+                # needs the operator to have opted in when starting the process.
+                self.log(
+                    "Post-download command ignored: running a shell command from "
+                    f"the interface is disabled. Set {POST_COMMAND_ENV}=1 before "
+                    "starting SpotiFLAC to enable it.",
+                    "error",
+                )
+                post_download_action = "none"
+                post_download_command = ""
             qobuz_local_api_url = config.get("qobuz_local_api_url") or None
             tidal_custom_api = config.get("tidal_custom_api") or None
             loop_val = config.get("loop", None)
@@ -1394,7 +1471,7 @@ class SpotiFLAC_API(
             from .core.health_check import run_health_check
 
             self.log(f"Health check started for: {', '.join(services)}", "info")
-            results = asyncio.run(run_health_check(services))
+            results = run_sync(run_health_check(services))
             data = [
                 {
                     "provider": r.provider,

@@ -18,6 +18,7 @@ import aiofiles
 import httpx
 
 from ..core.spotify_metadata import _maximize_cover_url
+from ..core.loop_runner import run_sync
 
 
 class CoversLyricsMixin:
@@ -32,7 +33,7 @@ class CoversLyricsMixin:
         ).start()
 
     def _download_lyrics_task(self, track_data) -> None:
-        asyncio.run(self._download_lyrics_task_async(track_data))
+        run_sync(self._download_lyrics_task_async(track_data))
 
     async def _download_lyrics_task_async(self, track_data) -> None:
         try:
@@ -85,7 +86,7 @@ class CoversLyricsMixin:
         ).start()
 
     def _download_cover_task(self, track_data) -> None:
-        asyncio.run(self._download_cover_task_async(track_data))
+        run_sync(self._download_cover_task_async(track_data))
 
     async def _download_cover_task_async(self, track_data) -> None:
         track_id = ""
@@ -150,7 +151,7 @@ class CoversLyricsMixin:
         ).start()
 
     def _download_cover_task_typed(self, cover_data) -> None:
-        asyncio.run(self._download_cover_task_typed_async(cover_data))
+        run_sync(self._download_cover_task_typed_async(cover_data))
 
     async def _download_cover_task_typed_async(self, cover_data) -> None:
         try:
@@ -201,7 +202,7 @@ class CoversLyricsMixin:
         ).start()
 
     def _download_album_cover_task(self, album_data) -> None:
-        asyncio.run(self._download_album_cover_task_async(album_data))
+        run_sync(self._download_album_cover_task_async(album_data))
 
     async def _download_album_cover_task_async(self, album_data) -> None:
         try:
@@ -244,7 +245,7 @@ class CoversLyricsMixin:
         ).start()
 
     def _run_async_covers(self, tracks_data) -> None:
-        asyncio.run(self._async_download_all_covers(tracks_data))
+        run_sync(self._async_download_all_covers(tracks_data))
 
     async def _async_download_all_covers(self, tracks_data) -> None:
         total = len(tracks_data)
@@ -307,7 +308,7 @@ class CoversLyricsMixin:
         ).start()
 
     def _run_async_lyrics(self, tracks_data) -> None:
-        asyncio.run(self._async_download_all_lyrics(tracks_data))
+        run_sync(self._async_download_all_lyrics(tracks_data))
 
     async def _async_download_all_lyrics(self, tracks_data) -> None:
         import aiofiles

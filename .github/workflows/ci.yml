@@ -32,7 +32,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          # .[web] rather than plain `.` — the webapp/launcher tests start
+          # with pytest.importorskip("fastapi"), so without the extra they
+          # were being silently skipped here (5 files' worth) while passing
+          # locally, which is the worst of both worlds.
+          pip install -e '.[web]'
           pip install -r requirements-dev.txt
 
       - name: Ruff (lint)
@@ -49,7 +53,7 @@ jobs:
         run: mypy SpotiFLAC || true
 
       - name: Pytest (with coverage)
-        run: pytest -v --cov=SpotiFLAC --cov-report=term-missing --cov-fail-under=18
+        run: pytest -v --cov=SpotiFLAC --cov-report=term-missing --cov-fail-under=30
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -88,7 +92,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          # .[web] rather than plain `.` — the webapp/launcher tests start
+          # with pytest.importorskip("fastapi"), so without the extra they
+          # were being silently skipped here (5 files' worth) while passing
+          # locally, which is the worst of both worlds.
+          pip install -e '.[web]'
           pip install -r requirements-dev.txt
 
       - name: Pytest

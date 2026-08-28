@@ -9,9 +9,9 @@ metadata, and applying the chosen match with an automatic backup.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import threading
+from ..core.loop_runner import run_sync
 
 
 class LocalTaggingMixin:
@@ -53,7 +53,7 @@ class LocalTaggingMixin:
         try:
             from ..core.local_processor import scan_and_match_async
 
-            entries = asyncio.run(scan_and_match_async(path))
+            entries = run_sync(scan_and_match_async(path))
             payload = [self._serialize_scan_entry(e) for e in entries]
             self._push("app_local_scan_results", {"path": path, "files": payload})
         except Exception as e:
@@ -172,7 +172,7 @@ class LocalTaggingMixin:
 
                 try:
                     metadata = TrackMetadata.model_validate(metadata_dict)
-                    result = asyncio.run(
+                    result = run_sync(
                         retag_local_file_async(
                             file_path, metadata, opts, backup=backup
                         ),

@@ -31,11 +31,14 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from ..core.atomic_io import write_private_json
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +81,10 @@ def _load() -> list[TrustedKey]:
 
 
 def _save(keys: list[TrustedKey]) -> None:
-    TRUSTED_KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TRUSTED_KEYS_FILE.write_text(
-        json.dumps({"keys": [k.to_dict() for k in keys]}, indent=2),
-        encoding="utf-8",
-    )
+    # Atomic + owner-only: this file decides which extension signatures are
+    # accepted, so a half-written one must never be able to silently empty
+    # the trust list, and it has no business being world-readable.
+    write_private_json(TRUSTED_KEYS_FILE, {"keys": [k.to_dict() for k in keys]})
 
 
 def _validate_public_key(public_key_b64: str) -> None:
@@ -180,3 +182,61 @@ def trust_tier(
     if sha256:
         return "checksum-only"
     return "unverified"
+
+
+# ─────────────────────────────────────────────────────────────
+#  Enforcement
+# ─────────────────────────────────────────────────────────────
+#
+# Everything above only *describes* an entry. Until this section existed, a
+# signature that failed to verify installed exactly like one that verified —
+# the tier was a badge in the GUI and nothing else. What follows lets an
+# operator say "refuse anything below X", which is the whole point of having
+# signed the packages in the first place.
+
+#: Increasing order of assurance. Index in this list is the comparable rank.
+TRUST_TIERS: tuple[str, ...] = ("unverified", "checksum-only", "signed")
+
+MIN_TRUST_ENV = "SPOTIFLAC_MIN_TRUST"
+
+#: The historical behaviour, and still the default: install anything, label it
+#: honestly. Raising this is opt-in precisely because no registry is bundled —
+#: defaulting to "signed" would make a fresh install unable to install
+#: anything at all from the registry the user just configured.
+DEFAULT_MIN_TRUST = "unverified"
+
+
+def tier_rank(tier: str) -> int:
+    """Comparable rank for a tier name. Unknown names sort lowest, so a typo
+    can never accidentally grant more trust than intended.
+    """
+    try:
+        return TRUST_TIERS.index(tier)
+    except ValueError:
+        return -1
+
+
+def normalise_min_trust(value: str | None) -> str:
+    """Validates a minimum-tier name, falling back to the default.
+
+    Raises TrustKeyError for a non-empty value that isn't a known tier: a
+    misspelled `--min-trust-tier signd` must not silently mean "no floor".
+    """
+    if value is None or not str(value).strip():
+        return DEFAULT_MIN_TRUST
+    tier = str(value).strip().lower()
+    if tier not in TRUST_TIERS:
+        msg = f"Unknown trust tier {value!r}. Expected one of: {', '.join(TRUST_TIERS)}"
+        raise TrustKeyError(msg)
+    return tier
+
+
+def resolve_min_trust(explicit: str | None = None) -> str:
+    """CLI/API value wins, then $SPOTIFLAC_MIN_TRUST, then the default."""
+    if explicit is not None and str(explicit).strip():
+        return normalise_min_trust(explicit)
+    return normalise_min_trust(os.environ.get(MIN_TRUST_ENV))
+
+
+def meets_min_trust(tier: str, min_tier: str) -> bool:
+    return tier_rank(tier) >= tier_rank(min_tier)

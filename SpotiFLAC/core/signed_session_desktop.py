@@ -309,7 +309,10 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
         # === MODE 2: Automation via solver.py (pydoll) ===
         logger.info("Attempting automated verification via solver.py...")
         try:
-            from SpotiFLAC.core.solver import solve_with_callback
+            from SpotiFLAC.core.solver import (
+                _kill_by_profile_dir,
+                solve_with_callback,
+            )
 
             # Try to extract the sitekey if it is exposed in the HTML page
             sitekey = ""
@@ -330,6 +333,9 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             # FIX: Run the solver in a separate daemon thread so the main thread
             # can listen to the grant_queue without blocking!
             # =========================================================================
+            solver_cancel = threading.Event()
+            solver_browser_info: dict = {}
+
             def _run_solver_thread():
                 try:
                     _token, grant_res = solve_with_callback(
@@ -337,6 +343,8 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                         final_challenge_url,
                         60,
                         3.0,
+                        cancel_event=solver_cancel,
+                        browser_info=solver_browser_info,
                     )
                     if grant_res:
                         with contextlib.suppress(queue.Full):
@@ -370,6 +378,18 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
 
             if grant:
                 logger.info("Automated verification successful! Grant received.")
+                # If the grant reached us via the local callback server, the
+                # solver thread + its Chromium/Brave window may still be
+                # grinding on the challenge page. Tell it to wind down, and
+                # also kill its browser directly (scoped to that solver's own
+                # profile dir) in case the solver coroutine is wedged and
+                # can't act on the cancel itself — otherwise the window
+                # lingers (visibly, on macOS) until the hard watchdog.
+                solver_cancel.set()
+                _profile_dir = solver_browser_info.get("profile_dir")
+                if _profile_dir:
+                    with contextlib.suppress(Exception):
+                        _kill_by_profile_dir(_profile_dir)
                 # NOTE: previously this force-killed every Chrome process
                 # matching "--remote-debugging-port" system-wide to make
                 # the solver thread exit instantly. That's unscoped: with
