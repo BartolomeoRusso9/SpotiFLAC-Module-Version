@@ -39,7 +39,20 @@ _FINISHED_STATUSES = frozenset({JobStatus.DONE, JobStatus.FAILED})
 
 
 class QueueFullError(RuntimeError):
-    """Raised by submit() when an owner is over their pending-job limit."""
+    """Raised by submit() when an owner is over their pending-job limit.
+
+    Carries `pending` and `limit` as attributes rather than only inside the
+    message. An HTTP caller should be told how many jobs are queued and what
+    the limit is — that is genuinely useful — but it should be told by a
+    response built from these fields, never by putting `str(exc)` in the
+    body. That pattern is fine until the day an exception carries something
+    it shouldn't, and by then nobody is looking.
+    """
+
+    def __init__(self, message: str, pending: int = 0, limit: int = 0) -> None:
+        super().__init__(message)
+        self.pending = pending
+        self.limit = limit
 
 
 @dataclass
@@ -128,7 +141,9 @@ class JobQueue:
                     f"{owner} already has {pending} downloads queued "
                     f"(limit {self._max_pending_per_owner}); wait for some to finish."
                 )
-                raise QueueFullError(msg)
+                raise QueueFullError(
+                    msg, pending=pending, limit=self._max_pending_per_owner
+                )
             self._jobs[job.id] = job
             self._evict_finished_locked()
         self._queue.put(job.id)

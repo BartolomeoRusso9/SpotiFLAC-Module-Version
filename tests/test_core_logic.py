@@ -518,6 +518,7 @@ def test_transcode_helpers_and_conversion(monkeypatch, tmp_path):
     asyncio.run(_run())
 
 
+@pytest.mark.uses_registry
 def test_extension_manager_deduplicates_registry_checks_in_one_process(
     monkeypatch, tmp_path
 ):

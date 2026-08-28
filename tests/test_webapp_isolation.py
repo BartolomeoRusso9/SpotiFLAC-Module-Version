@@ -176,3 +176,28 @@ def test_a_dead_socket_is_dropped_and_does_not_block_the_others() -> None:
 
     assert delivered == ["healthy"]
     assert broken not in manager._connections
+
+
+def test_a_full_queue_answers_with_structured_fields_not_an_exception_string() -> None:
+    """CodeQL flagged `str(exc)` in the 429 body, and it was right to: an
+    exception message is written for a log reader. The caller still learns
+    everything actionable, from fields built on purpose.
+    """
+    app = webapp.create_app(multiuser=True)
+    # The class attribute is only a *default argument*, bound at definition
+    # time, so patching it after the fact changes nothing — set the limit on
+    # the live queue instead.
+    app.state.job_queue._max_pending_per_owner = 0
+    client = _login(app, "alice", "alice-password")
+
+    resp = client.post(
+        "/api/queue/submit-download", json={"selected_indices": [], "config": {}}
+    )
+
+    assert resp.status_code == 429
+    body = resp.json()
+    assert body["limit"] == 0
+    assert "pending" in body
+    # The username and the internal phrasing stay in the log, not the body.
+    assert "alice" not in body["error"]
+    assert "wait for some to finish" not in body["error"]

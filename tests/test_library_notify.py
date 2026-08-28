@@ -221,3 +221,39 @@ def test_failed_tracks_are_not_listed(tmp_path) -> None:
     assert "Good" in content
     assert "Bad" not in content
     assert report.downloaded_paths() == [str(tmp_path / "music" / "Good.flac")]
+
+
+def test_plain_http_subsonic_warns_about_the_password_derivation(caplog) -> None:
+    """Plex and Jellyfin send a revocable API token. Subsonic sends a digest
+    of the account password, so a plaintext connection is a different class
+    of exposure and deserves saying so.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        ln.build_target(
+            "navidrome", "http://nas.local:4533", token="pw", username="alice"
+        )
+    assert "plain HTTP" in caplog.text
+    assert "offline" in caplog.text
+
+
+def test_https_subsonic_says_nothing(caplog) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        ln.build_target(
+            "navidrome", "https://nas.local:4533", token="pw", username="alice"
+        )
+    assert "plain HTTP" not in caplog.text
+
+
+def test_plain_http_is_not_flagged_for_token_based_servers(caplog) -> None:
+    """A Plex token is revocable and carries no password material, so the
+    warning would be noise there.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        ln.build_target("plex", "http://nas.local:32400", token="t")
+    assert "plain HTTP" not in caplog.text

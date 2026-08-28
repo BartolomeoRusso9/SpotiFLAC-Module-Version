@@ -94,20 +94,54 @@ def build_target(
         )
         raise LibraryNotifyError(msg)
 
-    return LibraryTarget(kind, url.strip(), resolved_token, resolved_user)
+    target = LibraryTarget(kind, url.strip(), resolved_token, resolved_user)
+
+    if target.kind in ("navidrome", "subsonic") and target.base.startswith("http://"):
+        # Worth a warning specifically here. Plex and Jellyfin send an API
+        # token — revoke it and it's over. Subsonic sends md5(password+salt)
+        # derived from the account password itself, so anyone watching a
+        # plaintext connection gets something they can grind offline. On a
+        # LAN behind a router this is a small risk; over anything else it
+        # isn't.
+        logger.warning(
+            "[library] %s is plain HTTP. Subsonic auth derives from your "
+            "account password, so it can be captured and attacked offline — "
+            "use https://, or an account you use for nothing else.",
+            target.base,
+        )
+
+    return target
 
 
 def _subsonic_auth(password: str) -> dict[str, str]:
-    """Subsonic's salted-hash auth: md5(password + salt), never the password.
+    """Subsonic's salted-hash auth: `t = md5(password + salt)`, `s = salt`.
 
-    md5 is Subsonic's choice, not ours — the protocol specifies it, so this
-    is a compatibility requirement rather than a security decision. It is
-    still strictly better than the `p=` plaintext parameter the same API
-    also accepts.
+    On the MD5
+    ----------
+    Static analysis flags this, and it is right that MD5 is weak. It is also
+    not a choice available to us: the Subsonic API *specifies* this exact
+    construction, and the server computes the same digest to compare. Using
+    PBKDF2 or bcrypt here would simply fail to authenticate.
+
+    The alternatives the protocol offers are worse:
+
+      - `p=<password>` — the plaintext password, in the query string, and
+        therefore in the server's access log.
+      - `p=enc:<hex>` — hex-encoded plaintext, which is the same thing.
+
+    So this is the strongest of the three options a Subsonic server accepts,
+    not a preference. What it *does* mean, and what the caller should know:
+    the digest is offline-crackable for a weak password, so use a dedicated
+    account for SpotiFLAC rather than one whose password you reuse, and
+    reach the server over HTTPS (see request_rescan, which warns otherwise).
+
+    If this alert is triaged again: it is accurate about MD5 and wrong about
+    the remedy. Dismiss it as "won't fix" against this docstring, or drop
+    Subsonic support — those are the two real options.
     """
     salt = secrets.token_hex(8)
     return {
-        "t": hashlib.md5(  # noqa: S324 - protocol-mandated, not a security choice
+        "t": hashlib.md5(  # noqa: S324 - Subsonic protocol, see docstring
             (password + salt).encode("utf-8")
         ).hexdigest(),
         "s": salt,

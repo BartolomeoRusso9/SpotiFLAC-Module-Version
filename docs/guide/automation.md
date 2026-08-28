@@ -115,6 +115,16 @@ from a GUI or web request, which must not get to choose which host a
 credential is sent to. A server that is down is logged and ignored: the
 files are on disk either way.
 
+**A note on Navidrome/Subsonic.** Plex and Jellyfin take a revocable API
+token. Subsonic's protocol instead authenticates with `md5(password + salt)`
+computed from the account password — that construction is specified by the
+API, not chosen here, and the server compares against the same digest. It is
+the strongest of the three options Subsonic accepts (the other two send the
+password in the query string), but it means the value on the wire is
+derived from your password and can be attacked offline if captured. Use
+`https://`, and give SpotiFLAC an account you use for nothing else.
+SpotiFLAC warns when a Subsonic target is plain HTTP.
+
 ---
 
 ## Resuming interrupted downloads

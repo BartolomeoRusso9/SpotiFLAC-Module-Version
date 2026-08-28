@@ -453,6 +453,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     app = FastAPI(title="SpotiFLAC Web", lifespan=_lifespan)
     app.state.shared_api = app_state_api
     app.state.api_registry = registry
+    app.state.job_queue = job_queue
 
     @app.middleware("http")
     async def _no_cache_frontend(request, call_next):
@@ -577,7 +578,25 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                     },
                 )
             except QueueFullError as exc:
-                return JSONResponse({"error": str(exc)}, status_code=429)
+                # Built from the exception's own fields, not str(exc): an
+                # exception message is written for a log reader, and putting
+                # one in a response body is how internals end up in front of
+                # whoever is calling. The caller still learns everything
+                # actionable — how many they have queued, and the limit.
+                logger.info(
+                    "Queue submission refused for %s (%d/%d)",
+                    request.state.username,
+                    exc.pending,
+                    exc.limit,
+                )
+                return JSONResponse(
+                    {
+                        "error": "Too many downloads already queued.",
+                        "pending": exc.pending,
+                        "limit": exc.limit,
+                    },
+                    status_code=429,
+                )
             return JSONResponse({"job_id": job.id, "status": job.status.value})
 
         @app.get("/api/queue/mine")
