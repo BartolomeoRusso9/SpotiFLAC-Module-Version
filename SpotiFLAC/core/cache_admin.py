@@ -142,13 +142,17 @@ def prune(max_age_s: float = DEFAULT_MAX_AGE_S, dry_run: bool = False) -> dict:
     root = cache_root()
     responses = root / RESPONSES_DIR
     removed = freed = 0
-    cutoff = time.time() - max_age_s
+    now = time.time()
 
     if responses.is_dir():
         for path in responses.rglob("*.json"):
             try:
                 stat = path.stat()
-                if stat.st_mtime > cutoff:
+                # A just-written file can carry an mtime a hair ahead of our
+                # clock (filesystem timestamp resolution, notably on Windows),
+                # so floor the age at zero. max_age_s == 0 then means "stale".
+                age = max(0.0, now - stat.st_mtime)
+                if age < max_age_s:
                     continue
                 freed += stat.st_size
                 removed += 1
