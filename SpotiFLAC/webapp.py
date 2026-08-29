@@ -193,6 +193,15 @@ ALLOWED_METHODS: set[str] = {
     # Extension health (read-only, plus a counter reset).
     "get_extension_health",
     "reset_extension_health",
+    # The dashboard (core/stats.py). Read-only, and in multi-user mode it is
+    # the calling account's own history: each account gets its own Api
+    # instance, and `owner` is set on it above.
+    "get_stats",
+    # CSV input (core/csv_source.py). Both take the file's *contents*, never
+    # a path — the browser reads the file locally, so nothing here can be
+    # pointed at a path on the host.
+    "preview_csv",
+    "fetch_csv",
 }
 
 # Deliberately absent from ALLOWED_METHODS, even though they exist on the Api
@@ -369,6 +378,10 @@ class ApiRegistry:
         api._ws_broadcast = lambda fn, args: self._manager.broadcast(
             fn, args, owner=username
         )
+        # Everything this instance downloads is written to the log under this
+        # name, and the dashboard it serves reads back the same name — one
+        # account's numbers, not the machine's.
+        api.owner = username or ""
         if username:
             # A per-account subfolder of the same root, not an unrelated
             # path: an operator who bind-mounted one downloads volume still

@@ -312,6 +312,20 @@ class LinkResolver:
             logger.debug(f"[link_resolver] Songlink ISRC lookup async failed: {e}")
         return {}
 
+    async def spotify_url_for_isrc_async(self, isrc: str) -> str:
+        """The Spotify link for a recording, given only its ISRC.
+
+        An identity lookup rather than a search: `core/csv_source.py` uses it
+        for CSV rows that carry an ISRC and no usable title, where guessing
+        from text would risk downloading the wrong recording under the right
+        name.
+        """
+        normalized = (isrc or "").upper().strip()
+        if not normalized:
+            return ""
+        links = await self._get_songlink_isrc_links_async(normalized)
+        return links.get("spotify", "")
+
     async def _get_songstats_links_async(self, identifier: str) -> dict[str, str]:
         try:
             url = (

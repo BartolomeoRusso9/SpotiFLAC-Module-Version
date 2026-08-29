@@ -4853,3 +4853,283 @@ async function resetExtensionHealth() {
     showToast('Could not clear the statistics.', 'error');
   }
 }
+
+// ── Your library, in numbers (core/stats.py) ──────────────────────────────
+//
+// The download log read back as a dashboard. Everything here is derived from
+// downloads this install actually made, so the view is honest about what it
+// cannot know: genre, release year and duration are only recorded for
+// downloads made since the feature landed, and each section reports its own
+// coverage rather than presenting a fifth of the library as all of it.
+
+function statsPeriodArgs() {
+  const value = $('stats-period')?.value || 'all';
+  if (value === 'year') return [new Date().getFullYear(), null];
+  if (value === '365') return [null, 365];
+  if (value === '30') return [null, 30];
+  return [null, null];
+}
+
+function statsBytes(value) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = Number(value) || 0;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+  return (unit === 0 ? size.toFixed(0) : size.toFixed(1)) + ' ' + units[unit];
+}
+
+function statsDuration(ms) {
+  const seconds = Math.floor((Number(ms) || 0) / 1000);
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days) return `${days}d ${hours}h`;
+  if (hours) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function statsTile(label, value, hint) {
+  return `
+    <div class="stat-tile">
+      <div class="stat-tile-value">${regEscapeHtml(value)}</div>
+      <div class="stat-tile-label">${regEscapeHtml(label)}</div>
+      ${hint ? `<div class="stat-tile-hint">${regEscapeHtml(hint)}</div>` : ''}
+    </div>`;
+}
+
+// One ranking as labelled bars. `rows` is [{label, value, caption}], drawn
+// relative to the largest value so the shape of the list is readable at a
+// glance rather than needing the numbers to be compared by eye.
+function statsBars(rows, formatValue) {
+  if (!rows.length) return '<div class="s-label" style="font-size:11.5px;">Nothing here yet.</div>';
+  const peak = Math.max(...rows.map((row) => row.value)) || 1;
+  return rows.map((row) => `
+    <div class="stat-bar-row">
+      <div class="stat-bar-label" title="${regEscapeHtml(row.label)}">${regEscapeHtml(row.label)}</div>
+      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.max(2, (row.value / peak) * 100)}%"></div></div>
+      <div class="stat-bar-value">${regEscapeHtml((formatValue || String)(row.value))}</div>
+    </div>`).join('');
+}
+
+function statsSection(title, inner, note) {
+  return `
+    <div class="s-section">
+      <div class="s-title">${regEscapeHtml(title)}</div>
+      ${note ? `<div class="s-label" style="font-size:11px;margin:-2px 0 10px;">${regEscapeHtml(note)}</div>` : ''}
+      ${inner}
+    </div>`;
+}
+
+async function loadStats() {
+  const body = $('stats-body');
+  if (!body) return;
+  if (!window.pywebview?.api?.get_stats) {
+    body.innerHTML = '<div class="s-label" style="font-size:11.5px;">Statistics are unavailable in this build.</div>';
+    return;
+  }
+  body.innerHTML = '<div class="s-label" style="font-size:11.5px;">Loading…</div>';
+  try {
+    const [year, days] = statsPeriodArgs();
+    renderStats(await window.pywebview.api.get_stats(year, days, 10));
+  } catch (e) {
+    body.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Could not read the download log.</div>';
+  }
+}
+
+function renderStats(doc) {
+  const body = $('stats-body');
+  if (!body) return;
+  if (!doc || doc.error) {
+    body.innerHTML = `<div class="s-label" style="font-size:11.5px;color:var(--red);">${regEscapeHtml(doc?.error || 'No data.')}</div>`;
+    return;
+  }
+
+  const totals = doc.totals || {};
+  if (!totals.tracks) {
+    body.innerHTML = `
+      <div class="s-section">
+        <div class="s-title">Nothing yet</div>
+        <div class="s-label" style="font-size:11.5px;">
+          This is built from the download log, which fills up as you fetch
+          tracks. Come back after a download or two.
+        </div>
+      </div>`;
+    return;
+  }
+
+  const sections = [];
+
+  sections.push(`
+    <div class="stat-tiles">
+      ${statsTile('tracks', totals.tracks)}
+      ${statsTile('artists', totals.artists)}
+      ${statsTile('albums', totals.albums)}
+      ${statsTile('on disk', statsBytes(totals.bytes))}
+      ${totals.listening_known
+        ? statsTile('of music', statsDuration(totals.listening_ms),
+            totals.listening_known === totals.tracks ? '' : `timed for ${totals.listening_known} of them`)
+        : ''}
+      ${totals.failed ? statsTile('failed', totals.failed, `${Math.round((totals.success_rate || 0) * 100)}% succeeded`) : ''}
+    </div>`);
+
+  sections.push(statsSection('Top artists', statsBars(
+    (doc.top_artists || []).map((e) => ({ label: e.name, value: e.tracks })),
+  )));
+
+  const albums = (doc.top_albums || []).map((e) => ({
+    label: e.artist ? `${e.name} — ${e.artist}` : e.name,
+    value: e.tracks,
+  }));
+  sections.push(statsSection('Top albums', statsBars(albums)));
+
+  const genres = doc.top_genres || { entries: [] };
+  sections.push(statsSection(
+    'Top genres',
+    statsBars((genres.entries || []).map((e) => ({ label: e.name, value: e.tracks }))),
+    genres.unknown
+      ? `Known for ${genres.known} of ${totals.tracks} tracks — a genre needs metadata enrichment to have been on when the track was downloaded.`
+      : '',
+  ));
+
+  const decades = doc.decades || { entries: [] };
+  if ((decades.entries || []).length) {
+    sections.push(statsSection(
+      'By decade',
+      statsBars(decades.entries.map((e) => ({ label: e.name, value: e.tracks }))),
+      decades.unknown ? `Release year known for ${decades.known} of ${totals.tracks} tracks.` : '',
+    ));
+  }
+
+  const repeats = doc.top_tracks || [];
+  if (repeats.length) {
+    sections.push(statsSection(
+      'Fetched more than once',
+      statsBars(repeats.map((e) => ({ label: `${e.name} — ${e.artist}`, value: e.tracks }))),
+      'A re-download after a quality upgrade, or the same song from two playlists.',
+    ));
+  }
+
+  sections.push(statsSection('Providers', statsBars(
+    (doc.providers || []).map((e) => ({ label: e.name, value: e.tracks })),
+  )));
+
+  const formats = doc.formats || [];
+  if (formats.length) {
+    sections.push(statsSection('Formats', statsBars(
+      formats.map((e) => ({ label: (e.name || '').toUpperCase(), value: e.tracks })),
+    )));
+  }
+
+  const timeline = (doc.timeline || []).slice(-12);
+  if (timeline.length) {
+    sections.push(statsSection('Last months', statsBars(
+      timeline.map((e) => ({ label: e.month, value: e.tracks })),
+    )));
+  }
+
+  const activity = doc.activity || {};
+  const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  if ((activity.by_weekday || []).some((n) => n)) {
+    sections.push(statsSection('By weekday', statsBars(
+      activity.by_weekday.map((count, index) => ({ label: weekdays[index], value: count })),
+    )));
+  }
+
+  const facts = [];
+  if (activity.busiest_day) {
+    facts.push(`Busiest day: ${activity.busiest_day.date} (${activity.busiest_day.tracks} tracks)`);
+  }
+  if (activity.active_days) {
+    facts.push(`Downloaded on ${activity.active_days} day(s) · longest streak ${activity.longest_streak}`);
+  }
+  if (doc.first) {
+    const when = new Date((doc.first.downloaded_at || 0) * 1000).toLocaleDateString();
+    facts.push(`First in this period: ${doc.first.title} — ${doc.first.artist} (${when})`);
+  }
+  if (facts.length) {
+    sections.push(statsSection(
+      'Highlights',
+      facts.map((fact) => `<div class="s-label" style="font-size:12px;line-height:1.9;">${regEscapeHtml(fact)}</div>`).join(''),
+    ));
+  }
+
+  body.innerHTML = sections.join('');
+}
+
+// ── CSV import (core/csv_source.py) ───────────────────────────────────────
+//
+// The file is read here, in the browser, and only its text crosses to Python
+// — so this works identically in the desktop window and over `--web`, and a
+// server never has to be able to see the user's disk.
+
+// Blob.text() everywhere it exists, FileReader where it doesn't — the
+// desktop window runs whatever webview the operating system ships, which on
+// an older install predates it.
+function readFileAsText(file) {
+  if (typeof file.text === 'function') return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('read failed'));
+    reader.readAsText(file);
+  });
+}
+
+function openCsvPicker() {
+  $('csvFileInput')?.click();
+}
+
+async function onCsvFileChosen(input) {
+  const file = input?.files?.[0];
+  // Cleared straight away so choosing the same file twice in a row still
+  // fires a change event.
+  if (input) input.value = '';
+  if (!file) return;
+
+  if (file.size > 2000000) {
+    showToast('That file is too large to import (2 MB max).', 'error');
+    return;
+  }
+  if (!window.pywebview?.api?.fetch_csv) {
+    showToast('CSV import is unavailable in this build.', 'error');
+    return;
+  }
+
+  let text;
+  try {
+    text = await readFileAsText(file);
+  } catch (e) {
+    showToast('Could not read that file.', 'error');
+    return;
+  }
+
+  try {
+    const started = await window.pywebview.api.fetch_csv(text, file.name);
+    if (started?.status === 'error') {
+      showToast(started.error || 'Could not read that file.', 'error');
+      return;
+    }
+    showToast(`Reading ${file.name}… rows without a link are matched against the catalogue.`, 'info');
+  } catch (e) {
+    showToast(e.message || 'CSV import failed.', 'error');
+  }
+}
+
+// Pushed by api_mixins/csv_import.py once the track list is ready. The table
+// itself is filled by the ordinary showTracklist event, so this only reports
+// on the rows that did not make it.
+window.app_csv_loaded = function (payload) {
+  const missed = (payload?.unresolved || []).length;
+  if (missed) {
+    showToast(
+      `${payload.tracks} track(s) loaded · ${missed} row(s) could not be matched (see the log).`,
+      'info',
+    );
+  } else {
+    showToast(`${payload.tracks} track(s) loaded from ${payload.file}.`, 'success');
+  }
+};
+
+window.app_csv_error = function (payload) {
+  showToast(payload?.error || 'CSV import failed.', 'error');
+};

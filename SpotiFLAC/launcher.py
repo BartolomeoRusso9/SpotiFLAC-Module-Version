@@ -305,6 +305,73 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "only when its content changed. 'none' disables it.",
     )
 
+    # ── CSV input ───────────────────────────────────────────────────────────
+    csv_grp = parser.add_argument_group("CSV")
+    csv_grp.add_argument(
+        "--csv",
+        dest="csv_path",
+        default=None,
+        metavar="FILE",
+        help="Download every track listed in a CSV file "
+        "(spotiflac --csv tracks.csv DEST). Rows carrying a link (a Spotify "
+        "URL, a spotify:track: URI, or any other supported service URL) are "
+        "used as they are; rows carrying only a title/artist — or only an "
+        "ISRC — are matched against the catalogue. Exports from Exportify, "
+        "Soundiiz, TuneMyMusic and a plain one-link-per-line file are all "
+        "understood without configuration: the delimiter is detected and the "
+        "columns are matched by name. The whole file is treated as one "
+        "playlist (see --playlist): duplicated rows are downloaded once, "
+        "tracks already in DEST are skipped, and an M3U named after the file "
+        "is written next to them (--m3u none disables it).",
+    )
+    csv_grp.add_argument(
+        "--csv-dry-run",
+        dest="csv_dry_run",
+        action="store_true",
+        help="Resolve the CSV and print what would be downloaded — which row "
+        "matched what, and with what confidence — without downloading "
+        "anything. Worth doing once on an unfamiliar export.",
+    )
+    csv_grp.add_argument(
+        "--csv-min-score",
+        dest="csv_min_score",
+        type=float,
+        default=None,
+        metavar="0..1",
+        help="How close a catalogue match has to be before a text-only row "
+        "is downloaded (default: 0.62). Raise it if a file is producing "
+        "wrong matches, lower it for an export with messy titles — a wrong "
+        "match is a file with the right name and the wrong music in it, so "
+        "unmatched rows are reported rather than guessed at.",
+    )
+    csv_grp.add_argument(
+        "--csv-unresolved",
+        dest="csv_unresolved",
+        default=None,
+        metavar="FILE",
+        help="Write the rows that could not be matched to this CSV, in a "
+        "shape you can correct (fix the title, paste a link) and feed "
+        "straight back to --csv.",
+    )
+    csv_grp.add_argument(
+        "--csv-concurrency",
+        dest="csv_concurrency",
+        type=int,
+        default=4,
+        metavar="N",
+        help="How many rows are looked up at a time while resolving the file "
+        "(default: 4). Unrelated to --max-concurrent, which governs the "
+        "downloads themselves.",
+    )
+    csv_grp.add_argument(
+        "--csv-delimiter",
+        dest="csv_delimiter",
+        default=None,
+        metavar="CHAR",
+        help="Column separator, when the automatic detection gets it wrong "
+        r"(e.g. --csv-delimiter ';'). Use $'\t' for tab-separated files.",
+    )
+
     def _service_type(value: str) -> str:
         from .extensions.catalog import known_service
 
@@ -1141,6 +1208,55 @@ async def _notify_library_async(
     await request_rescan(target)
 
 
+async def _resolve_csv_async(
+    csv_path: str,
+    *,
+    delimiter: str | None,
+    min_score: float,
+    concurrency: int,
+    unresolved_path: str | None,
+):
+    """Reads and resolves a CSV, reporting on it. Shared by the run and
+    `--csv-dry-run`, which are the same work minus the downloading.
+
+    A file that cannot be read, or that holds nothing recognisable, exits
+    rather than starting a run that would download zero tracks and call it a
+    success — the mistake is almost always a wrong path or a wrong column,
+    and both are worth being told about immediately.
+    """
+    from .core import csv_source
+    from .core.errors import SpotiflacError
+
+    logger = logging.getLogger("SpotiFLAC")
+    try:
+        document = await asyncio.to_thread(
+            csv_source.read_rows, csv_path, delimiter=delimiter
+        )
+    except SpotiflacError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    resolution = await csv_source.resolve_rows(
+        document.rows,
+        document=document,
+        min_score=min_score,
+        concurrency=concurrency,
+    )
+
+    if unresolved_path and resolution.unresolved:
+        try:
+            csv_source.write_unresolved(unresolved_path, resolution.unresolved)
+            logger.warning(
+                "[csv] %d unmatched row(s) written to %s",
+                len(resolution.unresolved),
+                unresolved_path,
+            )
+        except SpotiflacError as exc:
+            logger.error("[csv] %s", exc.message)
+
+    return resolution
+
+
 async def _run_download_async(
     url: str | list[str],
     *,
@@ -1174,6 +1290,11 @@ async def _run_download_async(
     transcode_bitrate: str = "320k",
     transcode_keep_original: bool = False,
     playlist_urls: list[str] | None = None,
+    csv_path: str | None = None,
+    csv_min_score: float = 0.62,
+    csv_concurrency: int = 4,
+    csv_delimiter: str | None = None,
+    csv_unresolved: str | None = None,
     m3u_format: str = "m3u8",
     max_concurrent_downloads: int = 2,
     verify_hires: bool = False,
@@ -1282,7 +1403,36 @@ async def _run_download_async(
 
     try:
         downloader = SpotiflacDownloader(opts)
-        if playlist_urls:
+        if csv_path:
+            # Resolved here rather than inside run_csv_async so the report
+            # file (--csv-unresolved) is written even when the download that
+            # follows is interrupted: the rows that need fixing are the part
+            # of the run the user can act on.
+            resolution = await _resolve_csv_async(
+                csv_path,
+                delimiter=csv_delimiter,
+                min_score=csv_min_score,
+                concurrency=csv_concurrency,
+                unresolved_path=csv_unresolved,
+            )
+            if loop:
+                logger.warning(
+                    "--loop is ignored with --csv: run the command again to "
+                    "retry what failed.",
+                )
+            if playlist_urls:
+                logger.warning(
+                    "--playlist is ignored with --csv: run it separately to "
+                    "sync those playlists.",
+                )
+            await downloader.run_csv_async(
+                csv_path,
+                resolution=resolution,
+                m3u_format=m3u_format,
+                min_score=csv_min_score,
+                resolve_concurrency=csv_concurrency,
+            )
+        elif playlist_urls:
             if loop:
                 logger.warning(
                     "--loop is ignored with --playlist: run the command again "
@@ -1526,6 +1676,42 @@ async def amain() -> None:
             f"Web user '{user_rm_args.username}' removed."
             if found
             else f"No web user named '{user_rm_args.username}'."
+        )
+        return
+
+    if _argv_has("--stats"):
+        from .core import stats
+
+        # allow_abbrev=False: "--stats" is a prefix of every other flag in
+        # this group, and argparse would rather exit(2) than guess.
+        stats_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        stats_parser.add_argument("--stats", action="store_true")
+        stats_parser.add_argument(
+            "--stats-year", dest="year", type=int, default=None, metavar="YYYY"
+        )
+        stats_parser.add_argument(
+            "--stats-days", dest="days", type=int, default=None, metavar="N"
+        )
+        stats_parser.add_argument(
+            "--stats-user", dest="owner", default=None, metavar="USERNAME"
+        )
+        stats_parser.add_argument(
+            "--stats-top", dest="top", type=int, default=stats.DEFAULT_TOP
+        )
+        stats_parser.add_argument("--json", dest="as_json", action="store_true")
+        stats_args, _ = stats_parser.parse_known_args(sys.argv[1:])
+
+        window = stats.parse_window(year=stats_args.year, days=stats_args.days)
+        document = await asyncio.to_thread(
+            stats.wrapped,
+            owner=stats_args.owner,
+            window=window,
+            top=max(1, stats_args.top),
+        )
+        print(
+            json.dumps(document, indent=2)
+            if stats_args.as_json
+            else stats.format_wrapped(document)
         )
         return
 
@@ -1855,6 +2041,10 @@ async def amain() -> None:
                 transcode_keep_original=cfg.get("transcode_keep_original", False),
                 max_concurrent_downloads=cfg.get("max_concurrent_downloads", 2),
                 verify_hires=cfg.get("verify_hires", False),
+                # The wizard takes a .csv where it takes a link (see
+                # interactive.py's URL step); everything after that point is
+                # the same run.
+                csv_path=cfg.get("csv_path") or None,
             )
 
         await _run_once()
@@ -1896,7 +2086,44 @@ async def amain() -> None:
     args = parse_args(profile_defaults=merged_defaults)
     playlist_urls, output_dir = _split_positionals(args)
 
-    if not (args.url or playlist_urls) or not output_dir:
+    if args.csv_path:
+        # `spotiflac --csv tracks.csv DEST` gives argparse a single
+        # positional, which it binds to `url`. The file is the input here, so
+        # that positional is the destination.
+        if not output_dir and args.url:
+            output_dir, args.url = args.url, ""
+        elif args.url:
+            logger_ = logging.getLogger("SpotiFLAC")
+            logger_.warning(
+                "[csv] the URL argument is ignored with --csv; run it "
+                "separately to download it.",
+            )
+            args.url = ""
+
+    if args.csv_path and args.csv_dry_run:
+        # No destination needed and nothing downloaded: this is the "what
+        # would this file do?" pass, and it must run before the check below
+        # that a destination was given at all.
+        from .core import csv_source
+
+        resolution = await _resolve_csv_async(
+            args.csv_path,
+            delimiter=args.csv_delimiter,
+            min_score=(
+                args.csv_min_score
+                if args.csv_min_score is not None
+                else csv_source.DEFAULT_MIN_SCORE
+            ),
+            concurrency=args.csv_concurrency,
+            unresolved_path=args.csv_unresolved,
+        )
+        if args.json_report:
+            print(json.dumps(resolution.to_dict(), indent=2))
+        else:
+            print(csv_source.format_resolution(resolution, verbose=True))
+        return
+
+    if not (args.url or playlist_urls or args.csv_path) or not output_dir:
         parser = argparse.ArgumentParser(
             prog="spotiflac",
             description="Download tracks in true FLAC/MP3 via Deezer, Tidal, Qobuz, SoundCloud, YouTube, Pandora and more.",
@@ -1982,6 +2209,13 @@ async def amain() -> None:
             transcode_bitrate=args.transcode_bitrate,
             transcode_keep_original=args.transcode_keep_original,
             playlist_urls=playlist_urls,
+            csv_path=args.csv_path,
+            csv_min_score=(
+                args.csv_min_score if args.csv_min_score is not None else 0.62
+            ),
+            csv_concurrency=args.csv_concurrency,
+            csv_delimiter=args.csv_delimiter,
+            csv_unresolved=args.csv_unresolved,
             m3u_format=args.m3u_format,
             max_concurrent_downloads=args.max_concurrent,
             verify_hires=args.verify_hires,

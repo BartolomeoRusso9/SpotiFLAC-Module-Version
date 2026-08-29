@@ -366,3 +366,86 @@ def test_library_scan_reports_an_empty_folder(tmp_path):
     assert body["scanned"] == 0
     assert body["candidates"] == []
     assert body["target"] == "LOSSLESS"
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────
+
+
+def test_stats_reports_the_log_as_a_dashboard():
+    from SpotiFLAC.core import download_log
+
+    download_log.record(
+        title="Song",
+        artist="Daft Punk, Julian Casablancas",
+        album="Random Access Memories",
+        provider="ext:tidal-web",
+        fmt="flac",
+        size_bytes=40,
+        genre="Electronic; House",
+        release_year="2013",
+        duration_ms=337_000,
+    )
+    client, _ = make_client()
+    body = client.get("/api/v1/stats").json()
+
+    assert body["totals"]["tracks"] == 1
+    assert body["totals"]["artists"] == 2
+    assert body["window"]["label"] == "all time"
+    assert {entry["name"] for entry in body["top_genres"]["entries"]} == {
+        "Electronic",
+        "House",
+    }
+    assert body["decades"]["entries"][0]["name"] == "2010s"
+
+
+def test_stats_windows_are_named_in_the_response():
+    client, _ = make_client()
+
+    assert client.get("/api/v1/stats?year=2026").json()["window"]["label"] == "2026"
+    assert (
+        client.get("/api/v1/stats?days=30").json()["window"]["label"] == "last 30 days"
+    )
+    # Out of range rather than silently clamped.
+    assert client.get("/api/v1/stats?days=0").status_code == 422
+
+
+def test_stats_are_empty_but_valid_before_anything_is_downloaded():
+    client, _ = make_client()
+    body = client.get("/api/v1/stats").json()
+
+    assert body["totals"]["tracks"] == 0
+    assert body["top_artists"] == []
+    assert body["first"] is None
+
+
+# ── CSV input ─────────────────────────────────────────────────────────────
+
+
+def test_csv_resolve_turns_rows_into_links_without_queueing_them():
+    client, api = make_client()
+    content = (
+        "Track URI,Track Name,Artist Name(s)\n"
+        "spotify:track:4uLU6hMCjMI75M1A2tKUQC,Never Gonna Give You Up,Rick Astley\n"
+        "https://open.spotify.com/track/1301WleyT98MSxVHPZCA6M,Everlong,Foo Fighters\n"
+    )
+
+    body = client.post(
+        "/api/v1/csv/resolve", json={"content": content, "name": "export.csv"}
+    ).json()
+
+    assert body["rows"] == 2
+    assert body["urls"] == [
+        "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC",
+        "https://open.spotify.com/track/1301WleyT98MSxVHPZCA6M",
+    ]
+    assert [row["how"] for row in body["resolved"]] == ["link", "link"]
+    # Resolving is not downloading: nothing was fetched or queued.
+    assert api.fetched == []
+
+
+def test_a_csv_with_nothing_recognisable_in_it_is_a_400():
+    client, _ = make_client()
+    response = client.post("/api/v1/csv/resolve", json={"content": "\n\n"})
+
+    assert response.status_code == 400
+    assert "error" in response.json()

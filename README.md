@@ -77,6 +77,8 @@ If you just want a GUI for personal use, with no code involved, the [Desktop](ht
 - **Library upgrade** — find files below a target quality (including fake Hi-Res) and re-fetch them
 - **Outbound notifications** — webhook, Discord, Telegram or ntfy, per track or one summary per run
 - **Versioned REST API** at `/api/v1`, with an OpenAPI document at `/docs`
+- **CSV input** — hand it a playlist export (Exportify, Soundiiz, a bare list of links) and it downloads what the file lists, matching rows that carry no link and reporting the ones it cannot
+- **Dashboard** — what you have actually downloaded, as numbers: top artists, genres, decades, providers, listening time, activity by weekday and streaks (`--stats`, or the Stats screen)
 - **Durable queue and download log** (SQLite): a restart no longer loses queued work
 - **Per-account quotas and an admin role** in `--web-multiuser`
 - **Extension health panel** — success rate, latency and last error per provider
@@ -103,6 +105,8 @@ renders it usefully. Every page below is the same text that used to be here.
 | --- | --- |
 | [Quick Start](docs/guide/quick-start.md) | Every way to run it — GUI, web, CLI, interactive wizard, Python — and the URL types it accepts |
 | [Extensions](docs/guide/extensions.md) | Registries, installing providers, signature verification and trust tiers |
+| [Downloading from a CSV](docs/guide/csv.md) | Feeding it a file of tracks instead of a link: supported exports, how rows without a link are matched, and the unmatched-row report |
+| [Your library in numbers](docs/guide/dashboard.md) | The dashboard built from what you have actually downloaded — top artists, genres, decades, activity |
 | [Configuration](docs/guide/configuration.md) | Every option: naming, quality, lyrics, enrichment, transcoding, watch mode, profiles |
 | [API Reference](docs/guide/api-reference.md) | `SpotiFLAC` and `AsyncSpotiFLAC`, and the objects they return |
 | [Local Tagging](docs/guide/local-tagging.md) | Retagging an existing library, MusicBrainz enrichment, download validation |

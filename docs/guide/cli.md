@@ -15,6 +15,7 @@ readability. Marked `text` rather than `bash` so nothing suggests otherwise.
 ```text
 ./SpotiFLAC-Windows.exe url
                         output_dir
+                        [--csv tracks.csv]
                         [--service ext:<id> [ext:<id> ...]]
                         [--filename-format "{title} - {artist}"]
                         [--output-path "files/song.flac"]
@@ -46,6 +47,7 @@ readability. Marked `text` rather than `bash` so nothing suggests otherwise.
 chmod +x SpotiFLAC-Linux-arm64
 ./SpotiFLAC-Linux-arm64 url
                         output_dir
+                        [--csv tracks.csv]
                         [--service ext:<id> [ext:<id> ...]]
                         [--filename-format "{title} - {artist}"]
                         [--output-path "files/song.flac"]

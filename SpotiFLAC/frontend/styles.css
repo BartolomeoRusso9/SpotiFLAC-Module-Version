@@ -2387,3 +2387,73 @@ body.dark-theme .local-title.diff, body.dark-theme .local-artist.diff { color: v
 .local-badge.warn { background: rgba(245,158,11,.15); color: var(--yellow-d); }
 body.dark-theme .local-badge.warn { color: var(--yellow); }
 .local-badge.err { background: rgba(239,68,68,.15); color: var(--red); }
+    /* ── Your library, in numbers (view-stats) ─────────────────────────────
+       Deliberately built from the same tokens as the rest of the interface
+       (surface/border/muted/yellow) so the dashboard inherits both themes
+       without a second palette to keep in agreement. */
+    .stat-tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .stat-tile {
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+    }
+    .stat-tile-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+      word-break: break-word;
+    }
+    .stat-tile-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .stat-tile-hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+    .stat-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 0;
+      font-size: 12px;
+    }
+    .stat-bar-label {
+      flex: 0 0 34%;
+      max-width: 34%;
+      color: var(--text2);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .stat-bar-track {
+      flex: 1;
+      height: 8px;
+      min-width: 0;
+      background: var(--surface2);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .stat-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--yellow) 0%, var(--yellow-d) 100%);
+    }
+    .stat-bar-value {
+      flex: 0 0 52px;
+      text-align: right;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    @media (max-width: 640px) {
+      .stat-bar-label { flex-basis: 44%; max-width: 44%; }
+    }

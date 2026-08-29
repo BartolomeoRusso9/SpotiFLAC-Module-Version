@@ -170,6 +170,23 @@ def print_playlist_resolved(name: str, track_count: int, url: str) -> None:
     _write(f"[PLAYLIST] {name[:48]} · {track_count} track(s) · {url}")
 
 
+def print_csv_resolved(
+    path: str,
+    rows: int,
+    resolved: int,
+    unresolved: int,
+) -> None:
+    """What the CSV turned out to contain, before anything is fetched.
+
+    Resolving a few hundred rows against the catalogue takes a while and
+    produces no other output; this says how much of the file made it through
+    and how much of it needs the user's attention, in the same place the run
+    header and the sync plan appear.
+    """
+    tail = f" · {unresolved} unmatched" if unresolved else ""
+    _write(f"[CSV] {path} · {rows} row(s) · {resolved} resolved{tail}")
+
+
 def print_sync_plan(unique: int, already_present: int, pending: int) -> None:
     """What the merge decided, before a single byte is downloaded."""
     _write(

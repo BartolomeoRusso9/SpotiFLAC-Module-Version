@@ -196,6 +196,21 @@ from zero, and `.part` files are cleaned up at the end.
 
 ---
 
+## What has been downloaded (`--stats`)
+
+```bash
+spotiflac --stats                 # everything
+spotiflac --stats --stats-year 2026 --json
+```
+
+Totals, top artists/genres/decades, providers and formats, a month-by-month
+timeline and activity (weekday, hour, streaks) — read back out of the download
+log, so it costs one SQLite query and no network. `--json` gives the same
+document for a script; the GUI shows it as the **Stats** screen. Full detail:
+[Your library in numbers](dashboard.md).
+
+---
+
 ## Cache maintenance
 
 ```bash

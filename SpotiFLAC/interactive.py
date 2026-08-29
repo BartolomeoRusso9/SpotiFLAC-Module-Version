@@ -617,7 +617,10 @@ def _summary(cfg: dict) -> None:
         pad = " " * max(0, 22 - len(label))
         print(f"  {BOLD(label)}{pad}: {value}")
 
-    row("URL", cfg["url"][:65])
+    if cfg.get("csv_path"):
+        row("CSV file", cfg["csv_path"][:65])
+    else:
+        row("URL", cfg["url"][:65])
     row("Output Dir", cfg["output_dir"])
 
     if cfg.get("output_path"):
@@ -747,15 +750,28 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
     prefill = await _pick_from_history()
 
     url = ""
+    csv_path = ""
     while True:
         if prefill:
-            url = _ask("URL", prefill)
+            url = _ask("URL or .csv file", prefill)
             prefill = None
         else:
-            url = _ask("URL")
+            url = _ask("URL or .csv file")
 
         if not url:
             continue
+
+        # A CSV is the other kind of input (see core/csv_source.py): a list of
+        # tracks rather than a link to one. Recognised here so the wizard can
+        # take one without a separate question everybody else has to answer.
+        candidate = os.path.expanduser(url.strip().strip("'\""))
+        if candidate.lower().endswith((".csv", ".tsv")):
+            if not os.path.isfile(candidate):
+                print(f"  {DIM('No such file: ' + candidate)}")
+                continue
+            csv_path = candidate
+            url = ""
+            break
 
         lower_url = url.lower()
         is_blocked = False
@@ -779,11 +795,13 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
             break
 
     cfg["url"] = url
+    cfg["csv_path"] = csv_path
     original_url = url
 
     # ── Profile load ────────────────────────────────────────────────────────
     cfg = await _profile_load_section(cfg)
     cfg["url"] = original_url
+    cfg["csv_path"] = csv_path
 
     # ── Extension registries ────────────────────────────────────────────────
     await _manage_registries_section(min_trust_tier)
@@ -1344,7 +1362,11 @@ def _print_cli_command(cfg: dict) -> None:
         cfg (dict): Configuration values used to construct the command.
 
     """
-    parts = ["spotiflac", cfg["url"], cfg["output_dir"]]
+    parts = (
+        ["spotiflac", "--csv", cfg["csv_path"], cfg["output_dir"]]
+        if cfg.get("csv_path")
+        else ["spotiflac", cfg["url"], cfg["output_dir"]]
+    )
     if cfg.get("output_path"):
         parts.extend(["-o", cfg["output_path"]])
     parts.extend(["-s", *cfg["services"]])

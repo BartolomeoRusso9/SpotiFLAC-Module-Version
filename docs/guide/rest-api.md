@@ -46,6 +46,8 @@ curl -b jar localhost:8000/api/v1/info
 | `GET` | `/api/v1/downloads` | The caller's jobs. |
 | `GET` | `/api/v1/downloads/{id}` | One job. |
 | `GET` | `/api/v1/history` | What has actually been downloaded. |
+| `GET` | `/api/v1/stats` | The same log as a dashboard: totals, rankings, activity. |
+| `POST` | `/api/v1/csv/resolve` | A CSV of tracks → links. Downloads nothing. |
 | `GET` | `/api/v1/subscriptions` | Followed artists. |
 | `POST` | `/api/v1/subscriptions` | Follow one. **201**. |
 | `DELETE` | `/api/v1/subscriptions/{id}` | Unfollow. **204**. |
@@ -73,6 +75,46 @@ curl localhost:8000/api/v1/downloads/a1b2…
 In multi-user mode a job is visible only to the account that submitted it, and
 an id belonging to someone else answers **404**, not 403 — whether it exists
 is not something to let an account probe for.
+
+### The dashboard
+
+```bash
+curl 'localhost:8000/api/v1/stats?year=2026&top=5'
+```
+
+Totals, top artists/albums/genres, providers, formats, a month-by-month
+timeline and activity (weekday, hour, streaks) for one period — `year=` or
+`days=`, and neither for all of it. In multi-user mode it covers the calling
+account's own downloads, never the instance's.
+
+Every ranking that depends on a column added later carries its own coverage:
+
+```json
+{"top_genres": {"known": 812, "unknown": 244, "entries": [{"name": "Rock", "tracks": 300, "share": 0.37}]}}
+```
+
+`known + unknown` is the period's track count. A client should say so rather
+than presenting `entries` as the whole picture: genre, release year and
+duration are only recorded for downloads made since they were added to the
+log, and a genre also needs metadata enrichment to have been on.
+
+### Importing a CSV
+
+```bash
+curl -X POST localhost:8000/api/v1/csv/resolve \
+     -H 'content-type: application/json' \
+     -d '{"content":"Track Name,Artist Name(s)\nEverlong,Foo Fighters\n","name":"wishlist.csv"}'
+```
+
+The file's *contents*, not a path — a path would be a path on the server, and
+the caller has no business naming one. Rows carrying a link keep it; rows
+carrying only text are matched against the catalogue and scored, and anything
+below `min_score` (0.62 by default) comes back under `unresolved` rather than
+being guessed at.
+
+Resolving is not downloading: the response is a list of URLs for the caller
+to review and then queue through `POST /downloads` like any other download,
+so quotas, the queue limit and per-account isolation all apply unchanged.
 
 ### Errors
 

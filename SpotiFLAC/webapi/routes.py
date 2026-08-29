@@ -26,6 +26,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .schemas import (
     ApiInfo,
+    CsvResolveRequest,
+    CsvResolveResponse,
+    CsvResolvedRow,
+    CsvUnresolvedRow,
     DownloadRecordOut,
     DownloadRequest,
     ErrorResponse,
@@ -38,6 +42,7 @@ from .schemas import (
     ResolveRequest,
     ResolveResponse,
     SearchResponse,
+    StatsResponse,
     SubscriptionCheckOut,
     SubscriptionCheckResponse,
     SubscriptionCreate,
@@ -314,6 +319,74 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
                 )
                 for r in records
             ],
+        )
+
+    @router.get(
+        "/stats",
+        response_model=StatsResponse,
+        summary="The download log as a dashboard",
+    )
+    async def download_stats(
+        request: Request,
+        year: int | None = Query(default=None, ge=1970, le=2999),
+        days: int | None = Query(default=None, ge=1, le=3650),
+        top: int = Query(default=10, ge=1, le=100),
+    ) -> StatsResponse:
+        """Totals, rankings and activity for one period.
+
+        Read-only and derived entirely from what this instance has already
+        downloaded — `year` and `days` are alternative ways to name the
+        period, and giving neither covers all of it.
+        """
+        from ..core import stats
+
+        owner = _owner(deps, request) if deps.multiuser else None
+        window = stats.parse_window(year=year, days=days)
+        document = await run_in_threadpool(
+            stats.wrapped, owner=owner, window=window, top=top
+        )
+        return StatsResponse(**document)
+
+    # ── CSV input ─────────────────────────────────────────────────────────
+
+    @router.post(
+        "/csv/resolve",
+        response_model=CsvResolveResponse,
+        responses=_ERRORS,
+        summary="Turn a CSV of tracks into links",
+    )
+    async def resolve_csv(payload: CsvResolveRequest) -> CsvResolveResponse:
+        """Parses a CSV and matches the rows that carry no link.
+
+        Nothing is queued here: the caller reviews the matches and then posts
+        the URLs it accepts to `/downloads`, so a wrong match is something to
+        notice rather than something already on disk.
+        """
+        from ..core import csv_source
+        from ..core.errors import SpotiflacError
+
+        try:
+            document = await run_in_threadpool(
+                csv_source.read_text,
+                payload.content,
+                name=payload.name,
+                delimiter=payload.delimiter,
+            )
+        except SpotiflacError as exc:
+            raise _fail(400, exc.message) from exc
+
+        resolution = await csv_source.resolve_rows(
+            document.rows, document=document, min_score=payload.min_score
+        )
+        return CsvResolveResponse(
+            rows=len(document.rows),
+            resolved=[
+                CsvResolvedRow(**entry.to_dict()) for entry in resolution.resolved
+            ],
+            unresolved=[
+                CsvUnresolvedRow(**entry.to_dict()) for entry in resolution.unresolved
+            ],
+            urls=resolution.urls,
         )
 
     # ── Subscriptions ─────────────────────────────────────────────────────

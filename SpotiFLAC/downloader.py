@@ -23,9 +23,10 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .core.console import (
+    print_csv_resolved,
     print_playlist_resolved,
     print_playlist_summary,
     print_run_header,
@@ -1360,6 +1361,163 @@ class SpotiflacDownloader:
         }
         located.update(await self._download_pending_async(plan, opts))
         await self._write_playlist_files_async(plan, located, output_dir, m3u_format)
+
+    # ------------------------------------------------------------------
+    # CSV input
+    # ------------------------------------------------------------------
+
+    async def run_csv_async(
+        self,
+        csv_path: str,
+        *,
+        document: Any = None,
+        resolution: Any = None,
+        m3u_format: str = "m3u8",
+        min_score: float = 0.62,
+        resolve_concurrency: int = 4,
+        name: str = "",
+    ) -> dict:
+        """Downloads every track a CSV file lists.
+
+        A CSV is a playlist that happens to live on disk, so it is run
+        through exactly the same machinery `--playlist` uses: one flat
+        destination folder, a track listed twice fetched once, anything
+        already in the folder never fetched again, and an M3U written
+        alongside in file order. What is different is only the front of the
+        pipeline — `core/csv_source.py` turns rows into links first, matching
+        the ones that carry only text against the catalogue and reporting
+        (never guessing at) the ones that don't match well enough.
+
+        `document`/`resolution` let a caller that already has the parsed rows
+        — the GUI, which is handed the file's *text* rather than a path, or a
+        CLI dry run that has just resolved them — skip the work again.
+        Returns a summary of the run for `--json` and for the GUI.
+        """
+        from .core import csv_source
+
+        if resolution is None:
+            if document is None:
+                document = await asyncio.to_thread(csv_source.read_rows, csv_path)
+            resolution = await csv_source.resolve_rows(
+                document.rows,
+                document=document,
+                min_score=min_score,
+                concurrency=resolve_concurrency,
+            )
+
+        document = resolution.document
+        summary: dict = {
+            "file": document.path or csv_path,
+            "rows": len(document.rows),
+            "resolved": len(resolution.resolved),
+            "unresolved": [entry.to_dict() for entry in resolution.unresolved],
+            "tracks": 0,
+            "already_present": 0,
+            "downloaded": 0,
+        }
+
+        urls = resolution.urls
+        print_csv_resolved(
+            summary["file"],
+            len(document.rows),
+            len(resolution.resolved),
+            len(resolution.unresolved),
+        )
+        if not urls:
+            logger.warning("[csv] No row could be resolved to a link")
+            return summary
+
+        opts = self._playlist_opts()
+        output_dir = Path(opts.output_dir)
+        await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
+        index = await asyncio.to_thread(index_audio_files, output_dir)
+
+        tracks = await self._resolve_csv_tracks_async(urls, resolve_concurrency)
+        if not tracks:
+            logger.warning("[csv] No track could be fetched for the resolved links")
+            return summary
+
+        # Same reasoning as the playlist path: the ISRC is what dedups two
+        # rows naming one recording, and resolving it for a track already on
+        # disk is a request spent on a file nobody is going to download.
+        pending_isrc = [
+            track
+            for position, track in enumerate(tracks, 1)
+            if find_existing_track(
+                index,
+                track,
+                track_stem(track, opts, position),
+                opts.transcode_to,
+            )
+            is None
+        ]
+        resolved_isrc = await self._resolve_isrc_bulk_async(pending_isrc)
+        resolved_by_id = {track.id: track for track in resolved_isrc}
+        tracks = [resolved_by_id.get(track.id, track) for track in tracks]
+
+        source = PlaylistSource(
+            url=summary["file"],
+            name=name or Path(summary["file"]).stem or "CSV",
+            tracks=tuple(tracks),
+        )
+        plan = build_plan([source], m3u_format=m3u_format)
+        plan = mark_existing(plan, index, opts)
+        print_sync_plan(len(plan.tracks), len(plan.present), len(plan.pending))
+
+        located: dict[str, Path] = {
+            planned.key: planned.existing_path for planned in plan.present
+        }
+        downloaded = await self._download_pending_async(plan, opts)
+        located.update(downloaded)
+        await self._write_playlist_files_async(plan, located, output_dir, m3u_format)
+
+        summary.update(
+            {
+                "tracks": len(plan.tracks),
+                "already_present": len(plan.present),
+                "downloaded": len(downloaded),
+            }
+        )
+        return summary
+
+    async def _resolve_csv_tracks_async(
+        self,
+        urls: list[str],
+        concurrency: int,
+    ) -> list[TrackMetadata]:
+        """Metadata for every link a CSV resolved to, in file order.
+
+        Concurrent, unlike the playlist path: a CSV is typically hundreds of
+        *track* links rather than a handful of playlist links, and fetching
+        those one after another is the difference between a minute and half
+        an hour. A link that fails is logged and dropped — one bad row does
+        not cancel the rest of the file.
+        """
+        # Built once, up front, and only when something here actually needs
+        # it: several coroutines racing to lazily create it would each open
+        # their own Spotify session, and a CSV of links to other services
+        # needs none at all.
+        if any(
+            url_host_matches(url, "open.spotify.com", "play.spotify.com")
+            for url in urls
+        ):
+            with contextlib.suppress(Exception):
+                self._metadata_client()
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+
+        async def _fetch(url: str) -> list[TrackMetadata]:
+            async with semaphore:
+                try:
+                    _name, tracks, _info = await self._resolve_metadata_async(url)
+                    return tracks or []
+                except SpotiflacError as exc:
+                    logger.error("[csv] %s: %s", url, exc)
+                except Exception as exc:
+                    logger.error("[csv] %s: %s", url, exc)
+                return []
+
+        results = await asyncio.gather(*(_fetch(url) for url in urls))
+        return [track for group in results for track in group]
 
     def _playlist_opts(self) -> DownloadOptions:
         """Options adjusted for a flat, multi-playlist run."""

@@ -15,10 +15,12 @@ from pathlib import Path
 import webview
 
 from .api_mixins.covers_lyrics import CoversLyricsMixin
+from .api_mixins.csv_import import CsvImportMixin
 from .api_mixins.dedup import DedupMixin
 from .api_mixins.discovery import DiscoveryMixin
 from .api_mixins.extension_health import ExtensionHealthMixin
 from .api_mixins.local_tagging import LocalTaggingMixin
+from .api_mixins.stats import StatsMixin
 from .api_mixins.subscriptions import SubscriptionsMixin
 from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
@@ -81,6 +83,8 @@ class SpotiFLAC_API(
     TrustMixin,
     SubscriptionsMixin,
     ExtensionHealthMixin,
+    CsvImportMixin,
+    StatsMixin,
 ):
     """pywebview/`--web` bridge — every method here (plus the two mixins
     above) becomes a callable the frontend invokes as `pywebview.api.<name>`
@@ -103,6 +107,11 @@ class SpotiFLAC_API(
         # Desktop (pywebview) mode never sets this and is completely unaffected.
         self._ws_broadcast = None
         self.download_dir = DEFAULT_DOWNLOAD_DIR
+        # Which account this instance belongs to, set by webapp.py's
+        # ApiRegistry in multi-user mode and left blank everywhere else. It
+        # is what the download log is written under, which is what per-account
+        # quotas count and what the dashboard reads back.
+        self.owner = ""
         self.current_tracks = []
         self.current_url = ""
         self.app_version = "unknown"
@@ -1339,8 +1348,14 @@ class SpotiFLAC_API(
                 self.log("Error: select at least one service.", "error")
                 return
 
-            if len(selected_indices) == len(self.current_tracks):
-                urls_to_download = [self.current_url]
+            collection_url = (self.current_url or "").strip()
+            # A track list loaded from a CSV has no collection URL to stand
+            # for it (see api_mixins/csv_import.py), so the whole-collection
+            # shortcut only applies when there really is one.
+            if collection_url.startswith(("http", "spotify:")) and len(
+                selected_indices
+            ) == len(self.current_tracks):
+                urls_to_download = [collection_url]
                 self.log("Downloading entire album/playlist…", "info")
             else:
                 urls_to_download = []
@@ -1385,6 +1400,14 @@ class SpotiFLAC_API(
             monitor_thread.start()
 
             from . import SpotiFLAC
+            from .core.download_log import record_hook
+
+            # The same hook the CLI installs (see launcher._run_download_async).
+            # Without it nothing a GUI or `--web` user downloaded was ever
+            # written down: per-account quotas had nothing to count, and the
+            # dashboard would have shown an empty history to precisely the
+            # people who never touch the CLI.
+            log_hook = record_hook(self.owner)
 
             for u in urls_to_download:
                 SpotiFLAC(
@@ -1414,6 +1437,7 @@ class SpotiFLAC_API(
                     post_download_command=post_download_command,
                     log_level=current_log_level,
                     loop=loop_minutes,
+                    post_download_hooks=[log_hook],
                 )
 
             self._push_download_stats()

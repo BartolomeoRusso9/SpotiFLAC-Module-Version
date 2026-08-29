@@ -13,6 +13,10 @@ Three features need that record:
     once should not come back the next time an artist is checked.
   - Simply answering "have I got this already?" across moved or retagged
     files, by ISRC rather than by path.
+  - **The dashboard** (`core/stats.py`, `spotiflac --stats`): every question
+    it answers — top artists, genres, listening time, which month was busiest
+    — is a question about this table, which is why v2 of the schema records
+    the genre, release year and duration alongside the size.
 
 Written from a post-download hook (see `record_hook`), so it observes exactly
 the same per-track events `--post-hook` and `--json` do, rather than the
@@ -47,6 +51,12 @@ class DownloadRecord:
     bytes: int
     success: bool
     downloaded_at: float
+    #: Only known for downloads recorded since the dashboard landed, and only
+    #: when the metadata carried it (genre comes from enrichment, which is
+    #: optional). Empty means "not known", never "none".
+    genre: str = ""
+    release_year: str = ""
+    duration_ms: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -63,6 +73,9 @@ class DownloadRecord:
             "bytes": self.bytes,
             "success": self.success,
             "downloaded_at": self.downloaded_at,
+            "genre": self.genre,
+            "release_year": self.release_year,
+            "duration_ms": self.duration_ms,
         }
 
 
@@ -81,7 +94,26 @@ def _row_to_record(row) -> DownloadRecord:
         bytes=int(row["bytes"] or 0),
         success=bool(row["success"]),
         downloaded_at=float(row["downloaded_at"] or 0.0),
+        genre=_column(row, "genre"),
+        release_year=_column(row, "release_year"),
+        duration_ms=int(_column(row, "duration_ms") or 0),
     )
+
+
+def _column(row, name: str, default: Any = "") -> Any:
+    """One column of a row, tolerating its absence.
+
+    The dashboard columns arrived in schema v2 (see core/db.py). Every
+    connection migrates before it is handed out, so they are always there in
+    practice — but a caller passing rows from its own query (a test, a future
+    projection that selects a subset) shouldn't crash on the ones it left
+    out.
+    """
+    try:
+        value = row[name]
+    except (IndexError, KeyError):
+        return default
+    return value if value is not None else default
 
 
 def record(
@@ -97,6 +129,9 @@ def record(
     fmt: str = "",
     size_bytes: int | None = None,
     success: bool = True,
+    genre: str = "",
+    release_year: str = "",
+    duration_ms: int = 0,
 ) -> None:
     """Appends one row. Never raises.
 
@@ -112,8 +147,9 @@ def record(
                 """
                 INSERT INTO downloads (
                     owner, spotify_id, isrc, title, artist, album,
-                    provider, file_path, format, bytes, success, downloaded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    provider, file_path, format, bytes, success, downloaded_at,
+                    genre, release_year, duration_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner,
@@ -128,6 +164,9 @@ def record(
                     int(size_bytes or 0),
                     1 if success else 0,
                     time.time(),
+                    genre or "",
+                    release_year or "",
+                    int(duration_ms or 0),
                 ),
             )
     except Exception:
@@ -163,6 +202,14 @@ def record_hook(owner: str = "") -> Any:
             file_path=getattr(result, "file_path", "") or "",
             fmt=getattr(result, "format", "") or "",
             success=bool(getattr(result, "success", False)),
+            # What the dashboard is built from. `year` is a property on
+            # TrackMetadata (the first four characters of release_date), and
+            # `genre` is only filled in when metadata enrichment ran — the
+            # log records what it was given rather than going looking, which
+            # is what makes it safe to call from a post-download hook.
+            genre=getattr(metadata, "genre", "") or "",
+            release_year=str(getattr(metadata, "year", "") or ""),
+            duration_ms=int(getattr(metadata, "duration_ms", 0) or 0),
         )
 
     _on_track.__qualname__ = "download_log.record_hook.on_track"
