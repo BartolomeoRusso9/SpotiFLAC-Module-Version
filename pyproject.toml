@@ -114,6 +114,14 @@ target-version = ["py310"]
 [tool.ruff]
 line-length = 88
 
+[tool.ruff.lint]
+# Pin the rule set explicitly. With no `select`, Ruff applies whatever its
+# current default is — and Ruff 0.16 (Aug 2026) expanded that default, which
+# turned CI red (500+ findings: BLE001, RUF012, S110, N999, …) with zero code
+# changes. This is the historical default set; broaden it deliberately later
+# and fix findings in batches rather than having a release do it for us.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.ruff.lint.per-file-ignores]
 # Imports deliberately placed after module-level setup code (see the
 # comments at each site): a circular-import guard in core/__init__.py,
