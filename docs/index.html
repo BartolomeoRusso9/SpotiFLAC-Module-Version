@@ -388,7 +388,7 @@ SpotiFLAC(
         </details>
         <details class="faq-item">
           <summary>Can I write my own extension?</summary>
-          <div class="faq-answer">Yes — JavaScript and Python are both supported. <code class="mono">spotiflac --ext-scaffold NAME</code> generates a working starting point for either, and <code class="mono">spotiflac --ext-dry-run PATH</code> validates it (manifest, entry point, exposes the right shape) without installing it or contacting any registry. Reading the loader source directly (<code class="mono">SpotiFLAC/extensions/</code>) still helps for anything beyond the basics.</div>
+          <div class="faq-answer">Yes — JavaScript and Python are both supported. <code class="mono">spotiflac --ext-scaffold NAME</code> generates a working starting point for either, and <code class="mono">spotiflac --ext-dry-run PATH</code> validates it (manifest, entry point, exposes the right shape) without installing it or contacting any registry. For Python there's a full walkthrough — the <code class="mono">BaseProvider</code> contract, the <code class="mono">core</code> toolbox, a complete example provider, packaging and publishing: see <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/blob/main/docs/guide/python-extensions.md" target="_blank" rel="noopener">Writing a Python Extension</a>.</div>
         </details>
         <details class="faq-item">
           <summary>GUI or web mode — which should I use?</summary>
