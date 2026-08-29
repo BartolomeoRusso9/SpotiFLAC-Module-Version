@@ -287,8 +287,6 @@ jobs:
             cat ai_changelog.md >> release_body.md
             
             cat << 'EOF' >> release_body.md
-            
-            ### WORKING APIs
 
             ## Downloads
             

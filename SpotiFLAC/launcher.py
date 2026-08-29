@@ -20,14 +20,19 @@ import json
 import logging
 import os
 import sys
+import time
 from collections.abc import Awaitable, Callable
 
 from .check_update import check_for_updates_async
 from .client import _CleanConsoleFormatter
 from .core.library_notify import LIBRARY_TOKEN_ENV, LIBRARY_USER_ENV
 from .core.library_notify import SUPPORTED as LIBRARY_SUPPORTED
+from .core.notifiers import EVENTS as NOTIFY_EVENTS
+from .core.notifiers import KINDS as NOTIFY_KINDS
+from .core.notifiers import NOTIFY_TOKEN_ENV, NOTIFY_URL_ENV
 from .core.report import RunReport
 from .downloader import DownloadOptions, SpotiflacDownloader
+from .core.web_users import ROLES as WEB_USER_ROLES
 from .extensions.trust import TRUST_TIERS
 from .interactive import run_interactive
 
@@ -53,6 +58,21 @@ def _early_urls_from_argv(flag: str) -> list[str]:
         elif token.startswith(f"{flag}="):
             urls.append(token.split("=", 1)[1])
     return urls
+
+
+def _argv_has(*flags: str) -> bool:
+    """True if any of `flags` is present in argv, bare or in `flag=value` form.
+
+    The subcommand dispatch below routes on raw membership checks; without
+    this, a flag that takes a value (`--upgrade-library=/music`) would slip
+    past its own handler and fall through to the ordinary download path.
+    argparse itself accepts either form, so only the routing check needs it.
+    """
+    return any(
+        arg == flag or arg.startswith(f"{flag}=")
+        for arg in sys.argv[1:]
+        for flag in flags
+    )
 
 
 def _early_registries_from_argv() -> list[str]:
@@ -678,6 +698,41 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "portable.",
     )
 
+    notify_grp = parser.add_argument_group("Notifications")
+    notify_grp.add_argument(
+        "--notify",
+        dest="notify",
+        choices=list(NOTIFY_KINDS),
+        default=None,
+        help="Send run results to a webhook, Discord, Telegram or ntfy. "
+        "Off unless given; nothing is built in.",
+    )
+    notify_grp.add_argument(
+        "--notify-url",
+        dest="notify_url",
+        default=None,
+        help=f"Destination. Falls back to ${NOTIFY_URL_ENV}. Not readable from "
+        "the GUI/web config on purpose — this sends data off the machine.",
+    )
+    notify_grp.add_argument(
+        "--notify-token",
+        dest="notify_token",
+        default=None,
+        help=f"Bearer token (ntfy, webhook) or bot token (Telegram). Falls "
+        f"back to ${NOTIFY_TOKEN_ENV}.",
+    )
+    notify_grp.add_argument(
+        "--notify-chat-id", dest="notify_chat_id", default="", metavar="ID"
+    )
+    notify_grp.add_argument(
+        "--notify-on",
+        dest="notify_on",
+        choices=list(NOTIFY_EVENTS),
+        default="summary",
+        help="'summary' (default) sends one message for the whole run; "
+        "'success'/'failure'/'both' send one per track.",
+    )
+
     output_grp = parser.add_argument_group("Output")
     output_grp.add_argument(
         "--json",
@@ -770,6 +825,250 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     )
 
     return parser.parse_args()
+
+
+# ─────────────────────────────────────────────────────────────
+#  Subscriptions (--subscribe / --check-subscriptions)
+# ─────────────────────────────────────────────────────────────
+
+SUBSCRIPTION_FLAGS = (
+    "--subscribe",
+    "--unsubscribe",
+    "--subscriptions",
+    "--check-subscriptions",
+)
+
+
+def _subscription_parser() -> argparse.ArgumentParser:
+    # allow_abbrev=False for the same reason the --web parser sets it:
+    # `--subscribe` is a prefix of `--subscribe-groups`/`--subscribe-backfill`,
+    # and with abbreviation on argparse calls a bare `--subscribe` ambiguous
+    # and exits(2).
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--subscribe", dest="subscribe", default=None, metavar="URL")
+    parser.add_argument(
+        "--unsubscribe", dest="unsubscribe", default=None, metavar="URL"
+    )
+    parser.add_argument("--subscriptions", action="store_true")
+    parser.add_argument("--check-subscriptions", dest="check", action="store_true")
+    parser.add_argument(
+        "--subscribe-groups",
+        dest="groups",
+        default=None,
+        metavar="album,single",
+        help="Release types to follow: any of "
+        f"{', '.join(subscription_groups())} — or 'all'.",
+    )
+    parser.add_argument(
+        "--subscribe-backfill",
+        dest="backfill",
+        action="store_true",
+        help="Treat the existing back catalogue as new. Off by default: a "
+        "new subscription records what exists today as already-seen, so the "
+        "first thing it fetches is the first thing released after you "
+        "subscribed.",
+    )
+    parser.add_argument(
+        "--subscribe-reset",
+        dest="reset",
+        default=None,
+        metavar="URL",
+        help="Forget what this subscription has seen, so the whole catalogue "
+        "counts as new again.",
+    )
+    parser.add_argument("--subscribe-name", dest="sub_name", default="", metavar="NAME")
+    parser.add_argument("--download", dest="download", action="store_true")
+    parser.add_argument("--json", dest="as_json", action="store_true")
+    parser.add_argument("--profile", dest="profile", default=None)
+    parser.add_argument("--output-dir", dest="output_dir", default=None)
+    return parser
+
+
+def subscription_groups() -> tuple[str, ...]:
+    from .core.subscriptions import RELEASE_GROUPS
+
+    return RELEASE_GROUPS
+
+
+def _print_subscriptions(rows: list[dict]) -> None:
+    if not rows:
+        print("No subscriptions. Add one with: spotiflac --subscribe <artist URL>")
+        return
+    for row in rows:
+        state = "" if row["enabled"] else "  (disabled)"
+        checked = (
+            time.strftime("%Y-%m-%d %H:%M", time.localtime(row["last_checked_at"]))
+            if row["last_checked_at"]
+            else "never"
+        )
+        print(f"{row['name'] or '(unnamed)'}{state}")
+        print(f"    {row['url']}")
+        print(
+            f"    groups: {row['include_groups']}  ·  seen: {row['seen_count']} "
+            f"release(s)  ·  last checked: {checked}"
+        )
+        if row["last_error"]:
+            print(f"    last error: {row['last_error']}")
+        if row["output_dir"]:
+            print(f"    into: {row['output_dir']}")
+
+
+async def _handle_subscriptions() -> None:
+    """Everything behind the --subscribe* / --check-subscriptions flags.
+
+    Kept in one function, and dispatched from amain() the same way --cache-*
+    and --trust-key-* are, so a subscription command never falls through into
+    the ordinary download path (which would then complain about a missing
+    URL).
+    """
+    from .core import subscriptions
+
+    parser = _subscription_parser()
+    args, _ = parser.parse_known_args(sys.argv[1:])
+
+    if args.subscribe:
+        try:
+            sub = subscriptions.add(
+                args.subscribe,
+                name=args.sub_name,
+                include_groups=args.groups,
+                output_dir=args.output_dir or "",
+            )
+        except subscriptions.SubscriptionError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Following {sub.name or sub.url} ({sub.include_groups}).")
+        if not args.backfill:
+            print(
+                "The current catalogue will be recorded as already-seen on the "
+                "first check; only later releases are fetched. Use "
+                "--subscribe-backfill on the next --check-subscriptions to "
+                "fetch what is already out."
+            )
+        return
+
+    if args.unsubscribe:
+        removed = subscriptions.remove_by_url(args.unsubscribe)
+        print(
+            f"Unfollowed {args.unsubscribe}."
+            if removed
+            else f"Not following {args.unsubscribe}."
+        )
+        return
+
+    if args.reset:
+        sub = subscriptions.get_by_url(args.reset)
+        if sub is None:
+            print(f"Not following {args.reset}.", file=sys.stderr)
+            sys.exit(1)
+        subscriptions.forget_seen(sub.id)
+        print(
+            f"Reset {sub.name or sub.url}. The next check with "
+            "--subscribe-backfill will treat the whole catalogue as new."
+        )
+        return
+
+    if args.subscriptions:
+        rows = [s.to_dict() for s in subscriptions.list_all()]
+        (
+            print(json.dumps(rows, indent=2))
+            if args.as_json
+            else _print_subscriptions(rows)
+        )
+        return
+
+    # --check-subscriptions
+    results = await subscriptions.check_all_async(backfill=args.backfill)
+
+    if args.download:
+        profile_defaults = (
+            await _load_profile_into_defaults(args.profile) if args.profile else {}
+        ) or load_config()
+        await subscriptions.sync_async(
+            results, _subscription_downloader(profile_defaults, args.output_dir)
+        )
+
+    if args.as_json:
+        print(json.dumps([r.to_dict() for r in results], indent=2))
+        return
+
+    total_new = sum(len(r.new) for r in results)
+    for result in results:
+        label = (
+            result.artist_name or result.subscription.name or result.subscription.url
+        )
+        if result.error:
+            print(f"{label}: error — {result.error}")
+        elif result.watermarked:
+            print(f"{label}: first check, {result.total} release(s) recorded as seen.")
+        elif result.new:
+            print(f"{label}: {len(result.new)} new release(s)")
+            for release in result.new:
+                year = f" ({release.year})" if release.year else ""
+                print(f"    · {release.title}{year} [{release.type}]")
+        else:
+            print(f"{label}: nothing new.")
+    if total_new and not args.download:
+        print(f"\n{total_new} new release(s). Re-run with --download to fetch them.")
+
+
+def _subscription_downloader(profile_defaults: dict, output_dir_override: str | None):
+    """A `download(url, output_dir)` closure over the ordinary download path.
+
+    Subscriptions deliberately own no download settings of their own: a
+    fetched release should land with exactly the naming, quality, lyrics and
+    tagging the same instance would have used for a manual download, which
+    means reading them from the profile/config like every other run does.
+    """
+    pd = profile_defaults or {}
+
+    async def _download(url: str, sub_output_dir: str) -> None:
+        destination = output_dir_override or sub_output_dir or pd.get("output_dir")
+        if not destination:
+            raise ValueError(
+                "No destination for this subscription: pass --output-dir, give "
+                "the subscription one when adding it, or save a profile with "
+                "an output_dir."
+            )
+        await _run_download_async(
+            url,
+            output_dir=destination,
+            services=pd.get("services") or ["ext:tidal-web"],
+            filename_format=pd.get("filename_format", "{title} - {artist}"),
+            use_track_numbers=pd.get("use_track_numbers", False),
+            use_album_track_numbers=pd.get("use_album_track_numbers", False),
+            use_artist_subfolders=pd.get("use_artist_subfolders", False),
+            use_album_subfolders=pd.get("use_album_subfolders", False),
+            create_playlist_subfolders=pd.get("create_playlist_subfolders", True),
+            loop=None,
+            quality=pd.get("quality", "LOSSLESS"),
+            first_artist_only=pd.get("first_artist_only", False),
+            artist_separator=pd.get("artist_separator"),
+            include_featuring=pd.get("include_featuring", False),
+            log_level=logging.ERROR,
+            output_path=None,
+            allow_fallback=pd.get("allow_fallback", True),
+            embed_lyrics=pd.get("embed_lyrics", True),
+            lyrics_providers=pd.get("lyrics_providers") or ["apple", "lrclib"],
+            enrich_metadata=pd.get("enrich_metadata", True),
+            enrich_providers=pd.get("enrich_providers")
+            or ["deezer", "apple", "qobuz", "tidal"],
+            qobuz_local_api_url=pd.get("qobuz_local_api_url"),
+            tidal_custom_api=pd.get("tidal_custom_api"),
+            track_max_retries=pd.get("track_max_retries", 0),
+            post_download_action=pd.get("post_download_action", "none"),
+            post_download_command=pd.get("post_download_command", ""),
+            resume=pd.get("resume", True),
+            post_download_hooks=pd.get("post_download_hooks") or [],
+            timeout_s=pd.get("timeout_s"),
+            transcode_to=pd.get("transcode_to"),
+            transcode_bitrate=pd.get("transcode_bitrate", "320k"),
+            transcode_keep_original=pd.get("transcode_keep_original", False),
+            max_concurrent_downloads=pd.get("max_concurrent_downloads", 2),
+            verify_hires=pd.get("verify_hires", False),
+        )
+
+    return _download
 
 
 async def watch_forever(
@@ -886,6 +1185,11 @@ async def _run_download_async(
     library_token: str | None = None,
     library_user: str | None = None,
     write_m3u: str | None = None,
+    notify: str | None = None,
+    notify_url: str | None = None,
+    notify_token: str | None = None,
+    notify_chat_id: str = "",
+    notify_on: str = "summary",
 ) -> None:
     """Async bridge to SpotiflacDownloader, bypassing the synchronous
     `SpotiFLAC()` wrapper (which would do a nested `asyncio.run()` and
@@ -908,10 +1212,40 @@ async def _run_download_async(
     # The report backs three separate features now (--json, --write-m3u, and
     # the count in the library-rescan log line), so it is built whenever any
     # of them is on rather than for --json alone.
-    report = RunReport() if (json_report or write_m3u) else None
+    notify_target = None
+    if notify:
+        from .core.notifiers import NotifierError, build_target, notify_hook
+
+        try:
+            notify_target = build_target(
+                notify, notify_url, notify_token, notify_chat_id, notify_on
+            )
+        except NotifierError as exc:
+            # Up front, before anything is downloaded: a notifier configured
+            # wrongly is a typo to fix now, not something to discover after a
+            # two-hour discography finishes and says nothing.
+            logger.error("[notify] %s", exc)
+            raise SystemExit(2) from exc
+
+    # The report backs --json, --write-m3u, the count in the library-rescan
+    # log line, and now the run-summary notification.
+    report = (
+        RunReport()
+        if (json_report or write_m3u or (notify_on == "summary" and notify_target))
+        else None
+    )
     hooks: list = list(post_download_hooks or [])
     if report is not None:
         hooks.append(report)
+    if notify_target is not None and notify_on != "summary":
+        hooks.append(notify_hook(notify_target))
+
+    # Every finished track is recorded durably, so quotas have something to
+    # count and "have I already got this?" can be answered by ISRC rather
+    # than by looking at the filesystem. See core/download_log.py.
+    from .core.download_log import record_hook
+
+    hooks.append(record_hook())
 
     opts = DownloadOptions(
         output_dir=output_dir,
@@ -976,6 +1310,11 @@ async def _run_download_async(
             await _notify_library_async(
                 library_type, library_url, library_token, library_user
             )
+
+        if notify_target is not None and notify_on == "summary" and report is not None:
+            from .core.notifiers import notify_run_summary
+
+            await notify_run_summary(notify_target, report)
 
         if json_report and report is not None:
             print(report.to_json(), flush=True)
@@ -1079,16 +1418,98 @@ async def amain() -> None:
         user_parser.add_argument(
             "--web-user-add", dest="creds", nargs=2, metavar=("USERNAME", "PASSWORD")
         )
+        user_parser.add_argument(
+            "--role",
+            choices=list(WEB_USER_ROLES),
+            default="user",
+            help="'admin' may see instance-wide metrics and manage other "
+            "accounts' quotas; 'user' (default) may not.",
+        )
+        user_parser.add_argument(
+            "--daily-tracks",
+            type=int,
+            default=0,
+            help="Tracks this account may download per rolling 24h. "
+            "0 (default) is unlimited.",
+        )
+        user_parser.add_argument(
+            "--daily-mb",
+            type=int,
+            default=0,
+            help="Megabytes per rolling 24h. 0 (default) is unlimited.",
+        )
         user_args, _ = user_parser.parse_known_args(sys.argv[1:])
 
         from .core.web_users import WebUserError, create_user
 
         try:
-            create_user(*user_args.creds)
+            create_user(
+                *user_args.creds,
+                role=user_args.role,
+                daily_track_quota=user_args.daily_tracks,
+                daily_byte_quota=user_args.daily_mb * 1024 * 1024,
+            )
         except WebUserError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
-        print(f"Web user '{user_args.creds[0]}' created.")
+        print(f"Web user '{user_args.creds[0]}' created ({user_args.role}).")
+        return
+
+    if _argv_has("--web-user-quota"):
+        quota_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        quota_parser.add_argument(
+            "--web-user-quota", dest="username", metavar="USERNAME"
+        )
+        quota_parser.add_argument("--daily-tracks", type=int, default=None)
+        quota_parser.add_argument("--daily-mb", type=int, default=None)
+        quota_args, _ = quota_parser.parse_known_args(sys.argv[1:])
+
+        from .core.web_users import quota_usage, set_quota
+
+        updated = set_quota(
+            quota_args.username,
+            daily_track_quota=quota_args.daily_tracks,
+            daily_byte_quota=(
+                None
+                if quota_args.daily_mb is None
+                else quota_args.daily_mb * 1024 * 1024
+            ),
+        )
+        if not updated:
+            print(f"No web user named '{quota_args.username}'.", file=sys.stderr)
+            sys.exit(1)
+        usage = quota_usage(quota_args.username)
+        print(
+            f"{quota_args.username}: "
+            f"{usage['tracks_used']}/{usage['tracks_limit'] or '∞'} tracks, "
+            f"{usage['bytes_used'] // (1024 * 1024)}/"
+            f"{(usage['bytes_limit'] // (1024 * 1024)) if usage['bytes_limit'] else '∞'}"
+            f" MB in the last {int(usage['window_hours'])}h."
+        )
+        return
+
+    if "--web-user-role" in sys.argv:
+        role_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        role_parser.add_argument(
+            "--web-user-role",
+            dest="pair",
+            nargs=2,
+            metavar=("USERNAME", "ROLE"),
+        )
+        role_args, _ = role_parser.parse_known_args(sys.argv[1:])
+
+        from .core.web_users import WebUserError, set_role
+
+        try:
+            updated = set_role(*role_args.pair)
+        except WebUserError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(
+            f"'{role_args.pair[0]}' is now {role_args.pair[1]}."
+            if updated
+            else f"No web user named '{role_args.pair[0]}'."
+        )
         return
 
     if "--web-user-remove" in sys.argv:
@@ -1168,10 +1589,22 @@ async def amain() -> None:
         return
 
     if "--web-user-list" in sys.argv:
-        from .core.web_users import list_usernames
+        from .core.web_users import list_users
 
-        users = list_usernames()
-        print("\n".join(users) if users else "No web users configured.")
+        users = list_users()
+        if not users:
+            print("No web users configured.")
+            return
+        for user in users:
+            tracks = user["daily_track_quota"] or "∞"
+            size = (
+                f"{user['daily_byte_quota'] // (1024 * 1024)} MB"
+                if user["daily_byte_quota"]
+                else "∞"
+            )
+            print(
+                f"{user['username']}  [{user['role']}]  {tracks} tracks/day, {size}/day"
+            )
         return
 
     if "--health-check" in sys.argv:
@@ -1270,6 +1703,90 @@ async def amain() -> None:
             # is never written to the console. Use trusted_keys.json directly
             # if you need to inspect or export the public key bytes.
             print(f"key-{idx}: {name}")
+        return
+
+    if _argv_has("--upgrade-library"):
+        # allow_abbrev=False: `--upgrade-library` is a prefix of
+        # `--upgrade-library-target`, and argparse would call a bare
+        # `--upgrade-library` ambiguous and exit(2).
+        up_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        up_parser.add_argument("--upgrade-library", dest="path", required=True)
+        up_parser.add_argument(
+            "--upgrade-target",
+            dest="target",
+            default="LOSSLESS",
+            help="Quality to bring the library up to (default: LOSSLESS). "
+            "Anything normalize_quality() understands: LOSSLESS, HI_RES, …",
+        )
+        up_parser.add_argument(
+            "--upgrade-verify-hires",
+            dest="verify",
+            action="store_true",
+            help="Also reclassify files that declare Hi-Res but whose audio "
+            "stops at CD range. Needs the 'hires' extra, and decodes ~30s per "
+            "file — slow on a large library.",
+        )
+        up_parser.add_argument(
+            "--upgrade-download",
+            dest="download",
+            action="store_true",
+            help="Actually re-download what was found. Without this the "
+            "command only reports (a scan is safe; a re-download is not).",
+        )
+        up_parser.add_argument("--upgrade-limit", dest="limit", type=int, default=None)
+        up_parser.add_argument("--no-recursive", dest="recursive", action="store_false")
+        up_parser.add_argument("--verbose", "-v", action="store_true")
+        up_parser.add_argument("--json", dest="as_json", action="store_true")
+        up_parser.add_argument("--profile", dest="profile", default=None)
+        up_parser.add_argument("--output-dir", dest="output_dir", default=None)
+        up_args, _ = up_parser.parse_known_args(sys.argv[1:])
+
+        from .tools.library_upgrade_cli import run as run_upgrade_scan
+        from .tools.library_upgrade_cli import run_and_upgrade_async
+
+        if not up_args.download:
+            run_upgrade_scan(
+                up_args.path,
+                up_args.target,
+                recursive=up_args.recursive,
+                verify_hires=up_args.verify,
+                as_json=up_args.as_json,
+                verbose=up_args.verbose,
+            )
+            return
+
+        profile_defaults = (
+            await _load_profile_into_defaults(up_args.profile)
+            if up_args.profile
+            else {}
+        ) or load_config()
+        # The upgraded file goes back where the library already is unless
+        # told otherwise, which is what makes this an *upgrade* rather than a
+        # second copy somewhere else.
+        destination = (
+            up_args.output_dir or profile_defaults.get("output_dir") or up_args.path
+        )
+        downloader = _subscription_downloader(
+            {**profile_defaults, "quality": up_args.target}, destination
+        )
+
+        async def _download(url: str) -> None:
+            await downloader(url, destination)
+
+        await run_and_upgrade_async(
+            up_args.path,
+            up_args.target,
+            _download,
+            recursive=up_args.recursive,
+            verify_hires=up_args.verify,
+            limit=up_args.limit,
+            as_json=up_args.as_json,
+            verbose=up_args.verbose,
+        )
+        return
+
+    if _argv_has(*SUBSCRIPTION_FLAGS, "--subscribe-reset"):
+        await _handle_subscriptions()
         return
 
     if "--interactive" in sys.argv:
@@ -1468,6 +1985,11 @@ async def amain() -> None:
             m3u_format=args.m3u_format,
             max_concurrent_downloads=args.max_concurrent,
             verify_hires=args.verify_hires,
+            notify=args.notify,
+            notify_url=args.notify_url,
+            notify_token=args.notify_token,
+            notify_chat_id=args.notify_chat_id,
+            notify_on=args.notify_on,
         )
 
     await _run_once()

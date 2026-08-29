@@ -14,7 +14,7 @@
 services:
   spotiflac-web:
     # Swap for the published image if you don't want to build locally:
-    # image: ghcr.io/bartolomeorusso9/spotiflac-module-version:latest
+    # image: ghcr.io/bartolomeorusso9/spotiflac:latest
     build: .
     command: ["--web", "--host", "0.0.0.0", "--port", "8000"]
     ports:

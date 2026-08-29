@@ -201,7 +201,11 @@ def ensure_node_installed(
 
     if proc.returncode != 0:
         stderr_tail = (proc.stderr or "").strip().splitlines()[-1:] or [""]
-        needs_root = platform.system() == "Linux" and os.geteuid() != 0
+        needs_root = (
+            platform.system() == "Linux"
+            and hasattr(os, "geteuid")
+            and os.geteuid() != 0
+        )
         sudo_hint = (
             f" This usually needs root — try: sudo {' '.join(argv)}"
             if needs_root

@@ -48,6 +48,9 @@
     <button class="nav-btn" id="nav-local" onclick="switchView('local')" title="Fix Local Files" data-label="Fix Local Files">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
     </button>
+    <button class="nav-btn" id="nav-following" onclick="switchView('following'); loadSubscriptions();" title="Following" data-label="Following">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+    </button>
     <button class="nav-btn" id="nav-logs"     onclick="switchView('logs')"     title="Logs" data-label="Logs">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
     </button>
@@ -368,6 +371,49 @@
       </div>
     </div>
 
+    <div class="view" id="view-following">
+      <div class="s-header">
+        <h1>Following</h1>
+        <div class="s-actions">
+          <button class="act-btn secondary" type="button" onclick="checkSubscriptions(false)">Check for new</button>
+          <button class="act-btn primary" type="button" onclick="checkSubscriptions(true)">Check &amp; download</button>
+        </div>
+      </div>
+      <div class="s-body">
+        <div class="s-section">
+          <div class="s-title">Follow an artist</div>
+          <p style="font-size:12px;color:var(--muted);margin:-4px 0 12px;line-height:1.6;">
+            Paste an artist link. The catalogue that already exists is recorded as
+            seen, so the first thing downloaded is the first thing released
+            <em>after</em> you follow — not four hundred back-catalogue tracks.
+            Use <strong>Reset</strong> on a row if you do want the back catalogue.
+          </p>
+          <div class="s-row" style="align-items:stretch;gap:8px;">
+            <input type="text" id="subscription-url-input" class="full" placeholder="https://open.spotify.com/artist/…" style="flex:1;">
+            <select id="subscription-groups" style="max-width:170px;">
+              <option value="album,single">Albums &amp; singles</option>
+              <option value="album">Albums only</option>
+              <option value="single">Singles only</option>
+              <option value="all">Everything</option>
+            </select>
+            <button class="act-btn primary" type="button" onclick="addSubscription()" style="padding:8px 16px;font-size:12px;white-space:nowrap;">Follow</button>
+          </div>
+        </div>
+
+        <div class="s-section">
+          <div class="s-title">Followed artists</div>
+          <div id="subscription-list" class="sort-list" style="margin-top:4px;">
+            <div class="s-label" style="font-size:11.5px;">Loading…</div>
+          </div>
+        </div>
+
+        <div class="s-section" id="subscription-results-section" style="display:none;">
+          <div class="s-title">Last check</div>
+          <div id="subscription-results" class="sort-list" style="margin-top:4px;"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="view" id="view-settings">
       <div class="s-header">
       <h1>Settings</h1>
@@ -681,6 +727,24 @@
         </div>
 
         <div class="tc" id="tc-extensions">
+          <div class="s-section">
+            <div class="s-title">Extension Health</div>
+            <p style="font-size:12px;color:var(--muted);margin:-4px 0 12px;line-height:1.6;">
+              How each provider has actually behaved on this machine — attempts,
+              how often they worked, how long they took, and what the last failure
+              said. Worst first. An extension listed as <em>never tried</em> is not
+              broken; nothing has reached it yet, usually because another provider
+              earlier in your service order keeps succeeding first.
+            </p>
+            <div class="s-row" style="align-items:stretch;gap:8px;">
+              <button class="act-btn secondary" type="button" onclick="loadExtensionHealth()" style="padding:8px 16px;font-size:12px;">Refresh</button>
+              <button class="act-btn secondary" type="button" onclick="resetExtensionHealth()" style="padding:8px 16px;font-size:12px;" title="Clear the recorded counters — useful after fixing a broken extension, so old failures stop dominating its success rate.">Reset stats</button>
+            </div>
+            <div id="ext-health-list" class="sort-list" style="margin-top:12px;">
+              <div class="s-label" style="font-size:11.5px;">Loading extension health…</div>
+            </div>
+          </div>
+
           <div class="s-section">
             <div class="s-title">Extension Registries</div>
             <p style="font-size:12px;color:var(--muted);margin:-4px 0 12px;line-height:1.6;">

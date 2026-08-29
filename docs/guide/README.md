@@ -11,7 +11,9 @@ usefully. The text is unchanged by the split.
 | [Configuration](configuration.md) | Every option: naming, quality, lyrics, enrichment, transcoding, watch mode, profiles |
 | [API Reference](api-reference.md) | `SpotiFLAC` and `AsyncSpotiFLAC`, and the objects they return |
 | [Local Tagging](local-tagging.md) | Retagging an existing library, MusicBrainz enrichment, download validation |
-| [Automation & Operations](automation.md) | JSON output, post-download hooks, M3U, library rescan, cache maintenance, running the web server |
+| [Automation & Operations](automation.md) | JSON output, post-download hooks, notifications, M3U, library rescan, cache maintenance, running the web server |
+| [Following Artists](subscriptions.md) | Subscriptions, new-release checks, and the library-upgrade pass |
+| [REST API](rest-api.md) | The versioned `/api/v1` surface, quotas and the admin endpoints |
 | [Docker](docker.md) | Headless and NAS setups |
 | [CLI](cli.md) | The standalone executables |
 
