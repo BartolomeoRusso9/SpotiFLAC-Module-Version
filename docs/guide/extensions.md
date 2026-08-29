@@ -145,7 +145,7 @@ python -m SpotiFLAC.tools.registry_signing_cli sign \
 ### Developing Extensions
 
 - **JavaScript extensions** reuse the format built for [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile). Its [Extension Development Guide](https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/main/docs/EXTENSION_DEVELOPMENT.md) is the closest available reference, but it was written for Mobile — some details (packaging, available runtime capabilities) may not match this project exactly. Verify against this repository's own loader (`SpotiFLAC/extensions/runtime.py`) before relying on it.
-- **Python extensions** are ZIP packages (`.spotiflac-ext` / `.sflx`) containing a manifest and a Python module, loaded directly by `SpotiFLAC/extensions/python_provider.py`. There's no separate guide yet — reading that file, and an existing extension's manifest, is currently the best way to see the expected shape.
+- **Python extensions** are ZIP packages (`.spotiflac-ext` / `.sflx`) containing a manifest and a Python module, loaded directly by `SpotiFLAC/extensions/python_provider.py`. See **[Writing a Python Extension](python-extensions.md)** for a full walkthrough — the `BaseProvider` contract, the `core` toolbox (`http`, `errors`, `models`, `tagger`, validation, ISRC/link helpers), a complete example provider, and packaging/registry steps.
 
 **Scaffolding a new extension** generates a starting point that already satisfies this repo's own loader, instead of reverse-engineering the shape from an existing extension:
 

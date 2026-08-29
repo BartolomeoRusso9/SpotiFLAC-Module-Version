@@ -8,6 +8,7 @@ usefully. The text is unchanged by the split.
 | --- | --- |
 | [Quick Start](quick-start.md) | Every way to run it — GUI, web, CLI, interactive wizard, Python — and the URL types it accepts |
 | [Extensions](extensions.md) | Registries, installing providers, signature verification and trust tiers |
+| [Writing a Python Extension](python-extensions.md) | Building a download-provider extension: `BaseProvider`, the `core` toolbox, a full example, packaging and publishing |
 | [Configuration](configuration.md) | Every option: naming, quality, lyrics, enrichment, transcoding, watch mode, profiles |
 | [API Reference](api-reference.md) | `SpotiFLAC` and `AsyncSpotiFLAC`, and the objects they return |
 | [Local Tagging](local-tagging.md) | Retagging an existing library, MusicBrainz enrichment, download validation |
