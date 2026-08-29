@@ -218,9 +218,12 @@ def build_request(
         return target.url, {"content": text[:1900] or "(no content)"}, {}
 
     if target.kind == "telegram":
+        # No parse_mode: the message is plain text (see track_summary), and
+        # asking Telegram to parse it as HTML makes a track title containing
+        # '<' fail the whole send with "can't parse entities".
         return (
             target.url,
-            {"chat_id": target.chat_id, "text": text[:4000], "parse_mode": "HTML"},
+            {"chat_id": target.chat_id, "text": text[:4000]},
             {},
         )
 

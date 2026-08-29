@@ -104,6 +104,11 @@ class _ProviderStats:
             self.failures += 1
             self.last_failure = now
             self.last_outcome = "failure"
+            # last_duration_s tracks the most recent attempt of any kind (a
+            # timeout has a meaningful duration too); only avg_duration_s stays
+            # success-only, so a run of failures can't skew the latency EMA.
+            if duration_s > 0:
+                self.last_duration_s = duration_s
             if error:
                 self.last_error = str(error)[:300]
         self.last_attempt = now

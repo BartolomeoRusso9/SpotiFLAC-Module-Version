@@ -87,14 +87,19 @@ async def run_and_upgrade_async(
     """
     from ..core.library_upgrade import plan_async
 
-    report = run(
+    # Scan directly rather than via run(): in --json mode the only thing on
+    # stdout must be the final JSON document below, so the intermediate
+    # human-readable report is suppressed entirely (run() always prints one
+    # form or the other).
+    report = scan_library(
         path,
         target_quality,
         recursive=recursive,
         verify_hires=verify_hires,
-        as_json=False,
-        verbose=verbose,
+        progress=_progress if not as_json else None,
     )
+    if not as_json:
+        print(format_report(report, verbose=verbose))
     if not report.candidates:
         return 0
 

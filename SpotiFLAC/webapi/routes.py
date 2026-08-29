@@ -19,7 +19,10 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .schemas import (
     ApiInfo,
@@ -79,6 +82,10 @@ def _fail(status: int, message: str, detail: str | None = None) -> HTTPException
     Messages here are written for the caller. Anything with internals in it —
     a traceback, a path, a library version — is logged server-side and
     replaced with something generic, the same rule the RPC bridge follows.
+
+    The dict detail is rendered as the top-level body by `_ErrorShapeRoute`
+    below; FastAPI's default handler would otherwise nest it under a second
+    "detail" key and break the ErrorResponse shape these routes declare.
     """
     body: dict[str, Any] = {"error": message}
     if detail:
@@ -86,8 +93,31 @@ def _fail(status: int, message: str, detail: str | None = None) -> HTTPException
     return HTTPException(status_code=status, detail=body)
 
 
+class _ErrorShapeRoute(APIRoute):
+    """Renders an HTTPException raised with a dict detail (see `_fail`) as that
+    dict directly, so the response body matches the declared ErrorResponse
+    model instead of being wrapped in an extra `{"detail": ...}`."""
+
+    def get_route_handler(self):
+        original = super().get_route_handler()
+
+        async def handler(request: Request):
+            try:
+                return await original(request)
+            except StarletteHTTPException as exc:
+                if isinstance(exc.detail, dict):
+                    return JSONResponse(
+                        exc.detail,
+                        status_code=exc.status_code,
+                        headers=getattr(exc, "headers", None),
+                    )
+                raise
+
+        return handler
+
+
 def build_v1_router(deps: ApiDeps) -> APIRouter:
-    router = APIRouter(prefix="/api/v1", tags=["v1"])
+    router = APIRouter(prefix="/api/v1", tags=["v1"], route_class=_ErrorShapeRoute)
 
     # ── Instance ──────────────────────────────────────────────────────────
 

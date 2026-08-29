@@ -70,22 +70,21 @@ class HistoryManager:
 
         try:
             if not self.path.exists():
+                # Nothing to import: mark handled so we don't stat it forever.
+                db.set_meta(_LEGACY_IMPORTED_KEY)
                 return
             legacy = json.loads(self.path.read_text(encoding="utf-8"))
         except Exception:
             # A corrupt or unreadable legacy file is not worth a warning: the
             # history is a convenience, and starting empty is the right
-            # outcome. (This is also what the old get_all() did.)
+            # outcome. (This is also what the old get_all() did.) Mark it
+            # handled — a malformed file will never parse, so retrying every
+            # start is pointless.
+            db.set_meta(_LEGACY_IMPORTED_KEY)
             return
 
-        finally:
-            # Whatever happened above — imported, empty, missing, corrupt —
-            # this file has now had its one chance. Marking it here rather
-            # than only on success means a malformed file is not re-parsed on
-            # every single start.
-            db.set_meta(_LEGACY_IMPORTED_KEY)
-
         if not isinstance(legacy, list):
+            db.set_meta(_LEGACY_IMPORTED_KEY)
             return
 
         rows = []
@@ -100,6 +99,7 @@ class HistoryManager:
                 )
             )
         if not rows:
+            db.set_meta(_LEGACY_IMPORTED_KEY)
             return
         try:
             with db.transaction() as conn:
@@ -109,6 +109,9 @@ class HistoryManager:
                     rows,
                 )
             logger.info("[history] Imported %d entries from %s", len(rows), self.path)
+            # Only now, after the rows are committed: a failed transaction
+            # leaves the file eligible for retry on the next start.
+            db.set_meta(_LEGACY_IMPORTED_KEY)
         except Exception:
             logger.debug("[history] legacy import failed", exc_info=True)
 

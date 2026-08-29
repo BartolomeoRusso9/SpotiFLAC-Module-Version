@@ -61,7 +61,7 @@ Open `http://localhost:8000` in a browser.
 Official Docker images are published on GitHub Container Registry (GHCR), allowing you to run the latest version without building locally.
 
 ```bash
-docker pull ghcr.io/bartolomeorusso9/spotiflac-module-version:latest
+docker pull ghcr.io/bartolomeorusso9/spotiflac:latest
 ```
 
 ### Logs in Headless Environments

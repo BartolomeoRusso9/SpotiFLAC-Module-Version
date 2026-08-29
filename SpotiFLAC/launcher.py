@@ -60,6 +60,21 @@ def _early_urls_from_argv(flag: str) -> list[str]:
     return urls
 
 
+def _argv_has(*flags: str) -> bool:
+    """True if any of `flags` is present in argv, bare or in `flag=value` form.
+
+    The subcommand dispatch below routes on raw membership checks; without
+    this, a flag that takes a value (`--upgrade-library=/music`) would slip
+    past its own handler and fall through to the ordinary download path.
+    argparse itself accepts either form, so only the routing check needs it.
+    """
+    return any(
+        arg == flag or arg.startswith(f"{flag}=")
+        for arg in sys.argv[1:]
+        for flag in flags
+    )
+
+
 def _early_registries_from_argv() -> list[str]:
     return _early_urls_from_argv("--registries")
 
@@ -1023,19 +1038,18 @@ def _subscription_downloader(profile_defaults: dict, output_dir_override: str | 
             use_track_numbers=pd.get("use_track_numbers", False),
             use_album_track_numbers=pd.get("use_album_track_numbers", False),
             use_artist_subfolders=pd.get("use_artist_subfolders", False),
-            use_album_subfolders=pd.get("use_album_subfolders", True),
-            create_playlist_subfolders=pd.get("create_playlist_subfolders", False),
+            use_album_subfolders=pd.get("use_album_subfolders", False),
+            create_playlist_subfolders=pd.get("create_playlist_subfolders", True),
             loop=None,
             quality=pd.get("quality", "LOSSLESS"),
             first_artist_only=pd.get("first_artist_only", False),
             artist_separator=pd.get("artist_separator"),
-            include_featuring=pd.get("include_featuring", True),
+            include_featuring=pd.get("include_featuring", False),
             log_level=logging.ERROR,
             output_path=None,
             allow_fallback=pd.get("allow_fallback", True),
             embed_lyrics=pd.get("embed_lyrics", True),
-            lyrics_providers=pd.get("lyrics_providers")
-            or ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
+            lyrics_providers=pd.get("lyrics_providers") or ["apple", "lrclib"],
             enrich_metadata=pd.get("enrich_metadata", True),
             enrich_providers=pd.get("enrich_providers")
             or ["deezer", "apple", "qobuz", "tidal"],
@@ -1441,7 +1455,7 @@ async def amain() -> None:
         print(f"Web user '{user_args.creds[0]}' created ({user_args.role}).")
         return
 
-    if "--web-user-quota" in sys.argv:
+    if _argv_has("--web-user-quota"):
         quota_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
         quota_parser.add_argument(
             "--web-user-quota", dest="username", metavar="USERNAME"
@@ -1691,7 +1705,7 @@ async def amain() -> None:
             print(f"key-{idx}: {name}")
         return
 
-    if "--upgrade-library" in sys.argv:
+    if _argv_has("--upgrade-library"):
         # allow_abbrev=False: `--upgrade-library` is a prefix of
         # `--upgrade-library-target`, and argparse would call a bare
         # `--upgrade-library` ambiguous and exit(2).
@@ -1771,9 +1785,7 @@ async def amain() -> None:
         )
         return
 
-    if any(flag in sys.argv for flag in SUBSCRIPTION_FLAGS) or (
-        "--subscribe-reset" in sys.argv
-    ):
+    if _argv_has(*SUBSCRIPTION_FLAGS, "--subscribe-reset"):
         await _handle_subscriptions()
         return
 

@@ -721,6 +721,19 @@ async def download_one_async(
                     provider.name, str(exc) or type(exc).__name__
                 )
 
+            if result.success and not result.skipped:
+                # Record the provider outcome the moment its download settles,
+                # before transcode/move post-processing: the latency sample
+                # should measure the provider, and a post-processing failure
+                # further down must not erase the fact that the provider itself
+                # delivered the track. (The `skipped` case is recorded below
+                # with a zero duration on purpose.)
+                await _record_provider_outcome(
+                    provider.name,
+                    True,
+                    time.monotonic() - provider_started_at,
+                )
+
             if result.success:
                 if opts.transcode_to:
                     # A file already existing in another format is also converted:
@@ -770,9 +783,7 @@ async def download_one_async(
                     metadata.title,
                 )
                 _schedule_hires_check(opts, result)
-                await _record_provider_outcome(
-                    provider.name, True, time.monotonic() - provider_started_at
-                )
+                # Success already recorded above, at provider-settle time.
                 return result
 
             errors[provider.name] = result.error or "unknown error"

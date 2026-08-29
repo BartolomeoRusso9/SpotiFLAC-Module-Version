@@ -139,6 +139,11 @@ class JobQueue:
         # web_users-backed check.
         self._quota_check = quota_check
         self._lock = threading.Lock()
+        # Guards the write+forget store mutations that deliberately run outside
+        # `_lock` (they do I/O). Without it, two threads' `_write`/`_forget`
+        # pairs can interleave so an evicted job is deleted before its own
+        # write lands, leaving an orphan row that nothing ever cleans up.
+        self._persist_lock = threading.Lock()
 
         # Restore before the workers start, so a recovered job cannot be
         # picked up while the rest of the backlog is still being read.
@@ -289,8 +294,9 @@ class JobQueue:
                 )
             self._jobs[job.id] = job
             evicted = self._evict_finished_locked()
-        self._write(job)
-        self._forget(evicted)
+        with self._persist_lock:
+            self._write(job)
+            self._forget(evicted)
         self._queue.put(job.id)
         return job
 
@@ -372,7 +378,8 @@ class JobQueue:
                     job.status = status
                     job.finished_at = time.time()
                     evicted = self._evict_finished_locked()
-                self._write(job)
-                self._forget(evicted)
+                with self._persist_lock:
+                    self._write(job)
+                    self._forget(evicted)
             finally:
                 self._queue.task_done()
