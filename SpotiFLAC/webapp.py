@@ -496,11 +496,13 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         # Mirrors what _on_loaded() does for the desktop window, minus the
         # window-specific bits (there is no self._window in web mode, so
         # every push below goes out over the WebSocket only).
-        await run_in_threadpool(api.log, "Python backend connected (web mode).", "info")
+        await run_in_threadpool(
+            api.log, "Python backend connected (web mode).", "debug"
+        )
         await run_in_threadpool(
             api.log,
             f"Default download folder: {api.download_dir}",
-            "info",
+            "debug",
         )
         await run_in_threadpool(api._check_ffmpeg_startup)
         await run_in_threadpool(api._check_node_startup)

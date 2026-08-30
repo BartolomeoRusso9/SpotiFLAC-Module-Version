@@ -75,7 +75,6 @@
       --shadow-soft: 0 20px 48px rgba(0, 0, 0, 0.4);
       --shadow-strong: 0 28px 64px rgba(0, 0, 0, 0.6);
     }
-    body.dark-theme .s-section { background: #0a0a0a; }
 
     html, body { height: 100%; overflow: hidden; background: var(--bg); }
     body {
@@ -239,6 +238,13 @@
       flex-shrink: 0;
       overflow: visible;
       box-shadow: inset 1px 0 0 rgba(255,255,255,0.5), inset -4px 0 8px rgba(15,23,42,0.02);
+      /* backdrop-filter makes this a stacking context, so the nav tooltips'
+         own z-index can never lift them out of the sidebar — they were being
+         painted under whatever #content stacked on top (album card, track
+         table, toasts). Positioning the sidebar and stacking it above
+         #content moves the whole subtree, tooltips included, in front. */
+      position: relative;
+      z-index: 150;
     }
     .nav-btn {
       width: 40px; height: 40px;
@@ -270,6 +276,9 @@
     /* ── Content ── */
     #content {
       flex: 1;
+      /* Kept below #sidebar (z-index 150) so nav tooltips overhang it. */
+      position: relative;
+      z-index: 1;
       display: flex;
       flex-direction: column;
       overflow-y: auto;
@@ -450,7 +459,7 @@
       color: var(--muted);
       border: 1px solid var(--border2);
       border-radius: 12px;
-      background: rgba(255,255,255,.05);
+      background: var(--surface2);
     }
 
     /* Main split */
@@ -1348,6 +1357,8 @@
     .log-msg.ok    { color: var(--green); }
     .log-msg.error { color: var(--red); }
     .log-msg.warn  { color: var(--yellow); }
+    /* Startup diagnostics: visible here, but deliberately never toasted. */
+    .log-msg.debug { color: var(--muted); }
 
     /* ══════════ SETTINGS VIEW ══════════ */
     #view-settings { padding: 0; overflow: hidden; }
@@ -1413,6 +1424,9 @@
       box-shadow: 0 14px 32px rgba(15,23,42,0.05), inset 0 1px 0 rgba(255,255,255,0.8);
       position: relative;
       overflow: hidden;
+    }
+    body.dark-theme .s-section {
+      box-shadow: 0 14px 32px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.04);
     }
     .s-section::before {
       content: "";
@@ -1646,7 +1660,7 @@
       white-space: nowrap; pointer-events: none;
       opacity: 0; transition: opacity .12s ease;
       z-index: 600;
-      box-shadow: 0 4px 14px rgb(0, 0, 0);
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
     }
     .nav-btn[data-label]:hover::after { opacity: 1; }
 
@@ -2364,6 +2378,69 @@ body.dark-theme .track-table-header {
 
 body.dark-theme .track-row.done { background: rgba(34,197,94,.09); }
 body.dark-theme .track-row.failed { background: rgba(239,68,68,.09); }
+
+/* The surfaces the block above missed. Each of these is a panel whose only
+   background is a light-only gradient, so in dark mode it stayed a white
+   slab: the hero, the recent-fetch cards, the queue dock and panel, the log
+   panel and the settings tabs. They share the surface treatment used for
+   #album-card etc. so the whole app reads as one material. */
+body.dark-theme .recent-card,
+body.dark-theme #queue-dock,
+body.dark-theme .queue-panel,
+body.dark-theme #log-panel,
+body.dark-theme .s-section {
+  background: linear-gradient(180deg, #1b1b20 0%, #151519 100%);
+  border-color: var(--border);
+}
+
+body.dark-theme .recent-card:hover,
+body.dark-theme #queue-dock:hover {
+  border-color: var(--border2);
+}
+
+body.dark-theme .hero-text {
+  background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
+  border-color: rgba(148,163,184,0.14);
+}
+
+body.dark-theme .hero-icon {
+  background: linear-gradient(135deg, #26262c 0%, rgba(245,197,66,0.22) 100%);
+  box-shadow: 0 10px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,0.10);
+}
+
+body.dark-theme #album-cover {
+  background: linear-gradient(135deg, #26262c, #1b1b20);
+  border-color: var(--border);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45), inset 0 1px 2px rgba(255,255,255,0.06);
+}
+
+body.dark-theme .stab:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+/* The base .act-btn shadow paints a white top highlight, which on a dark
+   button reads as a stray light line rather than a bevel. */
+body.dark-theme .act-btn {
+  border-color: var(--border);
+  box-shadow: 0 8px 16px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+body.dark-theme .act-btn.secondary:hover {
+  border-color: var(--border2);
+}
+
+/* Status chips are pastel-on-white pairs; keep the hue but move the fill to
+   a translucent tint so they sit on a dark panel instead of punching a
+   bright hole in it (same approach as .local-badge). */
+body.dark-theme .queue-summary .qs-icon { background: rgba(148,163,184,.16); color: var(--text2); }
+body.dark-theme .queue-summary .qs-item.queued .qs-icon { background: rgba(56,189,248,.16); color: #7dd3fc; }
+body.dark-theme .queue-summary .qs-item.completed .qs-icon { background: rgba(34,197,94,.16); color: #86efac; }
+body.dark-theme .queue-summary .qs-item.skipped .qs-icon { background: rgba(245,158,11,.16); color: #fcd34d; }
+body.dark-theme .queue-summary .qs-item.failed .qs-icon { background: rgba(239,68,68,.16); color: #fca5a5; }
+body.dark-theme .queue-item .qi-pill.waiting { background: rgba(245,158,11,.16); color: #fcd34d; }
+body.dark-theme .queue-item .qi-pill.active { background: rgba(59,130,246,.18); color: #93c5fd; }
+body.dark-theme .queue-item .qi-pill.error { background: rgba(239,68,68,.16); color: #fca5a5; }
+
 /* ══════════ LOCAL AUTO-TAGGER ══════════ */
 .local-drop-zone { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 22px 16px; border: 1.5px dashed var(--border); border-radius: 10px; background: var(--surface2); color: var(--muted); transition: border-color var(--t), background var(--t), color var(--t); }
 .local-drop-zone svg { color: var(--muted); transition: color var(--t); }

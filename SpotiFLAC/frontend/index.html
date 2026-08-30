@@ -19,6 +19,22 @@
   <link rel="stylesheet" href="styles.css?v=20260817">
 </head>
 <body>
+<script>
+  // Theme, applied before the first paint. app.js used to do this only from
+  // its 'pywebviewready' handler, which meant the window painted light and
+  // then flipped — and in --web mode that event never fires until you are
+  // signed in, so the login screen, and any session that failed to sign in,
+  // stayed light no matter what was chosen. 'spotiflac-theme-mode' is the
+  // single source of truth for the choice; applyTheme() in app.js re-runs
+  // this same logic later and agrees with it.
+  (function () {
+    var mode = 'auto';
+    try { mode = localStorage.getItem('spotiflac-theme-mode') || 'auto'; } catch (e) {}
+    var dark = mode === 'dark' ||
+      (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.body.classList.add(dark ? 'dark-theme' : 'light-theme');
+  })();
+</script>
 
 <div id="titlebar">
   <div class="dots">

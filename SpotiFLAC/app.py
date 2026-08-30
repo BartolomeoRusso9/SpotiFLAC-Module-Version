@@ -165,15 +165,21 @@ class SpotiFLAC_API(
         """Initializes the frontend after the webview finishes loading.
 
         Starts extension initialization and updates the frontend with stored history, profiles, and the application version when a window is available.
+
+        Everything logged here is a startup diagnostic, so it goes out as
+        "debug": it lands in the Logs view but raises no toast. A stack of
+        six toasts on every launch told the user nothing they had asked
+        for. Only the ffmpeg/Node *failure* paths below stay at "error",
+        because those do need to interrupt.
         """
-        self.log("Python Backend connected.", "info")
-        self.log(f"Default download folder: {self.download_dir}", "info")
+        self.log("Python Backend connected.", "debug")
+        self.log(f"Default download folder: {self.download_dir}", "debug")
         self._check_ffmpeg_startup()
         self._check_node_startup()
         try:
             from .extensions.manager import ExtensionManager
 
-            self.log("Download extension...", "info")
+            self.log("Download extension...", "debug")
             threading.Thread(
                 target=lambda: ExtensionManager(auto_install_downloads=True),
                 daemon=True,
@@ -224,7 +230,7 @@ class SpotiFLAC_API(
             result = check_ffmpeg()
             if result["available"]:
                 short = result["version"][:80]
-                self.log(f"ffmpeg: {short}", "ok")
+                self.log(f"ffmpeg: {short}", "debug")
             else:
                 self.log(
                     "⚠  ffmpeg not found — Tidal FLAC muxing and Amazon "
@@ -250,7 +256,7 @@ class SpotiFLAC_API(
 
             result = check_node()
             if result["available"]:
-                self.log(f"Node.js: {result['version']}", "ok")
+                self.log(f"Node.js: {result['version']}", "debug")
             else:
                 self.log(
                     "⚠  Node.js not found — JavaScript extensions won't work "
@@ -286,6 +292,13 @@ class SpotiFLAC_API(
     # ── UI communication ──────────────────────────────────────────────────────
 
     def log(self, message, type="") -> None:
+        """Sends one line to the frontend log.
+
+        `type` selects both the colour in the Logs view and whether a toast
+        pops: "ok"/"info"/"warn"/"error" toast, "debug" (and the empty
+        default) are log-only. Use "debug" for anything routine enough that
+        the user would not miss it.
+        """
         try:
             self._push("app_log", str(message), type)
         except Exception:

@@ -182,7 +182,17 @@ function applyTheme(mode) {
 function changeTheme() {
   const val = $('config-theme').value;
   applyTheme(val);
-  try { localStorage.setItem('spotiflac-theme-mode', val); } catch (e) {}
+  try {
+    localStorage.setItem('spotiflac-theme-mode', val);
+    // Mirror the choice into the settings blob as well. saveSettings() only
+    // writes it when the user presses Save, so without this the blob kept
+    // saying 'auto' while spotiflac-theme-mode said 'dark' — and the blob is
+    // what applySettings() reads at boot, which is how a picked dark theme
+    // came back light on the next launch.
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
+    stored.theme = val;
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(stored));
+  } catch (e) {}
 }
 
 function syncSystemTheme(e) {
@@ -237,7 +247,12 @@ function applySettings(settings = {}) {
       };
   }
   if ($('config-fallback')) $('config-fallback').checked = cfg.allow_fallback;
-  if ($('config-theme')) $('config-theme').value = cfg.theme;
+  // The dedicated key wins over the blob's copy: it is what the pre-paint
+  // script in index.html already acted on, and a stale cfg.theme here would
+  // otherwise flip the UI back a moment after load.
+  let themeMode = cfg.theme;
+  try { themeMode = localStorage.getItem('spotiflac-theme-mode') || cfg.theme; } catch (e) {}
+  if ($('config-theme')) $('config-theme').value = themeMode;
   if ($('config-font')) $('config-font').value = cfg.font;
   changeFont();
   changeTheme();
@@ -877,11 +892,15 @@ function logMessage(msg, type = '') {
     area.scrollTop = area.scrollHeight;
   }
 
-  // Also generate a visual Toast based on the event type!
+  // Also generate a visual Toast based on the event type.
+  // 'debug' (and an absent type) stay in the panel above and never toast —
+  // that is where startup diagnostics go, so a launch no longer greets the
+  // user with a stack of notifications they did not ask for.
+  if (type === 'debug' || !type) return;
+
   if (type === 'ok') toastMgr.success(msg);
   else if (type === 'error') toastMgr.error(msg);
   else if (type === 'warn') toastMgr.warning(msg);
-  // If there is no type or it is routine info ("info"), show info only when relevant
   else if (type === 'info') toastMgr.info(msg, { duration: 2500 });
 }
 
@@ -3992,7 +4011,7 @@ function renderHomeSections(sections) {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.addEventListener('pywebviewready', async () => {
-  logMessage('Python backend connected.', 'ok');
+  logMessage('Python backend connected.', 'debug');
   loadHistoryAndProfiles();
   checkAuthStatus();
 
