@@ -128,9 +128,14 @@ function asPath(target) {
 
 // Every fs function that creates or modifies something, with the index of
 // the argument naming the path it acts on. `link`/`symlink`/`rename` write
-// at their *second* argument; `copyFile` and `cp` too. `cp` recursively
-// copies a whole tree and is as capable of landing on ~/.ssh as writeFile
-// is, so it belongs here as much as copyFile does.
+// at their *second* argument; `copyFile` and `cp` too.
+//
+// `cp` is listed defensively rather than because it currently leaks: on the
+// Node in use it is implemented over `copyFileSync`/`mkdirSync`, so it is
+// already refused through those. That is an implementation detail of
+// Node's, not a promise, and `cp` recursively copies a whole tree onto a
+// destination exactly as `copyFile` does — so it is checked directly
+// instead of being left to depend on how Node happens to build it.
 const GUARDED = {
   writeFile: 0, appendFile: 0, open: 0, truncate: 0, unlink: 0,
   rmdir: 0, rm: 0, mkdir: 0, chmod: 0, chown: 0, utimes: 0,

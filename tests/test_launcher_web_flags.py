@@ -144,10 +144,8 @@ def test_amain_guards_both_network_steps(monkeypatch, capsys) -> None:
     correct in the source and wrong in effect — an early call added above
     it, a condition inverted — reads exactly the same to the parser.
     """
-    import asyncio
     import sys
 
-    from SpotiFLAC import launcher
     from SpotiFLAC.extensions import manager as ext_manager
 
     ran: list[str] = []

@@ -292,7 +292,15 @@ class CoversLyricsMixin:
                 self.log(f"[{idx}/{total}] HQ Cover saved: {filename}", "debug")
             except Exception as e:
                 failed += 1
-                self.log(f"[{idx}/{total}] Cover error for '{title}': {e}", "debug")
+                # "error-quiet", not "debug": a cover that failed is a thing
+                # the user asked for and did not get, and at the default log
+                # level a "debug" line is not shown at all — the bulk run
+                # reported a summary and swallowed every reason. "-quiet"
+                # keeps it out of the toast/notification stream, which a
+                # 300-track playlist would otherwise bury.
+                self.log(
+                    f"[{idx}/{total}] Cover error for '{title}': {e}", "error-quiet"
+                )
 
         # Create an async client and start all downloads together!
         async with httpx.AsyncClient(
@@ -375,7 +383,10 @@ class CoversLyricsMixin:
                 )
             except Exception as e:
                 failed += 1
-                self.log(f"[{idx}/{total}] Lyrics error for '{title}': {e}", "debug")
+                # See the cover loop above for why this is not "debug".
+                self.log(
+                    f"[{idx}/{total}] Lyrics error for '{title}': {e}", "error-quiet"
+                )
 
         # Download all lyrics concurrently
         tasks = [

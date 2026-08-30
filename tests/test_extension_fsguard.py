@@ -357,8 +357,12 @@ def test_a_path_that_is_not_a_string_is_still_checked(
 
 
 def test_cp_cannot_copy_into_a_forbidden_directory(extdir, scratch, tmp_path) -> None:
-    """fs.cp copies a whole tree and lands on a destination exactly like
-    copyFile does, so leaving it unguarded left the shorter route open.
+    """fs.cp copies a whole tree onto a destination exactly as copyFile does.
+
+    This one passes with `cp` absent from GUARDED too: the Node in use
+    implements cpSync over copyFileSync, so it is refused through that. The
+    test pins the *outcome* rather than the mechanism, which is the part
+    that has to keep holding if Node ever stops building cp that way.
     """
     forbidden = tmp_path / "elsewhere"
     forbidden.mkdir()
