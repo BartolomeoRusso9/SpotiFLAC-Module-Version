@@ -716,7 +716,13 @@ class SpotifyWebClient:
                         track_id,
                     )
                     return ""
-                self.initialize()
+                # force=True, as query() does on its own 401. Plain
+                # initialize() only fills in credentials that are *missing*,
+                # and a 401 here means the ones we hold are present and
+                # expired — so the retry re-sent the same dead token and got
+                # the same 401. The ISRC never recovered; it just cost a
+                # second round-trip before giving up.
+                self.initialize(force=True)
                 return self.get_isrc_from_metadata(track_id, _retried=True)
             if resp.status_code != 200:
                 return ""
