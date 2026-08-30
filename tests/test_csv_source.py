@@ -258,6 +258,32 @@ def test_a_text_row_is_matched_and_a_hopeless_one_is_reported() -> None:
     assert "Everlong" in missed.best or "Monkey Wrench" in missed.best
 
 
+def test_an_isrc_row_resolves_through_spotifys_own_catalogue() -> None:
+    """A row identified only by its ISRC must not depend on Songlink.
+
+    Odesli retired free public access to the v1-alpha.1 API — every request
+    now answers 401 PUBLIC_API_ACCESS_DEPRECATED — and the failure was
+    silent: the row came back "ISRC not found", which is precisely the row
+    that could otherwise have been matched with certainty rather than
+    guessed at. Spotify's own `isrc:` search operator answers it instead.
+    """
+    track = _track(title="Window Shopper", artists="50 Cent")
+    catalogue = _FakeCatalogue([track])
+    rows = [csv_source.CsvRow(line=2, isrc="USUM70504267")]
+
+    # No resolver at all: if the implementation still needed one, this would
+    # reach for the real (dead) LinkResolver instead of the catalogue.
+    resolution = asyncio.run(csv_source.resolve_rows(rows, client=catalogue))
+
+    assert len(resolution.resolved) == 1
+    resolved = resolution.resolved[0]
+    assert resolved.how == "isrc"
+    assert catalogue.queries == ["isrc:USUM70504267"], (
+        "the ISRC has to be sent as an isrc: query — a bare ISRC is scored "
+        "as free text by Spotify and returns unrelated tracks"
+    )
+
+
 def test_an_isrc_is_the_second_chance_when_the_text_does_not_match() -> None:
     rows = [
         csv_source.CsvRow(

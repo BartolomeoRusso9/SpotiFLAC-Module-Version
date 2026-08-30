@@ -44,6 +44,24 @@ except Exception as exc:  # pragma: no cover - depends on optional install
     acoustid = None  # type: ignore[assignment]
     _ACOUSTID_IMPORT_ERROR = exc
 
+# Decoding a fingerprint into comparable integers is a *separate* capability
+# from producing one. `fpcalc` alone yields the compressed base64 form, which
+# is all AcoustID's lookup needs; turning that into 32-bit ints needs
+# libchromaprint through the `chromaprint` module, which Homebrew's
+# chromaprint formula does not install (it ships the fpcalc binary only).
+#
+# This used to be reached as `acoustid.chromaprint`, an attribute that does
+# not exist on any pyacoustid release — so compute_fingerprint() raised
+# AttributeError for everyone who had fpcalc. Nobody noticed because without
+# fpcalc the function returned earlier, and the feature is opt-in.
+try:
+    import chromaprint
+
+    _CHROMAPRINT_IMPORT_ERROR: Exception | None = None
+except Exception as exc:  # pragma: no cover - depends on libchromaprint
+    chromaprint = None  # type: ignore[assignment]
+    _CHROMAPRINT_IMPORT_ERROR = exc
+
 # Duplicate recordings of the same song are, in practice, always within a
 # couple of seconds of each other in duration. Comparing durations first is
 # O(1) per pair and skips the much more expensive fingerprint alignment
@@ -76,15 +94,28 @@ class AudioFingerprint:
 
 
 def is_available() -> bool:
-    """Whether fingerprinting can run at all: pyacoustid importable AND its
+    """Whether a fingerprint can be *produced*: pyacoustid importable AND its
     underlying `fpcalc` binary on PATH. Mirrors ffmpeg_check.check_ffmpeg()'s
     approach (check PATH directly) rather than pyacoustid's own probing,
     which raises its own acoustid.NoBackendError — not a plain
     FileNotFoundError — making a "call it and see" check needlessly fragile.
+
+    Enough for identifying a file against AcoustID, which takes the
+    compressed fingerprint as-is. Comparing two fingerprints needs more —
+    see can_compare().
     """
     if acoustid is None:
         return False
     return shutil.which("fpcalc") is not None
+
+
+def can_compare() -> bool:
+    """Whether two fingerprints can be compared to each other, which needs
+    them decoded into integers and therefore libchromaprint on top of
+    everything is_available() checks. The duplicate finder requires this;
+    identification does not.
+    """
+    return is_available() and chromaprint is not None
 
 
 def compute_fingerprint(path: str | Path) -> AudioFingerprint:
@@ -100,15 +131,27 @@ def compute_fingerprint(path: str | Path) -> AudioFingerprint:
     p = Path(path)
     try:
         duration, compressed = acoustid.fingerprint_file(str(p))
-        raw_ints, _algorithm = acoustid.chromaprint.decode_fingerprint(compressed)
     except Exception as exc:
         msg = f"Could not fingerprint {p.name}: {exc}"
         raise AudioFingerprintError(msg) from exc
 
+    # Best effort, and deliberately not fatal: a caller that only needs to
+    # *identify* the file (acoustid_lookup) uses `compressed` and never looks
+    # at `raw`, so a missing libchromaprint must not deny it a fingerprint it
+    # can use. find_duplicate_groups(), which does need `raw`, is gated on
+    # can_compare() instead.
+    raw_ints: tuple[int, ...] = ()
+    if chromaprint is not None:
+        try:
+            decoded, _algorithm = chromaprint.decode_fingerprint(compressed)
+            raw_ints = tuple(decoded)
+        except Exception as exc:
+            logger.debug("[audio_fingerprint] could not decode %s: %s", p.name, exc)
+
     return AudioFingerprint(
         path=p,
         duration_s=float(duration),
-        raw=tuple(raw_ints),
+        raw=raw_ints,
         compressed=compressed.decode()
         if isinstance(compressed, bytes)
         else str(compressed),

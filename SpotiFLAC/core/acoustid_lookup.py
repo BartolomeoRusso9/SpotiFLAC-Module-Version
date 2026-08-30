@@ -154,7 +154,13 @@ async def identify_isrc_async(
                 "client": client,
                 "duration": str(int(round(fingerprint.duration_s))),
                 "fingerprint": fingerprint.compressed,
-                "meta": "recordings+isrcs",
+                # "isrcs" alone, not "recordings+isrcs". Combining the two
+                # is what the documented syntax suggests, and it silently
+                # returns results with zero recordings attached — no error,
+                # just nothing to read. "isrcs" on its own returns the
+                # recordings *and* their ISRCs. Verified against the live
+                # endpoint; do not "fix" this back.
+                "meta": "isrcs",
             },
             timeout=timeout_s,
         )

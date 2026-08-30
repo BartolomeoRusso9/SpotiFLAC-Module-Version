@@ -26,11 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .isrc_utils import normalize_isrc
-from .local_matcher import (
-    MatchCandidate,
-    match_local_file,
-    search_and_match,
-)
+from .local_matcher import MatchCandidate, match_local_file
 from .local_scanner import LocalFileInfo, scan_path
 from .tagger import EmbedOptions, embed_metadata_async
 
@@ -185,22 +181,80 @@ async def _identify_unresolved_async(
         if not isrc:
             continue
 
-        # Search by the identified recording rather than by the file's own
-        # (wrong) tags, and hand the ISRC to the matcher so the hit is
-        # recognised as an identity match rather than scored as text.
-        candidates = await search_and_match(
-            entry.info.search_title or isrc,
-            entry.info.search_artist,
-            entry.info.old_album or None,
-            limit=candidates_per_file,
-            duration_ms=entry.info.old_duration_ms,
-            isrc=isrc,
-            client=client,
+        candidate = await _track_for_isrc(
+            isrc, client=client, expected_duration_ms=entry.info.old_duration_ms
         )
-        if candidates:
-            entries[index] = LocalScanEntry(info=entry.info, candidates=candidates)
+        if candidate is not None:
+            entries[index] = LocalScanEntry(info=entry.info, candidates=[candidate])
 
     return entries
+
+
+async def _track_for_isrc(
+    isrc: str, *, client, expected_duration_ms: int = 0
+) -> MatchCandidate | None:
+    """The Spotify track a recording *is*, found by its ISRC.
+
+    Deliberately not a text search on the file's own metadata. The whole
+    reason this file reached the second pass is that its text was unusable,
+    so searching by that same text reproduces the failure — an early version
+    did exactly that and answered a file guessed as "01" with "Vaz Tè -
+    010", having already identified it correctly.
+
+    `isrc:` is an exact operator in Spotify's search, so this is an identity
+    lookup rather than a guess, which is why the candidate comes back with
+    how="isrc". (The obvious route, link_resolver.spotify_url_for_isrc_async,
+    is not usable: its Songlink backend now answers 401 without an API key.)
+
+    The duration cross-check is the one piece of doubt worth keeping. It
+    costs nothing — both numbers are already in hand — and catches the case
+    where an ISRC is shared by, or misattributed to, a different cut.
+    """
+    from .local_matcher import ISRC_MATCH_CONFIDENCE
+    from .text_match import DURATION_TOLERANCE_MS
+
+    try:
+        if client is None:
+            from .spotify_metadata import SpotifyMetadataClient
+
+            client = SpotifyMetadataClient()
+        results = await asyncio.to_thread(client.search, f"isrc:{isrc}", 3)
+    except Exception as exc:
+        logger.debug("[local_processor] ISRC search failed for %s: %s", isrc, exc)
+        return None
+
+    tracks = results.get("tracks", []) if isinstance(results, dict) else []
+    if not tracks:
+        logger.debug("[local_processor] Spotify knows no track for ISRC %s", isrc)
+        return None
+
+    track = tracks[0]
+    candidate_duration = int(getattr(track, "duration_ms", 0) or 0)
+    if expected_duration_ms and candidate_duration:
+        delta = abs(expected_duration_ms - candidate_duration)
+        if delta > DURATION_TOLERANCE_MS:
+            logger.debug(
+                "[local_processor] discarding ISRC %s: %s is %.1fs from the file",
+                isrc,
+                getattr(track, "title", "?"),
+                delta / 1000,
+            )
+            return None
+
+    # search() leaves several fields blank; the local tagger writes them, so
+    # fetch the full record the way local_matcher does for its best match.
+    try:
+        track = await client.get_track_async(track.id)
+    except Exception as exc:
+        logger.debug("[local_processor] full detail fetch failed for %s: %s", isrc, exc)
+
+    return MatchCandidate(
+        metadata=track,
+        confidence=ISRC_MATCH_CONFIDENCE,
+        how="isrc",
+        title_ratio=1.0,
+        artist_known=True,
+    )
 
 
 async def _with_musicbrainz_tags(

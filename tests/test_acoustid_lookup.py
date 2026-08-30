@@ -29,9 +29,7 @@ ISRC = "GBAYE0601498"
 def _ok_response(isrc: str = ISRC, score: float = 1.0) -> dict:
     return {
         "status": "ok",
-        "results": [
-            {"score": score, "recordings": [{"id": "rec-1", "isrcs": [isrc]}]}
-        ],
+        "results": [{"score": score, "recordings": [{"id": "rec-1", "isrcs": [isrc]}]}],
     }
 
 
@@ -151,13 +149,10 @@ def test_a_network_failure_is_not_an_exception(monkeypatch) -> None:
     _stub_fingerprint(monkeypatch)
 
     class _Client:
-        def __init__(self, *a, **k) -> None:
-            pass
-
         async def post(self, *a, **k):
             raise OSError("connection reset")
 
-    monkeypatch.setattr(acoustid_lookup, "AsyncHttpClient", _Client)
+    _install_client(monkeypatch, _Client())
     assert _run(acoustid_lookup.identify_isrc_async("/m/x.flac")) == ""
 
 
@@ -169,27 +164,29 @@ def test_the_request_carries_what_acoustid_requires(monkeypatch) -> None:
     sent: dict = {}
 
     class _Client:
-        def __init__(self, *a, **k) -> None:
-            pass
-
         async def post(self, url, **kwargs):
             sent["url"] = url
             sent["data"] = kwargs.get("data")
             return _Response(_ok_response())
 
-    monkeypatch.setattr(acoustid_lookup, "AsyncHttpClient", _Client)
+    _install_client(monkeypatch, _Client())
     _run(acoustid_lookup.identify_isrc_async("/m/x.flac", settings_key="MYKEY"))
 
     assert sent["data"]["client"] == "MYKEY", "a user's own key must win"
     assert sent["data"]["fingerprint"] == "FPCOMPRESSED"
     assert sent["data"]["duration"] == "242", "seconds, rounded, as a string"
-    assert "isrcs" in sent["data"]["meta"]
+    assert sent["data"]["meta"] == "isrcs", (
+        "combining meta values ('recordings+isrcs') makes AcoustID return "
+        "results with no recordings attached, silently — verified live"
+    )
 
 
 # --- helpers ----------------------------------------------------------------
 
 
 class _Response:
+    status_code = 200
+
     def __init__(self, payload) -> None:
         self._payload = payload
 
@@ -210,11 +207,86 @@ def _stub_fingerprint(monkeypatch, *, duration_s: float = 240.0) -> None:
 
 
 def _stub_post(monkeypatch, payload) -> None:
-    class _Client:
-        def __init__(self, *a, **k) -> None:
-            pass
+    """Stubs the shared httpx client the lookup posts through."""
 
+    class _Client:
         async def post(self, *a, **k):
             return _Response(payload)
 
-    monkeypatch.setattr(acoustid_lookup, "AsyncHttpClient", _Client)
+    _install_client(monkeypatch, _Client())
+
+
+def _install_client(monkeypatch, client) -> None:
+    class _Manager:
+        @staticmethod
+        async def get_async_client_safe():
+            return client
+
+    monkeypatch.setattr(acoustid_lookup, "NetworkManager", _Manager)
+
+
+# --- turning an identified ISRC into a Spotify track ------------------------
+
+
+def _search_stub(tracks):
+    class _Client:
+        def search(self, query, limit=5):
+            _Client.last_query = query
+            return {"tracks": tracks}
+
+        async def get_track_async(self, track_id):
+            return tracks[0]
+
+    return _Client()
+
+
+def test_isrc_is_resolved_by_identity_not_by_the_files_own_text() -> None:
+    """The file's text is what failed in the first place. Searching by it
+    again answered a file guessed as "01" with a track called "010"; the
+    query has to be the ISRC.
+    """
+    from SpotiFLAC.core.local_processor import _track_for_isrc
+
+    track = TrackMetadata(
+        id="1" * 22,
+        title="Window Shopper",
+        artists="50 Cent",
+        album="a",
+        album_artist="50 Cent",
+        duration_ms=192_240,
+    )
+    client = _search_stub([track])
+    candidate = asyncio.run(_track_for_isrc("USUM70504267", client=client))
+
+    assert type(client).last_query == "isrc:USUM70504267"
+    assert candidate is not None
+    assert candidate.how == "isrc"
+    assert candidate.is_safe
+
+
+def test_a_duration_that_disagrees_rejects_the_isrc() -> None:
+    """An ISRC shared by, or misattributed to, a different cut. Both numbers
+    are already in hand, so the check is free.
+    """
+    from SpotiFLAC.core.local_processor import _track_for_isrc
+
+    track = TrackMetadata(
+        id="1" * 22,
+        title="Window Shopper (Extended)",
+        artists="50 Cent",
+        album="a",
+        album_artist="50 Cent",
+        duration_ms=600_000,
+    )
+    candidate = asyncio.run(
+        _track_for_isrc(
+            "USUM70504267", client=_search_stub([track]), expected_duration_ms=190_000
+        )
+    )
+    assert candidate is None
+
+
+def test_an_isrc_spotify_does_not_know_yields_nothing() -> None:
+    from SpotiFLAC.core.local_processor import _track_for_isrc
+
+    assert asyncio.run(_track_for_isrc("ZZZZZ0000000", client=_search_stub([]))) is None

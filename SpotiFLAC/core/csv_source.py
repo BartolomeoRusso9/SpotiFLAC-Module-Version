@@ -588,14 +588,42 @@ async def _search(client: Any, query: str, limit: int = SEARCH_LIMIT) -> list:
         return []
 
 
-async def _spotify_url_for_isrc(isrc: str, resolver: Any | None) -> str:
-    """The Spotify link for an ISRC, via the cross-platform resolver.
+async def _spotify_url_for_isrc(
+    isrc: str, resolver: Any | None, client: Any | None = None
+) -> str:
+    """The Spotify link for an ISRC.
 
-    Used only for rows that carry an ISRC and nothing else to search with.
-    Unlike a text search this is an identity lookup: either the ISRC is known
-    and the answer is the right recording, or it isn't and the row is
-    reported.
+    Used for rows that carry an ISRC, either alone or as a second chance
+    when the text did not match well enough. Unlike a text search this is an
+    identity lookup: either the ISRC is known and the answer is the right
+    recording, or it isn't and the row is reported.
+
+    Spotify's own catalogue is asked first, through the `isrc:` search
+    operator. That used to go to link_resolver.spotify_url_for_isrc_async()
+    instead, whose Songlink backend now answers every request with
+    401 PUBLIC_API_ACCESS_DEPRECATED — Odesli retired free public access to
+    the v1-alpha.1 API. The effect was silent: a row identified only by its
+    ISRC, which is the one kind of row that could have been matched with
+    certainty, came back as "ISRC not found".
+
+    The resolver is still tried afterwards, so an injected or future working
+    one is used rather than ignored.
     """
+    if client is not None:
+        try:
+            results = await _search(client, f"isrc:{isrc}")
+        except Exception as exc:
+            logger.debug("[csv] ISRC search failed for %s: %s", isrc, exc)
+            results = []
+        for candidate in results or []:
+            url = getattr(candidate, "external_url", "") or (
+                f"https://open.spotify.com/track/{candidate.id}"
+                if getattr(candidate, "id", "")
+                else ""
+            )
+            if url:
+                return url
+
     if resolver is None:
         from .link_resolver import LinkResolver
 
@@ -632,7 +660,7 @@ async def _resolve_one(
         # An ISRC alongside the text is a second, exact chance before giving
         # up: exports whose titles are localised or truncated still carry it.
         if row.isrc:
-            url = await _spotify_url_for_isrc(row.isrc, resolver)
+            url = await _spotify_url_for_isrc(row.isrc, resolver, client)
             if url:
                 return ResolvedRow(row=row, url=url, how="isrc", score=1.0)
         if candidate is None:
@@ -645,7 +673,7 @@ async def _resolve_one(
         )
 
     if row.isrc:
-        url = await _spotify_url_for_isrc(row.isrc, resolver)
+        url = await _spotify_url_for_isrc(row.isrc, resolver, client)
         if url:
             return ResolvedRow(row=row, url=url, how="isrc", score=1.0)
         return UnresolvedRow(row=row, reason="ISRC not found")
