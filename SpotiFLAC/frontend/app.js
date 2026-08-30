@@ -406,10 +406,20 @@ function onEnrichChange() {
 function onPostChange() {
   $('post-cmd-row').style.display = $('config-post-action').value === 'command' ? 'flex' : 'none';
 }
+// Formats that carry no bitrate knob — must match core/transcode.LOSSLESS_FORMATS.
+const LOSSLESS_TRANSCODE_FORMATS = ['flac', 'alac', 'wav', 'aiff', 'wavpack', 'tta'];
+
 function onTranscodeChange() {
-  const on = $('config-transcode') && $('config-transcode').value !== 'none';
+  const fmt = $('config-transcode') ? $('config-transcode').value : 'none';
+  const on = fmt !== 'none';
   document.querySelectorAll('.transcode-opt').forEach(row => {
     row.style.display = on ? 'flex' : 'none';
+  });
+  // Bitrate is meaningless for a lossless target: the encoder re-encodes the
+  // samples untouched, so the row would offer a setting that does nothing.
+  const lossy = on && !LOSSLESS_TRANSCODE_FORMATS.includes(fmt);
+  document.querySelectorAll('.transcode-lossy').forEach(row => {
+    row.style.display = lossy ? 'flex' : 'none';
   });
 }
 

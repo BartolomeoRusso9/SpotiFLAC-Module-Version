@@ -31,6 +31,7 @@ from .core.notifiers import EVENTS as NOTIFY_EVENTS
 from .core.notifiers import KINDS as NOTIFY_KINDS
 from .core.notifiers import NOTIFY_TOKEN_ENV, NOTIFY_URL_ENV
 from .core.report import RunReport
+from .core.transcode import LOSSLESS_FORMATS, SUPPORTED_FORMATS
 from .downloader import DownloadOptions, SpotiflacDownloader
 from .core.web_users import ROLES as WEB_USER_ROLES
 from .extensions.trust import TRUST_TIERS
@@ -294,9 +295,57 @@ async def _load_profile_into_defaults(profile_name: str) -> dict:
     return {}
 
 
-def _resolve_log_level(verbose: bool) -> int:
-    """Hide warnings unless the user explicitly asked for verbose logging."""
-    return logging.DEBUG if verbose else logging.ERROR
+_LOG_LEVEL_NAMES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+
+def _coerce_log_level(value: str | int) -> int:
+    """Turns a level name, alias or number into a logging constant.
+
+    Accepts what a profile stores (an int) as readily as what a user types
+    (`debug`, `WARN`), so the same value survives a save/load round trip.
+    """
+    if isinstance(value, int):
+        return value
+
+    name = str(value).strip().upper()
+    if not name:
+        msg = "log level cannot be empty"
+        raise argparse.ArgumentTypeError(msg)
+    if name.isdigit():
+        return int(name)
+
+    name = {
+        "WARN": "WARNING",
+        "ERR": "ERROR",
+        "CRIT": "CRITICAL",
+        "FATAL": "CRITICAL",
+    }.get(name, name)
+    resolved = logging.getLevelName(name)
+    if not isinstance(resolved, int):
+        msg = f"invalid log level {value!r}; choose from {', '.join(_LOG_LEVEL_NAMES)}"
+        raise argparse.ArgumentTypeError(msg)
+    return resolved
+
+
+def _resolve_log_level(
+    verbose: bool,
+    explicit: str | int | None = None,
+    profile_default: str | int | None = None,
+) -> int:
+    """Hide warnings unless the user explicitly asked for more.
+
+    Precedence: --log-level, then --verbose (a shorthand for DEBUG), then
+    whatever a profile stored, then the quiet default. A profile value ranks
+    *below* --verbose on purpose: it is a saved preference, and a flag typed
+    for this one run has to be able to win over it.
+    """
+    if explicit is not None:
+        return _coerce_log_level(explicit)
+    if verbose:
+        return logging.DEBUG
+    if profile_default is not None:
+        return _coerce_log_level(profile_default)
+    return logging.ERROR
 
 
 def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
@@ -455,6 +504,24 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "provider falls back to HI_RES_LOSSLESS instead of using it. "
         "Legacy provider-specific values remain accepted. Default: LOSSLESS",
     )
+    # A pair rather than a lone --no-fallback: a profile can set
+    # allow_fallback=False, and without --fallback there would be no way to
+    # turn it back on for a single run.
+    parser.add_argument(
+        "--fallback",
+        action="store_true",
+        dest="allow_fallback",
+        default=pd.get("allow_fallback", True),
+        help="Let a provider serve a lower tier when the requested --quality "
+        "is unavailable for a track (default: enabled).",
+    )
+    parser.add_argument(
+        "--no-fallback",
+        action="store_false",
+        dest="allow_fallback",
+        help="Fail a track outright when the requested --quality is not "
+        "available, instead of accepting a lower tier.",
+    )
     parser.add_argument(
         "--use-track-numbers",
         action="store_true",
@@ -585,6 +652,20 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         default=pd.get("verbose", False),
     )
     parser.add_argument(
+        "--log-level",
+        dest="log_level",
+        type=_coerce_log_level,
+        default=None,
+        metavar="LEVEL",
+        help="Console log level: "
+        + ", ".join(_LOG_LEVEL_NAMES)
+        + ". Overrides --verbose, which is a shorthand for DEBUG. "
+        "Default: ERROR (only failures are printed).",
+    )
+    # Kept apart from --log-level's own default so the resolver can tell a
+    # saved preference from a flag typed for this run.
+    parser.set_defaults(profile_log_level=pd.get("log_level"))
+    parser.add_argument(
         "--interactive",
         action="store_true",
         default=pd.get("interactive", False),
@@ -712,12 +793,16 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     transcode_grp = parser.add_argument_group("Transcoding")
     transcode_grp.add_argument(
         "--transcode",
-        choices=["none", "mp3"],
+        choices=["none", *SUPPORTED_FORMATS],
         default=pd.get("transcode_to") or "none",
         dest="transcode_to",
         help="Convert every downloaded track to this format (default: none — "
-        "keep the provider's original format). Requires ffmpeg. Tracks already "
-        "present in the target format are skipped without contacting a provider.",
+        "keep the provider's original format). Lossless targets ("
+        + ", ".join(LOSSLESS_FORMATS)
+        + ") re-encode the samples untouched — same rate, same bit depth; "
+        "'mp3' encodes at --transcode-bitrate. ALAC lands in a .m4a and "
+        "wavpack in a .wv. Requires ffmpeg. Tracks already present in the "
+        "target format are skipped without contacting a provider.",
     )
     transcode_grp.add_argument(
         "--mp3",
@@ -727,18 +812,27 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         help="Shorthand for --transcode mp3 (320 kbps unless --transcode-bitrate is given)",
     )
     transcode_grp.add_argument(
+        "--alac",
+        action="store_const",
+        const="alac",
+        dest="transcode_to",
+        help="Shorthand for --transcode alac — lossless .m4a, the format "
+        "macOS reads natively (Finder artwork, Music.app, QuickLook)",
+    )
+    transcode_grp.add_argument(
         "--transcode-bitrate",
         default=pd.get("transcode_bitrate", "320k"),
         dest="transcode_bitrate",
         metavar="RATE",
-        help="Bitrate for --transcode (default: 320k)",
+        help="Bitrate for the lossy --transcode targets (default: 320k). "
+        "Ignored by the lossless ones.",
     )
     transcode_grp.add_argument(
         "--keep-original",
         action="store_true",
         dest="transcode_keep_original",
         default=pd.get("transcode_keep_original", False),
-        help="Keep the original lossless file next to the transcoded one "
+        help="Keep the original downloaded file next to the transcoded one "
         "(default: the source is deleted after a successful conversion)",
     )
 
@@ -2054,7 +2148,7 @@ async def amain() -> None:
         verbose = (
             cfg.get("verbose", False) or "--verbose" in sys.argv or "-v" in sys.argv
         )
-        log_level = _resolve_log_level(verbose)
+        log_level = _resolve_log_level(verbose, None, cfg.get("log_level"))
         _root_handler = logging.StreamHandler(sys.stdout)
         _root_handler.setFormatter(
             _CleanConsoleFormatter(
@@ -2229,7 +2323,7 @@ async def amain() -> None:
         else merged_defaults.get("track_max_retries", 0)
     )
 
-    log_level = _resolve_log_level(args.verbose)
+    log_level = _resolve_log_level(args.verbose, args.log_level, args.profile_log_level)
     log_format = (
         "%(levelname)s:%(name)s: %(message)s"
         if args.verbose
@@ -2257,7 +2351,7 @@ async def amain() -> None:
             include_featuring=args.include_featuring,
             log_level=log_level,
             output_path=args.output_path,
-            allow_fallback=True,
+            allow_fallback=args.allow_fallback,
             embed_lyrics=args.embed_lyrics,
             lyrics_providers=args.lyrics_providers,
             enrich_metadata=args.enrich,
@@ -2316,11 +2410,12 @@ async def amain() -> None:
                 "first_artist_only": args.first_artist_only,
                 "artist_separator": args.artist_separator,
                 "include_featuring": args.include_featuring,
-                "allow_fallback": True,
+                "allow_fallback": args.allow_fallback,
                 "embed_lyrics": args.embed_lyrics,
                 "lyrics_providers": args.lyrics_providers,
                 "enrich_metadata": args.enrich,
                 "enrich_providers": args.enrich_providers,
+                "log_level": log_level,
                 "transcode_to": args.transcode_to,
                 "transcode_bitrate": args.transcode_bitrate,
                 "transcode_keep_original": args.transcode_keep_original,

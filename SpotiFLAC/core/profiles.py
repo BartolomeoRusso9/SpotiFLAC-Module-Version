@@ -64,6 +64,10 @@ class ProfileConfig(BaseModel):
     # when a profile is saved, so anything the CLI can set has to be listed.
     resume: bool = True
     post_download_hooks: list[str] = Field(default_factory=list)
+    # Both are written by launcher's --save-profile and were being dropped
+    # here, so `--verify-hires --save-profile x` came back without it.
+    create_playlist_subfolders: bool = True
+    verify_hires: bool = False
 
     model_config = {"extra": "ignore"}
 

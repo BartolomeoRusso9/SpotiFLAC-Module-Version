@@ -1429,7 +1429,7 @@ class SpotiFLAC_API(
                 "tidal",
                 "soundcloud",
             ]
-            from .core.transcode import normalize_transcode_format
+            from .core.transcode import is_lossless, normalize_transcode_format
 
             # The GUI sends "none" when conversion is disabled
             transcode_to = normalize_transcode_format(config.get("transcode_to"))
@@ -1506,9 +1506,12 @@ class SpotiFLAC_API(
                 return
 
             if transcode_to:
+                # The bitrate only applies to the lossy targets: printing it
+                # next to FLAC or ALAC would imply a knob that isn't there.
+                detail = "lossless" if is_lossless(transcode_to) else transcode_bitrate
                 self.log(
                     f"Transcoding enabled — tracks will be saved as "
-                    f"{transcode_to.upper()} {transcode_bitrate}"
+                    f"{transcode_to.upper()} {detail}"
                     + ("" if transcode_keep_original else " (originals removed)"),
                     "debug",
                 )

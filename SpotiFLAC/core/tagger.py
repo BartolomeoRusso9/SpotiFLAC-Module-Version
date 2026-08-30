@@ -163,7 +163,12 @@ _EXT_OPUS = {".opus"}
 _EXT_WAV = {".wav", ".wave"}
 _EXT_AIFF = {".aiff", ".aif", ".afc"}
 _EXT_WMA = {".wma"}
-_EXT_APEV2 = {".wv", ".ape", ".mpc", ".mp+", ".tta"}
+_EXT_APEV2 = {".wv", ".ape", ".mpc", ".mp+"}
+# TrueAudio sits apart from its WavPack/Monkey's Audio neighbours: the format
+# carries a leading ID3v2 tag, not a trailing APEv2 one, which is why mutagen
+# models it as an ID3FileType. Tagging it through _embed_apev2() raises
+# "not a Frame instance" and leaves the file untagged.
+_EXT_TTA = {".tta"}
 
 SUPPORTED_SUFFIXES = (
     _EXT_FLAC
@@ -175,6 +180,7 @@ SUPPORTED_SUFFIXES = (
     | _EXT_AIFF
     | _EXT_WMA
     | _EXT_APEV2
+    | _EXT_TTA
 )
 
 # ---------------------------------------------------------------------------
@@ -570,6 +576,33 @@ def _embed_aiff(
 
 
 # ---------------------------------------------------------------------------
+# Internal: write ID3 tags to a TTA file
+# ---------------------------------------------------------------------------
+
+
+def _embed_tta(
+    path: Path,
+    tags: dict[str, str],
+    cover_data: bytes | None,
+    lyrics: str | None,
+    lyrics_prov: str,
+    cover_mime: str = "image/jpeg",
+) -> None:
+    """Scrive tag ID3v2 su un file TTA (TrueAudio)."""
+    from mutagen.trueaudio import TrueAudio
+
+    audio = TrueAudio(str(path))
+    if audio.tags is None:
+        audio.add_tags()
+    audio.tags.clear()
+
+    _apply_id3_frames(audio.tags, tags, cover_data, lyrics, lyrics_prov, cover_mime)
+
+    audio.save()
+    logger.debug("[tagger/tta] tags written: %s", path.name)
+
+
+# ---------------------------------------------------------------------------
 # Internal: write Vorbis Comment tags to a FLAC file
 # ---------------------------------------------------------------------------
 
@@ -870,10 +903,6 @@ def _apev2_class_for(suffix: str) -> type:
         from mutagen.musepack import Musepack
 
         return Musepack
-    if suffix == ".tta":
-        from mutagen.trueaudio import TrueAudio
-
-        return TrueAudio
 
     from mutagen.apev2 import APEv2File
 
@@ -1038,6 +1067,8 @@ async def _write_tags_async(
         await asyncio.to_thread(
             _embed_aiff, path, tags, cover_data, lyrics, lyrics_prov
         )
+    elif suffix in _EXT_TTA:
+        await asyncio.to_thread(_embed_tta, path, tags, cover_data, lyrics, lyrics_prov)
     elif suffix in _EXT_WMA:
         await asyncio.to_thread(_embed_asf, path, tags, cover_data, lyrics, lyrics_prov)
     elif suffix in _EXT_APEV2:
@@ -1240,6 +1271,10 @@ def read_embedded_tags(
             from mutagen.oggopus import OggOpus
 
             return _read_vorbis_comment_tags(path, OggOpus)
+        if suffix in _EXT_TTA:
+            from mutagen.trueaudio import TrueAudio
+
+            return _read_id3_container_tags(TrueAudio(str(path)).tags)
         if suffix in _EXT_WMA:
             return _read_asf_tags(path)
         if suffix in _EXT_APEV2:

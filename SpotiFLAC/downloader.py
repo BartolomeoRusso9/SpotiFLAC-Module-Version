@@ -66,8 +66,10 @@ from .core.spotify_metadata import SpotifyMetadataClient
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
     ensure_ffmpeg_available,
+    extension_for,
     normalize_bitrate,
     normalize_transcode_format,
+    result_format_for,
     transcode_file_async,
     transcoded_file_exists,
 )
@@ -162,8 +164,10 @@ class DownloadOptions:
     qobuz_token: str | None = None
     qobuz_local_api_url: str | None = None
 
-    # Post-download conversion: None = keep the provider format,
-    # "mp3" = convert every track to MP3 at `transcode_bitrate`.
+    # Post-download conversion: None = keep the provider format, otherwise
+    # one of core.transcode.SUPPORTED_FORMATS — a lossless target
+    # ("flac", "alac", "wav", "aiff", "wavpack", "tta") re-encodes without
+    # touching the samples, "mp3" encodes at `transcode_bitrate`.
     # The converted file uses the same name with a different extension so
     # skipping already-downloaded tracks still works (the converted file is
     # looked for directly before contacting providers).
@@ -485,7 +489,7 @@ def transcode_target_path(
     if not opts.transcode_to:
         return None
 
-    extension = f".{opts.transcode_to}"
+    extension = extension_for(opts.transcode_to)
     if opts.output_path:
         base, _ = os.path.splitext(opts.output_path)
         return Path(base + extension)
@@ -512,7 +516,9 @@ async def _transcode_result_async(
     which also covers providers that natively deliver MP3.
     """
     source = Path(result.file_path or "")
-    if not result.file_path or source.suffix.lower() == f".{opts.transcode_to}":
+    if not result.file_path or source.suffix.lower() == extension_for(
+        opts.transcode_to
+    ):
         return result
 
     try:
@@ -531,7 +537,9 @@ async def _transcode_result_async(
 
     # Even a "skipped" result (file already existing in another format) is
     # rewritten: it should be reported as a successful download, not as a skip.
-    return DownloadResult.ok(result.provider, str(dest), opts.transcode_to)
+    return DownloadResult.ok(
+        result.provider, str(dest), result_format_for(opts.transcode_to)
+    )
 
 
 async def _record_provider_outcome(
@@ -585,7 +593,7 @@ async def download_one_async(
         return DownloadResult.skipped_result(
             providers[0].name if providers else "none",
             str(transcode_target),
-            fmt=opts.transcode_to,
+            fmt=result_format_for(opts.transcode_to),
         )
 
     for attempt in range(opts.track_max_retries + 1):
@@ -738,7 +746,7 @@ async def download_one_async(
             if result.success:
                 if opts.transcode_to:
                     # A file already existing in another format is also converted:
-                    # on the next pass the skip logic will already find it in MP3.
+                    # on the next pass the skip logic finds it in the target format.
                     result = await _transcode_result_async(result, opts)
                     if not result.success:
                         return result

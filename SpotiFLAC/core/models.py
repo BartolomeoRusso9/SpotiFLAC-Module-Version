@@ -154,13 +154,20 @@ class TrackMetadata(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+#: Container a finished file can be in — the extension without its dot, which
+#: is what extensions/provider._ext_to_fmt() produces. Every value of
+#: core.transcode.extension_for() must appear here or a transcoded download
+#: fails validation; tests/test_transcode_lossless.py enforces that.
+AudioFormat = Literal["flac", "mp3", "m4a", "wav", "aiff", "wv", "tta"]
+
+
 class DownloadResult(BaseModel):
     """Represents the outcome of a download operation."""
 
     success: bool
     provider: str
     file_path: str | None = None
-    format: Literal["flac", "mp3", "m4a"] | None = None
+    format: AudioFormat | None = None
     error: str | None = None
     skipped: bool = False
 
@@ -177,7 +184,7 @@ class DownloadResult(BaseModel):
         cls,
         provider: str,
         file_path: str,
-        fmt: Literal["flac", "mp3", "m4a"] = "flac",
+        fmt: AudioFormat = "flac",
     ) -> DownloadResult:
         return cls(success=True, provider=provider, file_path=file_path, format=fmt)
 
@@ -186,7 +193,7 @@ class DownloadResult(BaseModel):
         cls,
         provider: str,
         file_path: str,
-        fmt: Literal["flac", "mp3", "m4a"] | None = None,
+        fmt: AudioFormat | None = None,
     ) -> DownloadResult:
         return cls(
             success=True,

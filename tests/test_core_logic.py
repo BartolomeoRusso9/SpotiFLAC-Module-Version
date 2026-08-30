@@ -505,7 +505,7 @@ def test_transcode_helpers_and_conversion(monkeypatch, tmp_path):
         return True
 
     monkeypatch.setattr(transcode, "_run_ffmpeg", fake_run_ffmpeg)
-    monkeypatch.setattr(transcode, "transfer_tags_to_mp3_async", fake_transfer)
+    monkeypatch.setattr(transcode, "transfer_tags_async", fake_transfer)
 
     async def _run():
         dest = await transcode.transcode_file_async(

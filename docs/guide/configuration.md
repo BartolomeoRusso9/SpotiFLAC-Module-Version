@@ -179,9 +179,23 @@ SpotiFLAC(
 
 > **Tip:** Pair `--timeout` with `--retries` so that a stalled track is automatically re-attempted against the next extension instead of blocking the entire queue indefinitely.
 
-### MP3 Transcoding
+### Transcoding
 
-Downloads use the selected quality profile: `HI_RES_LOSSLESS` requests the best available lossless tier, while `LOSSLESS` requests standard lossless audio. Set `transcode_to="mp3"` (Python) or `--mp3` / `--transcode mp3` (CLI) to convert every finished track to MP3 — 320 kbps by default — for players or car stereos that cannot handle lossless files. Tags, cover art and lyrics are carried over to the MP3, and the original file is deleted once the conversion succeeds unless `transcode_keep_original` / `--keep-original` is set.
+Downloads use the selected quality profile: `HI_RES_LOSSLESS` requests the best available lossless tier, while `LOSSLESS` requests standard lossless audio. Set `transcode_to` (Python) or `--transcode` (CLI) to convert every finished track to a single format of your choice. Tags, cover art and lyrics are carried over to the new file, and the original is deleted once the conversion succeeds unless `transcode_keep_original` / `--keep-original` is set.
+
+| Value | Extension | Kind | Why you'd pick it |
+| --- | --- | --- | --- |
+| `flac` | `.flac` | lossless | The universal default — read by everything except Finder previews on macOS |
+| `alac` | `.m4a` | lossless | Apple Lossless. The one lossless format macOS reads natively: Finder shows the cover art, Music.app and QuickLook just work |
+| `wavpack` | `.wv` | lossless | Compresses a little better than FLAC; narrower player support |
+| `tta` | `.tta` | lossless | True Audio — very cheap to decode, niche support |
+| `wav` | `.wav` | lossless, uncompressed | For DJ software and audio editors that want raw PCM. Roughly 1.6× the size of FLAC |
+| `aiff` | `.aiff` | lossless, uncompressed | The Apple flavour of raw PCM, same size as WAV |
+| `mp3` | `.mp3` | lossy | 320 kbps by default, for players or car stereos that cannot handle lossless files |
+
+**The lossless targets are bit-exact.** The sample rate and bit depth of the source are carried over untouched — no resampling, no requantisation — so a 24-bit/96 kHz FLAC converted to ALAC decodes back to byte-identical PCM. Only `mp3` re-encodes the audio, and only it reads `transcode_bitrate` / `--transcode-bitrate`; the lossless encoders ignore it.
+
+Converting a *lossy* source to a lossless target is allowed but logs a warning: the output is a faithful copy of an already-degraded signal, not a recovered original, and it will be several times larger.
 
 Requires `ffmpeg`. Checked upfront — before any track downloads — so you never download a whole album only to fail at the conversion step. If it's not on your `PATH`, SpotiFLAC automatically attempts to install it right there, printing progress as it goes (`core/ffmpeg_check.py`), using the same package managers and privilege rules as the Node.js auto-install described above (never escalates privileges itself); the run only fails if that attempt doesn't work out. Tidal FLAC muxing and Amazon decryption also need ffmpeg but have no such auto-install — they just fail if it's missing, same as before.
 
@@ -191,6 +205,12 @@ spotiflac https://open.spotify.com/album/... ./out --service ext:tidal-web --mp3
 
 # Keep the FLAC too, and use 192 kbps instead
 spotiflac https://open.spotify.com/album/... ./out --mp3 --transcode-bitrate 192k --keep-original
+
+# Lossless, in a container macOS reads natively (--alac is shorthand)
+spotiflac https://open.spotify.com/album/... ./out --alac
+
+# Any other lossless target
+spotiflac https://open.spotify.com/album/... ./out --transcode wavpack
 ```
 
 ```python
@@ -200,14 +220,14 @@ SpotiFLAC(
     url="https://open.spotify.com/album/...",
     output_dir="./downloads",
     services=["ext:tidal-web", "ext:qobuz-web"],
-    transcode_to="mp3",
-    transcode_bitrate="320k",
+    transcode_to="alac",          # or flac / wav / aiff / wavpack / tta / mp3
+    transcode_bitrate="320k",     # mp3 only; ignored by the lossless targets
 )
 ```
 
-**Skipping already-downloaded tracks still works.** The converted file keeps the exact name the extension would have used, only with an `.mp3` extension, so SpotiFLAC looks for that file *before* contacting any extension and skips the track when it is already there — no network request, no re-encode. Running the same album twice therefore costs nothing the second time. A leftover file from an earlier lossless run is converted in place instead of being re-downloaded, so an existing library converges to MP3 in a single pass.
+**Skipping already-downloaded tracks still works.** The converted file keeps the exact name the extension would have used, only with the target extension, so SpotiFLAC looks for that file *before* contacting any extension and skips the track when it is already there — no network request, no re-encode. Running the same album twice therefore costs nothing the second time. A leftover file from an earlier run in another format is converted in place instead of being re-downloaded, so an existing library converges to the chosen format in a single pass.
 
-The conversion is a no-op for extensions that already deliver MP3, which are passed through untouched.
+The conversion is a no-op for extensions that already deliver the requested format, which are passed through untouched. For `alac` the *codec* is checked rather than the extension, since a lossy AAC download also lands in an `.m4a` and must not be mislabelled as lossless.
 
 ### Hi-Res Verification
 
@@ -235,7 +255,7 @@ SpotiFLAC(
 - **Off by default and fully opt-in.** It requires the optional `librosa` and `numpy` packages, which are *not* installed by default — install them with `pip install librosa numpy` or `pip install SpotiFLAC[hires]`. If they're missing, the check is silently skipped (a debug-level log line, nothing more) rather than breaking your run.
 - **Never blocks or fails a download.** The check runs as a background task *after* the file has already been saved successfully — a track download is never delayed, retried, or marked as failed because of it, and analysis errors (corrupt segment, unreadable file, etc.) are swallowed and logged at debug level, not surfaced as errors.
 - **A finding is a hint, not a certification.** Some genuine Hi-Res masters are deliberately low-pass filtered during mastering (common in pop/rock) and will still read as "no anomaly". Treat a "possibly upsampled" warning as something worth a closer listen, not definitive proof.
-- **Skipped automatically for lossy output.** If `transcode_to="mp3"` (or `--mp3`) is set, the already-lossy result is never analyzed — checking an MP3 for ultrasonic content would be meaningless.
+- **Skipped automatically for lossy output.** If `transcode_to="mp3"` (or `--mp3`) is set, the already-lossy result is never analyzed — checking an MP3 for ultrasonic content would be meaningless. The lossless targets keep the check, since they preserve the spectrum of the source exactly.
 - **Standalone tool.** The underlying checker also ships as a CLI you can point at any file(s) you already have, independent of a download run:
 
   ```bash
