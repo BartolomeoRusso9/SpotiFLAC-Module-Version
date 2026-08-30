@@ -1275,11 +1275,35 @@ async def _resolve_csv_async(
         print(f"Error: {exc.message}", file=sys.stderr)
         raise SystemExit(2) from exc
 
+    total_rows = len(document.rows)
+    logger.info("[csv] %s: %d row(s) to find", document.path, total_rows)
+
+    # A CSV of titles is one catalogue lookup per row, four at a time — a
+    # 1875-row file is minutes of a silent terminal. The counter says how
+    # far along it is and, separately, how many rows have actually matched,
+    # because a run that is finding nothing is worth interrupting early.
+    last_line = [0.0]
+
+    def _report(done: int, total: int, found: int) -> None:
+        now = time.monotonic()
+        if done < total and (now - last_line[0]) < 1.0:
+            return
+        last_line[0] = now
+        logger.info("[csv] matching %d/%d — %d found", done, total, found)
+
     resolution = await csv_source.resolve_rows(
         document.rows,
         document=document,
         min_score=min_score,
         concurrency=concurrency,
+        on_progress=_report,
+    )
+
+    logger.info(
+        "[csv] %d/%d row(s) matched, %d not found",
+        len(resolution.resolved),
+        total_rows,
+        len(resolution.unresolved),
     )
 
     if unresolved_path and resolution.unresolved:

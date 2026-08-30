@@ -16,6 +16,7 @@ remote caller cannot name a path on the host to have it opened.
 from __future__ import annotations
 
 import threading
+import time
 
 from ..core.loop_runner import run_sync
 
@@ -26,6 +27,11 @@ MAX_CSV_CHARS = 2_000_000
 #: Links resolved to metadata at a time. Same reasoning as
 #: csv_source.DEFAULT_CONCURRENCY: politeness, not throughput.
 FETCH_CONCURRENCY = 4
+
+#: Seconds between progress pushes while matching. Every row would be one
+#: bridge message per lookup — a 1875-row file's worth of them — for a
+#: counter nobody can read that fast.
+PROGRESS_INTERVAL_S = 0.25
 
 
 class CsvImportMixin:
@@ -121,10 +127,30 @@ class CsvImportMixin:
             document = csv_source.read_text(
                 content, name=name or "playlist.csv", delimiter=delimiter
             )
+            total_rows = len(document.rows)
             self.log(
-                f"{document.path}: {len(document.rows)} row(s). Matching them…",
+                f"{document.path}: {total_rows} row(s) to find. Matching them…",
                 "debug",
             )
+            self.set_progress(f"Matching 0/{total_rows} — 0 found")
+
+            last_push = 0.0
+
+            def _matching_progress(done: int, total: int, found: int) -> None:
+                # Throttled, except for the last row: the final counter is
+                # the one the user reads, so it must never be the one the
+                # throttle drops.
+                nonlocal last_push
+                now = time.monotonic()
+                if done < total and (now - last_push) < PROGRESS_INTERVAL_S:
+                    return
+                last_push = now
+                self.set_progress(f"Matching {done}/{total} — {found} found")
+                self._push_safe(
+                    "app_csv_progress",
+                    {"done": done, "total": total, "found": found},
+                )
+
             resolution = run_sync(
                 csv_source.resolve_rows(
                     document.rows,
@@ -132,6 +158,7 @@ class CsvImportMixin:
                     min_score=(
                         csv_source.DEFAULT_MIN_SCORE if min_score is None else min_score
                     ),
+                    on_progress=_matching_progress,
                 )
             )
         except SpotiflacError as e:
@@ -144,6 +171,15 @@ class CsvImportMixin:
             self.set_progress("Error.")
             self._push_safe("app_csv_error", {"error": str(e)})
             return
+
+        # The headline number, stated once and plainly: how many of the rows
+        # in the file turned into a track. Everything below breaks down the
+        # remainder; this is the line the user is actually looking for.
+        self.log(
+            f"{document.path}: {len(resolution.resolved)}/{total_rows} row(s) "
+            f"matched, {len(resolution.unresolved)} not found.",
+            "ok" if not resolution.unresolved else "warn",
+        )
 
         for entry in resolution.unresolved:
             # Named individually rather than counted: the point of reporting
@@ -159,8 +195,8 @@ class CsvImportMixin:
             )
         if resolution.unresolved:
             self.log(
-                f"{len(resolution.unresolved)} row(s) could not be matched — "
-                "see the Logs view for which.",
+                f"{len(resolution.unresolved)} of {total_rows} row(s) could not "
+                "be matched — see the Logs view for which.",
                 "warn",
             )
 
@@ -172,7 +208,7 @@ class CsvImportMixin:
             )
             return
 
-        self.set_progress(f"Fetching {len(resolution.urls)} track(s)…")
+        self.set_progress(f"Fetching metadata for {len(resolution.urls)} track(s)…")
         try:
             tracks = run_sync(self._csv_tracks_async(resolution.urls))
         except Exception as e:
@@ -201,8 +237,11 @@ class CsvImportMixin:
             track_count=len(tracks),
             source="CSV",
         )
+        # tracks vs resolution.resolved can differ: a row can match a link
+        # whose metadata then fails to fetch. Reporting both against the
+        # row count is what makes that visible instead of silent.
         self.log(
-            f"{len(tracks)} track(s) ready"
+            f"{len(tracks)}/{total_rows} track(s) ready"
             + (
                 f" · {len(resolution.unresolved)} row(s) unmatched"
                 if resolution.unresolved
@@ -216,7 +255,8 @@ class CsvImportMixin:
             "app_csv_loaded",
             {
                 "file": document.path,
-                "rows": len(document.rows),
+                "rows": total_rows,
+                "matched": len(resolution.resolved),
                 "tracks": len(tracks),
                 "unresolved": [entry.to_dict() for entry in resolution.unresolved],
             },

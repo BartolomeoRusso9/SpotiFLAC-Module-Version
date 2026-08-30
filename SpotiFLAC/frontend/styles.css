@@ -419,6 +419,15 @@
     
     .mode-btn:hover { background: var(--surface3); }
     .mode-btn.active { background: var(--yellow); color: #000; border-color: var(--yellow-d); }
+    /* Set while a CSV is being matched — a file of titles is one catalogue
+       lookup per row, so the button stays busy for a while and the running
+       count sits in its tooltip. */
+    .mode-btn.is-busy { border-color: var(--yellow-d); }
+    .mode-btn.is-busy .mode-btn-icon { animation: csv-matching 1.2s ease-in-out infinite; }
+    @keyframes csv-matching { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+    @media (prefers-reduced-motion: reduce) {
+      .mode-btn.is-busy .mode-btn-icon { animation: none; opacity: .7; }
+    }
     .mode-btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; font-size: 14px; }
     /* Fetch mode shows the chain, Search mode the magnifier. The button
        already gets .active in search mode, so the swap needs no JS — and

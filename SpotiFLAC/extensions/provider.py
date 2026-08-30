@@ -44,6 +44,56 @@ from .runtime_features import signed_fetch, signed_session_client
 logger = logging.getLogger(__name__)
 
 
+def _human_bytes(size: float) -> str:
+    value = float(size)
+    for unit in ("B", "KB", "MB"):
+        if value < 1024:
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} GB"
+
+
+class _TransferProgress:
+    """What is actually known about one download's byte counts.
+
+    Two things report on the same transfer — the bridge's `progress`
+    messages and the disk poller — and they know different amounts. The
+    bridge has the Content-Length when the extension streams through
+    `global.file.download`; the poller only ever has the size on disk. This
+    holds whichever is better, so the progress bar is fed real bytes and the
+    poller stops guessing the moment the bridge starts reporting.
+    """
+
+    __slots__ = ("bridge_reporting", "bytes_on_disk", "total_bytes")
+
+    def __init__(self) -> None:
+        self.bytes_on_disk = 0
+        self.total_bytes = 0
+        #: The bridge has sent at least one event carrying real byte counts.
+        self.bridge_reporting = False
+
+    def note(self, received: int, total: int | None) -> None:
+        self.bytes_on_disk = max(self.bytes_on_disk, int(received or 0))
+        if total:
+            self.total_bytes = int(total)
+            self.bridge_reporting = True
+
+    def estimate_total(self, fraction: float) -> int:
+        """The full size implied by `fraction` of the bytes written so far.
+
+        Only useful for an extension that reports a fraction without a
+        Content-Length. Below 1% the division amplifies noise into a wildly
+        wrong total, and a wrong total is worse than none: it draws a bar
+        that fills and then keeps going. Unknown (0) is the honest answer
+        there, and it renders as an indeterminate bar.
+        """
+        if self.total_bytes:
+            return self.total_bytes
+        if fraction >= 0.01 and self.bytes_on_disk > 0:
+            return int(self.bytes_on_disk / min(1.0, fraction))
+        return 0
+
+
 class JSExtensionProvider(BaseProvider):
     """Provider that delegates downloads and metadata to a JavaScript extension.
 
@@ -414,12 +464,48 @@ class JSExtensionProvider(BaseProvider):
                     fmt=_ext_to_fmt(output_path.suffix),
                 )
 
-            def _progress_adapter(fraction: float) -> None:
+            # Shared between the bridge's real progress events and the disk
+            # poller below, so whichever of the two is actually reporting,
+            # the other stops guessing over the top of it.
+            transfer = _TransferProgress()
+
+            def _progress_adapter(
+                fraction: float,
+                bytes_received: int | None = None,
+                bytes_total: int | None = None,
+            ) -> None:
+                """Real byte counts from the bridge, when it has them.
+
+                This used to take only the fraction and report it as
+                `(percent, 100)` — but the callback's contract is
+                `(current_bytes, total_bytes)`, so a 30 MB FLAC drew a bar
+                that filled to "97B / 100B" and a transfer speed computed
+                from a percentage. `nodeFileDownload` has been emitting
+                `bytesReceived`/`bytesTotal` all along and JSRuntime already
+                offers them here; nothing was accepting them.
+                """
                 if self._progress_cb is None:
                     return
+                if bytes_received is None or not bytes_total:
+                    # An extension that streams through global.file.download
+                    # produces two progress streams for one download: the
+                    # bridge's, carrying real byte counts, and its own
+                    # onProgress, carrying a bare 0..1. Once the first is
+                    # running it is strictly better, so the second is
+                    # dropped rather than re-emitting stale numbers over it
+                    # and flattening the transfer speed to zero.
+                    if transfer.bridge_reporting:
+                        return
+                    # Otherwise: an extension that writes its own file. Fall
+                    # back to what is on disk, which is at least a real
+                    # number of bytes.
+                    bytes_received = transfer.bytes_on_disk
+                    bytes_total = transfer.estimate_total(fraction)
+                    if not bytes_received:
+                        return
+                transfer.note(bytes_received, bytes_total)
                 try:
-                    current = int(max(0.0, min(1.0, fraction)) * 100)
-                    result = self._progress_cb(current, 100)
+                    result = self._progress_cb(bytes_received, bytes_total or 0)
                     # If the callback is async and returns a coroutine, we can't await it here
                     # (we're in a sync context via to_thread), so we need to close it to prevent warnings
                     if asyncio.iscoroutine(result):
@@ -427,7 +513,16 @@ class JSExtensionProvider(BaseProvider):
                 except Exception:
                     pass
 
-            logger.info("[%s] Downloading '%s'", self.name, metadata.title)
+            logger.info(
+                "[%s] Download starting: '%s' — %s · quality=%s · track_id=%s → %s",
+                self.name,
+                metadata.title,
+                metadata.artists,
+                quality,
+                track_id,
+                output_path.name,
+            )
+            download_started_at = time.monotonic()
 
             # ── Progress fallback via disk polling ──────────────────────────
             # Covers the case where the extension bypasses global.file.download
@@ -437,7 +532,7 @@ class JSExtensionProvider(BaseProvider):
             # _bridge.js), this fallback is simply redundant and harmless.
             poll_stop = asyncio.Event()
             poll_task = asyncio.create_task(
-                self._poll_file_progress_async(output_path, poll_stop),
+                self._poll_file_progress_async(output_path, poll_stop, transfer),
             )
 
             try:
@@ -456,9 +551,39 @@ class JSExtensionProvider(BaseProvider):
                 with contextlib.suppress(asyncio.CancelledError):
                     await poll_task
 
+            elapsed = time.monotonic() - download_started_at
+
             if not dl_result or not dl_result.get("success"):
                 err = (dl_result or {}).get("error_message", "download failed")
+                # The extension's own words, at a level that is visible by
+                # default. This is the answer to "it said nothing and no
+                # file appeared": either the call never returned a result at
+                # all, or it returned one saying why.
+                logger.warning(
+                    "[%s] Download FAILED for '%s' after %.1fs: %s",
+                    self.name,
+                    metadata.title,
+                    elapsed,
+                    err if dl_result else "the extension returned no result",
+                )
                 return DownloadResult.fail(self.name, err)
+
+            written = transfer.bytes_on_disk
+            with contextlib.suppress(OSError):
+                if output_path.exists():
+                    written = output_path.stat().st_size
+            logger.info(
+                "[%s] Download finished: '%s' — %s in %.1fs%s",
+                self.name,
+                metadata.title,
+                _human_bytes(written),
+                elapsed,
+                (
+                    f" ({written / elapsed / (1024 * 1024):.1f} MB/s)"
+                    if elapsed > 0 and written
+                    else ""
+                ),
+            )
 
             # ── Reassemble any segments (e.g., Tidal DASH via extension) ──
             actual_path = await self._finalize_segments_async(dl_result, output_path)
@@ -768,12 +893,21 @@ class JSExtensionProvider(BaseProvider):
         self,
         output_path: Path,
         stop_event: asyncio.Event,
+        transfer: _TransferProgress,
     ) -> None:
         """Monitors the growth of output_path (or its common temporary variants:
-        .part, .tmp, .download) and feeds self._progress_cb with an estimated
-        percentage when no real "progress" events arrive from the JS bridge
-        (e.g., extensions that write their own files without passing through
-        global.file.download).
+        .part, .tmp, .download) and feeds self._progress_cb with the real
+        number of bytes on disk when no "progress" events arrive from the JS
+        bridge (e.g., extensions that write their own files without passing
+        through global.file.download).
+
+        It reports bytes rather than a made-up percentage. The old version
+        emitted `1 - 1/(1 + polls * 0.15)` as a percent-of-100 "byte" count,
+        which moved the bar on a timer whether or not anything was being
+        transferred, and told the bar the file was 100 bytes long. Bytes on
+        disk are a real measurement; the total stays unknown unless the
+        bridge supplies one, and an unknown total draws an indeterminate bar
+        instead of a wrong one.
         """
         if self._progress_cb is None:
             return
@@ -786,12 +920,10 @@ class JSExtensionProvider(BaseProvider):
         ]
 
         last_size = 0
-        elapsed_polls = 0
 
         try:
             while not stop_event.is_set():
                 await asyncio.sleep(0.3)
-                elapsed_polls += 1
 
                 size = 0
                 for cand in candidates:
@@ -804,13 +936,17 @@ class JSExtensionProvider(BaseProvider):
                 if size <= 0:
                     continue
 
-                fraction = min(0.97, 1 - (1 / (1 + elapsed_polls * 0.15)))
+                transfer.bytes_on_disk = size
+
+                # The bridge is reporting real byte counts for this
+                # download, so it owns the bar; polling would only fight it.
+                if transfer.bridge_reporting:
+                    continue
 
                 if size != last_size:
                     last_size = size
                     try:
-                        current = int(fraction * 100)
-                        result = self._progress_cb(current, 100)
+                        result = self._progress_cb(size, transfer.total_bytes)
                         # If the callback is async, await it
                         if asyncio.iscoroutine(result):
                             await result

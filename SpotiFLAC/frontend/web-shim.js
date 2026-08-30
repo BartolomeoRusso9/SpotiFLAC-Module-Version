@@ -300,6 +300,7 @@
     'app_cover_download_finished',
     'app_csv_error',
     'app_csv_loaded',
+    'app_csv_progress',
     'app_download_finished',
     'app_handle_provider_search_error',
     'app_handle_provider_search_results',

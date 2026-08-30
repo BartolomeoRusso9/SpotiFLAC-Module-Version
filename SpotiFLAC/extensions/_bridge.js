@@ -226,6 +226,43 @@ if (!isMainThread) {
   // (trackId, quality, outputPath, onProgress).
   const DOWNLOAD_OUTPUT_ARG = 2;
 
+  // ── onProgress scale, inferred per call ──────────────────────────────
+  //
+  // Extensions disagree about what they pass to onProgress, and nothing in
+  // the call says which. Of the ones shipped for this runtime: tidal-web,
+  // deezer, amazon and qobuz-web report 0..100; pandora and soundcloud
+  // report 0..1. Both arrive here on the same channel, and the host read
+  // every value as a fraction and clamped it to 1 — so a percentage
+  // extension's opening `onProgress(5)` pinned the bar at 100% for the
+  // whole download, which is what it looked like in the UI.
+  //
+  // Inferred rather than declared, because the extensions cannot be
+  // changed: a value above 1 can only be a percentage, and once one has
+  // arrived every later value for that call is read the same way. Below
+  // that a value is read as a fraction — which is what an 0..1 extension
+  // sends, and what an 0..100 one sends only for "0%" and "1%".
+  //
+  // The host always receives 0..1, whichever the extension speaks.
+  //
+  // Exactly 1 is the one value the rule cannot place: "100%" from a
+  // fraction extension and "1%" from a percentage one. It is held just
+  // short of complete until something disambiguates it — reporting it as
+  // done would fill the bar and release it, and qobuz-web, which rounds its
+  // percentage, sends a 1 early in every download. A bar that sits at 99%
+  // is a smaller lie than one that completes and then reopens at 37%, and
+  // nothing depends on progress reaching 1: the track's bar is released by
+  // clear_item() when the download returns.
+  const progressScale = new Map(); // callId -> 'percent'
+  const AMBIGUOUS_ONE = 0.99;
+
+  const normalizeProgress = (id, raw) => {
+    let value = Number(raw);
+    if (!isFinite(value) || value < 0) value = 0;
+    if (value > 1) progressScale.set(id, 'percent');
+    if (progressScale.get(id) === 'percent') return Math.min(1, value / 100);
+    return value >= 1 ? AMBIGUOUS_ONE : value;
+  };
+
   // Receives commands from the main thread and executes them *synchronously*
   parentPort.on('message', ({ id, call, args }) => {
     _currentCallId = id; // NEW: rende id disponibile a bridgeCall() durante fn(...)
@@ -238,7 +275,11 @@ if (!isMainThread) {
       // Wraps onProgress if the arg is the placeholder "__progress__"
       const finalArgs = (args || []).map(a =>
         a === '__progress__'
-          ? (v) => parentPort.postMessage({ type: 'progress', callId: id, value: v })
+          ? (v) => parentPort.postMessage({
+              type: 'progress',
+              callId: id,
+              value: normalizeProgress(id, v),
+            })
           : a
       );
       // Tell the filesystem guard that the host sanctioned this path. The
@@ -264,6 +305,7 @@ if (!isMainThread) {
       parentPort.postMessage({ id, error: (e && e.message) || String(e) });
     } finally {
       _currentCallId = null; // NEW
+      progressScale.delete(id);
     }
   });
 

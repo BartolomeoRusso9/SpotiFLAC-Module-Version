@@ -5219,6 +5219,27 @@ async function onCsvFileChosen(input) {
   }
 }
 
+// Pushed by api_mixins/csv_import.py while the rows are being matched.
+// Matching a CSV of titles is one catalogue lookup per row, so a large file
+// is minutes of work; without this the import button said nothing between
+// "Reading the file…" and the finished track list, and a file whose columns
+// were mapped wrong looked exactly like one that was working. Two numbers,
+// because they answer different questions: how far along it is, and how
+// much of it is actually being found.
+window.app_csv_progress = function (payload) {
+  const { done = 0, total = 0, found = 0 } = payload || {};
+  // The line itself is already on screen: the same counter arrives as an
+  // app_set_progress label. This puts it on the button that started the
+  // import too, since that is where the pointer is, and marks the button
+  // busy — without touching its innerHTML, which is the icon.
+  const btn = $('csvBtn');
+  if (!btn) return;
+  const label = `Matching ${done}/${total} · ${found} found`;
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  btn.classList.toggle('is-busy', done < total);
+};
+
 // Pushed by api_mixins/csv_import.py once the track list is ready. The table
 // itself is filled by the ordinary showTracklist event, so this only reports
 // on the rows that did not make it.

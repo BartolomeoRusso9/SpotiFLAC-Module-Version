@@ -704,7 +704,7 @@ async def resolve_rows(
     resolver: Any | None = None,
     min_score: float = DEFAULT_MIN_SCORE,
     concurrency: int = DEFAULT_CONCURRENCY,
-    on_progress: Callable[[int, int], None] | None = None,
+    on_progress: Callable[[int, int, int], None] | None = None,
 ) -> CsvResolution:
     """Turns rows into links, searching the catalogue for the ones that need it.
 
@@ -712,6 +712,13 @@ async def resolve_rows(
     Spotify metadata client in production, a fake in tests. It is only built
     when a row actually needs a search, so a CSV of links resolves without
     touching the network at all.
+
+    `on_progress(done, total, found)` is called once per finished row.
+    `found` — how many of those rows actually matched a track — is reported
+    alongside the count because they are different numbers and the gap is
+    the interesting one: a 300-row file that is 300 rows in and 40 tracks
+    found is a file with the wrong columns, and the user should not have to
+    wait for the run to end to learn that.
     """
     if document is None:
         document = CsvDocument(
@@ -730,10 +737,11 @@ async def resolve_rows(
 
     semaphore = asyncio.Semaphore(max(1, concurrency))
     done = 0
+    found = 0
     total = len(rows)
 
     async def _worker(row: CsvRow):
-        nonlocal done
+        nonlocal done, found
         async with semaphore:
             try:
                 outcome = await _resolve_one(
@@ -744,8 +752,16 @@ async def resolve_rows(
                 logger.debug("[csv] line %d failed: %s", row.line, exc)
                 outcome = UnresolvedRow(row=row, reason=str(exc) or "lookup failed")
             done += 1
+            if isinstance(outcome, ResolvedRow):
+                found += 1
             if on_progress is not None:
-                on_progress(done, total)
+                # A callback that raises must not lose the row it was
+                # reporting on: this is a progress display, not part of the
+                # resolution.
+                try:
+                    on_progress(done, total, found)
+                except Exception:
+                    logger.debug("[csv] progress callback raised, ignored")
             return outcome
 
     outcomes = await asyncio.gather(*(_worker(row) for row in rows))
