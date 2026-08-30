@@ -132,8 +132,7 @@ def test_two_event_loops_still_serialise_on_one_path() -> None:
                 log.append(f"{marker}-end")
 
     threads = [
-        threading.Thread(target=lambda m=m: asyncio.run(_hold(m)))
-        for m in ("a", "b")
+        threading.Thread(target=lambda m=m: asyncio.run(_hold(m))) for m in ("a", "b")
     ]
     for t in threads:
         t.start()

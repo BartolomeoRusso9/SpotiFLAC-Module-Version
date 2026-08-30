@@ -42,6 +42,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+
 class _PathLock:
     """One destination's coordinator: one cross-loop gate, one gate per loop.
 
