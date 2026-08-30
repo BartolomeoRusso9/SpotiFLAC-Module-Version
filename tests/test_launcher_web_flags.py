@@ -100,3 +100,72 @@ def test_the_welcome_banner_is_suppressed_under_json(capsys) -> None:
         assert "SpotiFLAC" in capsys.readouterr().out
     finally:
         sys.argv = original
+
+
+# --- --help must not reach the network -------------------------------------
+
+
+def test_help_skips_the_startup_network_work() -> None:
+    """argparse handles -h/--help further down amain(), and everything before
+    that point — the update check and the extension registry bootstrap —
+    reaches the network. `spotiflac --help` therefore waited on three HTTP
+    attempts per configured registry to print a static string, and appeared
+    to hang outright when a registry was slow to answer.
+    """
+    from SpotiFLAC.launcher import _is_help_invocation
+
+    assert _is_help_invocation(["--help"])
+    assert _is_help_invocation(["-h"])
+    assert _is_help_invocation(["--gui", "--help"])
+
+
+def test_a_real_command_is_not_mistaken_for_help() -> None:
+    """The bootstrap has to keep running for everything that uses
+    extensions, which is nearly everything.
+    """
+    from SpotiFLAC.launcher import _is_help_invocation
+
+    for argv in (
+        [],
+        ["--gui"],
+        ["--web"],
+        ["https://open.spotify.com/track/x"],
+        ["--output", "help"],
+        ["--search", "-h-h"],
+    ):
+        assert not _is_help_invocation(argv), argv
+
+
+def test_amain_guards_both_network_steps(monkeypatch, capsys) -> None:
+    """Guarding only one of them would leave the other on the --help path.
+
+    Run rather than read: an AST scan proves the two names appear under some
+    `if not help_only`, not that neither actually runs. A guard that was
+    correct in the source and wrong in effect — an early call added above
+    it, a condition inverted — reads exactly the same to the parser.
+    """
+    import sys
+
+    from SpotiFLAC.extensions import manager as ext_manager
+
+    ran: list[str] = []
+
+    async def _updates():
+        ran.append("check_for_updates_async")
+
+    def _manager(*args, **kwargs):
+        ran.append("ExtensionManager")
+        raise AssertionError("must not construct an ExtensionManager for --help")
+
+    monkeypatch.setattr(launcher, "check_for_updates_async", _updates)
+    monkeypatch.setattr(ext_manager, "ExtensionManager", _manager)
+    # amain() takes no arguments: it reads sys.argv itself, both for the
+    # help sniff above and for the parser below it.
+    monkeypatch.setattr(sys, "argv", ["spotiflac", "--help"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        asyncio.run(launcher.amain())
+
+    assert exit_info.value.code == 0
+    assert ran == [], f"--help still did network work: {ran}"
+    assert "usage:" in capsys.readouterr().out

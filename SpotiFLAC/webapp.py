@@ -141,6 +141,7 @@ ALLOWED_METHODS: set[str] = {
     "get_ffmpeg_status",
     "get_node_status",
     "save_settings",
+    "save_theme",
     "load_settings",
     "get_registries",
     "add_registry",
@@ -193,6 +194,15 @@ ALLOWED_METHODS: set[str] = {
     # Extension health (read-only, plus a counter reset).
     "get_extension_health",
     "reset_extension_health",
+    # The dashboard (core/stats.py). Read-only, and in multi-user mode it is
+    # the calling account's own history: each account gets its own Api
+    # instance, and `owner` is set on it above.
+    "get_stats",
+    # CSV input (core/csv_source.py). Both take the file's *contents*, never
+    # a path — the browser reads the file locally, so nothing here can be
+    # pointed at a path on the host.
+    "preview_csv",
+    "fetch_csv",
 }
 
 # Deliberately absent from ALLOWED_METHODS, even though they exist on the Api
@@ -369,6 +379,10 @@ class ApiRegistry:
         api._ws_broadcast = lambda fn, args: self._manager.broadcast(
             fn, args, owner=username
         )
+        # Everything this instance downloads is written to the log under this
+        # name, and the dashboard it serves reads back the same name — one
+        # account's numbers, not the machine's.
+        api.owner = username or ""
         if username:
             # A per-account subfolder of the same root, not an unrelated
             # path: an operator who bind-mounted one downloads volume still
@@ -483,11 +497,13 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         # Mirrors what _on_loaded() does for the desktop window, minus the
         # window-specific bits (there is no self._window in web mode, so
         # every push below goes out over the WebSocket only).
-        await run_in_threadpool(api.log, "Python backend connected (web mode).", "info")
+        await run_in_threadpool(
+            api.log, "Python backend connected (web mode).", "debug"
+        )
         await run_in_threadpool(
             api.log,
             f"Default download folder: {api.download_dir}",
-            "info",
+            "debug",
         )
         await run_in_threadpool(api._check_ffmpeg_startup)
         await run_in_threadpool(api._check_node_startup)

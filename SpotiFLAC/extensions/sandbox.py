@@ -57,6 +57,12 @@ _BASE_ALLOWLIST = (
     "TMPDIR",
     # Node's own knobs, including the OpenSSL legacy flag runtime.py sets.
     "NODE_OPTIONS",
+    # Opt-out of the private-network guard, for an extension deliberately
+    # pointed at a self-hosted service on the LAN — see _netguard.js.
+    "SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK",
+    # Opt-out of the write allow-list, and the extra directories it permits.
+    "SPOTIFLAC_EXT_ALLOW_ANY_WRITE",
+    "SPOTIFLAC_EXT_WRITABLE_DIRS",
     "NODE_EXTRA_CA_CERTS",
     "NODE_PATH",
     # Custom CA bundles: without these, an extension simply cannot reach the

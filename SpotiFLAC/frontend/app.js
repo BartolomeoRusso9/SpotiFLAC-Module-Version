@@ -160,29 +160,52 @@ function switchTab(name, btn) {
 }
 
 // ── Appearance ───────────────────────────────────────────────────────────────
+// The theme class goes on BOTH <html> and <body>. The tokens are declared on
+// :root and overridden per theme, and `html { background: var(--bg) }` reads
+// them from <html> — with the class only on <body>, <html> kept resolving
+// --bg to the light default, so the page's outermost background (what shows
+// through on overscroll and around the content) stayed light grey in dark
+// mode. Keeping both in sync also means the pre-paint script in index.html
+// and this function can't disagree about which element carries the state.
+function setThemeClass(dark) {
+  for (const el of [document.documentElement, document.body]) {
+    if (!el) continue;
+    el.classList.toggle('dark-theme', dark);
+    el.classList.toggle('light-theme', !dark);
+  }
+}
+
 function applyTheme(mode) {
-  if (mode === 'light') {
-    document.body.classList.remove('dark-theme');
-    document.body.classList.add('light-theme');
-  } else if (mode === 'dark') {
-    document.body.classList.remove('light-theme');
-    document.body.classList.add('dark-theme');
+  if (mode === 'light' || mode === 'dark') {
+    setThemeClass(mode === 'dark');
   } else {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    if (prefersDark) {
-      document.body.classList.remove('light-theme');
-      document.body.classList.add('dark-theme');
-    } else {
-      document.body.classList.remove('dark-theme');
-      document.body.classList.add('light-theme');
-    }
+    setThemeClass(window.matchMedia('(prefers-color-scheme: dark)').matches);
   }
 }
 
 function changeTheme() {
   const val = $('config-theme').value;
   applyTheme(val);
-  try { localStorage.setItem('spotiflac-theme-mode', val); } catch (e) {}
+  try {
+    localStorage.setItem('spotiflac-theme-mode', val);
+    // Mirror the choice into the settings blob as well. saveSettings() only
+    // writes it when the user presses Save, so without this the blob kept
+    // saying 'auto' while spotiflac-theme-mode said 'dark' — and the blob is
+    // what applySettings() reads at boot, which is how a picked dark theme
+    // came back light on the next launch.
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
+    stored.theme = val;
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(stored));
+  } catch (e) {}
+  // …and into gui-settings.json, which is the copy that actually survives.
+  // Both localStorage writes above live in the web view's per-origin storage,
+  // and the desktop window has not historically kept that across launches
+  // (see run_gui() in app.py), so on its own the picker never stuck. This is
+  // a theme-only merge, so it cannot clobber unsaved edits elsewhere in the
+  // Settings form.
+  try {
+    window.pywebview?.api?.save_theme?.(val);
+  } catch (e) {}
 }
 
 function syncSystemTheme(e) {
@@ -237,7 +260,19 @@ function applySettings(settings = {}) {
       };
   }
   if ($('config-fallback')) $('config-fallback').checked = cfg.allow_fallback;
-  if ($('config-theme')) $('config-theme').value = cfg.theme;
+  // The dedicated key wins over the blob's copy: it is what the pre-paint
+  // script in index.html already acted on, and a stale cfg.theme here would
+  // otherwise flip the UI back a moment after load. When the key is absent —
+  // the normal state in the desktop window, whose storage does not always
+  // survive a restart — cfg.theme (from gui-settings.json, written by
+  // save_theme()) is the surviving copy, so seed the key back from it and
+  // the *next* launch gets the right colour before the first paint.
+  let themeMode = cfg.theme;
+  try {
+    themeMode = localStorage.getItem('spotiflac-theme-mode') || cfg.theme;
+    localStorage.setItem('spotiflac-theme-mode', themeMode);
+  } catch (e) {}
+  if ($('config-theme')) $('config-theme').value = themeMode;
   if ($('config-font')) $('config-font').value = cfg.font;
   changeFont();
   changeTheme();
@@ -259,6 +294,7 @@ function applySettings(settings = {}) {
   if ($('config-post-cmd')) $('config-post-cmd').value = cfg.post_download_command;
   if ($('config-qobuz-local-api')) $('config-qobuz-local-api').value = cfg.qobuz_local_api_url || '';
   if ($('config-tidal-api')) $('config-tidal-api').value = cfg.tidal_custom_api || '';
+  if ($('config-acoustid-key')) $('config-acoustid-key').value = cfg.acoustid_api_key || '';
   if ($('config-loop')) $('config-loop').value = cfg.loop;
   if ($('config-loglevel')) $('config-loglevel').value = cfg.log_level;
   applyListState('services-list', cfg.services);
@@ -468,6 +504,7 @@ const DEFAULT_SETTINGS = {
   transcode_keep_original: false,
   qobuz_local_api_url: '',
   tidal_custom_api: '',
+  acoustid_api_key: '',
   loop: 0,
   log_level: 'INFO',
   services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
@@ -867,22 +904,35 @@ const TRACKS_PER_PAGE = 50;
 
 // ── Logging & Python bridge ──────────────────────────────────────────────────
 function logMessage(msg, type = '') {
+  // A '-quiet' suffix means "colour this line like its base type, but never
+  // toast it". It exists for lists the user genuinely wants itemised in the
+  // panel — the unmatched rows of a CSV import, say — where itemising the
+  // notifications instead would mean hundreds of popups. The panel keeps
+  // every line, in its usual colour; a single summary toast is raised by the
+  // caller alongside the list.
+  const quiet = typeof type === 'string' && type.endsWith('-quiet');
+  const base = quiet ? type.slice(0, -'-quiet'.length) : type;
+
   // Write to the log UI panel
   const area = $('logArea');
   if (area) {
     const line = document.createElement('div');
     line.className = 'log-line';
-    line.innerHTML = `<span class="log-ts">${ts()}</span><span class="log-msg ${type}">${escHtml(msg)}</span>`;
+    line.innerHTML = `<span class="log-ts">${ts()}</span><span class="log-msg ${base}">${escHtml(msg)}</span>`;
     area.appendChild(line);
     area.scrollTop = area.scrollHeight;
   }
 
-  // Also generate a visual Toast based on the event type!
-  if (type === 'ok') toastMgr.success(msg);
-  else if (type === 'error') toastMgr.error(msg);
-  else if (type === 'warn') toastMgr.warning(msg);
-  // If there is no type or it is routine info ("info"), show info only when relevant
-  else if (type === 'info') toastMgr.info(msg, { duration: 2500 });
+  // Also generate a visual Toast based on the event type.
+  // 'debug' (and an absent type) stay in the panel above and never toast —
+  // that is where startup diagnostics go, so a launch no longer greets the
+  // user with a stack of notifications they did not ask for.
+  if (quiet || base === 'debug' || !base) return;
+
+  if (base === 'ok') toastMgr.success(msg);
+  else if (base === 'error') toastMgr.error(msg);
+  else if (base === 'warn') toastMgr.warning(msg);
+  else if (base === 'info') toastMgr.info(msg, { duration: 2500 });
 }
 
 function clearLog() { $('logArea').innerHTML = ''; }
@@ -2187,6 +2237,9 @@ function renderRecentSearches() {
     const searches = JSON.parse(localStorage.getItem('recent_searches') || '[]');
     const grid = $('recent-grid');
     grid.innerHTML = '';
+    // These are text rows, so the grid drops to a single full-width column
+    // instead of the 120px artwork tracks the fetches use.
+    grid.classList.add('searches');
     const label = $('recent-wrap').querySelector('.recent-label');
     if (label) label.textContent = 'RECENT SEARCHES';
     
@@ -2197,7 +2250,9 @@ function renderRecentSearches() {
         card.style.display = 'flex';
         card.style.alignItems = 'center';
         card.style.gap = '10px';
-        card.innerHTML = `<span style="font-size:16px;">🔎</span><span class="rc-title" style="font-size:13px; color:var(--text);">${escHtml(q)}</span>`;
+        // Same stroke icon as the search-mode toggle, not an emoji: it sits
+        // in a themed card and has to take its colour from the theme.
+        card.innerHTML = `<span class="rc-search-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></span><span class="rc-title" style="font-size:13px; color:var(--text);">${escHtml(q)}</span>`;
         card.onclick = () => {
             $('urlInput').value = q;
             $('urlInput').dispatchEvent(new Event('input'));
@@ -2220,14 +2275,12 @@ function toggleSearchMode() {
     const toggle = $('searchModeToggle');
     const input = $('urlInput');
     const mode = $('searchMode');
-    const icon = $('searchModeIcon');
     const label = $('searchModeText');
     const fetchBtn = $('fetchBtn');
 
     if (mode.value === 'link') {
         mode.value = 'search';
         toggle.classList.add('active');
-        icon.textContent = '🔎';
         label.textContent = 'Search';
         toggle.title = 'Switch to Fetch Mode';
         
@@ -2241,7 +2294,6 @@ function toggleSearchMode() {
     } else {
         mode.value = 'link';
         toggle.classList.remove('active');
-        icon.textContent = '🔗';
         label.textContent = 'Fetch';
         toggle.title = 'Switch to Search Mode';
         
@@ -2260,7 +2312,6 @@ function updateSearchMode() {
   const mode = $('searchMode').value;
   const input = $('urlInput');
   const toggle = $('searchModeToggle');
-  const icon = $('searchModeIcon');
   const label = $('searchModeText');
   
   if (mode === 'search') {
@@ -2268,7 +2319,6 @@ function updateSearchMode() {
     clearTimeout(phTimeout);
     input.placeholder = 'Search Spotify with keywords, artist or track name…';
     toggle.classList.add('active');
-    icon.textContent = '🔎';
     label.textContent = 'Search';
     toggle.title = 'Switch to Fetch Mode';
     $('track-table-wrap')?.classList.add('hidden');
@@ -2277,7 +2327,6 @@ function updateSearchMode() {
   } else {
     // Link mode: reset and restart the animation
     toggle.classList.remove('active');
-    icon.textContent = '🔗';
     label.textContent = 'Fetch';
     toggle.title = 'Switch to Search Mode';
     
@@ -2575,6 +2624,8 @@ function normalizeHistoryUrl(url) {
 
 function renderRecent(hist) {
   const grid = $('recent-grid'); grid.innerHTML = '';
+  // Artwork tiles, not the one-line rows renderRecentSearches() builds.
+  grid.classList.remove('searches');
   if (!hist || !hist.length) {
     grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--muted);padding:10px 0;">No recent fetches yet.</div>';
     return;
@@ -3024,16 +3075,20 @@ function setFetchingState(state, customMsg = null) {
     // If a toast is already open, close it before opening another
     if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
     
+    // Plain text, not markup: toastMgr escapes the message (see
+    // toast-system.js's escapeHtml), so the <div> that used to be passed
+    // here rendered as a literal tag in the corner of the window — which
+    // is what made a normal fetch look like a debug popup.
     currentFetchToastId = toastMgr.loading(
-      `<div class="ft-desc loading" style="font-size:12px; margin-top:2px; color:var(--text2);">please wait...</div>`, 
+      'please wait...',
       { title: title, position: 'bottom-left' } // Lo teniamo a sinistra come l'originale
     );
-  } 
+  }
   else if (state === 'success') {
     if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
-    toastMgr.success('success', { title: 'Completato', position: 'bottom-left', duration: 2500 });
+    toastMgr.success('Tracklist loaded.', { title: 'Done', position: 'bottom-left', duration: 2500 });
     currentFetchToastId = null;
-  } 
+  }
   else if (state === 'error') {
     if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
     const errorTitle = customMsg || 'error occurred';
@@ -3163,6 +3218,7 @@ function buildConfig() {
     post_download_command:  $('config-post-cmd')?.value?.trim() || '',
     qobuz_local_api_url:    $('config-qobuz-local-api').value.trim() || null,
     tidal_custom_api:       $('config-tidal-api').value.trim()  || null,
+    acoustid_api_key:       $('config-acoustid-key')?.value.trim() || '',
     loop:                   parseInt($('config-loop').value) || null,
     log_level:              $('config-loglevel').value,
   };
@@ -3992,7 +4048,10 @@ function renderHomeSections(sections) {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.addEventListener('pywebviewready', async () => {
-  logMessage('Python backend connected.', 'ok');
+  // No "backend connected" line here: the backend logs its own as soon as it
+  // is ready (_on_loaded() in app.py, and webapp.py in --web mode), so
+  // announcing it from this side too printed the same event twice, in two
+  // different capitalisations.
   loadHistoryAndProfiles();
   checkAuthStatus();
 
@@ -4131,6 +4190,32 @@ window.showNodeWarning = function(result) {
 // Sets the two version-label DOM elements. Called from Python via the
 // generic _push() bridge (desktop: evaluate_js, web: WebSocket dispatch) —
 // see SpotiFLAC/app.py's _push() and frontend/web-shim.js.
+// Playcounts that arrived after the table was drawn — a CSV import shows its
+// tracklist immediately and fills this column in behind it (see
+// _start_csv_playcounts() in api_mixins/csv_import.py), because an arbitrary
+// list of tracks costs one Spotify lookup each and there is no album-wide
+// query to read them all from at once. Patches the cells in place rather than
+// re-rendering, so the user's checkboxes, scroll position and page stay put.
+window.app_update_playcounts = function (byId) {
+  if (!byId || typeof byId !== 'object') return;
+  let patched = 0;
+  currentTracks.forEach((t, i) => {
+    const count = byId[t.id];
+    if (!count) return;
+    t.playcount = count;
+    patched++;
+    // Only the rows on the current page exist in the DOM; the rest pick the
+    // value up from currentTracks the next time they are rendered.
+    const cb = document.querySelector(`.track-cb[value="${i}"]`);
+    const cell = cb && cb.closest('.track-row')?.querySelector('.tr-playcount');
+    // A playlist view puts the album name in this column instead — leave it be.
+    if (cell && cell.textContent.trim() === '—') {
+      cell.textContent = String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+  });
+  if (patched) logMessage(`Playcount filled in for ${patched} track(s).`, 'debug');
+};
+
 window.__set_version_label = function (version) {
   const tb = document.getElementById('tb-version');
   if (tb) tb.innerText = version;
@@ -4460,7 +4545,26 @@ function renderLocalTracks() {
                 </div>
             `;
 
-            scoreCol = `<span class="local-badge ${isSafe ? 'ok' : 'warn'}" title="Confidence Score">${best.confidence}%</span>`;
+            // An ISRC hit is an identity check, not a similarity score, so it
+            // says so instead of showing a meaningless 100%. A row that scored
+            // well but is held back — the title disagrees, or it looks like a
+            // live/remix version with no duration to confirm it — explains why
+            // it is not pre-ticked, rather than leaving the user to wonder.
+            if (best.how === 'isrc') {
+                scoreCol = `<span class="local-badge ok" title="Matched by ISRC — the file's own recording ID, not a guess">ISRC</span>`;
+            } else {
+                let why = 'Confidence score';
+                if (!isSafe && best.confidence >= 90) {
+                    if (!best.artist_known) {
+                        why = 'This file has no artist — in tags or in its name — so only the title was compared. Check before applying';
+                    } else if (best.variant_unconfirmed) {
+                        why = 'Looks like a different version (live/remix/instrumental) and there is no duration to confirm it — check before applying';
+                    } else {
+                        why = 'The titles do not agree closely enough to apply this unattended — check before applying';
+                    }
+                }
+                scoreCol = `<span class="local-badge ${isSafe ? 'ok' : 'warn'}" title="${escHtml(why)}">${best.confidence}%</span>`;
+            }
             checkbox = `<input type="checkbox" class="local-cb" value="${i}" data-file-path="${escHtml(item.file_path)}" ${isSafe ? 'checked' : ''} onchange="updateLocalSelection()">`;
         } else if (item.error) {
             scoreCol = `<span class="local-badge err">Error</span>`;
@@ -4853,3 +4957,304 @@ async function resetExtensionHealth() {
     showToast('Could not clear the statistics.', 'error');
   }
 }
+
+// ── Your library, in numbers (core/stats.py) ──────────────────────────────
+//
+// The download log read back as a dashboard. Everything here is derived from
+// downloads this install actually made, so the view is honest about what it
+// cannot know: genre, release year and duration are only recorded for
+// downloads made since the feature landed, and each section reports its own
+// coverage rather than presenting a fifth of the library as all of it.
+
+function statsPeriodArgs() {
+  const value = $('stats-period')?.value || 'all';
+  if (value === 'year') return [new Date().getFullYear(), null];
+  if (value === '365') return [null, 365];
+  if (value === '30') return [null, 30];
+  return [null, null];
+}
+
+function statsBytes(value) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = Number(value) || 0;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+  return (unit === 0 ? size.toFixed(0) : size.toFixed(1)) + ' ' + units[unit];
+}
+
+function statsDuration(ms) {
+  const seconds = Math.floor((Number(ms) || 0) / 1000);
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days) return `${days}d ${hours}h`;
+  if (hours) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function statsTile(label, value, hint) {
+  return `
+    <div class="stat-tile">
+      <div class="stat-tile-value">${regEscapeHtml(value)}</div>
+      <div class="stat-tile-label">${regEscapeHtml(label)}</div>
+      ${hint ? `<div class="stat-tile-hint">${regEscapeHtml(hint)}</div>` : ''}
+    </div>`;
+}
+
+// One ranking as labelled bars. `rows` is [{label, value, caption}], drawn
+// relative to the largest value so the shape of the list is readable at a
+// glance rather than needing the numbers to be compared by eye.
+function statsBars(rows, formatValue) {
+  if (!rows.length) return '<div class="s-label" style="font-size:11.5px;">Nothing here yet.</div>';
+  const peak = Math.max(...rows.map((row) => row.value)) || 1;
+  return rows.map((row) => `
+    <div class="stat-bar-row">
+      <div class="stat-bar-label" title="${regEscapeHtml(row.label)}">${regEscapeHtml(row.label)}</div>
+      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.max(2, (row.value / peak) * 100)}%"></div></div>
+      <div class="stat-bar-value">${regEscapeHtml((formatValue || String)(row.value))}</div>
+    </div>`).join('');
+}
+
+function statsSection(title, inner, note) {
+  return `
+    <div class="s-section">
+      <div class="s-title">${regEscapeHtml(title)}</div>
+      ${note ? `<div class="s-label" style="font-size:11px;margin:-2px 0 10px;">${regEscapeHtml(note)}</div>` : ''}
+      ${inner}
+    </div>`;
+}
+
+async function loadStats() {
+  const body = $('stats-body');
+  if (!body) return;
+  if (!window.pywebview?.api?.get_stats) {
+    body.innerHTML = '<div class="s-label" style="font-size:11.5px;">Statistics are unavailable in this build.</div>';
+    return;
+  }
+  body.innerHTML = '<div class="s-label" style="font-size:11.5px;">Loading…</div>';
+  try {
+    const [year, days] = statsPeriodArgs();
+    renderStats(await window.pywebview.api.get_stats(year, days, 10));
+  } catch (e) {
+    body.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Could not read the download log.</div>';
+  }
+}
+
+function renderStats(doc) {
+  const body = $('stats-body');
+  if (!body) return;
+  if (!doc || doc.error) {
+    body.innerHTML = `<div class="s-label" style="font-size:11.5px;color:var(--red);">${regEscapeHtml(doc?.error || 'No data.')}</div>`;
+    return;
+  }
+
+  const totals = doc.totals || {};
+  if (!totals.tracks) {
+    body.innerHTML = `
+      <div class="s-section">
+        <div class="s-title">Nothing yet</div>
+        <div class="s-label" style="font-size:11.5px;">
+          This is built from the download log, which fills up as you fetch
+          tracks. Come back after a download or two.
+        </div>
+      </div>`;
+    return;
+  }
+
+  const sections = [];
+
+  sections.push(`
+    <div class="stat-tiles">
+      ${statsTile('tracks', totals.tracks)}
+      ${statsTile('artists', totals.artists)}
+      ${statsTile('albums', totals.albums)}
+      ${statsTile('on disk', statsBytes(totals.bytes))}
+      ${totals.listening_known
+        ? statsTile('of music', statsDuration(totals.listening_ms),
+            totals.listening_known === totals.tracks ? '' : `timed for ${totals.listening_known} of them`)
+        : ''}
+      ${totals.failed ? statsTile('failed', totals.failed, `${Math.round((totals.success_rate || 0) * 100)}% succeeded`) : ''}
+    </div>`);
+
+  sections.push(statsSection('Top artists', statsBars(
+    (doc.top_artists || []).map((e) => ({ label: e.name, value: e.tracks })),
+  )));
+
+  const albums = (doc.top_albums || []).map((e) => ({
+    label: e.artist ? `${e.name} — ${e.artist}` : e.name,
+    value: e.tracks,
+  }));
+  sections.push(statsSection('Top albums', statsBars(albums)));
+
+  const genres = doc.top_genres || { entries: [] };
+  sections.push(statsSection(
+    'Top genres',
+    statsBars((genres.entries || []).map((e) => ({ label: e.name, value: e.tracks }))),
+    genres.unknown
+      ? `Known for ${genres.known} of ${totals.tracks} tracks — a genre needs metadata enrichment to have been on when the track was downloaded.`
+      : '',
+  ));
+
+  const decades = doc.decades || { entries: [] };
+  if ((decades.entries || []).length) {
+    sections.push(statsSection(
+      'By decade',
+      statsBars(decades.entries.map((e) => ({ label: e.name, value: e.tracks }))),
+      decades.unknown ? `Release year known for ${decades.known} of ${totals.tracks} tracks.` : '',
+    ));
+  }
+
+  const repeats = doc.top_tracks || [];
+  if (repeats.length) {
+    sections.push(statsSection(
+      'Fetched more than once',
+      statsBars(repeats.map((e) => ({ label: `${e.name} — ${e.artist}`, value: e.tracks }))),
+      'A re-download after a quality upgrade, or the same song from two playlists.',
+    ));
+  }
+
+  sections.push(statsSection('Providers', statsBars(
+    (doc.providers || []).map((e) => ({ label: e.name, value: e.tracks })),
+  )));
+
+  const formats = doc.formats || [];
+  if (formats.length) {
+    sections.push(statsSection('Formats', statsBars(
+      formats.map((e) => ({ label: (e.name || '').toUpperCase(), value: e.tracks })),
+    )));
+  }
+
+  const timeline = (doc.timeline || []).slice(-12);
+  if (timeline.length) {
+    sections.push(statsSection('Last months', statsBars(
+      timeline.map((e) => ({ label: e.month, value: e.tracks })),
+    )));
+  }
+
+  const activity = doc.activity || {};
+  const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  if ((activity.by_weekday || []).some((n) => n)) {
+    sections.push(statsSection('By weekday', statsBars(
+      activity.by_weekday.map((count, index) => ({ label: weekdays[index], value: count })),
+    )));
+  }
+
+  const facts = [];
+  if (activity.busiest_day) {
+    facts.push(`Busiest day: ${activity.busiest_day.date} (${activity.busiest_day.tracks} tracks)`);
+  }
+  if (activity.active_days) {
+    facts.push(`Downloaded on ${activity.active_days} day(s) · longest streak ${activity.longest_streak}`);
+  }
+  if (doc.first) {
+    const when = new Date((doc.first.downloaded_at || 0) * 1000).toLocaleDateString();
+    facts.push(`First in this period: ${doc.first.title} — ${doc.first.artist} (${when})`);
+  }
+  if (facts.length) {
+    sections.push(statsSection(
+      'Highlights',
+      facts.map((fact) => `<div class="s-label" style="font-size:12px;line-height:1.9;">${regEscapeHtml(fact)}</div>`).join(''),
+    ));
+  }
+
+  body.innerHTML = sections.join('');
+}
+
+// ── CSV import (core/csv_source.py) ───────────────────────────────────────
+//
+// The file is read here, in the browser, and only its text crosses to Python
+// — so this works identically in the desktop window and over `--web`, and a
+// server never has to be able to see the user's disk.
+
+// Blob.text() everywhere it exists, FileReader where it doesn't — the
+// desktop window runs whatever webview the operating system ships, which on
+// an older install predates it.
+function readFileAsText(file) {
+  if (typeof file.text === 'function') return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('read failed'));
+    reader.readAsText(file);
+  });
+}
+
+function openCsvPicker() {
+  $('csvFileInput')?.click();
+}
+
+async function onCsvFileChosen(input) {
+  const file = input?.files?.[0];
+  // Cleared straight away so choosing the same file twice in a row still
+  // fires a change event.
+  if (input) input.value = '';
+  if (!file) return;
+
+  if (file.size > 2000000) {
+    showToast('That file is too large to import (2 MB max).', 'error');
+    return;
+  }
+  if (!window.pywebview?.api?.fetch_csv) {
+    showToast('CSV import is unavailable in this build.', 'error');
+    return;
+  }
+
+  let text;
+  try {
+    text = await readFileAsText(file);
+  } catch (e) {
+    showToast('Could not read that file.', 'error');
+    return;
+  }
+
+  try {
+    const started = await window.pywebview.api.fetch_csv(text, file.name);
+    if (started?.status === 'error') {
+      showToast(started.error || 'Could not read that file.', 'error');
+      return;
+    }
+    showToast(`Reading ${file.name}… rows without a link are matched against the catalogue.`, 'info');
+  } catch (e) {
+    showToast(e.message || 'CSV import failed.', 'error');
+  }
+}
+
+// Pushed by api_mixins/csv_import.py while the rows are being matched.
+// Matching a CSV of titles is one catalogue lookup per row, so a large file
+// is minutes of work; without this the import button said nothing between
+// "Reading the file…" and the finished track list, and a file whose columns
+// were mapped wrong looked exactly like one that was working. Two numbers,
+// because they answer different questions: how far along it is, and how
+// much of it is actually being found.
+window.app_csv_progress = function (payload) {
+  const { done = 0, total = 0, found = 0 } = payload || {};
+  // The line itself is already on screen: the same counter arrives as an
+  // app_set_progress label. This puts it on the button that started the
+  // import too, since that is where the pointer is, and marks the button
+  // busy — without touching its innerHTML, which is the icon.
+  const btn = $('csvBtn');
+  if (!btn) return;
+  const label = `Matching ${done}/${total} · ${found} found`;
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  btn.classList.toggle('is-busy', done < total);
+};
+
+// Pushed by api_mixins/csv_import.py once the track list is ready. The table
+// itself is filled by the ordinary showTracklist event, so this only reports
+// on the rows that did not make it.
+window.app_csv_loaded = function (payload) {
+  const missed = (payload?.unresolved || []).length;
+  if (missed) {
+    showToast(
+      `${payload.tracks} track(s) loaded · ${missed} row(s) could not be matched (see the log).`,
+      'info',
+    );
+  } else {
+    showToast(`${payload.tracks} track(s) loaded from ${payload.file}.`, 'success');
+  }
+};
+
+window.app_csv_error = function (payload) {
+  showToast(payload?.error || 'CSV import failed.', 'error');
+};

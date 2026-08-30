@@ -108,7 +108,7 @@ class CoversLyricsMixin:
                 )
                 return
 
-            self.log(f"Downloading HQ cover for: {title}…", "info")
+            self.log(f"Downloading HQ cover for: {title}…", "debug")
 
             import httpx
 
@@ -216,7 +216,7 @@ class CoversLyricsMixin:
                 self.log(f"No cover URL available for: {title}", "error")
                 return
 
-            self.log(f"Downloading HQ album cover: {artist} - {title}…", "info")
+            self.log(f"Downloading HQ album cover: {artist} - {title}…", "debug")
 
             async with httpx.AsyncClient() as client:
                 resp = await client.get(cover_url, timeout=15, follow_redirects=True)
@@ -248,14 +248,20 @@ class CoversLyricsMixin:
         run_sync(self._async_download_all_covers(tracks_data))
 
     async def _async_download_all_covers(self, tracks_data) -> None:
+        # Per-item lines below are logged as "debug": they still show up in
+        # the Logs panel, but they no longer raise a toast each. A 50-track
+        # playlist used to pop 50 notifications on success and one more per
+        # failure; the single summary at the end carries the same
+        # information, and a failure count so nothing is lost by not
+        # toasting each one.
         total = len(tracks_data)
-        success, skipped = 0, 0
+        success, skipped, failed = 0, 0, 0
 
-        self.log(f"Saving covers for {total} tracks at warp speed…", "info")
+        self.log(f"Saving covers for {total} tracks at warp speed…", "debug")
         os.makedirs(self.download_dir, exist_ok=True)
 
         async def fetch_and_save(client, track_data, idx) -> None:
-            nonlocal success, skipped
+            nonlocal success, skipped, failed
             title = track_data.get("title", "Unknown")
             artist = track_data.get("artist", "")
 
@@ -283,9 +289,18 @@ class CoversLyricsMixin:
                     await f.write(resp.content)
 
                 success += 1
-                self.log(f"[{idx}/{total}] HQ Cover saved: {filename}", "ok")
+                self.log(f"[{idx}/{total}] HQ Cover saved: {filename}", "debug")
             except Exception as e:
-                self.log(f"[{idx}/{total}] Cover error for '{title}': {e}", "error")
+                failed += 1
+                # "error-quiet", not "debug": a cover that failed is a thing
+                # the user asked for and did not get, and at the default log
+                # level a "debug" line is not shown at all — the bulk run
+                # reported a summary and swallowed every reason. "-quiet"
+                # keeps it out of the toast/notification stream, which a
+                # 300-track playlist would otherwise bury.
+                self.log(
+                    f"[{idx}/{total}] Cover error for '{title}': {e}", "error-quiet"
+                )
 
         # Create an async client and start all downloads together!
         async with httpx.AsyncClient(
@@ -297,7 +312,11 @@ class CoversLyricsMixin:
             ]
             await asyncio.gather(*tasks)
 
-        self.log(f"All covers done — {success} saved, {skipped} skipped.", "ok")
+        self.log(
+            f"All covers done — {success} saved, {skipped} skipped"
+            + (f", {failed} failed." if failed else "."),
+            "warn" if failed else "ok",
+        )
 
     # ── Bulk: lyrics for every track (ASYNC VERSION) ──
     def download_all_lyrics(self, tracks_data) -> None:
@@ -315,14 +334,17 @@ class CoversLyricsMixin:
 
         from ..core.lyrics import fetch_lyrics_async
 
+        # Same reasoning as _async_download_all_covers above: per-item lines
+        # stay in the Logs panel as "debug" instead of raising one toast per
+        # track, and the closing summary reports the failures.
         total = len(tracks_data)
-        success, skipped = 0, 0
+        success, skipped, failed = 0, 0, 0
 
-        self.log(f"Fetching lyrics for {total} tracks concurrently…", "info")
+        self.log(f"Fetching lyrics for {total} tracks concurrently…", "debug")
         os.makedirs(self.download_dir, exist_ok=True)
 
         async def fetch_and_save_lyric(track_data, idx) -> None:
-            nonlocal success, skipped
+            nonlocal success, skipped, failed
             title = track_data.get("title", "Unknown")
             artist = track_data.get("artist", "")
             isrc = track_data.get("isrc", "")
@@ -357,10 +379,14 @@ class CoversLyricsMixin:
                 success += 1
                 self.log(
                     f"[{idx}/{total}] Lyrics saved: {filename} (via {provider})",
-                    "ok",
+                    "debug",
                 )
             except Exception as e:
-                self.log(f"[{idx}/{total}] Lyrics error for '{title}': {e}", "error")
+                failed += 1
+                # See the cover loop above for why this is not "debug".
+                self.log(
+                    f"[{idx}/{total}] Lyrics error for '{title}': {e}", "error-quiet"
+                )
 
         # Download all lyrics concurrently
         tasks = [
@@ -368,4 +394,8 @@ class CoversLyricsMixin:
         ]
         await asyncio.gather(*tasks)
 
-        self.log(f"All lyrics done — {success} saved, {skipped} skipped.", "ok")
+        self.log(
+            f"All lyrics done — {success} saved, {skipped} skipped"
+            + (f", {failed} failed." if failed else "."),
+            "warn" if failed else "ok",
+        )

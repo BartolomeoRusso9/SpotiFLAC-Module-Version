@@ -87,3 +87,42 @@ def test_dedup_status_reachable_over_http(client) -> None:
     assert resp.status_code == 200
     result = resp.json()["result"]
     assert "available" in result
+
+
+def test_the_dashboard_and_csv_import_are_in_the_page(client) -> None:
+    html = client.get("/").text
+    assert 'id="view-stats"' in html
+    assert 'id="stats-body"' in html
+    assert "onclick=\"switchView('stats'); loadStats();\"" in html
+    # The CSV button sits next to the link/search toggle: a third way in.
+    assert 'id="csvFileInput"' in html
+    assert 'onclick="openCsvPicker()"' in html
+
+
+def test_the_dashboard_round_trips_over_http(client) -> None:
+    from SpotiFLAC.core import download_log
+
+    download_log.record(
+        title="Song", artist="Queen", provider="ext:tidal-web", genre="Rock"
+    )
+
+    # Positional arguments, exactly as web-shim.js sends them:
+    # get_stats(year, days, top).
+    result = client.post("/api/get_stats", json=[None, None, 5]).json()["result"]
+
+    assert result["totals"]["tracks"] == 1
+    assert result["top_artists"][0]["name"] == "Queen"
+
+
+def test_csv_preview_round_trips_over_http(client) -> None:
+    content = (
+        "Track URI,Track Name,Artist Name(s)\n"
+        "spotify:track:4uLU6hMCjMI75M1A2tKUQC,Never Gonna Give You Up,Rick Astley\n"
+    )
+    # preview_csv(content, name, delimiter, min_score)
+    result = client.post(
+        "/api/preview_csv", json=[content, "export.csv", None, None]
+    ).json()["result"]
+
+    assert result["ok"] is True
+    assert result["urls"] == ["https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"]

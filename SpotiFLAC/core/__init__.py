@@ -145,6 +145,16 @@ def get_health_zarz_url() -> str:
     return _get_registry().get("health", {}).get("zarz", "")
 
 
+def get_acoustid_config() -> dict:
+    """AcoustID's application key and lookup endpoint, from the cloud
+    registry — see acoustid_lookup.py. Returns {} when the registry has no
+    "acoustid" section, which callers must treat as "identification is not
+    configured" rather than as an error.
+    """
+    cfg = _get_registry().get("acoustid", {})
+    return cfg if isinstance(cfg, dict) else {}
+
+
 def get_community_url(provider: str) -> str:
     return _get_registry().get("community", {}).get(provider, "")
 

@@ -222,6 +222,52 @@ if (!isMainThread) {
 
   parentPort.postMessage({ type: 'ready' });
 
+  // Position of the output path in a download() call: the host passes
+  // (trackId, quality, outputPath, onProgress).
+  const DOWNLOAD_OUTPUT_ARG = 2;
+
+  // ── onProgress scale, inferred per call ──────────────────────────────
+  //
+  // Extensions disagree about what they pass to onProgress, and nothing in
+  // the call says which. Of the ones shipped for this runtime: tidal-web,
+  // deezer, amazon and qobuz-web report 0..100; pandora and soundcloud
+  // report 0..1. Both arrive here on the same channel, and the host read
+  // every value as a fraction and clamped it to 1 — so a percentage
+  // extension's opening `onProgress(5)` pinned the bar at 100% for the
+  // whole download, which is what it looked like in the UI.
+  //
+  // Inferred rather than declared, because the extensions cannot be
+  // changed: a value above 1 can only be a percentage, and once one has
+  // arrived every later value for that call is read the same way. Below
+  // that a value is read as a fraction — which is what an 0..1 extension
+  // sends, and what an 0..100 one sends only for "0%" and "1%".
+  //
+  // The host always receives 0..1, whichever the extension speaks.
+  //
+  // Exactly 1 is the one value the rule cannot place: "100%" from a
+  // fraction extension and "1%" from a percentage one. Nothing is reported
+  // for it — the bar holds whatever it last showed until a value that can
+  // be placed arrives.
+  //
+  // Reporting it as done would fill the bar and release it, and qobuz-web,
+  // which rounds its percentage, sends a 1 early in every download. Showing
+  // it as 99% instead was worse still: qobuz-web's next value is 2, which
+  // establishes the percentage scale and lands at 0.02, so the bar ran
+  // 99% → 2% on every download it made. Skipping the event costs nothing —
+  // nothing depends on progress reaching 1, since the track's bar is
+  // released by clear_item() when the download returns.
+  const progressScale = new Map(); // callId -> 'percent'
+  //: What normalizeProgress returns for a value it cannot place.
+  const UNPLACEABLE = null;
+
+  const normalizeProgress = (id, raw) => {
+    let value = Number(raw);
+    if (!isFinite(value) || value < 0) value = 0;
+    if (value > 1) progressScale.set(id, 'percent');
+    if (progressScale.get(id) === 'percent') return Math.min(1, value / 100);
+    return value >= 1 ? UNPLACEABLE : value;
+  };
+
   // Receives commands from the main thread and executes them *synchronously*
   parentPort.on('message', ({ id, call, args }) => {
     _currentCallId = id; // NEW: rende id disponibile a bridgeCall() durante fn(...)
@@ -234,15 +280,37 @@ if (!isMainThread) {
       // Wraps onProgress if the arg is the placeholder "__progress__"
       const finalArgs = (args || []).map(a =>
         a === '__progress__'
-          ? (v) => parentPort.postMessage({ type: 'progress', callId: id, value: v })
+          ? (v) => {
+              const value = normalizeProgress(id, v);
+              if (value === null) return; // ambiguous: say nothing
+              parentPort.postMessage({ type: 'progress', callId: id, value });
+            }
           : a
       );
+      // Tell the filesystem guard that the host sanctioned this path. The
+      // output directory is chosen per download (--output, the GUI folder
+      // picker), so it cannot be on a static allow-list — see _fsguard.js.
+      //
+      // Only argument 2, and only for `download`. The host calls
+      // download(trackId, quality, outputPath, onProgress) — see
+      // JSExtensionProvider — so that one position is the path *it* chose.
+      // Sanctioning every argument that merely looks like a path handed the
+      // extension the pen: a track_id of "../../../../etc/ssh" would have
+      // unlocked writes to whatever directory it named, which is the whole
+      // of what the guard is for.
+      if (call === 'download' && typeof global.__spotiflacAllowWrite === 'function') {
+        const outputPath = finalArgs[DOWNLOAD_OUTPUT_ARG];
+        if (typeof outputPath === 'string' && outputPath) {
+          global.__spotiflacAllowWrite(outputPath);
+        }
+      }
       const result = fn(...finalArgs);
       parentPort.postMessage({ id, result });
     } catch (e) {
       parentPort.postMessage({ id, error: (e && e.message) || String(e) });
     } finally {
       _currentCallId = null; // NEW
+      progressScale.delete(id);
     }
   });
 
@@ -381,6 +449,15 @@ function nodeHttpRequest(method, rawUrl, body, headers, _depth = 0) {
  * (progressUpdateThreshold = 128 * 1024).
  */
 function nodeFileDownload(rawUrl, outputPath, opts, callId) {
+  // The host was asked to write this path, so it is sanctioned by
+  // definition — and this runs in the *main* thread, whose filesystem guard
+  // never saw the worker-side registration in the download dispatch below.
+  // Without it an extension that delegates its download to the bridge (all
+  // of them, for the streaming path) is refused its own output file, plus
+  // the siblings it stages alongside it (".init.part" and friends).
+  if (typeof global.__spotiflacAllowWrite === 'function') {
+    global.__spotiflacAllowWrite(outputPath);
+  }
   return new Promise((resolve) => {
     let u;
     try { u = new URL(rawUrl); } catch (e) {

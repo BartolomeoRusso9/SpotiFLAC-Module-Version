@@ -15,6 +15,7 @@ import contextlib
 import os
 import shlex
 import sys
+from datetime import datetime
 from urllib.parse import urlparse
 
 from .core.health_check import run_health_check
@@ -395,6 +396,269 @@ async def _pick_from_history() -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# CSV picker
+# ---------------------------------------------------------------------------
+
+#: What the picker considers a track list. `.tsv` is here because
+#: `core/csv_source.py` sniffs the delimiter and reads tab-separated exports
+#: with the same code path.
+_CSV_SUFFIXES = (".csv", ".tsv")
+
+#: Files listed at once. Enough to cover "the export I made a minute ago"
+#: without turning the menu into something that has to be scrolled.
+_CSV_SCAN_LIMIT = 15
+
+_CSV_BROWSE_WORDS = {"csv", "tsv", "file", "browse", "pick"}
+
+
+def _clean_path_input(value: str) -> str:
+    """Turn what a terminal hands us into a path that can be opened.
+
+    A file dragged into the terminal arrives quoted, or — on a Unix shell —
+    with its spaces backslash-escaped (``/Users/me/My\\ tracks.csv``). Both
+    are undone here, and `~` is expanded so a typed home path works too.
+
+    The unescaping is POSIX-only on purpose: on Windows the backslash is the
+    path separator, and running ``C:\\Users\\me\\list.csv`` through `shlex`
+    hands back ``C:Usersmelist.csv``. Quotes are stripped on both, since
+    that is what dragging a path with a space into either shell produces.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
+        candidate = raw[1:-1]
+    elif os.name == "nt":
+        candidate = raw
+    else:
+        try:
+            parts = shlex.split(raw)
+        except ValueError:
+            parts = []
+        # More than one part means the spaces were never escaped, so the
+        # whole line is the path — splitting it would only lose the rest.
+        candidate = parts[0] if len(parts) == 1 else raw
+
+    return os.path.expanduser(candidate)
+
+
+def _looks_like_csv_path(value: str) -> bool:
+    return value.lower().endswith(_CSV_SUFFIXES)
+
+
+def _short_dir(path: str) -> str:
+    """`/Users/me/Downloads` reads better as `~/Downloads` in a menu."""
+    home = os.path.expanduser("~")
+    if path == home:
+        return "~"
+    if path.startswith(home + os.sep):
+        return "~" + path[len(home) :]
+    return path
+
+
+def _format_size(size: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+async def _last_output_folder() -> str:
+    try:
+        from .core.session_memory import get_last_folder_async
+
+        return await get_last_folder_async() or ""
+    except Exception:
+        return ""
+
+
+def _csv_scan_dirs(extra: str = "", last_folder: str = "") -> list[str]:
+    """Where a track list is likely to be, most specific first.
+
+    `extra` is a folder the user just named, so it wins over the guesses.
+    """
+    home = os.path.expanduser("~")
+    raw = [
+        extra,
+        os.getcwd(),
+        os.path.join(os.getcwd(), "Downloads"),
+        last_folder,
+        os.path.join(home, "Downloads"),
+        os.path.join(home, "Desktop"),
+        os.path.join(home, "Documents"),
+        os.path.join(home, "Music"),
+    ]
+
+    dirs: list[str] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not entry:
+            continue
+        path = os.path.abspath(os.path.expanduser(entry))
+        if path in seen or not os.path.isdir(path):
+            continue
+        seen.add(path)
+        dirs.append(path)
+    return dirs
+
+
+def _scan_csv_files(dirs: list[str], limit: int = _CSV_SCAN_LIMIT) -> list[tuple]:
+    """The CSV/TSV files in `dirs`, as (path, mtime, size).
+
+    Ordered by folder first and modification time second, so a folder the
+    user just named stays at the top of the list instead of being scattered
+    through whatever else is newer somewhere else.
+
+    One level deep only: scanning a home folder recursively is slow enough to
+    be noticed, and the file someone means is nearly always the one they just
+    exported into a folder they can name.
+    """
+    found: list[tuple] = []
+    seen: set[str] = set()
+    for rank, directory in enumerate(dirs):
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            continue
+        for entry in entries:
+            if not _looks_like_csv_path(entry.name):
+                continue
+            try:
+                if not entry.is_file():
+                    continue
+                stat = entry.stat()
+            except OSError:
+                continue
+            real = os.path.realpath(entry.path)
+            if real in seen:
+                continue
+            seen.add(real)
+            found.append((rank, entry.path, stat.st_mtime, stat.st_size))
+
+    found.sort(key=lambda item: (item[0], -item[2]))
+    return [(path, mtime, size) for _rank, path, mtime, size in found[:limit]]
+
+
+async def _read_csv_document(path: str):
+    """Parse `path`, returning (document, error message). Never raises."""
+    try:
+        from .core import csv_source
+    except Exception as exc:
+        return None, f"CSV support is unavailable: {exc}"
+    try:
+        document = await asyncio.to_thread(csv_source.read_rows, path)
+    except Exception as exc:
+        return None, str(exc) or exc.__class__.__name__
+    return document, ""
+
+
+def _print_csv_preview(document) -> None:
+    """Show what was actually read, so a wrong file is caught here.
+
+    A CSV that parses is not necessarily the right CSV: the row count and the
+    first few titles are what tells someone they picked last month's export.
+    """
+    columns = ", ".join(document.columns) if document.columns else "positional"
+    delimiter = {"\t": "tab"}.get(document.delimiter, document.delimiter)
+    print(
+        f"  {GREEN('✓')} {len(document.rows)} tracks  "
+        f"{DIM('· delimiter ' + delimiter + ' · fields: ' + columns)}"
+    )
+    for row in document.rows[:3]:
+        print(f"     {DIM('·')} {row.label[:64]}")
+    if len(document.rows) > 3:
+        print(DIM(f"     … {len(document.rows) - 3} more"))
+    if document.ignored_lines:
+        shown = ", ".join(str(line) for line in document.ignored_lines[:5])
+        more = "…" if len(document.ignored_lines) > 5 else ""
+        print(
+            YELLOW(
+                f"  {len(document.ignored_lines)} line(s) skipped as empty: {shown}{more}"
+            )
+        )
+
+
+async def _accept_csv_path(path: str) -> str | None:
+    """Validate a chosen file and show its preview. None when unusable."""
+    if not os.path.isfile(path):
+        print(f"  {RED('✗')} No such file: {path}")
+        return None
+
+    document, error = await _read_csv_document(path)
+    if document is None:
+        print(f"  {RED('✗')} {os.path.basename(path)}: {error}")
+        return None
+
+    print(
+        f"\n  {BOLD(os.path.basename(path))} {DIM(_short_dir(os.path.dirname(path)))}"
+    )
+    _print_csv_preview(document)
+    return path
+
+
+async def _pick_csv_file(seed_dir: str = "") -> str | None:
+    """Browse for a track list instead of typing its path.
+
+    Returns a path that parsed cleanly, or None when the user backs out —
+    the caller keeps asking for a URL in that case.
+    """
+    last_folder = await _last_output_folder()
+    dirs = _csv_scan_dirs(seed_dir, last_folder)
+
+    while True:
+        files = _scan_csv_files(dirs)
+
+        _section("CSV file  (optional)")
+        if files:
+            for index, (path, mtime, size) in enumerate(files, 1):
+                stamp = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+                print(f"  {index}. {os.path.basename(path)}")
+                print(
+                    f"     {DIM(_short_dir(os.path.dirname(path)))}  "
+                    f"{DIM(stamp)}  {DIM(_format_size(size))}"
+                )
+        else:
+            searched = ", ".join(_short_dir(d) for d in dirs[:4])
+            print(DIM(f"  No .csv or .tsv file found in: {searched}"))
+
+        select_hint = f"[1-{len(files)}] Select  |  " if files else ""
+        print(
+            DIM(
+                f"\n  {select_hint}paste a file path  |  "
+                "type a folder to scan it  |  Enter: cancel"
+            )
+        )
+
+        try:
+            val = input("  → ").strip()
+        except (EOFError, KeyboardInterrupt):
+            sys.exit(0)
+
+        if _is_back_command(val):
+            raise _BackRequested
+
+        if not val:
+            return None
+
+        if val.isdigit() and 1 <= int(val) <= len(files):
+            accepted = await _accept_csv_path(files[int(val) - 1][0])
+            if accepted:
+                return accepted
+            continue
+
+        candidate = _clean_path_input(val)
+        if os.path.isdir(candidate):
+            dirs = _csv_scan_dirs(candidate, last_folder)
+            continue
+
+        accepted = await _accept_csv_path(candidate)
+        if accepted:
+            return accepted
+
+
+# ---------------------------------------------------------------------------
 # Extension Registries
 # ---------------------------------------------------------------------------
 
@@ -617,7 +881,10 @@ def _summary(cfg: dict) -> None:
         pad = " " * max(0, 22 - len(label))
         print(f"  {BOLD(label)}{pad}: {value}")
 
-    row("URL", cfg["url"][:65])
+    if cfg.get("csv_path"):
+        row("CSV file", cfg["csv_path"][:65])
+    else:
+        row("URL", cfg["url"][:65])
     row("Output Dir", cfg["output_dir"])
 
     if cfg.get("output_path"):
@@ -746,16 +1013,64 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
 
     prefill = await _pick_from_history()
 
+    print(DIM("  Type csv to browse for a track list, or paste a .csv/.tsv path."))
+
     url = ""
+    csv_path = ""
     while True:
         if prefill:
-            url = _ask("URL", prefill)
+            url = _ask("URL or .csv file", prefill)
             prefill = None
         else:
-            url = _ask("URL")
+            url = _ask("URL or .csv file")
 
         if not url:
             continue
+
+        # A CSV is the other kind of input (see core/csv_source.py): a list of
+        # tracks rather than a link to one. Recognised here so the wizard can
+        # take one without a separate question everybody else has to answer.
+        if url.strip().lower() in _CSV_BROWSE_WORDS:
+            picked = await _pick_csv_file()
+            if not picked:
+                continue
+            csv_path = picked
+            url = ""
+            break
+
+        candidate = _clean_path_input(url)
+
+        # A bare folder is never a URL, so read it as "look in here" rather
+        # than sending it off to be resolved as a link.
+        if os.path.isdir(candidate):
+            picked = await _pick_csv_file(candidate)
+            if not picked:
+                continue
+            csv_path = picked
+            url = ""
+            break
+
+        if _looks_like_csv_path(candidate):
+            # A link to a CSV is not a CSV: --csv reads a file on this
+            # machine, so say that rather than opening a file browser over
+            # an address the user clearly meant as an address.
+            if candidate.lower().startswith(("http://", "https://")):
+                print(
+                    f"  {DIM('A track list has to be a local file — download it first.')}"
+                )
+                continue
+
+            # The file is parsed now, not at download time: a wrong path or an
+            # export with no usable column is worth one line of feedback here
+            # instead of a failure after every other question has been asked.
+            picked = await _accept_csv_path(candidate)
+            if not picked:
+                picked = await _pick_csv_file(os.path.dirname(candidate))
+            if not picked:
+                continue
+            csv_path = picked
+            url = ""
+            break
 
         lower_url = url.lower()
         is_blocked = False
@@ -779,11 +1094,13 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
             break
 
     cfg["url"] = url
+    cfg["csv_path"] = csv_path
     original_url = url
 
     # ── Profile load ────────────────────────────────────────────────────────
     cfg = await _profile_load_section(cfg)
     cfg["url"] = original_url
+    cfg["csv_path"] = csv_path
 
     # ── Extension registries ────────────────────────────────────────────────
     await _manage_registries_section(min_trust_tier)
@@ -1344,7 +1661,11 @@ def _print_cli_command(cfg: dict) -> None:
         cfg (dict): Configuration values used to construct the command.
 
     """
-    parts = ["spotiflac", cfg["url"], cfg["output_dir"]]
+    parts = (
+        ["spotiflac", "--csv", cfg["csv_path"], cfg["output_dir"]]
+        if cfg.get("csv_path")
+        else ["spotiflac", cfg["url"], cfg["output_dir"]]
+    )
     if cfg.get("output_path"):
         parts.extend(["-o", cfg["output_path"]])
     parts.extend(["-s", *cfg["services"]])

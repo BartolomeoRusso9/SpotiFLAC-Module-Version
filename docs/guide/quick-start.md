@@ -182,6 +182,8 @@ SpotiFLAC's core resolves the following URL formats as input; whether a given ta
 | Playlist | `open.spotify.com/playlist/...` |
 | Discography (via artist URL) | `open.spotify.com/artist/...` |
 
+A **CSV file** is accepted wherever a URL is — `spotiflac --csv wishlist.csv DEST`, the file icon in the GUI, a path in the wizard. Rows that carry no link are matched against the catalogue, and the ones that cannot be matched are reported rather than guessed at. See [Downloading from a CSV](csv.md).
+
 > Extensions may add support for resolving Tidal, Apple Music, SoundCloud, YouTube, Pandora, or other platform URLs directly, and may output FLAC, ALAC/M4A, AAC, or MP3 depending on what the source and the extension support. Consult the documentation of the specific extension you install for its supported URL formats and output format.
 
 ---

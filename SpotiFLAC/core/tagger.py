@@ -67,6 +67,88 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: A FLAC METADATA_BLOCK carries a 24-bit length, so nothing in it may
+#: exceed 16 MiB — and mutagen refuses the whole save() with "block is too
+#: long to write" rather than dropping the picture, which means one
+#: oversized cover loses every tag on the track. A little under the real
+#: ceiling, to leave room for the block's own header and description.
+MAX_FLAC_PICTURE_BYTES = 16 * 1000 * 1000
+
+
+def fit_cover(cover_data: bytes) -> bytes | None:
+    """Cover art small enough to embed, or None if it cannot be made to fit.
+
+    Re-encodes as progressively lower-quality JPEG and then downscales,
+    which is what the artwork services' 3000x3000 PNGs need to survive the
+    trip into a FLAC.
+
+    Pillow is a declared dependency, so the ImportError path below is for a
+    broken or partial install rather than a normal one. It is kept because
+    the alternative — letting the import raise — would turn a missing
+    optional-looking library back into a lost tag write, which is the exact
+    failure this function exists to prevent.
+    """
+    if len(cover_data) <= MAX_FLAC_PICTURE_BYTES:
+        return cover_data
+
+    try:
+        import io
+
+        from PIL import Image
+    except Exception:
+        logger.warning(
+            "[tagger] cover is %.1f MB, over the %.0f MB a FLAC picture block "
+            "can hold, and Pillow could not be imported to resize it — "
+            "embedding the track without artwork. Reinstall Pillow to keep it.",
+            len(cover_data) / 1e6,
+            MAX_FLAC_PICTURE_BYTES / 1e6,
+        )
+        return None
+
+    try:
+        image = Image.open(io.BytesIO(cover_data))
+        image.load()
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+    except Exception as exc:
+        logger.warning("[tagger] cover could not be decoded to resize: %s", exc)
+        return None
+
+    for quality in (90, 80, 70, 60):
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=quality, optimize=True)
+        if buffer.tell() <= MAX_FLAC_PICTURE_BYTES:
+            logger.debug(
+                "[tagger] cover re-encoded at q%d: %.1f MB -> %.1f MB",
+                quality,
+                len(cover_data) / 1e6,
+                buffer.tell() / 1e6,
+            )
+            return buffer.getvalue()
+
+    # Still too big at q60: the picture is enormous rather than badly
+    # compressed, so halve the dimensions until it fits.
+    working = image
+    for _ in range(4):
+        working = working.resize(
+            (max(1, working.width // 2), max(1, working.height // 2)),
+            Image.LANCZOS,
+        )
+        buffer = io.BytesIO()
+        working.save(buffer, format="JPEG", quality=85, optimize=True)
+        if buffer.tell() <= MAX_FLAC_PICTURE_BYTES:
+            logger.debug(
+                "[tagger] cover downscaled to %dx%d: %.1f MB",
+                working.width,
+                working.height,
+                buffer.tell() / 1e6,
+            )
+            return buffer.getvalue()
+
+    logger.warning("[tagger] cover could not be made to fit; embedding without it")
+    return None
+
+
 SOURCE_TAG = "https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version"
 
 # ---------------------------------------------------------------------------
@@ -516,6 +598,7 @@ def _embed_flac(
         else:
             audio[key] = val
 
+    cover_data = fit_cover(cover_data) if cover_data else cover_data
     if cover_data:
         pic = FlacPicture()
         pic.data = cover_data
@@ -563,6 +646,12 @@ def _embed_vorbis_comment(
         else:
             audio[key] = val
 
+    # No fit_cover() here. It exists to squeeze artwork under
+    # MAX_FLAC_PICTURE_BYTES, which is the ceiling on a *FLAC metadata
+    # block* — a 24-bit length field in the FLAC container. An Ogg file has
+    # no such block: METADATA_BLOCK_PICTURE is a base64 Vorbis comment, and
+    # a Vorbis comment carries a 32-bit length. Applying the FLAC ceiling
+    # here re-encoded artwork that would have embedded intact.
     if cover_data:
         import base64
 
@@ -1225,6 +1314,11 @@ class EmbedOptions:
     # Leave as None to keep the previous behavior (multi-value on
     # FLAC/OGG/Opus, single ", "-joined string elsewhere).
     artist_separator: str | None = None
+    #: Measure the file's loudness and write REPLAYGAIN_* tags, so players
+    #: even out a library whose tracks come from different masters and eras.
+    #: Off by default: the analysis decodes the whole file and costs a few
+    #: seconds per track. See core/replaygain.py.
+    replaygain: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -1277,6 +1371,25 @@ async def embed_metadata_async(
             logger.debug("[tagger] enriched: %s", list(enriched_tags.keys()))
         except Exception as exc:
             logger.warning("[tagger] enrichment failed: %s", exc)
+
+    # ── 1b. ReplayGain ─────────────────────────────────────────────────────
+    # Measured from the file that is about to be tagged, not from the source:
+    # a transcode changes the loudness, so anything computed earlier would
+    # describe a file the user does not have. Never fatal — a track with no
+    # ReplayGain tags plays, it just plays at its own level.
+    if opts.replaygain:
+        try:
+            from .replaygain import replaygain_tags_async
+
+            gain_tags = await replaygain_tags_async(path)
+            if gain_tags:
+                # Under anything the caller set explicitly: an album-level
+                # gain passed in extra_tags should win over a track-level
+                # one measured here.
+                enriched_tags = {**gain_tags, **enriched_tags}
+                logger.debug("[tagger] replaygain: %s", gain_tags)
+        except Exception as exc:
+            logger.warning("[tagger] replaygain analysis failed: %s", exc)
 
     # ── 2. Cover art ───────────────────────────────────────────────────────
     if not cover_data:

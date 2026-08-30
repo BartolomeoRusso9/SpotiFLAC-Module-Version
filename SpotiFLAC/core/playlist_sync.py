@@ -209,8 +209,19 @@ def track_stem(track: TrackMetadata, opts: DownloadOptions, position: int) -> st
     )
 
 
-def index_audio_files(output_dir: Path | str) -> dict[str, list[Path]]:
-    """Maps audio files by filename stem and lightweight identifying tags."""
+def index_audio_files(
+    output_dir: Path | str, *, use_cache: bool = True
+) -> dict[str, list[Path]]:
+    """Maps audio files by filename stem and lightweight identifying tags.
+
+    Tag reads are cached per file and reused while its mtime and size are
+    unchanged, so a second run over an unchanged library stats every file
+    instead of decoding it — see core/library_index_cache.py. Pass
+    use_cache=False to force a full re-read.
+    """
+    from .library_index_cache import CachedTags, LibraryIndexCache
+
+    cache = LibraryIndexCache(output_dir) if use_cache else None
     index: dict[str, list[Path]] = {}
     isrc_index: dict[str, list[Path]] = {}
     identity_index: dict[str, list[Path]] = {}
@@ -227,19 +238,31 @@ def index_audio_files(output_dir: Path | str) -> dict[str, list[Path]]:
                 continue
             path = Path(root) / name
             add(index, stem.casefold(), path)
-            try:
-                tags = read_embedded_tags(path, include_cover=False).tags
-            except Exception:
-                tags = {}
-            isrc = normalize_isrc(str(tags.get("ISRC", "")))
-            title = str(tags.get("TITLE", "")).strip()
-            artist = str(tags.get("ARTIST", "")).strip()
-            album = str(tags.get("ALBUM", "")).strip()
+            cached = cache.get(path) if cache else None
+            if cached is not None:
+                isrc, title = cached.isrc, cached.title
+                artist, album = cached.artist, cached.album
+            else:
+                try:
+                    tags = read_embedded_tags(path, include_cover=False).tags
+                except Exception:
+                    tags = {}
+                isrc = normalize_isrc(str(tags.get("ISRC", "")))
+                title = str(tags.get("TITLE", "")).strip()
+                artist = str(tags.get("ARTIST", "")).strip()
+                album = str(tags.get("ALBUM", "")).strip()
+                if cache:
+                    cache.put(
+                        path,
+                        CachedTags(isrc=isrc, title=title, artist=artist, album=album),
+                    )
             add(isrc_index, isrc, path)
             add(identity_index, _identity_key(title, artist, album), path)
 
     index["__isrc__"] = isrc_index
     index["__identity__"] = identity_index
+    if cache:
+        cache.save()
     return index
 
 

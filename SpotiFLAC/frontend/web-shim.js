@@ -158,7 +158,7 @@
 
   const REMOTE_METHODS = [
     'get_version', 'get_latest_version', 'get_artist_images', 'get_ffmpeg_status', 'get_node_status',
-    'save_settings', 'load_settings', 'get_registries', 'add_registry', 'remove_registry',
+    'save_settings', 'save_theme', 'load_settings', 'get_registries', 'add_registry', 'remove_registry',
     'get_history', 'get_profiles', 'load_profile_data', 'cache_image', 'get_spotify_home_feed',
     'search_provider', 'search_provider_async', 'remove_history_item',
     'get_network_status', 'save_profile_data', 'delete_profile_data', 'check_qobuz_api',
@@ -172,6 +172,9 @@
     'get_subscriptions', 'add_subscription', 'remove_subscription',
     'set_subscription_enabled', 'reset_subscription', 'check_subscriptions',
     'get_extension_health', 'reset_extension_health',
+    'get_stats',
+    // CSV import sends the file's text, read in the browser — never a path.
+    'preview_csv', 'fetch_csv',
   ];
 
   // Deliberately NOT here (and not in webapp.py's ALLOWED_METHODS):
@@ -295,6 +298,9 @@
   const ALLOWED_PUSH_FNS = new Set([
     '__set_version_label',
     'app_cover_download_finished',
+    'app_csv_error',
+    'app_csv_loaded',
+    'app_csv_progress',
     'app_download_finished',
     'app_handle_provider_search_error',
     'app_handle_provider_search_results',
@@ -307,6 +313,7 @@
     'app_set_metadata',
     'app_set_progress',
     'app_update_download_stats',
+    'app_update_playcounts',
     'loadHistoryAndProfiles',
     'showFfmpegWarning',
     'showTracklist',

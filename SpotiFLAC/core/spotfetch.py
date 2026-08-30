@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 # Uses the relative import path matching spotfetch.py's actual location
+from SpotiFLAC.core.http import SAFE_ACCEPT_ENCODING
 from SpotiFLAC.core.spotify_totp import generate_spotify_totp
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,13 @@ class SpotifyWebClient:
     def __init__(self) -> None:
         # We use httpx.Client instead of requests.Session for instant connections
         limits = httpx.Limits(max_keepalive_connections=15, max_connections=30)
-        self._session = httpx.Client(limits=limits, timeout=15.0)
+        self._session = httpx.Client(
+            limits=limits,
+            timeout=15.0,
+            # See SAFE_ACCEPT_ENCODING: httpx 0.28.1 mis-decodes some
+            # multi-frame zstd bodies, so zstd is not advertised.
+            headers={"Accept-Encoding": SAFE_ACCEPT_ENCODING},
+        )
         self._session.headers.update(
             {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
@@ -153,7 +160,13 @@ class SpotifyWebClient:
             self.device_id = ""
             # Recreate session to clear cookies
             limits = httpx.Limits(max_keepalive_connections=15, max_connections=30)
-            self._session = httpx.Client(limits=limits, timeout=15.0)
+            self._session = httpx.Client(
+                limits=limits,
+                timeout=15.0,
+                # See SAFE_ACCEPT_ENCODING: httpx 0.28.1 mis-decodes some
+                # multi-frame zstd bodies, so zstd is not advertised.
+                headers={"Accept-Encoding": SAFE_ACCEPT_ENCODING},
+            )
             self._session.headers.update(
                 {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
@@ -430,7 +443,12 @@ class SpotifyWebClient:
             )
 
             # Direct extraction, Go-style
-            track_data = data.get("data", {}).get("trackUnion", {})
+            # `data` is present-but-null on a partial GraphQL failure, so
+            # the two-step .get() chain would raise AttributeError here.
+            envelope = data.get("data") if isinstance(data, dict) else None
+            track_data = (envelope or {}).get("trackUnion") or {}
+            if not isinstance(track_data, dict):
+                track_data = {}
             playcount = track_data.get("playcount", "")
 
             result = {
@@ -669,8 +687,16 @@ class SpotifyWebClient:
             bytes_.append(0)
         return "".join(f"{b:02x}" for b in reversed(bytes_))
 
-    def get_isrc_from_metadata(self, track_id: str) -> str:
-        """Retrieves the ISRC from spclient's binary endpoint (same approach as the JS)."""
+    def get_isrc_from_metadata(self, track_id: str, _retried: bool = False) -> str:
+        """Retrieves the ISRC from spclient's binary endpoint (same approach as the JS).
+
+        `_retried` bounds the 401 path to a single refresh. A token that comes
+        back from initialize() still unauthorised — a market the endpoint
+        refuses, a revoked client token — used to recurse forever, each turn
+        costing a full session bootstrap. This method is awaited inside
+        _isrc_for_track_async(), which is gathered into every single-track
+        metadata load, so that recursion did not fail: it hung the load.
+        """
         try:
             gid = self.spotify_id_to_hex_gid(track_id)
             resp = self._session.get(
@@ -683,8 +709,21 @@ class SpotifyWebClient:
                 },
             )
             if resp.status_code == 401:
-                self.initialize()
-                return self.get_isrc_from_metadata(track_id)
+                if _retried:
+                    logger.debug(
+                        "[spotfetch] ISRC endpoint still 401 after a token "
+                        "refresh for %s — giving up",
+                        track_id,
+                    )
+                    return ""
+                # force=True, as query() does on its own 401. Plain
+                # initialize() only fills in credentials that are *missing*,
+                # and a 401 here means the ones we hold are present and
+                # expired — so the retry re-sent the same dead token and got
+                # the same 401. The ISRC never recovered; it just cost a
+                # second round-trip before giving up.
+                self.initialize(force=True)
+                return self.get_isrc_from_metadata(track_id, _retried=True)
             if resp.status_code != 200:
                 return ""
             import re

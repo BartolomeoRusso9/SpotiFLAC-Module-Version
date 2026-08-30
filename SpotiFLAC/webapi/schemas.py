@@ -186,6 +186,197 @@ class HistoryResponse(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────
+#  CSV input
+# ─────────────────────────────────────────────────────────────
+
+
+class CsvResolveRequest(BaseModel):
+    """A CSV's *contents*, not a path.
+
+    A path would be a path on the server, which a remote caller neither knows
+    nor should be able to name — the same reasoning that keeps `file_path`
+    out of DownloadRecordOut.
+    """
+
+    content: str = Field(
+        min_length=1,
+        max_length=2_000_000,
+        description="The file itself. Any delimiter; a header is detected.",
+    )
+    name: str = Field(
+        default="",
+        max_length=200,
+        description="What to call the file in the response. Cosmetic.",
+    )
+    delimiter: str | None = Field(
+        default=None,
+        max_length=1,
+        description="Overrides the automatic detection.",
+    )
+    min_score: float = Field(
+        default=0.62,
+        ge=0.0,
+        le=1.0,
+        description="How close a catalogue match must be before a text-only "
+        "row is accepted. Rows below it come back unresolved rather than "
+        "guessed at.",
+    )
+
+
+class CsvResolvedRow(BaseModel):
+    line: int
+    input: str
+    url: str
+    how: Literal["link", "search", "isrc"]
+    score: float
+    matched: str = ""
+
+
+class CsvUnresolvedRow(BaseModel):
+    line: int
+    input: str
+    reason: str
+    best: str = ""
+    score: float = 0.0
+
+
+class CsvResolveResponse(BaseModel):
+    """What the file turned out to contain, before anything is queued.
+
+    Resolving and downloading are deliberately two calls: the caller sees
+    every match (and every miss) first, then queues the URLs it accepts
+    through `POST /downloads` like any other download — so quotas, the queue
+    limit and per-account isolation all apply unchanged.
+    """
+
+    rows: int
+    resolved: list[CsvResolvedRow]
+    unresolved: list[CsvUnresolvedRow]
+    urls: list[str] = Field(description="Every resolved link, deduplicated.")
+
+
+# ─────────────────────────────────────────────────────────────
+#  Dashboard
+# ─────────────────────────────────────────────────────────────
+
+
+class StatsWindow(BaseModel):
+    since: float | None = None
+    until: float | None = None
+    label: str = Field(
+        description="How the period reads to a person: 'all time', '2026', "
+        "'last 30 days'."
+    )
+
+
+class StatsTotals(BaseModel):
+    tracks: int
+    failed: int
+    attempts: int
+    success_rate: float
+    bytes: int
+    artists: int
+    albums: int
+    listening_ms: int
+    listening_known: int = Field(
+        description="How many of the tracks carried a duration. Durations are "
+        "only recorded from schema v2 onwards, so an older history reports "
+        "less listening time than it actually holds."
+    )
+
+
+class StatsEntry(BaseModel):
+    """One row of a ranking: an artist, a genre, a provider, a format."""
+
+    name: str
+    tracks: int
+    share: float = Field(description="Fraction of the period's tracks, 0…1.")
+
+
+class StatsAlbumEntry(BaseModel):
+    name: str
+    artist: str
+    tracks: int
+    share: float
+
+
+class StatsTrackEntry(BaseModel):
+    name: str
+    artist: str
+    tracks: int
+
+
+class StatsCoverage(BaseModel):
+    """A ranking that only some of the history could contribute to.
+
+    `known` + `unknown` add up to the period's tracks; a client should say so
+    rather than presenting `entries` as the whole picture.
+    """
+
+    known: int
+    unknown: int
+    entries: list[StatsEntry]
+
+
+class StatsDecades(StatsCoverage):
+    pass
+
+
+class StatsMonth(BaseModel):
+    month: str = Field(
+        description="YYYY-MM. Months with nothing in them are "
+        "present with zeroes rather than missing."
+    )
+    tracks: int
+    bytes: int
+
+
+class StatsBusiestDay(BaseModel):
+    date: str
+    tracks: int
+
+
+class StatsActivity(BaseModel):
+    by_weekday: list[int] = Field(description="Seven counts, Monday first.")
+    by_hour: list[int] = Field(description="Twenty-four counts, local time.")
+    busiest_day: StatsBusiestDay | None = None
+    active_days: int
+    longest_streak: int
+    current_streak: int
+
+
+class StatsMilestone(BaseModel):
+    title: str
+    artist: str
+    album: str
+    provider: str
+    downloaded_at: float
+
+
+class StatsResponse(BaseModel):
+    """Everything the dashboard shows for one period and one account."""
+
+    generated_at: float
+    owner: str = ""
+    window: StatsWindow
+    totals: StatsTotals
+    top_artists: list[StatsEntry]
+    top_albums: list[StatsAlbumEntry]
+    top_tracks: list[StatsTrackEntry] = Field(
+        description="Tracks fetched more than once in the period — a repeat is "
+        "worth surfacing precisely because it is not obvious."
+    )
+    top_genres: StatsCoverage
+    decades: StatsDecades
+    providers: list[StatsEntry]
+    formats: list[StatsEntry]
+    timeline: list[StatsMonth]
+    activity: StatsActivity
+    first: StatsMilestone | None = None
+    last: StatsMilestone | None = None
+
+
+# ─────────────────────────────────────────────────────────────
 #  Subscriptions
 # ─────────────────────────────────────────────────────────────
 

@@ -117,6 +117,7 @@ class SubscriptionsMixin:
         if not download or not total_new:
             return
 
+        unfetched = 0
         for result in results:
             for release in result.new:
                 try:
@@ -125,4 +126,13 @@ class SubscriptionsMixin:
                     # download — same settings, same progress events.
                     self.fetch_metadata(release.url)
                 except Exception as e:
-                    self.log(f"Could not fetch {release.title}: {e}", "warn")
+                    # Quiet, then counted: a check that covers many
+                    # subscriptions can fail on many releases at once.
+                    unfetched += 1
+                    self.log(f"Could not fetch {release.title}: {e}", "warn-quiet")
+        if unfetched:
+            self.log(
+                f"{unfetched} new release(s) could not be fetched — "
+                "see the Logs view for which.",
+                "warn",
+            )

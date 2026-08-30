@@ -162,6 +162,26 @@ _MIGRATIONS: tuple[tuple[str, ...], ...] = (
         )
         """,
     ),
+    # v2 — what a download *was*, not only that it happened.
+    #
+    # The log answered "how many, and how big" because that is all quotas and
+    # deduplication need. The dashboard (core/stats.py) asks a different kind
+    # of question — which genres, which era, how many hours — and none of it
+    # can be reconstructed afterwards: the metadata that knew is gone by the
+    # time the file is on disk, and reading a hundred thousand files back is
+    # not an answer.
+    #
+    # Rows written before this migration keep empty values, so the dashboard
+    # reports what it knows and says how much of the history predates it,
+    # rather than quietly presenting a partial picture as the whole one.
+    (
+        "ALTER TABLE downloads ADD COLUMN genre TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE downloads ADD COLUMN release_year TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE downloads ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0",
+        # The dashboard's own access pattern: every row in a time window,
+        # for everyone or for one account.
+        "CREATE INDEX IF NOT EXISTS idx_downloads_time ON downloads(downloaded_at)",
+    ),
 )
 
 

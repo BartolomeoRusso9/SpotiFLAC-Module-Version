@@ -31,6 +31,12 @@
     }
 
     /* ── Light theme ── */
+    /* Declared for <html> as well as <body>: `html { background: var(--bg) }`
+       below resolves the tokens on the <html> element, so with the class only
+       on <body> the page's outermost background kept the light :root default
+       and showed through around the content in dark mode. Both elements carry
+       the theme class (see setThemeClass() in app.js). */
+    html.light-theme,
     body.light-theme {
       --bg:        #ffffff;
       --surface:   #ffffff;
@@ -53,6 +59,7 @@
     }
 
     /* ── Dark theme ── */
+    html.dark-theme,
     body.dark-theme {
       --bg:        #0a0a0a;
       --surface:   #1a1a1a;
@@ -75,7 +82,6 @@
       --shadow-soft: 0 20px 48px rgba(0, 0, 0, 0.4);
       --shadow-strong: 0 28px 64px rgba(0, 0, 0, 0.6);
     }
-    body.dark-theme .s-section { background: #0a0a0a; }
 
     html, body { height: 100%; overflow: hidden; background: var(--bg); }
     body {
@@ -239,6 +245,13 @@
       flex-shrink: 0;
       overflow: visible;
       box-shadow: inset 1px 0 0 rgba(255,255,255,0.5), inset -4px 0 8px rgba(15,23,42,0.02);
+      /* backdrop-filter makes this a stacking context, so the nav tooltips'
+         own z-index can never lift them out of the sidebar — they were being
+         painted under whatever #content stacked on top (album card, track
+         table, toasts). Positioning the sidebar and stacking it above
+         #content moves the whole subtree, tooltips included, in front. */
+      position: relative;
+      z-index: 150;
     }
     .nav-btn {
       width: 40px; height: 40px;
@@ -270,6 +283,9 @@
     /* ── Content ── */
     #content {
       flex: 1;
+      /* Kept below #sidebar (z-index 150) so nav tooltips overhang it. */
+      position: relative;
+      z-index: 1;
       display: flex;
       flex-direction: column;
       overflow-y: auto;
@@ -403,7 +419,24 @@
     
     .mode-btn:hover { background: var(--surface3); }
     .mode-btn.active { background: var(--yellow); color: #000; border-color: var(--yellow-d); }
+    /* Set while a CSV is being matched — a file of titles is one catalogue
+       lookup per row, so the button stays busy for a while and the running
+       count sits in its tooltip. */
+    .mode-btn.is-busy { border-color: var(--yellow-d); }
+    .mode-btn.is-busy .mode-btn-icon { animation: csv-matching 1.2s ease-in-out infinite; }
+    @keyframes csv-matching { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+    @media (prefers-reduced-motion: reduce) {
+      .mode-btn.is-busy .mode-btn-icon { animation: none; opacity: .7; }
+    }
     .mode-btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; font-size: 14px; }
+    /* Fetch mode shows the chain, Search mode the magnifier. The button
+       already gets .active in search mode, so the swap needs no JS — and
+       because these are `stroke: currentColor` SVGs they invert with the
+       button when .mode-btn.active turns it yellow, which an emoji could
+       not do. */
+    .mode-btn-icon .icon-search,
+    .mode-btn.active .mode-btn-icon .icon-link { display: none; }
+    .mode-btn.active .mode-btn-icon .icon-search { display: block; }
     #searchModeText { display: none; }
 
     .url-wrap { 
@@ -450,7 +483,7 @@
       color: var(--muted);
       border: 1px solid var(--border2);
       border-radius: 12px;
-      background: rgba(255,255,255,.05);
+      background: var(--surface2);
     }
 
     /* Main split */
@@ -1043,7 +1076,12 @@
     }
     #recent-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      /* auto-FILL, not auto-fit. auto-fit collapses the empty tracks and
+         lets the surviving ones absorb the freed space, so a single recent
+         fetch stretched across the full 820px row — and since .rc-cover is
+         aspect-ratio 1, that made the artwork ~780px tall. auto-fill keeps
+         the empty tracks, so one card is one card whatever the count. */
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
       justify-content: start;
       gap: 12px;
       width: 100%;
@@ -1052,6 +1090,21 @@
     .recent-card {
       width: 100%;
       max-width: none;
+    }
+    /* Recent *searches* share this grid but are one-line rows, not artwork
+       tiles — a 120px track would squeeze and truncate them — so the grid
+       drops to a single full-width column for them (see the .searches class
+       set by renderRecentSearches()). */
+    #recent-grid.searches {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .rc-search-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      flex-shrink: 0;
     }
 
     .recent-label {
@@ -1348,6 +1401,8 @@
     .log-msg.ok    { color: var(--green); }
     .log-msg.error { color: var(--red); }
     .log-msg.warn  { color: var(--yellow); }
+    /* Startup diagnostics: visible here, but deliberately never toasted. */
+    .log-msg.debug { color: var(--muted); }
 
     /* ══════════ SETTINGS VIEW ══════════ */
     #view-settings { padding: 0; overflow: hidden; }
@@ -1413,6 +1468,9 @@
       box-shadow: 0 14px 32px rgba(15,23,42,0.05), inset 0 1px 0 rgba(255,255,255,0.8);
       position: relative;
       overflow: hidden;
+    }
+    body.dark-theme .s-section {
+      box-shadow: 0 14px 32px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.04);
     }
     .s-section::before {
       content: "";
@@ -1646,7 +1704,7 @@
       white-space: nowrap; pointer-events: none;
       opacity: 0; transition: opacity .12s ease;
       z-index: 600;
-      box-shadow: 0 4px 14px rgb(0, 0, 0);
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
     }
     .nav-btn[data-label]:hover::after { opacity: 1; }
 
@@ -2345,6 +2403,17 @@ body.dark-theme .mode-btn.active {
   box-shadow: 0 10px 24px rgba(245,197,66,0.16), inset 0 1px 0 rgba(255,255,255,0.25);
 }
 
+/* `body.dark-theme .mode-btn` above is more specific than `.mode-btn.active`,
+   so in dark mode the active button kept the inactive grey fill while still
+   taking the near-black "on yellow" foreground from the rule above — the
+   search-mode icon came out almost invisible. This restores the fill that
+   colour is chosen for. It went unnoticed while the icon was an emoji,
+   because an emoji paints in its own colours and ignores `color`. */
+body.dark-theme .mode-btn.active {
+  background: var(--yellow);
+  border-color: var(--yellow-d);
+}
+
 body.dark-theme input,
 body.dark-theme select,
 body.dark-theme textarea,
@@ -2364,6 +2433,69 @@ body.dark-theme .track-table-header {
 
 body.dark-theme .track-row.done { background: rgba(34,197,94,.09); }
 body.dark-theme .track-row.failed { background: rgba(239,68,68,.09); }
+
+/* The surfaces the block above missed. Each of these is a panel whose only
+   background is a light-only gradient, so in dark mode it stayed a white
+   slab: the hero, the recent-fetch cards, the queue dock and panel, the log
+   panel and the settings tabs. They share the surface treatment used for
+   #album-card etc. so the whole app reads as one material. */
+body.dark-theme .recent-card,
+body.dark-theme #queue-dock,
+body.dark-theme .queue-panel,
+body.dark-theme #log-panel,
+body.dark-theme .s-section {
+  background: linear-gradient(180deg, #1b1b20 0%, #151519 100%);
+  border-color: var(--border);
+}
+
+body.dark-theme .recent-card:hover,
+body.dark-theme #queue-dock:hover {
+  border-color: var(--border2);
+}
+
+body.dark-theme .hero-text {
+  background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
+  border-color: rgba(148,163,184,0.14);
+}
+
+body.dark-theme .hero-icon {
+  background: linear-gradient(135deg, #26262c 0%, rgba(245,197,66,0.22) 100%);
+  box-shadow: 0 10px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,0.10);
+}
+
+body.dark-theme #album-cover {
+  background: linear-gradient(135deg, #26262c, #1b1b20);
+  border-color: var(--border);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45), inset 0 1px 2px rgba(255,255,255,0.06);
+}
+
+body.dark-theme .stab:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+/* The base .act-btn shadow paints a white top highlight, which on a dark
+   button reads as a stray light line rather than a bevel. */
+body.dark-theme .act-btn {
+  border-color: var(--border);
+  box-shadow: 0 8px 16px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+body.dark-theme .act-btn.secondary:hover {
+  border-color: var(--border2);
+}
+
+/* Status chips are pastel-on-white pairs; keep the hue but move the fill to
+   a translucent tint so they sit on a dark panel instead of punching a
+   bright hole in it (same approach as .local-badge). */
+body.dark-theme .queue-summary .qs-icon { background: rgba(148,163,184,.16); color: var(--text2); }
+body.dark-theme .queue-summary .qs-item.queued .qs-icon { background: rgba(56,189,248,.16); color: #7dd3fc; }
+body.dark-theme .queue-summary .qs-item.completed .qs-icon { background: rgba(34,197,94,.16); color: #86efac; }
+body.dark-theme .queue-summary .qs-item.skipped .qs-icon { background: rgba(245,158,11,.16); color: #fcd34d; }
+body.dark-theme .queue-summary .qs-item.failed .qs-icon { background: rgba(239,68,68,.16); color: #fca5a5; }
+body.dark-theme .queue-item .qi-pill.waiting { background: rgba(245,158,11,.16); color: #fcd34d; }
+body.dark-theme .queue-item .qi-pill.active { background: rgba(59,130,246,.18); color: #93c5fd; }
+body.dark-theme .queue-item .qi-pill.error { background: rgba(239,68,68,.16); color: #fca5a5; }
+
 /* ══════════ LOCAL AUTO-TAGGER ══════════ */
 .local-drop-zone { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 22px 16px; border: 1.5px dashed var(--border); border-radius: 10px; background: var(--surface2); color: var(--muted); transition: border-color var(--t), background var(--t), color var(--t); }
 .local-drop-zone svg { color: var(--muted); transition: color var(--t); }
@@ -2387,3 +2519,73 @@ body.dark-theme .local-title.diff, body.dark-theme .local-artist.diff { color: v
 .local-badge.warn { background: rgba(245,158,11,.15); color: var(--yellow-d); }
 body.dark-theme .local-badge.warn { color: var(--yellow); }
 .local-badge.err { background: rgba(239,68,68,.15); color: var(--red); }
+    /* ── Your library, in numbers (view-stats) ─────────────────────────────
+       Deliberately built from the same tokens as the rest of the interface
+       (surface/border/muted/yellow) so the dashboard inherits both themes
+       without a second palette to keep in agreement. */
+    .stat-tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .stat-tile {
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+    }
+    .stat-tile-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
+    .stat-tile-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .stat-tile-hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+    .stat-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 0;
+      font-size: 12px;
+    }
+    .stat-bar-label {
+      flex: 0 0 34%;
+      max-width: 34%;
+      color: var(--text2);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .stat-bar-track {
+      flex: 1;
+      height: 8px;
+      min-width: 0;
+      background: var(--surface2);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .stat-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--yellow) 0%, var(--yellow-d) 100%);
+    }
+    .stat-bar-value {
+      flex: 0 0 52px;
+      text-align: right;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    @media (max-width: 640px) {
+      .stat-bar-label { flex-basis: 44%; max-width: 44%; }
+    }

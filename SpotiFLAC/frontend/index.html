@@ -17,8 +17,45 @@
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css?v=20260817">
+  <script>
+    // Theme, applied before the first paint. app.js used to do this only from
+    // its 'pywebviewready' handler, which meant the window painted light and
+    // then flipped — and in --web mode that event never fires until you are
+    // signed in, so the login screen, and any session that failed to sign in,
+    // stayed light no matter what was chosen.
+    //
+    // This lives in <head>, not at the top of <body>: it needs to run before
+    // anything is painted, and at that point document.body does not exist
+    // yet, which is why the class goes on documentElement. app.js's
+    // setThemeClass() then keeps <html> and <body> carrying the same class —
+    // <html> so that `html { background: var(--bg) }` picks up the dark
+    // tokens, <body> for the many `body.dark-theme ...` component rules.
+    //
+    // The choice is stored twice: 'spotiflac-theme-mode' here (per-origin,
+    // readable this early) and gui-settings.json server-side (survives a
+    // restart even when the web view's storage does not — see save_theme()
+    // in app.py). applyTheme() in app.js reconciles the two after load.
+    (function () {
+      var mode = 'auto';
+      try { mode = localStorage.getItem('spotiflac-theme-mode') || 'auto'; } catch (e) {}
+      var dark = mode === 'dark' ||
+        (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.classList.add(dark ? 'dark-theme' : 'light-theme');
+    })();
+  </script>
 </head>
 <body>
+<script>
+  // Mirror the class the <head> script just put on <html> onto <body>, still
+  // before anything paints. Most component rules are written as
+  // `body.dark-theme ...`, and the base `body { background: ... }` is a
+  // light-only gradient — so a body without the class would paint a light
+  // slab over the correctly-dark <html> for the frames between here and
+  // app.js's applyTheme().
+  document.body.classList.add(
+    document.documentElement.classList.contains('dark-theme') ? 'dark-theme' : 'light-theme'
+  );
+</script>
 
 <div id="titlebar">
   <div class="dots">
@@ -50,6 +87,9 @@
     </button>
     <button class="nav-btn" id="nav-following" onclick="switchView('following'); loadSubscriptions();" title="Following" data-label="Following">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+    </button>
+    <button class="nav-btn" id="nav-stats" onclick="switchView('stats'); loadStats();" title="Your library in numbers" data-label="Stats">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
     </button>
     <button class="nav-btn" id="nav-logs"     onclick="switchView('logs')"     title="Logs" data-label="Logs">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
@@ -86,11 +126,34 @@
       <div id="search-bar">
         <div class="search-container">
           <div class="mode-wrap">
+            <!-- Both icons ship in the markup and CSS shows the one matching
+                 the current mode, keyed off the .active class the toggle
+                 already carries (see .mode-btn.active in styles.css). That
+                 keeps the swap in one place: this used to be an emoji that
+                 two separate JS functions reassigned, which is why they could
+                 drift, and an emoji renders in the system's own colour and
+                 style rather than following the button like the CSV icon
+                 beside it does. -->
             <button id="searchModeToggle" type="button" class="mode-btn" onclick="toggleSearchMode()" title="Switch to Search Mode">
-              <span class="mode-btn-icon" id="searchModeIcon">🔗</span>
+              <span class="mode-btn-icon" id="searchModeIcon">
+                <svg class="icon-link" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                <svg class="icon-search" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+              </span>
               <span id="searchModeText">Fetch</span>
             </button>
             <input id="searchMode" type="hidden" value="link">
+            <!-- A CSV is the third way in, next to a link and a search: the
+                 file is read in the browser and its text is sent, so nothing
+                 here depends on the server seeing your disk. -->
+            <button id="csvBtn" type="button" class="mode-btn" onclick="openCsvPicker()"
+                    title="Import a CSV of tracks (Exportify, Soundiiz, a list of links…)"
+                    aria-label="Import a CSV of tracks">
+              <span class="mode-btn-icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+              </span>
+            </button>
+            <input id="csvFileInput" type="file" accept=".csv,.tsv,.txt,text/csv"
+                   style="display:none" onchange="onCsvFileChosen(this)">
           </div>
           <div class="url-wrap">
             <span class="url-icon">
@@ -414,6 +477,32 @@
       </div>
     </div>
 
+    <div class="view" id="view-stats">
+      <div class="s-header">
+        <h1>Your library</h1>
+        <div class="s-actions">
+          <select id="stats-period" onchange="loadStats()" style="max-width:170px;">
+            <option value="all">All time</option>
+            <option value="year">This year</option>
+            <option value="365">Last 365 days</option>
+            <option value="30">Last 30 days</option>
+          </select>
+          <button class="act-btn secondary" type="button" onclick="loadStats()">Refresh</button>
+        </div>
+      </div>
+      <div class="s-body">
+        <p style="font-size:12px;color:var(--muted);margin:-4px 0 14px;line-height:1.6;">
+          Built from what this install has actually downloaded. Genre, release
+          year and duration are only recorded for downloads made since this
+          feature landed, and a genre needs metadata enrichment to have been
+          on — each section says how much of your history it could use.
+        </p>
+        <div id="stats-body">
+          <div class="s-label" style="font-size:11.5px;">Loading…</div>
+        </div>
+      </div>
+    </div>
+
     <div class="view" id="view-settings">
       <div class="s-header">
       <h1>Settings</h1>
@@ -590,6 +679,10 @@
                 <span id="config-tidal-api-display" class="api-config-pill">Not set</span>
               </div>
               <input type="hidden" id="config-tidal-api">
+            </div>
+            <div class="s-row">
+              <span class="s-label">AcoustID API key<small>Optional. Identifying untagged files uses a key shared by all users, capped at 3 lookups/second between everyone; your own key gets its own budget. Free from acoustid.org/new-application</small></span>
+              <input type="text" id="config-acoustid-key" placeholder="Using the shared key" style="width:190px;">
             </div>
           </div>
           <div class="s-section">

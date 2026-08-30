@@ -33,6 +33,8 @@ from typing_extensions import Self
 from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.errors import ErrorKind, SpotiflacError
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from SpotiFLAC.core.output_lock import output_path_lock
+from SpotiFLAC.core.text_match import track_identity_mismatch
 from SpotiFLAC.core.signed_session_mobile import SignedSessionClient
 
 from .manager import ExtensionManager, InstalledExtension
@@ -40,6 +42,67 @@ from .runtime import ExtensionRuntimeError, JSRuntime
 from .runtime_features import signed_fetch, signed_session_client
 
 logger = logging.getLogger(__name__)
+
+
+def _human_bytes(size: float) -> str:
+    value = float(size)
+    for unit in ("B", "KB", "MB"):
+        if value < 1024:
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} GB"
+
+
+class _TransferProgress:
+    """What is actually known about one download's byte counts.
+
+    Two things report on the same transfer — the bridge's `progress`
+    messages and the disk poller — and they know different amounts. The
+    bridge has the Content-Length when the extension streams through
+    `global.file.download`; the poller only ever has the size on disk. This
+    holds whichever is better, so the progress bar is fed real bytes and the
+    poller stops guessing the moment the bridge starts reporting.
+    """
+
+    __slots__ = ("bridge_reporting", "bytes_on_disk", "total_bytes")
+
+    def __init__(self) -> None:
+        self.bytes_on_disk = 0
+        self.total_bytes = 0
+        #: The bridge has sent at least one event carrying real byte counts.
+        self.bridge_reporting = False
+
+    def note(
+        self, received: int, total: int | None, *, from_bridge: bool = False
+    ) -> None:
+        """Record a report. `from_bridge` marks it as the bridge's own bytes.
+
+        The flag is separate from `total` because a chunked response has no
+        Content-Length: the bridge still knows exactly how many bytes it has
+        received, and that it is reporting at all is what tells the disk
+        poller to stand down. Tying the two together let a total-less
+        transfer be overwritten by the poller's guesses.
+        """
+        self.bytes_on_disk = max(self.bytes_on_disk, int(received or 0))
+        if total:
+            self.total_bytes = int(total)
+        if from_bridge or total:
+            self.bridge_reporting = True
+
+    def estimate_total(self, fraction: float) -> int:
+        """The full size implied by `fraction` of the bytes written so far.
+
+        Only useful for an extension that reports a fraction without a
+        Content-Length. Below 1% the division amplifies noise into a wildly
+        wrong total, and a wrong total is worse than none: it draws a bar
+        that fills and then keeps going. Unknown (0) is the honest answer
+        there, and it renders as an indeterminate bar.
+        """
+        if self.total_bytes:
+            return self.total_bytes
+        if fraction >= 0.01 and self.bytes_on_disk > 0:
+            return int(self.bytes_on_disk / min(1.0, fraction))
+        return 0
 
 
 class JSExtensionProvider(BaseProvider):
@@ -385,186 +448,364 @@ class JSExtensionProvider(BaseProvider):
             native_id=str(track_id),
         )
 
-        try:
-            for stale in output_path.parent.glob(f"{output_path.stem}.*"):
-                if stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4"):
-                    if stale.exists() and stale.stat().st_size == 0:
-                        stale.unlink()
-                        logger.debug(
-                            "[%s] Removed stale zero-byte file: %s",
-                            self.name,
-                            stale.name,
-                        )
-        except Exception:
-            pass
-
-        if self._file_exists(output_path):
-            return DownloadResult.skipped_result(
-                self.name,
-                str(output_path),
-                fmt=_ext_to_fmt(output_path.suffix),
-            )
-
-        def _progress_adapter(fraction: float) -> None:
-            if self._progress_cb is None:
-                return
+        # Everything below writes to output_path, so one download of a
+        # given destination happens at a time. Two tracks can resolve to
+        # the same filename — a playlist listing a track twice, an album
+        # queued alongside its single — and without this they stream into
+        # the same .part and rename over each other, leaving a file that
+        # looks complete and is not. See core/output_lock.py.
+        async with output_path_lock(output_path):
             try:
-                current = int(max(0.0, min(1.0, fraction)) * 100)
-                result = self._progress_cb(current, 100)
-                # If the callback is async and returns a coroutine, we can't await it here
-                # (we're in a sync context via to_thread), so we need to close it to prevent warnings
-                if asyncio.iscoroutine(result):
-                    result.close()
+                for stale in output_path.parent.glob(f"{output_path.stem}.*"):
+                    if stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4"):
+                        if stale.exists() and stale.stat().st_size == 0:
+                            stale.unlink()
+                            logger.debug(
+                                "[%s] Removed stale zero-byte file: %s",
+                                self.name,
+                                stale.name,
+                            )
             except Exception:
                 pass
 
-        logger.info("[%s] Downloading '%s'", self.name, metadata.title)
-
-        # ── Progress fallback via disk polling ──────────────────────────
-        # Covers the case where the extension bypasses global.file.download
-        # (e.g., writing segments manually via file.writeBytes) and thus
-        # never generates real "progress" events from the bridge. If instead
-        # real events arrive (now emitted by nodeFileDownload in
-        # _bridge.js), this fallback is simply redundant and harmless.
-        poll_stop = asyncio.Event()
-        poll_task = asyncio.create_task(
-            self._poll_file_progress_async(output_path, poll_stop),
-        )
-
-        try:
-            dl_result = await asyncio.to_thread(
-                self._call,
-                "download",
-                track_id,
-                quality,
-                str(output_path),
-                None,
-                progress_cb=_progress_adapter,
-            )
-        finally:
-            poll_stop.set()
-            poll_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await poll_task
-
-        if not dl_result or not dl_result.get("success"):
-            err = (dl_result or {}).get("error_message", "download failed")
-            return DownloadResult.fail(self.name, err)
-
-        # ── Reassemble any segments (e.g., Tidal DASH via extension) ──
-        actual_path = await self._finalize_segments_async(dl_result, output_path)
-        if actual_path is None:
-            return DownloadResult.fail(
-                self.name,
-                "Download returned no usable audio (segments unmergeable)",
-            )
-
-        if Path(actual_path).suffix.lower() in [".m4a", ".mp4"]:
-            codec = await _get_codec_async(actual_path)
-            if codec == "flac":
-                logger.info(
-                    "[%s] FLAC hidden inside M4A container detected. Starting extraction (remux)...",
+            if self._file_exists(output_path):
+                return DownloadResult.skipped_result(
                     self.name,
-                )
-                flac_path = str(Path(actual_path).with_suffix(".flac"))
-
-                d_key = dl_result.get("decryption_key") or dl_result.get(
-                    "decryptionKey",
+                    str(output_path),
+                    fmt=_ext_to_fmt(output_path.suffix),
                 )
 
-                if await _remux_to_flac_async(actual_path, flac_path, d_key):
-                    import os
+            # Shared between the bridge's real progress events and the disk
+            # poller below, so whichever of the two is actually reporting,
+            # the other stops guessing over the top of it.
+            transfer = _TransferProgress()
 
-                    with contextlib.suppress(OSError):
-                        os.remove(actual_path)
-                    actual_path = flac_path
-                    logger.info(
-                        "[%s] FLAC extraction completed successfully.",
-                        self.name,
-                    )
+            def _progress_adapter(
+                fraction: float,
+                bytes_received: int | None = None,
+                bytes_total: int | None = None,
+            ) -> None:
+                """Real byte counts from the bridge, when it has them.
+
+                This used to take only the fraction and report it as
+                `(percent, 100)` — but the callback's contract is
+                `(current_bytes, total_bytes)`, so a 30 MB FLAC drew a bar
+                that filled to "97B / 100B" and a transfer speed computed
+                from a percentage. `nodeFileDownload` has been emitting
+                `bytesReceived`/`bytesTotal` all along and JSRuntime already
+                offers them here; nothing was accepting them.
+                """
+                if self._progress_cb is None:
+                    return
+                # Whether the bridge counted the bytes is a separate question
+                # from whether it knows the total. A chunked response has no
+                # Content-Length, so `bytes_total` is 0 while `bytes_received`
+                # is exact — treating the two as one condition threw those
+                # real counts away and replaced them with the disk poller's,
+                # which is the worse number of the two.
+                if bytes_received is not None:
+                    transfer.note(bytes_received, bytes_total, from_bridge=True)
+                    # An estimate is still better than an indeterminate bar,
+                    # and estimate_total() declines to make one when the
+                    # fraction is too small to divide by.
+                    bytes_total = bytes_total or transfer.estimate_total(fraction)
+                    if not bytes_received and not bytes_total:
+                        # The opening event of a chunked transfer: no bytes
+                        # yet and no total. It says nothing the bar can draw,
+                        # but noting it above is what stands the poller down.
+                        return
                 else:
-                    logger.warning(
-                        "[%s] FLAC extraction failed, keeping the original file.",
-                        self.name,
-                    )
+                    # An extension that streams through global.file.download
+                    # produces two progress streams for one download: the
+                    # bridge's, carrying real byte counts, and its own
+                    # onProgress, carrying a bare 0..1. Once the first is
+                    # running it is strictly better, so the second is
+                    # dropped rather than re-emitting stale numbers over it
+                    # and flattening the transfer speed to zero.
+                    if transfer.bridge_reporting:
+                        return
+                    # Otherwise: an extension that writes its own file. Fall
+                    # back to what is on disk, which is at least a real
+                    # number of bytes.
+                    bytes_received = transfer.bytes_on_disk
+                    bytes_total = transfer.estimate_total(fraction)
+                    if not bytes_received:
+                        return
+                    transfer.note(bytes_received, bytes_total)
+                try:
+                    result = self._progress_cb(bytes_received, bytes_total or 0)
+                    # If the callback is async and returns a coroutine, we can't await it here
+                    # (we're in a sync context via to_thread), so we need to close it to prevent warnings
+                    if asyncio.iscoroutine(result):
+                        result.close()
+                except Exception:
+                    pass
 
-        fmt = _ext_to_fmt(Path(actual_path).suffix)
+            logger.info(
+                "[%s] Download starting: '%s' — %s · quality=%s · track_id=%s → %s",
+                self.name,
+                metadata.title,
+                metadata.artists,
+                quality,
+                track_id,
+                output_path.name,
+            )
+            download_started_at = time.monotonic()
 
-        # ── MusicBrainz, like in native providers (tidal.py, qobuz.py, etc.) ──
-        mb_tags: dict[str, str] = {}
-        if enrich_metadata and metadata.isrc:
+            # ── Progress fallback via disk polling ──────────────────────────
+            # Covers the case where the extension bypasses global.file.download
+            # (e.g., writing segments manually via file.writeBytes) and thus
+            # never generates real "progress" events from the bridge. If instead
+            # real events arrive (now emitted by nodeFileDownload in
+            # _bridge.js), this fallback is simply redundant and harmless.
+            poll_stop = asyncio.Event()
+            poll_task = asyncio.create_task(
+                self._poll_file_progress_async(output_path, poll_stop, transfer),
+            )
+
             try:
-                from SpotiFLAC.core.isrc_utils import normalize_isrc
-                from SpotiFLAC.core.musicbrainz import (
-                    fetch_mb_metadata_async,
-                    mb_result_to_tags,
+                dl_result = await asyncio.to_thread(
+                    self._call,
+                    "download",
+                    track_id,
+                    quality,
+                    str(output_path),
+                    None,
+                    progress_cb=_progress_adapter,
                 )
+            finally:
+                poll_stop.set()
+                poll_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await poll_task
 
-                isrc_clean = normalize_isrc(metadata.isrc)
-                if isrc_clean:
-                    mb_data = await fetch_mb_metadata_async(isrc_clean)
-                    mb_tags = mb_result_to_tags(mb_data)
-            except Exception as e:
-                logger.debug(
-                    "[%s] MusicBrainz lookup failed (non-fatal): %s",
+            elapsed = time.monotonic() - download_started_at
+
+            if not dl_result or not dl_result.get("success"):
+                err = (dl_result or {}).get("error_message", "download failed")
+                # The extension's own words, at a level that is visible by
+                # default. This is the answer to "it said nothing and no
+                # file appeared": either the call never returned a result at
+                # all, or it returned one saying why.
+                logger.warning(
+                    "[%s] Download FAILED for '%s' after %.1fs: %s",
                     self.name,
-                    e,
+                    metadata.title,
+                    elapsed,
+                    err if dl_result else "the extension returned no result",
                 )
+                return DownloadResult.fail(self.name, err)
 
-        try:
-            from SpotiFLAC.core.download_validation import (
-                validate_downloaded_track_async,
-            )
-            from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
-
-            expected_s = metadata.duration_ms // 1000
-            valid, err_msg = await validate_downloaded_track_async(
-                actual_path,
-                expected_s,
-            )
-            if not valid:
-                logger.warning("[%s] Validation failed: %s", self.name, err_msg)
-                return DownloadResult.fail(self.name, f"Validation failed: {err_msg}")
-
-            await embed_metadata_async(
-                Path(actual_path),
-                metadata,
-                EmbedOptions(
-                    cover_url=metadata.cover_url or "",
-                    first_artist_only=first_artist_only,
-                    artist_separator=artist_separator,
-                    embed_lyrics=embed_lyrics,
-                    lyrics_providers=lyrics_providers or [],
-                    enrich=enrich_metadata,
-                    enrich_providers=enrich_providers,
-                    enrich_qobuz_token=qobuz_token or "",
-                    is_album=is_album,
-                    extra_tags=mb_tags,
+            written = transfer.bytes_on_disk
+            with contextlib.suppress(OSError):
+                if output_path.exists():
+                    written = output_path.stat().st_size
+            logger.info(
+                "[%s] Download finished: '%s' — %s in %.1fs%s",
+                self.name,
+                metadata.title,
+                _human_bytes(written),
+                elapsed,
+                (
+                    f" ({written / elapsed / (1024 * 1024):.1f} MB/s)"
+                    if elapsed > 0 and written
+                    else ""
                 ),
             )
-        except Exception as e:
-            logger.warning("[%s] Tagging failed (non-fatal): %s", self.name, e)
 
-        try:
-            for stale in output_path.parent.glob(f"{output_path.stem}.*"):
-                if (
-                    stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4")
-                    and stale.exists()
-                    and stale.stat().st_size == 0
-                    and str(stale) != str(actual_path)
-                ):
-                    stale.unlink()
+            # ── Reassemble any segments (e.g., Tidal DASH via extension) ──
+            actual_path = await self._finalize_segments_async(dl_result, output_path)
+            if actual_path is None:
+                return DownloadResult.fail(
+                    self.name,
+                    "Download returned no usable audio (segments unmergeable)",
+                )
+
+            if Path(actual_path).suffix.lower() in [".m4a", ".mp4"]:
+                codec = await _get_codec_async(actual_path)
+                if codec == "flac":
                     logger.info(
-                        "[%s] Removed leftover zero-byte file: %s",
+                        "[%s] FLAC hidden inside M4A container detected. Starting extraction (remux)...",
                         self.name,
-                        stale.name,
                     )
-        except Exception as exc:
-            logger.warning("[%s] Post-download cleanup failed: %s", self.name, exc)
+                    flac_path = str(Path(actual_path).with_suffix(".flac"))
 
-        return DownloadResult.ok(self.name, actual_path, fmt)
+                    d_key = dl_result.get("decryption_key") or dl_result.get(
+                        "decryptionKey",
+                    )
+
+                    if await _remux_to_flac_async(actual_path, flac_path, d_key):
+                        import os
+
+                        with contextlib.suppress(OSError):
+                            os.remove(actual_path)
+                        actual_path = flac_path
+                        logger.info(
+                            "[%s] FLAC extraction completed successfully.",
+                            self.name,
+                        )
+                    else:
+                        logger.warning(
+                            "[%s] FLAC extraction failed, keeping the original file.",
+                            self.name,
+                        )
+
+            fmt = _ext_to_fmt(Path(actual_path).suffix)
+
+            # ── MusicBrainz, like in native providers (tidal.py, qobuz.py, etc.) ──
+            mb_tags: dict[str, str] = {}
+            if enrich_metadata and metadata.isrc:
+                try:
+                    from SpotiFLAC.core.isrc_utils import normalize_isrc
+                    from SpotiFLAC.core.musicbrainz import (
+                        fetch_mb_metadata_async,
+                        mb_result_to_tags,
+                    )
+
+                    isrc_clean = normalize_isrc(metadata.isrc)
+                    if isrc_clean:
+                        mb_data = await fetch_mb_metadata_async(isrc_clean)
+                        mb_tags = mb_result_to_tags(mb_data)
+                except Exception as e:
+                    logger.debug(
+                        "[%s] MusicBrainz lookup failed (non-fatal): %s",
+                        self.name,
+                        e,
+                    )
+
+            try:
+                from SpotiFLAC.core.download_validation import (
+                    validate_downloaded_track_async,
+                )
+                from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
+
+                expected_s = metadata.duration_ms // 1000
+                valid, err_msg = await validate_downloaded_track_async(
+                    actual_path,
+                    expected_s,
+                )
+                if not valid:
+                    logger.warning("[%s] Validation failed: %s", self.name, err_msg)
+                    return DownloadResult.fail(
+                        self.name, f"Validation failed: {err_msg}"
+                    )
+
+                # The duration check above proves the file is a whole track. It
+                # cannot prove it is *this* track: a cover, a re-recording or a
+                # different artist's song of the same name all run the right
+                # length. checkAvailability() returns only {available, track_id},
+                # so what the provider resolved is not knowable before the
+                # download — but download() reports the title/artist/album it
+                # actually fetched, which is enough to catch a wrong match here,
+                # before the requested track's tags are written over it.
+                mismatch = track_identity_mismatch(
+                    expected_title=metadata.title,
+                    expected_artist=metadata.artists,
+                    expected_album=metadata.album,
+                    expected_isrc=metadata.isrc,
+                    found_title=str(
+                        dl_result.get("title") or dl_result.get("name") or ""
+                    ),
+                    found_artist=str(
+                        dl_result.get("artist") or dl_result.get("artists") or ""
+                    ),
+                    found_album=str(
+                        dl_result.get("album") or dl_result.get("album_name") or ""
+                    ),
+                    found_isrc=str(dl_result.get("isrc") or ""),
+                )
+                if mismatch:
+                    logger.warning("[%s] Wrong track: %s", self.name, mismatch)
+                    with contextlib.suppress(OSError):
+                        Path(actual_path).unlink()
+                    return DownloadResult.fail(self.name, f"Wrong track: {mismatch}")
+
+                await embed_metadata_async(
+                    Path(actual_path),
+                    metadata,
+                    EmbedOptions(
+                        cover_url=metadata.cover_url or "",
+                        first_artist_only=first_artist_only,
+                        artist_separator=artist_separator,
+                        embed_lyrics=embed_lyrics,
+                        lyrics_providers=lyrics_providers or [],
+                        enrich=enrich_metadata,
+                        enrich_providers=enrich_providers,
+                        enrich_qobuz_token=qobuz_token or "",
+                        is_album=is_album,
+                        extra_tags=mb_tags,
+                    ),
+                )
+            except Exception as e:
+                logger.warning("[%s] Tagging failed (non-fatal): %s", self.name, e)
+
+            try:
+                for stale in output_path.parent.glob(f"{output_path.stem}.*"):
+                    if (
+                        stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4")
+                        and stale.exists()
+                        and stale.stat().st_size == 0
+                        and str(stale) != str(actual_path)
+                    ):
+                        stale.unlink()
+                        logger.info(
+                            "[%s] Removed leftover zero-byte file: %s",
+                            self.name,
+                            stale.name,
+                        )
+            except Exception as exc:
+                logger.warning("[%s] Post-download cleanup failed: %s", self.name, exc)
+
+            return DownloadResult.ok(self.name, actual_path, fmt)
 
     # ─────────────────────── Segment reassembly ────────────────────────
+
+    def _sanctioned_output(
+        self,
+        file_path: str | None,
+        output_path: Path,
+    ) -> Path | None:
+        """`file_path` as reported by the extension, if it is ours to touch.
+
+        The host chose where this download goes and told the filesystem
+        guard about that one directory (see _bridge.js and _fsguard.js).
+        What comes back is just a string in the extension's result, and
+        everything downstream treats it as the downloaded track: tags are
+        written into it, and a track-identity mismatch deletes it. A path
+        outside the output directory — a bug in an extension building it
+        from unsanitised metadata, or one that means harm — would have that
+        happen to a file nobody asked about.
+
+        Symlinks are resolved before the check, so a link planted inside the
+        output directory cannot stand in for a file outside it.
+
+        None when there is no usable path, which sends the caller on to the
+        segment reassembly below and, failing that, to a failed download —
+        the honest outcome, and a loud one.
+        """
+        if not file_path:
+            return None
+        try:
+            resolved = Path(file_path).resolve()
+            allowed = output_path.parent.resolve()
+            resolved.relative_to(allowed)
+        except ValueError:
+            logger.warning(
+                "[%s] Extension reported a file outside the output folder; "
+                "ignoring it: %s",
+                self.name,
+                file_path,
+            )
+            return None
+        except OSError as exc:
+            logger.warning(
+                "[%s] Could not check the reported file path (%s): %s",
+                self.name,
+                file_path,
+                exc,
+            )
+            return None
+        return resolved
 
     async def _finalize_segments_async(
         self,
@@ -575,8 +816,9 @@ class JSExtensionProvider(BaseProvider):
         return downloaded segments instead of a single ready audio file.
         Expected contract, in order of priority:
 
-          1. dl_result["file_path"] exists and is a valid non-empty file
-             → no extra work, original behavior.
+          1. dl_result["file_path"] is a non-empty file inside the output
+             directory → no extra work, original behavior. See
+             _sanctioned_output() for why the location is checked.
           2. dl_result["segments"] is an ordered list of absolute paths
              (init segment included, if present) → concatenate them as
              raw bytes into a temp file and then remux with ffmpeg
@@ -590,13 +832,9 @@ class JSExtensionProvider(BaseProvider):
         Returns the path (str) of the final audio file ready for tagging,
         or None if it was not possible to rebuild a valid file.
         """
-        file_path = dl_result.get("file_path")
-        if (
-            file_path
-            and Path(file_path).exists()
-            and Path(file_path).stat().st_size > 0
-        ):
-            return file_path
+        file_path = self._sanctioned_output(dl_result.get("file_path"), output_path)
+        if file_path and file_path.is_file() and file_path.stat().st_size > 0:
+            return str(file_path)
 
         import re
 
@@ -727,12 +965,21 @@ class JSExtensionProvider(BaseProvider):
         self,
         output_path: Path,
         stop_event: asyncio.Event,
+        transfer: _TransferProgress,
     ) -> None:
         """Monitors the growth of output_path (or its common temporary variants:
-        .part, .tmp, .download) and feeds self._progress_cb with an estimated
-        percentage when no real "progress" events arrive from the JS bridge
-        (e.g., extensions that write their own files without passing through
-        global.file.download).
+        .part, .tmp, .download) and feeds self._progress_cb with the real
+        number of bytes on disk when no "progress" events arrive from the JS
+        bridge (e.g., extensions that write their own files without passing
+        through global.file.download).
+
+        It reports bytes rather than a made-up percentage. The old version
+        emitted `1 - 1/(1 + polls * 0.15)` as a percent-of-100 "byte" count,
+        which moved the bar on a timer whether or not anything was being
+        transferred, and told the bar the file was 100 bytes long. Bytes on
+        disk are a real measurement; the total stays unknown unless the
+        bridge supplies one, and an unknown total draws an indeterminate bar
+        instead of a wrong one.
         """
         if self._progress_cb is None:
             return
@@ -745,12 +992,10 @@ class JSExtensionProvider(BaseProvider):
         ]
 
         last_size = 0
-        elapsed_polls = 0
 
         try:
             while not stop_event.is_set():
                 await asyncio.sleep(0.3)
-                elapsed_polls += 1
 
                 size = 0
                 for cand in candidates:
@@ -763,13 +1008,17 @@ class JSExtensionProvider(BaseProvider):
                 if size <= 0:
                     continue
 
-                fraction = min(0.97, 1 - (1 / (1 + elapsed_polls * 0.15)))
+                transfer.bytes_on_disk = size
+
+                # The bridge is reporting real byte counts for this
+                # download, so it owns the bar; polling would only fight it.
+                if transfer.bridge_reporting:
+                    continue
 
                 if size != last_size:
                     last_size = size
                     try:
-                        current = int(fraction * 100)
-                        result = self._progress_cb(current, 100)
+                        result = self._progress_cb(size, transfer.total_bytes)
                         # If the callback is async, await it
                         if asyncio.iscoroutine(result):
                             await result

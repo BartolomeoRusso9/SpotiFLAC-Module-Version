@@ -147,6 +147,20 @@ class JSRuntime:
         # startup_timeout is armed, and the deadlock is silent. Losing the
         # rlimits is the lesser cost; the environment allowlist is the part
         # that was actually protecting something.
+        # Refuse outbound connections to private/local addresses from inside
+        # the extension's own process. Extensions are third-party code with
+        # an ordinary network stack, and nothing they legitimately do needs
+        # to reach 127.0.0.1 (SpotiFLAC's own --web server), the LAN, or
+        # 169.254.169.254. See extensions/_netguard.js for what this does
+        # and does not protect against.
+        for guard_name in ("_netguard.js", "_fsguard.js"):
+            guard = Path(__file__).with_name(guard_name)
+            if guard.is_file():
+                # Quoted: NODE_OPTIONS is split on whitespace like a shell
+                # word list, so an unquoted path containing a space arrives
+                # as two arguments and Node exits on the second.
+                node_options = f'{node_options} --require "{guard}"'.strip()
+
         env = build_env({"NODE_OPTIONS": node_options} if node_options else None)
         logger.debug("[ExtRuntime] %s", describe())
 

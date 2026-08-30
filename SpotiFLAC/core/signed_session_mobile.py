@@ -22,6 +22,8 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
+from .signed_session_errors import should_clear_session
+
 logger = logging.getLogger(__name__)
 
 
@@ -710,8 +712,25 @@ class SignedSessionClient:
                 resp.status_code,
                 getattr(resp, "reason_phrase", ""),
             )
+        # Only a 401 the *gateway* attributed to itself means the session is
+        # dead. One the gateway forwarded from the provider — no
+        # subscription, region-locked, their token expired — says nothing
+        # about our session, and clearing it there costs the user a
+        # Turnstile challenge for a track that was simply unavailable.
+        # See core/signed_session_errors.py.
         if resp.status_code in (401, 428):
-            self.clear()
+            body = b""
+            with contextlib.suppress(Exception):
+                body = resp.content
+            if should_clear_session(resp.status_code, body):
+                self.clear()
+            else:
+                logger.debug(
+                    "[signed_session:%s] %s came from the provider, "
+                    "keeping the session",
+                    self.namespace,
+                    resp.status_code,
+                )
         return resp
 
     # ─────────────────────── ticket / download layer ──────────────────────
@@ -753,6 +772,20 @@ class SignedSessionClient:
     ) -> str:
         resource_hash = self.compute_resource_hash(provider, resource_id, resource_type)
 
+        # A download that never starts almost always died here, and until
+        # now it died quietly: the ticket step is a whole network round trip
+        # with its own authentication, and the only trace of it was the
+        # exception the caller turned into "download failed". These three
+        # lines say which of the two it was — asked and refused, or asked
+        # and answered — without needing DEBUG on.
+        logger.info(
+            "[signed_session:%s] Ticket requested: %s %s:%s",
+            self.namespace,
+            provider,
+            resource_type,
+            resource_id,
+        )
+        started = time.monotonic()
         resp = await self.request(
             "POST",
             tickets_path,
@@ -762,14 +795,41 @@ class SignedSessionClient:
                 "resource_hash": resource_hash,
             },
         )
+        elapsed = time.monotonic() - started
+        if resp.status_code >= 400:
+            logger.warning(
+                "[signed_session:%s] Ticket refused for %s:%s — HTTP %d after "
+                "%.1fs: %s",
+                self.namespace,
+                resource_type,
+                resource_id,
+                resp.status_code,
+                elapsed,
+                resp.text[:200],
+            )
         resp.raise_for_status()
         data = resp.json()
 
         ticket_id = str(data.get("ticket_id") or data.get("ticket") or "").strip()
         if not ticket_id:
+            logger.warning(
+                "[signed_session:%s] Ticket NOT returned for %s:%s — the "
+                "response carried no ticket_id: %s",
+                self.namespace,
+                resource_type,
+                resource_id,
+                str(data)[:200],
+            )
             msg = f"ticket response missing ticket_id: {data}"
             raise RuntimeError(msg)
 
+        logger.info(
+            "[signed_session:%s] Ticket granted for %s:%s in %.1fs",
+            self.namespace,
+            resource_type,
+            resource_id,
+            elapsed,
+        )
         return ticket_id
 
     async def ticketed_request(
@@ -901,9 +961,67 @@ async def perform_signed_fetch(
                         return {"error": str(exc)}
 
         # At this point the session is guaranteed for all parallel tracks
-        resp = await client.request(method, path, json_body=body, extra_headers=headers)
+        #
+        # An extension's own ticket call arrives here rather than through
+        # get_download_ticket(): the JS does its own POST /tickets over
+        # signedFetch. It is the step a stalled download is most often stuck
+        # in, so it is named in the log instead of being one anonymous
+        # signed request among many.
+        is_ticket = "/tickets" in path
+        if is_ticket:
+            logger.info(
+                "[signed_session:%s] Ticket requested by the extension (%s %s)",
+                client.namespace,
+                method,
+                path,
+            )
+        else:
+            logger.debug(
+                "[signed_session:%s] signedFetch %s %s",
+                client.namespace,
+                method,
+                path,
+            )
 
-        if resp.status_code in (401, 428):
+        started = time.monotonic()
+        resp = await client.request(method, path, json_body=body, extra_headers=headers)
+        elapsed = time.monotonic() - started
+
+        if is_ticket:
+            granted = False
+            if 200 <= resp.status_code < 300:
+                # The body is the extension's to parse; all this needs to
+                # know is whether a ticket came back at all, so that "asked
+                # and got nothing" stops looking like "asked and got a
+                # ticket" in the log.
+                with contextlib.suppress(Exception):
+                    payload = resp.json()
+                    granted = bool(
+                        isinstance(payload, dict)
+                        and (payload.get("ticket_id") or payload.get("ticket"))
+                    )
+            if granted:
+                logger.info(
+                    "[signed_session:%s] Ticket returned in %.1fs",
+                    client.namespace,
+                    elapsed,
+                )
+            else:
+                logger.warning(
+                    "[signed_session:%s] Ticket NOT returned — HTTP %d after "
+                    "%.1fs: %s",
+                    client.namespace,
+                    resp.status_code,
+                    elapsed,
+                    resp.text[:200],
+                )
+
+        # Same distinction as in request(): re-bootstrapping and demanding
+        # verification are session decisions, and a provider's refusal is
+        # not grounds for either.
+        if resp.status_code in (401, 428) and should_clear_session(
+            resp.status_code, getattr(resp, "content", b"")
+        ):
             retry_auth_url = await client.bootstrap()
             if isinstance(retry_auth_url, str) and retry_auth_url:
                 return {"needsVerification": True, "auth_url": retry_auth_url}
@@ -923,9 +1041,16 @@ async def perform_signed_fetch(
             "retryAfterSeconds": retry_after,
         }
     except Exception as exc:
-        logger.debug(
-            "[signed_session:%s] signedFetch failed: %s",
+        # "warning", not "debug": this is the end of the road for whatever
+        # the extension was doing, and returning {"error": …} means the JS
+        # side decides how loudly to fail. At debug the reason was invisible
+        # at the default level, so a download that stopped here reported
+        # only "download failed".
+        logger.warning(
+            "[signed_session:%s] signedFetch %s %s failed: %s",
             client.namespace,
+            method,
+            path,
             exc,
         )
         return {"error": str(exc)}

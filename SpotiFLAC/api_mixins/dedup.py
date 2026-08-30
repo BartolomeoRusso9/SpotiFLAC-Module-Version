@@ -19,9 +19,13 @@ class DedupMixin:
         get_ffmpeg_status().
         """
         try:
-            from ..core.audio_fingerprint import is_available
+            # can_compare(), not is_available(): grouping duplicates needs
+            # decoded fingerprints, which needs libchromaprint on top of the
+            # fpcalc binary. Identifying a single file (acoustid_lookup) has
+            # the lower bar and is checked separately.
+            from ..core.audio_fingerprint import can_compare
 
-            available = is_available()
+            available = can_compare()
         except Exception:
             available = False
         return {
@@ -29,8 +33,9 @@ class DedupMixin:
             "install_hint": (
                 None
                 if available
-                else "pip install SpotiFLAC[dedup] (also needs the 'fpcalc' "
-                "binary from Chromaprint on PATH)"
+                else "pip install SpotiFLAC[dedup], plus Chromaprint itself: "
+                "the 'fpcalc' binary on PATH and the libchromaprint shared "
+                "library (Homebrew's chromaprint formula installs fpcalc only)"
             ),
         }
 
@@ -80,17 +85,23 @@ class DedupMixin:
 
             from ..core.audio_fingerprint import (
                 AudioFingerprintError,
+                can_compare,
                 compute_fingerprint,
                 find_duplicate_groups,
-                is_available,
             )
             from ..core.local_scanner import SUPPORTED_EXTENSIONS
 
-            if not is_available():
+            # can_compare(), not is_available(): with fpcalc but no
+            # libchromaprint every fingerprint comes back with an empty
+            # `raw`, so the scan would run to completion and report zero
+            # duplicates — a silently wrong answer, which is worse than
+            # saying the feature is unavailable.
+            if not can_compare():
                 self._push(
                     "app_dedup_error",
                     "Duplicate detection requires the optional 'pyacoustid' "
-                    "package and the 'fpcalc' binary — see get_dedup_status().",
+                    "package, the 'fpcalc' binary AND the libchromaprint "
+                    "library — see get_dedup_status().",
                 )
                 return
 
@@ -106,11 +117,23 @@ class DedupMixin:
             )
 
             fingerprints = []
+            skipped = 0
             for f in files:
                 try:
                     fingerprints.append(compute_fingerprint(f))
                 except AudioFingerprintError as e:
-                    self.log(f"[dedup] skipped {f.name}: {e}", "warn")
+                    # Quiet: a scan over a large library can skip a lot of
+                    # files, and one toast each would bury the window. Each
+                    # is still named in the Logs view; the count below is
+                    # what the user is told up front.
+                    skipped += 1
+                    self.log(f"[dedup] skipped {f.name}: {e}", "warn-quiet")
+            if skipped:
+                self.log(
+                    f"[dedup] skipped {skipped} unreadable file(s) — "
+                    "see the Logs view for which.",
+                    "warn",
+                )
 
             groups = find_duplicate_groups(fingerprints, similarity_threshold=threshold)
             self._push(
