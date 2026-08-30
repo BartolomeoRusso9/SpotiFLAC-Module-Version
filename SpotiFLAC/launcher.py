@@ -327,17 +327,38 @@ def _coerce_log_level(value: str | int) -> int:
     return resolved
 
 
+#: Chatty libraries whose own INFO records say nothing about what SpotiFLAC
+#: is doing — httpx alone emits a line per request. They are pinned to
+#: WARNING so the default level can be INFO and stay readable; --verbose
+#: lifts the pin, because a network problem is exactly when their frames
+#: are worth reading.
+_NOISY_LIBRARY_LOGGERS = ("httpx", "httpcore", "hpack", "urllib3", "asyncio")
+
+
+def _quiet_noisy_libraries(level: int) -> None:
+    """Pins third-party loggers to WARNING unless we are debugging."""
+    pinned = logging.NOTSET if level <= logging.DEBUG else logging.WARNING
+    for name in _NOISY_LIBRARY_LOGGERS:
+        logging.getLogger(name).setLevel(pinned)
+
+
 def _resolve_log_level(
     verbose: bool,
     explicit: str | int | None = None,
     profile_default: str | int | None = None,
 ) -> int:
-    """Hide warnings unless the user explicitly asked for more.
+    """Report what the run is doing, and no more.
 
     Precedence: --log-level, then --verbose (a shorthand for DEBUG), then
-    whatever a profile stored, then the quiet default. A profile value ranks
+    whatever a profile stored, then the default. A profile value ranks
     *below* --verbose on purpose: it is a saved preference, and a flag typed
     for this one run has to be able to win over it.
+
+    The default is INFO, not ERROR: the milestones of a download — which
+    provider was tried, the ticket, the audio fetch, the transcode — are all
+    logged at info, and at ERROR a run that hung showed nothing at all until
+    it gave up. The libraries that would flood that level are pinned
+    separately, see _quiet_noisy_libraries().
     """
     if explicit is not None:
         return _coerce_log_level(explicit)
@@ -345,7 +366,7 @@ def _resolve_log_level(
         return logging.DEBUG
     if profile_default is not None:
         return _coerce_log_level(profile_default)
-    return logging.ERROR
+    return logging.INFO
 
 
 def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
@@ -660,7 +681,8 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         help="Console log level: "
         + ", ".join(_LOG_LEVEL_NAMES)
         + ". Overrides --verbose, which is a shorthand for DEBUG. "
-        "Default: ERROR (only failures are printed).",
+        "Default: INFO (the milestones of the run). Third-party libraries "
+        "are held at WARNING unless the level is DEBUG.",
     )
     # Kept apart from --log-level's own default so the resolver can tell a
     # saved preference from a flag typed for this run.
@@ -2156,6 +2178,7 @@ async def amain() -> None:
             )
         )
         logging.basicConfig(level=log_level, handlers=[_root_handler])
+        _quiet_noisy_libraries(log_level)
 
         async def _run_once() -> None:
             await _run_download_async(
@@ -2332,6 +2355,7 @@ async def amain() -> None:
     _cli_handler = logging.StreamHandler(sys.stdout)
     _cli_handler.setFormatter(_CleanConsoleFormatter(log_format))
     logging.basicConfig(level=log_level, handlers=[_cli_handler])
+    _quiet_noisy_libraries(log_level)
 
     async def _run_once() -> None:
         await _run_download_async(

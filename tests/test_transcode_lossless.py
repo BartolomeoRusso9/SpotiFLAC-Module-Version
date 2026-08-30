@@ -810,10 +810,6 @@ def _level(argv: list[str], profile_defaults: dict | None = None) -> int:
     return _resolve_log_level(args.verbose, args.log_level, args.profile_log_level)
 
 
-def test_log_level_defaults_to_errors_only():
-    assert _level([]) == logging.ERROR
-
-
 @pytest.mark.parametrize(
     ("given", "expected"),
     [
@@ -906,3 +902,63 @@ def test_output_path_is_absolute_for_a_relative_output_dir(
     assert path.is_absolute(), f"{output_dir!r} produced a relative path"
     assert path == path.resolve()
     assert path.parent.is_dir()
+
+
+# ---------------------------------------------------------------------------
+# The default level shows what the run is doing
+# ---------------------------------------------------------------------------
+
+
+def test_default_level_is_info_so_download_milestones_are_visible():
+    """The ticket, the audio fetch and the transcode are all logger.info.
+
+    At the old ERROR default a run that hung printed nothing at all until it
+    gave up, which is why every diagnosis needed --verbose and its flood.
+    """
+    assert _level([]) == logging.INFO
+
+
+def test_noisy_libraries_are_pinned_below_the_default_level():
+    """INFO is only usable as a default if httpx isn't logging every request."""
+    from SpotiFLAC.launcher import _NOISY_LIBRARY_LOGGERS, _quiet_noisy_libraries
+
+    _quiet_noisy_libraries(logging.INFO)
+    for name in _NOISY_LIBRARY_LOGGERS:
+        assert logging.getLogger(name).level == logging.WARNING
+
+
+def test_debug_lifts_the_pin_on_libraries():
+    """A network problem is exactly when httpcore's frames are worth reading."""
+    from SpotiFLAC.launcher import _NOISY_LIBRARY_LOGGERS, _quiet_noisy_libraries
+
+    _quiet_noisy_libraries(logging.DEBUG)
+    for name in _NOISY_LIBRARY_LOGGERS:
+        assert logging.getLogger(name).level == logging.NOTSET
+
+
+def test_a_quieter_level_can_still_be_asked_for():
+    assert _level(["--log-level", "ERROR"]) == logging.ERROR
+    assert _level(["--log-level", "WARNING"]) == logging.WARNING
+
+
+def test_signed_session_names_the_audio_fetch_at_info():
+    """Regression: POST /dl was logged at debug.
+
+    The ticket was named at info but the request that actually fetches the
+    audio was not, so at the default level a download that stalled on the
+    fetch looked identical to one that never started it.
+    """
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "SpotiFLAC"
+        / "core"
+        / "signed_session_mobile.py"
+    ).read_text()
+    block = src[src.index('is_ticket = "/tickets" in path') :][:1200]
+    assert 'is_download = "/dl" in path' in block
+    assert "Fetching audio" in block
+    # and it must be info, not the debug branch it used to fall through to
+    fetch_at = block.index("Fetching audio")
+    assert "logger.info(" in block[fetch_at - 120 : fetch_at]

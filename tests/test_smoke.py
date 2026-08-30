@@ -13,9 +13,18 @@ from SpotiFLAC.launcher import (
 )
 
 
-def test_log_level_hides_warnings_without_verbose():
-    assert _resolve_log_level(verbose=False) == logging.ERROR
+def test_default_level_reports_run_milestones():
+    # Was ERROR, which hid the info lines that say what a run is doing —
+    # the provider being tried, the ticket, the audio fetch, the transcode —
+    # so a stalled download printed nothing until it gave up. The libraries
+    # that would flood INFO are pinned separately by _quiet_noisy_libraries().
+    assert _resolve_log_level(verbose=False) == logging.INFO
     assert _resolve_log_level(verbose=True) == logging.DEBUG
+
+
+def test_a_quieter_level_is_still_reachable():
+    assert _resolve_log_level(verbose=False, explicit="ERROR") == logging.ERROR
+    assert _resolve_log_level(verbose=False, explicit="WARNING") == logging.WARNING
 
 
 def test_profile_config_accepts_named_log_levels():

@@ -968,9 +968,22 @@ async def perform_signed_fetch(
         # in, so it is named in the log instead of being one anonymous
         # signed request among many.
         is_ticket = "/tickets" in path
+        # /dl is the request that actually fetches the audio, and the two
+        # together — ticket, then fetch — are the whole visible shape of a
+        # signed download. Naming them both at info level is what tells a
+        # stalled run apart from a slow one without turning on debug and
+        # drowning in httpcore frames.
+        is_download = "/dl" in path
         if is_ticket:
             logger.info(
                 "[signed_session:%s] Ticket requested by the extension (%s %s)",
+                client.namespace,
+                method,
+                path,
+            )
+        elif is_download:
+            logger.info(
+                "[signed_session:%s] Fetching audio (%s %s)",
                 client.namespace,
                 method,
                 path,
@@ -1015,6 +1028,13 @@ async def perform_signed_fetch(
                     elapsed,
                     resp.text[:200],
                 )
+        elif is_download:
+            logger.info(
+                "[signed_session:%s] Audio source responded HTTP %d in %.1fs",
+                client.namespace,
+                resp.status_code,
+                elapsed,
+            )
 
         # Same distinction as in request(): re-bootstrapping and demanding
         # verification are session decisions, and a provider's refusal is
