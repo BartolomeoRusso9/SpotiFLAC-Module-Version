@@ -414,22 +414,32 @@ _CSV_BROWSE_WORDS = {"csv", "tsv", "file", "browse", "pick"}
 def _clean_path_input(value: str) -> str:
     """Turn what a terminal hands us into a path that can be opened.
 
-    A file dragged into the terminal arrives shell-escaped
-    (``/Users/me/My\\ tracks.csv``) or quoted; `shlex` undoes both. `~` is
-    expanded so a typed home path works too.
+    A file dragged into the terminal arrives quoted, or — on a Unix shell —
+    with its spaces backslash-escaped (``/Users/me/My\\ tracks.csv``). Both
+    are undone here, and `~` is expanded so a typed home path works too.
+
+    The unescaping is POSIX-only on purpose: on Windows the backslash is the
+    path separator, and running ``C:\\Users\\me\\list.csv`` through `shlex`
+    hands back ``C:Usersmelist.csv``. Quotes are stripped on both, since
+    that is what dragging a path with a space into either shell produces.
     """
     raw = (value or "").strip()
     if not raw:
         return ""
-    candidate = raw
-    try:
-        parts = shlex.split(raw)
-    except ValueError:
-        parts = []
-    if len(parts) == 1:
-        candidate = parts[0]
+
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
+        candidate = raw[1:-1]
+    elif os.name == "nt":
+        candidate = raw
     else:
-        candidate = raw.strip("'\"")
+        try:
+            parts = shlex.split(raw)
+        except ValueError:
+            parts = []
+        # More than one part means the spaces were never escaped, so the
+        # whole line is the path — splitting it would only lose the rest.
+        candidate = parts[0] if len(parts) == 1 else raw
+
     return os.path.expanduser(candidate)
 
 

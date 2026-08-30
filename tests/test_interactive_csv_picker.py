@@ -77,6 +77,23 @@ def test_clean_path_input_keeps_unquoted_spaces(tmp_path):
     assert interactive._clean_path_input("/tmp/My tracks.csv") == "/tmp/My tracks.csv"
 
 
+def test_clean_path_input_leaves_windows_separators_alone(monkeypatch):
+    """On Windows the backslash is the path separator, not an escape.
+
+    Unescaping there turned `C:\\Users\\me\\list.csv` into
+    `C:Usersmelist.csv`, and every pasted path was answered with
+    "No such file".
+    """
+    monkeypatch.setattr(os, "name", "nt")
+    assert interactive._clean_path_input(r"C:\Users\me\list.csv") == (
+        r"C:\Users\me\list.csv"
+    )
+    # Dragging a path with a space into a Windows shell quotes it instead.
+    assert interactive._clean_path_input(r'"C:\Users\me\my list.csv"') == (
+        r"C:\Users\me\my list.csv"
+    )
+
+
 def test_looks_like_csv_path_is_case_insensitive():
     assert interactive._looks_like_csv_path("a.CSV")
     assert interactive._looks_like_csv_path("a.tsv")
@@ -173,7 +190,9 @@ def test_browse_words_cover_what_the_prompt_advertises():
 
 
 def test_short_dir_uses_a_tilde(monkeypatch, tmp_path):
+    # expanduser() reads HOME on Unix and USERPROFILE on Windows.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     assert interactive._short_dir(str(tmp_path)) == "~"
     assert interactive._short_dir(str(tmp_path / "Downloads")) == os.path.join(
         "~", "Downloads"

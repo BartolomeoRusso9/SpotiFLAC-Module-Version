@@ -59,7 +59,10 @@ def test_a_symlink_out_of_the_folder_is_refused(provider, output_path, tmp_path)
     outsider = tmp_path / "elsewhere.flac"
     outsider.write_bytes(_AUDIO)
     link = output_path.parent / "song.flac"
-    link.symlink_to(outsider)
+    try:
+        link.symlink_to(outsider)
+    except OSError as exc:  # Windows without the privilege to create links
+        pytest.skip(f"symlinks unavailable here: {exc}")
 
     # Resolved before the check: a link planted inside the output folder
     # must not stand in for a file outside it.
