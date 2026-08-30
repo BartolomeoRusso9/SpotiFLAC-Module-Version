@@ -65,16 +65,32 @@ def isolated_home(monkeypatch, tmp_path_factory):
     )
 
 
-def test_clean_path_input_undoes_terminal_escaping():
+def test_clean_path_input_undoes_terminal_escaping(monkeypatch):
+    """A Unix shell escapes the spaces in a dragged path.
+
+    Pinned to posix: the same backslashes are separators on Windows, and the
+    two behaviours are opposites — see the Windows test below.
+    """
+    monkeypatch.setattr(os, "name", "posix")
     assert interactive._clean_path_input("/tmp/My\\ tracks.csv") == "/tmp/My tracks.csv"
-    assert interactive._clean_path_input("'/tmp/a b.csv'") == "/tmp/a b.csv"
-    assert interactive._clean_path_input('  "/tmp/x.csv" ') == "/tmp/x.csv"
-    assert interactive._clean_path_input("") == ""
 
 
-def test_clean_path_input_keeps_unquoted_spaces(tmp_path):
-    # shlex splits this into two words; the raw path is the useful reading.
-    assert interactive._clean_path_input("/tmp/My tracks.csv") == "/tmp/My tracks.csv"
+def test_clean_path_input_strips_quotes_anywhere(monkeypatch):
+    """Quoting is what both shells do with a path that has a space in it."""
+    for name in ("posix", "nt"):
+        monkeypatch.setattr(os, "name", name)
+        assert interactive._clean_path_input("'/tmp/a b.csv'") == "/tmp/a b.csv"
+        assert interactive._clean_path_input('  "/tmp/x.csv" ') == "/tmp/x.csv"
+        assert interactive._clean_path_input("") == ""
+
+
+def test_clean_path_input_keeps_unquoted_spaces(monkeypatch):
+    """Neither branch may drop half the line when nothing was escaped."""
+    for name in ("posix", "nt"):
+        monkeypatch.setattr(os, "name", name)
+        assert (
+            interactive._clean_path_input("/tmp/My tracks.csv") == "/tmp/My tracks.csv"
+        )
 
 
 def test_clean_path_input_leaves_windows_separators_alone(monkeypatch):
