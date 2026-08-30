@@ -152,9 +152,9 @@ def compute_fingerprint(path: str | Path) -> AudioFingerprint:
         path=p,
         duration_s=float(duration),
         raw=raw_ints,
-        compressed=compressed.decode()
-        if isinstance(compressed, bytes)
-        else str(compressed),
+        compressed=(
+            compressed.decode() if isinstance(compressed, bytes) else str(compressed)
+        ),
     )
 
 

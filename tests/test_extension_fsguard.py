@@ -153,14 +153,12 @@ def test_the_host_can_sanction_a_path_at_run_time(extdir, scratch, tmp_path) -> 
 
     assert _write(target, cwd=extdir, tmpdir=scratch) == "blocked"
 
-    sanctioning = textwrap.dedent(
-        """
+    sanctioning = textwrap.dedent("""
         const fs = require('fs');
         global.__spotiflacAllowWrite(process.argv[1]);
         try { fs.writeFileSync(process.argv[1], 'x'); console.log('written'); }
         catch (e) { console.log('blocked'); }
-        """
-    )
+        """)
     assert _write(target, cwd=extdir, tmpdir=scratch, script=sanctioning) == "written"
 
 
@@ -185,8 +183,7 @@ def test_a_preload_reaches_inside_a_worker_thread(guard, tmp_path) -> None:
     the main thread. A preload that stopped at the main thread would guard
     an empty room — and would look correct in every direct test.
     """
-    worker = textwrap.dedent(
-        """
+    worker = textwrap.dedent("""
         const { Worker } = require('worker_threads');
         new Worker(`
           const net = require('net');
@@ -198,8 +195,7 @@ def test_a_preload_reaches_inside_a_worker_thread(guard, tmp_path) -> None:
           s.on('connect', () => { console.log('open'); process.exit(0); });
           s.connect(9, '127.0.0.1');
         `, { eval: true });
-        """
-    )
+        """)
     out = subprocess.run(
         ["node", "--require", str(NETGUARD), "-e", worker],
         capture_output=True,
@@ -266,8 +262,7 @@ def test_a_registration_in_the_worker_does_not_reach_the_main_thread(
     downloads.mkdir()
     target = downloads / "song.flac"
 
-    script = textwrap.dedent(
-        f"""
+    script = textwrap.dedent(f"""
         const {{ Worker }} = require('worker_threads');
         const fs = require('fs');
         const target = {str(target)!r};
@@ -281,8 +276,7 @@ def test_a_registration_in_the_worker_does_not_reach_the_main_thread(
           catch (e) {{ console.log('blocked'); }}
           w.terminate();
         }});
-        """
-    )
+        """)
     assert _write(target, cwd=extdir, tmpdir=scratch, script=script) == "blocked"
 
 
@@ -298,6 +292,6 @@ def test_the_bridge_sanctions_the_path_where_the_write_happens() -> None:
         r"function nodeFileDownload\([^)]*\)\s*\{(.*?)\n\}", bridge, re.DOTALL
     )
     assert match, "nodeFileDownload is not where this test expects it"
-    assert "__spotiflacAllowWrite" in match.group(1), (
-        "the main thread writes the file but never sanctions its path"
-    )
+    assert "__spotiflacAllowWrite" in match.group(
+        1
+    ), "the main thread writes the file but never sanctions its path"

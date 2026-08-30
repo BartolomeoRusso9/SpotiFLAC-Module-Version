@@ -91,9 +91,9 @@ def test_the_isrc_reaches_the_track(monkeypatch) -> None:
 
     track = asyncio.run(client.get_track_async("0" * 22))
 
-    assert web.asked_for == ["0" * 22], (
-        "get_track_async must look the ISRC up; it used to hardcode isrc=''"
-    )
+    assert web.asked_for == [
+        "0" * 22
+    ], "get_track_async must look the ISRC up; it used to hardcode isrc=''"
     assert track.isrc == ISRC
 
 
