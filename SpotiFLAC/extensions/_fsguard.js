@@ -34,6 +34,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const url = require('url');
 
 if (process.env.SPOTIFLAC_EXT_ALLOW_ANY_WRITE === '1') {
   return;
@@ -104,22 +105,45 @@ function refuse(target) {
   return err;
 }
 
+// Node accepts a path as a string, a Buffer, or a file:// URL, and all three
+// reach the same syscall. Only the string form was ever checked, so
+// `fs.writeFileSync(Buffer.from('/root/.ssh/authorized_keys'), …)` and the
+// URL form walked straight past the guard. Anything that is not one of the
+// three (a file descriptor to fs.open, say) returns null and is left alone —
+// an fd names no path, so there is no prefix to check.
+function asPath(target) {
+  if (typeof target === 'string') return target;
+  if (Buffer.isBuffer(target)) return target.toString('utf8');
+  if (target instanceof URL || (target && target.protocol === 'file:' && target.href)) {
+    try {
+      return url.fileURLToPath(target);
+    } catch {
+      // A file: URL Node itself will reject. Refusing is the safe answer:
+      // returning null here would wave it through unchecked.
+      return '\u0000invalid-file-url';
+    }
+  }
+  return null;
+}
+
 // Every fs function that creates or modifies something, with the index of
 // the argument naming the path it acts on. `link`/`symlink`/`rename` write
-// at their *second* argument; `copyFile` too.
+// at their *second* argument; `copyFile` and `cp` too. `cp` recursively
+// copies a whole tree and is as capable of landing on ~/.ssh as writeFile
+// is, so it belongs here as much as copyFile does.
 const GUARDED = {
   writeFile: 0, appendFile: 0, open: 0, truncate: 0, unlink: 0,
   rmdir: 0, rm: 0, mkdir: 0, chmod: 0, chown: 0, utimes: 0,
   createWriteStream: 0, writev: 0, mkdtemp: 0,
-  rename: 1, copyFile: 1, link: 1, symlink: 1,
+  rename: 1, copyFile: 1, cp: 1, link: 1, symlink: 1,
 };
 
 function guard(namespace, name, index, { promise = false } = {}) {
   const original = namespace[name];
   if (typeof original !== 'function') return;
   namespace[name] = function guarded(...args) {
-    const target = args[index];
-    if (typeof target === 'string' && !isAllowed(target)) {
+    const target = asPath(args[index]);
+    if (target !== null && !isAllowed(target)) {
       const err = refuse(target);
       if (promise) return Promise.reject(err);
       // Callback-style: hand the error to the callback if there is one,

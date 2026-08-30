@@ -295,3 +295,79 @@ def test_the_bridge_sanctions_the_path_where_the_write_happens() -> None:
     assert "__spotiflacAllowWrite" in match.group(
         1
     ), "the main thread writes the file but never sanctions its path"
+
+
+# --- path forms and copy variants -----------------------------------------
+
+_BUFFER_PROBE = r"""
+const fs = require('fs');
+const target = Buffer.from(process.argv[1], 'utf8');
+try {
+  fs.writeFileSync(target, 'x');
+  fs.unlinkSync(target);
+  console.log('written');
+} catch (e) {
+  console.log(String(e.message).includes('fsguard') ? 'blocked' : 'error:' + e.code);
+}
+"""
+
+_URL_PROBE = r"""
+const fs = require('fs');
+const { pathToFileURL } = require('url');
+const target = pathToFileURL(process.argv[1]);
+try {
+  fs.writeFileSync(target, 'x');
+  fs.unlinkSync(target);
+  console.log('written');
+} catch (e) {
+  console.log(String(e.message).includes('fsguard') ? 'blocked' : 'error:' + e.code);
+}
+"""
+
+_CP_PROBE = r"""
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const source = path.join(process.cwd(), 'source.txt');
+fs.writeFileSync(source, 'x');
+try {
+  fs.cpSync(source, process.argv[1]);
+  console.log('written');
+} catch (e) {
+  console.log(String(e.message).includes('fsguard') ? 'blocked' : 'error:' + e.code);
+}
+"""
+
+
+@pytest.mark.parametrize(
+    ("name", "probe"),
+    [("a Buffer", _BUFFER_PROBE), ("a file: URL", _URL_PROBE)],
+)
+def test_a_path_that_is_not_a_string_is_still_checked(
+    name, probe, extdir, scratch, tmp_path
+) -> None:
+    """Node takes a path as a string, a Buffer or a file:// URL, and all
+    three reach the same syscall. Checking only the string form left the
+    other two as a one-line way around the guard.
+    """
+    forbidden = tmp_path / "elsewhere"
+    forbidden.mkdir()
+    result = _write(forbidden / "key", cwd=extdir, tmpdir=scratch, script=probe)
+    assert result == "blocked", f"{name} walked past the guard: {result}"
+
+
+def test_cp_cannot_copy_into_a_forbidden_directory(extdir, scratch, tmp_path) -> None:
+    """fs.cp copies a whole tree and lands on a destination exactly like
+    copyFile does, so leaving it unguarded left the shorter route open.
+    """
+    forbidden = tmp_path / "elsewhere"
+    forbidden.mkdir()
+    result = _write(forbidden / "copied", cwd=extdir, tmpdir=scratch, script=_CP_PROBE)
+    assert result == "blocked", result
+
+
+def test_cp_still_works_inside_an_allowed_directory(extdir, scratch) -> None:
+    """Guarding it must not break the legitimate copy."""
+    assert _write(extdir / "copied", cwd=extdir, tmpdir=scratch, script=_CP_PROBE) == (
+        "written"
+    )

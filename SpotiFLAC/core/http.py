@@ -128,7 +128,13 @@ logger = logging.getLogger(__name__)
 # difference is not worth the flakiness.
 #
 # Revisit when the pinned httpx carries the upstream fix.
-SAFE_ACCEPT_ENCODING = "gzip, deflate, br"
+#
+# `br` is not listed either, for a plainer reason: httpx only decodes Brotli
+# when `brotli`/`brotlicffi` is installed, and neither is a declared
+# dependency — `httpx[http2]` does not pull one in. Advertising it anyway
+# invites a server to send a body nothing here can decode. Add it back the
+# day Brotli support becomes a required dependency, not before.
+SAFE_ACCEPT_ENCODING = "gzip, deflate"
 
 
 _CONTENT_RANGE_RE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(?:\d+|\*)\s*$", re.IGNORECASE)

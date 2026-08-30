@@ -687,8 +687,16 @@ class SpotifyWebClient:
             bytes_.append(0)
         return "".join(f"{b:02x}" for b in reversed(bytes_))
 
-    def get_isrc_from_metadata(self, track_id: str) -> str:
-        """Retrieves the ISRC from spclient's binary endpoint (same approach as the JS)."""
+    def get_isrc_from_metadata(self, track_id: str, _retried: bool = False) -> str:
+        """Retrieves the ISRC from spclient's binary endpoint (same approach as the JS).
+
+        `_retried` bounds the 401 path to a single refresh. A token that comes
+        back from initialize() still unauthorised — a market the endpoint
+        refuses, a revoked client token — used to recurse forever, each turn
+        costing a full session bootstrap. This method is awaited inside
+        _isrc_for_track_async(), which is gathered into every single-track
+        metadata load, so that recursion did not fail: it hung the load.
+        """
         try:
             gid = self.spotify_id_to_hex_gid(track_id)
             resp = self._session.get(
@@ -701,8 +709,15 @@ class SpotifyWebClient:
                 },
             )
             if resp.status_code == 401:
+                if _retried:
+                    logger.debug(
+                        "[spotfetch] ISRC endpoint still 401 after a token "
+                        "refresh for %s — giving up",
+                        track_id,
+                    )
+                    return ""
                 self.initialize()
-                return self.get_isrc_from_metadata(track_id)
+                return self.get_isrc_from_metadata(track_id, _retried=True)
             if resp.status_code != 200:
                 return ""
             import re

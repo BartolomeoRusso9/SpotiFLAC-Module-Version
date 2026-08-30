@@ -2531,7 +2531,7 @@ body.dark-theme .local-badge.warn { color: var(--yellow); }
       font-weight: 700;
       color: var(--text);
       line-height: 1.2;
-      word-break: break-word;
+      overflow-wrap: anywhere;
     }
     .stat-tile-label {
       font-size: 11px;

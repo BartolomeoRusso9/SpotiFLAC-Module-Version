@@ -423,9 +423,12 @@ def _milestone(row: Any) -> dict:
 def human_bytes(value: float) -> str:
     size = float(value)
     for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
+        if size < 1024:
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
+    # `or unit == "GB"` used to sit in the condition above, which returned at
+    # the GB step whatever the size was and left this line unreachable: a
+    # multi-terabyte library read as "2048.0 GB".
     return f"{size:.1f} TB"
 
 

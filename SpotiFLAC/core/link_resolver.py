@@ -392,6 +392,25 @@ class LinkResolver:
         normalized = (isrc or "").upper().strip()
         if not normalized:
             return ""
+
+        # The resolve API first, for the same reason _get_songlink_links_by_
+        # url_async() prefers it: Songlink answers 401
+        # PUBLIC_API_ACCESS_DEPRECATED to everything since Odesli retired free
+        # access, so the Songlink-only version of this function returned ""
+        # for every ISRC ever passed to it — a CSV row with an ISRC and no
+        # usable title resolved to nothing at all.
+        #
+        # The resolve endpoint takes a URL or a platform/type/id triple, not
+        # an ISRC, so Deezer's ISRC index supplies the URL. That is the same
+        # bridge resolve_all_async() already uses to go from an ISRC to the
+        # rest of the platforms.
+        deezer_url = await self._get_deezer_url_by_isrc_async(normalized)
+        if deezer_url:
+            resolved = await self._resolve_links_async({"url": deezer_url})
+            spotify = resolved.get("spotify", "")
+            if spotify:
+                return spotify
+
         links = await self._get_songlink_isrc_links_async(normalized)
         return links.get("spotify", "")
 

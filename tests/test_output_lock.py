@@ -109,6 +109,44 @@ def test_a_second_event_loop_gets_its_own_lock() -> None:
     asyncio.run(_once())  # a reused, dead-loop lock would raise here
 
 
+def test_two_event_loops_still_serialise_on_one_path() -> None:
+    """The case the lock was written for. The GUI runs each API call in its
+    own thread with its own asyncio.run(), so a collision on one filename is
+    as likely to span two loops as to happen inside one — and a lock kept
+    per loop lets both threads take their own and write at once, which is
+    the corruption this module exists to prevent.
+    """
+    import threading
+
+    log: list[str] = []
+    log_lock = threading.Lock()
+    started = threading.Barrier(2, timeout=5)
+
+    async def _hold(marker: str) -> None:
+        await asyncio.to_thread(started.wait)
+        async with output_path_lock("/m/Artist/Contended.flac"):
+            with log_lock:
+                log.append(f"{marker}-start")
+            await asyncio.sleep(0.05)
+            with log_lock:
+                log.append(f"{marker}-end")
+
+    threads = [
+        threading.Thread(target=lambda m=m: asyncio.run(_hold(m)))
+        for m in ("a", "b")
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+        assert not t.is_alive(), "a loop never got the lock"
+
+    assert log in (
+        ["a-start", "a-end", "b-start", "b-end"],
+        ["b-start", "b-end", "a-start", "a-end"],
+    ), log
+
+
 def test_the_provider_holds_it_across_the_whole_write() -> None:
     """Locking only the download would leave the rename, the validation and
     the tag write racing.

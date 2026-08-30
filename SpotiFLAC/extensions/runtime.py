@@ -156,7 +156,10 @@ class JSRuntime:
         for guard_name in ("_netguard.js", "_fsguard.js"):
             guard = Path(__file__).with_name(guard_name)
             if guard.is_file():
-                node_options = f"{node_options} --require {guard}".strip()
+                # Quoted: NODE_OPTIONS is split on whitespace like a shell
+                # word list, so an unquoted path containing a space arrives
+                # as two arguments and Node exits on the second.
+                node_options = f'{node_options} --require "{guard}"'.strip()
 
         env = build_env({"NODE_OPTIONS": node_options} if node_options else None)
         logger.debug("[ExtRuntime] %s", describe())

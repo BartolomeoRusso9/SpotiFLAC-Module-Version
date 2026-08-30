@@ -37,6 +37,28 @@ from .extensions.trust import TRUST_TIERS
 from .interactive import run_interactive
 
 
+def _match_score(value: str) -> float:
+    """A --csv-min-score argparse type: a real number in 0…1.
+
+    `type=float` alone accepts "-1", "5" and "nan". None of them mean
+    anything as a threshold, and each fails in its own quiet way: a negative
+    or a NaN makes every comparison against it behave as though no floor
+    were set, so an export of messy titles downloads a wrong match under the
+    right filename — which is precisely what the flag exists to prevent.
+    """
+    try:
+        score = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number") from None
+    # NaN fails both comparisons below, so it is rejected by the same test.
+    if not 0.0 <= score <= 1.0:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not a match score: expected a number from 0.0 "
+            "(accept anything) to 1.0 (accept only an exact match)"
+        )
+    return score
+
+
 def _early_urls_from_argv(flag: str) -> list[str]:
     """Best-effort scan of raw sys.argv for repeated `flag URL` occurrences.
 
@@ -352,7 +374,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     csv_grp.add_argument(
         "--csv-min-score",
         dest="csv_min_score",
-        type=float,
+        type=_match_score,
         default=None,
         metavar="0..1",
         help="How close a catalogue match has to be before a text-only row "

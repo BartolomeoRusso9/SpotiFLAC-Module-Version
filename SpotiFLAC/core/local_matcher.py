@@ -211,24 +211,115 @@ async def search_and_match(
                 exc,
             )
 
-    # The ISRC check runs last, on purpose: `search()` does not populate the
-    # isrc field, so only the fully-fetched best candidate above has one to
-    # compare. A hit here overrides whatever the text scoring concluded.
+    # The ISRC check runs last, on purpose. A hit here overrides whatever the
+    # text scoring concluded — the ISRC names the recording, so it settles it.
     wanted = normalize_isrc(isrc)
     if wanted:
-        for i, cand in enumerate(candidates):
-            if normalize_isrc(getattr(cand.metadata, "isrc", "")) == wanted:
-                candidates[i] = MatchCandidate(
-                    metadata=cand.metadata,
-                    confidence=ISRC_MATCH_CONFIDENCE,
-                    how="isrc",
-                    title_ratio=cand.title_ratio,
-                    artist_known=cand.artist_known,
-                )
-                candidates.insert(0, candidates.pop(i))
-                break
+        candidates = await _apply_isrc_identity(client, candidates, wanted, isrc=isrc)
 
     return candidates
+
+
+async def _apply_isrc_identity(
+    client,
+    candidates: list[MatchCandidate],
+    wanted: str,
+    *,
+    isrc: str,
+) -> list[MatchCandidate]:
+    """Promotes the candidate the ISRC actually names, fetching it if needed.
+
+    `search()` leaves the isrc field blank, so only the fully-fetched best
+    candidate ever carries one. Scanning the list for a match therefore could
+    only ever confirm candidates[0]: a *lower*-ranked candidate that was the
+    right recording had a blank ISRC, compared unequal, and the text-ranked
+    guess was kept — the one case the ISRC exists to correct.
+
+    So when nothing in the list answers for free, the ISRC is looked up
+    directly. The result is verified against full metadata rather than
+    trusted, because the search backend is Spotify's own `searchV2` and a
+    filter it does not understand comes back as an ordinary text search:
+    unrelated tracks, which must not be promoted to certainty. One search and
+    at most one track fetch, and only for a file that carries an ISRC the
+    text ranking did not already agree with.
+    """
+    for i, cand in enumerate(candidates):
+        if normalize_isrc(getattr(cand.metadata, "isrc", "")) == wanted:
+            candidates[i] = MatchCandidate(
+                metadata=cand.metadata,
+                confidence=ISRC_MATCH_CONFIDENCE,
+                how="isrc",
+                title_ratio=cand.title_ratio,
+                artist_known=cand.artist_known,
+            )
+            candidates.insert(0, candidates.pop(i))
+            return candidates
+
+    named = await _track_for_isrc(client, wanted, candidates)
+    if named is None:
+        return candidates
+
+    # Drop the same track if the text search already returned it lower down,
+    # so promoting it does not leave a duplicate behind.
+    named_id = getattr(named, "id", "")
+    kept = [c for c in candidates if getattr(c.metadata, "id", "") != named_id]
+    kept.insert(
+        0,
+        MatchCandidate(
+            metadata=named,
+            confidence=ISRC_MATCH_CONFIDENCE,
+            how="isrc",
+            # An ISRC identity short-circuits safe_to_apply(), so these two
+            # are informational here rather than part of the decision.
+            title_ratio=1.0,
+            artist_known=True,
+        ),
+    )
+    logger.debug(
+        "[local_matcher] ISRC %s named %r, which the text search did not rank first",
+        isrc,
+        named_id,
+    )
+    return kept
+
+
+async def _track_for_isrc(client, wanted: str, candidates: list[MatchCandidate]):
+    """The Spotify track whose ISRC really is `wanted`, or None."""
+    import asyncio
+
+    try:
+        results = await asyncio.to_thread(client.search, f"isrc:{wanted}", 1)
+    except Exception as exc:
+        logger.debug("[local_matcher] ISRC lookup failed for %s: %s", wanted, exc)
+        return None
+
+    tracks = results.get("tracks", []) if isinstance(results, dict) else []
+    if not tracks:
+        return None
+    track_id = getattr(tracks[0], "id", "")
+    if not track_id:
+        return None
+
+    # The top candidate was already fetched in full above; re-fetching it
+    # would buy nothing but a request.
+    for cand in candidates:
+        if getattr(cand.metadata, "id", "") == track_id:
+            found = cand.metadata
+            break
+    else:
+        try:
+            found = await client.get_track_async(track_id)
+        except Exception as exc:
+            logger.debug(
+                "[local_matcher] full-detail fetch failed for ISRC hit %r: %s",
+                track_id,
+                exc,
+            )
+            return None
+
+    if normalize_isrc(getattr(found, "isrc", "")) != wanted:
+        return None
+    return found
 
 
 async def match_local_file(

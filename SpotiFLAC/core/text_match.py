@@ -48,6 +48,13 @@ _TITLE_NOISE_RE = re.compile(
 )
 
 
+#: A credit trailing a title without brackets — "Song feat. X". The
+#: bracketed forms are _TITLE_NOISE_RE's job; this catches the ones a
+#: catalogue writes bare, which titles_match() has to remove before it can
+#: compare two titles by equality.
+_TRAILING_CREDIT_RE = re.compile(r"\s+(?:feat|ft|featuring)\.?\s+\S.*$", re.IGNORECASE)
+
+
 #: Decorations that mark a *different recording* of the same song. Both these
 #: and the benign ones below are stripped before comparing titles — that is
 #: what lets "Everlong" match "Everlong (Remastered)" — but stripping them
@@ -231,30 +238,49 @@ def artist_ratio(expected: str, found: str) -> float:
     return best
 
 
+def _decorations_stripped(value: str) -> str:
+    """`value` with every recognised decoration removed, not just the last.
+
+    strip_noise() peels one trailing group, so "Everlong (Remastered) [Live]"
+    still comes back decorated. titles_match() compares the results by
+    equality, so the peeling has to run to a fixed point or the equality
+    never lands on titles carrying two of them.
+    """
+    text = (value or "").strip()
+    for _ in range(4):
+        stripped = _TRAILING_CREDIT_RE.sub("", strip_noise(text)).strip()
+        if not stripped or stripped == text:
+            break
+        text = stripped
+    return text
+
+
 def titles_match(expected: str, found: str) -> bool:
     """Whether two titles name the same song.
 
-    Like artists_match(), a generous predicate guarding against rejecting a
-    correct match: catalogues disagree about parenthesised suffixes,
-    featured-artist credits inside the title, and punctuation, and none of
-    that makes it a different song. Containment is allowed because one side
-    is often the other plus a decoration.
+    Generous about decorations, strict about everything else. Catalogues
+    disagree over parenthesised suffixes, featured-artist credits and
+    punctuation, and none of that makes it a different song — so those are
+    stripped from both sides first, and what is left has to be *equal*.
+
+    Plain containment used to stand in for that, and it is not the same
+    test: "Love" is contained in "Love Story", "Alone" in "Not Alone", "Run"
+    in "Run the World". Every one of those is a different song, and every
+    one of them satisfied a substring check — which is how a provider that
+    returned the wrong recording got past track_identity_mismatch(), the one
+    check that exists to catch it. The ratio floor below still covers a
+    decoration nothing here recognises.
     """
     expected_folded, found_folded = fold(expected), fold(found)
     if not expected_folded or not found_folded:
         return False
     if expected_folded == found_folded:
         return True
-    if expected_folded in found_folded or found_folded in expected_folded:
-        return True
 
-    expected_core = fold(strip_noise(expected))
-    found_core = fold(strip_noise(found))
-    if expected_core and found_core:
-        if expected_core == found_core:
-            return True
-        if expected_core in found_core or found_core in expected_core:
-            return True
+    expected_core = fold(_decorations_stripped(expected))
+    found_core = fold(_decorations_stripped(found))
+    if expected_core and found_core and expected_core == found_core:
+        return True
 
     return ratio(expected, found) >= 0.9
 

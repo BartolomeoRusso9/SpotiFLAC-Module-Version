@@ -136,20 +136,38 @@ def test_a_real_command_is_not_mistaken_for_help() -> None:
         assert not _is_help_invocation(argv), argv
 
 
-def test_amain_guards_both_network_steps() -> None:
-    """Guarding only one of them would leave the other on the --help path."""
-    import ast
-    import inspect
+def test_amain_guards_both_network_steps(monkeypatch, capsys) -> None:
+    """Guarding only one of them would leave the other on the --help path.
+
+    Run rather than read: an AST scan proves the two names appear under some
+    `if not help_only`, not that neither actually runs. A guard that was
+    correct in the source and wrong in effect — an early call added above
+    it, a condition inverted — reads exactly the same to the parser.
+    """
+    import asyncio
+    import sys
 
     from SpotiFLAC import launcher
+    from SpotiFLAC.extensions import manager as ext_manager
 
-    source = inspect.getsource(launcher.amain)
-    tree = ast.parse(source.lstrip())
-    guarded = [
-        ast.unparse(node)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.If) and "help_only" in ast.unparse(node.test)
-    ]
-    joined = " ".join(guarded)
-    assert "check_for_updates_async" in joined
-    assert "ExtensionManager" in joined
+    ran: list[str] = []
+
+    async def _updates():
+        ran.append("check_for_updates_async")
+
+    def _manager(*args, **kwargs):
+        ran.append("ExtensionManager")
+        raise AssertionError("must not construct an ExtensionManager for --help")
+
+    monkeypatch.setattr(launcher, "check_for_updates_async", _updates)
+    monkeypatch.setattr(ext_manager, "ExtensionManager", _manager)
+    # amain() takes no arguments: it reads sys.argv itself, both for the
+    # help sniff above and for the parser below it.
+    monkeypatch.setattr(sys, "argv", ["spotiflac", "--help"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        asyncio.run(launcher.amain())
+
+    assert exit_info.value.code == 0
+    assert ran == [], f"--help still did network work: {ran}"
+    assert "usage:" in capsys.readouterr().out

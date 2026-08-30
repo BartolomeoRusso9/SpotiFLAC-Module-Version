@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import io
 import logging
 import re
 from dataclasses import dataclass
@@ -404,19 +405,34 @@ def read_text(
     sample = "\n".join(text.splitlines()[:20])
     used_delimiter = delimiter or _sniff_delimiter(sample)
 
-    reader = csv.reader(text.splitlines(), delimiter=used_delimiter)
-    records = [record for record in reader]
+    # io.StringIO(..., newline="") rather than text.splitlines(): a quoted
+    # field may legitimately contain a newline, and splitlines() cuts the
+    # record in half there — the reader then sees two short rows and the
+    # track's title arrives truncated. Feeding the reader the raw stream
+    # lets it keep the quoted newline inside the field where it belongs.
+    #
+    # Each record is paired with the *physical* line it starts on, which is
+    # no longer its position in the list once a field spans lines. That
+    # number is what CsvRow.line and ignored_lines report, so it has to be
+    # the line the user would count in their editor.
+    stream = io.StringIO(text, newline="")
+    reader = csv.reader(stream, delimiter=used_delimiter)
+    records: list[tuple[int, list[str]]] = []
+    consumed = 0
+    for record in reader:
+        records.append((consumed + 1, record))
+        consumed = reader.line_num
     if not records:
         raise SpotiflacError(ErrorKind.PARSE_ERROR, f"{label} holds no rows.")
 
-    columns = _map_columns(records[0])
+    columns = _map_columns(records[0][1])
     # A first line that names at least one column we understand is a header.
     # One that doesn't is data: a bare list of links has no header at all,
     # and reading it as one would silently drop its first track.
     has_header = bool(columns)
     field_index: dict[str, int] = {}
     if has_header:
-        header = records[0]
+        header = records[0][1]
         # `column`, not `name`: this used to bind the loop variable to the
         # function's `name` parameter, so after a CSV *with* a header the
         # document's path came out as whichever column matched last —
@@ -428,8 +444,7 @@ def read_text(
 
     rows: list[CsvRow] = []
     ignored: list[int] = []
-    for offset, cells in enumerate(records[1:] if has_header else records, start=1):
-        line = offset + 1 if has_header else offset
+    for line, cells in records[1:] if has_header else records:
         if not any((cell or "").strip() for cell in cells):
             continue
         if has_header:

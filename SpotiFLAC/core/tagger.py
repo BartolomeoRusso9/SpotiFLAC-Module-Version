@@ -646,7 +646,12 @@ def _embed_vorbis_comment(
         else:
             audio[key] = val
 
-    cover_data = fit_cover(cover_data) if cover_data else cover_data
+    # No fit_cover() here. It exists to squeeze artwork under
+    # MAX_FLAC_PICTURE_BYTES, which is the ceiling on a *FLAC metadata
+    # block* — a 24-bit length field in the FLAC container. An Ogg file has
+    # no such block: METADATA_BLOCK_PICTURE is a base64 Vorbis comment, and
+    # a Vorbis comment carries a 32-bit length. Applying the FLAC ceiling
+    # here re-encoded artwork that would have embedded intact.
     if cover_data:
         import base64
 

@@ -37,9 +37,14 @@ class _RecordingClient:
         return {"playcount": "42", "rank": "", "status": ""}
 
 
-def _api() -> SpotiFLAC_API:
+def _api(download_dir=None) -> SpotiFLAC_API:
     api = SpotiFLAC_API()
     api.log = lambda *a, **k: None  # type: ignore[method-assign]
+    if download_dir is not None:
+        # _download_task() mkdirs this before doing anything else, so a test
+        # that leaves it at DEFAULT_DOWNLOAD_DIR creates a real folder in the
+        # user's home just by running.
+        api.download_dir = str(download_dir)
     return api
 
 
@@ -106,12 +111,12 @@ def test_pool_size_stays_small() -> None:
     assert PLAYCOUNT_MIN_INTERVAL_S >= 0.05
 
 
-def test_download_task_always_clears_the_active_flag() -> None:
+def test_download_task_always_clears_the_active_flag(tmp_path) -> None:
     """A flag left set would starve the playcount fetch forever, so it is
     cleared in _download_task's `finally` — including on the early-return
     and exception paths.
     """
-    api = _api()
+    api = _api(download_dir=tmp_path)
     api.set_progress = lambda *a, **k: None  # type: ignore[method-assign]
     api._push = lambda *a, **k: None  # type: ignore[method-assign]
     api._push_download_stats = lambda *a, **k: None  # type: ignore[method-assign]

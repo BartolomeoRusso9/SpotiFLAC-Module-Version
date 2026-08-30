@@ -118,3 +118,64 @@ def test_a_transport_failure_is_not_an_exception(monkeypatch) -> None:
 
     monkeypatch.setattr(resolver, "http", _Boom())
     assert asyncio.run(resolver._resolve_links_async({"url": "https://x"})) == {}
+
+
+def test_an_isrc_resolves_to_spotify_through_the_resolve_api(monkeypatch) -> None:
+    """Songlink answers 401 to the `isrc` form too, so this used to return ""
+    for every ISRC. Deezer's ISRC index supplies the URL the resolve endpoint
+    understands.
+    """
+    resolver = LinkResolver()
+    seen: list[dict] = []
+
+    async def fake_deezer(isrc):
+        assert isrc == "USUM70504267"
+        return "https://www.deezer.com/track/634430472"
+
+    async def fake_resolve(payload):
+        seen.append(payload)
+        return {"spotify": "https://open.spotify.com/track/0NJu93oln1kkgbHLFzLJ4h"}
+
+    async def unreachable(_isrc):  # pragma: no cover - must not be called
+        raise AssertionError("Songlink must not be asked once resolve answered")
+
+    monkeypatch.setattr(resolver, "_get_deezer_url_by_isrc_async", fake_deezer)
+    monkeypatch.setattr(resolver, "_resolve_links_async", fake_resolve)
+    monkeypatch.setattr(resolver, "_get_songlink_isrc_links_async", unreachable)
+
+    url = asyncio.run(resolver.spotify_url_for_isrc_async("usum70504267"))
+    assert url == "https://open.spotify.com/track/0NJu93oln1kkgbHLFzLJ4h"
+    assert seen == [{"url": "https://www.deezer.com/track/634430472"}]
+
+
+def test_the_isrc_lookup_still_falls_back_to_songlink(monkeypatch) -> None:
+    resolver = LinkResolver()
+
+    async def no_deezer(_isrc):
+        return ""
+
+    async def fake_songlink(isrc):
+        assert isrc == "USUM70504267"
+        return {"spotify": "https://open.spotify.com/track/fallback"}
+
+    monkeypatch.setattr(resolver, "_get_deezer_url_by_isrc_async", no_deezer)
+    monkeypatch.setattr(resolver, "_get_songlink_isrc_links_async", fake_songlink)
+
+    url = asyncio.run(resolver.spotify_url_for_isrc_async("USUM70504267"))
+    assert url == "https://open.spotify.com/track/fallback"
+
+
+def test_an_isrc_nothing_recognises_stays_empty(monkeypatch) -> None:
+    resolver = LinkResolver()
+
+    async def nothing(_isrc):
+        return {}
+
+    async def no_deezer(_isrc):
+        return ""
+
+    monkeypatch.setattr(resolver, "_get_deezer_url_by_isrc_async", no_deezer)
+    monkeypatch.setattr(resolver, "_get_songlink_isrc_links_async", nothing)
+
+    assert asyncio.run(resolver.spotify_url_for_isrc_async("USUM70504267")) == ""
+    assert asyncio.run(resolver.spotify_url_for_isrc_async("  ")) == ""

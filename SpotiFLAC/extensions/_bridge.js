@@ -222,6 +222,10 @@ if (!isMainThread) {
 
   parentPort.postMessage({ type: 'ready' });
 
+  // Position of the output path in a download() call: the host passes
+  // (trackId, quality, outputPath, onProgress).
+  const DOWNLOAD_OUTPUT_ARG = 2;
+
   // Receives commands from the main thread and executes them *synchronously*
   parentPort.on('message', ({ id, call, args }) => {
     _currentCallId = id; // NEW: rende id disponibile a bridgeCall() durante fn(...)
@@ -240,11 +244,18 @@ if (!isMainThread) {
       // Tell the filesystem guard that the host sanctioned this path. The
       // output directory is chosen per download (--output, the GUI folder
       // picker), so it cannot be on a static allow-list — see _fsguard.js.
+      //
+      // Only argument 2, and only for `download`. The host calls
+      // download(trackId, quality, outputPath, onProgress) — see
+      // JSExtensionProvider — so that one position is the path *it* chose.
+      // Sanctioning every argument that merely looks like a path handed the
+      // extension the pen: a track_id of "../../../../etc/ssh" would have
+      // unlocked writes to whatever directory it named, which is the whole
+      // of what the guard is for.
       if (call === 'download' && typeof global.__spotiflacAllowWrite === 'function') {
-        for (const a of finalArgs) {
-          if (typeof a === 'string' && (a.includes('/') || a.includes('\\'))) {
-            global.__spotiflacAllowWrite(a);
-          }
+        const outputPath = finalArgs[DOWNLOAD_OUTPUT_ARG];
+        if (typeof outputPath === 'string' && outputPath) {
+          global.__spotiflacAllowWrite(outputPath);
         }
       }
       const result = fn(...finalArgs);
