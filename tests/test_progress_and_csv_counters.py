@@ -107,17 +107,28 @@ def test_a_broken_progress_callback_does_not_lose_rows() -> None:
 
 
 def _adapter(provider, transfer):
-    """The adapter built inside download_track_async, in isolation."""
+    """The adapter built inside download_track_async, in isolation.
+
+    Mirrors JSExtensionProvider.download_track_async's `_progress_adapter`;
+    keep the two in step.
+    """
 
     def adapt(fraction, bytes_received=None, bytes_total=None):
         if provider._progress_cb is None:
             return
-        if bytes_received is None or not bytes_total:
+        if bytes_received is not None:
+            transfer.note(bytes_received, bytes_total, from_bridge=True)
+            bytes_total = bytes_total or transfer.estimate_total(fraction)
+            if not bytes_received and not bytes_total:
+                return
+        else:
+            if transfer.bridge_reporting:
+                return
             bytes_received = transfer.bytes_on_disk
             bytes_total = transfer.estimate_total(fraction)
             if not bytes_received:
                 return
-        transfer.note(bytes_received, bytes_total)
+            transfer.note(bytes_received, bytes_total)
         provider._progress_cb(bytes_received, bytes_total or 0)
 
     return adapt
@@ -137,6 +148,41 @@ def test_real_byte_counts_reach_the_progress_callback() -> None:
 
     assert seen == [(15_728_640, 31_457_280)]
     assert transfer.bridge_reporting
+
+
+def test_bridge_bytes_are_kept_when_the_total_is_unknown() -> None:
+    """A chunked response carries no Content-Length. The bridge still counts
+    the bytes exactly, and those counts used to be thrown away and replaced
+    by the disk poller's — the worse of the two numbers.
+    """
+    seen: list[tuple[int, int]] = []
+    provider = JSExtensionProvider.__new__(JSExtensionProvider)
+    provider._progress_cb = lambda current, total: seen.append((current, total))
+    transfer = _TransferProgress()
+    adapt = _adapter(provider, transfer)
+
+    adapt(0.0, 0, 0)  # the opening event: nothing to draw yet
+    adapt(0.5, 4_000_000, 0)
+
+    assert seen == [(4_000_000, 8_000_000)], "the estimate stands in for the total"
+    assert transfer.bridge_reporting, "the poller must stand down all the same"
+    assert transfer.bytes_on_disk == 4_000_000
+
+
+def test_an_extensions_own_fraction_cannot_overwrite_bridge_bytes() -> None:
+    """The two streams arrive for the same download. The fraction-only one
+    is the weaker report and must not land on top of the byte counts.
+    """
+    seen: list[tuple[int, int]] = []
+    provider = JSExtensionProvider.__new__(JSExtensionProvider)
+    provider._progress_cb = lambda current, total: seen.append((current, total))
+    transfer = _TransferProgress()
+    adapt = _adapter(provider, transfer)
+
+    adapt(0.5, 4_000_000, 0)  # bridge, no Content-Length
+    adapt(0.6)  # the extension's own onProgress
+
+    assert seen == [(4_000_000, 8_000_000)]
 
 
 def test_a_fraction_without_a_content_length_is_scaled_from_the_file() -> None:
@@ -343,12 +389,16 @@ def test_an_ordinary_signed_request_is_not_announced_as_a_ticket(caplog) -> None
 # bridge infers the scale instead.
 
 _SCALE_HARNESS = """
+// null is what the bridge returns for a value it cannot place; the worker
+// posts no progress event for those, which is 'skip' here.
+const show = (v) => (v === null ? 'skip' : v.toFixed(2));
 const run = (label, id, values) =>
-  console.log(label + '|' + values.map(v => normalizeProgress(id, v).toFixed(2)).join(','));
+  console.log(label + '|' + values.map(v => show(normalizeProgress(id, v))).join(','));
 run('percent-early', 1, [5, 10, 45, 90, 94, 100]);
 run('percent-rounded', 2, [0, 1, 37, 100]);
 run('fraction', 3, [0.1, 0.3, 1.0]);
 run('junk', 4, [NaN, -3, 'x', 250]);
+run('one-then-two', 5, [1, 2]);
 """
 
 
@@ -385,14 +435,19 @@ def test_the_bridge_normalises_both_progress_scales() -> None:
     assert got["percent-early"] == "0.05,0.10,0.45,0.90,0.94,1.00"
 
     # qobuz-web rounds its percentage, so it sends a bare 1 early on. That
-    # value cannot be placed yet, so it is held just short of complete
-    # rather than filling the bar and releasing it.
-    assert got["percent-rounded"] == "0.00,0.99,0.37,1.00"
+    # value cannot be placed yet, so nothing is reported for it rather than
+    # filling the bar and releasing it.
+    assert got["percent-rounded"] == "0.00,skip,0.37,1.00"
 
     # A fraction extension never trips the rule, so it is left alone. Its
-    # closing 1.0 is the same ambiguous value, held at 0.99; the bar is
+    # closing 1.0 is the same ambiguous value and is skipped too; the bar is
     # released by clear_item() when the download returns, not by this.
-    assert got["fraction"] == "0.10,0.30,0.99"
+    assert got["fraction"] == "0.10,0.30,skip"
 
     # NaN, negatives and non-numbers must not escape the 0..1 range.
     assert got["junk"] == "0.00,0.00,0.00,1.00"
+
+    # The reason the ambiguous 1 is skipped rather than shown as 99%: the
+    # very next value settles the scale at 2%, and a bar cannot run
+    # 99% → 2% without looking broken.
+    assert got["one-then-two"] == "skip,0.02"

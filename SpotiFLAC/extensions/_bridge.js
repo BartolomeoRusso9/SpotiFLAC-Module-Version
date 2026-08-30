@@ -245,22 +245,27 @@ if (!isMainThread) {
   // The host always receives 0..1, whichever the extension speaks.
   //
   // Exactly 1 is the one value the rule cannot place: "100%" from a
-  // fraction extension and "1%" from a percentage one. It is held just
-  // short of complete until something disambiguates it — reporting it as
-  // done would fill the bar and release it, and qobuz-web, which rounds its
-  // percentage, sends a 1 early in every download. A bar that sits at 99%
-  // is a smaller lie than one that completes and then reopens at 37%, and
-  // nothing depends on progress reaching 1: the track's bar is released by
-  // clear_item() when the download returns.
+  // fraction extension and "1%" from a percentage one. Nothing is reported
+  // for it — the bar holds whatever it last showed until a value that can
+  // be placed arrives.
+  //
+  // Reporting it as done would fill the bar and release it, and qobuz-web,
+  // which rounds its percentage, sends a 1 early in every download. Showing
+  // it as 99% instead was worse still: qobuz-web's next value is 2, which
+  // establishes the percentage scale and lands at 0.02, so the bar ran
+  // 99% → 2% on every download it made. Skipping the event costs nothing —
+  // nothing depends on progress reaching 1, since the track's bar is
+  // released by clear_item() when the download returns.
   const progressScale = new Map(); // callId -> 'percent'
-  const AMBIGUOUS_ONE = 0.99;
+  //: What normalizeProgress returns for a value it cannot place.
+  const UNPLACEABLE = null;
 
   const normalizeProgress = (id, raw) => {
     let value = Number(raw);
     if (!isFinite(value) || value < 0) value = 0;
     if (value > 1) progressScale.set(id, 'percent');
     if (progressScale.get(id) === 'percent') return Math.min(1, value / 100);
-    return value >= 1 ? AMBIGUOUS_ONE : value;
+    return value >= 1 ? UNPLACEABLE : value;
   };
 
   // Receives commands from the main thread and executes them *synchronously*
@@ -275,11 +280,11 @@ if (!isMainThread) {
       // Wraps onProgress if the arg is the placeholder "__progress__"
       const finalArgs = (args || []).map(a =>
         a === '__progress__'
-          ? (v) => parentPort.postMessage({
-              type: 'progress',
-              callId: id,
-              value: normalizeProgress(id, v),
-            })
+          ? (v) => {
+              const value = normalizeProgress(id, v);
+              if (value === null) return; // ambiguous: say nothing
+              parentPort.postMessage({ type: 'progress', callId: id, value });
+            }
           : a
       );
       // Tell the filesystem guard that the host sanctioned this path. The

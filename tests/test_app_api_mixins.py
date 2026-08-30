@@ -118,6 +118,28 @@ def test_an_unreadable_csv_comes_back_as_an_error_not_an_exception() -> None:
     assert api.preview_csv("x" * 3_000_000)["ok"] is False
 
 
+def test_a_nonsense_match_score_is_refused_before_anything_is_matched() -> None:
+    """A negative or a NaN floor accepts every candidate, so a messy export
+    downloads a wrong match under the right filename. The CLI and the REST
+    schema check this; the GUI bridge took the number on trust.
+    """
+    api = SpotiFLAC_API()
+    # A row that carries a link resolves without a catalogue search, so the
+    # valid-threshold case below stays offline.
+    content = (
+        "Track URI,Track Name,Artist Name(s)\n"
+        "spotify:track:4uLU6hMCjMI75M1A2tKUQC,Everlong,Foo Fighters\n"
+    )
+
+    for bad in (-0.5, 1.5, float("nan"), "close enough"):
+        assert api.preview_csv(content, min_score=bad)["ok"] is False, bad
+        assert api.fetch_csv(content, min_score=bad)["status"] == "error", bad
+
+    # A valid threshold still gets through, and so does "unset".
+    assert api.preview_csv(content, min_score=0.9)["ok"] is True
+    assert api.preview_csv(content)["ok"] is True
+
+
 def test_a_csv_import_fills_the_track_table_like_a_link_does(monkeypatch) -> None:
     """The point of the CSV path: it ends where a pasted link ends, so the
     existing track table, selection and download button need no new case.

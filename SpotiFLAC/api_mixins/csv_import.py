@@ -34,6 +34,35 @@ FETCH_CONCURRENCY = 4
 PROGRESS_INTERVAL_S = 0.25
 
 
+def _validated_min_score(value: float | None) -> float:
+    """The match floor, checked before it reaches `csv_source.resolve_rows`.
+
+    The CLI checks this in argparse (`launcher._match_score`) and the REST
+    API in its schema; the GUI bridge is the one path that took the number
+    on trust. A NaN or a negative fails every comparison the same way a
+    missing floor does, so an export of messy titles quietly downloads a
+    wrong match under the right filename — which is the whole thing the
+    threshold exists to prevent.
+
+    Raises `ValueError`, which both callers turn into an error for the UI.
+    """
+    from ..core import csv_source
+
+    if value is None:
+        return csv_source.DEFAULT_MIN_SCORE
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{value!r} is not a match score.") from None
+    # NaN fails both comparisons, so it is rejected by the same test.
+    if not 0.0 <= score <= 1.0:
+        raise ValueError(
+            "The match score must be a number from 0.0 (accept anything) "
+            "to 1.0 (accept only an exact match)."
+        )
+    return score
+
+
 class CsvImportMixin:
     def preview_csv(
         self,
@@ -55,6 +84,10 @@ class CsvImportMixin:
             return {"ok": False, "error": "The file is empty."}
         if len(content) > MAX_CSV_CHARS:
             return {"ok": False, "error": "That file is too large to read here."}
+        try:
+            score = _validated_min_score(min_score)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
 
         try:
             document = csv_source.read_text(
@@ -64,9 +97,7 @@ class CsvImportMixin:
                 csv_source.resolve_rows(
                     document.rows,
                     document=document,
-                    min_score=(
-                        csv_source.DEFAULT_MIN_SCORE if min_score is None else min_score
-                    ),
+                    min_score=score,
                 )
             )
         except SpotiflacError as e:
@@ -104,10 +135,17 @@ class CsvImportMixin:
             return {"status": "error", "error": "The file is empty."}
         if len(content) > MAX_CSV_CHARS:
             return {"status": "error", "error": "That file is too large to read here."}
+        # Checked here rather than in the thread: a bad threshold is the
+        # caller's mistake to hear about, and the thread's only way of
+        # answering is an error event pushed at the UI after the fact.
+        try:
+            score = _validated_min_score(min_score)
+        except ValueError as e:
+            return {"status": "error", "error": str(e)}
 
         threading.Thread(
             target=self._fetch_csv_thread,
-            args=(content, name, delimiter, min_score),
+            args=(content, name, delimiter, score),
             daemon=True,
         ).start()
         return {"status": "started"}
@@ -119,10 +157,16 @@ class CsvImportMixin:
         delimiter: str | None,
         min_score: float | None,
     ) -> None:
+        """`fetch_csv` validates `min_score` before starting this thread; it
+        is normalized again here because the method is also called directly,
+        and a threshold this path took on trust is the one that would let a
+        wrong match through.
+        """
         from ..core import csv_source
         from ..core.errors import SpotiflacError
 
         try:
+            score = _validated_min_score(min_score)
             self.set_progress("Reading the file…")
             document = csv_source.read_text(
                 content, name=name or "playlist.csv", delimiter=delimiter
@@ -155,9 +199,7 @@ class CsvImportMixin:
                 csv_source.resolve_rows(
                     document.rows,
                     document=document,
-                    min_score=(
-                        csv_source.DEFAULT_MIN_SCORE if min_score is None else min_score
-                    ),
+                    min_score=score,
                     on_progress=_matching_progress,
                 )
             )

@@ -72,10 +72,21 @@ class _TransferProgress:
         #: The bridge has sent at least one event carrying real byte counts.
         self.bridge_reporting = False
 
-    def note(self, received: int, total: int | None) -> None:
+    def note(
+        self, received: int, total: int | None, *, from_bridge: bool = False
+    ) -> None:
+        """Record a report. `from_bridge` marks it as the bridge's own bytes.
+
+        The flag is separate from `total` because a chunked response has no
+        Content-Length: the bridge still knows exactly how many bytes it has
+        received, and that it is reporting at all is what tells the disk
+        poller to stand down. Tying the two together let a total-less
+        transfer be overwritten by the poller's guesses.
+        """
         self.bytes_on_disk = max(self.bytes_on_disk, int(received or 0))
         if total:
             self.total_bytes = int(total)
+        if from_bridge or total:
             self.bridge_reporting = True
 
     def estimate_total(self, fraction: float) -> int:
@@ -486,7 +497,24 @@ class JSExtensionProvider(BaseProvider):
                 """
                 if self._progress_cb is None:
                     return
-                if bytes_received is None or not bytes_total:
+                # Whether the bridge counted the bytes is a separate question
+                # from whether it knows the total. A chunked response has no
+                # Content-Length, so `bytes_total` is 0 while `bytes_received`
+                # is exact — treating the two as one condition threw those
+                # real counts away and replaced them with the disk poller's,
+                # which is the worse number of the two.
+                if bytes_received is not None:
+                    transfer.note(bytes_received, bytes_total, from_bridge=True)
+                    # An estimate is still better than an indeterminate bar,
+                    # and estimate_total() declines to make one when the
+                    # fraction is too small to divide by.
+                    bytes_total = bytes_total or transfer.estimate_total(fraction)
+                    if not bytes_received and not bytes_total:
+                        # The opening event of a chunked transfer: no bytes
+                        # yet and no total. It says nothing the bar can draw,
+                        # but noting it above is what stands the poller down.
+                        return
+                else:
                     # An extension that streams through global.file.download
                     # produces two progress streams for one download: the
                     # bridge's, carrying real byte counts, and its own
@@ -503,7 +531,7 @@ class JSExtensionProvider(BaseProvider):
                     bytes_total = transfer.estimate_total(fraction)
                     if not bytes_received:
                         return
-                transfer.note(bytes_received, bytes_total)
+                    transfer.note(bytes_received, bytes_total)
                 try:
                     result = self._progress_cb(bytes_received, bytes_total or 0)
                     # If the callback is async and returns a coroutine, we can't await it here
@@ -732,6 +760,53 @@ class JSExtensionProvider(BaseProvider):
 
     # ─────────────────────── Segment reassembly ────────────────────────
 
+    def _sanctioned_output(
+        self,
+        file_path: str | None,
+        output_path: Path,
+    ) -> Path | None:
+        """`file_path` as reported by the extension, if it is ours to touch.
+
+        The host chose where this download goes and told the filesystem
+        guard about that one directory (see _bridge.js and _fsguard.js).
+        What comes back is just a string in the extension's result, and
+        everything downstream treats it as the downloaded track: tags are
+        written into it, and a track-identity mismatch deletes it. A path
+        outside the output directory — a bug in an extension building it
+        from unsanitised metadata, or one that means harm — would have that
+        happen to a file nobody asked about.
+
+        Symlinks are resolved before the check, so a link planted inside the
+        output directory cannot stand in for a file outside it.
+
+        None when there is no usable path, which sends the caller on to the
+        segment reassembly below and, failing that, to a failed download —
+        the honest outcome, and a loud one.
+        """
+        if not file_path:
+            return None
+        try:
+            resolved = Path(file_path).resolve()
+            allowed = output_path.parent.resolve()
+            resolved.relative_to(allowed)
+        except ValueError:
+            logger.warning(
+                "[%s] Extension reported a file outside the output folder; "
+                "ignoring it: %s",
+                self.name,
+                file_path,
+            )
+            return None
+        except OSError as exc:
+            logger.warning(
+                "[%s] Could not check the reported file path (%s): %s",
+                self.name,
+                file_path,
+                exc,
+            )
+            return None
+        return resolved
+
     async def _finalize_segments_async(
         self,
         dl_result: dict,
@@ -741,8 +816,9 @@ class JSExtensionProvider(BaseProvider):
         return downloaded segments instead of a single ready audio file.
         Expected contract, in order of priority:
 
-          1. dl_result["file_path"] exists and is a valid non-empty file
-             → no extra work, original behavior.
+          1. dl_result["file_path"] is a non-empty file inside the output
+             directory → no extra work, original behavior. See
+             _sanctioned_output() for why the location is checked.
           2. dl_result["segments"] is an ordered list of absolute paths
              (init segment included, if present) → concatenate them as
              raw bytes into a temp file and then remux with ffmpeg
@@ -756,13 +832,9 @@ class JSExtensionProvider(BaseProvider):
         Returns the path (str) of the final audio file ready for tagging,
         or None if it was not possible to rebuild a valid file.
         """
-        file_path = dl_result.get("file_path")
-        if (
-            file_path
-            and Path(file_path).exists()
-            and Path(file_path).stat().st_size > 0
-        ):
-            return file_path
+        file_path = self._sanctioned_output(dl_result.get("file_path"), output_path)
+        if file_path and file_path.is_file() and file_path.stat().st_size > 0:
+            return str(file_path)
 
         import re
 
