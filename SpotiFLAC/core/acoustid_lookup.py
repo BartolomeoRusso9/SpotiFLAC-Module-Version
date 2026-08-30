@@ -72,7 +72,7 @@ def is_available(settings_key: str = "") -> bool:
     return bool(client)
 
 
-def _best_isrc(payload: dict) -> tuple[str, float]:
+def _best_isrc(payload: dict) -> tuple[str, float, str]:
     """Pulls the highest-scoring ISRC out of a /v2/lookup response.
 
     The shape is results[].recordings[].isrcs[], and every level is
@@ -80,9 +80,9 @@ def _best_isrc(payload: dict) -> tuple[str, float]:
     that carries no ISRC, which is a miss for our purposes, not an error.
     """
     if not isinstance(payload, dict) or payload.get("status") != "ok":
-        return "", 0.0
+        return "", 0.0, ""
 
-    best_isrc, best_score = "", 0.0
+    best_isrc, best_score, best_id = "", 0.0, ""
     for result in payload.get("results") or []:
         if not isinstance(result, dict):
             continue
@@ -99,10 +99,14 @@ def _best_isrc(payload: dict) -> tuple[str, float]:
                 isrc = normalize_isrc(str(raw))
                 if isrc:
                     best_isrc, best_score = isrc, score
+                    # AcoustID's own id for the recording. Worth writing into
+                    # the file: it makes every future identification free,
+                    # and it is the tag MusicBrainz Picard reads too.
+                    best_id = str(result.get("id") or "")
                     break
             if best_isrc and best_score == score:
                 break
-    return best_isrc, best_score
+    return best_isrc, best_score, best_id
 
 
 async def identify_isrc_async(
@@ -110,8 +114,10 @@ async def identify_isrc_async(
     *,
     settings_key: str = "",
     timeout_s: int = 20,
-) -> str:
-    """The ISRC of whatever recording `file_path` actually contains, or "".
+) -> tuple[str, str]:
+    """(ISRC, AcoustID id) for whatever recording `file_path` contains.
+
+    Both are "" when the file could not be identified.
 
     Never raises: an unavailable fpcalc, an unconfigured key, a network
     failure, a rate-limited response or a fingerprint AcoustID has never
@@ -121,17 +127,17 @@ async def identify_isrc_async(
     client, url = _configured_key(settings_key)
     if not client:
         logger.debug("[acoustid] no application key configured; skipping lookup")
-        return ""
+        return "", ""
 
     try:
         fingerprint = await compute_fingerprint_async(file_path)
     except AudioFingerprintError as exc:
         logger.debug("[acoustid] could not fingerprint %s: %s", file_path, exc)
-        return ""
+        return "", ""
 
     if not fingerprint.compressed or not fingerprint.duration_s:
         logger.debug("[acoustid] empty fingerprint for %s", file_path)
-        return ""
+        return "", ""
 
     await _rate_limiter.wait_for_slot()
 
@@ -167,7 +173,7 @@ async def identify_isrc_async(
         payload = response.json()
     except Exception as exc:
         logger.debug("[acoustid] lookup failed for %s: %s", file_path, exc)
-        return ""
+        return "", ""
 
     if not isinstance(payload, dict) or payload.get("status") != "ok":
         message = ""
@@ -181,12 +187,12 @@ async def identify_isrc_async(
             file_path,
             message or f"HTTP {getattr(response, 'status_code', '?')}",
         )
-        return ""
+        return "", ""
 
-    isrc, score = _best_isrc(payload)
+    isrc, score, acoustid_id = _best_isrc(payload)
     if not isrc:
         logger.debug("[acoustid] no ISRC for %s", file_path)
-        return ""
+        return "", ""
     if score < MIN_SCORE:
         logger.debug(
             "[acoustid] discarding %s for %s: score %.2f below %.2f",
@@ -195,7 +201,7 @@ async def identify_isrc_async(
             score,
             MIN_SCORE,
         )
-        return ""
+        return "", ""
 
     logger.debug("[acoustid] %s identified as %s (score %.2f)", file_path, isrc, score)
-    return isrc
+    return isrc, acoustid_id

@@ -24,12 +24,19 @@ from SpotiFLAC.core.local_scanner import LocalFileInfo
 from SpotiFLAC.core.models import TrackMetadata
 
 ISRC = "GBAYE0601498"
+ACOUSTID = "9ff43b6a-4f16-427c-93c2-92307ca505e0"
 
 
 def _ok_response(isrc: str = ISRC, score: float = 1.0) -> dict:
     return {
         "status": "ok",
-        "results": [{"score": score, "recordings": [{"id": "rec-1", "isrcs": [isrc]}]}],
+        "results": [
+            {
+                "id": ACOUSTID,
+                "score": score,
+                "recordings": [{"id": "rec-1", "isrcs": [isrc]}],
+            }
+        ],
     }
 
 
@@ -87,13 +94,13 @@ def test_isrc_is_read_from_the_best_scoring_result() -> None:
             {"score": 0.99, "recordings": [{"isrcs": [ISRC]}]},
         ],
     }
-    assert acoustid_lookup._best_isrc(payload) == (ISRC, 0.99)
+    assert acoustid_lookup._best_isrc(payload)[:2] == (ISRC, 0.99)
 
 
 def test_a_result_without_isrcs_is_not_an_answer() -> None:
     """AcoustID can know the recording and have no ISRC for it."""
     payload = {"status": "ok", "results": [{"score": 1.0, "recordings": [{"id": "r"}]}]}
-    assert acoustid_lookup._best_isrc(payload) == ("", 0.0)
+    assert acoustid_lookup._best_isrc(payload)[:2] == ("", 0.0)
 
 
 @pytest.mark.parametrize(
@@ -108,7 +115,7 @@ def test_a_result_without_isrcs_is_not_an_answer() -> None:
     ],
 )
 def test_malformed_responses_yield_no_answer(payload) -> None:
-    assert acoustid_lookup._best_isrc(payload) == ("", 0.0)
+    assert acoustid_lookup._best_isrc(payload)[:2] == ("", 0.0)
 
 
 # --- the lookup itself ------------------------------------------------------
@@ -126,7 +133,7 @@ def test_no_key_means_no_request(monkeypatch) -> None:
         raise AssertionError("fingerprinting must not run without a key")
 
     monkeypatch.setattr(acoustid_lookup, "compute_fingerprint_async", _boom)
-    assert _run(acoustid_lookup.identify_isrc_async("/m/x.flac")) == ""
+    assert _run(acoustid_lookup.identify_isrc_async("/m/x.flac")) == ("", "")
 
 
 def test_a_low_score_is_discarded(monkeypatch) -> None:
@@ -135,13 +142,13 @@ def test_a_low_score_is_discarded(monkeypatch) -> None:
     """
     _stub_fingerprint(monkeypatch)
     _stub_post(monkeypatch, _ok_response(score=0.5))
-    assert _run(acoustid_lookup.identify_isrc_async("/m/x.flac")) == ""
+    assert _run(acoustid_lookup.identify_isrc_async("/m/x.flac")) == ("", "")
 
 
 def test_a_confident_match_returns_the_isrc(monkeypatch) -> None:
     _stub_fingerprint(monkeypatch)
     _stub_post(monkeypatch, _ok_response(score=0.98))
-    assert _run(acoustid_lookup.identify_isrc_async("/m/x.flac")) == ISRC
+    assert _run(acoustid_lookup.identify_isrc_async("/m/x.flac")) == (ISRC, ACOUSTID)
 
 
 def test_a_network_failure_is_not_an_exception(monkeypatch) -> None:
@@ -153,7 +160,7 @@ def test_a_network_failure_is_not_an_exception(monkeypatch) -> None:
             raise OSError("connection reset")
 
     _install_client(monkeypatch, _Client())
-    assert _run(acoustid_lookup.identify_isrc_async("/m/x.flac")) == ""
+    assert _run(acoustid_lookup.identify_isrc_async("/m/x.flac")) == ("", "")
 
 
 def test_the_request_carries_what_acoustid_requires(monkeypatch) -> None:
@@ -290,3 +297,28 @@ def test_an_isrc_spotify_does_not_know_yields_nothing() -> None:
     from SpotiFLAC.core.local_processor import _track_for_isrc
 
     assert asyncio.run(_track_for_isrc("ZZZZZ0000000", client=_search_stub([]))) is None
+
+
+# --- the fingerprint id is worth keeping too --------------------------------
+
+
+def test_the_acoustid_is_returned_alongside_the_isrc(monkeypatch) -> None:
+    """A file that names its own fingerprint makes every later
+    identification free, and ACOUSTID_ID is the tag Picard reads as well —
+    so the id is not thrown away once the ISRC has been read out of it.
+    """
+    _stub_fingerprint(monkeypatch)
+    _stub_post(monkeypatch, _ok_response(score=0.98))
+    isrc, acoustid = _run(acoustid_lookup.identify_isrc_async("/m/x.flac"))
+    assert (isrc, acoustid) == (ISRC, ACOUSTID)
+
+
+def test_a_result_without_an_id_still_yields_the_isrc(monkeypatch) -> None:
+    """The id is a bonus; missing it must not cost the identification."""
+    payload = {
+        "status": "ok",
+        "results": [{"score": 0.99, "recordings": [{"isrcs": [ISRC]}]}],
+    }
+    _stub_fingerprint(monkeypatch)
+    _stub_post(monkeypatch, payload)
+    assert _run(acoustid_lookup.identify_isrc_async("/m/x.flac")) == (ISRC, "")

@@ -21,6 +21,26 @@ class LinkResolver:
     """Resolves cross-platform links using a Multi-Provider approach (Async-only)."""
 
     SONGLINK_API_URL = "https://api.song.link/v1-alpha.1/links"
+
+    #: Songlink retired free public access to v1-alpha.1 — every request now
+    #: answers 401 PUBLIC_API_ACCESS_DEPRECATED — so it is no longer a
+    #: resolver, only a fallback kept in case access returns. This is what
+    #: actually answers, and it returns the ISRC alongside the links.
+    RESOLVE_API_URL = "https://api.zarz.moe/v1/resolve"
+
+    #: The resolve API's platform names, mapped onto the ones the rest of
+    #: this class uses (which are Songlink's).
+    _RESOLVE_PLATFORM_KEYS = {
+        "Spotify": "spotify",
+        "Deezer": "deezer",
+        "Tidal": "tidal",
+        "AppleMusic": "appleMusic",
+        "AmazonMusic": "amazonMusic",
+        "SoundCloud": "soundcloud",
+        "Qobuz": "qobuz",
+        "YouTubeMusic": "youtubeMusic",
+        "YouTube": "youtube",
+    }
     DEEZER_ISRC_API = "https://api.deezer.com/track/isrc:{}"
     DEEZER_TRACK_API = "https://api.deezer.com/track/{}"
     MAX_RETRIES = 3
@@ -146,6 +166,42 @@ class LinkResolver:
             return f"https://www.deezer.com/track/{track_id}"
         return raw_url.strip()
 
+    def _process_resolve_response(self, data: dict) -> dict[str, str]:
+        """The resolve API's answer, in the same shape as Songlink's.
+
+        Its values are sometimes a bare URL string and sometimes an object
+        carrying one, so both are accepted rather than assuming either.
+        """
+        if not isinstance(data, dict) or not data.get("success"):
+            return {}
+
+        song_urls = data.get("songUrls")
+        if not isinstance(song_urls, dict):
+            return {}
+
+        links: dict[str, str] = {}
+        for resolve_key, platform in self._RESOLVE_PLATFORM_KEYS.items():
+            raw = song_urls.get(resolve_key)
+            url = ""
+            if isinstance(raw, str):
+                url = raw
+            elif isinstance(raw, dict):
+                url = str(raw.get("url") or raw.get("link") or "")
+            if url:
+                links[platform] = self._normalize_platform_url(platform, url)
+        return links
+
+    async def _resolve_links_async(self, payload: dict) -> dict[str, str]:
+        """Asks the resolve API. Returns {} on any failure, so the caller
+        falls through to Songlink exactly as it did before.
+        """
+        try:
+            resp = await self.http.post(self.RESOLVE_API_URL, json=payload, timeout=20)
+            return self._process_resolve_response(resp.json())
+        except Exception as exc:
+            logger.debug("[link_resolver] resolve API failed for %s: %s", payload, exc)
+            return {}
+
     def _process_songlink_response(self, data: dict) -> dict[str, str]:
         links: dict[str, str] = {}
         entities = data.get("linksByPlatform", {})
@@ -269,6 +325,14 @@ class LinkResolver:
         return {}
 
     async def _get_songlink_links_by_url_async(self, url: str) -> dict[str, str]:
+        # The resolve API first, Songlink second. Not a preference: Songlink
+        # answers 401 PUBLIC_API_ACCESS_DEPRECATED to everything since Odesli
+        # retired free access to v1-alpha.1, so it resolves nothing at all
+        # any more. It is kept behind the new path rather than deleted
+        # because the day access returns it costs one request to find out.
+        links = await self._resolve_links_async({"url": url})
+        if links:
+            return links
         return await self._get_songlink_links_async({"url": url, "userCountry": "US"})
 
     async def _get_songlink_links_by_id_async(
@@ -276,6 +340,11 @@ class LinkResolver:
         raw_id: str,
         platform: str,
     ) -> dict[str, str]:
+        links = await self._resolve_links_async(
+            {"platform": platform, "type": "track", "id": raw_id},
+        )
+        if links:
+            return links
         return await self._get_songlink_links_async(
             {"id": raw_id, "platform": platform, "userCountry": "US", "type": "song"},
         )

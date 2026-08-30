@@ -66,29 +66,56 @@ def _candidate(
 MUST_NOT_AUTO_APPLY = [
     # The regression that motivated all of this: an identical, long artist
     # name used to carry a different song to 93.8 — above the threshold.
-    ("Can't Stop", "Red Hot Chili Peppers", "Don't Stop", "Red Hot Chili Peppers",
-     "different song, same artist, near-identical title"),
-    ("Juicy", "The Notorious B.I.G.", "Big Poppa", "The Notorious B.I.G.",
-     "different song by the same artist"),
-    ("Time", "Pink Floyd", "Money", "Pink Floyd",
-     "different song, same album"),
-    ("Alive", "Pearl Jam", "Alive", "Empire Of The Sun",
-     "same title, unrelated artist"),
+    (
+        "Can't Stop",
+        "Red Hot Chili Peppers",
+        "Don't Stop",
+        "Red Hot Chili Peppers",
+        "different song, same artist, near-identical title",
+    ),
+    (
+        "Juicy",
+        "The Notorious B.I.G.",
+        "Big Poppa",
+        "The Notorious B.I.G.",
+        "different song by the same artist",
+    ),
+    ("Time", "Pink Floyd", "Money", "Pink Floyd", "different song, same album"),
+    (
+        "Alive",
+        "Pearl Jam",
+        "Alive",
+        "Empire Of The Sun",
+        "same title, unrelated artist",
+    ),
 ]
 
 # (local title, local artist, candidate title, candidate artist, why)
 MUST_AUTO_APPLY = [
     ("Juicy", "The Notorious B.I.G.", "Juicy", "The Notorious B.I.G.", "exact"),
-    ("Everlong", "Foo Fighters", "Everlong (Remastered)", "Foo Fighters",
-     "a remaster is the same recording"),
-    ("Bohemian Rhapsody", "Queen", "Bohemian Rhapsody - Remastered 2011", "Queen",
-     "suffixed remaster"),
-    ("Sicko Mode", "Travis Scott", "SICKO MODE", "Travis Scott, Drake",
-     "case difference and an extra credited artist"),
-    ("Cafe", "Sfera Ebbasta", "Café", "Sfera Ebbasta",
-     "the file lost the accent"),
-    ("Where Is My Mind?", "Pixies", "Where Is My Mind", "Pixies",
-     "punctuation only"),
+    (
+        "Everlong",
+        "Foo Fighters",
+        "Everlong (Remastered)",
+        "Foo Fighters",
+        "a remaster is the same recording",
+    ),
+    (
+        "Bohemian Rhapsody",
+        "Queen",
+        "Bohemian Rhapsody - Remastered 2011",
+        "Queen",
+        "suffixed remaster",
+    ),
+    (
+        "Sicko Mode",
+        "Travis Scott",
+        "SICKO MODE",
+        "Travis Scott, Drake",
+        "case difference and an extra credited artist",
+    ),
+    ("Cafe", "Sfera Ebbasta", "Café", "Sfera Ebbasta", "the file lost the accent"),
+    ("Where Is My Mind?", "Pixies", "Where Is My Mind", "Pixies", "punctuation only"),
 ]
 
 
@@ -128,8 +155,10 @@ def test_live_version_is_held_back_when_nothing_can_confirm_it() -> None:
     applied unattended.
     """
     candidate = _candidate(
-        "Otherside", "Red Hot Chili Peppers",
-        "Otherside - Live", "Red Hot Chili Peppers",
+        "Otherside",
+        "Red Hot Chili Peppers",
+        "Otherside - Live",
+        "Red Hot Chili Peppers",
     )
     assert candidate.title_ratio == pytest.approx(1.0)
     assert candidate.variant_unconfirmed
@@ -141,8 +170,12 @@ def test_disagreeing_durations_sink_a_live_version() -> None:
     the variant flag is not needed.
     """
     candidate = _candidate(
-        "Everlong", "Foo Fighters", "Everlong - Live", "Foo Fighters",
-        local_duration=250_000, cand_duration=331_000,
+        "Everlong",
+        "Foo Fighters",
+        "Everlong - Live",
+        "Foo Fighters",
+        local_duration=250_000,
+        cand_duration=331_000,
     )
     assert not candidate.variant_unconfirmed  # durations were known
     assert candidate.confidence < SAFE_MATCH_THRESHOLD
@@ -151,8 +184,12 @@ def test_disagreeing_durations_sink_a_live_version() -> None:
 
 def test_agreeing_durations_confirm_a_remaster() -> None:
     candidate = _candidate(
-        "Everlong", "Foo Fighters", "Everlong (Remastered)", "Foo Fighters",
-        local_duration=250_000, cand_duration=250_500,
+        "Everlong",
+        "Foo Fighters",
+        "Everlong (Remastered)",
+        "Foo Fighters",
+        local_duration=250_000,
+        cand_duration=250_500,
     )
     assert candidate.is_safe
 
@@ -203,7 +240,7 @@ def test_a_guessed_artist_from_the_filename_still_counts() -> None:
 
 
 def test_artist_alias_is_offered_but_not_auto_applied() -> None:
-    """"2Pac" and "Tupac Shakur" are the same person, and nothing in the text
+    """ "2Pac" and "Tupac Shakur" are the same person, and nothing in the text
     says so. The right behaviour is to surface the match for the user to
     confirm, not to guess — so it scores well short of the threshold while
     still being a plausible candidate.
@@ -211,3 +248,59 @@ def test_artist_alias_is_offered_but_not_auto_applied() -> None:
     candidate = _candidate("Changes", "2Pac", "Changes", "Tupac Shakur")
     assert not candidate.is_safe
     assert candidate.confidence > 50  # still worth showing
+
+
+# --- artist credits: the same artist written differently --------------------
+
+
+@pytest.mark.parametrize(
+    ("expected", "found", "why"),
+    [
+        ("Drake", "Drake feat. Rihanna", "a featured artist in the credit"),
+        ("Travis Scott", "Travis Scott, Drake", "an extra credited artist"),
+        ("Sfera Ebbasta", "Ebbasta Sfera", "the words in another order"),
+        ("Lazza, Low Kidd", "Low Kidd & Lazza", "another separator and order"),
+        ("Djavan", "Đavan", "a letter NFKD does not decompose"),
+        ("Coeur", "Cœur", "a ligature"),
+        ("YOASOBI", "ヨアソビ", "the same artist in another script"),
+    ],
+)
+def test_the_same_artist_written_differently_still_matches(expected, found, why):
+    """Artist carries 0.4 of the score, so treating these as different
+    artists drags correct matches under the threshold. Measured before the
+    fix: 0.43, 0.80, 0.54, 0.57, 0.73, 0.67 and 0.00 respectively.
+    """
+    from SpotiFLAC.core.text_match import artist_ratio
+
+    assert artist_ratio(expected, found) == pytest.approx(1.0), why
+
+
+@pytest.mark.parametrize(
+    ("expected", "found"),
+    [
+        ("Drake", "Kendrick Lamar"),
+        ("Queen", "Pearl Jam"),
+        ("50 Cent", "The Game"),
+        ("Pearl Jam", "Empire Of The Sun"),
+    ],
+)
+def test_different_artists_stay_different(expected, found) -> None:
+    """The generosity above must not extend to genuinely unrelated names —
+    that is what keeps "Alive" by Pearl Jam from matching "Alive" by Empire
+    Of The Sun.
+    """
+    from SpotiFLAC.core.text_match import artist_ratio, artists_match
+
+    assert not artists_match(expected, found)
+    assert artist_ratio(expected, found) < 0.5
+
+
+def test_cross_script_is_not_a_blanket_yes() -> None:
+    """The cross-script rule declines to reject on absent evidence; it must
+    not fire when both sides are readable as the same script.
+    """
+    from SpotiFLAC.core.text_match import artists_match, is_latin_script
+
+    assert is_latin_script("Drake")
+    assert not is_latin_script("ヨアソビ")
+    assert not artists_match("Drake", "Kendrick Lamar")

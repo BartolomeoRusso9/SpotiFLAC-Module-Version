@@ -22,6 +22,8 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
+from .signed_session_errors import should_clear_session
+
 logger = logging.getLogger(__name__)
 
 
@@ -710,8 +712,25 @@ class SignedSessionClient:
                 resp.status_code,
                 getattr(resp, "reason_phrase", ""),
             )
+        # Only a 401 the *gateway* attributed to itself means the session is
+        # dead. One the gateway forwarded from the provider — no
+        # subscription, region-locked, their token expired — says nothing
+        # about our session, and clearing it there costs the user a
+        # Turnstile challenge for a track that was simply unavailable.
+        # See core/signed_session_errors.py.
         if resp.status_code in (401, 428):
-            self.clear()
+            body = b""
+            with contextlib.suppress(Exception):
+                body = resp.content
+            if should_clear_session(resp.status_code, body):
+                self.clear()
+            else:
+                logger.debug(
+                    "[signed_session:%s] %s came from the provider, "
+                    "keeping the session",
+                    self.namespace,
+                    resp.status_code,
+                )
         return resp
 
     # ─────────────────────── ticket / download layer ──────────────────────
@@ -903,7 +922,12 @@ async def perform_signed_fetch(
         # At this point the session is guaranteed for all parallel tracks
         resp = await client.request(method, path, json_body=body, extra_headers=headers)
 
-        if resp.status_code in (401, 428):
+        # Same distinction as in request(): re-bootstrapping and demanding
+        # verification are session decisions, and a provider's refusal is
+        # not grounds for either.
+        if resp.status_code in (401, 428) and should_clear_session(
+            resp.status_code, getattr(resp, "content", b"")
+        ):
             retry_auth_url = await client.bootstrap()
             if isinstance(retry_auth_url, str) and retry_auth_url:
                 return {"needsVerification": True, "auth_url": retry_auth_url}

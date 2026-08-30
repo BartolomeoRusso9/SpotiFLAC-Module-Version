@@ -41,6 +41,7 @@ classifiers = [
 dependencies = [
     "httpx[http2]>=0.27.0",
     "mutagen>=1.47.0",
+    "Pillow>=12.3.0",
     "pydantic>=2.7.0",
     "cryptography>=50.0.0",
     "pycryptodome>=3.20.0",

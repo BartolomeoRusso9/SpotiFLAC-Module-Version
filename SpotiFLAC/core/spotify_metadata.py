@@ -391,6 +391,21 @@ class SpotifyMetadataClient:
             logger.debug(f"[spotify] Failed to fetch album artists for {album_id}: {e}")
             return ""
 
+    async def _isrc_for_track_async(self, track_id: str) -> str:
+        """The track's ISRC, or "" — never raises.
+
+        An ISRC is worth having but never worth failing a metadata fetch
+        over, so every failure here degrades to the old behaviour (no ISRC)
+        rather than propagating.
+        """
+        try:
+            return await asyncio.to_thread(
+                self.web_client.get_isrc_from_metadata, track_id
+            )
+        except Exception as exc:
+            logger.debug("[spotify] no ISRC for %s: %s", track_id, exc)
+            return ""
+
     async def get_track_async(self, track_id: str) -> TrackMetadata:
         """Retrieves complete metadata for a single track, composer included."""
         payload = {
@@ -452,9 +467,20 @@ class SpotifyMetadataClient:
         artists_str = ", ".join(artists_list)
         # ------------------------------------------------------------------
 
-        composer_str = await asyncio.to_thread(
-            self.web_client.get_track_composer,
-            track_id,
+        # The ISRC comes from spclient's own metadata endpoint, which the
+        # GraphQL query above does not carry. It used to be fetched only by
+        # enrich_track_async() — a method nothing ever called, so every track
+        # left this function with isrc="". That silently disabled a lot:
+        # find_existing_track() falls back to title+artist matching,
+        # _with_musicbrainz_tags() returns early, the local tagger's ISRC
+        # identity check can never fire, and files SpotiFLAC writes carry no
+        # ISRC for the next run to recognise.
+        #
+        # Gathered with the composer lookup rather than awaited after it, so
+        # the extra request costs no wall-clock time.
+        composer_str, isrc_str = await asyncio.gather(
+            asyncio.to_thread(self.web_client.get_track_composer, track_id),
+            self._isrc_for_track_async(track_id),
         )
 
         c_items = album_data.get("copyright", {}).get("items", [])
@@ -470,7 +496,7 @@ class SpotifyMetadataClient:
             artists=artists_str,
             album=album_data.get("name", "Unknown"),
             album_artist=album_artists_str,
-            isrc="",
+            isrc=isrc_str,
             track_number=track_union.get("trackNumber") or 0,
             disc_number=track_union.get("discNumber") or 1,
             total_tracks=0,

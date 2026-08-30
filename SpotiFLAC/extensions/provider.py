@@ -33,6 +33,8 @@ from typing_extensions import Self
 from SpotiFLAC.core.base import BaseProvider
 from SpotiFLAC.core.errors import ErrorKind, SpotiflacError
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from SpotiFLAC.core.output_lock import output_path_lock
+from SpotiFLAC.core.text_match import track_identity_mismatch
 from SpotiFLAC.core.signed_session_mobile import SignedSessionClient
 
 from .manager import ExtensionManager, InstalledExtension
@@ -385,184 +387,223 @@ class JSExtensionProvider(BaseProvider):
             native_id=str(track_id),
         )
 
-        try:
-            for stale in output_path.parent.glob(f"{output_path.stem}.*"):
-                if stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4"):
-                    if stale.exists() and stale.stat().st_size == 0:
-                        stale.unlink()
-                        logger.debug(
-                            "[%s] Removed stale zero-byte file: %s",
-                            self.name,
-                            stale.name,
-                        )
-        except Exception:
-            pass
-
-        if self._file_exists(output_path):
-            return DownloadResult.skipped_result(
-                self.name,
-                str(output_path),
-                fmt=_ext_to_fmt(output_path.suffix),
-            )
-
-        def _progress_adapter(fraction: float) -> None:
-            if self._progress_cb is None:
-                return
+        # Everything below writes to output_path, so one download of a
+        # given destination happens at a time. Two tracks can resolve to
+        # the same filename — a playlist listing a track twice, an album
+        # queued alongside its single — and without this they stream into
+        # the same .part and rename over each other, leaving a file that
+        # looks complete and is not. See core/output_lock.py.
+        async with output_path_lock(output_path):
             try:
-                current = int(max(0.0, min(1.0, fraction)) * 100)
-                result = self._progress_cb(current, 100)
-                # If the callback is async and returns a coroutine, we can't await it here
-                # (we're in a sync context via to_thread), so we need to close it to prevent warnings
-                if asyncio.iscoroutine(result):
-                    result.close()
+                for stale in output_path.parent.glob(f"{output_path.stem}.*"):
+                    if stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4"):
+                        if stale.exists() and stale.stat().st_size == 0:
+                            stale.unlink()
+                            logger.debug(
+                                "[%s] Removed stale zero-byte file: %s",
+                                self.name,
+                                stale.name,
+                            )
             except Exception:
                 pass
 
-        logger.info("[%s] Downloading '%s'", self.name, metadata.title)
-
-        # ── Progress fallback via disk polling ──────────────────────────
-        # Covers the case where the extension bypasses global.file.download
-        # (e.g., writing segments manually via file.writeBytes) and thus
-        # never generates real "progress" events from the bridge. If instead
-        # real events arrive (now emitted by nodeFileDownload in
-        # _bridge.js), this fallback is simply redundant and harmless.
-        poll_stop = asyncio.Event()
-        poll_task = asyncio.create_task(
-            self._poll_file_progress_async(output_path, poll_stop),
-        )
-
-        try:
-            dl_result = await asyncio.to_thread(
-                self._call,
-                "download",
-                track_id,
-                quality,
-                str(output_path),
-                None,
-                progress_cb=_progress_adapter,
-            )
-        finally:
-            poll_stop.set()
-            poll_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await poll_task
-
-        if not dl_result or not dl_result.get("success"):
-            err = (dl_result or {}).get("error_message", "download failed")
-            return DownloadResult.fail(self.name, err)
-
-        # ── Reassemble any segments (e.g., Tidal DASH via extension) ──
-        actual_path = await self._finalize_segments_async(dl_result, output_path)
-        if actual_path is None:
-            return DownloadResult.fail(
-                self.name,
-                "Download returned no usable audio (segments unmergeable)",
-            )
-
-        if Path(actual_path).suffix.lower() in [".m4a", ".mp4"]:
-            codec = await _get_codec_async(actual_path)
-            if codec == "flac":
-                logger.info(
-                    "[%s] FLAC hidden inside M4A container detected. Starting extraction (remux)...",
+            if self._file_exists(output_path):
+                return DownloadResult.skipped_result(
                     self.name,
-                )
-                flac_path = str(Path(actual_path).with_suffix(".flac"))
-
-                d_key = dl_result.get("decryption_key") or dl_result.get(
-                    "decryptionKey",
+                    str(output_path),
+                    fmt=_ext_to_fmt(output_path.suffix),
                 )
 
-                if await _remux_to_flac_async(actual_path, flac_path, d_key):
-                    import os
+            def _progress_adapter(fraction: float) -> None:
+                if self._progress_cb is None:
+                    return
+                try:
+                    current = int(max(0.0, min(1.0, fraction)) * 100)
+                    result = self._progress_cb(current, 100)
+                    # If the callback is async and returns a coroutine, we can't await it here
+                    # (we're in a sync context via to_thread), so we need to close it to prevent warnings
+                    if asyncio.iscoroutine(result):
+                        result.close()
+                except Exception:
+                    pass
 
-                    with contextlib.suppress(OSError):
-                        os.remove(actual_path)
-                    actual_path = flac_path
-                    logger.info(
-                        "[%s] FLAC extraction completed successfully.",
-                        self.name,
-                    )
-                else:
-                    logger.warning(
-                        "[%s] FLAC extraction failed, keeping the original file.",
-                        self.name,
-                    )
+            logger.info("[%s] Downloading '%s'", self.name, metadata.title)
 
-        fmt = _ext_to_fmt(Path(actual_path).suffix)
+            # ── Progress fallback via disk polling ──────────────────────────
+            # Covers the case where the extension bypasses global.file.download
+            # (e.g., writing segments manually via file.writeBytes) and thus
+            # never generates real "progress" events from the bridge. If instead
+            # real events arrive (now emitted by nodeFileDownload in
+            # _bridge.js), this fallback is simply redundant and harmless.
+            poll_stop = asyncio.Event()
+            poll_task = asyncio.create_task(
+                self._poll_file_progress_async(output_path, poll_stop),
+            )
 
-        # ── MusicBrainz, like in native providers (tidal.py, qobuz.py, etc.) ──
-        mb_tags: dict[str, str] = {}
-        if enrich_metadata and metadata.isrc:
             try:
-                from SpotiFLAC.core.isrc_utils import normalize_isrc
-                from SpotiFLAC.core.musicbrainz import (
-                    fetch_mb_metadata_async,
-                    mb_result_to_tags,
+                dl_result = await asyncio.to_thread(
+                    self._call,
+                    "download",
+                    track_id,
+                    quality,
+                    str(output_path),
+                    None,
+                    progress_cb=_progress_adapter,
                 )
+            finally:
+                poll_stop.set()
+                poll_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await poll_task
 
-                isrc_clean = normalize_isrc(metadata.isrc)
-                if isrc_clean:
-                    mb_data = await fetch_mb_metadata_async(isrc_clean)
-                    mb_tags = mb_result_to_tags(mb_data)
-            except Exception as e:
-                logger.debug(
-                    "[%s] MusicBrainz lookup failed (non-fatal): %s",
+            if not dl_result or not dl_result.get("success"):
+                err = (dl_result or {}).get("error_message", "download failed")
+                return DownloadResult.fail(self.name, err)
+
+            # ── Reassemble any segments (e.g., Tidal DASH via extension) ──
+            actual_path = await self._finalize_segments_async(dl_result, output_path)
+            if actual_path is None:
+                return DownloadResult.fail(
                     self.name,
-                    e,
+                    "Download returned no usable audio (segments unmergeable)",
                 )
 
-        try:
-            from SpotiFLAC.core.download_validation import (
-                validate_downloaded_track_async,
-            )
-            from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
-
-            expected_s = metadata.duration_ms // 1000
-            valid, err_msg = await validate_downloaded_track_async(
-                actual_path,
-                expected_s,
-            )
-            if not valid:
-                logger.warning("[%s] Validation failed: %s", self.name, err_msg)
-                return DownloadResult.fail(self.name, f"Validation failed: {err_msg}")
-
-            await embed_metadata_async(
-                Path(actual_path),
-                metadata,
-                EmbedOptions(
-                    cover_url=metadata.cover_url or "",
-                    first_artist_only=first_artist_only,
-                    artist_separator=artist_separator,
-                    embed_lyrics=embed_lyrics,
-                    lyrics_providers=lyrics_providers or [],
-                    enrich=enrich_metadata,
-                    enrich_providers=enrich_providers,
-                    enrich_qobuz_token=qobuz_token or "",
-                    is_album=is_album,
-                    extra_tags=mb_tags,
-                ),
-            )
-        except Exception as e:
-            logger.warning("[%s] Tagging failed (non-fatal): %s", self.name, e)
-
-        try:
-            for stale in output_path.parent.glob(f"{output_path.stem}.*"):
-                if (
-                    stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4")
-                    and stale.exists()
-                    and stale.stat().st_size == 0
-                    and str(stale) != str(actual_path)
-                ):
-                    stale.unlink()
+            if Path(actual_path).suffix.lower() in [".m4a", ".mp4"]:
+                codec = await _get_codec_async(actual_path)
+                if codec == "flac":
                     logger.info(
-                        "[%s] Removed leftover zero-byte file: %s",
+                        "[%s] FLAC hidden inside M4A container detected. Starting extraction (remux)...",
                         self.name,
-                        stale.name,
                     )
-        except Exception as exc:
-            logger.warning("[%s] Post-download cleanup failed: %s", self.name, exc)
+                    flac_path = str(Path(actual_path).with_suffix(".flac"))
 
-        return DownloadResult.ok(self.name, actual_path, fmt)
+                    d_key = dl_result.get("decryption_key") or dl_result.get(
+                        "decryptionKey",
+                    )
+
+                    if await _remux_to_flac_async(actual_path, flac_path, d_key):
+                        import os
+
+                        with contextlib.suppress(OSError):
+                            os.remove(actual_path)
+                        actual_path = flac_path
+                        logger.info(
+                            "[%s] FLAC extraction completed successfully.",
+                            self.name,
+                        )
+                    else:
+                        logger.warning(
+                            "[%s] FLAC extraction failed, keeping the original file.",
+                            self.name,
+                        )
+
+            fmt = _ext_to_fmt(Path(actual_path).suffix)
+
+            # ── MusicBrainz, like in native providers (tidal.py, qobuz.py, etc.) ──
+            mb_tags: dict[str, str] = {}
+            if enrich_metadata and metadata.isrc:
+                try:
+                    from SpotiFLAC.core.isrc_utils import normalize_isrc
+                    from SpotiFLAC.core.musicbrainz import (
+                        fetch_mb_metadata_async,
+                        mb_result_to_tags,
+                    )
+
+                    isrc_clean = normalize_isrc(metadata.isrc)
+                    if isrc_clean:
+                        mb_data = await fetch_mb_metadata_async(isrc_clean)
+                        mb_tags = mb_result_to_tags(mb_data)
+                except Exception as e:
+                    logger.debug(
+                        "[%s] MusicBrainz lookup failed (non-fatal): %s",
+                        self.name,
+                        e,
+                    )
+
+            try:
+                from SpotiFLAC.core.download_validation import (
+                    validate_downloaded_track_async,
+                )
+                from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
+
+                expected_s = metadata.duration_ms // 1000
+                valid, err_msg = await validate_downloaded_track_async(
+                    actual_path,
+                    expected_s,
+                )
+                if not valid:
+                    logger.warning("[%s] Validation failed: %s", self.name, err_msg)
+                    return DownloadResult.fail(
+                        self.name, f"Validation failed: {err_msg}"
+                    )
+
+                # The duration check above proves the file is a whole track. It
+                # cannot prove it is *this* track: a cover, a re-recording or a
+                # different artist's song of the same name all run the right
+                # length. checkAvailability() returns only {available, track_id},
+                # so what the provider resolved is not knowable before the
+                # download — but download() reports the title/artist/album it
+                # actually fetched, which is enough to catch a wrong match here,
+                # before the requested track's tags are written over it.
+                mismatch = track_identity_mismatch(
+                    expected_title=metadata.title,
+                    expected_artist=metadata.artists,
+                    expected_album=metadata.album,
+                    expected_isrc=metadata.isrc,
+                    found_title=str(
+                        dl_result.get("title") or dl_result.get("name") or ""
+                    ),
+                    found_artist=str(
+                        dl_result.get("artist") or dl_result.get("artists") or ""
+                    ),
+                    found_album=str(
+                        dl_result.get("album") or dl_result.get("album_name") or ""
+                    ),
+                    found_isrc=str(dl_result.get("isrc") or ""),
+                )
+                if mismatch:
+                    logger.warning("[%s] Wrong track: %s", self.name, mismatch)
+                    with contextlib.suppress(OSError):
+                        Path(actual_path).unlink()
+                    return DownloadResult.fail(self.name, f"Wrong track: {mismatch}")
+
+                await embed_metadata_async(
+                    Path(actual_path),
+                    metadata,
+                    EmbedOptions(
+                        cover_url=metadata.cover_url or "",
+                        first_artist_only=first_artist_only,
+                        artist_separator=artist_separator,
+                        embed_lyrics=embed_lyrics,
+                        lyrics_providers=lyrics_providers or [],
+                        enrich=enrich_metadata,
+                        enrich_providers=enrich_providers,
+                        enrich_qobuz_token=qobuz_token or "",
+                        is_album=is_album,
+                        extra_tags=mb_tags,
+                    ),
+                )
+            except Exception as e:
+                logger.warning("[%s] Tagging failed (non-fatal): %s", self.name, e)
+
+            try:
+                for stale in output_path.parent.glob(f"{output_path.stem}.*"):
+                    if (
+                        stale.suffix.lower() in (".flac", ".mp3", ".m4a", ".mp4")
+                        and stale.exists()
+                        and stale.stat().st_size == 0
+                        and str(stale) != str(actual_path)
+                    ):
+                        stale.unlink()
+                        logger.info(
+                            "[%s] Removed leftover zero-byte file: %s",
+                            self.name,
+                            stale.name,
+                        )
+            except Exception as exc:
+                logger.warning("[%s] Post-download cleanup failed: %s", self.name, exc)
+
+            return DownloadResult.ok(self.name, actual_path, fmt)
 
     # ─────────────────────── Segment reassembly ────────────────────────
 

@@ -75,6 +75,49 @@ def variant_conflict(local_title: str, candidate_title: str) -> bool:
     return candidate_marked != local_marked
 
 
+#: Letters NFKD leaves alone because they are distinct letters rather than a
+#: base plus a combining mark. Catalogues transliterate them inconsistently,
+#: so "Đavan" and "Djavan" have to fold to the same thing.
+_TRANSLITERATIONS = {
+    "đ": "dj",
+    "ø": "o",
+    "æ": "ae",
+    "œ": "oe",
+    "ß": "ss",
+    "þ": "th",
+    "ð": "d",
+    "ł": "l",
+}
+
+#: Separators a credit list can use. "x" and "and" are surrounded by spaces
+#: on purpose: they are ordinary letters inside a name ("Sixx", "Anderson").
+_ARTIST_SPLIT_RE = re.compile(
+    r"\s+(?:feat\.?|ft\.?|featuring|with|vs\.?|and|x)\s+|[,;&/]|\s+\+\s+",
+    re.IGNORECASE,
+)
+
+#: Ranges that are definitely not Latin script. A name written in one of
+#: these and its romanisation share no characters at all, so comparing them
+#: as text is meaningless — see artists_match().
+_NON_LATIN_RANGES = (
+    (0x4E00, 0x9FFF),  # CJK
+    (0x3040, 0x309F),  # hiragana
+    (0x30A0, 0x30FF),  # katakana
+    (0xAC00, 0xD7AF),  # hangul
+    (0x0600, 0x06FF),  # arabic
+    (0x0400, 0x04FF),  # cyrillic
+    (0x0590, 0x05FF),  # hebrew
+    (0x0E00, 0x0E7F),  # thai
+)
+
+
+def is_latin_script(value: str) -> bool:
+    """Whether `value` is written in a Latin alphabet."""
+    return not any(
+        any(low <= ord(ch) <= high for low, high in _NON_LATIN_RANGES) for ch in value
+    )
+
+
 def fold(value: str) -> str:
     """Casefolds, strips accents and reduces punctuation to single spaces.
 
@@ -82,9 +125,10 @@ def fold(value: str) -> str:
     "Café": casefold() alone leaves the two different, and the difference
     is never meaningful for identifying a recording.
     """
-    text = unicodedata.normalize("NFKD", value or "")
+    text = unicodedata.normalize("NFKD", value or "").casefold()
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    return _NON_WORD_RE.sub(" ", text.casefold()).strip()
+    text = "".join(_TRANSLITERATIONS.get(ch, ch) for ch in text)
+    return _NON_WORD_RE.sub(" ", text).strip()
 
 
 def strip_noise(value: str) -> str:
@@ -113,6 +157,174 @@ def ratio(left: str, right: str) -> float:
     return max(plain, stripped)
 
 
+def split_artists(value: str) -> list[str]:
+    """A credit string broken into the individual artists it names.
+
+    "Travis Scott, Drake" and "Drake feat. Rihanna" are one string in the
+    tag and two artists in fact. Comparing the strings whole is what made
+    "Drake" score 0.43 against "Drake feat. Rihanna" — the same artist.
+    """
+    parts = (fold(part) for part in _ARTIST_SPLIT_RE.split(value or ""))
+    return [part for part in parts if part]
+
+
+def _same_words(left: str, right: str) -> bool:
+    """Whether two names use the same words in any order.
+
+    Catalogues disagree about ordering more often than you would expect —
+    "Lazza, Low Kidd" against "Low Kidd & Lazza", or a surname-first
+    rendering.
+    """
+    left_words, right_words = left.split(), right.split()
+    return bool(left_words) and sorted(left_words) == sorted(right_words)
+
+
+def artists_match(expected: str, found: str) -> bool:
+    """Whether two credit strings name the same artist.
+
+    A deliberately generous predicate, because the failure it guards
+    against is rejecting a correct match: the credit lists two catalogues
+    attach to one recording differ constantly in featured artists,
+    separators and ordering, and none of that means the recording is
+    different.
+
+    The last rule is the unintuitive one. When one side is written in a
+    non-Latin script and the other is not, they share no characters at all
+    — "YOASOBI" against "ヨアソビ" scores exactly 0.00 — so text comparison
+    says nothing whatsoever. Treating that as a match is not a guess: it is
+    declining to reject on evidence that does not exist, and leaving the
+    decision to the title and duration.
+    """
+    expected_folded, found_folded = fold(expected), fold(found)
+    if not expected_folded or not found_folded:
+        return False
+    if expected_folded == found_folded:
+        return True
+    if expected_folded in found_folded or found_folded in expected_folded:
+        return True
+    if _same_words(expected_folded, found_folded):
+        return True
+
+    for one in split_artists(expected):
+        for other in split_artists(found):
+            if one == other or one in other or other in one:
+                return True
+            if _same_words(one, other):
+                return True
+
+    return is_latin_script(expected) != is_latin_script(found)
+
+
+def artist_ratio(expected: str, found: str) -> float:
+    """Similarity of two credit strings in 0…1, artist-aware.
+
+    1.0 whenever artists_match() is satisfied, so a featured artist or a
+    different ordering costs nothing; otherwise the best similarity between
+    any pair of the individual names, falling back to the whole strings.
+    """
+    if artists_match(expected, found):
+        return 1.0
+    best = ratio(expected, found)
+    for one in split_artists(expected):
+        for other in split_artists(found):
+            best = max(best, SequenceMatcher(None, one, other).ratio())
+    return best
+
+
+def titles_match(expected: str, found: str) -> bool:
+    """Whether two titles name the same song.
+
+    Like artists_match(), a generous predicate guarding against rejecting a
+    correct match: catalogues disagree about parenthesised suffixes,
+    featured-artist credits inside the title, and punctuation, and none of
+    that makes it a different song. Containment is allowed because one side
+    is often the other plus a decoration.
+    """
+    expected_folded, found_folded = fold(expected), fold(found)
+    if not expected_folded or not found_folded:
+        return False
+    if expected_folded == found_folded:
+        return True
+    if expected_folded in found_folded or found_folded in expected_folded:
+        return True
+
+    expected_core = fold(strip_noise(expected))
+    found_core = fold(strip_noise(found))
+    if expected_core and found_core:
+        if expected_core == found_core:
+            return True
+        if expected_core in found_core or found_core in expected_core:
+            return True
+
+    return ratio(expected, found) >= 0.9
+
+
+def track_identity_mismatch(
+    *,
+    expected_title: str = "",
+    expected_artist: str = "",
+    expected_album: str = "",
+    expected_isrc: str = "",
+    found_title: str = "",
+    found_artist: str = "",
+    found_album: str = "",
+    found_isrc: str = "",
+) -> str:
+    """Why the track that came back is not the one asked for, or "".
+
+    A provider that resolves the wrong recording — a cover, a re-recording,
+    a different artist with the same song title — otherwise produces a file
+    of one track carrying another track's tags, permanently and silently.
+    This is the check that catches it.
+
+    Every comparison is skipped when either side is empty: an extension that
+    reports nothing about what it fetched cannot be contradicted, and
+    rejecting on missing information would break every provider that stays
+    quiet. Only positive disagreement rejects.
+
+    A matching ISRC settles it outright — it names the recording, so the
+    titles may say whatever they like. A *conflicting* ISRC is the opposite:
+    strong evidence of the wrong track, and it removes the album leniency
+    below.
+    """
+    from .isrc_utils import normalize_isrc
+
+    want_isrc = normalize_isrc(expected_isrc)
+    got_isrc = normalize_isrc(found_isrc)
+    if want_isrc and got_isrc:
+        if want_isrc == got_isrc:
+            return ""
+        return f"different recording: asked for ISRC {want_isrc}, got {got_isrc}"
+
+    if (
+        expected_artist
+        and found_artist
+        and not artists_match(expected_artist, found_artist)
+    ):
+        return f"different artist: asked for {expected_artist!r}, got {found_artist!r}"
+
+    if expected_title and found_title and not titles_match(expected_title, found_title):
+        return f"different title: asked for {expected_title!r}, got {found_title!r}"
+
+    # Album last, and forgivingly: the same recording legitimately appears on
+    # a single, an album, a deluxe edition and three compilations, so a
+    # disagreement here is only meaningful when the track identity is not
+    # already established by title and artist.
+    if expected_album and found_album and not titles_match(expected_album, found_album):
+        strong_identity = bool(
+            expected_title
+            and found_title
+            and fold(expected_title) == fold(found_title)
+            and expected_artist
+            and found_artist
+            and artists_match(expected_artist, found_artist)
+        )
+        if not strong_identity:
+            return f"different album: asked for {expected_album!r}, got {found_album!r}"
+
+    return ""
+
+
 def score_track_match(
     *,
     title: str,
@@ -139,7 +351,9 @@ def score_track_match(
     first_artist = getattr(candidate, "first_artist", "") or ""
 
     if artist:
-        artist_score = max(ratio(artist, artists), ratio(artist, first_artist))
+        artist_score = max(
+            artist_ratio(artist, artists), artist_ratio(artist, first_artist)
+        )
         score = 0.6 * title_score + 0.4 * artist_score
     else:
         score = title_score

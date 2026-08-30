@@ -237,6 +237,16 @@ if (!isMainThread) {
           ? (v) => parentPort.postMessage({ type: 'progress', callId: id, value: v })
           : a
       );
+      // Tell the filesystem guard that the host sanctioned this path. The
+      // output directory is chosen per download (--output, the GUI folder
+      // picker), so it cannot be on a static allow-list — see _fsguard.js.
+      if (call === 'download' && typeof global.__spotiflacAllowWrite === 'function') {
+        for (const a of finalArgs) {
+          if (typeof a === 'string' && (a.includes('/') || a.includes('\\'))) {
+            global.__spotiflacAllowWrite(a);
+          }
+        }
+      }
       const result = fn(...finalArgs);
       parentPort.postMessage({ id, result });
     } catch (e) {

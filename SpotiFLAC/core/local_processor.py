@@ -19,6 +19,7 @@ audio.delete() first). What this module adds on top:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import shutil
 from dataclasses import dataclass, field, replace
@@ -168,7 +169,7 @@ async def _identify_unresolved_async(
     for index in pending:
         entry = entries[index]
         try:
-            isrc = await identify_isrc_async(
+            isrc, acoustid_id = await identify_isrc_async(
                 entry.info.file_path, settings_key=acoustid_key
             )
         except Exception as exc:  # never abort a scan over one file
@@ -185,6 +186,12 @@ async def _identify_unresolved_async(
             isrc, client=client, expected_duration_ms=entry.info.old_duration_ms
         )
         if candidate is not None:
+            if acoustid_id:
+                # Carried on the metadata so the apply step can write it into
+                # the file: a track that names its own fingerprint makes every
+                # later identification free, and ACOUSTID_ID is the tag
+                # MusicBrainz Picard reads as well.
+                candidate.metadata.extra_info["acoustid_id"] = acoustid_id
             entries[index] = LocalScanEntry(info=entry.info, candidates=[candidate])
 
     return entries
@@ -329,6 +336,14 @@ async def retag_local_file_async(
             )
 
     opts = await _with_musicbrainz_tags(metadata, opts)
+
+    acoustid_id = ""
+    with contextlib.suppress(Exception):
+        acoustid_id = str((metadata.extra_info or {}).get("acoustid_id") or "")
+    if acoustid_id:
+        opts = replace(
+            opts, extra_tags={"ACOUSTID_ID": acoustid_id, **(opts.extra_tags or {})}
+        )
 
     try:
         await embed_metadata_async(path, metadata, opts)

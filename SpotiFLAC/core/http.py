@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import atexit as _atexit
 import contextlib
+import ipaddress
 import logging
 import os
 import re
@@ -367,7 +368,13 @@ class AsyncHttpClient:
                     **kwargs,
                 )
             except httpx.TransportError as exc:
-                raise NetworkError(self._provider, f"Request failed: {exc}") from exc
+                resp = await self._retry_over_doh(
+                    method, url, headers, req_timeout, exc, kwargs
+                )
+                if resp is None:
+                    raise NetworkError(
+                        self._provider, f"Request failed: {exc}"
+                    ) from exc
             self._raise_for_status(resp)
             return resp
 
@@ -378,6 +385,71 @@ class AsyncHttpClient:
             reraise=True,
         )
         return await retryer(_attempt)
+
+    async def _retry_over_doh(
+        self,
+        method: str,
+        url: str,
+        headers: dict,
+        timeout: Any,
+        exc: BaseException,
+        kwargs: dict,
+    ) -> httpx.Response | None:
+        """One retry against an address resolved over DNS-over-HTTPS.
+
+        Only for a failure that was specifically the *name* not resolving,
+        which is how DNS-level ISP blocking presents. A refused connection
+        or a timeout is a different problem and retrying it here would just
+        double the cost of every ordinary outage.
+
+        The request keeps its original Host header and SNI, so TLS is still
+        verified against the hostname the caller asked for: a resolver
+        handing back somebody else's address fails the handshake rather than
+        silently receiving the traffic.
+        """
+        from urllib.parse import urlsplit, urlunsplit
+
+        from .dns_doh import looks_like_dns_failure, resolve_async
+
+        if not looks_like_dns_failure(exc):
+            return None
+
+        parts = urlsplit(url)
+        hostname = parts.hostname or ""
+        if not hostname:
+            return None
+        with contextlib.suppress(ValueError):
+            ipaddress.ip_address(hostname)
+            return None  # already an address; DNS was never involved
+
+        for address in await resolve_async(hostname):
+            netloc = f"[{address}]" if ":" in address else address
+            if parts.port:
+                netloc = f"{netloc}:{parts.port}"
+            try:
+                client = await self._client()
+                resp = await client.request(
+                    method,
+                    urlunsplit(parts._replace(netloc=netloc)),
+                    headers={**headers, "Host": parts.netloc},
+                    timeout=timeout,
+                    extensions={"sni_hostname": hostname},
+                    **kwargs,
+                )
+            except Exception as retry_exc:
+                logger.debug(
+                    "[doh] retry via %s failed for %s: %s",
+                    address,
+                    hostname,
+                    retry_exc,
+                )
+                continue
+            logger.info(
+                "[doh] %s resolved via DNS-over-HTTPS after the system resolver failed",
+                hostname,
+            )
+            return resp
+        return None
 
     def _wait_strategy(self, retry_state: RetryCallState) -> float:
         """Retry-After for 429s; otherwise exponential backoff from RetryConfig."""
