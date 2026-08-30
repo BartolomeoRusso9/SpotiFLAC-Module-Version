@@ -391,6 +391,15 @@ function nodeHttpRequest(method, rawUrl, body, headers, _depth = 0) {
  * (progressUpdateThreshold = 128 * 1024).
  */
 function nodeFileDownload(rawUrl, outputPath, opts, callId) {
+  // The host was asked to write this path, so it is sanctioned by
+  // definition — and this runs in the *main* thread, whose filesystem guard
+  // never saw the worker-side registration in the download dispatch below.
+  // Without it an extension that delegates its download to the bridge (all
+  // of them, for the streaming path) is refused its own output file, plus
+  // the siblings it stages alongside it (".init.part" and friends).
+  if (typeof global.__spotiflacAllowWrite === 'function') {
+    global.__spotiflacAllowWrite(outputPath);
+  }
   return new Promise((resolve) => {
     let u;
     try { u = new URL(rawUrl); } catch (e) {

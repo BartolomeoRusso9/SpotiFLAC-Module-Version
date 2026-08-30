@@ -100,3 +100,56 @@ def test_the_welcome_banner_is_suppressed_under_json(capsys) -> None:
         assert "SpotiFLAC" in capsys.readouterr().out
     finally:
         sys.argv = original
+
+
+# --- --help must not reach the network -------------------------------------
+
+
+def test_help_skips_the_startup_network_work() -> None:
+    """argparse handles -h/--help further down amain(), and everything before
+    that point — the update check and the extension registry bootstrap —
+    reaches the network. `spotiflac --help` therefore waited on three HTTP
+    attempts per configured registry to print a static string, and appeared
+    to hang outright when a registry was slow to answer.
+    """
+    from SpotiFLAC.launcher import _is_help_invocation
+
+    assert _is_help_invocation(["--help"])
+    assert _is_help_invocation(["-h"])
+    assert _is_help_invocation(["--gui", "--help"])
+
+
+def test_a_real_command_is_not_mistaken_for_help() -> None:
+    """The bootstrap has to keep running for everything that uses
+    extensions, which is nearly everything.
+    """
+    from SpotiFLAC.launcher import _is_help_invocation
+
+    for argv in (
+        [],
+        ["--gui"],
+        ["--web"],
+        ["https://open.spotify.com/track/x"],
+        ["--output", "help"],
+        ["--search", "-h-h"],
+    ):
+        assert not _is_help_invocation(argv), argv
+
+
+def test_amain_guards_both_network_steps() -> None:
+    """Guarding only one of them would leave the other on the --help path."""
+    import ast
+    import inspect
+
+    from SpotiFLAC import launcher
+
+    source = inspect.getsource(launcher.amain)
+    tree = ast.parse(source.lstrip())
+    guarded = [
+        ast.unparse(node)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If) and "help_only" in ast.unparse(node.test)
+    ]
+    joined = " ".join(guarded)
+    assert "check_for_updates_async" in joined
+    assert "ExtensionManager" in joined

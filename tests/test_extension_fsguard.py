@@ -247,3 +247,57 @@ def test_the_probe_itself_is_not_vacuous(extdir, tmp_path) -> None:
         timeout=30,
     )
     assert out.stdout.strip() == "written"
+
+
+# --- the two-thread topology, which is where this first went wrong ---------
+
+
+def test_a_registration_in_the_worker_does_not_reach_the_main_thread(
+    extdir, scratch, tmp_path
+) -> None:
+    """Each thread gets its own copy of the preload, and its own allow-list.
+
+    This is the shape of the bug that broke downloading: extensions delegate
+    the actual transfer to the host via a `file.download` bridge request, so
+    the write happens in the *main* thread while the only registration
+    happened in the worker. Every download was refused its own output file.
+    """
+    downloads = tmp_path / "Music"
+    downloads.mkdir()
+    target = downloads / "song.flac"
+
+    script = textwrap.dedent(
+        f"""
+        const {{ Worker }} = require('worker_threads');
+        const fs = require('fs');
+        const target = {str(target)!r};
+        const w = new Worker(
+          "global.__spotiflacAllowWrite(" + JSON.stringify(target) + ");" +
+          "require('worker_threads').parentPort.postMessage('done');",
+          {{ eval: true }}
+        );
+        w.on('message', () => {{
+          try {{ fs.writeFileSync(target, 'x'); console.log('written'); }}
+          catch (e) {{ console.log('blocked'); }}
+          w.terminate();
+        }});
+        """
+    )
+    assert _write(target, cwd=extdir, tmpdir=scratch, script=script) == "blocked"
+
+
+def test_the_bridge_sanctions_the_path_where_the_write_happens() -> None:
+    """nodeFileDownload runs in the main thread and opens the write stream
+    itself, so the sanction has to be there and not only in the worker's
+    dispatch.
+    """
+    import re
+
+    bridge = (EXTENSIONS / "_bridge.js").read_text()
+    match = re.search(
+        r"function nodeFileDownload\([^)]*\)\s*\{(.*?)\n\}", bridge, re.DOTALL
+    )
+    assert match, "nodeFileDownload is not where this test expects it"
+    assert "__spotiflacAllowWrite" in match.group(1), (
+        "the main thread writes the file but never sanctions its path"
+    )

@@ -75,6 +75,23 @@ def _argv_has(*flags: str) -> bool:
     )
 
 
+def _is_help_invocation(argv: list[str] | None = None) -> bool:
+    """Whether this run only wants the usage text and will then exit.
+
+    argparse handles -h/--help itself, further down amain(), and everything
+    before that point is startup work: an update check and the extension
+    registry bootstrap, both of which reach the network. So `spotiflac
+    --help` waited on three HTTP attempts per configured registry before
+    printing a static string — and with a registry unreachable it appeared
+    to hang outright, which is the first thing anyone installing this hits.
+
+    Only -h/--help: there is no --version flag, and a subcommand that looks
+    informational but is not would be worse to guess at than to leave alone.
+    """
+    args = sys.argv[1:] if argv is None else argv
+    return any(arg in ("-h", "--help") for arg in args)
+
+
 def _early_registries_from_argv() -> list[str]:
     return _early_urls_from_argv("--registries")
 
@@ -1497,22 +1514,30 @@ async def amain() -> None:
 
     _print_welcome_banner()
 
-    with contextlib.suppress(Exception):
-        await check_for_updates_async()
+    # Nothing below this point is needed to print usage, and all of it
+    # touches the network. Skipping it for --help is what turns the first
+    # command anyone runs from a multi-second wait — or an apparent hang,
+    # when a configured registry is unreachable — back into instant output.
+    help_only = _is_help_invocation()
+
+    if not help_only:
+        with contextlib.suppress(Exception):
+            await check_for_updates_async()
 
     _register_cli_registries(_early_registries_from_argv())
     _register_cli_registry_directories(_early_registry_directories_from_argv())
 
-    try:
-        from .extensions.manager import ExtensionManager
+    if not help_only:
+        try:
+            from .extensions.manager import ExtensionManager
 
-        await asyncio.to_thread(
-            ExtensionManager,
-            auto_install_downloads=True,
-            min_trust_tier=_early_min_trust_from_argv(),
-        )
-    except Exception:
-        pass
+            await asyncio.to_thread(
+                ExtensionManager,
+                auto_install_downloads=True,
+                min_trust_tier=_early_min_trust_from_argv(),
+            )
+        except Exception:
+            pass
 
     if "--gui" in sys.argv:
         from .app import run_gui
