@@ -46,6 +46,25 @@ class ArtistSimple:
 # ---------------------------------------------------------------------------
 
 
+def _dig(node: Any, *keys: str) -> dict:
+    """Walks a chain of keys, treating a null value like a missing one.
+
+    `data.get("data", {}).get("trackUnion", {})` looks defensive but is not:
+    the default only applies when the key is *absent*, and Spotify's GraphQL
+    sends `{"data": null, "errors": [...]}` when a query partly fails — the
+    key is present and null, so the chain reaches `None.get(...)` and raises
+    `'NoneType' object has no attribute 'get'`. Under a big batch of
+    single-track lookups that surfaced as the occasional "Metadata fetch
+    failed" with no useful detail. Anything that isn't a dict — null, a
+    list, a scalar — yields {} here, so callers can keep reading with .get().
+    """
+    for key in keys:
+        if not isinstance(node, dict):
+            return {}
+        node = node.get(key)
+    return node if isinstance(node, dict) else {}
+
+
 def _safe_playcount(raw: Any) -> str:
     """Reads the playcount from either a dict or a scalar value."""
     if isinstance(raw, dict):
@@ -366,7 +385,7 @@ class SpotifyMetadataClient:
         }
         try:
             data = await asyncio.to_thread(self.web_client.query, payload)
-            album_union = data.get("data", {}).get("albumUnion", {})
+            album_union = _dig(data, "data", "albumUnion")
             return _join_artists(album_union.get("artists", {}))
         except Exception as e:
             logger.debug(f"[spotify] Failed to fetch album artists for {album_id}: {e}")
@@ -385,7 +404,7 @@ class SpotifyMetadataClient:
             },
         }
         data = await asyncio.to_thread(self.web_client.query, payload)
-        track_union = data.get("data", {}).get("trackUnion", {})
+        track_union = _dig(data, "data", "trackUnion")
 
         album_data = track_union.get("albumOfTrack", {})
         cover = self.web_client.extract_cover_url(album_data.get("coverArt", {}))
@@ -519,7 +538,7 @@ class SpotifyMetadataClient:
                 },
             }
             data = await asyncio.to_thread(self.web_client.query, payload)
-            au = data.get("data", {}).get("albumUnion", {})
+            au = _dig(data, "data", "albumUnion")
 
             # Save the album metadata only on the first pass
             if not album_union:
@@ -629,7 +648,7 @@ class SpotifyMetadataClient:
                 },
             }
             response = await asyncio.to_thread(self.web_client.query, payload)
-            playlist_v2 = response.get("data", {}).get("playlistV2", {})
+            playlist_v2 = _dig(response, "data", "playlistV2")
 
             if playlist_name == "Unknown Playlist" and playlist_v2:
                 playlist_name = playlist_v2.get("name", "Unknown Playlist")
@@ -754,7 +773,7 @@ class SpotifyMetadataClient:
                 self.web_client.query,
                 self._search_payload(query, limit),
             )
-            search_v2 = data.get("data", {}).get("searchV2", {})
+            search_v2 = _dig(data, "data", "searchV2")
         except Exception as e:
             logger.debug(f"[spotify] Search error: {e}")
             return {"tracks": [], "albums": [], "artists": [], "playlists": []}

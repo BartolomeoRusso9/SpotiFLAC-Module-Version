@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 # Uses the relative import path matching spotfetch.py's actual location
+from SpotiFLAC.core.http import SAFE_ACCEPT_ENCODING
 from SpotiFLAC.core.spotify_totp import generate_spotify_totp
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,13 @@ class SpotifyWebClient:
     def __init__(self) -> None:
         # We use httpx.Client instead of requests.Session for instant connections
         limits = httpx.Limits(max_keepalive_connections=15, max_connections=30)
-        self._session = httpx.Client(limits=limits, timeout=15.0)
+        self._session = httpx.Client(
+            limits=limits,
+            timeout=15.0,
+            # See SAFE_ACCEPT_ENCODING: httpx 0.28.1 mis-decodes some
+            # multi-frame zstd bodies, so zstd is not advertised.
+            headers={"Accept-Encoding": SAFE_ACCEPT_ENCODING},
+        )
         self._session.headers.update(
             {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
@@ -153,7 +160,13 @@ class SpotifyWebClient:
             self.device_id = ""
             # Recreate session to clear cookies
             limits = httpx.Limits(max_keepalive_connections=15, max_connections=30)
-            self._session = httpx.Client(limits=limits, timeout=15.0)
+            self._session = httpx.Client(
+                limits=limits,
+                timeout=15.0,
+                # See SAFE_ACCEPT_ENCODING: httpx 0.28.1 mis-decodes some
+                # multi-frame zstd bodies, so zstd is not advertised.
+                headers={"Accept-Encoding": SAFE_ACCEPT_ENCODING},
+            )
             self._session.headers.update(
                 {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
@@ -430,7 +443,12 @@ class SpotifyWebClient:
             )
 
             # Direct extraction, Go-style
-            track_data = data.get("data", {}).get("trackUnion", {})
+            # `data` is present-but-null on a partial GraphQL failure, so
+            # the two-step .get() chain would raise AttributeError here.
+            envelope = data.get("data") if isinstance(data, dict) else None
+            track_data = (envelope or {}).get("trackUnion") or {}
+            if not isinstance(track_data, dict):
+                track_data = {}
             playcount = track_data.get("playcount", "")
 
             result = {

@@ -31,6 +31,12 @@
     }
 
     /* ── Light theme ── */
+    /* Declared for <html> as well as <body>: `html { background: var(--bg) }`
+       below resolves the tokens on the <html> element, so with the class only
+       on <body> the page's outermost background kept the light :root default
+       and showed through around the content in dark mode. Both elements carry
+       the theme class (see setThemeClass() in app.js). */
+    html.light-theme,
     body.light-theme {
       --bg:        #ffffff;
       --surface:   #ffffff;
@@ -53,6 +59,7 @@
     }
 
     /* ── Dark theme ── */
+    html.dark-theme,
     body.dark-theme {
       --bg:        #0a0a0a;
       --surface:   #1a1a1a;

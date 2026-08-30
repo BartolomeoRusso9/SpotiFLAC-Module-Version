@@ -106,11 +106,23 @@ class DedupMixin:
             )
 
             fingerprints = []
+            skipped = 0
             for f in files:
                 try:
                     fingerprints.append(compute_fingerprint(f))
                 except AudioFingerprintError as e:
-                    self.log(f"[dedup] skipped {f.name}: {e}", "warn")
+                    # Quiet: a scan over a large library can skip a lot of
+                    # files, and one toast each would bury the window. Each
+                    # is still named in the Logs view; the count below is
+                    # what the user is told up front.
+                    skipped += 1
+                    self.log(f"[dedup] skipped {f.name}: {e}", "warn-quiet")
+            if skipped:
+                self.log(
+                    f"[dedup] skipped {skipped} unreadable file(s) — "
+                    "see the Logs view for which.",
+                    "warn",
+                )
 
             groups = find_duplicate_groups(fingerprints, similarity_threshold=threshold)
             self._push(

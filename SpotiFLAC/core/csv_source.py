@@ -427,8 +427,14 @@ def read_text(
     field_index: dict[str, int] = {}
     if has_header:
         header = records[0]
-        for field, name in columns.items():
-            field_index[field] = header.index(name)
+        # `column`, not `name`: this used to bind the loop variable to the
+        # function's `name` parameter, so after a CSV *with* a header the
+        # document's path came out as whichever column matched last —
+        # "Duration (ms)" instead of "playlist.csv". That name is what the
+        # Logs line, the album card's title and the written playlist all
+        # show, so the mix-up was visible in three places.
+        for field, column in columns.items():
+            field_index[field] = header.index(column)
 
     rows: list[CsvRow] = []
     ignored: list[int] = []

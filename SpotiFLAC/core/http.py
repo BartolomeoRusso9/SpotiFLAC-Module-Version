@@ -110,6 +110,26 @@ install_log_redaction()
 logger = logging.getLogger(__name__)
 
 
+# httpx's default is "gzip, deflate, br, zstd" whenever the `zstandard`
+# package is importable. We drop zstd on purpose.
+#
+# httpx 0.28.1's ZStandardDecoder mishandles a multi-frame zstd body when a
+# frame ends exactly on a network chunk boundary: it only swaps in a fresh
+# decompressor while `unused_data` is non-empty, so a frame that ends with
+# the chunk leaves the exhausted decompressobj in place, and the next chunk
+# fails with `DecodingError: cannot use a decompressobj multiple times`.
+#
+# Whether that happens depends on how the body happens to be split across
+# packets, which is why it showed up as one random failure in a batch of
+# ~1800 metadata fetches rather than as a reproducible one. Not advertising
+# zstd means servers negotiate br/gzip instead and the broken path is
+# unreachable; the bodies here are small JSON documents, so the compression
+# difference is not worth the flakiness.
+#
+# Revisit when the pinned httpx carries the upstream fix.
+SAFE_ACCEPT_ENCODING = "gzip, deflate, br"
+
+
 _CONTENT_RANGE_RE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(?:\d+|\*)\s*$", re.IGNORECASE)
 
 
@@ -184,7 +204,12 @@ class NetworkManager:
                 # never switched on, so the h2 package was being installed and
                 # not used. Negotiated over ALPN, so servers that don't speak
                 # HTTP/2 transparently stay on 1.1.
-                client = httpx.AsyncClient(limits=limits, timeout=30.0, http2=True)
+                client = httpx.AsyncClient(
+                    limits=limits,
+                    timeout=30.0,
+                    http2=True,
+                    headers={"Accept-Encoding": SAFE_ACCEPT_ENCODING},
+                )
                 cls._async_clients[loop] = client
         return client
 

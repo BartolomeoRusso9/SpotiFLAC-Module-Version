@@ -141,6 +141,7 @@ ALLOWED_METHODS: set[str] = {
     "get_ffmpeg_status",
     "get_node_status",
     "save_settings",
+    "save_theme",
     "load_settings",
     "get_registries",
     "add_registry",

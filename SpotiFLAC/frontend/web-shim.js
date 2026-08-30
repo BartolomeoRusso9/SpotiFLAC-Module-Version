@@ -158,7 +158,7 @@
 
   const REMOTE_METHODS = [
     'get_version', 'get_latest_version', 'get_artist_images', 'get_ffmpeg_status', 'get_node_status',
-    'save_settings', 'load_settings', 'get_registries', 'add_registry', 'remove_registry',
+    'save_settings', 'save_theme', 'load_settings', 'get_registries', 'add_registry', 'remove_registry',
     'get_history', 'get_profiles', 'load_profile_data', 'cache_image', 'get_spotify_home_feed',
     'search_provider', 'search_provider_async', 'remove_history_item',
     'get_network_status', 'save_profile_data', 'delete_profile_data', 'check_qobuz_api',
@@ -312,6 +312,7 @@
     'app_set_metadata',
     'app_set_progress',
     'app_update_download_stats',
+    'app_update_playcounts',
     'loadHistoryAndProfiles',
     'showFfmpegWarning',
     'showTracklist',

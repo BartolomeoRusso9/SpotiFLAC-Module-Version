@@ -17,23 +17,44 @@
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css?v=20260817">
+  <script>
+    // Theme, applied before the first paint. app.js used to do this only from
+    // its 'pywebviewready' handler, which meant the window painted light and
+    // then flipped — and in --web mode that event never fires until you are
+    // signed in, so the login screen, and any session that failed to sign in,
+    // stayed light no matter what was chosen.
+    //
+    // This lives in <head>, not at the top of <body>: it needs to run before
+    // anything is painted, and at that point document.body does not exist
+    // yet, which is why the class goes on documentElement. app.js's
+    // setThemeClass() then keeps <html> and <body> carrying the same class —
+    // <html> so that `html { background: var(--bg) }` picks up the dark
+    // tokens, <body> for the many `body.dark-theme ...` component rules.
+    //
+    // The choice is stored twice: 'spotiflac-theme-mode' here (per-origin,
+    // readable this early) and gui-settings.json server-side (survives a
+    // restart even when the web view's storage does not — see save_theme()
+    // in app.py). applyTheme() in app.js reconciles the two after load.
+    (function () {
+      var mode = 'auto';
+      try { mode = localStorage.getItem('spotiflac-theme-mode') || 'auto'; } catch (e) {}
+      var dark = mode === 'dark' ||
+        (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.classList.add(dark ? 'dark-theme' : 'light-theme');
+    })();
+  </script>
 </head>
 <body>
 <script>
-  // Theme, applied before the first paint. app.js used to do this only from
-  // its 'pywebviewready' handler, which meant the window painted light and
-  // then flipped — and in --web mode that event never fires until you are
-  // signed in, so the login screen, and any session that failed to sign in,
-  // stayed light no matter what was chosen. 'spotiflac-theme-mode' is the
-  // single source of truth for the choice; applyTheme() in app.js re-runs
-  // this same logic later and agrees with it.
-  (function () {
-    var mode = 'auto';
-    try { mode = localStorage.getItem('spotiflac-theme-mode') || 'auto'; } catch (e) {}
-    var dark = mode === 'dark' ||
-      (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    document.body.classList.add(dark ? 'dark-theme' : 'light-theme');
-  })();
+  // Mirror the class the <head> script just put on <html> onto <body>, still
+  // before anything paints. Most component rules are written as
+  // `body.dark-theme ...`, and the base `body { background: ... }` is a
+  // light-only gradient — so a body without the class would paint a light
+  // slab over the correctly-dark <html> for the frames between here and
+  // app.js's applyTheme().
+  document.body.classList.add(
+    document.documentElement.classList.contains('dark-theme') ? 'dark-theme' : 'light-theme'
+  );
 </script>
 
 <div id="titlebar">

@@ -160,22 +160,26 @@ function switchTab(name, btn) {
 }
 
 // ── Appearance ───────────────────────────────────────────────────────────────
+// The theme class goes on BOTH <html> and <body>. The tokens are declared on
+// :root and overridden per theme, and `html { background: var(--bg) }` reads
+// them from <html> — with the class only on <body>, <html> kept resolving
+// --bg to the light default, so the page's outermost background (what shows
+// through on overscroll and around the content) stayed light grey in dark
+// mode. Keeping both in sync also means the pre-paint script in index.html
+// and this function can't disagree about which element carries the state.
+function setThemeClass(dark) {
+  for (const el of [document.documentElement, document.body]) {
+    if (!el) continue;
+    el.classList.toggle('dark-theme', dark);
+    el.classList.toggle('light-theme', !dark);
+  }
+}
+
 function applyTheme(mode) {
-  if (mode === 'light') {
-    document.body.classList.remove('dark-theme');
-    document.body.classList.add('light-theme');
-  } else if (mode === 'dark') {
-    document.body.classList.remove('light-theme');
-    document.body.classList.add('dark-theme');
+  if (mode === 'light' || mode === 'dark') {
+    setThemeClass(mode === 'dark');
   } else {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    if (prefersDark) {
-      document.body.classList.remove('light-theme');
-      document.body.classList.add('dark-theme');
-    } else {
-      document.body.classList.remove('dark-theme');
-      document.body.classList.add('light-theme');
-    }
+    setThemeClass(window.matchMedia('(prefers-color-scheme: dark)').matches);
   }
 }
 
@@ -192,6 +196,15 @@ function changeTheme() {
     const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
     stored.theme = val;
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(stored));
+  } catch (e) {}
+  // …and into gui-settings.json, which is the copy that actually survives.
+  // Both localStorage writes above live in the web view's per-origin storage,
+  // and the desktop window has not historically kept that across launches
+  // (see run_gui() in app.py), so on its own the picker never stuck. This is
+  // a theme-only merge, so it cannot clobber unsaved edits elsewhere in the
+  // Settings form.
+  try {
+    window.pywebview?.api?.save_theme?.(val);
   } catch (e) {}
 }
 
@@ -249,9 +262,16 @@ function applySettings(settings = {}) {
   if ($('config-fallback')) $('config-fallback').checked = cfg.allow_fallback;
   // The dedicated key wins over the blob's copy: it is what the pre-paint
   // script in index.html already acted on, and a stale cfg.theme here would
-  // otherwise flip the UI back a moment after load.
+  // otherwise flip the UI back a moment after load. When the key is absent —
+  // the normal state in the desktop window, whose storage does not always
+  // survive a restart — cfg.theme (from gui-settings.json, written by
+  // save_theme()) is the surviving copy, so seed the key back from it and
+  // the *next* launch gets the right colour before the first paint.
   let themeMode = cfg.theme;
-  try { themeMode = localStorage.getItem('spotiflac-theme-mode') || cfg.theme; } catch (e) {}
+  try {
+    themeMode = localStorage.getItem('spotiflac-theme-mode') || cfg.theme;
+    localStorage.setItem('spotiflac-theme-mode', themeMode);
+  } catch (e) {}
   if ($('config-theme')) $('config-theme').value = themeMode;
   if ($('config-font')) $('config-font').value = cfg.font;
   changeFont();
@@ -882,12 +902,21 @@ const TRACKS_PER_PAGE = 50;
 
 // ── Logging & Python bridge ──────────────────────────────────────────────────
 function logMessage(msg, type = '') {
+  // A '-quiet' suffix means "colour this line like its base type, but never
+  // toast it". It exists for lists the user genuinely wants itemised in the
+  // panel — the unmatched rows of a CSV import, say — where itemising the
+  // notifications instead would mean hundreds of popups. The panel keeps
+  // every line, in its usual colour; a single summary toast is raised by the
+  // caller alongside the list.
+  const quiet = typeof type === 'string' && type.endsWith('-quiet');
+  const base = quiet ? type.slice(0, -'-quiet'.length) : type;
+
   // Write to the log UI panel
   const area = $('logArea');
   if (area) {
     const line = document.createElement('div');
     line.className = 'log-line';
-    line.innerHTML = `<span class="log-ts">${ts()}</span><span class="log-msg ${type}">${escHtml(msg)}</span>`;
+    line.innerHTML = `<span class="log-ts">${ts()}</span><span class="log-msg ${base}">${escHtml(msg)}</span>`;
     area.appendChild(line);
     area.scrollTop = area.scrollHeight;
   }
@@ -896,12 +925,12 @@ function logMessage(msg, type = '') {
   // 'debug' (and an absent type) stay in the panel above and never toast —
   // that is where startup diagnostics go, so a launch no longer greets the
   // user with a stack of notifications they did not ask for.
-  if (type === 'debug' || !type) return;
+  if (quiet || base === 'debug' || !base) return;
 
-  if (type === 'ok') toastMgr.success(msg);
-  else if (type === 'error') toastMgr.error(msg);
-  else if (type === 'warn') toastMgr.warning(msg);
-  else if (type === 'info') toastMgr.info(msg, { duration: 2500 });
+  if (base === 'ok') toastMgr.success(msg);
+  else if (base === 'error') toastMgr.error(msg);
+  else if (base === 'warn') toastMgr.warning(msg);
+  else if (base === 'info') toastMgr.info(msg, { duration: 2500 });
 }
 
 function clearLog() { $('logArea').innerHTML = ''; }
@@ -3043,16 +3072,20 @@ function setFetchingState(state, customMsg = null) {
     // If a toast is already open, close it before opening another
     if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
     
+    // Plain text, not markup: toastMgr escapes the message (see
+    // toast-system.js's escapeHtml), so the <div> that used to be passed
+    // here rendered as a literal tag in the corner of the window — which
+    // is what made a normal fetch look like a debug popup.
     currentFetchToastId = toastMgr.loading(
-      `<div class="ft-desc loading" style="font-size:12px; margin-top:2px; color:var(--text2);">please wait...</div>`, 
+      'please wait...',
       { title: title, position: 'bottom-left' } // Lo teniamo a sinistra come l'originale
     );
-  } 
+  }
   else if (state === 'success') {
     if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
-    toastMgr.success('success', { title: 'Completato', position: 'bottom-left', duration: 2500 });
+    toastMgr.success('Tracklist loaded.', { title: 'Done', position: 'bottom-left', duration: 2500 });
     currentFetchToastId = null;
-  } 
+  }
   else if (state === 'error') {
     if (currentFetchToastId) toastMgr.dismiss(currentFetchToastId);
     const errorTitle = customMsg || 'error occurred';
@@ -4011,7 +4044,10 @@ function renderHomeSections(sections) {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.addEventListener('pywebviewready', async () => {
-  logMessage('Python backend connected.', 'debug');
+  // No "backend connected" line here: the backend logs its own as soon as it
+  // is ready (_on_loaded() in app.py, and webapp.py in --web mode), so
+  // announcing it from this side too printed the same event twice, in two
+  // different capitalisations.
   loadHistoryAndProfiles();
   checkAuthStatus();
 
@@ -4150,6 +4186,32 @@ window.showNodeWarning = function(result) {
 // Sets the two version-label DOM elements. Called from Python via the
 // generic _push() bridge (desktop: evaluate_js, web: WebSocket dispatch) —
 // see SpotiFLAC/app.py's _push() and frontend/web-shim.js.
+// Playcounts that arrived after the table was drawn — a CSV import shows its
+// tracklist immediately and fills this column in behind it (see
+// _start_csv_playcounts() in api_mixins/csv_import.py), because an arbitrary
+// list of tracks costs one Spotify lookup each and there is no album-wide
+// query to read them all from at once. Patches the cells in place rather than
+// re-rendering, so the user's checkboxes, scroll position and page stay put.
+window.app_update_playcounts = function (byId) {
+  if (!byId || typeof byId !== 'object') return;
+  let patched = 0;
+  currentTracks.forEach((t, i) => {
+    const count = byId[t.id];
+    if (!count) return;
+    t.playcount = count;
+    patched++;
+    // Only the rows on the current page exist in the DOM; the rest pick the
+    // value up from currentTracks the next time they are rendered.
+    const cb = document.querySelector(`.track-cb[value="${i}"]`);
+    const cell = cb && cb.closest('.track-row')?.querySelector('.tr-playcount');
+    // A playlist view puts the album name in this column instead — leave it be.
+    if (cell && cell.textContent.trim() === '—') {
+      cell.textContent = String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+  });
+  if (patched) logMessage(`Playcount filled in for ${patched} track(s).`, 'debug');
+};
+
 window.__set_version_label = function (version) {
   const tb = document.getElementById('tb-version');
   if (tb) tb.innerText = version;

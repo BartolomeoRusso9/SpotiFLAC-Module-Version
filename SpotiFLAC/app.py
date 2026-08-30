@@ -61,15 +61,33 @@ def _post_command_allowed() -> bool:
 
 
 class UILogHandler(logging.Handler):
+    """Mirrors the `SpotiFLAC` logger into the GUI's Logs panel.
+
+    Every record still reaches the panel; what changes with the level is
+    whether it also raises a toast. INFO used to map to "info", which
+    toasts — so a single album download popped one notification per
+    library log line ("[SpotiFLAC.core.spotify_metadata] [DEBUG] URL
+    type: ...", "[ExtMgr] 'x' already up-to-date", one per merged
+    segment, ...) and buried the screen in what read as debug spam.
+    These are diagnostics, not things the user asked to be interrupted
+    by, so INFO and DEBUG now map to "debug": panel-only. Only WARNING
+    and above, which the user does need to see without opening the
+    panel, still toast.
+    """
+
     def __init__(self, api) -> None:
         super().__init__()
         self.api = api
 
     def emit(self, record) -> None:
         try:
-            level = record.levelname
             msg = self.format(record)
-            ltype = "error" if level == "ERROR" else ("info" if level == "INFO" else "")
+            if record.levelno >= logging.ERROR:
+                ltype = "error"
+            elif record.levelno >= logging.WARNING:
+                ltype = "warn"
+            else:
+                ltype = "debug"
             self.api.log(msg, ltype)
         except Exception:
             pass
@@ -296,8 +314,20 @@ class SpotiFLAC_API(
 
         `type` selects both the colour in the Logs view and whether a toast
         pops: "ok"/"info"/"warn"/"error" toast, "debug" (and the empty
-        default) are log-only. Use "debug" for anything routine enough that
-        the user would not miss it.
+        default) are log-only.
+
+        The bar for a toast is "the user would be worse off for missing
+        this", not "something happened". In practice that means outcomes
+        and summaries, not narration: "Downloading X…" followed by "X
+        saved" is two popups for one event, and a per-item line inside a
+        loop is one popup per track. Both belong at "debug" — they are
+        still in the Logs view, one click away, and the closing summary
+        carries the counts.
+
+        For a list the user does want itemised in the panel — the unmatched
+        rows of a CSV import, say — append "-quiet" to the type
+        ("error-quiet", "warn-quiet"): the line keeps its colour there and
+        raises no toast, leaving one summary toast to stand for the list.
         """
         try:
             self._push("app_log", str(message), type)
@@ -399,6 +429,31 @@ class SpotiFLAC_API(
         except Exception as e:
             self.log(f"Failed to save settings: {e}", "error")
 
+    def save_theme(self, mode: str) -> dict:
+        """Persists just the colour mode, without touching anything else.
+
+        The theme picker applies immediately, but the rest of the Settings
+        form only reaches disk when the user presses Save. Routing the theme
+        through save_settings() would therefore either write half-edited
+        settings or lose the theme, which is why it gets its own merge here.
+
+        This is also what makes the choice survive a restart at all: the
+        desktop window's localStorage is per-origin and has historically not
+        been stable across launches (see run_gui()), so gui-settings.json is
+        the copy that can be relied on.
+        """
+        mode = str(mode or "auto")
+        if mode not in ("auto", "light", "dark"):
+            return {"ok": False, "error": f"unknown theme mode: {mode}"}
+        try:
+            cfg = self.load_settings() or {}
+            cfg["theme"] = mode
+            self.save_settings(cfg)
+            return {"ok": True, "theme": mode}
+        except Exception as e:
+            self.log(f"Failed to save theme: {e}", "error")
+            return {"ok": False, "error": str(e)}
+
     def load_settings(self) -> dict:
         try:
             settings_file = Path.home() / ".cache" / "spotiflac" / "gui-settings.json"
@@ -427,7 +482,7 @@ class SpotiFLAC_API(
             from .extensions import registry_config
 
             registries = registry_config.add_registry(url)
-            self.log(f"Registry added: {url}", "info")
+            self.log(f"Registry added: {url}", "debug")
             return {"ok": True, "registries": registries}
         except Exception as e:
             self.log(f"Failed to add registry: {e}", "error")
@@ -438,7 +493,7 @@ class SpotiFLAC_API(
             from .extensions import registry_config
 
             registries = registry_config.remove_registry(url)
-            self.log(f"Registry removed: {url}", "info")
+            self.log(f"Registry removed: {url}", "debug")
             return {"ok": True, "registries": registries}
         except Exception as e:
             self.log(f"Failed to remove registry: {e}", "error")
@@ -1025,7 +1080,7 @@ class SpotiFLAC_API(
     async def _fetch_metadata_task(self, url) -> None:
         try:
             self.set_progress("Retrieving metadata…")
-            self.log(f"Analyzing input: {url}", "info")
+            self.log(f"Analyzing input: {url}", "debug")
 
             # ── Detection: is it a URL or a search query? ──────────────────
             stripped = url.strip()
@@ -1111,11 +1166,11 @@ class SpotiFLAC_API(
                         )
 
                         if playlist_match:
-                            self.log("Attempting to fetch playcount…", "info")
+                            self.log("Attempting to fetch playcount…", "debug")
                             playlist_id = playlist_match.group(1)
                             playcount_map = sp_client.get_playlist_stats(playlist_id)
                         elif track_match and len(tracks) == 1 and not is_artist:
-                            self.log("Attempting to fetch playcount…", "info")
+                            self.log("Attempting to fetch playcount…", "debug")
                             track_id = track_match.group(1)
                             stats = sp_client.get_track_stats(track_id)
                             if stats.get("playcount"):
@@ -1123,7 +1178,7 @@ class SpotiFLAC_API(
                         elif album_match:
                             self.log(
                                 "Attempting to fetch playcount for album (fast mode)…",
-                                "info",
+                                "debug",
                             )
                             album_id = album_match.group(1)
                             playcount_map = sp_client.get_album_stats(album_id)
@@ -1134,7 +1189,7 @@ class SpotiFLAC_API(
                     except Exception as auth_err:
                         self.log(
                             f"Playcount unavailable: {type(auth_err).__name__}",
-                            "info",
+                            "debug",
                         )
 
                 except Exception:
@@ -1369,9 +1424,10 @@ class SpotiFLAC_API(
                 selected_indices
             ) == len(self.current_tracks):
                 urls_to_download = [collection_url]
-                self.log("Downloading entire album/playlist…", "info")
+                self.log("Downloading entire album/playlist…", "debug")
             else:
                 urls_to_download = []
+                unresolved: list[str] = []
                 for i in selected_indices:
                     t = self.current_tracks[i]
                     t_url = getattr(t, "external_url", None) or getattr(t, "url", None)
@@ -1386,10 +1442,21 @@ class SpotiFLAC_API(
                     if t_url:
                         urls_to_download.append(t_url)
                     else:
+                        # Quiet: a tracklist that carries no links at all —
+                        # a CSV of bare titles, say — hits this for every
+                        # selected row, and one toast per row would be a
+                        # wall of them. Counted into one toast below.
+                        unresolved.append(t.title)
                         self.log(
                             f"Could not resolve URL for '{t.title}'. Skipping.",
-                            "error",
+                            "error-quiet",
                         )
+                if unresolved:
+                    self.log(
+                        f"Skipped {len(unresolved)} track(s) with no resolvable "
+                        "link — see the Logs view for which.",
+                        "warn",
+                    )
 
             if not urls_to_download:
                 self.log("No valid URLs to download.", "error")
@@ -1400,7 +1467,7 @@ class SpotiFLAC_API(
                     f"Transcoding enabled — tracks will be saved as "
                     f"{transcode_to.upper()} {transcode_bitrate}"
                     + ("" if transcode_keep_original else " (originals removed)"),
-                    "info",
+                    "debug",
                 )
 
             self.set_progress(f"Downloading ({quality})…")
@@ -1515,7 +1582,7 @@ class SpotiFLAC_API(
         try:
             from .core.health_check import run_health_check
 
-            self.log(f"Health check started for: {', '.join(services)}", "info")
+            self.log(f"Health check started for: {', '.join(services)}", "debug")
             results = run_sync(run_health_check(services))
             data = [
                 {
@@ -1541,6 +1608,31 @@ class SpotiFLAC_API(
             self.log("health_check module not found.", "error")
         except Exception as e:
             self.log(f"Health check error: {e!s}", "error")
+
+
+#: Port the desktop window's bundled HTTP server prefers, so the page keeps
+#: one origin (and therefore one localStorage) across launches. See the
+#: comment at webview.start() below for why that matters.
+GUI_HTTP_PORT = 47251
+
+
+def _pick_gui_port() -> int | None:
+    """`GUI_HTTP_PORT` when it is free, otherwise None (pick any port).
+
+    Falling back rather than failing is deliberate: a busy port costs a
+    stable origin — the window flashes light for a frame before app.js
+    applies the stored theme — while refusing to start costs the whole
+    application. The theme itself survives either way, because it is
+    stored server-side in gui-settings.json.
+    """
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", GUI_HTTP_PORT))
+    except OSError:
+        return None
+    return GUI_HTTP_PORT
 
 
 def run_gui() -> None:
@@ -1613,7 +1705,37 @@ def run_gui() -> None:
     api.set_window(window)
     window.events.loaded += api._on_loaded
 
-    webview.start(http_server=True)
+    # Two defaults conspired to make the theme picker look broken in the
+    # desktop window, both of them about *where* the page's localStorage
+    # lives:
+    #
+    #   private_mode=True (pywebview's default) throws the web view's
+    #   storage away when the process exits, so 'spotiflac-theme-mode' was
+    #   never there on the next launch.
+    #
+    #   http_server=True with no port serves index.html from a *random*
+    #   free port, and http://127.0.0.1:51234 and http://127.0.0.1:51235 are
+    #   different origins with different localStorage. So even within a
+    #   single session's lifetime the storage was thrown away again on the
+    #   next launch, private mode or not.
+    #
+    # The result was that picking Dark applied instantly and then came back
+    # light on every restart. A fixed port plus a real storage directory
+    # gives the page one stable origin whose contents survive, which is what
+    # the pre-paint script in index.html reads. The theme no longer depends
+    # on it either (save_theme() writes it to gui-settings.json — see
+    # changeTheme() in frontend/app.js), but a stable origin is what keeps
+    # the window from painting light for a frame first.
+    storage_path = str(Path.home() / ".cache" / "spotiflac" / "webview")
+    with contextlib.suppress(Exception):
+        Path(storage_path).mkdir(parents=True, exist_ok=True)
+
+    webview.start(
+        http_server=True,
+        http_port=_pick_gui_port(),
+        private_mode=False,
+        storage_path=storage_path,
+    )
 
 
 if __name__ == "__main__":

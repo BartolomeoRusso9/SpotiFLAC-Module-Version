@@ -13,11 +13,58 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+// At most this many toasts may be on screen in one corner at a time. Beyond
+// it the oldest is dismissed to make room, so a burst can never grow past a
+// stack the user can actually read (or click past — a full-height column of
+// toasts covers the UI underneath it).
+const MAX_VISIBLE_TOASTS = 4;
+
 class ToastManager {
   constructor() {
     this.toastId = 0;
     // Check whether the user has disabled sounds
     this.soundEnabled = localStorage.getItem('spotiflac-sound-enabled') !== 'false';
+    // message+type -> { id, count, until } for the coalescing below.
+    this.recent = new Map();
+  }
+
+  // Repeats of the same message inside this window update the existing
+  // toast with an "xN" counter instead of stacking identical copies. A
+  // retry loop or a per-track log line that fires twenty times is one
+  // notification that counts up, not twenty notifications.
+  static DEDUPE_MS = 4000;
+
+  coalesce(message, opts) {
+    const key = `${opts.type}|${opts.title}|${message}`;
+    const now = Date.now();
+    // Drop entries that have expired, or whose toast is gone/on its way out
+    // — merging into a toast mid-exit-animation would bump a counter nobody
+    // gets to read.
+    for (const [k, entry] of this.recent) {
+      const el = document.getElementById(entry.id);
+      const leaving = el && (el.classList.contains('slideOutRight') || el.classList.contains('slideOutLeft'));
+      if (entry.until < now || !el || leaving) this.recent.delete(k);
+    }
+    const hit = this.recent.get(key);
+    if (!hit) return { key, id: null };
+
+    hit.count++;
+    hit.until = now + ToastManager.DEDUPE_MS;
+    const el = document.getElementById(hit.id);
+    const msgEl = el && el.querySelector('.toast-message');
+    if (msgEl) msgEl.textContent = `${message}  ×${hit.count}`;
+    return { key, id: hit.id };
+  }
+
+  trim(container) {
+    const toasts = Array.from(container.querySelectorAll('.toast'));
+    // Never evict a loading toast: it is tracking work still in flight and
+    // its owner dismisses it by id when that work ends.
+    const evictable = toasts.filter(t => !t.classList.contains('loading'));
+    const over = toasts.length - MAX_VISIBLE_TOASTS;
+    for (let i = 0; i < over && i < evictable.length; i++) {
+      this.dismiss(evictable[i].id);
+    }
   }
 
   getContainer(position) {
@@ -106,6 +153,17 @@ class ToastManager {
     };
 
     const container = this.getContainer(opts.position);
+
+    // A repeat of a message already on screen updates that toast instead of
+    // adding another one. Loading toasts are exempt: callers hold their id
+    // to update and dismiss them individually.
+    let dedupeKey = null;
+    if (opts.type !== 'loading') {
+      const merged = this.coalesce(message, opts);
+      if (merged.id) return merged.id;
+      dedupeKey = merged.key;
+    }
+
     this.toastId++;
     const id = `toast-${this.toastId}`;
 
@@ -142,6 +200,10 @@ class ToastManager {
     `;
 
     container.appendChild(toast);
+    if (dedupeKey) {
+      this.recent.set(dedupeKey, { id, count: 1, until: Date.now() + ToastManager.DEDUPE_MS });
+    }
+    this.trim(container);
 
     if (opts.sound && ['success', 'error', 'warning', 'info'].includes(opts.type)) {
       this.playSound(opts.type);

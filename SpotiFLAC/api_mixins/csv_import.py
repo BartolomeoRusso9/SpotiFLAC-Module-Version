@@ -123,7 +123,7 @@ class CsvImportMixin:
             )
             self.log(
                 f"{document.path}: {len(document.rows)} row(s). Matching them…",
-                "info",
+                "debug",
             )
             resolution = run_sync(
                 csv_source.resolve_rows(
@@ -147,8 +147,22 @@ class CsvImportMixin:
 
         for entry in resolution.unresolved:
             # Named individually rather than counted: the point of reporting
-            # a miss is that the user can go and fix that row.
-            self.log(f"No match for line {entry.row.line}: {entry.row.label}", "error")
+            # a miss is that the user can go and fix that row. But "listed
+            # individually" is a property of the Logs panel, not of the
+            # notification corner — at "error" this raised one popup per
+            # unmatched row, and a 1875-row CSV with a few hundred misses
+            # buried the window in them. "error-quiet" keeps each line, and
+            # keeps it red, while the toast is the single count below.
+            self.log(
+                f"No match for line {entry.row.line}: {entry.row.label}",
+                "error-quiet",
+            )
+        if resolution.unresolved:
+            self.log(
+                f"{len(resolution.unresolved)} row(s) could not be matched — "
+                "see the Logs view for which.",
+                "warn",
+            )
 
         if not resolution.urls:
             self.log("Nothing in that file could be matched.", "error")
@@ -207,6 +221,48 @@ class CsvImportMixin:
                 "unresolved": [entry.to_dict() for entry in resolution.unresolved],
             },
         )
+        self._start_csv_playcounts(tracks)
+
+    def _start_csv_playcounts(self, tracks: list) -> None:
+        """Fills the Playcount column in, after the table is already up.
+
+        A CSV is an arbitrary list of tracks, so there is no album or
+        playlist query to read every count from at once the way
+        fetch_metadata() does — it is one lookup per track. That is far too
+        slow to hold the tracklist behind, so the table is pushed first
+        (above) and the counts are patched into it as they arrive. Until
+        then the column reads "—", which is why it stayed empty for CSV
+        imports: nothing was ever asking for it.
+        """
+        track_ids = [
+            tid
+            for tid in (getattr(t, "id", "") for t in tracks)
+            if tid and len(tid) == 22  # a Spotify base62 id; other services have none
+        ]
+        if not track_ids:
+            return
+
+        def _work() -> None:
+            try:
+                from ..core.spotfetch import SpotifyWebClient
+
+                stats = self._fetch_track_playcounts(SpotifyWebClient(), track_ids)
+                if not stats:
+                    return
+                self._push_safe(
+                    "app_update_playcounts",
+                    {tid: s.get("playcount", "") for tid, s in stats.items()},
+                )
+                self.log(
+                    f"Playcount filled in for {len(stats)} of "
+                    f"{len(track_ids)} track(s).",
+                    "debug",
+                )
+            except Exception as e:
+                # Never fatal: the tracklist is already usable without it.
+                self.log(f"Playcount unavailable: {e}", "debug")
+
+        threading.Thread(target=_work, daemon=True).start()
 
     async def _csv_tracks_async(self, urls: list[str]) -> list:
         """Metadata for every resolved link, in file order.
