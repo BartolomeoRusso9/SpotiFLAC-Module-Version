@@ -66,6 +66,11 @@ class MatchCandidate:
     #: The candidate is a live take / remix / instrumental where the file is
     #: not (or vice versa), and no duration was available to confirm it.
     variant_unconfirmed: bool = False
+    #: Whether the file gave us an artist at all — a tag, or a filename the
+    #: guesser could split. Without one the score is the title agreement
+    #: alone, which for a file called "01.mp3" means searching for "01" and
+    #: scoring 100 against any track that happens to be titled "01".
+    artist_known: bool = True
 
     @property
     def is_safe(self) -> bool:
@@ -79,6 +84,7 @@ class MatchCandidate:
             self.confidence >= SAFE_MATCH_THRESHOLD
             and self.title_ratio >= SAFE_TITLE_RATIO
             and not self.variant_unconfirmed
+            and self.artist_known
         )
 
 
@@ -172,6 +178,7 @@ async def search_and_match(
                 variant_unconfirmed=(
                     not durations_known and variant_conflict(title, candidate_title)
                 ),
+                artist_known=bool(artist),
             )
         )
 
@@ -194,6 +201,7 @@ async def search_and_match(
                 how=candidates[0].how,
                 title_ratio=candidates[0].title_ratio,
                 variant_unconfirmed=candidates[0].variant_unconfirmed,
+                artist_known=candidates[0].artist_known,
             )
         except Exception as exc:
             logger.debug(
@@ -215,6 +223,7 @@ async def search_and_match(
                     confidence=ISRC_MATCH_CONFIDENCE,
                     how="isrc",
                     title_ratio=cand.title_ratio,
+                    artist_known=cand.artist_known,
                 )
                 candidates.insert(0, candidates.pop(i))
                 break

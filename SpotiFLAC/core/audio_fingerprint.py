@@ -67,6 +67,12 @@ class AudioFingerprint:
     path: Path
     duration_s: float
     raw: tuple[int, ...]  # decoded 32-bit Chromaprint fingerprint ints
+    #: The compressed, base64 form fpcalc actually emits. Kept because it is
+    #: what AcoustID's /v2/lookup wants as its `fingerprint` parameter (see
+    #: acoustid_lookup.py) — it used to be decoded and discarded, so
+    #: identifying a file meant running fpcalc a second time for a value the
+    #: first run had already produced.
+    compressed: str = ""
 
 
 def is_available() -> bool:
@@ -99,7 +105,14 @@ def compute_fingerprint(path: str | Path) -> AudioFingerprint:
         msg = f"Could not fingerprint {p.name}: {exc}"
         raise AudioFingerprintError(msg) from exc
 
-    return AudioFingerprint(path=p, duration_s=float(duration), raw=tuple(raw_ints))
+    return AudioFingerprint(
+        path=p,
+        duration_s=float(duration),
+        raw=tuple(raw_ints),
+        compressed=compressed.decode()
+        if isinstance(compressed, bytes)
+        else str(compressed),
+    )
 
 
 async def compute_fingerprint_async(path: str | Path) -> AudioFingerprint:

@@ -294,6 +294,7 @@ function applySettings(settings = {}) {
   if ($('config-post-cmd')) $('config-post-cmd').value = cfg.post_download_command;
   if ($('config-qobuz-local-api')) $('config-qobuz-local-api').value = cfg.qobuz_local_api_url || '';
   if ($('config-tidal-api')) $('config-tidal-api').value = cfg.tidal_custom_api || '';
+  if ($('config-acoustid-key')) $('config-acoustid-key').value = cfg.acoustid_api_key || '';
   if ($('config-loop')) $('config-loop').value = cfg.loop;
   if ($('config-loglevel')) $('config-loglevel').value = cfg.log_level;
   applyListState('services-list', cfg.services);
@@ -503,6 +504,7 @@ const DEFAULT_SETTINGS = {
   transcode_keep_original: false,
   qobuz_local_api_url: '',
   tidal_custom_api: '',
+  acoustid_api_key: '',
   loop: 0,
   log_level: 'INFO',
   services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
@@ -3216,6 +3218,7 @@ function buildConfig() {
     post_download_command:  $('config-post-cmd')?.value?.trim() || '',
     qobuz_local_api_url:    $('config-qobuz-local-api').value.trim() || null,
     tidal_custom_api:       $('config-tidal-api').value.trim()  || null,
+    acoustid_api_key:       $('config-acoustid-key')?.value.trim() || '',
     loop:                   parseInt($('config-loop').value) || null,
     log_level:              $('config-loglevel').value,
   };
@@ -4552,9 +4555,13 @@ function renderLocalTracks() {
             } else {
                 let why = 'Confidence score';
                 if (!isSafe && best.confidence >= 90) {
-                    why = best.variant_unconfirmed
-                        ? 'Looks like a different version (live/remix/instrumental) and there is no duration to confirm it — check before applying'
-                        : 'The titles do not agree closely enough to apply this unattended — check before applying';
+                    if (!best.artist_known) {
+                        why = 'This file has no artist — in tags or in its name — so only the title was compared. Check before applying';
+                    } else if (best.variant_unconfirmed) {
+                        why = 'Looks like a different version (live/remix/instrumental) and there is no duration to confirm it — check before applying';
+                    } else {
+                        why = 'The titles do not agree closely enough to apply this unattended — check before applying';
+                    }
                 }
                 scoreCol = `<span class="local-badge ${isSafe ? 'ok' : 'warn'}" title="${escHtml(why)}">${best.confidence}%</span>`;
             }

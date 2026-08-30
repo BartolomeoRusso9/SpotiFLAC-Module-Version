@@ -31,6 +31,7 @@ class LocalTaggingMixin:
                 "how": c.how,
                 "title_ratio": c.title_ratio,
                 "variant_unconfirmed": c.variant_unconfirmed,
+                "artist_known": c.artist_known,
                 # first_artist is a computed property on TrackMetadata, not a
                 # stored field — model_dump() only includes real fields, so
                 # it has to be added back in explicitly or the frontend
@@ -63,7 +64,15 @@ class LocalTaggingMixin:
         try:
             from ..core.local_processor import scan_and_match_async
 
-            entries = run_sync(scan_and_match_async(path))
+            # A user-supplied AcoustID key, when set, is used instead of the
+            # shared one for identifying files the tags could not resolve —
+            # see core/acoustid_lookup.py for why that matters.
+            try:
+                acoustid_key = str(self.load_settings().get("acoustid_api_key") or "")
+            except Exception:
+                acoustid_key = ""
+
+            entries = run_sync(scan_and_match_async(path, acoustid_key=acoustid_key))
             payload = [self._serialize_scan_entry(e) for e in entries]
             self._push("app_local_scan_results", {"path": path, "files": payload})
         except Exception as e:

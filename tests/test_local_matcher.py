@@ -58,6 +58,7 @@ def _candidate(
         variant_unconfirmed=(
             not durations_known and variant_conflict(local_title, cand_title)
         ),
+        artist_known=bool(local_artist),
     )
 
 
@@ -167,6 +168,37 @@ def test_isrc_match_is_identity_not_similarity() -> None:
         how="isrc",
         title_ratio=0.1,
     )
+    assert candidate.is_safe
+
+
+def test_title_only_match_is_never_auto_applied() -> None:
+    """A file with no tags and a useless name ("01.mp3") is guessed into
+    title="01", artist="" — and then a track that really is called "01"
+    scores a perfect title match with nothing to contradict it.
+
+    The old scorer was accidentally safe here: it compared the concatenated
+    " 01" against "Some Artist 01", which scored 20. Weighting the fields
+    separately removed that accident, so the guard has to be explicit.
+    """
+    for junk in ("01", "audio", "track01", "5f3a9c2b"):
+        candidate = _candidate(junk, "", junk, "Some Artist")
+        assert candidate.confidence == pytest.approx(100.0), (
+            "title-only agreement is expected to score full marks; the point "
+            "is that the score alone must not be what decides"
+        )
+        assert not candidate.artist_known
+        assert not candidate.is_safe, (
+            f"a file called {junk}.mp3 would have its tags overwritten with "
+            f"'Some Artist - {junk}' unattended"
+        )
+
+
+def test_a_guessed_artist_from_the_filename_still_counts() -> None:
+    """The guard is "no artist at all", not "no artist tag" — a file named
+    'Foo Fighters - Everlong.flac' has no tags but is perfectly identifiable.
+    """
+    candidate = _candidate("Everlong", "Foo Fighters", "Everlong", "Foo Fighters")
+    assert candidate.artist_known
     assert candidate.is_safe
 
 

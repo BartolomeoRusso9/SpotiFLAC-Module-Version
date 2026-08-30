@@ -25,7 +25,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .local_matcher import MatchCandidate, match_local_file
+from .isrc_utils import normalize_isrc
+from .local_matcher import (
+    MatchCandidate,
+    match_local_file,
+    search_and_match,
+)
 from .local_scanner import LocalFileInfo, scan_path
 from .tagger import EmbedOptions, embed_metadata_async
 
@@ -68,6 +73,7 @@ async def scan_and_match_async(
     *,
     recursive: bool = True,
     candidates_per_file: int = 5,
+    acoustid_key: str = "",
 ) -> list[LocalScanEntry]:
     """Phases 1+2 combined: scan every supported file under `path`, then
     search a match for each. Matching is done concurrently (search is I/O
@@ -109,7 +115,92 @@ async def scan_and_match_async(
             )
         return LocalScanEntry(info=info, candidates=candidates)
 
-    return list(await asyncio.gather(*(_match_one(i) for i in infos)))
+    entries = list(await asyncio.gather(*(_match_one(i) for i in infos)))
+    return await _identify_unresolved_async(
+        entries,
+        client=client,
+        candidates_per_file=candidates_per_file,
+        acoustid_key=acoustid_key,
+    )
+
+
+def _needs_identifying(entry: LocalScanEntry) -> bool:
+    """Whether the cheap path left this file without a usable answer.
+
+    Two cases, and they are the same case underneath: the tags were no good.
+    Either the search found nothing at all, or it found something the
+    matcher will not stand behind — which for a file with no artist to
+    compare is the normal outcome (see local_matcher.SAFE_TITLE_RATIO and
+    `artist_known`). Anything already resolved safely is left alone: it cost
+    nothing and a fingerprint could not improve on it.
+    """
+    if entry.info.error:
+        return False
+    if normalize_isrc(entry.info.old_isrc):
+        return False  # the file already names its own recording
+    return not entry.is_safe_match
+
+
+async def _identify_unresolved_async(
+    entries: list[LocalScanEntry],
+    *,
+    client,
+    candidates_per_file: int,
+    acoustid_key: str = "",
+) -> list[LocalScanEntry]:
+    """Second pass over the files text matching could not settle: identify
+    them by sound, then re-match on the ISRC that comes back.
+
+    Runs strictly on the leftovers. On a folder whose tags are in decent
+    shape this does nothing at all and costs one availability check.
+    """
+    from .acoustid_lookup import identify_isrc_async
+    from .acoustid_lookup import is_available as acoustid_available
+
+    pending = [i for i, e in enumerate(entries) if _needs_identifying(e)]
+    if not pending or not acoustid_available(acoustid_key):
+        return entries
+
+    logger.info(
+        "[local_processor] identifying %d unresolved file(s) by fingerprint",
+        len(pending),
+    )
+
+    # Serial on purpose. The lookup is rate-limited to 3/s globally anyway,
+    # so concurrency here would only queue up inside the limiter, and fpcalc
+    # is a subprocess per file.
+    for index in pending:
+        entry = entries[index]
+        try:
+            isrc = await identify_isrc_async(
+                entry.info.file_path, settings_key=acoustid_key
+            )
+        except Exception as exc:  # never abort a scan over one file
+            logger.debug(
+                "[local_processor] identification failed for %s: %s",
+                entry.info.file_path,
+                exc,
+            )
+            continue
+        if not isrc:
+            continue
+
+        # Search by the identified recording rather than by the file's own
+        # (wrong) tags, and hand the ISRC to the matcher so the hit is
+        # recognised as an identity match rather than scored as text.
+        candidates = await search_and_match(
+            entry.info.search_title or isrc,
+            entry.info.search_artist,
+            entry.info.old_album or None,
+            limit=candidates_per_file,
+            duration_ms=entry.info.old_duration_ms,
+            isrc=isrc,
+            client=client,
+        )
+        if candidates:
+            entries[index] = LocalScanEntry(info=entry.info, candidates=candidates)
+
+    return entries
 
 
 async def _with_musicbrainz_tags(
