@@ -420,6 +420,14 @@
     .mode-btn:hover { background: var(--surface3); }
     .mode-btn.active { background: var(--yellow); color: #000; border-color: var(--yellow-d); }
     .mode-btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; font-size: 14px; }
+    /* Fetch mode shows the chain, Search mode the magnifier. The button
+       already gets .active in search mode, so the swap needs no JS — and
+       because these are `stroke: currentColor` SVGs they invert with the
+       button when .mode-btn.active turns it yellow, which an emoji could
+       not do. */
+    .mode-btn-icon .icon-search,
+    .mode-btn.active .mode-btn-icon .icon-link { display: none; }
+    .mode-btn.active .mode-btn-icon .icon-search { display: block; }
     #searchModeText { display: none; }
 
     .url-wrap { 
@@ -1059,7 +1067,12 @@
     }
     #recent-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      /* auto-FILL, not auto-fit. auto-fit collapses the empty tracks and
+         lets the surviving ones absorb the freed space, so a single recent
+         fetch stretched across the full 820px row — and since .rc-cover is
+         aspect-ratio 1, that made the artwork ~780px tall. auto-fill keeps
+         the empty tracks, so one card is one card whatever the count. */
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
       justify-content: start;
       gap: 12px;
       width: 100%;
@@ -1068,6 +1081,21 @@
     .recent-card {
       width: 100%;
       max-width: none;
+    }
+    /* Recent *searches* share this grid but are one-line rows, not artwork
+       tiles — a 120px track would squeeze and truncate them — so the grid
+       drops to a single full-width column for them (see the .searches class
+       set by renderRecentSearches()). */
+    #recent-grid.searches {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .rc-search-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      flex-shrink: 0;
     }
 
     .recent-label {
@@ -2364,6 +2392,17 @@ body.dark-theme #fetchBtn,
 body.dark-theme .mode-btn.active {
   color: #17120a;
   box-shadow: 0 10px 24px rgba(245,197,66,0.16), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+
+/* `body.dark-theme .mode-btn` above is more specific than `.mode-btn.active`,
+   so in dark mode the active button kept the inactive grey fill while still
+   taking the near-black "on yellow" foreground from the rule above — the
+   search-mode icon came out almost invisible. This restores the fill that
+   colour is chosen for. It went unnoticed while the icon was an emoji,
+   because an emoji paints in its own colours and ignores `color`. */
+body.dark-theme .mode-btn.active {
+  background: var(--yellow);
+  border-color: var(--yellow-d);
 }
 
 body.dark-theme input,

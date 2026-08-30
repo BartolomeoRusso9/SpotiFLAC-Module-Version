@@ -126,8 +126,19 @@
       <div id="search-bar">
         <div class="search-container">
           <div class="mode-wrap">
+            <!-- Both icons ship in the markup and CSS shows the one matching
+                 the current mode, keyed off the .active class the toggle
+                 already carries (see .mode-btn.active in styles.css). That
+                 keeps the swap in one place: this used to be an emoji that
+                 two separate JS functions reassigned, which is why they could
+                 drift, and an emoji renders in the system's own colour and
+                 style rather than following the button like the CSV icon
+                 beside it does. -->
             <button id="searchModeToggle" type="button" class="mode-btn" onclick="toggleSearchMode()" title="Switch to Search Mode">
-              <span class="mode-btn-icon" id="searchModeIcon">🔗</span>
+              <span class="mode-btn-icon" id="searchModeIcon">
+                <svg class="icon-link" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                <svg class="icon-search" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+              </span>
               <span id="searchModeText">Fetch</span>
             </button>
             <input id="searchMode" type="hidden" value="link">

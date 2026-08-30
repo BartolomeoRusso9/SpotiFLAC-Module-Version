@@ -47,12 +47,12 @@ import csv
 import logging
 import re
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
 from .errors import ErrorKind, SpotiflacError
 from .isrc_utils import normalize_isrc
+from .text_match import fold, ratio, score_track_match, strip_noise
 
 logger = logging.getLogger(__name__)
 
@@ -74,22 +74,12 @@ DEFAULT_CONCURRENCY = 4
 #: track isn't in the first handful, the query was wrong, not too short.
 SEARCH_LIMIT = 8
 
-#: Beyond this a candidate of the same name is treated as a different
-#: recording (an edit, a live version, a full DJ mix) and penalised.
-DURATION_TOLERANCE_MS = 7000
-
 _SPOTIFY_ID_RE = re.compile(r"^[A-Za-z0-9]{22}$")
 _SPOTIFY_URI_RE = re.compile(
     r"^spotify:(track|album|playlist|artist):([A-Za-z0-9]{22})$"
 )
 _ISRC_LOOSE_RE = re.compile(r"^[A-Za-z]{2}[A-Za-z0-9]{3}\d{7}$")
-_NON_WORD_RE = re.compile(r"\W+", re.UNICODE)
 _HEADER_NOISE_RE = re.compile(r"[^a-z0-9]+")
-#: "(feat. X)", "[Remastered]", " - 2011 Remaster", " - Live at …"
-_TITLE_NOISE_RE = re.compile(
-    r"\s*[\(\[][^\)\]]*[\)\]]\s*$|\s+-\s+(?:[^-]*\b(?:remaster|remastered|live|mix|edit|version|mono|stereo|deluxe|bonus)\b.*)$",
-    re.IGNORECASE,
-)
 
 #: field → header aliases, most specific first. The order matters: a file
 #: with both "Artist Name(s)" and "Album Artist Name(s)" must map `artist` to
@@ -478,65 +468,28 @@ def read_text(
 # ---------------------------------------------------------------------------
 
 
-def _fold(value: str) -> str:
-    return _NON_WORD_RE.sub(" ", (value or "").casefold()).strip()
-
-
-def _strip_noise(value: str) -> str:
-    """Drops the decorations two catalogues disagree about.
-
-    "Everlong (Remastered)" and "Everlong" are the same recording as far as a
-    CSV row is concerned; comparing the stripped forms as well as the full
-    ones keeps that from costing a match.
-    """
-    return _TITLE_NOISE_RE.sub("", value or "").strip()
-
-
-def _ratio(left: str, right: str) -> float:
-    left_folded, right_folded = _fold(left), _fold(right)
-    if not left_folded or not right_folded:
-        return 0.0
-    if left_folded == right_folded:
-        return 1.0
-    plain = SequenceMatcher(None, left_folded, right_folded).ratio()
-    stripped = SequenceMatcher(
-        None, _fold(_strip_noise(left)), _fold(_strip_noise(right))
-    ).ratio()
-    return max(plain, stripped)
+# The scoring primitives moved to core/text_match.py so the local
+# auto-tagger scores a candidate the same way a CSV row does — it used to
+# carry its own, weaker version. Re-exported under the old private names
+# because they are used further down this module.
+_fold = fold
+_strip_noise = strip_noise
+_ratio = ratio
 
 
 def match_score(row: CsvRow, candidate: Any) -> float:
     """How well a search result answers a row, in 0…1.
 
-    Title carries the most weight, artist the rest; album and duration only
-    break ties, because an export that has them is not necessarily an export
-    that agrees with Spotify about them (a single vs. its album, a remaster's
-    running time). A duration that is out by more than
-    `DURATION_TOLERANCE_MS` is the one signal strong enough to actively push
-    a candidate down: same name, different recording.
+    Thin wrapper over text_match.score_track_match() — see there for how the
+    fields are weighted and why.
     """
-    title = _ratio(row.title, getattr(candidate, "title", ""))
-    artists = getattr(candidate, "artists", "") or ""
-    first_artist = getattr(candidate, "first_artist", "") or ""
-
-    if row.artist:
-        artist = max(_ratio(row.artist, artists), _ratio(row.artist, first_artist))
-        score = 0.6 * title + 0.4 * artist
-    else:
-        score = title
-
-    if row.album and getattr(candidate, "album", ""):
-        score = min(1.0, score + 0.05 * _ratio(row.album, candidate.album))
-
-    candidate_duration = int(getattr(candidate, "duration_ms", 0) or 0)
-    if row.duration_ms and candidate_duration:
-        delta = abs(row.duration_ms - candidate_duration)
-        if delta <= 3000:
-            score = min(1.0, score + 0.05)
-        elif delta > DURATION_TOLERANCE_MS:
-            score *= 0.7
-
-    return round(score, 4)
+    return score_track_match(
+        title=row.title,
+        artist=row.artist,
+        album=row.album,
+        duration_ms=row.duration_ms,
+        candidate=candidate,
+    )
 
 
 def best_match(row: CsvRow, candidates: Iterable[Any]) -> tuple[Any | None, float]:

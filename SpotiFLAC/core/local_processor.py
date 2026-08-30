@@ -34,6 +34,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Files matched in parallel. Each is a Spotify query, so this is a
+#: politeness limit rather than a throughput one.
+MATCH_CONCURRENCY = 4
+
 
 @dataclass
 class LocalScanEntry:
@@ -71,16 +75,38 @@ async def scan_and_match_async(
     """
     infos = await asyncio.to_thread(scan_path, path, recursive=recursive)
 
-    import os
+    # Every match is one Spotify query, so this is a politeness limit on a
+    # network resource — it used to be derived from os.cpu_count(), which
+    # measures the wrong thing entirely and left a 4-core machine at 4.
+    # Same value the CSV importer uses for the same reason.
+    semaphore = asyncio.Semaphore(MATCH_CONCURRENCY)
 
-    concurrency_limit = min(8, (os.cpu_count() or 4))
-    semaphore = asyncio.Semaphore(concurrency_limit)
+    # One client for the whole folder. Constructing a SpotifyMetadataClient
+    # bootstraps a Spotify session — ~640 ms — and this used to happen once
+    # per file inside match_local_file(), so scanning 500 files spent over
+    # five minutes doing nothing but re-authenticating.
+    client = None
+    if any(not i.error for i in infos):
+        try:
+            from .spotify_metadata import SpotifyMetadataClient
+
+            client = await asyncio.to_thread(SpotifyMetadataClient)
+        except Exception as exc:
+            # Not fatal: match_local_file() builds its own when passed None,
+            # which is merely the old, slower behaviour.
+            logger.warning(
+                "[local_processor] shared metadata client unavailable, "
+                "falling back to one per file: %s",
+                exc,
+            )
 
     async def _match_one(info: LocalFileInfo) -> LocalScanEntry:
         if info.error:
             return LocalScanEntry(info=info, candidates=[])
         async with semaphore:
-            candidates = await match_local_file(info, limit=candidates_per_file)
+            candidates = await match_local_file(
+                info, limit=candidates_per_file, client=client
+            )
         return LocalScanEntry(info=info, candidates=candidates)
 
     return list(await asyncio.gather(*(_match_one(i) for i in infos)))

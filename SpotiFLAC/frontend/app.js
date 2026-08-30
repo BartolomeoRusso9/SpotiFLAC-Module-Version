@@ -2235,6 +2235,9 @@ function renderRecentSearches() {
     const searches = JSON.parse(localStorage.getItem('recent_searches') || '[]');
     const grid = $('recent-grid');
     grid.innerHTML = '';
+    // These are text rows, so the grid drops to a single full-width column
+    // instead of the 120px artwork tracks the fetches use.
+    grid.classList.add('searches');
     const label = $('recent-wrap').querySelector('.recent-label');
     if (label) label.textContent = 'RECENT SEARCHES';
     
@@ -2245,7 +2248,9 @@ function renderRecentSearches() {
         card.style.display = 'flex';
         card.style.alignItems = 'center';
         card.style.gap = '10px';
-        card.innerHTML = `<span style="font-size:16px;">🔎</span><span class="rc-title" style="font-size:13px; color:var(--text);">${escHtml(q)}</span>`;
+        // Same stroke icon as the search-mode toggle, not an emoji: it sits
+        // in a themed card and has to take its colour from the theme.
+        card.innerHTML = `<span class="rc-search-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></span><span class="rc-title" style="font-size:13px; color:var(--text);">${escHtml(q)}</span>`;
         card.onclick = () => {
             $('urlInput').value = q;
             $('urlInput').dispatchEvent(new Event('input'));
@@ -2268,14 +2273,12 @@ function toggleSearchMode() {
     const toggle = $('searchModeToggle');
     const input = $('urlInput');
     const mode = $('searchMode');
-    const icon = $('searchModeIcon');
     const label = $('searchModeText');
     const fetchBtn = $('fetchBtn');
 
     if (mode.value === 'link') {
         mode.value = 'search';
         toggle.classList.add('active');
-        icon.textContent = '🔎';
         label.textContent = 'Search';
         toggle.title = 'Switch to Fetch Mode';
         
@@ -2289,7 +2292,6 @@ function toggleSearchMode() {
     } else {
         mode.value = 'link';
         toggle.classList.remove('active');
-        icon.textContent = '🔗';
         label.textContent = 'Fetch';
         toggle.title = 'Switch to Search Mode';
         
@@ -2308,7 +2310,6 @@ function updateSearchMode() {
   const mode = $('searchMode').value;
   const input = $('urlInput');
   const toggle = $('searchModeToggle');
-  const icon = $('searchModeIcon');
   const label = $('searchModeText');
   
   if (mode === 'search') {
@@ -2316,7 +2317,6 @@ function updateSearchMode() {
     clearTimeout(phTimeout);
     input.placeholder = 'Search Spotify with keywords, artist or track name…';
     toggle.classList.add('active');
-    icon.textContent = '🔎';
     label.textContent = 'Search';
     toggle.title = 'Switch to Fetch Mode';
     $('track-table-wrap')?.classList.add('hidden');
@@ -2325,7 +2325,6 @@ function updateSearchMode() {
   } else {
     // Link mode: reset and restart the animation
     toggle.classList.remove('active');
-    icon.textContent = '🔗';
     label.textContent = 'Fetch';
     toggle.title = 'Switch to Search Mode';
     
@@ -2623,6 +2622,8 @@ function normalizeHistoryUrl(url) {
 
 function renderRecent(hist) {
   const grid = $('recent-grid'); grid.innerHTML = '';
+  // Artwork tiles, not the one-line rows renderRecentSearches() builds.
+  grid.classList.remove('searches');
   if (!hist || !hist.length) {
     grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--muted);padding:10px 0;">No recent fetches yet.</div>';
     return;
@@ -4541,7 +4542,22 @@ function renderLocalTracks() {
                 </div>
             `;
 
-            scoreCol = `<span class="local-badge ${isSafe ? 'ok' : 'warn'}" title="Confidence Score">${best.confidence}%</span>`;
+            // An ISRC hit is an identity check, not a similarity score, so it
+            // says so instead of showing a meaningless 100%. A row that scored
+            // well but is held back — the title disagrees, or it looks like a
+            // live/remix version with no duration to confirm it — explains why
+            // it is not pre-ticked, rather than leaving the user to wonder.
+            if (best.how === 'isrc') {
+                scoreCol = `<span class="local-badge ok" title="Matched by ISRC — the file's own recording ID, not a guess">ISRC</span>`;
+            } else {
+                let why = 'Confidence score';
+                if (!isSafe && best.confidence >= 90) {
+                    why = best.variant_unconfirmed
+                        ? 'Looks like a different version (live/remix/instrumental) and there is no duration to confirm it — check before applying'
+                        : 'The titles do not agree closely enough to apply this unattended — check before applying';
+                }
+                scoreCol = `<span class="local-badge ${isSafe ? 'ok' : 'warn'}" title="${escHtml(why)}">${best.confidence}%</span>`;
+            }
             checkbox = `<input type="checkbox" class="local-cb" value="${i}" data-file-path="${escHtml(item.file_path)}" ${isSafe ? 'checked' : ''} onchange="updateLocalSelection()">`;
         } else if (item.error) {
             scoreCol = `<span class="local-badge err">Error</span>`;

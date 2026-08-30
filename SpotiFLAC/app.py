@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -32,6 +33,13 @@ DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC
 # Opt-in required before the GUI/web bridge may run post_download_action
 # ="command" (see _post_command_allowed / _download_task).
 POST_COMMAND_ENV = "SPOTIFLAC_ALLOW_POST_COMMAND"
+
+#: Playcount lookups run one request per track against Spotify's internal
+#: GraphQL API. These two together cap that at ~12 requests/second — roughly
+#: 2.5 minutes for a 1800-track CSV, in the background — instead of the ~32/s
+#: an unspaced pool of 8 produced. See _fetch_track_playcounts().
+PLAYCOUNT_WORKERS = 4
+PLAYCOUNT_MIN_INTERVAL_S = 0.08
 
 
 def _post_command_allowed() -> bool:
@@ -121,6 +129,10 @@ class SpotiFLAC_API(
 
     def __init__(self) -> None:
         self._window = None
+        # Set for as long as a download is running. Background work that is
+        # merely nice to have — the playcount column — waits on this rather
+        # than competing with the download for the same API and IP.
+        self._download_active = threading.Event()
         # Optional callable set by webapp.py in web mode: fn(event_name, args_list).
         # Desktop (pywebview) mode never sets this and is completely unaffected.
         self._ws_broadcast = None
@@ -397,16 +409,46 @@ class SpotiFLAC_API(
         sp_client,
         track_ids: list[str],
     ) -> dict[str, dict]:
-        """Retrieves playcount per track in parallel using get_track_stats."""
+        """Retrieves playcount per track in parallel using get_track_stats.
+
+        There is no bulk form of this query — an arbitrary list of tracks
+        costs one request each — so a large CSV means thousands of them, and
+        SpotifyWebClient.query() has no 429 handling of its own (only a 401
+        refresh). Two things keep that from turning into a burst against
+        Spotify's internal API:
+
+        - `PLAYCOUNT_MIN_INTERVAL_S` spaces request *starts* globally, no
+          matter how many workers are running, so throughput is a property
+          of this constant rather than of the pool size.
+        - a download in progress pauses the whole thing. Playcounts are a
+          column in a table; a download is what the user actually asked for,
+          and the two share an IP and an origin, so the column waits.
+        """
         stats_map: dict[str, dict] = {}
         unique_ids = [tid for tid in dict.fromkeys(track_ids) if tid]
         if not unique_ids:
             return stats_map
 
-        max_workers = min(8, len(unique_ids))
+        gate = threading.Lock()
+        next_start = [0.0]
+
+        def _fetch_one(track_id: str) -> dict:
+            # Yield entirely while a download is running.
+            while self._download_active.is_set():
+                time.sleep(0.5)
+            with gate:
+                now = time.monotonic()
+                wait = next_start[0] - now
+                if wait > 0:
+                    time.sleep(wait)
+                    now = time.monotonic()
+                next_start[0] = now + PLAYCOUNT_MIN_INTERVAL_S
+            return sp_client.get_track_stats(track_id)
+
+        max_workers = min(PLAYCOUNT_WORKERS, len(unique_ids))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_id = {
-                executor.submit(sp_client.get_track_stats, track_id): track_id
+                executor.submit(_fetch_one, track_id): track_id
                 for track_id in unique_ids
             }
             for future in as_completed(future_to_id):
@@ -1346,6 +1388,7 @@ class SpotiFLAC_API(
         ).start()
 
     def _download_task(self, selected_indices, config) -> None:
+        self._download_active.set()
         sf_logger = logging.getLogger("SpotiFLAC")
         handler = UILogHandler(self)
         handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
@@ -1545,6 +1588,7 @@ class SpotiFLAC_API(
             sf_logger.removeHandler(handler)
             if "console_handler" in locals():
                 sf_logger.removeHandler(console_handler)
+            self._download_active.clear()
 
     # ── Health Check ──────────────────────────────────────────────────────────
 

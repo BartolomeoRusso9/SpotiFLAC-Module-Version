@@ -81,6 +81,11 @@ class LocalFileInfo:
     old_year: str = ""
     old_genre: str = ""
     old_isrc: str = ""
+    #: Running time of the actual audio, read from the decoder rather than
+    #: from a tag. It is the strongest single signal for telling a matching
+    #: title apart from a different recording of it (a live take, an
+    #: extended mix), so the matcher weighs it — see text_match.
+    old_duration_ms: int = 0
     old_cover_base64: str = ""  # data URI, e.g. "data:image/jpeg;base64,..."
     guessed_title: str = ""
     guessed_artist: str = ""
@@ -144,6 +149,26 @@ def _guess_from_filename(path: Path) -> tuple[str, str]:
     return "", cleaned
 
 
+def _read_duration_ms(path: Path) -> int:
+    """Running time in milliseconds, or 0 if it cannot be determined.
+
+    Read through mutagen's format-sniffing `File()` rather than through
+    read_embedded_tags(), which dispatches per format and exposes tags only.
+    A duration this cheap to obtain is worth having: unlike every tag on the
+    file, it describes the audio itself, so it is the one thing a mistagged
+    file still tells the truth about.
+    """
+    try:
+        from mutagen import File as MutagenFile
+
+        audio = MutagenFile(str(path))
+        length = getattr(getattr(audio, "info", None), "length", 0) or 0
+        return int(round(float(length) * 1000))
+    except Exception as exc:
+        logger.debug("[local_scanner] no duration for %s: %s", path.name, exc)
+        return 0
+
+
 def _apply_embedded_tags(embedded: EmbeddedTags, info: LocalFileInfo) -> None:
     """Maps the canonical (uppercase, Vorbis-style) tag keys that
     tagger.read_embedded_tags() returns for *every* supported format onto
@@ -197,6 +222,8 @@ def scan_file(path: str | Path) -> LocalFileInfo:
     except Exception as exc:
         logger.warning("[local_scanner] failed to read %s: %s", p.name, exc)
         info.error = f"Could not read tags: {exc}"
+
+    info.old_duration_ms = _read_duration_ms(p)
 
     if not info.has_tags:
         artist, title = _guess_from_filename(p)

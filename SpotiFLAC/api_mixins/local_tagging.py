@@ -24,6 +24,13 @@ class LocalTaggingMixin:
             {
                 "confidence": c.confidence,
                 "is_safe": c.is_safe,
+                # "isrc" when the file's own ISRC identified the recording,
+                # "text" when it was scored on title/artist similarity. The
+                # UI labels the two differently: one is identity, the other
+                # is a guess, and the user deserves to know which.
+                "how": c.how,
+                "title_ratio": c.title_ratio,
+                "variant_unconfirmed": c.variant_unconfirmed,
                 # first_artist is a computed property on TrackMetadata, not a
                 # stored field — model_dump() only includes real fields, so
                 # it has to be added back in explicitly or the frontend
@@ -42,6 +49,8 @@ class LocalTaggingMixin:
             "old_album": info.old_album,
             "old_year": info.old_year,
             "old_genre": info.old_genre,
+            "old_isrc": info.old_isrc,
+            "old_duration_ms": info.old_duration_ms,
             "old_cover_base64": info.old_cover_base64,
             "has_tags": info.has_tags,
             "guessed_title": info.guessed_title,
