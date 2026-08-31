@@ -787,6 +787,26 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
             "lrclib",
         ],
     )
+    lyrics_grp.add_argument(
+        "--save-lrc",
+        action="store_true",
+        default=pd.get("save_lrc", False),
+        dest="save_lrc",
+        help=(
+            "also write the lyrics as an .lrc file next to the track, under "
+            "the audio file's own name"
+        ),
+    )
+    lyrics_grp.add_argument(
+        "--lrc-dir",
+        default=pd.get("lrc_library_dir") or None,
+        dest="lrc_library_dir",
+        metavar="DIR",
+        help=(
+            "also collect every lyric into DIR as 'Artist - Title.lrc', the "
+            "layout overlay players (LyricsX and the like) look lyrics up by"
+        ),
+    )
 
     # ── Metadata enrichment ─────────────────────────────────────────────────
     enrich_grp = parser.add_argument_group("Metadata Enrichment")
@@ -1272,6 +1292,8 @@ def _subscription_downloader(profile_defaults: dict, output_dir_override: str | 
             allow_fallback=pd.get("allow_fallback", True),
             embed_lyrics=pd.get("embed_lyrics", True),
             lyrics_providers=pd.get("lyrics_providers") or ["apple", "lrclib"],
+            save_lrc=pd.get("save_lrc", False),
+            lrc_library_dir=pd.get("lrc_library_dir") or None,
             enrich_metadata=pd.get("enrich_metadata", True),
             enrich_providers=pd.get("enrich_providers")
             or ["deezer", "apple", "qobuz", "tidal"],
@@ -1477,6 +1499,8 @@ async def _run_download_async(
     m3u_format: str = "m3u8",
     max_concurrent_downloads: int = 2,
     verify_hires: bool = False,
+    save_lrc: bool = False,
+    lrc_library_dir: str | None = None,
     resume: bool = True,
     post_download_hooks: list[str] | None = None,
     json_report: bool = False,
@@ -1576,6 +1600,8 @@ async def _run_download_async(
         transcode_keep_original=transcode_keep_original,
         max_concurrent_downloads=max(1, max_concurrent_downloads),
         verify_hires=verify_hires,
+        save_lrc=save_lrc,
+        lrc_library_dir=lrc_library_dir,
         resume=resume,
         post_download_hooks=hooks,
     )
@@ -2201,6 +2227,8 @@ async def amain() -> None:
                 allow_fallback=cfg.get("allow_fallback", True),
                 embed_lyrics=cfg["embed_lyrics"],
                 lyrics_providers=cfg["lyrics_providers"],
+                save_lrc=cfg.get("save_lrc", False),
+                lrc_library_dir=cfg.get("lrc_library_dir") or None,
                 enrich_metadata=cfg["enrich_metadata"],
                 enrich_providers=cfg["enrich_providers"],
                 qobuz_local_api_url=cfg.get("qobuz_local_api_url"),
@@ -2378,6 +2406,8 @@ async def amain() -> None:
             allow_fallback=args.allow_fallback,
             embed_lyrics=args.embed_lyrics,
             lyrics_providers=args.lyrics_providers,
+            save_lrc=args.save_lrc,
+            lrc_library_dir=args.lrc_library_dir,
             enrich_metadata=args.enrich,
             enrich_providers=args.enrich_providers,
             qobuz_local_api_url=qobuz_local_api_url,
@@ -2456,6 +2486,8 @@ async def amain() -> None:
                 "watch": args.watch,
                 "max_concurrent_downloads": args.max_concurrent,
                 "verify_hires": args.verify_hires,
+                "save_lrc": args.save_lrc,
+                "lrc_library_dir": args.lrc_library_dir,
             }
             await save_profile_async(args.save_profile, profile_cfg)
         except Exception:

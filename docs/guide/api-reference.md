@@ -35,7 +35,9 @@
 | `allow_fallback` | `bool` | `True` | For `HI_RES_LOSSLESS`, allows fallback to `LOSSLESS` when the higher-resolution tier is unavailable. It never downgrades lossless requests to compressed audio. |
 | `log_level` | `int` | `logging.WARNING` | Python logging level. |
 | `embed_lyrics` | `bool` | `True` | Whether to fetch and embed synchronized lyrics (LRC) into the audio file. |
-| `lyrics_providers` | `list` | `["spotify", "apple", "musixmatch", "lrclib", "amazon"]` | Priority order of lyrics providers to attempt. |
+| `lyrics_providers` | `list` | `["spotify", "apple", "musixmatch", "lrclib", "amazon"]` | Priority order of lyrics providers. All are queried at once; the answers are read back in this order, so the first entry that has lyrics wins. Put `apple` first for word-by-word timing. |
+| `save_lrc` | `bool` | `False` | Also write the lyrics as `<audio file's name>.lrc`, next to the track. |
+| `lrc_library_dir` | `str` | `None` | Also collect every lyric into this folder as `Artist - Title.lrc`, the layout overlay players (LyricsX and similar) look lyrics up by. |
 | `enrich_metadata` | `bool` | `True` | Enables multi-provider metadata enrichment (HD covers, BPM, labels, etc.). |
 | `enrich_providers` | `list` | `["deezer", "apple", "qobuz", "tidal"]` | Priority order of metadata providers to attempt. `soundcloud` is also accepted but isn't on by default. |
 | `qobuz_token` | `str` | `None` | Optional setting forwarded to the installed Qobuz extension, if it supports it. Has no built-in behavior of its own. |
@@ -174,6 +176,8 @@ SpotiFLAC(
 | `--log-level` | | `INFO` | Console log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` (aliases like `WARN` and numeric values are accepted). The default reports the milestones of a run — provider tried, ticket, audio fetch, transcode. Third-party libraries (httpx, httpcore, hpack, urllib3) are held at `WARNING` unless the level is `DEBUG`, so `INFO` stays readable. Overrides `--verbose`, which is a shorthand for `DEBUG`. A level stored in a profile ranks below `--verbose`. |
 | `--no-lyrics` | | `False` | Disable lyrics embedding (lyrics are embedded by default). |
 | `--lyrics-providers` | | `apple lrclib` | Lyrics provider priority order (CLI default; the Python API default is `spotify apple musixmatch lrclib amazon` when `lyrics_providers` is left unset). |
+| `--save-lrc` | | off | Also write the lyrics as an `.lrc` file next to the track, under the audio file's own name. |
+| `--lrc-dir` | `DIR` | — | Also collect every lyric into `DIR` as `Artist - Title.lrc`. |
 | `--no-enrich` | | `False` | Disable multi-provider metadata enrichment (enrichment is enabled by default). |
 | `--enrich-providers` | | `deezer apple qobuz tidal` | Metadata enrichment provider priority order. `soundcloud` is also accepted but isn't on by default. |
 | `--post-action` | | `none` | Action after all downloads finish: `none`, `open_folder`, `notify`, `command`. |

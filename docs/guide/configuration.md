@@ -67,6 +67,54 @@ spotiflac https://open.spotify.com/track/... ./out --service ext:tidal-web ext:q
 
 The health check runs in parallel with a configurable timeout (default: 5 s per endpoint) and never blocks your download if a check fails. In the GUI, the check reports provider-level availability and endpoint counts, without exposing individual raw endpoint URLs.
 
+### Lyrics Provider Order
+
+`lyrics_providers` (`--lyrics-providers`) is a **ranking**, not a set. Every provider on the list is queried at once — that is what keeps the lookup fast — but the answers are read back in the order you gave, and the first one that has lyrics wins.
+
+The order matters because the providers do not return the same thing. Apple returns *word-by-word* lyrics, timed per syllable:
+
+```
+[00:08.75]<00:08.75>Sento <00:09.05>un<00:09.22>ra-<00:09.41>ta- <00:09.90>ta
+```
+
+LRCLIB returns line-level lyrics. Put `apple` first and you get the first form wherever Apple has it, falling through to the rest where it does not — at no cost in speed, because by the time a first choice comes back empty the others have long since finished.
+
+Each provider's own answer is cached separately (7 days for a hit, 6 hours for a miss), so changing the order takes effect immediately rather than being masked by a cached result from a previous ordering.
+
+### Lyrics Files (`.lrc`)
+
+Lyrics are written into the audio file's tag by default. That is enough for tagging, and not enough for playback: **no major player renders word-by-word lyrics out of an embedded tag.** Apple Music in particular strips the inline timing from a local file and shows flat text, and the synced lyrics it scrolls for streamed tracks come from Apple's own servers, not from the file.
+
+The synced display comes from an `.lrc` file on disk, read by a player or an overlay app. Two switches, because two kinds of player disagree about where to look:
+
+| Option | Writes |
+| --- | --- |
+| `save_lrc` / `--save-lrc` | `<audio file's name>.lrc`, next to the track |
+| `lrc_library_dir` / `--lrc-dir DIR` | `DIR/Artist - Title.lrc`, one folder for everything |
+
+The first is the convention players pair a sidecar with its track by; the second is the `Artist - Title` layout overlay apps (LyricsX and similar) look lyrics up by — note it is the *reverse* of the default `{title} - {artist}` filename format, which is why it cannot simply reuse the audio file's name.
+
+```bash
+# Both layouts at once
+spotiflac https://open.spotify.com/playlist/... ./out \
+    --lyrics-providers apple lrclib \
+    --save-lrc --lrc-dir ~/Music/Lyrics
+```
+
+```python
+from SpotiFLAC import SpotiFLAC
+
+SpotiFLAC(
+    url="https://open.spotify.com/playlist/...",
+    output_dir="./out",
+    lyrics_providers=["apple", "lrclib"],
+    save_lrc=True,
+    lrc_library_dir="~/Music/Lyrics",
+)
+```
+
+Both are off by default. The lyrics are read back out of the finished file rather than fetched again, so there is no extra network request, it works with every provider, and the `.lrc` is by construction identical to what the track carries — including after transcoding, where the sidecar follows the converted file. A track with no lyrics produces no empty file, and a destination that cannot be written is logged as a warning rather than failing the download.
+
 ### Configuration Profiles
 
 Save and reuse complete download configurations without re-typing them every time.

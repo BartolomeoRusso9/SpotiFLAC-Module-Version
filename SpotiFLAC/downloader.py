@@ -40,7 +40,7 @@ from .core.errors import ErrorKind, SpotiflacError
 from .core.hooks import load_hooks, run_hooks
 from .core.http import AsyncHttpClient
 from .core.isrc_helper import IsrcHelper
-from .core.models import DownloadResult, TrackMetadata, build_filename
+from .core.models import DownloadResult, TrackMetadata, build_filename, sanitize
 from .core.playlist_sync import (
     PlaylistSource,
     SyncPlan,
@@ -155,6 +155,20 @@ class DownloadOptions:
     lyrics_providers: list[str] = field(
         default_factory=lambda: ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
     )
+
+    # Write the lyrics out as an .lrc file as well as into the tag. No player
+    # on macOS renders a *word-by-word* lyric out of an embedded tag — Apple
+    # Music strips the timing and shows flat text — so the synced display
+    # everyone actually wants comes from an overlay app (LyricsX and the like)
+    # reading a file on disk.
+    #
+    # `save_lrc` puts it next to the track under the audio file's own name,
+    # which is the convention players pair sidecars by. `lrc_library_dir`
+    # additionally collects every lyric into one folder as
+    # "Artist - Title.lrc", which is the convention the overlay apps look up
+    # by. The two answer different questions, so they are separate switches.
+    save_lrc: bool = False
+    lrc_library_dir: str | None = None
 
     enrich_metadata: bool = True
     # SoundCloud isn't checked by default — still selectable (GUI checklist,
@@ -548,6 +562,61 @@ async def _transcode_result_async(
 _IDENTITY_FIELDS = ("isrc", "title", "artists", "album", "duration_ms", "is_explicit")
 
 
+async def _write_lrc_sidecars_async(
+    result: DownloadResult,
+    metadata: TrackMetadata,
+    opts: DownloadOptions,
+) -> None:
+    """Write the track's lyrics out as .lrc file(s), if asked for.
+
+    Reads them back out of the finished file rather than fetching them
+    again: the tagger has already resolved the provider order and written
+    the result, so the tag is both the cheapest source and the one that is
+    guaranteed to match what the track actually carries. Runs after
+    transcoding and after any move, so the sidecar lands beside the file the
+    user ends up with.
+
+    Never raises. A missing lyric or an unwritable folder must not turn a
+    finished download into a failure.
+    """
+    if not (opts.save_lrc or opts.lrc_library_dir) or not result.file_path:
+        return
+
+    def _write() -> list[str]:
+        from .core.tagger import read_embedded_tags
+
+        audio = Path(result.file_path)
+        lyrics = (read_embedded_tags(audio, include_cover=False).lyrics or "").strip()
+        if not lyrics:
+            return []
+
+        written: list[str] = []
+        if opts.save_lrc:
+            beside = audio.with_suffix(".lrc")
+            beside.write_text(lyrics + "\n", encoding="utf-8")
+            written.append(str(beside))
+
+        if opts.lrc_library_dir:
+            # "Artist - Title", the order the overlay apps match on — the
+            # reverse of this project's default filename format, which is
+            # why this cannot simply reuse the audio file's stem.
+            artist = (
+                metadata.first_artist if opts.first_artist_only else metadata.artists
+            )
+            library = Path(opts.lrc_library_dir).expanduser()
+            library.mkdir(parents=True, exist_ok=True)
+            collected = library / f"{sanitize(artist)} - {sanitize(metadata.title)}.lrc"
+            collected.write_text(lyrics + "\n", encoding="utf-8")
+            written.append(str(collected))
+        return written
+
+    try:
+        for written in await asyncio.to_thread(_write):
+            logger.info("[lrc] wrote %s", written)
+    except Exception as exc:
+        logger.warning("[lrc] could not write sidecar for %s: %s", metadata.title, exc)
+
+
 def _restore_identity(metadata: TrackMetadata, requested: TrackMetadata) -> None:
     """Undo any change a provider made to what names the recording.
 
@@ -865,6 +934,8 @@ async def download_one_async(
                         target,
                         result.format or "flac",
                     )
+
+                await _write_lrc_sidecars_async(result, metadata, opts)
 
                 print_track_done(
                     result.provider or provider.name,

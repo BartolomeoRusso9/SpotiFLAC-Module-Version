@@ -40,6 +40,8 @@ class ProfileConfig(BaseModel):
     lyrics_providers: list[str] = Field(
         default_factory=lambda: ["apple", "lrclib"],
     )
+    save_lrc: bool = False
+    lrc_library_dir: str | None = None
     enrich_metadata: bool = True
     enrich_providers: list[str] = Field(
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"],

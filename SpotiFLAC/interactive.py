@@ -958,6 +958,13 @@ def _summary(cfg: dict) -> None:
             else "disabled"
         ),
     )
+    if cfg.get("save_lrc") or cfg.get("lrc_library_dir"):
+        lrc_where = []
+        if cfg.get("save_lrc"):
+            lrc_where.append("next to each track")
+        if cfg.get("lrc_library_dir"):
+            lrc_where.append(str(cfg["lrc_library_dir"]))
+        row(".lrc files", " · ".join(lrc_where))
     row(
         "Enrichment",
         (
@@ -1145,6 +1152,8 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
         cfg.setdefault("first_artist_only", False)
         cfg.setdefault("embed_lyrics", True)
         cfg.setdefault("lyrics_providers", ["apple", "lrclib"])
+        cfg.setdefault("save_lrc", False)
+        cfg.setdefault("lrc_library_dir", None)
         cfg.setdefault("enrich_metadata", True)
         cfg.setdefault("enrich_providers", ["deezer", "apple"])
         cfg.setdefault("allow_fallback", True)
@@ -1551,7 +1560,23 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
             defaults=cfg.get("lyrics_providers") or ["apple", "lrclib"],
             ordered=True,
         )
+
+        # No player renders a word-by-word lyric out of an embedded tag —
+        # Apple Music strips the timing and shows flat text — so the synced
+        # display comes from an .lrc on disk read by an overlay app.
+        cfg["save_lrc"] = _ask_bool(
+            "Also save an .lrc file next to each track?",
+            cfg.get("save_lrc", False),
+        )
+        lrc_dir = _ask(
+            "Collect every .lrc in one folder as 'Artist - Title.lrc' "
+            "(for LyricsX & co., leave blank to skip)",
+            cfg.get("lrc_library_dir") or "",
+        )
+        cfg["lrc_library_dir"] = lrc_dir or None
     else:
+        cfg["save_lrc"] = False
+        cfg["lrc_library_dir"] = None
         cfg["lyrics_providers"] = cfg.get("lyrics_providers") or [
             "apple",
             "lrclib",
@@ -1760,6 +1785,10 @@ def _print_cli_command(cfg: dict) -> None:
             "post_download_command",
         ):
             parts.extend(["--post-command", cfg["post_download_command"]])
+    if cfg.get("save_lrc"):
+        parts.append("--save-lrc")
+    if cfg.get("lrc_library_dir"):
+        parts.extend(["--lrc-dir", cfg["lrc_library_dir"]])
     if cfg.get("log_level") is not None:
         # Profiles store the numeric constant; print the name a user would
         # actually type, which --log-level accepts either way.
