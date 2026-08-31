@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1098,6 +1099,33 @@ async def _write_tags_async(
         raise SpotiflacError(ErrorKind.FILE_IO, f"Unsupported file type: {suffix}")
 
 
+def _tag_int(value: object, default: int = 0) -> int:
+    """A tag's numeric value, or `default` when it does not have one.
+
+    Track and disc numbers are text by the time they reach here, and text is
+    not always a number. MusicBrainz reports a vinyl track under the
+    designation printed on the sleeve — "B2" for side B, track 2 — and a tag
+    copied off another file can carry the "3/12" form. int() raises on both.
+
+    That mattered more than it sounds: in _embed_m4a() the conversion ran
+    *after* audio.delete(), so one "B2" from MusicBrainz raised, the caller
+    in core/transcode.py logged the failure and kept the conversion, and the
+    finished ALAC file was left with no tags whatsoever. Reported as
+    "Uuugly di Drake non va coi metadata"; the vinyl pressing of C,XOXO is
+    the release MusicBrainz picked for that ISRC.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return default
+    head = text.split("/", 1)[0].strip()
+    if head.lstrip("+-").isdigit():
+        return int(head)
+    # "B2" → 2, "A1" → 1: the digits of a printed designation are still the
+    # track's place on its side, which beats discarding the field.
+    digits = re.search(r"\d+", head)
+    return int(digits.group()) if digits else default
+
+
 def _embed_m4a(
     path: Path,
     tags: dict[str, str],
@@ -1108,13 +1136,16 @@ def _embed_m4a(
     """Writes tags to an M4A/AAC file via mutagen.mp4.MP4."""
     from mutagen.mp4 import MP4, MP4Cover
 
+    # Parsed before the delete, not after: whatever else changes here, the
+    # window in which this function can leave a file stripped of the tags it
+    # arrived with stays closed.
+    track_num = _tag_int(tags.get("TRACKNUMBER"))
+    track_total = _tag_int(tags.get("TRACKTOTAL"))
+    disc_num = _tag_int(tags.get("DISCNUMBER"), 1)
+    disc_total = _tag_int(tags.get("DISCTOTAL"), 1)
+
     audio = MP4(str(path))
     audio.delete()
-
-    track_num = int(tags.get("TRACKNUMBER", "0") or 0)
-    track_total = int(tags.get("TRACKTOTAL", "0") or 0)
-    disc_num = int(tags.get("DISCNUMBER", "1") or 1)
-    disc_total = int(tags.get("DISCTOTAL", "1") or 1)
 
     skip = {"TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL"}
 
@@ -1129,8 +1160,11 @@ def _embed_m4a(
             continue
         m4a_key = _M4A_MAP.get(key_up)
         if m4a_key == "tmpo":
+            # Strict on purpose, unlike the track and disc numbers above: a
+            # tempo is either a number or it is not, and guessing one out of
+            # surrounding text would write a BPM nobody measured.
             with contextlib.suppress(ValueError, TypeError):
-                audio[m4a_key] = [int(val)]
+                audio[m4a_key] = [int(str(val).strip())]
         elif m4a_key and m4a_key.startswith("----"):
             audio[m4a_key] = [str(val).encode("utf-8")]
         elif m4a_key:

@@ -543,16 +543,37 @@ async def _transcode_result_async(
     )
 
 
+#: The fields that say *which recording* this is, as opposed to the ones a
+#: provider is welcome to improve (cover art, label, release date).
+_IDENTITY_FIELDS = ("isrc", "title", "artists", "album", "duration_ms", "is_explicit")
+
+
+def _restore_identity(metadata: TrackMetadata, requested: TrackMetadata) -> None:
+    """Undo any change a provider made to what names the recording.
+
+    Providers write their findings onto the TrackMetadata they are handed,
+    and the same object goes to the next provider in the list — so one
+    provider's mistake becomes the next provider's brief. The tidal
+    extension resolves an ISRC through Qobuz and writes it back *before* it
+    finds out it has no API to download from; the karaoke ISRC it collected
+    for "Like Him" then travelled to qobuz, which matched it exactly and was
+    waved through.
+
+    Only fields the request actually had are put back. A provider that fills
+    in an ISRC nobody knew is doing the next one a favour, and that survives.
+    """
+    for name in _IDENTITY_FIELDS:
+        wanted = getattr(requested, name)
+        if wanted and getattr(metadata, name) != wanted:
+            setattr(metadata, name, wanted)
+
+
 def _restore_metadata(metadata: TrackMetadata, snapshot: TrackMetadata) -> None:
     """Put `metadata` back the way it was before a provider touched it.
 
-    Providers enrich the object they are handed — a better cover, the label,
-    the release date, and the ISRC of whatever their own search matched — and
-    the same object is then passed to the next provider in the list. When a
-    provider is rejected for having resolved the wrong recording, none of
-    what it wrote may be allowed to survive into that next attempt: its ISRC
-    in particular would make the rejection permanent, because the guard
-    compares against the ISRC the track carries.
+    The whole object, not just the identity fields: this runs when a
+    download has been rejected outright, so the cover, label and release
+    date the rejected provider supplied describe the wrong recording too.
     """
     for name in type(metadata).model_fields:
         setattr(metadata, name, getattr(snapshot, name))
@@ -625,6 +646,18 @@ async def download_one_async(
     errors: dict[str, str] = {}
     started_at = time.monotonic()
 
+    # What was asked for, before any provider gets to write its own findings
+    # onto the shared TrackMetadata. Taken once for the whole track, not once
+    # per provider: a provider that *fails* still leaves its mutations behind,
+    # so a per-provider snapshot records the previous provider's mistakes as
+    # if they were the request. That is not hypothetical — the tidal
+    # extension resolves an ISRC through Qobuz ("[tidal] ISRC from Qobuz
+    # (preferred)") and writes it back before discovering it has no API to
+    # download from; the karaoke ISRC it picked up for "Like Him" was then
+    # the thing the next provider, qobuz, was checked against. It matched,
+    # of course, and the karaoke take was accepted a second time.
+    requested = metadata.model_copy(deep=True)
+
     transcode_target = transcode_target_path(metadata, output_dir, opts, position)
     if transcode_target and transcoded_file_exists(transcode_target):
         print_track_skipped(
@@ -674,10 +707,6 @@ async def download_one_async(
             )
             cb = ProgressCallback(item_id=metadata.id, track_name=metadata.title)
             provider.set_progress_callback(cb)
-            # What was asked for, before this provider gets to write its own
-            # findings onto it. _reject_wrong_recording_async() compares the
-            # two afterwards, and restores this one when they disagree.
-            requested = metadata.model_copy(deep=True)
             # Per-provider, not per-track: `started_at` above covers the whole
             # track including every provider that failed before this one, and
             # attributing that to whichever provider happened to succeed last
@@ -853,6 +882,8 @@ async def download_one_async(
                 _schedule_hires_check(opts, result)
                 # Success already recorded above, at provider-settle time.
                 return result
+
+            _restore_identity(metadata, requested)
 
             errors[provider.name] = result.error or "unknown error"
             await _record_provider_outcome(

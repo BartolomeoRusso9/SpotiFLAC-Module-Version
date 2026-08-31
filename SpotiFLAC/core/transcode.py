@@ -518,9 +518,19 @@ async def transcode_file_async(
     try:
         await transfer_tags_async(src, tmp)
     except Exception as exc:
-        # ffmpeg already carried over the basic tags via -map_metadata:
-        # a partial tag set is not worth discarding the conversion.
-        logger.warning("[transcode] tag transfer failed for %s: %s", src.name, exc)
+        # The audio is good, so the conversion is kept — but say plainly what
+        # is lost. The writers clear the destination before they write, so a
+        # failure part-way through does not leave "the basic tags ffmpeg
+        # carried over via -map_metadata", as this comment used to claim: it
+        # leaves nothing. One non-numeric track number ("B2", from the vinyl
+        # pressing MusicBrainz picked) was enough to strip a finished ALAC
+        # file of every tag it had. See tagger._tag_int.
+        logger.warning(
+            "[transcode] tag transfer failed for %s — %s may have no tags: %s",
+            src.name,
+            dest.name,
+            exc,
+        )
 
     await asyncio.to_thread(os.replace, tmp, dest)
 

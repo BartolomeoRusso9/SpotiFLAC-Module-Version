@@ -116,6 +116,12 @@ _GENIUS_SEARCH = "https://genius.com/api/search/multi"
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0 Safari/537.36"
 _LYRICS_RESPONSE_CACHE_TTL = 7 * 24 * 60 * 60
 
+#: A provider that had nothing for a track is remembered too, but briefly.
+#: With the order authoritative, a first choice that keeps coming up empty
+#: would otherwise be asked again for every track of every run; a catalogue
+#: that gains the lyrics later still gets noticed the same day.
+_LYRICS_MISS_CACHE_TTL = 6 * 60 * 60
+
 
 # ---------------------------------------------------------------------------
 # Spotify anon token (sync helper, reused by async)
@@ -784,26 +790,30 @@ async def fetch_lyrics_async(
 
     if providers is None:
         providers = DEFAULT_LYRICS_PROVIDERS
-    cache_key = "|".join(
-        [
-            track_name,
-            artist_name,
-            album_name,
-            str(duration_s),
-            track_id,
-            isrc,
-            ",".join(providers),
-        ],
+
+    # Cached per provider, not per lookup. The cache used to hold the
+    # finished *decision* — "these providers, for this track, gave you
+    # lrclib's text" — under a key that included the provider list. That
+    # made every change to how a provider is chosen invisible for a week:
+    # when the ordering fix below landed, 65 of one playlist's 66 tracks
+    # were answered out of the cache with the line-level lyrics the old
+    # first-past-the-post behaviour had picked the night before, and the
+    # fix looked like it had done nothing. Caching each provider's own
+    # answer instead spares exactly the same network calls and leaves the
+    # choosing to be done fresh every time.
+    track_key = "|".join(
+        [track_name, artist_name, album_name, str(duration_s), track_id, isrc],
     )
-    cached = get_cached_response("lyrics", cache_key, _LYRICS_RESPONSE_CACHE_TTL)
-    if isinstance(cached, list) and len(cached) == 2:
-        logger.debug(
-            "[lyrics] Using cached lyrics provider '%s' for %s - %s",
-            cached[1],
-            artist_name,
-            track_name,
-        )
-        return str(cached[0]), str(cached[1])
+
+    def _cached_for(provider_name: str) -> str | None:
+        key = f"{provider_name}|{track_key}"
+        recent = get_cached_response("lyrics-provider", key, _LYRICS_MISS_CACHE_TTL)
+        if isinstance(recent, str):
+            return recent
+        older = get_cached_response("lyrics-provider", key, _LYRICS_RESPONSE_CACHE_TTL)
+        # Past the short TTL only a hit still counts: a miss that old is
+        # worth re-asking about.
+        return older if isinstance(older, str) and older else None
 
     ctx = LyricsContext(
         track_name=track_name,
@@ -827,19 +837,23 @@ async def fetch_lyrics_async(
         if not fetcher:
             return "", ""
 
+        cached = _cached_for(provider_name)
+        if cached is not None:
+            return (cached, provider_name) if cached else ("", "")
+
         try:
             result = await asyncio.wait_for(
                 fetcher(ctx),
                 timeout=10,
             )
-
-            if result and result.strip():
-                return (
-                    result,
-                    provider_name,
-                )
+            text = result.strip() if result else ""
+            put_cached_response("lyrics-provider", f"{provider_name}|{track_key}", text)
+            if text:
+                return result, provider_name
 
         except Exception as exc:
+            # Not cached: a timeout or a network error says nothing about
+            # whether this provider has the lyrics.
             logger.debug(
                 "[lyrics/%s] %s",
                 provider_name,
@@ -882,7 +896,6 @@ async def fetch_lyrics_async(
                 artist_name,
                 track_name,
             )
-            put_cached_response("lyrics", cache_key, list(result))
             return result
 
         return "", ""

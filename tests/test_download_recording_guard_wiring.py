@@ -56,6 +56,19 @@ class _Provider:
         return DownloadResult.ok(self.name, str(path))
 
 
+class _FailsAfterResolving(_Provider):
+    """A provider that writes back the ISRC it found, then fails anyway.
+
+    Exactly what the tidal extension does: it resolves the ISRC through
+    Qobuz ("[tidal] ISRC from Qobuz (preferred)") and stores it on the
+    metadata before discovering it has no API configured to download from.
+    """
+
+    async def download_track_async(self, metadata, output_dir, **kwargs):
+        metadata.isrc = self._isrc
+        return DownloadResult.fail(self.name, "no Tidal APIs configured")
+
+
 @pytest.fixture
 def _no_network(monkeypatch):
     """Deezer's answer for the karaoke ISRC, without asking Deezer."""
@@ -122,3 +135,44 @@ def test_a_provider_that_agrees_is_left_alone(_no_network, tmp_path) -> None:
 
     assert result.success
     assert (tmp_path / "tidal.flac").exists()
+
+
+def test_a_failed_provider_does_not_redefine_the_request(_no_network, tmp_path) -> None:
+    """The second time the karaoke got through, and the reason it did.
+
+    tidal resolved the karaoke ISRC, wrote it onto the shared metadata and
+    failed. qobuz then resolved that same karaoke ISRC — and against a
+    request that now *said* karaoke, there was no drift left to notice. The
+    request has to survive a provider that delivered nothing.
+    """
+    track = _track()
+    providers = [
+        _FailsAfterResolving("tidal", KARAOKE_ISRC, tmp_path),
+        _Provider("qobuz", KARAOKE_ISRC, tmp_path),
+    ]
+
+    result = _run(providers, tmp_path, track)
+
+    assert not result.success
+    assert "Wrong recording" in (result.error or "")
+    assert not (tmp_path / "qobuz.flac").exists()
+    assert track.isrc == REQUESTED_ISRC
+
+
+def test_a_failed_provider_may_still_fill_in_a_blank(_no_network, tmp_path) -> None:
+    """Only what the request actually said is put back. Nobody knew this
+    track's ISRC, so the one tidal found is a gift to the next provider, not
+    a corruption of the brief.
+    """
+    track = _track()
+    track.isrc = ""
+    providers = [
+        _FailsAfterResolving("tidal", REQUESTED_ISRC, tmp_path),
+        _Provider("qobuz", REQUESTED_ISRC, tmp_path),
+    ]
+
+    result = _run(providers, tmp_path, track)
+
+    assert result.success
+    assert result.provider == "qobuz"
+    assert track.isrc == REQUESTED_ISRC
