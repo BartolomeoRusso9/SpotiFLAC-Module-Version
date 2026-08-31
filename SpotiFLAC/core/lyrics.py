@@ -23,6 +23,9 @@ class LyricsContext:
     duration_s: int
     spotify_id: str
     isrc: str
+    #: Apple times every syllable; when True its lyrics are emitted as
+    #: word-by-word enhanced LRC, when False as plain line-synced LRC.
+    apple_word_by_word: bool = True
 
     @property
     def clean_track(self) -> str:
@@ -282,14 +285,20 @@ async def _fetch_spotify_async(track_id: str, timeout: int = 7) -> str:
         return ""
 
 
-def _apple_payload_to_lrc(data: object) -> str:
-    """Apple's timed-lyrics payload as enhanced LRC.
+def _apple_payload_to_lrc(data: object, word_by_word: bool = True) -> str:
+    """Apple's timed-lyrics payload as LRC.
 
     Apple times every *syllable*, not every word, which is what makes a
-    word-by-word display possible — so each part becomes its own inline
-    `<mm:ss.xx>` tag after the line's own `[mm:ss.xx]`. A part flagged
-    `part: true` continues the syllable before it ("ex|pres|sions") and gets
-    no space, or the word would be rendered broken apart.
+    word-by-word display possible — so with ``word_by_word`` each part
+    becomes its own inline ``<mm:ss.xx>`` tag after the line's own
+    ``[mm:ss.xx]``. A part flagged ``part: true`` continues the syllable
+    before it ("ex|pres|sions") and gets no space, or the word would be
+    rendered broken apart.
+
+    With ``word_by_word`` False the per-syllable timings are dropped and the
+    line is emitted as plain line-synced LRC — one ``[mm:ss.xx]`` per line
+    followed by the whole line's text — for players/overlays that only
+    understand line-level sync or for users who prefer it.
     """
     content = data.get("content", []) if isinstance(data, dict) else data
     if not isinstance(content, list):
@@ -307,11 +316,14 @@ def _apple_payload_to_lrc(data: object) -> str:
             part_text = part.get("text", "")
             if not part_text:
                 continue
-            part_timestamp = int(part.get("timestamp", ts))
             separator = "" if part.get("part", False) else " "
-            word_parts.append(
-                f"{separator}{_format_lrc_timestamp(part_timestamp, '<')}{part_text}"
-            )
+            if word_by_word:
+                part_timestamp = int(part.get("timestamp", ts))
+                word_parts.append(
+                    f"{separator}{_format_lrc_timestamp(part_timestamp, '<')}{part_text}"
+                )
+            else:
+                word_parts.append(f"{separator}{part_text}")
         line_text = "".join(word_parts).strip()
         if line_text:
             lrc_lines.append(f"{_format_lrc_timestamp(ts)}{line_text}")
@@ -324,6 +336,7 @@ async def _fetch_apple_async(
     duration_s: int,
     isrc: str = "",
     timeout: int = 7,
+    word_by_word: bool = True,
 ) -> str:
     try:
         client = await NetworkManager.get_async_client_safe()
@@ -366,7 +379,7 @@ async def _fetch_apple_async(
         )
         if not r_lyr.is_success:
             return ""
-        return _apple_payload_to_lrc(r_lyr.json())
+        return _apple_payload_to_lrc(r_lyr.json(), word_by_word=word_by_word)
     except Exception as exc:
         logger.debug("[lyrics/apple] async: %s", exc)
         return ""
@@ -728,6 +741,7 @@ _PROVIDER_MAP = {
         ctx.clean_artist,
         ctx.duration_s,
         ctx.isrc,
+        word_by_word=ctx.apple_word_by_word,
     ),
     "musixmatch": lambda ctx: _fetch_musixmatch_async(
         ctx.clean_track,
@@ -786,6 +800,7 @@ async def fetch_lyrics_async(
     track_id: str = "",
     isrc: str = "",
     providers: list[str] | None = None,
+    apple_word_by_word: bool = True,
 ) -> tuple[str, str]:
 
     if providers is None:
@@ -805,8 +820,16 @@ async def fetch_lyrics_async(
         [track_name, artist_name, album_name, str(duration_s), track_id, isrc],
     )
 
+    # Apple's word-by-word and line-synced renderings are different text from
+    # the same fetch, so they cannot share a cache entry — but only Apple's
+    # key needs splitting; every other provider ignores the setting.
+    def _provider_track_key(provider_name: str) -> str:
+        if provider_name == "apple":
+            return f"{track_key}|{'wbw' if apple_word_by_word else 'line'}"
+        return track_key
+
     def _cached_for(provider_name: str) -> str | None:
-        key = f"{provider_name}|{track_key}"
+        key = f"{provider_name}|{_provider_track_key(provider_name)}"
         recent = get_cached_response("lyrics-provider", key, _LYRICS_MISS_CACHE_TTL)
         if isinstance(recent, str):
             return recent
@@ -824,6 +847,7 @@ async def fetch_lyrics_async(
             track_id if track_id and len(track_id) == 22 and "_" not in track_id else ""
         ),
         isrc=isrc,
+        apple_word_by_word=apple_word_by_word,
     )
 
     async def run_provider(
@@ -847,7 +871,11 @@ async def fetch_lyrics_async(
                 timeout=10,
             )
             text = result.strip() if result else ""
-            put_cached_response("lyrics-provider", f"{provider_name}|{track_key}", text)
+            put_cached_response(
+                "lyrics-provider",
+                f"{provider_name}|{_provider_track_key(provider_name)}",
+                text,
+            )
             if text:
                 return result, provider_name
 

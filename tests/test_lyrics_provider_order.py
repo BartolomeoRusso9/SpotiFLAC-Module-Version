@@ -153,6 +153,52 @@ def test_apple_syllables_become_inline_timestamps() -> None:
     )
 
 
+def test_apple_line_synced_drops_the_syllable_timings() -> None:
+    """With word_by_word off, the inline <mm:ss.xx> tags go away and the line
+    is emitted as plain line-synced LRC — `part: true` still joins without a
+    space.
+    """
+    payload = {
+        "content": [
+            {
+                "timestamp": 16570,
+                "text": [
+                    {"timestamp": 16570, "text": "She"},
+                    {"timestamp": 16890, "text": "said"},
+                    {"timestamp": 17720, "text": "make"},
+                    {"timestamp": 18040, "text": "ex", "part": True},
+                    {"timestamp": 18430, "text": "pres"},
+                ],
+            },
+        ],
+    }
+    line = L._apple_payload_to_lrc(payload, word_by_word=False)
+    assert line == "[00:16.57]She said makeex pres"
+
+
+def test_apple_word_by_word_setting_reaches_the_fetcher(monkeypatch, cache) -> None:
+    seen: dict[str, bool] = {}
+
+    async def fake_apple(_ctx):
+        seen["wbw"] = _ctx.apple_word_by_word
+        return APPLE_LRC
+
+    monkeypatch.setattr(L, "_PROVIDER_MAP", {"apple": fake_apple})
+
+    asyncio.run(
+        L.fetch_lyrics_async(
+            "Like Him",
+            "Tyler, The Creator",
+            duration_s=278,
+            providers=["apple"],
+            apple_word_by_word=False,
+        ),
+    )
+    assert seen["wbw"] is False
+    # cached under the line-synced key, not the default word-by-word one
+    assert cache[("lyrics-provider", "apple|Like Him|Tyler, The Creator||278|||line")]
+
+
 # --- what the cache is allowed to remember ----------------------------------
 #
 # It used to remember the finished decision, keyed on the provider list — so
@@ -163,7 +209,13 @@ def test_apple_syllables_become_inline_timestamps() -> None:
 
 
 def _key(provider: str) -> tuple[str, str]:
-    return ("lyrics-provider", f"{provider}|Like Him|Tyler, The Creator||278||")
+    # Apple's key carries the word-by-word / line-synced mode ("wbw" by
+    # default) — its two renderings can't share a cache entry.
+    suffix = "|wbw" if provider == "apple" else ""
+    return (
+        "lyrics-provider",
+        f"{provider}|Like Him|Tyler, The Creator||278||{suffix}",
+    )
 
 
 def test_each_provider_is_cached_under_its_own_name(monkeypatch, cache) -> None:

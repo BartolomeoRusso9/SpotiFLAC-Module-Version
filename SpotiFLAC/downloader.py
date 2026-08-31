@@ -155,6 +155,11 @@ class DownloadOptions:
     lyrics_providers: list[str] = field(
         default_factory=lambda: ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
     )
+    # Apple times every syllable, so its lyrics are written word-by-word
+    # (enhanced LRC with inline <mm:ss.xx> tags) by default. Set False to get
+    # plain line-synced LRC from Apple instead — for players/overlays that
+    # only understand line-level timing, or for users who prefer it.
+    apple_lyrics_word_by_word: bool = True
 
     # Write the lyrics out as an .lrc file as well as into the tag. No player
     # on macOS renders a *word-by-word* lyric out of an embedded tag — Apple
@@ -809,6 +814,7 @@ async def download_one_async(
                     "allow_fallback": opts.allow_fallback,
                     "embed_lyrics": opts.embed_lyrics,
                     "lyrics_providers": opts.lyrics_providers,
+                    "apple_lyrics_word_by_word": opts.apple_lyrics_word_by_word,
                     "enrich_metadata": opts.enrich_metadata,
                     "enrich_providers": opts.enrich_providers,
                     "is_album": is_album,

@@ -40,6 +40,9 @@ class ProfileConfig(BaseModel):
     lyrics_providers: list[str] = Field(
         default_factory=lambda: ["apple", "lrclib"],
     )
+    #: Apple lyrics as word-by-word (per-syllable) enhanced LRC when True,
+    #: plain line-synced LRC when False.
+    apple_lyrics_word_by_word: bool = True
     save_lrc: bool = False
     lrc_library_dir: str | None = None
     enrich_metadata: bool = True

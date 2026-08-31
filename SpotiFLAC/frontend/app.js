@@ -277,6 +277,7 @@ function applySettings(settings = {}) {
   changeFont();
   changeTheme();
   if ($('config-lyrics')) { $('config-lyrics').checked = cfg.lyrics; onLyricsChange(); }
+  if ($('config-apple-wbw')) $('config-apple-wbw').checked = cfg.apple_lyrics_word_by_word !== false;
   if ($('config-enrich')) { $('config-enrich').checked = cfg.enrich_metadata; onEnrichChange(); }
   if ($('config-filename')) $('config-filename').value = cfg.filename_format;
   if ($('config-track-numbers')) { $('config-track-numbers').checked = cfg.use_track_numbers; onTNChange(); }
@@ -519,6 +520,7 @@ const DEFAULT_SETTINGS = {
   log_level: 'INFO',
   services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
   lyrics_providers: ['apple', 'lrclib'],
+  apple_lyrics_word_by_word: true,
   enrich_providers: ['deezer','apple','qobuz','tidal'],
 };
 
@@ -3211,6 +3213,7 @@ function buildConfig() {
     allow_fallback:         $('config-fallback').checked,
     lyrics:                 $('config-lyrics').checked,
     lyrics_providers:       getChecked('lyrics-list'),
+    apple_lyrics_word_by_word: $('config-apple-wbw') ? $('config-apple-wbw').checked : true,
     enrich_metadata:        $('config-enrich').checked,
     enrich_providers:       getChecked('enrich-list'),
     filename_format:         $('config-filename').value.trim() || '{title} - {artist}',
@@ -3411,6 +3414,7 @@ async function loadProfile() {
   $('config-tidal-api').value       = data.tidal_custom_api || '';
   $('config-track-numbers').checked = !!data.use_track_numbers; onTNChange();
   $('config-lyrics').checked = data.lyrics !== false;
+  if ($('config-apple-wbw')) $('config-apple-wbw').checked = data.apple_lyrics_word_by_word !== false;
   $('config-enrich').checked        = data.enrich_metadata !== false; onEnrichChange();
   updateAllApiConfigDisplays();
   isDirty = true;

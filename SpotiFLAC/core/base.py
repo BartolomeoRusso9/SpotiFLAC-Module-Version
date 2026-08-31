@@ -104,6 +104,7 @@ class BaseProvider(ABC):
         allow_fallback: bool = True,
         embed_lyrics: bool = False,
         lyrics_providers: list[str] | None = None,
+        apple_lyrics_word_by_word: bool = True,
         enrich_metadata: bool = False,
         enrich_providers: list[str] | None = None,
         is_album: bool = False,

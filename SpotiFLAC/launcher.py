@@ -788,6 +788,18 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         ],
     )
     lyrics_grp.add_argument(
+        "--apple-lyrics-line-synced",
+        action="store_false",
+        dest="apple_lyrics_word_by_word",
+        help=(
+            "get plain line-synced LRC from the Apple lyrics provider instead "
+            "of word-by-word (per-syllable) enhanced LRC"
+        ),
+    )
+    lyrics_grp.set_defaults(
+        apple_lyrics_word_by_word=pd.get("apple_lyrics_word_by_word", True),
+    )
+    lyrics_grp.add_argument(
         "--save-lrc",
         action="store_true",
         default=pd.get("save_lrc", False),
@@ -1292,6 +1304,7 @@ def _subscription_downloader(profile_defaults: dict, output_dir_override: str | 
             allow_fallback=pd.get("allow_fallback", True),
             embed_lyrics=pd.get("embed_lyrics", True),
             lyrics_providers=pd.get("lyrics_providers") or ["apple", "lrclib"],
+            apple_lyrics_word_by_word=pd.get("apple_lyrics_word_by_word", True),
             save_lrc=pd.get("save_lrc", False),
             lrc_library_dir=pd.get("lrc_library_dir") or None,
             enrich_metadata=pd.get("enrich_metadata", True),
@@ -1479,6 +1492,7 @@ async def _run_download_async(
     allow_fallback: bool,
     embed_lyrics: bool,
     lyrics_providers: list[str],
+    apple_lyrics_word_by_word: bool = True,
     enrich_metadata: bool,
     enrich_providers: list[str],
     qobuz_local_api_url: str | None,
@@ -1587,6 +1601,7 @@ async def _run_download_async(
         output_path=output_path,
         embed_lyrics=embed_lyrics,
         lyrics_providers=lyrics_providers,
+        apple_lyrics_word_by_word=apple_lyrics_word_by_word,
         enrich_metadata=enrich_metadata,
         enrich_providers=enrich_providers,
         qobuz_local_api_url=qobuz_local_api_url,
@@ -2227,6 +2242,7 @@ async def amain() -> None:
                 allow_fallback=cfg.get("allow_fallback", True),
                 embed_lyrics=cfg["embed_lyrics"],
                 lyrics_providers=cfg["lyrics_providers"],
+                apple_lyrics_word_by_word=cfg.get("apple_lyrics_word_by_word", True),
                 save_lrc=cfg.get("save_lrc", False),
                 lrc_library_dir=cfg.get("lrc_library_dir") or None,
                 enrich_metadata=cfg["enrich_metadata"],
@@ -2406,6 +2422,7 @@ async def amain() -> None:
             allow_fallback=args.allow_fallback,
             embed_lyrics=args.embed_lyrics,
             lyrics_providers=args.lyrics_providers,
+            apple_lyrics_word_by_word=args.apple_lyrics_word_by_word,
             save_lrc=args.save_lrc,
             lrc_library_dir=args.lrc_library_dir,
             enrich_metadata=args.enrich,
@@ -2467,6 +2484,7 @@ async def amain() -> None:
                 "allow_fallback": args.allow_fallback,
                 "embed_lyrics": args.embed_lyrics,
                 "lyrics_providers": args.lyrics_providers,
+                "apple_lyrics_word_by_word": args.apple_lyrics_word_by_word,
                 "enrich_metadata": args.enrich,
                 "enrich_providers": args.enrich_providers,
                 "log_level": log_level,

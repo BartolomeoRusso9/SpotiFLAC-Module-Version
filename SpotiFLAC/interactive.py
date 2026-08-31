@@ -953,7 +953,15 @@ def _summary(cfg: dict) -> None:
     row(
         "Lyrics",
         (
-            "enabled (" + ", ".join(cfg["lyrics_providers"]) + ")"
+            "enabled ("
+            + ", ".join(cfg["lyrics_providers"])
+            + ")"
+            + (
+                ""
+                if cfg.get("apple_lyrics_word_by_word", True)
+                or "apple" not in cfg["lyrics_providers"]
+                else " [apple: line-synced]"
+            )
             if cfg["embed_lyrics"]
             else "disabled"
         ),
@@ -1152,6 +1160,7 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
         cfg.setdefault("first_artist_only", False)
         cfg.setdefault("embed_lyrics", True)
         cfg.setdefault("lyrics_providers", ["apple", "lrclib"])
+        cfg.setdefault("apple_lyrics_word_by_word", True)
         cfg.setdefault("save_lrc", False)
         cfg.setdefault("lrc_library_dir", None)
         cfg.setdefault("enrich_metadata", True)
@@ -1561,6 +1570,12 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
             ordered=True,
         )
 
+        if "apple" in (cfg.get("lyrics_providers") or []):
+            cfg["apple_lyrics_word_by_word"] = _ask_bool(
+                "Apple lyrics word-by-word (off = line-by-line)?",
+                cfg.get("apple_lyrics_word_by_word", True),
+            )
+
         # No player renders a word-by-word lyric out of an embedded tag —
         # Apple Music strips the timing and shows flat text — so the synced
         # display comes from an .lrc on disk read by an overlay app.
@@ -1756,6 +1771,8 @@ def _print_cli_command(cfg: dict) -> None:
         parts.append("--no-lyrics")
     else:
         parts.extend(["--lyrics-providers", *cfg["lyrics_providers"]])
+        if not cfg.get("apple_lyrics_word_by_word", True):
+            parts.append("--apple-lyrics-line-synced")
     if not cfg["enrich_metadata"]:
         parts.append("--no-enrich")
     else:

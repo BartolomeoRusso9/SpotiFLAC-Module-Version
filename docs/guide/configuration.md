@@ -81,6 +81,20 @@ LRCLIB returns line-level lyrics. Put `apple` first and you get the first form w
 
 Each provider's own answer is cached separately (7 days for a hit, 6 hours for a miss), so changing the order takes effect immediately rather than being masked by a cached result from a previous ordering.
 
+### Apple Lyrics: Word-by-Word or Line-Synced
+
+By default Apple's lyrics are kept in their native *word-by-word* form (timed per syllable, with inline `<mm:ss.xx>` tags). Set `apple_lyrics_word_by_word=False` (Python / GUI toggle) or pass `--apple-lyrics-line-synced` (CLI) to drop the per-syllable timings and keep only line-level timing:
+
+```
+# word-by-word (default)
+[00:08.75]<00:08.75>Sento <00:09.05>un<00:09.22>ra-<00:09.41>ta- <00:09.90>ta
+
+# line-synced (--apple-lyrics-line-synced)
+[00:08.75]Sento unra-ta- ta
+```
+
+Line-synced is useful for players and overlay apps that only understand line-level `.lrc`, or simply if you prefer a plain karaoke-style scroll. The setting affects only the `apple` provider; every other provider is unchanged. Apple's two renderings are cached under separate keys, so switching the setting takes effect immediately.
+
 ### Lyrics Files (`.lrc`)
 
 Lyrics are written into the audio file's tag by default. That is enough for tagging, and not enough for playback: **no major player renders word-by-word lyrics out of an embedded tag.** Apple Music in particular strips the inline timing from a local file and shows flat text, and the synced lyrics it scrolls for streamed tracks come from Apple's own servers, not from the file.

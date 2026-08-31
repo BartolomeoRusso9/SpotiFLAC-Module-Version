@@ -65,7 +65,7 @@ If you just want a GUI for personal use, with no code involved, the [Desktop](ht
 - Docker support
 - Configuration Profiles
 - MusicBrainz metadata enrichment
-- Synchronized lyrics — embedded in the tag and, optionally, written out as `.lrc` files; word-by-word where the source has it
+- Synchronized lyrics — embedded in the tag and, optionally, written out as `.lrc` files; word-by-word where the source has it, or line-synced if you prefer
 - Optional MP3 320 kbps transcoding
 - Watch mode: re-sync a playlist/album/artist/URL on an interval, indefinitely
 - Optional shared-secret or per-account authentication for `--web`, plus a queued, per-user download history in multi-user mode

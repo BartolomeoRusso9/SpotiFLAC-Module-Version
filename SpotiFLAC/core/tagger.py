@@ -1381,6 +1381,10 @@ class EmbedOptions:
     cover_url: str = ""
     embed_lyrics: bool = False
     lyrics_providers: list[str] = field(default_factory=list)
+    #: When False, Apple lyrics are embedded as plain line-synced LRC instead
+    #: of word-by-word (per-syllable) enhanced LRC. Only affects the "apple"
+    #: lyrics provider.
+    apple_lyrics_word_by_word: bool = True
     enrich: bool = False
     enrich_providers: list[str] | None = None
     enrich_qobuz_token: str | None = None
@@ -1500,6 +1504,7 @@ async def embed_metadata_async(
                 track_id=metadata.id,
                 isrc=metadata.isrc,
                 providers=opts.lyrics_providers,
+                apple_word_by_word=opts.apple_lyrics_word_by_word,
             )
             if isinstance(res, tuple):
                 lyrics, lyrics_prov = res

@@ -1422,6 +1422,7 @@ class SpotiFLAC_API(
                 "apple",
                 "lrclib",
             ]
+            apple_lyrics_word_by_word = config.get("apple_lyrics_word_by_word", True)
             enrich_providers = config.get("enrich_providers") or [
                 "deezer",
                 "apple",
@@ -1551,6 +1552,7 @@ class SpotiFLAC_API(
                     artist_separator=artist_separator,
                     embed_lyrics=embed_lyrics,
                     lyrics_providers=lyrics_providers,
+                    apple_lyrics_word_by_word=apple_lyrics_word_by_word,
                     enrich_metadata=enrich_metadata,
                     enrich_providers=enrich_providers,
                     qobuz_local_api_url=qobuz_local_api_url,
