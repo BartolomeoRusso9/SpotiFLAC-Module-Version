@@ -143,14 +143,18 @@ def test_an_album_disagreement_alone_does_not_reject() -> None:
 def test_an_album_disagreement_does_reject_without_a_strong_identity() -> None:
     """The leniency above is bought by title and artist agreeing exactly.
     Where the title only nearly agrees, the album is evidence again.
+
+    The decoration here is a remaster on purpose: a live or karaoke marker
+    would be caught earlier, by the variant check, and this test would stop
+    exercising the album rule it is named after.
     """
     reason = _check(
         expected_title="Alive",
         expected_artist="Pearl Jam",
         expected_album="Ten",
-        found_title="Alive (Live at the Garden)",
+        found_title="Alive (2011 Remaster)",
         found_artist="Pearl Jam",
-        found_album="Live at the Garden",
+        found_album="Rearviewmirror: Greatest Hits",
     )
     assert "different album" in reason
 

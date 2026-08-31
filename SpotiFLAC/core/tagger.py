@@ -62,6 +62,10 @@ from mutagen.id3 import PictureType as ID3PictureType
 
 from .errors import ErrorKind, SpotiflacError
 
+# Runtime import, unlike TrackMetadata below: models imports nothing from
+# this package, so there is no cycle to avoid.
+from .models import split_credit
+
 if TYPE_CHECKING:
     from .models import TrackMetadata
 
@@ -614,6 +618,7 @@ def _embed_flac(
     lyrics: str | None,
     lyrics_prov: str,
     multi_artist: bool,
+    credits: dict[str, list[str]] | None = None,
 ) -> None:
     """Writes all Vorbis Comment tags to a FLAC file."""
     audio = FLAC(str(path))
@@ -626,8 +631,7 @@ def _embed_flac(
     for key, val in tags.items():
         if multi_artist and key in ("ARTIST", "ALBUMARTIST") and "," in val:
             # Vorbis Comment standard: repeat the tag for each artist value
-            parts = [a.strip() for a in val.split(",") if a.strip()]
-            audio[key] = parts
+            audio[key] = split_credit(val, (credits or {}).get(key))
         else:
             audio[key] = val
 
@@ -656,6 +660,7 @@ def _embed_vorbis_comment(
     lyrics_prov: str,
     multi_artist: bool,
     file_cls: type,
+    credits: dict[str, list[str]] | None = None,
 ) -> None:
     """Writes Vorbis Comment tags to an OGG Vorbis or Opus file.
 
@@ -674,8 +679,7 @@ def _embed_vorbis_comment(
 
     for key, val in tags.items():
         if multi_artist and key in ("ARTIST", "ALBUMARTIST") and "," in val:
-            parts = [a.strip() for a in val.split(",") if a.strip()]
-            audio[key] = parts
+            audio[key] = split_credit(val, (credits or {}).get(key))
         else:
             audio[key] = val
 
@@ -701,19 +705,23 @@ def _embed_vorbis_comment(
     logger.debug("[tagger/ogg] tags written: %s", path.name)
 
 
-def _embed_oggvorbis(path, tags, cover_data, lyrics, lyrics_prov, multi_artist) -> None:
+def _embed_oggvorbis(
+    path, tags, cover_data, lyrics, lyrics_prov, multi_artist, credits=None
+) -> None:
     from mutagen.oggvorbis import OggVorbis
 
     _embed_vorbis_comment(
-        path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggVorbis
+        path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggVorbis, credits
     )
 
 
-def _embed_oggopus(path, tags, cover_data, lyrics, lyrics_prov, multi_artist) -> None:
+def _embed_oggopus(
+    path, tags, cover_data, lyrics, lyrics_prov, multi_artist, credits=None
+) -> None:
     from mutagen.oggopus import OggOpus
 
     _embed_vorbis_comment(
-        path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggOpus
+        path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggOpus, credits
     )
 
 
@@ -1026,6 +1034,7 @@ async def _write_tags_async(
     lyrics_prov: str,
     multi_artist: bool,
     suffix: str,
+    credits: dict[str, list[str]] | None = None,
 ) -> None:
     if suffix in _EXT_FLAC:
         await asyncio.to_thread(
@@ -1036,6 +1045,7 @@ async def _write_tags_async(
             lyrics,
             lyrics_prov,
             multi_artist,
+            credits,
         )
     elif suffix in _EXT_MP3:
         await asyncio.to_thread(_embed_id3, path, tags, cover_data, lyrics, lyrics_prov)
@@ -1050,6 +1060,7 @@ async def _write_tags_async(
             lyrics,
             lyrics_prov,
             multi_artist,
+            credits,
         )
     elif suffix in _EXT_OPUS:
         await asyncio.to_thread(
@@ -1060,6 +1071,7 @@ async def _write_tags_async(
             lyrics,
             lyrics_prov,
             multi_artist,
+            credits,
         )
     elif suffix in _EXT_WAV:
         await asyncio.to_thread(_embed_wav, path, tags, cover_data, lyrics, lyrics_prov)
@@ -1510,13 +1522,22 @@ async def embed_metadata_async(
     # enriched_tags and opts.extra_tags) have been merged — so every format
     # (FLAC, OGG/Opus, MP3, M4A, WMA, ...) gets the same single joined value
     # instead of a multi-value field.
+    # The names the source actually had, so a comma inside one of them
+    # ("Tyler, The Creator") is not mistaken for a separator — by the
+    # multi-value writers below, or by the artist_separator rejoin.
+    credits = {
+        "ARTIST": list(metadata.artist_names),
+        "ALBUMARTIST": list(metadata.album_artist_names),
+    }
+
     effective_multi_artist = multi_artist
     if opts.artist_separator is not None:
         for key in ("ARTIST", "ALBUMARTIST"):
             val = tags.get(key, "")
             if val:
-                parts = [a.strip() for a in val.split(",") if a.strip()]
-                tags[key] = opts.artist_separator.join(parts)
+                tags[key] = opts.artist_separator.join(
+                    split_credit(val, credits.get(key))
+                )
         effective_multi_artist = False
 
     try:
@@ -1528,6 +1549,7 @@ async def embed_metadata_async(
             lyrics_prov,
             effective_multi_artist,
             suffix,
+            credits,
         )
     except SpotiflacError:
         raise

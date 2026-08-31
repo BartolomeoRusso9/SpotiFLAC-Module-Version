@@ -276,26 +276,40 @@ async def _fetch_spotify_async(track_id: str, timeout: int = 7) -> str:
         return ""
 
 
-def _score_apple_result(res: dict, t_name: str, a_name: str, duration_s: int) -> int:
-    score = 0
-    r_t = normalize_loose_string(res.get("songName", ""))
-    r_a = normalize_loose_string(res.get("artistName", ""))
-    t_t = normalize_loose_string(t_name)
-    t_a = normalize_loose_string(a_name)
-    if r_t == t_t:
-        score += 50
-    elif t_t in r_t or r_t in t_t:
-        score += 25
-    if r_a == t_a:
-        score += 60
-    elif t_a in r_a or r_a in t_a:
-        score += 30
-    r_dur = res.get("duration", 0)
-    if duration_s > 0 and r_dur > 0:
-        diff = abs((r_dur / 1000.0) - duration_s)
-        if diff <= 5:
-            score += 20
-    return score
+def _apple_payload_to_lrc(data: object) -> str:
+    """Apple's timed-lyrics payload as enhanced LRC.
+
+    Apple times every *syllable*, not every word, which is what makes a
+    word-by-word display possible — so each part becomes its own inline
+    `<mm:ss.xx>` tag after the line's own `[mm:ss.xx]`. A part flagged
+    `part: true` continues the syllable before it ("ex|pres|sions") and gets
+    no space, or the word would be rendered broken apart.
+    """
+    content = data.get("content", []) if isinstance(data, dict) else data
+    if not isinstance(content, list):
+        return ""
+
+    lrc_lines = []
+    for line in content:
+        if not isinstance(line, dict):
+            continue
+        ts = int(line.get("timestamp", 0))
+        word_parts = []
+        for part in line.get("text", []) or []:
+            if not isinstance(part, dict):
+                continue
+            part_text = part.get("text", "")
+            if not part_text:
+                continue
+            part_timestamp = int(part.get("timestamp", ts))
+            separator = "" if part.get("part", False) else " "
+            word_parts.append(
+                f"{separator}{_format_lrc_timestamp(part_timestamp, '<')}{part_text}"
+            )
+        line_text = "".join(word_parts).strip()
+        if line_text:
+            lrc_lines.append(f"{_format_lrc_timestamp(ts)}{line_text}")
+    return "\n".join(lrc_lines)
 
 
 async def _fetch_apple_async(
@@ -346,27 +360,7 @@ async def _fetch_apple_async(
         )
         if not r_lyr.is_success:
             return ""
-        data = r_lyr.json()
-        content = data.get("content", []) if isinstance(data, dict) else data
-        lrc_lines = []
-        for line in content:
-            ts = int(line.get("timestamp", 0))
-            text_parts = line.get("text", [])
-            word_parts = []
-            for part in text_parts:
-                part_text = part.get("text", "")
-                if not part_text:
-                    continue
-                part_timestamp = int(part.get("timestamp", ts))
-                separator = "" if part.get("part", False) else " "
-                word_parts.append(
-                    f"{separator}{_format_lrc_timestamp(part_timestamp, '<')}"
-                    f"{part_text}"
-                )
-            line_text = "".join(word_parts).strip()
-            if line_text:
-                lrc_lines.append(f"{_format_lrc_timestamp(ts)}{line_text}")
-        return "\n".join(lrc_lines)
+        return _apple_payload_to_lrc(r_lyr.json())
     except Exception as exc:
         logger.debug("[lyrics/apple] async: %s", exc)
         return ""
@@ -854,10 +848,21 @@ async def fetch_lyrics_async(
 
         return "", ""
 
+    # Every provider is asked at once, but they are *read* in the order the
+    # caller listed them. as_completed() used to be the reader, which made
+    # `providers` a set rather than a ranking: whoever answered first won,
+    # and lrclib answers in ~0.1s against Apple's ~1s (an iTunes search, then
+    # the lyrics fetch). So "apple, lrclib" reliably produced lrclib — plain
+    # line-level LRC — and the word-by-word lyrics the order was asking for
+    # never got used.
+    #
+    # Reading in order costs nothing when the first choice answers, and
+    # nothing when it fails either: the others have long since finished by
+    # then and their results are already waiting.
     tasks = [asyncio.create_task(run_provider(provider)) for provider in providers]
 
     try:
-        for task in asyncio.as_completed(tasks):
+        for task in tasks:
             lyrics, provider = await task
 
             if not lyrics:

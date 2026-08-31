@@ -62,6 +62,7 @@ from .core.progress import (
     uninstall_console_interception,
 )
 from .core.quality import normalize_quality, quality_for_provider
+from .core.recording_guard import wrong_recording_reason_async
 from .core.spotify_metadata import SpotifyMetadataClient
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
@@ -542,6 +543,52 @@ async def _transcode_result_async(
     )
 
 
+def _restore_metadata(metadata: TrackMetadata, snapshot: TrackMetadata) -> None:
+    """Put `metadata` back the way it was before a provider touched it.
+
+    Providers enrich the object they are handed — a better cover, the label,
+    the release date, and the ISRC of whatever their own search matched — and
+    the same object is then passed to the next provider in the list. When a
+    provider is rejected for having resolved the wrong recording, none of
+    what it wrote may be allowed to survive into that next attempt: its ISRC
+    in particular would make the rejection permanent, because the guard
+    compares against the ISRC the track carries.
+    """
+    for name in type(metadata).model_fields:
+        setattr(metadata, name, getattr(snapshot, name))
+
+
+async def _reject_wrong_recording_async(
+    metadata: TrackMetadata,
+    snapshot: TrackMetadata,
+    result: DownloadResult,
+    provider_name: str,
+) -> DownloadResult:
+    """`result` unchanged, or a failure if the provider fetched another take.
+
+    See core/recording_guard.py. The file is deleted rather than kept and
+    renamed: it carries the requested track's tags, so a copy left on disk
+    is indistinguishable from the real thing on the next run.
+    """
+    reason = await wrong_recording_reason_async(
+        requested_isrc=snapshot.isrc,
+        resolved_isrc=metadata.isrc,
+        title=snapshot.title,
+        artist=snapshot.artists,
+        duration_ms=snapshot.duration_ms,
+        is_explicit=snapshot.is_explicit,
+    )
+    if not reason:
+        return result
+
+    logger.warning("[%s] Wrong recording: %s", provider_name, reason)
+    if result.file_path:
+        with contextlib.suppress(OSError):
+            Path(result.file_path).unlink()
+    _restore_metadata(metadata, snapshot)
+    return DownloadResult.fail(provider_name, f"Wrong recording: {reason}")
+
+
 async def _record_provider_outcome(
     provider_name: str,
     success: bool,
@@ -627,6 +674,10 @@ async def download_one_async(
             )
             cb = ProgressCallback(item_id=metadata.id, track_name=metadata.title)
             provider.set_progress_callback(cb)
+            # What was asked for, before this provider gets to write its own
+            # findings onto it. _reject_wrong_recording_async() compares the
+            # two afterwards, and restores this one when they disagree.
+            requested = metadata.model_copy(deep=True)
             # Per-provider, not per-track: `started_at` above covers the whole
             # track including every provider that failed before this one, and
             # attributing that to whichever provider happened to succeed last
@@ -728,6 +779,14 @@ async def download_one_async(
                 )
                 result = DownloadResult.fail(
                     provider.name, str(exc) or type(exc).__name__
+                )
+
+            if result.success and not result.skipped:
+                result = await _reject_wrong_recording_async(
+                    metadata,
+                    requested,
+                    result,
+                    provider.name,
                 )
 
             if result.success and not result.skipped:

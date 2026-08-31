@@ -63,7 +63,15 @@ _TRAILING_CREDIT_RE = re.compile(r"\s+(?:feat|ft|featuring)\.?\s+\S.*$", re.IGNO
 #: listed separately: see variant_conflict().
 _DIFFERENT_RECORDING_RE = re.compile(
     r"\b(live|remix|mix|edit|instrumental|acoustic|demo|karaoke|"
-    r"a cappella|acapella|reprise|radio edit|extended)\b",
+    r"a cappella|acapella|reprise|radio edit|extended|"
+    # How a karaoke or tribute catalogue names itself when it does not use
+    # the word "karaoke": every one of these appears in a title that is
+    # otherwise identical to the original.
+    r"backing track|sing[- ]?along|tribute|made famous by|"
+    r"originally performed by|in the style of|"
+    # And the censored edit, which is the same performance with words
+    # removed — a different recording by any measure that matters here.
+    r"clean version|clean edit|censored)\b",
     re.IGNORECASE,
 )
 
@@ -321,6 +329,15 @@ def track_identity_mismatch(
         if want_isrc == got_isrc:
             return ""
         return f"different recording: asked for ISRC {want_isrc}, got {got_isrc}"
+
+    # Before the title comparison, because strip_noise() erases exactly the
+    # decoration that separates these: "Like Him (feat. Lola Young)" and
+    # "Like Him (feat. Lola Young) (Melody Karaoke Version)" fold to the same
+    # string, and titles_match() then calls them the same song. They are the
+    # same *song* — and a different recording of it, which is the thing this
+    # function exists to catch.
+    if expected_title and found_title and variant_conflict(expected_title, found_title):
+        return f"different version: asked for {expected_title!r}, got {found_title!r}"
 
     if (
         expected_artist
