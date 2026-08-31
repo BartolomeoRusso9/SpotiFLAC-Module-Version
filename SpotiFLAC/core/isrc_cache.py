@@ -10,7 +10,8 @@ import asyncio
 import json
 import logging
 import time
-from pathlib import Path
+
+from .paths import cache_path
 
 try:
     import aiofiles
@@ -19,7 +20,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-_CACHE_FILE = Path.home() / ".cache" / "spotiflac" / "isrc-cache.json"
+_CACHE_FILE = cache_path("isrc-cache.json")
 _cache_lock: asyncio.Lock | None = None
 _cache: dict[str, dict] | None = None
 

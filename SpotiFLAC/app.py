@@ -26,6 +26,7 @@ from .api_mixins.subscriptions import SubscriptionsMixin
 from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
 from .core.loop_runner import run_sync
+from .core.paths import cache_dir, cache_path
 from .core.url_utils import url_host_matches
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
@@ -465,7 +466,7 @@ class SpotiFLAC_API(
 
     def save_settings(self, cfg: dict) -> None:
         try:
-            settings_file = Path.home() / ".cache" / "spotiflac" / "gui-settings.json"
+            settings_file = cache_path("gui-settings.json")
             settings_file.parent.mkdir(parents=True, exist_ok=True)
             settings_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         except Exception as e:
@@ -498,7 +499,7 @@ class SpotiFLAC_API(
 
     def load_settings(self) -> dict:
         try:
-            settings_file = Path.home() / ".cache" / "spotiflac" / "gui-settings.json"
+            settings_file = cache_path("gui-settings.json")
             if settings_file.exists():
                 return json.loads(settings_file.read_text(encoding="utf-8"))
         except Exception as e:
@@ -1047,7 +1048,7 @@ class SpotiFLAC_API(
         return {"ok": True, "download_dir": self.download_dir}
 
     def open_config_folder(self) -> None:
-        config_dir = os.path.join(os.path.expanduser("~"), ".cache", "spotiflac")
+        config_dir = str(cache_dir())
         try:
             os.makedirs(config_dir, exist_ok=True)
             if sys.platform == "darwin":
@@ -1775,7 +1776,7 @@ def run_gui() -> None:
     # on it either (save_theme() writes it to gui-settings.json — see
     # changeTheme() in frontend/app.js), but a stable origin is what keeps
     # the window from painting light for a frame first.
-    storage_path = str(Path.home() / ".cache" / "spotiflac" / "webview")
+    storage_path = str(cache_path("webview"))
     with contextlib.suppress(Exception):
         Path(storage_path).mkdir(parents=True, exist_ok=True)
 

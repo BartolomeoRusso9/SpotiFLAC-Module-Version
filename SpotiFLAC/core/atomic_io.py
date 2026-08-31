@@ -1,5 +1,5 @@
-"""Crash-safe JSON writes for the small state files under ~/.spotiflac and
-~/.cache/spotiflac.
+"""Crash-safe JSON writes for the small state files under ~/.spotiflac
+(including its .cache subdirectory).
 
 `Path.write_text()` truncates the destination before it writes: interrupt it
 — a crash, a full disk, a power cut, two threads at once — and what's left on

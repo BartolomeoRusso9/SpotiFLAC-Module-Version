@@ -12,13 +12,21 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from SpotiFLAC.core.http import httpx
 
+from . import paths as _paths
+
 logger = logging.getLogger(__name__)
 
 _SEED_PARTS = [b"spotif", b"lac:co", b"mmunity:url:v1"]
 _AAD = b"spotiflac|community|url|v1"
 _CLOUD_URL = "https://gist.githubusercontent.com/BartolomeoRusso9/ef9fdbbc894818aea89d25a8d99f8c77/raw"
-_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "spotiflac")
-_CACHE_FILE = os.path.join(_CACHE_DIR, "endpoints_cache.txt")
+
+
+def _cache_dir() -> str:
+    return str(_paths.cache_dir())
+
+
+def _cache_file() -> str:
+    return os.path.join(_cache_dir(), "endpoints_cache.txt")
 
 
 def _decrypt_base64_payload(b64_string: str) -> dict:
@@ -43,6 +51,9 @@ def _decrypt_base64_payload(b64_string: str) -> dict:
 def _load_registry() -> dict:
     import tempfile
 
+    cache_dir = _cache_dir()
+    cache_file_path = _cache_file()
+
     try:
         fresh_url = f"{_CLOUD_URL}?t={int(time.time())}"
         response = httpx.get(
@@ -54,14 +65,14 @@ def _load_registry() -> dict:
         cloud_string = response.text
         registry = _decrypt_base64_payload(cloud_string)
         try:
-            os.makedirs(_CACHE_DIR, exist_ok=True)
+            os.makedirs(cache_dir, exist_ok=True)
             fd, temp_path = tempfile.mkstemp(
-                dir=_CACHE_DIR, prefix=".endpoints_cache_", suffix=".tmp"
+                dir=cache_dir, prefix=".endpoints_cache_", suffix=".tmp"
             )
             try:
                 with os.fdopen(fd, "w") as cache_file:
                     cache_file.write(cloud_string)
-                os.replace(temp_path, _CACHE_FILE)
+                os.replace(temp_path, cache_file_path)
             except Exception:
                 try:
                     os.unlink(temp_path)
@@ -77,8 +88,8 @@ def _load_registry() -> dict:
             exc,
         )
         try:
-            if os.path.exists(_CACHE_FILE):
-                with open(_CACHE_FILE) as cache_file:
+            if os.path.exists(cache_file_path):
+                with open(cache_file_path) as cache_file:
                     return _decrypt_base64_payload(cache_file.read())
         except Exception as cache_exc:
             logger.exception("Unable to read local cache: %s", cache_exc)

@@ -26,13 +26,14 @@ from pathlib import Path
 
 from . import db
 from .models import TrackMetadata
+from .paths import cache_path
 
 logger = logging.getLogger(__name__)
 
 #: Entries kept. Was 50, when every add rewrote the whole file.
 MAX_ENTRIES = 500
 
-LEGACY_FILE = Path.home() / ".cache" / "spotiflac" / "recent-fetches.json"
+LEGACY_FILE = cache_path("recent-fetches.json")
 
 #: Set once the legacy JSON file has been folded in (or explicitly discarded
 #: by a clear()). Durable rather than per-instance: the table being empty is

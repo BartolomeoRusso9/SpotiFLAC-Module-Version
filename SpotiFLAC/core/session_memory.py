@@ -4,12 +4,13 @@ import asyncio
 import json
 import logging
 import time
-from pathlib import Path
+
+from .paths import cache_path
 
 logger = logging.getLogger(__name__)
 
 _io_lock = asyncio.Lock()
-_SESSION_FILE = Path.home() / ".cache" / "spotiflac" / "session.json"
+_SESSION_FILE = cache_path("session.json")
 _MAX_HISTORY = 20
 
 

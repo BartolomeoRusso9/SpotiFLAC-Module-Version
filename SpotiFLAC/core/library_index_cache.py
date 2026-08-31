@@ -29,13 +29,15 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .paths import cache_path
+
 logger = logging.getLogger(__name__)
 
 #: Bumped when the stored shape changes, so an old cache is ignored rather
 #: than misread.
 _VERSION = 1
 
-_CACHE_DIR = Path.home() / ".cache" / "spotiflac" / "library-index"
+_CACHE_DIR = cache_path("library-index")
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,5 @@
 """Profile management — save/load named configuration presets.
-File: ~/.cache/spotiflac/profiles.json.
+File: ~/.spotiflac/.cache/profiles.json.
 
 Async usage:
     await save_profile_async("tidal-hires", cfg)
@@ -13,15 +13,16 @@ import asyncio
 import json
 import logging
 import time
-from pathlib import Path
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
+
+from .paths import cache_path
 
 logger = logging.getLogger(__name__)
 
 # Using asyncio.Lock instead of threading.Lock so it doesn't block the event loop
 _io_lock = asyncio.Lock()
-_PROFILES_FILE = Path.home() / ".cache" / "spotiflac" / "profiles.json"
+_PROFILES_FILE = cache_path("profiles.json")
 
 
 class ProfileConfig(BaseModel):
