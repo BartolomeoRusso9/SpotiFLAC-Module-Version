@@ -1102,7 +1102,16 @@ class DownloadWorker:
                 )
 
             manager = DownloadManager()
-            await manager.reset()
+            # No reset here. The tracks were put in this queue by
+            # _register_queue_async() just before the worker was built, and
+            # resetting now threw them away — after which start_download(),
+            # complete_download() and fail_download() all looked up ids that
+            # were no longer in the queue and silently did nothing. That is
+            # why every GUI download reported "0% · 0.00 MB/s" from start to
+            # finish and the queue dock never moved: the numbers were real,
+            # they were just being read off an empty queue. The reset now
+            # happens where a batch actually begins — see
+            # SpotiflacDownloader._register_queue_async().
             total = len(self._tracks)
             start = time.perf_counter()
 
@@ -2099,8 +2108,13 @@ class SpotiflacDownloader:
 
         Returns the tracks with their final ids: everything downstream (progress
         updates, per-track results) is keyed on them.
+
+        This is where a batch begins, so this is where the previous batch's
+        queue is cleared — doing it later, inside the worker, wiped the very
+        rows this method had just added.
         """
         manager = DownloadManager()
+        await manager.reset()
         updated_tracks = []
         for i, t in enumerate(tracks):
             track_item_id = t.id or t.external_url or f"queue-{i}-{uuid.uuid4().hex}"

@@ -1292,6 +1292,7 @@ def restore_manifest(
         dry_run=dry_run,
         manifest_path=str(path),
     )
+    restored_from: list[Path] = []
 
     for move in data.get("moves", []):
         source = Path(str(move.get("to", "")))
@@ -1346,8 +1347,32 @@ def restore_manifest(
                 destination=str(target),
             )
         )
+        restored_from.append(source.parent)
+
+    if not dry_run:
+        _prune_empty_dirs(restored_from, stop_at=path.parent)
 
     return result
+
+
+def _prune_empty_dirs(directories: list[Path], *, stop_at: Path) -> None:
+    """Removes the empty folders a restore left behind in the quarantine.
+
+    The quarantine mirrors the library's layout, so putting everything back
+    leaves the mirror standing empty — which reads as "the undo did not
+    work". Only empty directories are removed, and never `stop_at` itself:
+    that is the quarantine root, and it still holds the manifest.
+    """
+    for directory in {d.resolve() for d in directories}:
+        current = directory
+        while current != stop_at and stop_at in current.parents:
+            try:
+                current.rmdir()
+            except OSError:
+                # Not empty, or not ours to remove. Either way, stop here:
+                # everything above it holds this directory.
+                break
+            current = current.parent
 
 
 # ─────────────────────────────────────────────────────────────

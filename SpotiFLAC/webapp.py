@@ -186,6 +186,7 @@ ALLOWED_METHODS: set[str] = {
     # folder it can undo from. See api_mixins/dedup.py.
     "resolve_library_duplicates",
     "restore_library_duplicates",
+    "get_download_services",
     "get_trusted_keys",
     # Subscriptions (see core/subscriptions.py). Read and write, but every
     # write here only edits a list of URLs to follow — the same category of

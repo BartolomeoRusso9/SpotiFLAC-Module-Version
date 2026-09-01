@@ -704,3 +704,28 @@ def test_loading_refuses_something_that_is_not_one_of_ours(tmp_path):
 def test_loading_a_missing_database_says_so(tmp_path):
     with pytest.raises(FileNotFoundError):
         ld.load_report(tmp_path / "nope.db")
+
+
+@ffmpeg_required
+def test_restoring_takes_the_empty_quarantine_folders_with_it(tmp_path):
+    """A mirror of the library left standing empty reads as an undo that
+    did not work."""
+    _make_audio(tmp_path / "a.flac", codec="flac", title="Song", artist="A")
+    _make_audio(
+        tmp_path / "deep" / "nest" / "b.mp3",
+        codec="libmp3lame",
+        title="Song",
+        artist="A",
+    )
+
+    done = resolve_duplicates(scan_duplicates(tmp_path), dry_run=False)
+    trash = tmp_path / ld.TRASH_DIRNAME
+    assert (trash / "deep" / "nest").is_dir()
+
+    restore_manifest(done.manifest_path)
+
+    assert (tmp_path / "deep" / "nest" / "b.mp3").exists()
+    assert not (trash / "deep").exists()
+    # The quarantine root itself stays: it still holds the manifest.
+    assert trash.is_dir()
+    assert Path(done.manifest_path).exists()

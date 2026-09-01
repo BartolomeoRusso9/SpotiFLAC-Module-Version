@@ -23,7 +23,7 @@ from .core.health_check import run_health_check
 from .core.quality import normalize_quality
 from .core.transcode import is_lossless
 from .core.url_utils import url_host_matches
-from .extensions.catalog import SERVICE_ALIASES
+from .extensions.catalog import installed_download_services
 from .extensions.manager import ExtensionManager
 
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
@@ -193,58 +193,15 @@ def _header() -> None:
     print(DIM("  Tip: enter b/back at any question to restart the wizard."))
 
 
-def _canonical_service_name(ext_name: str) -> str | None:
-    """Normalize extension IDs such as ``tidal-web`` and ``tidal-py`` to one service name."""
-    value = (ext_name or "").lower().removeprefix("ext:")
-    if not value:
-        return None
-
-    value = value.replace("_", "-")
-    value = value.replace("-web", "").replace("-py", "")
-
-    alias_reverse = {v.lower(): k for k, v in SERVICE_ALIASES.items()}
-    if value in alias_reverse:
-        return alias_reverse[value]
-
-    if value.startswith("ytmusic"):
-        return "youtube"
-    if value.startswith("apple"):
-        return "apple"
-    if value.startswith("tidal"):
-        return "tidal"
-    if value.startswith("qobuz"):
-        return "qobuz"
-    if value.startswith("deezer"):
-        return "deezer"
-    if value.startswith("soundcloud"):
-        return "soundcloud"
-    if value.startswith("pandora"):
-        return "pandora"
-    if value.startswith("amazon"):
-        return "amazon"
-    return value
-
-
 def _installed_service_options() -> list[str]:
-    """Return the installed provider services as a deduplicated list for interactive menus."""
-    try:
-        manager = ExtensionManager(auto_install_downloads=False)
-        installed = manager.list_installed()
-    except Exception:
-        return []
+    """The installed provider services, for the interactive menus.
 
-    services: list[str] = []
-    seen: set[str] = set()
-    for ext in installed:
-        if not getattr(ext, "is_download_provider", False):
-            continue
-        service = _canonical_service_name(ext.name)
-        if not service or service in seen:
-            continue
-        seen.add(service)
-        services.append(service)
-
-    return sorted(services)
+    Thin wrapper: the discovery itself lives in extensions/catalog.py, which
+    is also what the GUI's Settings list reads — the two menus have to offer
+    the same providers, and the only way to be sure of that is for them to
+    ask the same function.
+    """
+    return [str(service["id"]) for service in installed_download_services()]
 
 
 def _require_installed_service_options() -> list[str]:

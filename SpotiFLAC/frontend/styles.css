@@ -1201,6 +1201,60 @@
       font-size: 18px; color: #475569; line-height: 1;
     }
 
+    /* The dock's second line is a live rate while one is known and a
+       count of what is done when it is not — see renderQueue(). */
+    #queue-dock .qd-bar {
+      grid-column: 1 / -1;
+      height: 3px; border-radius: 999px;
+      background: var(--surface2); overflow: hidden;
+      margin-top: 2px;
+    }
+    #queue-dock .qd-bar > i {
+      display: block; height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--yellow-d), var(--yellow));
+      border-radius: inherit;
+      transition: width .35s cubic-bezier(.22,.61,.36,1);
+    }
+    #queue-dock.done .qd-bar > i { background: var(--green); }
+
+    /* ── Empty states ─────────────────────────────────────────────────
+       Three screens open on nothing at all — no fetches, nobody followed,
+       no downloads logged — and each said so in its own way, in a different
+       size and colour. One component, so "there is nothing here yet" reads
+       the same everywhere and reads as designed rather than as missing. */
+    .empty-state {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center;
+      gap: 6px; padding: 38px 24px;
+      color: var(--muted);
+    }
+    .empty-state .es-icon {
+      width: 44px; height: 44px; margin-bottom: 6px;
+      display: grid; place-items: center;
+      border-radius: 14px;
+      background: var(--surface2);
+      color: var(--muted);
+      opacity: .9;
+    }
+    .empty-state .es-icon svg { width: 20px; height: 20px; }
+    .empty-state .es-title {
+      font-size: 13px; font-weight: 600; color: var(--text2);
+      letter-spacing: .01em;
+    }
+    .empty-state .es-hint {
+      font-size: 11.5px; line-height: 1.6; max-width: 46ch;
+      color: var(--muted);
+    }
+
+    /* Keyboard focus was invisible everywhere: the outline was suppressed by
+       the reset and never replaced, so tabbing through Settings moved a
+       selection nobody could see. Pointer clicks are unaffected. */
+    :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+      outline: 2px solid var(--yellow);
+      outline-offset: 2px;
+      border-radius: 8px;
+    }
+
     #queue-drawer {
       position: fixed; inset: 0;
       display: none; align-items: center; justify-content: center;

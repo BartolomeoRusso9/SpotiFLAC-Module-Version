@@ -15,6 +15,11 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="SpotiFLAC">
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+  <!-- Without these the browser asks for /favicon.ico on every load and
+       gets a 404 in the server log for a file that was never going to
+       be there. The artwork already ships. -->
+  <link rel="icon" type="image/svg+xml" href="assets/icons/logo.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/logo-192.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css?v=20260817">
   <script>
@@ -273,9 +278,10 @@
         <div class="qd-icon"><img src="assets/icons/download.svg" alt="Download"></div>
         <div class="qd-body">
           <div class="qd-downloaded" id="qd-downloaded">0.00 MB</div>
-          <div class="qd-speed" id="qd-speed">0.00 MB/s</div>
+          <div class="qd-speed" id="qd-speed">Idle</div>
         </div>
         <div class="qd-chevron">›</div>
+        <div class="qd-bar"><i id="qd-bar-fill"></i></div>
       </div>
       <div id="queue-drawer">
         <div id="queue-backdrop" onclick="toggleQueueDrawer()"></div>

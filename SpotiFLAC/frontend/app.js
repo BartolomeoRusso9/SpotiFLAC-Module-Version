@@ -298,10 +298,23 @@ function applySettings(settings = {}) {
   if ($('config-acoustid-key')) $('config-acoustid-key').value = cfg.acoustid_api_key || '';
   if ($('config-loop')) $('config-loop').value = cfg.loop;
   if ($('config-loglevel')) $('config-loglevel').value = cfg.log_level;
+  lastAppliedServices = Array.isArray(cfg.services) ? cfg.services : lastAppliedServices;
   applyListState('services-list', cfg.services);
   applyListState('lyrics-list', cfg.lyrics_providers);
   applyListState('enrich-list', cfg.enrich_providers);
   updateAllApiConfigDisplays();
+}
+
+function renumberList(el) {
+  // The priority number is the row's position, so it has to be rewritten
+  // whenever the rows move — after a drag, and after applyListState()
+  // reorders them to match the saved settings. It was only ever written at
+  // build time, so a saved order showed its rows numbered 8, 6, 3, 1…
+  if (!el) return;
+  el.querySelectorAll('.sort-item').forEach((item, i) => {
+    const num = item.querySelector('.priority-num');
+    if (num) num.textContent = i + 1;
+  });
 }
 
 function applyListState(id, values = []) {
@@ -319,6 +332,7 @@ function applyListState(id, values = []) {
     });
     items.filter(i => !values.includes(i.dataset.value)).forEach(item => el.appendChild(item));
   }
+  renumberList(el);
 }
 
 async function loadSettingsFromStorage() {
@@ -432,6 +446,7 @@ function makeSortable(el) {
     drag?.classList.remove('dragging');
     el.querySelectorAll('.sort-item').forEach(i => i.classList.remove('drag-over'));
     drag = null;
+    renumberList(el);
   }
   function onDO(e) {
     e.preventDefault();
@@ -627,6 +642,7 @@ function buildSortItem(item, index) {
     : item.icon ? `<span class="svc-icon ${item.iconClass}">${item.icon}</span>` : '';
   
   // Add the number (index + 1) and the checkbox
+  if (item.title) d.title = `Provided by ${item.title}`;
   d.innerHTML = `
     <span class="priority-num">${index + 1}</span>
     <span class="drag-h">⠿</span>
@@ -657,6 +673,53 @@ function getChecked(id) {
 populateList('services-list', ALL_SERVICES);
 populateList('lyrics-list',   ALL_LYRICS.map(x => ({ ...x, badge: null })));
 populateList('enrich-list',   ALL_ENRICH.map(x => ({ ...x, badge: null })));
+
+// ALL_SERVICES above is presentation only — the icon, the badge, the label —
+// and it paints instantly so Settings is never empty. What can actually be
+// downloaded from is decided by the installed extensions, which only the
+// backend knows: refreshInstalledServices() replaces the list with those,
+// exactly as the interactive wizard does (both read
+// extensions/catalog.installed_download_services).
+async function refreshInstalledServices() {
+  if (typeof window.pywebview?.api?.get_download_services !== 'function') return;
+  let services;
+  try {
+    const result = await window.pywebview.api.get_download_services();
+    services = result?.services;
+  } catch (e) {
+    console.warn('[services] could not read the installed providers:', e);
+    return;
+  }
+  // Nothing installed, or an older backend: keep the built-in list. An empty
+  // picker is indistinguishable from a broken one.
+  if (!Array.isArray(services) || !services.length) return;
+
+  const known = new Map(ALL_SERVICES.map(x => [x.id, x]));
+  const items = services.map(svc => {
+    const preset = known.get(svc.id);
+    if (preset) return { ...preset, title: (svc.extensions || []).join(', ') };
+    // A provider this build has no artwork or label for — a third-party
+    // extension, most likely. It still belongs in the list.
+    return {
+      id: svc.id,
+      label: svc.label || svc.id,
+      badge: null,
+      on: false,
+      icon: (svc.id || '?').slice(0, 2).toUpperCase(),
+      iconClass: svc.id,
+      title: (svc.extensions || []).join(', '),
+    };
+  });
+
+  populateList('services-list', items);
+  // Re-apply what was saved: populateList rebuilt the rows, so the order and
+  // the ticks that applySettings() put there are gone with them.
+  applyListState('services-list', lastAppliedServices.filter(id => known.has(id) || services.some(s => s.id === id)));
+}
+
+//: What applySettings() last put in the services list, so a refresh that
+//: arrives after it can restore the user's order instead of the defaults.
+let lastAppliedServices = ALL_SERVICES.filter(s => s.on).map(s => s.id);
 
 // ── HC chips ─────────────────────────────────────────────────────────────────
 const API_SOURCES = [
@@ -739,7 +802,15 @@ function renderPlatformIcon(type) {
     migu: 'migu.jpeg',
     songstats: 'songstats.png',
   };
-  const iconFile = iconMap[type] || `${type}.svg`;
+  const iconFile = iconMap[type];
+  if (!iconFile) {
+    // No artwork shipped for this one. The provider tables already carry a
+    // letter glyph for exactly this case; guessing at `${type}.svg` and then
+    // at `${type}.png` just put two 404s and a broken-image icon on screen.
+    const known = [...ALL_SERVICES, ...ALL_LYRICS, ...ALL_ENRICH].find(x => x.id === type);
+    const glyph = known?.icon || (type || '?').slice(0, 2).toUpperCase();
+    return `<span class="svc-icon icon-glyph ${type}">${escHtml(glyph)}</span>`;
+  }
   return `<span class="svc-icon icon-image ${type}"><img src="assets/icons/${iconFile}" alt="${type}" onerror="this.onerror=null; this.src='assets/icons/${type}.png';"></span>`;
 }
 
@@ -941,10 +1012,37 @@ function logMessage(msg, type = '') {
   // user with a stack of notifications they did not ask for.
   if (quiet || base === 'debug' || !base) return;
 
-  if (base === 'ok') toastMgr.success(msg);
-  else if (base === 'error') toastMgr.error(msg);
-  else if (base === 'warn') toastMgr.warning(msg);
-  else if (base === 'info') toastMgr.info(msg, { duration: 2500 });
+  // A toast is a headline, not a transcript. A provider that fails logs its
+  // whole Python traceback at error level, and passing that through put a
+  // wall of stack frames over half the window — unreadable, and it buried
+  // the one line that said what went wrong. The panel above still has all
+  // of it, which is what the panel is for.
+  const headline = toastHeadline(msg);
+
+  if (base === 'ok') toastMgr.success(headline);
+  else if (base === 'error') toastMgr.error(headline);
+  else if (base === 'warn') toastMgr.warning(headline);
+  else if (base === 'info') toastMgr.info(headline, { duration: 2500 });
+}
+
+const TOAST_MAX_CHARS = 160;
+
+function toastHeadline(msg) {
+  const text = String(msg ?? '');
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return text;
+
+  // A traceback's useful line is its last one ("SomeError: what happened"),
+  // not its first ("Traceback (most recent call last):").
+  const isTraceback = /^Traceback \(most recent call last\)/.test(lines[0]);
+  let headline = isTraceback ? lines[lines.length - 1] : lines[0];
+
+  if (headline.length > TOAST_MAX_CHARS) {
+    headline = headline.slice(0, TOAST_MAX_CHARS - 1).trimEnd() + '…';
+  } else if (lines.length === 1) {
+    return headline;
+  }
+  return `${headline} (see Logs for the rest)`;
 }
 
 function clearLog() { $('logArea').innerHTML = ''; }
@@ -2634,12 +2732,32 @@ function normalizeHistoryUrl(url) {
   }
 }
 
+//: The three screens that can open on nothing say so the same way.
+const EMPTY_ICONS = {
+  disc: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>',
+  user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  chart: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
+};
+
+function emptyState(icon, title, hint) {
+  return `<div class="empty-state">
+    <div class="es-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${EMPTY_ICONS[icon] || EMPTY_ICONS.disc}</svg></div>
+    <div class="es-title">${escHtml(title)}</div>
+    <div class="es-hint">${escHtml(hint)}</div>
+  </div>`;
+}
+
 function renderRecent(hist) {
   const grid = $('recent-grid'); grid.innerHTML = '';
   // Artwork tiles, not the one-line rows renderRecentSearches() builds.
   grid.classList.remove('searches');
   if (!hist || !hist.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--muted);padding:10px 0;">No recent fetches yet.</div>';
+    grid.innerHTML = `<div style="grid-column:1/-1;">${emptyState(
+      'disc',
+      'No recent fetches yet',
+      'Paste a Spotify track, album or playlist link above — what you fetch shows up here.',
+    )}</div>`;
     return;
   }
   const BADGE_CFG = {
@@ -2718,6 +2836,7 @@ async function removeRecent(url) {
 function addToQueue(indices) {
   console.log('addToQueue called', { indices, currentTracksLength: currentTracks.length, queueLengthBefore: queue.length });
   let added = false;
+  const skipped = [];
   indices.forEach(i => {
       const t = currentTracks[i];
       if (!t) {
@@ -2728,12 +2847,20 @@ function addToQueue(indices) {
       // Usa l'indice originale per evitare che Python scarichi la track sbagliata
       const realIndex = t._originalIndex !== undefined ? t._originalIndex : i;
 
-      if (queue.find(q => q.index === realIndex)) {
-        console.warn('Track already in queue', realIndex);
-        return;
-      }
       const itemId = t.id || t.external_url || `queue-${realIndex}-${Math.random().toString(16).slice(2)}`;
       const spotifyId = t.id || t.external_url || itemId;
+
+      // Deduped on the track's own identity, never on its position: a
+      // second fetch puts a *different* track at index 0, and matching on
+      // the index there silently refused to download it.
+      const duplicate = spotifyId
+        ? queue.find(q => q.spotify_id === spotifyId)
+        : queue.find(q => q.index === realIndex && q.title === t.title);
+      if (duplicate) {
+        console.warn('Track already in queue', spotifyId || realIndex);
+        skipped.push(duplicate);
+        return;
+      }
       queue.push({
         id: itemId,
         spotify_id: spotifyId,
@@ -2752,6 +2879,18 @@ function addToQueue(indices) {
   renderQueue();
   const emptyMsg = $('queue-empty');
   if (emptyMsg) emptyMsg.style.display = queue.length > 0 ? 'none' : 'flex';
+
+  // Nothing was added and something was recognised: say so. Refusing in
+  // silence is what made a re-queued track look like a dead button.
+  if (!added && skipped.length) {
+    const one = skipped[0];
+    const done = skipped.every(q => q.status === 'done');
+    toastMgr.info(
+      skipped.length === 1
+        ? `${one.title} is already ${done ? 'downloaded' : 'in the queue'}.`
+        : `Those ${skipped.length} tracks are already ${done ? 'downloaded' : 'in the queue'}.`,
+    );
+  }
   return added;
 }
 
@@ -2815,7 +2954,10 @@ function renderQueue() {
     const downloaded = $('qd-downloaded');
     const speed = $('qd-speed');
     if (downloaded) downloaded.textContent = queueStats.downloaded;
-    if (speed) speed.textContent = queueStats.speed;
+    if (speed) speed.textContent = 'Idle';
+    const bar = $('qd-bar-fill');
+    if (bar) bar.style.width = '0%';
+    dock?.classList.remove('done');
     resetQueueDuration();
     return;
   }
@@ -2884,8 +3026,22 @@ function renderQueue() {
   const downloaded = $('qd-downloaded');
   const speed = $('qd-speed');
   if (downloaded) downloaded.textContent = queueStats.downloaded;
-  if (speed) speed.textContent = queueStats.speed;
-  
+  if (speed) {
+    // A live rate only exists while a provider is reporting one. Printing
+    // "0.00 MB/s" the rest of the time made a working download look stalled;
+    // what is actually known then is how far through the queue we are.
+    const rate = parseFloat(queueStats.speed);
+    const active = queue.some(q => q.status === 'active');
+    speed.textContent = rate > 0
+      ? queueStats.speed
+      : active
+        ? `Downloading ${done + 1} of ${queue.length}…`
+        : `${done} of ${queue.length} done`;
+  }
+  const bar = $('qd-bar-fill');
+  if (bar) bar.style.width = `${queue.length ? Math.round((done / queue.length) * 100) : 0}%`;
+  dock?.classList.toggle('done', queue.length > 0 && done === queue.length);
+
   updateQueueDuration();
 }
 
@@ -4368,6 +4524,11 @@ window.addEventListener('pywebviewready', async () => {
   checkAuthStatus();
 
   await loadSettingsFromStorage();
+  // After the settings, so the saved order is known and can be restored on
+  // top of the narrowed list — and outside them, because a machine with no
+  // saved settings yet never calls applySettings() at all, which is exactly
+  // the fresh install that most needs to be told what it can download from.
+  await refreshInstalledServices();
   initSettingsTracking();
   updateSearchMode();
 });
@@ -5050,7 +5211,11 @@ function renderSubscriptions(subs) {
     return;
   }
   if (!subs || !subs.length) {
-    list.innerHTML = '<div class="s-label" style="font-size:11.5px;">Not following anyone yet.</div>';
+    list.innerHTML = emptyState(
+      'user',
+      'Not following anyone yet',
+      'Paste an artist link above to be told when they release something new.',
+    );
     return;
   }
 
@@ -5362,14 +5527,12 @@ function renderStats(doc) {
 
   const totals = doc.totals || {};
   if (!totals.tracks) {
-    body.innerHTML = `
-      <div class="s-section">
-        <div class="s-title">Nothing yet</div>
-        <div class="s-label" style="font-size:11.5px;">
-          This is built from the download log, which fills up as you fetch
-          tracks. Come back after a download or two.
-        </div>
-      </div>`;
+    body.innerHTML = `<div class="s-section">${emptyState(
+      'chart',
+      'Nothing to count yet',
+      'This is built from the download log, which fills up as you fetch tracks. '
+      + 'Come back after a download or two.',
+    )}</div>`;
     return;
   }
 

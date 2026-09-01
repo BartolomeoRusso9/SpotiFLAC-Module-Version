@@ -167,7 +167,8 @@
     'download_all_lyrics', 'get_track_preview', 'fetch_metadata', 'download_tracks',
     'run_health_check', 'scan_local', 'apply_local_tags', 'set_download_dir',
     'get_registry_directories', 'add_registry_directory', 'remove_registry_directory',
-    'discover_registries', 'get_dedup_status', 'scan_for_duplicates',
+    'discover_registries', 'get_download_services', 'get_dedup_status',
+    'scan_for_duplicates',
     'scan_library_duplicates', 'resolve_library_duplicates',
     'restore_library_duplicates',
     'get_trusted_keys',
@@ -294,18 +295,27 @@
   //
   // `fn` below names the global function to invoke and travels over the
   // WebSocket message, so it's dispatched only against this explicit
-  // allowlist (kept in sync with every `self._push("...")` call site in
-  // app.py) rather than an unrestricted `window[fn](...)` — that keeps a
+  // allowlist rather than an unrestricted `window[fn](...)` — that keeps a
   // compromised/malicious message from invoking arbitrary global functions.
+  //
+  // Every `self._push("...")` name in the Python source must appear here or
+  // the event is dropped with a console warning and the feature simply does
+  // nothing in --web mode, silently. tests/test_web_shim_methods_in_sync.py
+  // checks the two agree; three names had already drifted out before it did.
   const ALLOWED_PUSH_FNS = new Set([
     '__set_version_label',
     'app_cover_download_finished',
     'app_csv_error',
     'app_csv_loaded',
     'app_csv_progress',
+    'app_dedup_error',
+    'app_dedup_results',
     'app_download_finished',
     'app_handle_provider_search_error',
     'app_handle_provider_search_results',
+    'app_library_dedup_error',
+    'app_library_dedup_progress',
+    'app_library_dedup_results',
     'app_local_apply_error',
     'app_local_apply_finished',
     'app_local_apply_progress',
@@ -318,6 +328,7 @@
     'app_update_playcounts',
     'loadHistoryAndProfiles',
     'showFfmpegWarning',
+    'showNodeWarning',
     'showTracklist',
     'subscriptionsChecked',
     'updateFolderLabel',

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
+from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -366,6 +370,88 @@ def test_library_scan_reports_an_empty_folder(tmp_path):
     assert body["scanned"] == 0
     assert body["candidates"] == []
     assert body["target"] == "LOSSLESS"
+
+
+def test_library_duplicates_is_confined_to_the_download_folder(tmp_path):
+    client, _ = make_client(download_dir=str(tmp_path))
+
+    outside = client.post("/api/v1/library/duplicates", json={"path": "/"})
+    assert outside.status_code == 400
+    assert "outside" in outside.text
+
+    traversal = client.post(
+        "/api/v1/library/duplicates", json={"path": str(tmp_path / ".." / "..")}
+    )
+    assert traversal.status_code == 400
+
+
+def test_library_duplicates_reports_an_empty_folder(tmp_path):
+    client, _ = make_client(download_dir=str(tmp_path))
+    body = client.post(
+        "/api/v1/library/duplicates", json={"path": str(tmp_path)}
+    ).json()
+
+    assert body["groups"] == 0
+    assert body["duplicate_groups"] == []
+    assert body["library"]["files"] == 0
+    assert body["match"] == "both"
+    assert body["database"] == ""
+
+
+def test_library_duplicates_rejects_a_match_mode_it_does_not_have(tmp_path):
+    client, _ = make_client(download_dir=str(tmp_path))
+    resp = client.post(
+        "/api/v1/library/duplicates", json={"path": str(tmp_path), "match": "vibes"}
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None, reason="needs ffmpeg to build audio fixtures"
+)
+def test_library_duplicates_groups_and_can_write_its_index(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path / "cache"))
+    library = tmp_path / "music"
+    library.mkdir()
+    for name, codec in (("a.flac", "flac"), ("b.mp3", "libmp3lame")):
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=2:sample_rate=44100",
+                "-c:a",
+                codec,
+                "-metadata",
+                "title=Song",
+                "-metadata",
+                "artist=A",
+                str(library / name),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    client, _ = make_client(download_dir=str(tmp_path))
+    body = client.post(
+        "/api/v1/library/duplicates", json={"path": str(library), "export_db": True}
+    ).json()
+
+    assert body["library"]["files"] == 2
+    assert body["groups"] == 1
+    group = body["duplicate_groups"][0]
+    assert group["keep"]["path"].endswith(".flac")
+    assert [f["path"].endswith(".mp3") for f in group["duplicates"]] == [True]
+    assert body["reclaimable_bytes"] > 0
+    assert Path(body["database"]).exists()
+
+    # Read-only: the endpoint reports the duplicate, it does not remove it.
+    assert (library / "b.mp3").exists()
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────

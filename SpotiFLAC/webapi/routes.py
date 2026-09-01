@@ -37,6 +37,8 @@ from .schemas import (
     HistoryResponse,
     JobListResponse,
     JobOut,
+    LibraryDuplicatesRequest,
+    LibraryDuplicatesResponse,
     LibraryScanRequest,
     LibraryScanResponse,
     ResolveRequest,
@@ -79,6 +81,32 @@ class ApiDeps:
 
 def _owner(deps: ApiDeps, request: Request) -> str:
     return (deps.username_for(request) or "") if deps.multiuser else ""
+
+
+def _confined_path(path: str, download_dir: str) -> str:
+    """A request's path, resolved, or a 400 if it escapes the download folder.
+
+    The path comes from a request, so it is confined the same way
+    /api/browse-folder confines its own: a caller must not be able to
+    enumerate — or, for the routes that go on to act, touch — the filesystem
+    by asking about "/".
+    """
+    import os
+    from pathlib import Path
+
+    resolved = os.path.realpath(str(Path(path).expanduser()))
+    root = os.path.realpath(str(download_dir))
+    try:
+        inside = os.path.commonpath([resolved, root]) == root
+    except ValueError:
+        inside = False
+    if not inside:
+        raise _fail(
+            400,
+            "That path is outside this instance's download folder.",
+            "Scans are confined to the folder this account downloads into.",
+        )
+    return resolved
 
 
 def _fail(status: int, message: str, detail: str | None = None) -> HTTPException:
@@ -496,27 +524,10 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
     async def library_scan(
         request: Request, payload: LibraryScanRequest
     ) -> LibraryScanResponse:
-        import os
-        from pathlib import Path
-
         from ..core.library_upgrade import scan_library
 
         api = deps.api_for(request)
-        # The path comes from a request, so it is confined the same way
-        # /api/browse-folder confines its own: a caller must not be able to
-        # enumerate the filesystem by asking for a scan of "/".
-        resolved = os.path.realpath(str(Path(payload.path).expanduser()))
-        root = os.path.realpath(str(api.download_dir))
-        try:
-            inside = os.path.commonpath([resolved, root]) == root
-        except ValueError:
-            inside = False
-        if not inside:
-            raise _fail(
-                400,
-                "That path is outside this instance's download folder.",
-                "Scans are confined to the folder this account downloads into.",
-            )
+        resolved = _confined_path(payload.path, api.download_dir)
 
         report = await run_in_threadpool(
             scan_library,
@@ -526,5 +537,56 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
             verify_hires=payload.verify_hires,
         )
         return LibraryScanResponse(**report.to_dict())
+
+    @router.post(
+        "/library/duplicates",
+        response_model=LibraryDuplicatesResponse,
+        responses=_ERRORS,
+        summary="Find duplicate recordings in a library (read-only)",
+    )
+    async def library_duplicates(
+        request: Request, payload: LibraryDuplicatesRequest
+    ) -> LibraryDuplicatesResponse:
+        """Groups every copy of the same recording under `path`.
+
+        Read-only, like /library/scan next to it: it reports which copy of
+        each group is worth keeping and never acts on that. Resolving —
+        quarantining or deleting — is deliberately not on this surface;
+        `spotiflac --dedup-library … --dedup-apply` and the GUI panel are
+        where files get moved, both behind a second explicit step.
+        """
+        from pathlib import Path
+
+        from ..core.library_dedup import TRASH_DIRNAME, export_sqlite, scan_duplicates
+
+        api = deps.api_for(request)
+        resolved = _confined_path(payload.path, api.download_dir)
+
+        report = await run_in_threadpool(
+            scan_duplicates,
+            resolved,
+            recursive=payload.recursive,
+            match=payload.match,
+            duration_tolerance_s=payload.duration_tolerance_s,
+            verify=payload.verify,
+            similarity_threshold=payload.similarity_threshold,
+        )
+
+        database = ""
+        if payload.export_db:
+            try:
+                database = str(
+                    await run_in_threadpool(
+                        export_sqlite,
+                        report,
+                        Path(resolved) / TRASH_DIRNAME / "library-index.db",
+                    )
+                )
+            except OSError as exc:
+                # The scan succeeded; the index is a convenience on top of
+                # it and must not turn a good answer into a 500.
+                logger.warning("[api] could not write the dedup index: %s", exc)
+
+        return LibraryDuplicatesResponse(**report.to_dict(), database=database)
 
     return router

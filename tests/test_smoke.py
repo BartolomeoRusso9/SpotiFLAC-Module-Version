@@ -168,7 +168,9 @@ def test_interactive_service_options_are_deduplicated_from_installed_extensions(
                 DummyExt("soundcloud"),
             ]
 
-    monkeypatch.setattr("SpotiFLAC.interactive.ExtensionManager", DummyManager)
+    # Patched where the discovery actually lives now: interactive and the
+    # GUI both read extensions/catalog.installed_download_services().
+    monkeypatch.setattr("SpotiFLAC.extensions.catalog.ExtensionManager", DummyManager)
 
     assert interactive._installed_service_options() == ["qobuz", "soundcloud", "tidal"]
 
@@ -185,7 +187,7 @@ def test_interactive_stops_when_no_download_providers_are_installed(
         def list_installed(self):
             return []
 
-    monkeypatch.setattr("SpotiFLAC.interactive.ExtensionManager", DummyManager)
+    monkeypatch.setattr("SpotiFLAC.extensions.catalog.ExtensionManager", DummyManager)
 
     with pytest.raises(SystemExit):
         interactive._require_installed_service_options()

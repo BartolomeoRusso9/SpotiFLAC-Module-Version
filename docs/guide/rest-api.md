@@ -54,6 +54,7 @@ curl -b jar localhost:8000/api/v1/info
 | `POST` | `/api/v1/subscriptions/check` | Check every subscription for new releases. |
 | `GET` | `/api/v1/extensions` | Installed extensions and how reliable they have been. |
 | `POST` | `/api/v1/library/scan` | Files below a target quality (read-only). |
+| `POST` | `/api/v1/library/duplicates` | Duplicate recordings in a library (read-only). |
 
 ### Queueing a download
 
@@ -115,6 +116,29 @@ being guessed at.
 Resolving is not downloading: the response is a list of URLs for the caller
 to review and then queue through `POST /downloads` like any other download,
 so quotas, the queue limit and per-account isolation all apply unchanged.
+
+### Finding duplicates
+
+```bash
+curl -X POST localhost:8000/api/v1/library/duplicates \
+     -H 'content-type: application/json' \
+     -d '{"path":"/music","match":"both","export_db":true}'
+```
+
+Groups every copy of the same recording under `path` — by ISRC first, then by
+artist/title and duration for the files that carry none — and names the copy
+worth keeping in each group. The body carries the library recap (formats,
+tiers, how many files have no ISRC) alongside the groups; `export_db` also
+writes a SQLite index of the whole library and returns its path in
+`database`. See [Library Deduplication](local-tagging.md#library-deduplication)
+for what the grouping actually decides and why.
+
+**Read-only, deliberately.** It reports which copy to keep and never acts on
+that: removing files needs a second explicit step, and that step lives on the
+command line (`spotiflac --dedup-library … --dedup-apply`) and in the GUI
+panel, both of which can quarantine rather than delete and can undo
+themselves. An HTTP call that deletes from a music library is not something to
+add because the read side happened to be useful.
 
 ### Errors
 
