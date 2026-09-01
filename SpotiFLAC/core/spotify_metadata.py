@@ -65,6 +65,46 @@ def _dig(node: Any, *keys: str) -> dict:
     return node if isinstance(node, dict) else {}
 
 
+def _iso_date(node: Any) -> str:
+    """The release date of an album node, which Spotify may send as null.
+
+    A track the account cannot play — country-restricted, taken down — comes
+    back with the shape intact but the fields emptied: `"date": null`,
+    `"name": ""`. `node.get("date", {}).get("isoString", "")` then raises
+    `'NoneType' object has no attribute 'get'`, and a whole CSV import lost
+    that row to a "Metadata fetch failed" with nothing pointing at the cause.
+    """
+    value = _dig(node, "date").get("isoString")
+    return value if isinstance(value, str) else ""
+
+
+def _copyright_text(node: Any) -> str:
+    """The joined copyright line of an album node. Null-safe, see _iso_date."""
+    items = _dig(node, "copyright").get("items")
+    if not isinstance(items, list):
+        return ""
+    return " \u00b7 ".join(
+        c.get("text", "") for c in items if isinstance(c, dict) and c.get("text")
+    )
+
+
+def _is_explicit(node: Any) -> bool:
+    """Whether a track node is marked explicit. Null-safe, see _iso_date."""
+    return _dig(node, "contentRating").get("label") == "EXPLICIT"
+
+
+def _name(node: Any, default: str) -> str:
+    """A node's name, falling back when it is absent, null or blank.
+
+    Blank counts: a restricted track carries `"name": ""`, and a track
+    titled "" is a file named "".
+    """
+    if not isinstance(node, dict):
+        return default
+    value = node.get("name")
+    return value if isinstance(value, str) and value.strip() else default
+
+
 def _safe_playcount(raw: Any) -> str:
     """Reads the playcount from either a dict or a scalar value."""
     if isinstance(raw, dict):
@@ -420,12 +460,34 @@ class SpotifyMetadataClient:
         }
         data = await asyncio.to_thread(self.web_client.query, payload)
         track_union = _dig(data, "data", "trackUnion")
+        if not track_union:
+            raise SpotiflacError(
+                ErrorKind.TRACK_NOT_FOUND,
+                f"Spotify returned no metadata for track {track_id}.",
+            )
 
-        album_data = track_union.get("albumOfTrack", {})
-        cover = self.web_client.extract_cover_url(album_data.get("coverArt", {}))
+        # A track this account cannot see — pulled from the catalogue, or
+        # released only in other countries — answers with the shape intact
+        # and every field emptied: no name, no duration, null `date`. That
+        # null is what raised "'NoneType' object has no attribute 'get'"
+        # halfway through a CSV import; parsing it instead would put an
+        # untitled row in the track list that nothing can download. Saying
+        # which track and why is more use than either.
+        playability = _dig(track_union, "playability")
+        if not _name(track_union, "") and playability.get("playable") is False:
+            reason = str(playability.get("reason") or "").replace("_", " ").lower()
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"Track {track_id} is unavailable"
+                + (f" ({reason})" if reason else "")
+                + " — Spotify sent no metadata for it.",
+            )
+
+        album_data = _dig(track_union, "albumOfTrack")
+        cover = self.web_client.extract_cover_url(_dig(album_data, "coverArt"))
 
         # albumOfTrack in getTrack non include artists → fetch separato
-        album_artists_list = _extract_artist_names(album_data.get("artists", {}))
+        album_artists_list = _extract_artist_names(album_data.get("artists"))
         if not album_artists_list:
             album_id = album_data.get("id") or ""
             if not album_id:
@@ -455,11 +517,11 @@ class SpotifyMetadataClient:
 
         # 3. Additional support for the standard artists structure
         if not artists_list:
-            artists_list.extend(_extract_artist_names(track_union.get("artists", {})))
+            artists_list.extend(_extract_artist_names(track_union.get("artists")))
 
         # 4. Fallback to the album if necessary
         if not artists_list:
-            artists_list = _extract_artist_names(album_data.get("artists", {}))
+            artists_list = _extract_artist_names(album_data.get("artists"))
 
         # 5. Final fallback if everything fails
         if not artists_list:
@@ -484,19 +546,14 @@ class SpotifyMetadataClient:
             self._isrc_for_track_async(track_id),
         )
 
-        c_items = album_data.get("copyright", {}).get("items", [])
-        copyright_str = (
-            " \u00b7 ".join([c.get("text", "") for c in c_items if c.get("text")])
-            if c_items
-            else ""
-        )
+        copyright_str = _copyright_text(album_data)
 
         return TrackMetadata(
             id=track_id,
-            title=track_union.get("name", "Unknown"),
+            title=_name(track_union, "Unknown"),
             artists=artists_str,
             artist_names=artists_list,
-            album=album_data.get("name", "Unknown"),
+            album=_name(album_data, "Unknown"),
             album_artist=album_artists_str,
             album_artist_names=album_artists_list,
             isrc=isrc_str,
@@ -504,16 +561,14 @@ class SpotifyMetadataClient:
             disc_number=track_union.get("discNumber") or 1,
             total_tracks=0,
             duration_ms=_safe_duration_ms(track_union.get("duration")),
-            release_date=album_data.get("date", {}).get("isoString", ""),
+            release_date=_iso_date(album_data),
             cover_url=cover,
             external_url=_track_url(track_id),
             copyright=copyright_str,
             composer=composer_str,
             preview_url="",
             plays=_safe_playcount(track_union.get("playcount")),
-            is_explicit=(
-                track_union.get("contentRating", {}).get("label") == "EXPLICIT"
-            ),
+            is_explicit=_is_explicit(track_union),
         )
 
     # ------------------------------------------------------------------
@@ -573,8 +628,8 @@ class SpotifyMetadataClient:
             if not album_union:
                 album_union = au
 
-            tracks_v2 = au.get("tracksV2", {})
-            items = tracks_v2.get("items", [])
+            tracks_v2 = _dig(au, "tracksV2")
+            items = tracks_v2.get("items") or []
             if not items:
                 break
 
@@ -584,23 +639,18 @@ class SpotifyMetadataClient:
                 break
             offset += limit
 
-        album_name = album_union.get("name", "Unknown Album")
-        cover = self.web_client.extract_cover_url(album_union.get("coverArt", {}))
-        album_artists_list = _extract_artist_names(album_union.get("artists", {}))
+        album_name = _name(album_union, "Unknown Album")
+        cover = self.web_client.extract_cover_url(_dig(album_union, "coverArt"))
+        album_artists_list = _extract_artist_names(album_union.get("artists"))
         album_artists = ", ".join(album_artists_list)
-        release_date = album_union.get("date", {}).get("isoString", "")
-        total_tracks = album_union.get("tracksV2", {}).get("totalCount", 0)
+        release_date = _iso_date(album_union)
+        total_tracks = _dig(album_union, "tracksV2").get("totalCount") or 0
 
-        c_items = album_union.get("copyright", {}).get("items", [])
-        copyright_str = (
-            " \u00b7 ".join([c.get("text", "") for c in c_items if c.get("text")])
-            if c_items
-            else ""
-        )
+        copyright_str = _copyright_text(album_union)
 
         tracks: list[TrackMetadata] = []
         for item in all_items:
-            track_node = item.get("track", {})
+            track_node = _dig(item, "track")
 
             track_id = track_node.get("id")
             if not track_id:
@@ -612,15 +662,14 @@ class SpotifyMetadataClient:
                 continue
 
             track_artists_list = (
-                _extract_artist_names(track_node.get("artists", {}))
-                or album_artists_list
+                _extract_artist_names(track_node.get("artists")) or album_artists_list
             )
             track_artists = ", ".join(track_artists_list) or album_artists
 
             tracks.append(
                 TrackMetadata(
                     id=track_id,
-                    title=track_node.get("name", "Unknown"),
+                    title=_name(track_node, "Unknown"),
                     artists=track_artists,
                     artist_names=track_artists_list,
                     album=album_name,
@@ -638,9 +687,7 @@ class SpotifyMetadataClient:
                     composer="",
                     preview_url="",
                     plays=_safe_playcount(track_node.get("playcount")),
-                    is_explicit=(
-                        track_node.get("contentRating", {}).get("label") == "EXPLICIT"
-                    ),
+                    is_explicit=_is_explicit(track_node),
                 ),
             )
 
@@ -699,19 +746,19 @@ class SpotifyMetadataClient:
                 ) or _extract_playlist_cover(playlist_v2)
                 playlist_owner_avatar = _extract_playlist_owner_avatar(playlist_v2)
 
-            content = playlist_v2.get("content", {})
-            items = content.get("items", [])
+            content = _dig(playlist_v2, "content")
+            items = content.get("items") or []
             if not items:
                 break
 
             all_items.extend(items)
-            if len(all_items) >= content.get("totalCount", 0) or len(items) < limit:
+            if len(all_items) >= (content.get("totalCount") or 0) or len(items) < limit:
                 break
             offset += limit
 
         tracks: list[TrackMetadata] = []
         for item in all_items:
-            track_data = item.get("itemV2", {}).get("data", {})
+            track_data = _dig(item, "itemV2", "data")
             track_id = track_data.get("id")
             if not track_id:
                 uri = track_data.get("uri", "")
@@ -720,33 +767,28 @@ class SpotifyMetadataClient:
             if not track_id:
                 continue
 
-            album_data = track_data.get("albumOfTrack", {})
-            artists_list = _extract_artist_names(track_data.get("artists", {}))
+            album_data = _dig(track_data, "albumOfTrack")
+            artists_list = _extract_artist_names(track_data.get("artists"))
             if not artists_list:
-                artists_list = _extract_artist_names(album_data.get("artists", {})) or [
+                artists_list = _extract_artist_names(album_data.get("artists")) or [
                     "Unknown Artist",
                 ]
 
-            cover = self.web_client.extract_cover_url(album_data.get("coverArt", {}))
+            cover = self.web_client.extract_cover_url(_dig(album_data, "coverArt"))
             album_artists_list = (
-                _extract_artist_names(album_data.get("artists", {})) or artists_list[:1]
+                _extract_artist_names(album_data.get("artists")) or artists_list[:1]
             )
             album_artists = ", ".join(album_artists_list)
 
-            c_items = album_data.get("copyright", {}).get("items", [])
-            copyright_str = (
-                " \u00b7 ".join([c.get("text", "") for c in c_items if c.get("text")])
-                if c_items
-                else ""
-            )
+            copyright_str = _copyright_text(album_data)
 
             tracks.append(
                 TrackMetadata(
                     id=track_id,
-                    title=track_data.get("name", "Unknown"),
+                    title=_name(track_data, "Unknown"),
                     artists=", ".join(artists_list) if artists_list else "Unknown",
                     artist_names=artists_list,
-                    album=album_data.get("name", "Unknown"),
+                    album=_name(album_data, "Unknown"),
                     album_artist=album_artists,
                     album_artist_names=album_artists_list,
                     isrc="",
@@ -761,9 +803,7 @@ class SpotifyMetadataClient:
                     composer="",
                     preview_url="",
                     plays=_safe_playcount(track_data.get("playcount")),
-                    is_explicit=(
-                        track_data.get("contentRating", {}).get("label") == "EXPLICIT"
-                    ),
+                    is_explicit=_is_explicit(track_data),
                 ),
             )
 
@@ -818,28 +858,26 @@ class SpotifyMetadataClient:
         def _parse_tracks(items: list) -> list[TrackMetadata]:
             results = []
             for item in items:
-                t = item.get("item", {}).get("data", {})
+                t = _dig(item, "item", "data")
                 if not t.get("id"):
                     continue
-                album_node = t.get("albumOfTrack", {})
-                track_artists_list = _extract_artist_names(t.get("artists", {}))
+                album_node = _dig(t, "albumOfTrack")
+                track_artists_list = _extract_artist_names(t.get("artists"))
                 track_artists_str = ", ".join(track_artists_list)
                 album_artists_list = (
-                    _extract_artist_names(album_node.get("artists", {}))
+                    _extract_artist_names(album_node.get("artists"))
                     or track_artists_list
                 )
                 album_artists_str = ", ".join(album_artists_list)
 
-                cover = self.web_client.extract_cover_url(
-                    album_node.get("coverArt", {}),
-                )
+                cover = self.web_client.extract_cover_url(_dig(album_node, "coverArt"))
                 results.append(
                     TrackMetadata(
                         id=t["id"],
-                        title=t.get("name", "Unknown"),
+                        title=_name(t, "Unknown"),
                         artists=track_artists_str,
                         artist_names=track_artists_list,
-                        album=album_node.get("name", "Unknown"),
+                        album=_name(album_node, "Unknown"),
                         album_artist=album_artists_str,
                         album_artist_names=album_artists_list,
                         isrc="",
@@ -854,9 +892,7 @@ class SpotifyMetadataClient:
                         composer="",
                         preview_url="",
                         plays=_safe_playcount(t.get("playcount")),
-                        is_explicit=(
-                            t.get("contentRating", {}).get("label") == "EXPLICIT"
-                        ),
+                        is_explicit=_is_explicit(t),
                     ),
                 )
             return results
@@ -864,7 +900,7 @@ class SpotifyMetadataClient:
         def _parse_simple(items: list, kind: str) -> list[dict]:
             results = []
             for item in items:
-                node = item.get("data") or item.get("item", {}).get("data", {})
+                node = item.get("data") or _dig(item, "item", "data")
                 # La GraphQL di Spotify non espone sempre un campo `id` diretto su
                 # album/artist/playlist: the ID is embedded in the URI
                 # (es. "spotify:album:4aawyAB9vmqN3uQ7FjRGTy").
@@ -880,33 +916,30 @@ class SpotifyMetadataClient:
                     "id": node_id,
                     "type": kind,
                     "subtitle": kind.capitalize(),
-                    "name": node.get("name")
-                    or node.get("profile", {}).get("name", "Unknown"),
+                    "name": node.get("name") or _name(_dig(node, "profile"), "Unknown"),
                     "external_url": f"https://open.spotify.com/{kind}/{node_id}",
                 }
                 if kind == "album":
-                    entry["artists"] = _join_artists(node.get("artists", {}))
-                    entry["release_date"] = node.get("date", {}).get("isoString", "")
+                    entry["artists"] = _join_artists(node.get("artists"))
+                    entry["release_date"] = _iso_date(node)
                     entry["cover_url"] = self.web_client.extract_cover_url(
-                        node.get("coverArt", {}),
+                        _dig(node, "coverArt"),
                     )
                 elif kind == "artist":
                     cover_url = self.web_client.extract_cover_url(
-                        node.get("visualIdentity", {}),
+                        _dig(node, "visualIdentity"),
                     )
                     if not cover_url:
-                        alt_cover_data = node.get("visuals", {}).get("avatarImage", {})
+                        alt_cover_data = _dig(node, "visuals", "avatarImage")
                         cover_url = self.web_client.extract_cover_url(alt_cover_data)
                     entry["cover_url"] = cover_url
                 elif kind == "playlist":
-                    owner = node.get("owner", {})
+                    owner = _dig(node, "owner")
                     if not owner:
-                        owner_v2 = node.get("ownerV2", {})
-                        if isinstance(owner_v2, dict):
-                            owner = owner_v2.get("data") or {}
+                        owner = _dig(node, "ownerV2", "data")
                     entry["owner"] = owner.get("displayName") or owner.get("name") or ""
                     entry["cover_url"] = self.web_client.extract_cover_url(
-                        node.get("images", {}),
+                        _dig(node, "images"),
                     ) or _extract_playlist_cover(node)
                 results.append(entry)
             return results
@@ -919,10 +952,10 @@ class SpotifyMetadataClient:
         )
 
         return {
-            "tracks": _parse_tracks(tracks_data.get("items", [])),
-            "albums": _parse_simple(albums_data.get("items", []), "album"),
-            "artists": _parse_simple(artists_data.get("items", []), "artist"),
-            "playlists": _parse_simple(playlists_data.get("items", []), "playlist"),
+            "tracks": _parse_tracks(tracks_data.get("items") or []),
+            "albums": _parse_simple(albums_data.get("items") or [], "album"),
+            "artists": _parse_simple(artists_data.get("items") or [], "artist"),
+            "playlists": _parse_simple(playlists_data.get("items") or [], "playlist"),
         }
 
     async def search_by_type_async(

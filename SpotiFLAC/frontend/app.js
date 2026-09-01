@@ -1048,7 +1048,13 @@ function toastHeadline(msg) {
 function clearLog() { $('logArea').innerHTML = ''; }
 
 window.app_log = (msg, type = '') => logMessage(msg, type);
-window.app_set_progress = (label) => { if (label) setStatus(label); };
+// The backend pushes a bare string, so whether the job is still running has
+// to be read off the line itself: it ends in "…" while something is in
+// flight ("Reading the file…"), or carries a counter ("Matching 812/1875 ·
+// 806 found"), and finishes on a full stop ("Ready for download.", "Error.").
+// Getting it wrong only spins or stops a small dial, which is why a
+// heuristic is worth more here than a second event.
+window.app_set_progress = (label) => setStatus(label || '', /…|\d+\/\d+/.test(label || ''));
 window.app_set_metadata = (data) => {
   try {
     const d = typeof data === 'string' ? JSON.parse(data) : data;
@@ -1194,9 +1200,13 @@ window.loadHistoryAndProfiles = async () => {
 // ── Status bar ────────────────────────────────────────────────────────────────
 function setStatus(msg, loading = false) {
   const statusText = $('status-text');
-  if (statusText) statusText.textContent = msg;
+  if (statusText) statusText.textContent = msg || '';
+  // The strip only exists while it has something to say; an empty message is
+  // how every caller clears it.
+  const bar = $('status-bar');
+  if (bar) bar.classList.toggle('hidden', !msg);
   const spinner = $('spinner');
-  if (spinner) spinner.style.display = loading ? 'block' : 'none';
+  if (spinner) spinner.style.display = loading && msg ? 'block' : 'none';
 }
 function setTrackRenderStatus(msg, visible = false) {
   const el = $('track-render-status');
@@ -5694,25 +5704,32 @@ async function onCsvFileChosen(input) {
   }
 }
 
-// Pushed by api_mixins/csv_import.py while the rows are being matched.
-// Matching a CSV of titles is one catalogue lookup per row, so a large file
-// is minutes of work; without this the import button said nothing between
-// "Reading the file…" and the finished track list, and a file whose columns
-// were mapped wrong looked exactly like one that was working. Two numbers,
-// because they answer different questions: how far along it is, and how
-// much of it is actually being found.
+// Pushed by api_mixins/csv_import.py through both long phases of an import:
+// matching the rows against the catalogue, then fetching the metadata of
+// every link that matched. A large file is minutes of work in each, and
+// without this the import said nothing between "Reading the file…" and the
+// finished track list — a file whose columns were mapped wrong looked
+// exactly like one that was working, and a stalled fetch like a slow one.
+// Three numbers, because they answer different questions: how far along it
+// is, how much of it is coming back, and how much is being lost.
 window.app_csv_progress = function (payload) {
-  const { done = 0, total = 0, found = 0 } = payload || {};
+  const { phase = 'matching', done = 0, total = 0, found = 0, missing = 0 } = payload || {};
+  const matching = phase === 'matching';
+  const label =
+    `${matching ? 'Matching' : 'Fetching metadata'} ${done}/${total} · ` +
+    `${found} ${matching ? 'found' : 'ready'}` +
+    (missing ? ` · ${missing} ${matching ? 'not found' : 'without metadata'}` : '');
   // The line itself is already on screen: the same counter arrives as an
   // app_set_progress label. This puts it on the button that started the
   // import too, since that is where the pointer is, and marks the button
   // busy — without touching its innerHTML, which is the icon.
   const btn = $('csvBtn');
   if (!btn) return;
-  const label = `Matching ${done}/${total} · ${found} found`;
   btn.title = label;
   btn.setAttribute('aria-label', label);
-  btn.classList.toggle('is-busy', done < total);
+  // Only the metadata phase reaching its total ends the import; matching
+  // hits done === total and is immediately followed by the second phase.
+  btn.classList.toggle('is-busy', matching || done < total);
 };
 
 // Pushed by api_mixins/csv_import.py once the track list is ready. The table
@@ -5720,16 +5737,24 @@ window.app_csv_progress = function (payload) {
 // on the rows that did not make it.
 window.app_csv_loaded = function (payload) {
   const missed = (payload?.unresolved || []).length;
-  if (missed) {
-    showToast(
-      `${payload.tracks} track(s) loaded · ${missed} row(s) could not be matched (see the log).`,
-      'info',
-    );
+  const failed = payload?.failed || 0;
+  const btn = $('csvBtn');
+  if (btn) btn.classList.remove('is-busy');
+  if (missed || failed) {
+    const parts = [];
+    if (missed) parts.push(`${missed} row(s) could not be matched`);
+    // A row can match a link whose metadata then fails to fetch, which is
+    // why this is a separate number from the unmatched rows: together they
+    // account for the gap between the file's line count and the table's.
+    if (failed) parts.push(`${failed} link(s) returned no metadata`);
+    showToast(`${payload.tracks} track(s) loaded · ${parts.join(' · ')} (see the log).`, 'info');
   } else {
     showToast(`${payload.tracks} track(s) loaded from ${payload.file}.`, 'success');
   }
 };
 
 window.app_csv_error = function (payload) {
+  const btn = $('csvBtn');
+  if (btn) btn.classList.remove('is-busy');
   showToast(payload?.error || 'CSV import failed.', 'error');
 };

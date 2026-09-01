@@ -176,31 +176,14 @@ class CsvImportMixin:
                 f"{document.path}: {total_rows} row(s) to find. Matching them…",
                 "debug",
             )
-            self.set_progress(f"Matching 0/{total_rows} — 0 found")
-
-            last_push = 0.0
-
-            def _matching_progress(done: int, total: int, found: int) -> None:
-                # Throttled, except for the last row: the final counter is
-                # the one the user reads, so it must never be the one the
-                # throttle drops.
-                nonlocal last_push
-                now = time.monotonic()
-                if done < total and (now - last_push) < PROGRESS_INTERVAL_S:
-                    return
-                last_push = now
-                self.set_progress(f"Matching {done}/{total} — {found} found")
-                self._push_safe(
-                    "app_csv_progress",
-                    {"done": done, "total": total, "found": found},
-                )
-
+            report_matching = self._csv_counter("matching")
+            report_matching(0, total_rows, 0)
             resolution = run_sync(
                 csv_source.resolve_rows(
                     document.rows,
                     document=document,
                     min_score=score,
-                    on_progress=_matching_progress,
+                    on_progress=report_matching,
                 )
             )
         except SpotiflacError as e:
@@ -250,9 +233,17 @@ class CsvImportMixin:
             )
             return
 
-        self.set_progress(f"Fetching metadata for {len(resolution.urls)} track(s)…")
+        # The long half of a large import: 1875 rows match in seconds, then
+        # every matched link is its own metadata request. Reported row by row
+        # for the same reason matching is — the phase used to state its total
+        # once and then say nothing for minutes, which is indistinguishable
+        # from a hang.
+        report_fetch = self._csv_counter("metadata")
+        report_fetch(0, len(resolution.urls), 0)
         try:
-            tracks = run_sync(self._csv_tracks_async(resolution.urls))
+            tracks, failed_links = run_sync(
+                self._csv_tracks_async(resolution.urls, on_progress=report_fetch)
+            )
         except Exception as e:
             self.log(f"CSV: {e}", "error")
             self.set_progress("Error.")
@@ -282,13 +273,20 @@ class CsvImportMixin:
         # tracks vs resolution.resolved can differ: a row can match a link
         # whose metadata then fails to fetch. Reporting both against the
         # row count is what makes that visible instead of silent.
+        if failed_links:
+            self.log(
+                f"{failed_links} matched link(s) returned no metadata — see the "
+                "Logs view for which.",
+                "warn",
+            )
         self.log(
             f"{len(tracks)}/{total_rows} track(s) ready"
             + (
                 f" · {len(resolution.unresolved)} row(s) unmatched"
                 if resolution.unresolved
                 else ""
-            ),
+            )
+            + (f" · {failed_links} link(s) without metadata" if failed_links else ""),
             "ok",
         )
         self.set_progress("Ready for download.")
@@ -300,10 +298,64 @@ class CsvImportMixin:
                 "rows": total_rows,
                 "matched": len(resolution.resolved),
                 "tracks": len(tracks),
+                "failed": failed_links,
                 "unresolved": [entry.to_dict() for entry in resolution.unresolved],
             },
         )
         self._start_csv_playcounts(tracks)
+
+    def _csv_counter(self, phase: str):
+        """A throttled `done/total` counter for one phase of an import.
+
+        Both phases of a large CSV are the same shape — thousands of small
+        lookups behind a single line of UI — and both need to answer the
+        same two questions while they run: how far along is it, and how much
+        of it is actually coming back. A file 300 rows in with 40 found has
+        the wrong column mapped, and "300/1875" alone would hide that until
+        the run ended.
+
+        Returns `report(done, total, found, missing=None)` — the first three
+        being the signature `csv_source.resolve_rows` calls its `on_progress`
+        with, and `missing` defaulting to the rest of `done`. The metadata
+        phase passes it: one link can carry several tracks, so there `found`
+        counts tracks and the misses have to be counted separately rather
+        than subtracted. Throttled to PROGRESS_INTERVAL_S, except for the
+        last call of a phase: the final counter is the one the user reads,
+        so it must never be the one the throttle drops.
+        """
+        verb, found_word, missing_word = (
+            ("Matching", "found", "not found")
+            if phase == "matching"
+            else ("Fetching metadata", "ready", "no metadata")
+        )
+        last_push = 0.0
+
+        def report(
+            done: int, total: int, found: int, missing: int | None = None
+        ) -> None:
+            nonlocal last_push
+            now = time.monotonic()
+            if done < total and (now - last_push) < PROGRESS_INTERVAL_S:
+                return
+            last_push = now
+            if missing is None:
+                missing = max(done - found, 0)
+            self.set_progress(
+                f"{verb} {done}/{total} · {found} {found_word}"
+                + (f" · {missing} {missing_word}" if missing else "")
+            )
+            self._push_safe(
+                "app_csv_progress",
+                {
+                    "phase": phase,
+                    "done": done,
+                    "total": total,
+                    "found": found,
+                    "missing": missing,
+                },
+            )
+
+        return report
 
     def _start_csv_playcounts(self, tracks: list) -> None:
         """Fills the Playcount column in, after the table is already up.
@@ -346,12 +398,21 @@ class CsvImportMixin:
 
         threading.Thread(target=_work, daemon=True).start()
 
-    async def _csv_tracks_async(self, urls: list[str]) -> list:
+    async def _csv_tracks_async(
+        self,
+        urls: list[str],
+        on_progress=None,
+    ) -> tuple[list, int]:
         """Metadata for every resolved link, in file order.
 
         Runs through the downloader's own resolution so a CSV can mix
         services exactly like the address bar does — a Tidal link and an
         Apple Music link next to the Spotify ones.
+
+        Returns the tracks and how many links produced none, because those
+        two numbers differ and the gap is invisible otherwise: a row can
+        match a link whose metadata then fails, and until it was counted the
+        only trace was a track list quietly shorter than the match count.
         """
         import asyncio
 
@@ -359,18 +420,45 @@ class CsvImportMixin:
 
         downloader = SpotiflacDownloader(DownloadOptions(output_dir=self.download_dir))
         semaphore = asyncio.Semaphore(FETCH_CONCURRENCY)
+        total = len(urls)
+        done = 0
+        fetched = 0
+        failed = 0
 
         async def _one(url: str) -> list:
+            nonlocal done, fetched, failed
             async with semaphore:
                 try:
                     _name, tracks, _info = await downloader._resolve_metadata_async(url)
-                    return tracks or []
                 except Exception as e:
-                    self.log(f"CSV: {url} — {e}", "error")
-                    return []
+                    tracks = []
+                    # "error-quiet" for the same reason the unmatched rows
+                    # are: one popup per failing link buries the window under
+                    # a long file. The count below is the one toast.
+                    self.log(f"CSV: {url} — {e}", "error-quiet")
+                else:
+                    if not tracks:
+                        self.log(
+                            f"CSV: {url} — the response carried no track.",
+                            "error-quiet",
+                        )
+                tracks = tracks or []
+                if tracks:
+                    fetched += len(tracks)
+                else:
+                    failed += 1
+                done += 1
+                if on_progress is not None:
+                    try:
+                        on_progress(done, total, fetched, failed)
+                    except Exception:
+                        # Same rule as resolve_rows' counter: the display
+                        # must never cost the link it was reporting on.
+                        pass
+                return tracks
 
         groups = await asyncio.gather(*(_one(url) for url in urls))
-        return [track for group in groups for track in group]
+        return [track for group in groups for track in group], failed
 
     def _push_safe(self, event: str, payload) -> None:
         try:

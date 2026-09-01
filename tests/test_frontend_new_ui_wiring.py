@@ -37,6 +37,22 @@ def test_index_page_contains_the_new_sections(client) -> None:
     assert 'id="account-signout-row"' in html
 
 
+def test_the_status_line_has_somewhere_to_land(client) -> None:
+    """setStatus() writes to #status-text and spins #spinner, and for a long
+    while neither element existed — so every set_progress() the backend
+    pushed (reading a CSV, matching its rows, fetching metadata, downloading)
+    went nowhere, and minutes of work looked like a frozen window.
+    """
+    html = client.get("/").text
+    assert 'id="status-bar"' in html
+    assert 'id="status-text"' in html
+    assert 'id="spinner"' in html
+
+    app_js = client.get("/app.js").text
+    for element_id in ("status-bar", "status-text", "spinner"):
+        assert f"$('{element_id}')" in app_js
+
+
 def test_discovery_directory_add_list_remove_round_trip_over_http(client) -> None:
     added = client.post(
         "/api/add_registry_directory", json=["https://example.com/dir.json"]

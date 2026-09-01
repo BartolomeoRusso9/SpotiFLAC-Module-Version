@@ -172,6 +172,18 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           </button>
         </div>
+        <!-- Where set_progress() lands. Every long job in the app has been
+             pushing a line here — reading a CSV, matching its rows, fetching
+             metadata, downloading — at an element that did not exist, so
+             setStatus() wrote to nothing and a 1875-row import was several
+             minutes indistinguishable from a frozen window. aria-live so the
+             counter is announced as it changes, not only when focus lands on
+             it; hidden until there is something to say, so it costs no space
+             at rest. -->
+        <div id="status-bar" class="status-bar hidden" role="status" aria-live="polite">
+          <span id="spinner" class="status-spinner"></span>
+          <span id="status-text"></span>
+        </div>
       </div>
 
       <!-- Text Search Results Container -->

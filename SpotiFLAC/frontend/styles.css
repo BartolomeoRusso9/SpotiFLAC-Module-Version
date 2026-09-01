@@ -368,6 +368,33 @@
       border-bottom: 1px solid var(--border);
     }
 
+    /* The one line that says what the app is doing right now — see the
+       #status-bar comment in index.html for why it is not decorative. */
+    .status-bar {
+      width: 100%;
+      max-width: 860px;
+      margin: 10px auto 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 15px;
+      font-size: 11.5px;
+      color: var(--muted);
+    }
+    .status-spinner {
+      display: none;
+      flex: none;
+      width: 11px; height: 11px;
+      border: 2px solid var(--border2);
+      border-top-color: var(--yellow);
+      border-radius: 50%;
+      animation: status-spin 0.7s linear infinite;
+    }
+    @keyframes status-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .status-spinner { animation-duration: 2.4s; }
+    }
+
     .search-container {
       width: 100%;
       max-width: 860px;

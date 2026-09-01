@@ -103,6 +103,125 @@ def test_a_broken_progress_callback_does_not_lose_rows() -> None:
     assert len(resolution.resolved) + len(resolution.unresolved) == 6
 
 
+# --- the metadata counter --------------------------------------------------
+
+
+class _API:
+    """Just enough of SpotiFLAC_API for the CSV mixin's counters."""
+
+    def __init__(self) -> None:
+        self.download_dir = "."
+        self.progress: list[str] = []
+        self.pushed: list[tuple[str, dict]] = []
+        self.logs: list[tuple[str, str]] = []
+
+    def set_progress(self, label: str = "") -> None:
+        self.progress.append(label)
+
+    def log(self, message: str, type: str = "info") -> None:
+        self.logs.append((message, type))
+
+    def _push(self, event: str, payload) -> None:
+        self.pushed.append((event, payload))
+
+
+def _fetching_api(monkeypatch, resolve):
+    """A CSV mixin whose metadata lookups are `resolve(url)`, unthrottled."""
+    import SpotiFLAC.downloader as downloader_mod
+    from SpotiFLAC.api_mixins import csv_import
+
+    class _Api(csv_import.CsvImportMixin, _API):
+        pass
+
+    class _Downloader:
+        def __init__(self, _opts) -> None:
+            pass
+
+        async def _resolve_metadata_async(self, url):
+            return await resolve(url)
+
+    # Report every link rather than four times a second: the throttle is
+    # what these tests would otherwise be measuring.
+    monkeypatch.setattr(csv_import, "PROGRESS_INTERVAL_S", 0.0)
+    monkeypatch.setattr(downloader_mod, "SpotiflacDownloader", _Downloader)
+    return _Api()
+
+
+class _Track:
+    """A metadata object the counter only ever counts."""
+
+
+def test_the_metadata_phase_counts_as_it_goes(monkeypatch) -> None:
+    """The long half of a large import: 1875 rows match in seconds, then
+    every matched link is its own request. It used to state its total once
+    and then say nothing for minutes, which reads exactly like a hang.
+    """
+
+    async def _resolve(url):
+        # One link comes back empty, the way an unavailable track does.
+        return ("", [] if url.endswith("2") else [_Track()], {})
+
+    api = _fetching_api(monkeypatch, _resolve)
+    urls = [f"https://open.spotify.com/track/{i:022d}" for i in range(6)]
+
+    tracks, failed = asyncio.run(
+        api._csv_tracks_async(urls, on_progress=api._csv_counter("metadata"))
+    )
+
+    assert len(tracks) == 5
+    assert failed == 1
+    counts = [payload for name, payload in api.pushed if name == "app_csv_progress"]
+    assert [c["done"] for c in counts] == [1, 2, 3, 4, 5, 6]
+    assert counts[-1]["found"] == 5
+    # The misses are counted, not subtracted: one link can carry several
+    # tracks, so done - found says nothing about how many links failed.
+    assert counts[-1]["missing"] == 1
+    assert all(c["phase"] == "metadata" for c in counts)
+    # And the same numbers reach the status line, in words.
+    assert "6/6" in api.progress[-1]
+    assert "5 ready" in api.progress[-1]
+
+
+def test_a_link_without_metadata_is_logged_quietly_and_counted(monkeypatch) -> None:
+    """One popup per failing link buries the window under a long file, so
+    each line goes to the Logs view and the toast is the single count.
+    """
+
+    async def _resolve(url):
+        raise RuntimeError("Metadata fetch failed")
+
+    api = _fetching_api(monkeypatch, _resolve)
+
+    tracks, failed = asyncio.run(
+        api._csv_tracks_async(["https://open.spotify.com/track/aaa"])
+    )
+
+    assert tracks == []
+    assert failed == 1
+    assert [kind for _, kind in api.logs] == ["error-quiet"]
+
+
+def test_a_broken_metadata_counter_does_not_lose_a_track(monkeypatch) -> None:
+    """The counter is a display, on this side of the import too."""
+
+    async def _resolve(url):
+        return ("", [_Track()], {})
+
+    api = _fetching_api(monkeypatch, _resolve)
+
+    def _explode(*_args):
+        raise RuntimeError("the bridge went away")
+
+    tracks, failed = asyncio.run(
+        api._csv_tracks_async(
+            ["https://open.spotify.com/track/aaa"], on_progress=_explode
+        )
+    )
+
+    assert len(tracks) == 1
+    assert failed == 0
+
+
 # --- the download progress bar --------------------------------------------
 
 
