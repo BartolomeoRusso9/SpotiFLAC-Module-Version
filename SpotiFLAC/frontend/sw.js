@@ -19,7 +19,7 @@
 // WebSocket upgrade, which fetch/caches can't represent anyway) would be
 // actively wrong, not just unhelpful.
 
-const CACHE_NAME = "spotiflac-shell-v1";
+const CACHE_NAME = "spotiflac-shell-v2";
 const SHELL_FILES = [
   "./",
   "index.html",
