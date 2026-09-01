@@ -1283,6 +1283,12 @@ class SpotiFLAC_API(
                         "playcount": playcount,
                         "release_date": getattr(t, "release_date", ""),
                         "copyright": getattr(t, "copyright", ""),
+                        # For the album card's technical sheet. Every provider
+                        # fills these in unevenly, so the frontend drops any
+                        # row that comes back empty rather than showing a gap.
+                        "publisher": getattr(t, "publisher", ""),
+                        "upc": getattr(t, "upc", ""),
+                        "genre": getattr(t, "genre", ""),
                     },
                 )
 

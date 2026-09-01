@@ -27,6 +27,17 @@
       --shadow-soft: 0 20px 48px rgba(15, 23, 42, 0.08);
       --shadow-strong: 0 28px 64px rgba(15, 23, 42, 0.15);
       --t:          0.18s ease;
+      /* One easing curve for everything that moves. Plain `ease` accelerates
+         and decelerates at the same rate, which reads as mechanical on
+         surfaces this soft; this one leaves quickly and settles slowly. */
+      --ease:       cubic-bezier(0.22, 1, 0.36, 1);
+      --t-slow:     0.32s var(--ease);
+      /* The focus/active halo, so a ring is never a one-off rgba() again. */
+      --ring:       rgba(245,197,66,0.26);
+      /* A <select> is the one control the browser still draws itself, in the
+         OS's own chrome and font. Owning the chevron lets it be styled like
+         every other surface in the window. */
+      --chevron:    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
       --app-font:   'JetBrains Mono', 'Google Sans', 'Syne', sans-serif;
     }
 
@@ -38,6 +49,7 @@
        the theme class (see setThemeClass() in app.js). */
     html.light-theme,
     body.light-theme {
+      color-scheme: light;
       --bg:        #ffffff;
       --surface:   #ffffff;
       --surface2:  #f0f0f4;
@@ -56,11 +68,14 @@
       --button-bg:  #ffffff;
       --button-text:#111113;
       --button-border: rgba(0,0,0,0.08);
+      --ring:       rgba(212,162,0,0.22);
+      --chevron:    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
     }
 
     /* ── Dark theme ── */
     html.dark-theme,
     body.dark-theme {
+      color-scheme: dark;
       --bg:        #0a0a0a;
       --surface:   #1a1a1a;
       --surface2:  #2a2a2e;
@@ -81,6 +96,8 @@
       --button-border: rgba(255,255,255,0.1);
       --shadow-soft: 0 20px 48px rgba(0, 0, 0, 0.4);
       --shadow-strong: 0 28px 64px rgba(0, 0, 0, 0.6);
+      --ring:       rgba(255,214,10,0.24);
+      --chevron:    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2398989f' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
     }
 
     html, body { height: 100%; overflow: hidden; background: var(--bg); }
@@ -119,9 +136,16 @@
     }
     
     /* Disable drag ONLY on the colored buttons container so they remain clickable */
-    #titlebar .dots { 
-      -webkit-app-region: no-drag; 
+    #titlebar .dots {
+      -webkit-app-region: no-drag;
     }
+    /* In a browser tab (webapp.py adds .web-mode to <body>) the titlebar has
+       no job: the traffic-light buttons call pyWin() methods that only exist
+       on the pywebview bridge, and the drag region drags nothing. It was a
+       46px empty strip above every view. The version and the update badge it
+       also held are already shown in the home hero. The desktop build is
+       frameless and keeps it as the real window chrome. */
+    body.web-mode #titlebar { display: none; }
     .dots { display: flex; gap: 6px; }
     .dot {
       width: 12px; height: 12px; border-radius: 50%; cursor: pointer;
@@ -268,9 +292,13 @@
       background: rgba(255,255,255,0.72);
       color: var(--text);
       border-color: rgba(148,163,184,0.15);
-      transform: translateY(-2px);
+      /* Was translateY(-2px). In a horizontal toolbar a lift reads as the
+         button rising towards the pointer; in a vertical rail it just reads
+         as the row above it drifting out of line. */
+      transform: scale(1.06);
       box-shadow: 0 8px 18px rgba(15,23,42,0.10), inset 0 1px 0 rgba(255,255,255,0.9);
     }
+    .nav-btn:active { transform: scale(0.95); }
     .nav-btn.active {
       background: linear-gradient(135deg, var(--yellow) 0%, #f8d76b 100%);
       color: #111827;
@@ -278,6 +306,20 @@
       box-shadow: 0 12px 28px rgba(245,197,66,0.22), inset 0 1px 0 rgba(255,255,255,0.4);
       font-weight: 600;
     }
+    /* A tab marker on the rail edge. The yellow pill already says which view
+       is open, but only while you are looking at the pill; this reads as
+       position — which of eight stops down the rail you are at — from the
+       corner of the eye. */
+    .nav-btn.active::before {
+      content: '';
+      position: absolute;
+      left: -9px; top: 50%;  /* the sidebar's own left edge: 58px rail, 40px button */
+      width: 3px; height: 18px;
+      transform: translateY(-50%);
+      border-radius: 0 3px 3px 0;
+      background: var(--yellow-d);
+    }
+    .nav-btn.active:hover::before { opacity: .8; }
     .nav-spacer { flex: 1; }
 
     /* ── Content ── */
@@ -310,13 +352,18 @@
       padding: 18px 18px 12px;
       display: flex; justify-content: center;
     }
+    /* This was a bordered card around the title — a hard-edged rectangle
+       whose only content was the thing it framed, which is what made the
+       top of the window read as a box inside a box. The light it was
+       carrying is worth keeping; the edge is not, so the panel becomes a
+       radial glow that fades out before it reaches a border. */
     .hero-text {
       max-width: 800px; text-align: center;
-      padding: 12px 18px 8px;
-      border-radius: 24px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.38), rgba(255,255,255,0.08));
-      border: 1px solid rgba(148,163,184,0.12);
-      backdrop-filter: blur(8px);
+      padding: 18px 24px 14px;
+      border-radius: 28px;
+      background:
+        radial-gradient(50% 92% at 50% 0%, rgba(245,197,66,0.13), transparent 72%),
+        radial-gradient(46% 80% at 50% 6%, rgba(255,255,255,0.55), transparent 74%);
     }
     .hero-headline {
       display: flex; align-items: center; justify-content: center; gap: 14px;
@@ -358,8 +405,10 @@
       box-shadow: 0 12px 24px rgba(245,192,0,.14);
     }
     .hero-subtitle {
-      margin-top: 10px; color: var(--text2); font-size: 14px;
-      max-width: 760px; line-height: 1.6; margin-left: auto; margin-right: auto;
+      margin-top: 12px; color: var(--muted); font-size: 13.5px;
+      max-width: 720px; line-height: 1.65; margin-left: auto; margin-right: auto;
+      /* No single trailing word on its own line. */
+      text-wrap: balance;
     }
 
     /* ── SEARCH BAR v7 ── */
@@ -496,7 +545,7 @@
       background: linear-gradient(135deg, var(--yellow) 0%, #f8d76b 100%);
       color: #111827;
       border: 1px solid rgba(240,176,0,0.4);
-      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      transition: transform var(--t-slow), box-shadow var(--t-slow), opacity var(--t);
     }
     #fetchBtn:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(245,197,66,0.20), inset 0 1px 0 rgba(255,255,255,0.35); }
     #fetchBtn:active { transform: scale(.96); }
@@ -538,6 +587,39 @@
       pointer-events: none;
     }
     #album-card.hidden { display: none; }
+    /* The card is a cover plus a text column whose every line is short, so
+       the right third of it was always empty. #album-tech fills that with
+       the facts a download actually carries — label, the ℗ line, ISRC/UPC,
+       runtime — in a column of its own, divided off with a hairline. It
+       hides itself when there is nothing to show (artist pages), and it
+       drops below the text column on a narrow window (see the media query)
+       rather than crushing either side. */
+    #album-tech {
+      flex-shrink: 0;
+      width: 216px;
+      align-self: stretch;
+      padding-left: 20px;
+      border-left: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 11px;
+    }
+    #album-tech.hidden { display: none; }
+    #album-tech .tech-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    #album-tech .tech-k {
+      font-size: 9.5px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .14em; color: var(--muted);
+    }
+    #album-tech .tech-v {
+      font-size: 11.5px; line-height: 1.4; color: var(--text2);
+      font-family: 'JetBrains Mono', monospace;
+      overflow-wrap: anywhere;
+      /* A copyright line runs long; four lines is plenty of it, the rest is
+         on the title attribute. */
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4;
+      overflow: hidden;
+      /* body sets user-select: none window-wide; an ISRC or a catalogue
+         number is here specifically to be copied out. */
+      user-select: text; -webkit-user-select: text;
+    }
     #album-cover {
       width: 200px; height: 200px; border-radius: 20px;
       background: linear-gradient(135deg, rgba(255,255,255,0.5), rgba(255,255,255,0.2)); flex-shrink: 0;
@@ -775,10 +857,11 @@
     }
     .sort-btn:hover { border-color: var(--border2); color: var(--text2); }
     #sort-select {
-      padding: 5px 8px; background: var(--surface2);
+      padding: 6px 28px 6px 10px; background-color: var(--surface2);
       border: 1.5px solid var(--border); border-radius: var(--radius-sm);
       color: var(--text2); font-family: var(--app-font); font-size: 12px;
       outline: none; cursor: pointer;
+      background-position: right 8px center;
     }
 
     /* ── Text Search Results ── */
@@ -965,6 +1048,11 @@
     .track-table-header > div:nth-child(4) {
       text-align: center; padding-left: 6px;
     }
+    /* "Actions" over a right-aligned button cluster — was left-aligned, so
+       the word floated on its own halfway across an otherwise idle column. */
+    .track-table-header > div:nth-child(6) {
+      text-align: right; padding-right: 4px;
+    }
     .track-row {
       cursor: default;
       position: relative;
@@ -1030,7 +1118,12 @@
     .tr-dur { padding-right: 22px; }
     .tr-actions { margin-left: 10px; }
 
-    /* 4-button action area */
+    /* Action area. Download is the one thing a row is for, so it is the only
+       button shown at rest; lyrics / preview / cover / open are identical on
+       every one of 25+ rows, which turns them into noise, so they wait for
+       the row to be hovered or to hold keyboard focus. The column keeps its
+       width whichever state it is in — the hidden buttons still take their
+       space — so a row never reflows as the pointer crosses it. */
     .tr-actions { display: flex; gap: 3px; align-items: center; justify-content: flex-end; width: 100%;}
     .ta-btn {
       width: 30px; height: 30px; border-radius: 6px;
@@ -1041,6 +1134,18 @@
       position: relative;
     }
     .ta-btn:hover { background: var(--surface3); border-color: var(--border2); color: var(--text2); }
+    .tr-actions .ta-btn:not(.dl) {
+      opacity: 0;
+      transition: opacity var(--t), background var(--t), border-color var(--t), color var(--t);
+    }
+    .track-row:hover  .tr-actions .ta-btn:not(.dl),
+    .track-row:focus-within .tr-actions .ta-btn:not(.dl) {
+      opacity: 1;
+    }
+    /* No hover to reveal them with — keep the whole set visible. */
+    @media (hover: none) {
+      .tr-actions .ta-btn:not(.dl) { opacity: 1; }
+    }
     .ta-btn.dl { background: var(--yellow); color: #000; border-color: var(--yellow-d); }
     .ta-btn.dl:hover { opacity: .85; }
     .ta-btn.ta-lyrics:hover { color: #60a5fa; border-color: #3b82f6; }
@@ -1094,7 +1199,10 @@
     }
     .list-container {
       width: 100%;
-      max-width: 820px;
+      /* Was 820px. The album card lives here and now has a third column;
+         the tracklist below keeps its own 950px cap and stays centred
+         inside the wider track. */
+      max-width: 960px;
       margin: 0 auto;
       padding: 0 18px;
       display: flex;
@@ -1135,8 +1243,10 @@
     }
 
     .recent-label {
-      font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .08em; color: var(--muted); margin-bottom: 14px;
+      /* Matched to .s-title: the two are the same kind of heading and were
+         set two different ways. */
+      font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .16em; color: var(--muted); margin-bottom: 14px;
     }
     .recent-card {
       background: linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(247,249,251,0.96) 100%);
@@ -1271,6 +1381,34 @@
     .empty-state .es-hint {
       font-size: 11.5px; line-height: 1.6; max-width: 46ch;
       color: var(--muted);
+    }
+
+    /* Two components already honoured this preference on their own (the
+       status spinner, the CSV button's pulse) while every hover lift, panel
+       slide and toast still moved. One rule, at the end of the cascade for
+       the whole window: motion is reduced to a state change, and nothing
+       that conveys progress is removed — a spinner that has stopped says
+       something untrue, so those keep turning, slowly. */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+      .status-spinner,
+      .cover-download-btn.loading svg {
+        animation-duration: 2.4s !important;
+        animation-iteration-count: infinite !important;
+      }
+      /* A hover that moves the thing under the pointer is the part that
+         causes trouble; the colour change alone still answers "am I on it". */
+      .nav-btn:hover, .nav-btn:active,
+      #fetchBtn:hover, #fetchBtn:active,
+      .act-btn:hover, .act-btn:active,
+      .recent-card:hover {
+        transform: none;
+      }
     }
 
     /* Keyboard focus was invisible everywhere: the outline was suppressed by
@@ -1522,6 +1660,15 @@
       box-shadow: 0 12px 24px rgba(245,197,66,0.18);
     }
     .s-body { flex: 1; overflow-y: auto; padding: 14px 18px 18px; min-height: 0; }
+    /* Settings rows are label-left / control-right, so on a wide window the
+       two ends of one setting ended up 1200px apart with nothing between
+       them. Capped rather than centred: the heading, the tabs and the cards
+       all keep the same left edge, and only the empty middle stops growing. */
+    #view-settings > .s-header,
+    #view-settings > .s-body {
+      width: 100%;
+      max-width: 1180px;
+    }
     .s-body::-webkit-scrollbar { width: 3px; }
     .s-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
     .s-footer { position: sticky; bottom: 0; display: flex; justify-content: flex-start; padding: 10px 0 0; background: transparent; }
@@ -1563,7 +1710,13 @@
       pointer-events: none;
     }
     .s-section:last-child { margin-bottom: 0; }
-    .s-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: 12px; }
+    .s-title {
+      font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+      /* Wider tracking, lighter weight: at this size 800 fills the counters
+         in and the word turns into a block. Uppercase needs the air, not
+         the weight, to read as a heading. */
+      letter-spacing: .16em; color: var(--muted); margin-bottom: 14px;
+    }
     .s-row { display: flex; align-items: center; justify-content: space-between; min-height: 30px; margin-bottom: 8px; gap: 10px; }
     .s-row:last-child { margin-bottom: 0; }
     .s-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -1572,31 +1725,69 @@
     .s-sep { height: 1px; background: var(--border); margin: 8px 0; }
 
     select, input[type="text"], input[type="password"], input[type="number"] {
-      background: var(--surface); color: var(--text);
+      /* background-color, not the `background` shorthand: the select below
+         paints its chevron as a background-image, and a shorthand here (or
+         in the dark-theme override) would quietly erase it. */
+      background-color: var(--surface); color: var(--text);
       border: 1.5px solid var(--border); border-radius: var(--radius-sm);
-      padding: 6px 10px; outline: none;
+      padding: 7px 11px; outline: none;
       font-family: var(--app-font); font-size: 12.5px; cursor: pointer;
-      transition: border-color var(--t);
+      transition: border-color var(--t), box-shadow var(--t), background-color var(--t);
     }
-    select:focus, input:focus { border-color: var(--yellow); }
+    /* A native select renders in the OS's own font and chrome — the one
+       control in the window that was still being drawn by something other
+       than this stylesheet, and next to these rounded mono surfaces it read
+       as an unfinished part of the page. */
+    select {
+      appearance: none;
+      -webkit-appearance: none;
+      padding-right: 30px;
+      background-image: var(--chevron);
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      background-size: 13px 13px;
+      text-overflow: ellipsis;
+    }
+    select:hover,
+    input[type="text"]:hover, input[type="password"]:hover, input[type="number"]:hover {
+      border-color: var(--border2);
+    }
+    select:focus, input:focus {
+      border-color: var(--yellow);
+      box-shadow: 0 0 0 3px var(--ring);
+    }
     input[type="number"] { width: 70px; text-align: center; }
     input[type="text"].full, input[type="password"].full { width: 100%; }
 
+    input[type="checkbox"], input[type="radio"], progress {
+      accent-color: var(--yellow);
+    }
+
     /* Toggle */
-    .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+    .toggle { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
     .toggle input { opacity: 0; width: 0; height: 0; }
     .toggle-sl {
       position: absolute; inset: 0; background: var(--surface3);
       border-radius: 99px; border: 1.5px solid var(--border2); cursor: pointer;
-      transition: background var(--t), border-color var(--t);
+      transition: background var(--t), border-color var(--t), box-shadow var(--t);
     }
     .toggle-sl::before {
-      content: ''; position: absolute; width: 13px; height: 13px; left: 2px; top: 50%;
+      content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 50%;
       transform: translateY(-50%); background: var(--muted); border-radius: 50%;
-      transition: transform .2s, background var(--t);
+      transition: transform var(--t-slow), background var(--t), width var(--t);
+      box-shadow: 0 1px 3px rgba(15,23,42,0.18);
     }
     .toggle input:checked + .toggle-sl { background: var(--yellow-bg); border-color: var(--yellow); }
-    .toggle input:checked + .toggle-sl::before { transform: translateX(16px) translateY(-50%); background: var(--yellow); }
+    .toggle input:checked + .toggle-sl::before { transform: translateX(18px) translateY(-50%); background: var(--yellow); }
+    /* The checkbox itself is 0x0 and invisible, so the global focus-visible
+       ring had nothing to draw around: tabbing through Settings skipped
+       every switch as far as the eye could tell. */
+    .toggle input:focus-visible + .toggle-sl {
+      box-shadow: 0 0 0 3px var(--ring);
+      border-color: var(--yellow);
+    }
+    /* A switch is a physical thing; give it something to push against. */
+    .toggle-sl:active::before { width: 20px; }
 
     /* Sortable lists */
     .sort-list { display: flex; flex-direction: column; gap: 4px; }
@@ -2020,32 +2211,10 @@
   width: 16px; height: 16px; border-radius: 3px;
   vertical-align: middle; margin-left: 7px; flex-shrink: 0;
 }
-.track-meta-grid {
-  display: grid;
-  grid-template-columns: minmax(0,1fr) minmax(0,1fr);
-  gap: 10px 24px;
-
-  margin-bottom: 12px;
-  padding: 12px 0;
-
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-.track-meta-item { display: flex; flex-direction: column; gap: 3px; }
-.track-meta-label {
-  font-size: 10px; color: var(--muted); font-weight: 700;
-  text-transform: uppercase; letter-spacing: .06em;
-}
-.track-meta-value {
-  font-size: 13px;
-  color: var(--text);
-  font-weight: 600;
-  line-height: 1.35;
-
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
+/* The single-track card's below-the-title meta grid (.track-meta-grid) was
+   replaced by #album-tech — the card's right-hand column — which carries the
+   same fields plus ISRC and label. #track-meta-section is kept in the markup
+   as an empty, hidden container so the JS that clears it stays harmless. */
 
 /* ── ARTIST VIEW: sections Albums + Tracks ── */
 .artist-section-hdr {
@@ -2146,7 +2315,18 @@
 @media (max-width: 900px) {
   .search-container { flex-direction: column; gap: 10px; height: auto; padding: 10px; }
   .url-wrap { width: 100%; }
-  
+
+  /* The technical sheet can't hold a 216px column next to the cover and the
+     text at this width — it moves under the text as a wrapping row. */
+  #album-card { flex-wrap: wrap; }
+  #album-tech {
+    width: 100%; align-self: auto;
+    flex-direction: row; flex-wrap: wrap; gap: 12px 24px;
+    margin-top: 4px; padding: 14px 0 0;
+    border-left: none; border-top: 1px solid var(--border);
+  }
+  #album-tech .tech-row { flex: 0 1 auto; }
+
   /* Nascondi Playcount e Duration in modo forzato sia nell'header che nelle righe */
   .track-table-header > div:nth-child(4),
   .track-table-header > div:nth-child(5),
@@ -2501,7 +2681,8 @@ body.dark-theme textarea,
 body.dark-theme #urlInput,
 body.dark-theme #trackSearch,
 body.dark-theme .sr-filter-input {
-  background: var(--input-bg);
+  /* background-color: the select's chevron lives in background-image. */
+  background-color: var(--input-bg);
   color: var(--input-text);
   border-color: var(--input-border);
 }
@@ -2534,9 +2715,20 @@ body.dark-theme #queue-dock:hover {
   border-color: var(--border2);
 }
 
+/* The wordmark is a gradient from near-black to the accent. On the dark
+   ground that put "Spoti" at roughly the background's own luminance — the
+   left half of the app's own name was the least readable text on screen. */
+body.dark-theme .hero-title {
+  background: linear-gradient(135deg, #ffffff 0%, #c7c9d1 32%, var(--yellow) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: none;
+}
+
 body.dark-theme .hero-text {
-  background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
-  border-color: rgba(148,163,184,0.14);
+  background:
+    radial-gradient(50% 92% at 50% 0%, rgba(245,197,66,0.13), transparent 72%),
+    radial-gradient(46% 80% at 50% 6%, rgba(255,255,255,0.06), transparent 74%);
 }
 
 body.dark-theme .hero-icon {

@@ -1070,6 +1070,13 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             '<script src="toast-system.js?v=20260817"></script>',
             inject + '<script src="toast-system.js?v=20260817"></script>',
         )
+        # Marks the document as browser-served before the first paint, so CSS
+        # can drop the chrome that only makes sense in the pywebview window
+        # (the frameless titlebar and its traffic-light buttons, which call
+        # window methods that don't exist here). The desktop build loads
+        # index.html straight from disk and never hits this route, so its
+        # <body> stays unclassed.
+        html = html.replace("<body>", '<body class="web-mode">', 1)
         return HTMLResponse(html)
 
     @app.get("/web-shim.js")

@@ -1235,6 +1235,10 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
     metaSection.innerHTML = '';
     metaSection.style.display = 'none';
   }
+  // Cleared now, repopulated once the tracks are in (updateAlbumMeta, or
+  // showSingleTrackCard) — otherwise the previous fetch's sheet lingers
+  // while the new one loads.
+  renderAlbumTech([]);
   $('album-cover').querySelector('.cover-duration')?.remove();
   $('album-subtitle').style.display = '';
 
@@ -1315,8 +1319,11 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
     if (ownerRow) ownerRow.style.display = 'flex';
     
     if (ownerEl) ownerEl.textContent = owner || '';
-    const followerCount = Number(followers);
-    if (followersEl) followersEl.textContent = !Number.isNaN(followerCount) ? `${followerCount.toLocaleString()} followers` : '';
+    // Number('') and Number(null) are both 0, not NaN — so an album with no
+    // follower count was showing "0 followers", and that non-empty string
+    // then kept the whole meta-details row visible.
+    const followerCount = (followers === 0 || followers) ? Number(followers) : NaN;
+    if (followersEl) followersEl.textContent = Number.isFinite(followerCount) && followerCount > 0 ? `${followerCount.toLocaleString()} followers` : '';
     if (sourceEl) sourceEl.textContent = source || '';
   }
 
@@ -1463,7 +1470,32 @@ function updateAlbumMeta(trackCount) {
   if (trackCountEl) {
     trackCountEl.textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
   }
-  $('album-meta').style.display = '';
+  // For an album the subtitle already reads "<artist> · <date> · <n> tracks";
+  // the standalone artist line right under it was the same word again.
+  $('album-meta').style.display = badgeType === 'ALBUM' ? 'none' : '';
+
+  // Technical sheet (right column of the card). Per-track fields are shared
+  // across an album, so the first track stands in for the release; ISRC is
+  // genuinely per-track and stays out of an album-level sheet.
+  if (badgeType === 'ALBUM' || badgeType === 'PLAYLIST') {
+    const t0 = currentTracks[0] || {};
+    const totalMs = currentTracks.reduce((s, t) => s + (Number(t.duration_ms) || 0), 0);
+    const released = g_albumReleaseDate
+      ? String(g_albumReleaseDate).split('T')[0]
+      : (t0.release_date ? String(t0.release_date).split('T')[0] : '');
+    renderAlbumTech([
+      ['Label', t0.publisher || t0.label],
+      ['Copyright', t0.copyright],
+      ['Released', released],
+      ['Tracks', trackCount > 0 ? String(trackCount) : ''],
+      ['Total time', formatLongDuration(totalMs)],
+      ['UPC', t0.upc],
+    ]);
+  } else if (badgeType !== 'TRACK') {
+    // ARTIST / SEARCH — showSingleTrackCard owns the TRACK case.
+    renderAlbumTech([]);
+  }
+
   // Also update the tracks table header label
   setPlaycountHeaderLabel(badgeType === 'PLAYLIST' ? 'Album' : 'Playcount');
 }
@@ -1492,38 +1524,25 @@ function showSingleTrackCard(t) {
   // Hide the subtitle (quality) — already shown elsewhere
   $('album-subtitle').style.display = 'none';
 
-  // Populate the meta grid
+  // The old below-the-title grid is superseded by the technical sheet in the
+  // card's right column — same facts, plus ISRC and label, in the space that
+  // was empty anyway.
   const section = $('track-meta-section');
+  if (section) { section.innerHTML = ''; section.style.display = 'none'; }
   const playcountRaw = t.plays ?? t.playcount ?? t.playCount ?? t.plays_count;
-  const playcountVal = playcountRaw != null
+  const playcountVal = playcountRaw != null && String(playcountRaw).trim() && String(playcountRaw) !== '0'
     ? Number(playcountRaw).toLocaleString('it-IT')
     : null;
 
-  const metas = [
-    { label: 'Album',        value: t.album || t.album_name || t.release || null },
-    { label: 'Release Date', value: t.release_date ? String(t.release_date).split('T')[0] : (t.year || null) },
-    { label: 'Total Plays',  value: playcountVal },
-    { label: 'Copyright',    value: t.copyright || null },
-  ].filter(m => m.value);
-
-  if (metas.length) {
-    const grid = document.createElement('div');
-    grid.className = 'track-meta-grid';
-    metas.forEach(m => {
-      const item = document.createElement('div');
-      item.className = 'track-meta-item';
-      item.innerHTML = `
-        <div class="track-meta-label">${escHtml(m.label)}</div>
-        <div class="track-meta-value" title="${escHtml(String(m.value))}">${escHtml(String(m.value))}</div>
-      `;
-      grid.appendChild(item);
-    });
-    section.innerHTML = '';
-    section.appendChild(grid);
-    section.style.display = '';
-  } else {
-    section.style.display = 'none';
-  }
+  renderAlbumTech([
+    ['Album', t.album || t.album_name || t.release],
+    ['ISRC', t.isrc],
+    ['Label', t.publisher || t.label],
+    ['Copyright', t.copyright],
+    ['Released', t.release_date ? String(t.release_date).split('T')[0] : (t.year || '')],
+    ['Plays', playcountVal],
+    ['Genre', t.genre],
+  ]);
 
   // Bottoni azione specifici per la track
   const previewUrl = t.preview_url || t.previewUrl || '';
@@ -1572,6 +1591,7 @@ function closeAlbumCard() {
   metaSection.innerHTML = '';
   metaSection.style.display = 'none';
 }
+  renderAlbumTech([]);
   $('album-cover').querySelector('.cover-duration')?.remove();
   document.getElementById('artist-tabs-section')?.remove();
   loadHistoryAndProfiles();
@@ -1608,6 +1628,37 @@ function formatDuration(ms) {
   const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60); const sec = s % 60;
   return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+// "1 hr 14 min" / "38 min" — for a whole album's runtime, where mm:ss would
+// just be a big number.
+function formatLongDuration(ms) {
+  const total = Math.round((Number(ms) || 0) / 1000);
+  if (!total) return '';
+  const h = Math.floor(total / 3600);
+  const m = Math.round((total % 3600) / 60);
+  return h ? `${h} hr ${m} min` : `${m} min`;
+}
+
+// ── Album card: the technical sheet ─────────────────────────────────────────
+// Fills the column on the right of #album-card. `rows` is [[key, value], …];
+// a row whose value is empty or "—" is dropped, and an empty result hides
+// the whole column so artist pages (which have none of this) don't show an
+// empty rule. Values are plain text — an ISRC belongs in a box you can
+// select from, not behind a link.
+function renderAlbumTech(rows) {
+  const el = $('album-tech');
+  if (!el) return;
+  const clean = (rows || []).filter(r => {
+    const v = r && r[1] != null ? String(r[1]).trim() : '';
+    return v && v !== '—';
+  });
+  el.innerHTML = clean.map(([k, v]) => {
+    const val = String(v);
+    return `<div class="tech-row"><div class="tech-k">${escHtml(k)}</div>` +
+      `<div class="tech-v" title="${escHtml(val)}">${escHtml(val)}</div></div>`;
+  }).join('');
+  el.classList.toggle('hidden', clean.length === 0);
 }
 
 function injectArtistTabs(tracks) {
