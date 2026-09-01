@@ -225,6 +225,18 @@ class CsvImportMixin:
                 "warn",
             )
 
+        # A file that lists the same track twice is fetched once (see
+        # CsvResolution.urls). Counted because it is the last unexplained
+        # part of the gap between the file's line count and the table's:
+        # without it the closing summary reads as if rows had gone missing.
+        duplicates = len(resolution.resolved) - len(resolution.urls)
+        if duplicates:
+            self.log(
+                f"{duplicates} matched row(s) repeat a track already in the "
+                "list; each is fetched once.",
+                "debug",
+            )
+
         if not resolution.urls:
             self.log("Nothing in that file could be matched.", "error")
             self.set_progress("")
@@ -286,7 +298,8 @@ class CsvImportMixin:
                 if resolution.unresolved
                 else ""
             )
-            + (f" · {failed_links} link(s) without metadata" if failed_links else ""),
+            + (f" · {failed_links} link(s) without metadata" if failed_links else "")
+            + (f" · {duplicates} duplicate row(s)" if duplicates else ""),
             "ok",
         )
         self.set_progress("Ready for download.")
@@ -299,6 +312,7 @@ class CsvImportMixin:
                 "matched": len(resolution.resolved),
                 "tracks": len(tracks),
                 "failed": failed_links,
+                "duplicates": duplicates,
                 "unresolved": [entry.to_dict() for entry in resolution.unresolved],
             },
         )

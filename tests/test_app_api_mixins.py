@@ -178,6 +178,42 @@ def test_a_csv_import_fills_the_track_table_like_a_link_does(monkeypatch) -> Non
     assert events["app_csv_loaded"][0]["tracks"] == 1
 
 
+def test_a_repeated_link_is_counted_rather_than_fetched_twice(monkeypatch) -> None:
+    """The same track twice in a file is one fetch (CsvResolution.urls), so
+    the track table is shorter than the match count by the repeats. Saying
+    so is what keeps the closing summary's numbers adding up: without it
+    those rows look like rows that went missing.
+    """
+    from SpotiFLAC.core.models import TrackMetadata
+
+    api = SpotiFLAC_API()
+    pushed: list[tuple] = []
+    api._push = lambda name, *args: pushed.append((name, args))
+
+    async def _tracks(urls, on_progress=None):
+        assert urls == ["https://open.spotify.com/track/aaa"], "fetched once"
+        return [
+            TrackMetadata(
+                id="aaa",
+                title="Everlong",
+                artists="Foo Fighters",
+                album="The Colour and the Shape",
+                album_artist="Foo Fighters",
+            )
+        ], 0
+
+    monkeypatch.setattr(api, "_csv_tracks_async", _tracks)
+    api._fetch_csv_thread(
+        "https://open.spotify.com/track/aaa\n" * 3, "wishlist.csv", None, None
+    )
+
+    loaded = {name: args for name, args in pushed}["app_csv_loaded"][0]
+    assert loaded["rows"] == 3
+    assert loaded["matched"] == 3
+    assert loaded["tracks"] == 1
+    assert loaded["duplicates"] == 2
+
+
 def test_a_csv_with_no_usable_row_reports_instead_of_loading() -> None:
     """A recognised header with nothing under it: the track table is left
     alone and the interface is told why, rather than being handed an empty
