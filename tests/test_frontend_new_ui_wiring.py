@@ -89,6 +89,44 @@ def test_dedup_status_reachable_over_http(client) -> None:
     assert "available" in result
 
 
+def test_the_library_dedup_panel_is_in_the_page(client) -> None:
+    html = client.get("/").text
+    for element_id in (
+        "libdedup-match",
+        "libdedup-tolerance",
+        "libdedup-verify",
+        "libdedup-db",
+        "libdedup-groups",
+        "libdedup-actions",
+        "libdedup-undo",
+    ):
+        assert f'id="{element_id}"' in html
+    assert 'onclick="startLibraryDedupScan()"' in html
+    assert "onclick=\"resolveLibraryDuplicates('trash')\"" in html
+    assert "onclick=\"resolveLibraryDuplicates('delete')\"" in html
+
+
+def test_library_dedup_calls_line_up_with_the_mixin_signature(client) -> None:
+    """web-shim.js calls these with a positional array; this is the check
+    that the array the frontend sends still fits the Python signature."""
+    resp = client.post(
+        "/api/scan_library_duplicates",
+        json=["/does/not/exist", True, "both", 4.0, False, 0.95, False],
+    )
+    assert resp.status_code == 200
+    assert "does not exist" in resp.json()["result"]["error"]
+
+    resp = client.post(
+        "/api/resolve_library_duplicates", json=[["/a"], ["/b"], "trash", False]
+    )
+    assert resp.status_code == 200
+    assert "run a library duplicate scan first" in resp.json()["result"]["error"]
+
+    resp = client.post("/api/restore_library_duplicates", json=[""])
+    assert resp.status_code == 200
+    assert resp.json()["result"]["error"] == "No path given"
+
+
 def test_the_dashboard_and_csv_import_are_in_the_page(client) -> None:
     html = client.get("/").text
     assert 'id="view-stats"' in html

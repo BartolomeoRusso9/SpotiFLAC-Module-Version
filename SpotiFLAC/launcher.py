@@ -2119,6 +2119,124 @@ async def amain() -> None:
             print(f"key-{idx}: {name}")
         return
 
+    if _argv_has("--dedup-restore"):
+        restore_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        restore_parser.add_argument("--dedup-restore", dest="manifest", required=True)
+        restore_parser.add_argument("--json", dest="as_json", action="store_true")
+        restore_parser.add_argument("--verbose", "-v", action="store_true")
+        restore_args, _ = restore_parser.parse_known_args(sys.argv[1:])
+
+        from .tools.library_dedup_cli import run_restore
+
+        run_restore(
+            restore_args.manifest,
+            as_json=restore_args.as_json,
+            verbose=restore_args.verbose,
+        )
+        return
+
+    if _argv_has("--dedup-library", "--dedup-from-db"):
+        # allow_abbrev=False for the same reason the upgrade block below
+        # needs it: `--dedup-library` is a prefix of `--dedup-library-…`
+        # were one ever added, and an ambiguous flag exits(2) instead of
+        # running.
+        dd_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        # Not required: --dedup-from-db carries the library's identity in
+        # the database itself, so a resolution run needs no folder.
+        dd_parser.add_argument("--dedup-library", dest="path", default="")
+        dd_parser.add_argument(
+            "--dedup-match",
+            dest="match",
+            choices=("isrc", "tags", "both"),
+            default="both",
+            help="Which signal decides that two files are one recording "
+            "(default: both — ISRC first, artist/title+duration for the rest).",
+        )
+        dd_parser.add_argument(
+            "--dedup-tolerance", dest="tolerance", type=float, default=4.0
+        )
+        dd_parser.add_argument(
+            "--dedup-keep-version-noise",
+            dest="keep_version_noise",
+            action="store_true",
+            help="Treat '(2011 Remaster)' as part of the title, so a "
+            "remaster is not a duplicate of the original.",
+        )
+        dd_parser.add_argument(
+            "--dedup-verify",
+            dest="verify",
+            action="store_true",
+            help="Confirm each group against the audio with Chromaprint "
+            "before offering it. Needs the 'dedup' extra.",
+        )
+        dd_parser.add_argument(
+            "--dedup-threshold", dest="threshold", type=float, default=0.95
+        )
+        dd_parser.add_argument(
+            "--dedup-no-cache", dest="use_cache", action="store_false"
+        )
+        dd_parser.add_argument(
+            "--dedup-apply",
+            dest="apply",
+            action="store_true",
+            help="Actually resolve them. Without it the command only reports "
+            "(a scan is safe; removing files is not).",
+        )
+        dd_parser.add_argument(
+            "--dedup-delete",
+            dest="delete",
+            action="store_true",
+            help="With --dedup-apply, unlink instead of quarantining. Not undoable.",
+        )
+        dd_parser.add_argument("--dedup-trash", dest="trash_dir", default=None)
+        dd_parser.add_argument("--dedup-limit", dest="limit", type=int, default=None)
+        dd_parser.add_argument(
+            "--dedup-db",
+            dest="db_path",
+            default=None,
+            metavar="FILE.db",
+            help="Also write the scan to a SQLite database: one row per "
+            "file, duplicate groups on top of it.",
+        )
+        dd_parser.add_argument(
+            "--dedup-from-db",
+            dest="from_db",
+            default=None,
+            metavar="FILE.db",
+            help="Skip the scan and read the report back from a database a "
+            "previous run wrote.",
+        )
+        dd_parser.add_argument("--no-recursive", dest="recursive", action="store_false")
+        dd_parser.add_argument("--json", dest="as_json", action="store_true")
+        dd_parser.add_argument("--verbose", "-v", action="store_true")
+        dd_args, _ = dd_parser.parse_known_args(sys.argv[1:])
+
+        from .tools.library_dedup_cli import run as run_dedup
+
+        if not dd_args.path and not dd_args.from_db:
+            print("Error: --dedup-library needs a folder.", file=sys.stderr)
+            return
+
+        run_dedup(
+            dd_args.path,
+            recursive=dd_args.recursive,
+            match=dd_args.match,
+            duration_tolerance_s=dd_args.tolerance,
+            keep_version_noise=dd_args.keep_version_noise,
+            verify=dd_args.verify,
+            threshold=dd_args.threshold,
+            use_cache=dd_args.use_cache,
+            apply=dd_args.apply,
+            delete=dd_args.delete,
+            trash_dir=dd_args.trash_dir,
+            limit=dd_args.limit,
+            db_path=dd_args.db_path,
+            from_db=dd_args.from_db,
+            as_json=dd_args.as_json,
+            verbose=dd_args.verbose,
+        )
+        return
+
     if _argv_has("--upgrade-library"):
         # allow_abbrev=False: `--upgrade-library` is a prefix of
         # `--upgrade-library-target`, and argparse would call a bare

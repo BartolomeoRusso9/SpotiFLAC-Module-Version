@@ -3915,6 +3915,304 @@ function renderDuplicateGroups(groups) {
   toastMgr.success(`Found ${groups.length} duplicate group(s).`);
 }
 
+// ── Library duplicates (core/library_dedup.py) ───────────────────────────────
+// The other duplicate finder: metadata first, so it scales to a real library,
+// and it can act on what it found. The report lives on the backend instance
+// between the scan and the resolve — this keeps only what the UI needs to
+// render it and to say which files the user picked.
+let libDedupGroups = [];
+let libDedupManifest = '';
+
+async function startLibraryDedupScan() {
+  const path = $('local-path-input').value.trim();
+  if (!path) {
+    toastMgr.error('Please enter a valid folder or file path.');
+    return;
+  }
+
+  if (typeof window.pywebview?.api?.scan_library_duplicates !== 'function') {
+    toastMgr.error('The backend is not ready yet — try again in a moment.');
+    return;
+  }
+
+  const verify = $('libdedup-verify')?.checked || false;
+  if (verify && window.pywebview?.api?.get_dedup_status) {
+    // Same courtesy as the fingerprint scan: say the optional dependency is
+    // missing now, rather than after the user has waited for a walk.
+    try {
+      const status = await window.pywebview.api.get_dedup_status();
+      if (status && status.available === false) {
+        toastMgr.error(status.install_hint || 'Audio confirmation is not available on this machine.');
+        return;
+      }
+    } catch (e) {
+      // Fall through; the scan reports its own note if it cannot verify.
+    }
+  }
+
+  setTaBtnState($('btn-libdedup-scan'), 'loading');
+  libDedupGroups = [];
+  renderLibraryDedup(null);
+  $('libdedup-progress')?.classList.remove('hidden');
+  if ($('libdedup-progress')) $('libdedup-progress').textContent = 'Scanning…';
+
+  try {
+    const result = await window.pywebview.api.scan_library_duplicates(
+      path,
+      true,
+      $('libdedup-match')?.value || 'both',
+      parseFloat($('libdedup-tolerance')?.value || '4') || 4,
+      verify,
+      0.95,
+      $('libdedup-db')?.checked || false,
+    );
+    if (result && result.status === 'error') throw new Error(result.error || 'Scan failed');
+  } catch (err) {
+    console.error('[LibDedup] start failed:', err);
+    setTaBtnState($('btn-libdedup-scan'), 'error');
+    setTimeout(() => setTaBtnState($('btn-libdedup-scan'), 'default'), 2500);
+    $('libdedup-progress')?.classList.add('hidden');
+    toastMgr.error(err.message || 'Failed to start the library scan');
+  }
+}
+
+window.app_library_dedup_progress = function (payload) {
+  const el = $('libdedup-progress');
+  if (!el) return;
+  el.classList.remove('hidden');
+  el.textContent = `Scanning ${payload.done} / ${payload.total} file(s)…`;
+};
+
+window.app_library_dedup_results = function (report) {
+  setTaBtnState($('btn-libdedup-scan'), 'default');
+  $('libdedup-progress')?.classList.add('hidden');
+  renderLibraryDedup(report);
+};
+
+window.app_library_dedup_error = function (err) {
+  setTaBtnState($('btn-libdedup-scan'), 'error');
+  setTimeout(() => setTaBtnState($('btn-libdedup-scan'), 'default'), 2500);
+  $('libdedup-progress')?.classList.add('hidden');
+  toastMgr.error('Library scan failed: ' + err);
+};
+
+function renderLibraryDedup(report) {
+  const summary = $('libdedup-summary');
+  const container = $('libdedup-groups');
+  const actions = $('libdedup-actions');
+  if (!container) return;
+
+  if (!report) {
+    container.innerHTML = '';
+    summary?.classList.add('hidden');
+    actions?.classList.add('hidden');
+    return;
+  }
+
+  const lib = report.library || {};
+  const lines = [
+    `${lib.files || 0} file(s) scanned · ${lib.total_size || '0 B'}`,
+    `${report.groups || 0} duplicate group(s) · ${report.duplicate_files || 0} redundant copies · ${report.reclaimable || '0 B'} reclaimable`,
+    `${lib.missing_isrc || 0} without ISRC · ${lib.missing_tags || 0} without artist/title${lib.unreadable ? ` · ${lib.unreadable} unreadable` : ''}`,
+  ];
+  if (report.database) lines.push(`index written to ${report.database}`);
+  (report.notes || []).forEach((n) => lines.push(`note: ${n}`));
+  if (summary) {
+    summary.textContent = lines.join('\n');
+    summary.classList.remove('hidden');
+  }
+
+  // Each group keeps its own chosen keeper and its own selection, so the
+  // user can disagree with the ranking on one group without disturbing the
+  // rest. The backend is told both when they resolve.
+  libDedupGroups = (report.duplicate_groups || []).map((group) => {
+    const files = [group.keep, ...(group.duplicates || [])];
+    return {
+      key: group.key,
+      label: group.label,
+      matchedBy: group.matched_by,
+      reclaimable: group.reclaimable_bytes || 0,
+      files,
+      keepPath: group.keep?.path || '',
+      selected: new Set((group.duplicates || []).map((f) => f.path)),
+    };
+  });
+
+  if (!libDedupGroups.length) {
+    container.innerHTML = '<div class="s-label" style="font-size:11.5px;">No duplicates found.</div>';
+    actions?.classList.add('hidden');
+    toastMgr.success('No duplicates found.');
+    return;
+  }
+
+  container.innerHTML = libDedupGroups.map((group, i) => `
+    <div class="sort-item" style="flex-direction:column;align-items:stretch;gap:6px;cursor:default;">
+      <div class="s-label" style="font-size:11px;">
+        ${regEscapeHtml(group.label)} — ${group.files.length} copies, ${formatLibDedupSize(group.reclaimable)} reclaimable, matched by ${regEscapeHtml(group.matchedBy)}
+      </div>
+      ${group.files.map((file, j) => {
+        const isKeeper = file.path === group.keepPath;
+        return `
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="radio" name="libdedup-keep-${i}" ${isKeeper ? 'checked' : ''}
+                 onchange="setLibDedupKeeper(${i}, ${j})" title="Keep this copy">
+          <input type="checkbox" ${group.selected.has(file.path) ? 'checked' : ''}
+                 ${isKeeper ? 'disabled' : ''}
+                 onchange="toggleLibDedupFile(${i}, ${j}, this.checked)"
+                 title="${isKeeper ? 'The kept copy is never removed' : 'Remove this copy'}">
+          <span class="reg-url" style="flex:1;min-width:0;" title="${regEscapeHtml(file.path)}">${regEscapeHtml(file.path)}</span>
+          <span class="s-label" style="font-size:10.5px;white-space:nowrap;">${regEscapeHtml(file.quality || '')}</span>
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+
+  if (report.shown_groups !== undefined && report.shown_groups < report.groups) {
+    container.innerHTML += `<div class="s-label" style="font-size:11px;">Showing ${report.shown_groups} of ${report.groups} groups — resolve these, then scan again for the rest.</div>`;
+  }
+  actions?.classList.remove('hidden');
+  updateLibDedupCount();
+  toastMgr.success(`Found ${report.groups} duplicate group(s), ${report.reclaimable} reclaimable.`);
+}
+
+function formatLibDedupSize(bytes) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes || 0;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return `${unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
+
+function setLibDedupKeeper(groupIndex, fileIndex) {
+  const group = libDedupGroups[groupIndex];
+  if (!group) return;
+  const chosen = group.files[fileIndex];
+  if (!chosen) return;
+  // The copy being kept is never also a copy being removed; the one it
+  // replaces goes back to being selectable (and selected, since the point of
+  // the group is that it is redundant).
+  group.selected.delete(chosen.path);
+  group.selected.add(group.keepPath);
+  group.keepPath = chosen.path;
+  renderLibraryDedupGroup(groupIndex);
+  updateLibDedupCount();
+}
+
+function toggleLibDedupFile(groupIndex, fileIndex, checked) {
+  const group = libDedupGroups[groupIndex];
+  const file = group?.files[fileIndex];
+  if (!file || file.path === group.keepPath) return;
+  if (checked) group.selected.add(file.path); else group.selected.delete(file.path);
+  updateLibDedupCount();
+}
+
+function renderLibraryDedupGroup(groupIndex) {
+  // Only the radios and checkboxes of one group change when its keeper does,
+  // and re-rendering the whole list would scroll a long report back to the
+  // top under the user's cursor.
+  const group = libDedupGroups[groupIndex];
+  const container = $('libdedup-groups');
+  const item = container?.children[groupIndex];
+  if (!group || !item) return;
+  const rows = item.querySelectorAll('div[style*="display:flex"]');
+  group.files.forEach((file, j) => {
+    const row = rows[j];
+    if (!row) return;
+    const [radio, box] = row.querySelectorAll('input');
+    const isKeeper = file.path === group.keepPath;
+    if (radio) radio.checked = isKeeper;
+    if (box) {
+      box.disabled = isKeeper;
+      box.checked = group.selected.has(file.path);
+    }
+  });
+}
+
+function updateLibDedupCount() {
+  const total = libDedupGroups.reduce((sum, g) => sum + g.selected.size, 0);
+  const el = $('libdedup-selected');
+  if (el) el.textContent = `${total} selected`;
+  ['btn-libdedup-trash', 'btn-libdedup-delete'].forEach((id) => {
+    const btn = $(id);
+    if (btn) btn.disabled = total === 0;
+  });
+}
+
+async function resolveLibraryDuplicates(action) {
+  const paths = [];
+  const keepPaths = [];
+  libDedupGroups.forEach((group) => {
+    if (!group.selected.size) return;
+    keepPaths.push(group.keepPath);
+    group.selected.forEach((path) => paths.push(path));
+  });
+  if (!paths.length) {
+    toastMgr.error('Nothing selected.');
+    return;
+  }
+
+  const question = action === 'delete'
+    ? `Delete ${paths.length} file(s) permanently? This cannot be undone.`
+    : `Move ${paths.length} file(s) into the quarantine folder? You can undo this afterwards.`;
+  if (!confirm(question)) return;
+
+  const btn = $(action === 'delete' ? 'btn-libdedup-delete' : 'btn-libdedup-trash');
+  setTaBtnState(btn, 'loading');
+  try {
+    const result = await window.pywebview.api.resolve_library_duplicates(
+      paths, keepPaths, action, false,
+    );
+    if (!result || result.status === 'error') throw new Error(result?.error || 'Failed');
+
+    setTaBtnState(btn, 'default');
+    toastMgr.success(`${result.resolved} file(s) resolved, ${result.freed} reclaimed.`);
+    (result.actions || [])
+      .filter((a) => a.action === 'skip')
+      .slice(0, 10)
+      .forEach((a) => toastMgr.info(`Left alone: ${a.path} — ${a.error}`));
+
+    libDedupManifest = result.manifest || '';
+    const undo = $('libdedup-undo');
+    if (libDedupManifest && action !== 'delete') {
+      if ($('libdedup-manifest')) $('libdedup-manifest').textContent = libDedupManifest;
+      undo?.classList.remove('hidden');
+    } else {
+      undo?.classList.add('hidden');
+    }
+
+    // The scan describes a library that no longer exists; the backend has
+    // dropped the report for the same reason, so offering the stale list
+    // again would only produce "gone since the scan" for every row.
+    libDedupGroups = [];
+    renderLibraryDedup(null);
+  } catch (err) {
+    console.error('[LibDedup] resolve failed:', err);
+    setTaBtnState(btn, 'error');
+    setTimeout(() => setTaBtnState(btn, 'default'), 2500);
+    toastMgr.error(err.message || 'Could not resolve the duplicates');
+  }
+}
+
+async function undoLibraryDedup() {
+  if (!libDedupManifest) return;
+  setTaBtnState($('btn-libdedup-undo'), 'loading');
+  try {
+    const result = await window.pywebview.api.restore_library_duplicates(libDedupManifest);
+    if (!result || result.status === 'error') throw new Error(result?.error || 'Failed');
+    setTaBtnState($('btn-libdedup-undo'), 'default');
+    toastMgr.success(`${result.resolved} file(s) put back.`);
+    (result.actions || [])
+      .filter((a) => a.action === 'skip')
+      .slice(0, 10)
+      .forEach((a) => toastMgr.info(`Not restored: ${a.path} — ${a.error}`));
+    libDedupManifest = '';
+    $('libdedup-undo')?.classList.add('hidden');
+  } catch (err) {
+    setTaBtnState($('btn-libdedup-undo'), 'error');
+    setTimeout(() => setTaBtnState($('btn-libdedup-undo'), 'default'), 2500);
+    toastMgr.error(err.message || 'Could not restore the files');
+  }
+}
+
 // ── Multi-user auth (--web-multiuser; web mode only) ─────────────────────────
 // Desktop/pywebview mode has no concept of accounts, so all of this is a
 // no-op there — gated on __SPOTIFLAC_WEB_MODE__, set only by webapp.py's

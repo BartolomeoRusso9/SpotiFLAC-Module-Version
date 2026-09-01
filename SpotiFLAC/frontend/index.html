@@ -423,6 +423,55 @@
           </p>
           <div id="dedup-groups" class="sort-list"></div>
         </div>
+
+        <!-- Library-wide duplicates (core/library_dedup.py). Different tool
+             from the fingerprint scan above: metadata first, so it scales to
+             a whole library, and it can act on what it finds. -->
+        <div class="s-section" style="padding:16px 20px;">
+          <div class="s-title">Library Duplicates</div>
+          <p style="font-size:11.5px;color:var(--muted);margin:-4px 0 12px;line-height:1.5;">
+            Groups every copy of the same recording in the folder above — by ISRC, then by
+            artist/title and duration for the files that have none — and keeps the best copy of
+            each. Fast enough for a library of thousands, where the fingerprint scan is not.
+          </p>
+          <div class="s-row" style="gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+            <select id="libdedup-match" style="max-width:210px;" title="Which signal decides that two files are one recording">
+              <option value="both">ISRC, then tags</option>
+              <option value="isrc">ISRC only (safest)</option>
+              <option value="tags">Tags only</option>
+            </select>
+            <label class="s-label" style="display:flex;align-items:center;gap:6px;font-size:11.5px;" title="How far two durations may differ and still be the same recording">
+              Duration slack
+              <input type="number" id="libdedup-tolerance" value="4" min="0" max="60" step="0.5" style="width:64px;">s
+            </label>
+            <label class="s-label" style="display:flex;align-items:center;gap:6px;font-size:11.5px;" title="Fingerprint each group and split it where the audio disagrees. Slower; needs the 'dedup' extra.">
+              <input type="checkbox" id="libdedup-verify"> Confirm with audio
+            </label>
+            <label class="s-label" style="display:flex;align-items:center;gap:6px;font-size:11.5px;" title="Also write a SQLite index of the whole library next to the quarantine folder">
+              <input type="checkbox" id="libdedup-db"> Write index .db
+            </label>
+            <button class="act-btn primary" onclick="startLibraryDedupScan()" id="btn-libdedup-scan" style="margin-left:auto;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              Scan Library
+            </button>
+          </div>
+          <div id="libdedup-progress" class="hidden s-label" style="font-size:11.5px;margin-bottom:10px;"></div>
+          <div id="libdedup-summary" class="hidden" style="font-size:11.5px;color:var(--text2);line-height:1.7;margin-bottom:12px;white-space:pre-wrap;font-family:monospace;"></div>
+          <div id="libdedup-groups" class="sort-list"></div>
+          <div id="libdedup-actions" class="hidden s-row" style="gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;">
+            <span id="libdedup-selected" style="font-weight:600;font-size:12px;color:var(--text);">0 selected</span>
+            <button class="act-btn secondary" onclick="resolveLibraryDuplicates('trash')" id="btn-libdedup-trash" style="margin-left:auto;" title="Move them into .spotiflac-duplicates inside the library. Undoable.">
+              Move to quarantine
+            </button>
+            <button class="act-btn secondary" onclick="resolveLibraryDuplicates('delete')" id="btn-libdedup-delete" title="Delete them outright. Not undoable.">
+              Delete permanently
+            </button>
+          </div>
+          <div id="libdedup-undo" class="hidden" style="margin-top:12px;font-size:11.5px;color:var(--muted);display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <span id="libdedup-manifest" class="reg-url" style="flex:1;min-width:0;"></span>
+            <button class="act-btn secondary" onclick="undoLibraryDedup()" id="btn-libdedup-undo">Undo</button>
+          </div>
+        </div>
       </div>
 
       <div class="s-footer hidden" id="local-footer" style="padding:14px 18px; border-top:1px solid var(--border); background:var(--surface2); justify-content:space-between; align-items:center; flex-shrink: 0;">

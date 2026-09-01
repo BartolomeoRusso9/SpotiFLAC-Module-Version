@@ -168,6 +168,8 @@
     'run_health_check', 'scan_local', 'apply_local_tags', 'set_download_dir',
     'get_registry_directories', 'add_registry_directory', 'remove_registry_directory',
     'discover_registries', 'get_dedup_status', 'scan_for_duplicates',
+    'scan_library_duplicates', 'resolve_library_duplicates',
+    'restore_library_duplicates',
     'get_trusted_keys',
     'get_subscriptions', 'add_subscription', 'remove_subscription',
     'set_subscription_enabled', 'reset_subscription', 'check_subscriptions',
