@@ -492,6 +492,11 @@ class ProgressManager:
 
     _event_queue: asyncio.Queue | None = None
     _worker_task: asyncio.Task | None = None
+    # The loop `_event_queue` is bound to. asyncio.Queue latches onto the
+    # loop that first awaits it, and this class is a process-wide singleton
+    # while the GUI runs every download in its own asyncio.run() — so the
+    # queue outlives the loop that owns it and has to be rebuilt per loop.
+    _queue_loop: asyncio.AbstractEventLoop | None = None
 
     # item_id -> (last log time, last logged percentage), used only when the
     # bars are off and progress is reported as text instead.
@@ -505,9 +510,26 @@ class ProgressManager:
     def start_worker(cls) -> None:
         """Starts the consumer task idempotently. Must be called from
         inside the active event loop (create_task requires it).
+
+        A queue carried over from a previous, already-closed loop is thrown
+        away and rebuilt: reusing it makes every get()/put() raise
+        "Queue ... is bound to a different event loop", which is what the
+        second and every later download in the GUI used to hit.
         """
-        if cls._event_queue is None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop to attach a consumer to; enqueue_progress() drops the
+            # event rather than crashing the caller that reported it.
+            return
+
+        if cls._event_queue is None or cls._queue_loop is not loop:
             cls._event_queue = asyncio.Queue()
+            cls._queue_loop = loop
+            # The old consumer belonged to the old loop; it can neither be
+            # awaited nor cancelled from here, and it is already dead with
+            # its loop, so just let go of it.
+            cls._worker_task = None
 
         if cls._worker_task is not None and not cls._worker_task.done():
             return
@@ -516,6 +538,19 @@ class ProgressManager:
 
     @classmethod
     async def stop_worker(cls) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if cls._queue_loop is not None and cls._queue_loop is not loop:
+            # Left over from a loop that is gone: nothing here can be awaited
+            # on it, so drop the references and let the next run rebuild them.
+            cls._event_queue = None
+            cls._queue_loop = None
+            cls._worker_task = None
+            return
+
         if cls._worker_task is not None:
             if cls._event_queue is not None:
                 # sblocca il .get() in attesa nel task consumer
@@ -524,6 +559,9 @@ class ProgressManager:
                 await asyncio.wait_for(cls._worker_task, timeout=5)
             except asyncio.TimeoutError:
                 cls._worker_task.cancel()
+            except RuntimeError:
+                # Consumer already died with a stale loop; nothing to drain.
+                pass
             cls._worker_task = None
 
     @classmethod
