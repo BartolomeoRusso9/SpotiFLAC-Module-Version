@@ -1226,6 +1226,35 @@ function setPlaycountHeaderLabel(label) {
 let g_albumReleaseDate = '';
 let g_albumTrackCount = 0;
 
+// Samples the cover's average colour into --album-glow on #album-card (see
+// styles.css #album-card::before) for a soft artwork-derived tint instead of
+// a flat surface. Best-effort: a cover served without CORS headers taints
+// the canvas and getImageData() throws — caught silently, the card just
+// keeps its plain background. Never touches the <img> itself.
+function applyAlbumGlow(imgEl) {
+  const cardEl = $('album-card');
+  if (!cardEl) return;
+  try {
+    const SIZE = 24; // downsample hard — this is an average, not a picture
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE; canvas.height = SIZE;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgEl, 0, 0, SIZE, SIZE);
+    const { data } = ctx.getImageData(0, 0, SIZE, SIZE);
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 16) continue; // skip near-transparent pixels
+      r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+    }
+    if (!n) { cardEl.style.removeProperty('--album-glow'); return; }
+    r = Math.round(r / n); g = Math.round(g / n); b = Math.round(b / n);
+    cardEl.style.setProperty('--album-glow', `rgba(${r}, ${g}, ${b}, .5)`);
+  } catch (err) {
+    // Cross-origin cover, unsupported canvas, whatever — no glow this time.
+    cardEl.style.removeProperty('--album-glow');
+  }
+}
+
 function setAlbumCard(title, artist, coverUrl, quality, description, followers, owner, ownerAvatar, source, artistListeners, artistRank, artistVerified, artistBiography, releaseDate, trackCount) {
   g_albumReleaseDate = releaseDate || '';
   g_albumTrackCount = trackCount || 0;
@@ -1377,11 +1406,20 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
     // attribute and a JS string literal inside onclick="" — one apostrophe in
     // a cover URL was enough to break out and run as script.
     coverEl.textContent = '';
+    $('album-card')?.style.removeProperty('--album-glow'); // don't carry the previous cover's tint while this one loads
 
     const img = document.createElement('img');
     img.alt = 'cover';
+    img.className = 'cover-loading'; // blur-up: styles.css clears it once decode() resolves
     img.src = safeCover;
-    img.addEventListener('error', () => { coverEl.textContent = '🎵'; });
+    img.addEventListener('error', () => {
+      coverEl.textContent = '🎵';
+      $('album-card')?.style.removeProperty('--album-glow');
+    });
+    (img.decode ? img.decode().catch(() => {}) : Promise.resolve()).then(() => {
+      img.classList.remove('cover-loading');
+      applyAlbumGlow(img);
+    });
     coverEl.appendChild(img);
 
     const btn = document.createElement('button');
@@ -1397,6 +1435,7 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
     coverEl.appendChild(btn);
   } else {
     coverEl.textContent = '🎵';
+    $('album-card')?.style.removeProperty('--album-glow');
   }
   $('album-card').classList.remove('hidden');
   $('text-search-container')?.classList.add('hidden');
@@ -2822,10 +2861,10 @@ function renderRecent(hist) {
     return;
   }
   const BADGE_CFG = {
-    playlist: { label:'Playlist', color:'#a855f7', bg:'rgba(168,85,247,.15)', icon:'☰' },
-    artist:   { label:'Artist',  color:'#f97316', bg:'rgba(249,115,22,.15)',  icon:'♪' },
-    album:    { label:'Album',   color:'#22c55e', bg:'rgba(34,197,94,.15)',   icon:'◎' },
-    track:    { label:'Track',   color:'#3b82f6', bg:'rgba(59,130,246,.15)',  icon:'♩' },
+    playlist: { label:'Playlist', icon:'☰' },
+    artist:   { label:'Artist',  icon:'♪' },
+    album:    { label:'Album',   icon:'◎' },
+    track:    { label:'Track',   icon:'♩' },
   };
   hist.slice(0, 16).forEach(item => {
     const card = document.createElement('div');
@@ -2856,7 +2895,7 @@ function renderRecent(hist) {
     }
  
     const badgeHtml = badge
-      ? `<span class="rc-badge" style="color:${badge.color};background:${badge.bg};">${badge.icon} ${badge.label}</span>`
+      ? `<span class="rc-badge ${urlType}">${badge.icon} ${badge.label}</span>`
       : '';
     const subHtml = subtitle ? `<div class="rc-sub">${subtitle}</div>` : '';
  
@@ -4929,15 +4968,12 @@ async function navigateFolderBrowser(path) {
         if (items.length > 0) {
             items.forEach(item => {
                 const div = document.createElement('div');
-                div.style.cssText = 'padding:8px 12px; cursor:pointer; border-radius:6px; display:flex; align-items:center; gap:8px; color:var(--text); font-size:13px; border:1px solid transparent;';
+                div.className = 'fb-entry';
                 const icon = item.type === 'dir'
                     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>'
                     : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>';
                 div.innerHTML = icon + ' ';
                 div.appendChild(document.createTextNode(item.name));
-
-                div.onmouseover = () => div.style.backgroundColor = 'var(--surface2)';
-                div.onmouseout = () => div.style.backgroundColor = 'transparent';
 
                 div.onclick = async () => {
                     if (item.type === 'dir') {
@@ -4954,11 +4990,11 @@ async function navigateFolderBrowser(path) {
                 entriesDiv.appendChild(div);
             });
         } else {
-            entriesDiv.innerHTML = '<div style="padding:20px; text-align:center; color:var(--muted); font-size:12px;">No files or subdirectories found.</div>';
+            entriesDiv.innerHTML = '<div class="fb-empty">No files or subdirectories found.</div>';
         }
 
         $('fb-back').disabled = !data.parent;
-        $('fb-back').style.opacity = data.parent ? '1' : '0.5';
+        $('fb-back').classList.toggle('is-root', !data.parent);
 
     } catch (err) {
         console.error('[FolderBrowser] Navigation error:', err);
@@ -5432,8 +5468,8 @@ function healthRate(rate) {
 
 function healthColour(row) {
   if (!row.attempts) return 'var(--muted)';
-  if (row.success_rate >= 0.9) return 'var(--green, #22c55e)';
-  if (row.success_rate >= 0.5) return 'var(--yellow, #eab308)';
+  if (row.success_rate >= 0.9) return 'var(--green, #1ed760)';
+  if (row.success_rate >= 0.5) return 'var(--yellow, #f0c674)';
   return 'var(--red)';
 }
 

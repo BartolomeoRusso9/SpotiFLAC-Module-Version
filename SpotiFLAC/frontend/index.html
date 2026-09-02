@@ -11,7 +11,7 @@
        pywebview window too: manifest/theme-color are simply unused there,
        and the registration script below no-ops without that flag. -->
   <link rel="manifest" href="manifest.json?v=20260901">
-  <meta name="theme-color" content="#0a0a0a">
+  <meta name="theme-color" content="#0a0a0c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="SpotiFLAC">
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
@@ -20,7 +20,7 @@
        be there. The artwork already ships. -->
   <link rel="icon" type="image/svg+xml" href="assets/icons/logo.svg">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/logo-192.png">
-  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css?v=20260901">
   <script>
     // Theme, applied before the first paint. app.js used to do this only from
@@ -187,8 +187,8 @@
       </div>
 
       <!-- Text Search Results Container -->
-      <div id="text-search-container" class="hidden" style="padding: 0 18px 14px; border-bottom: 1px solid var(--border); max-width: 100%;">
-        <div id="text-search-results" style="display: flex; flex-direction: column; gap: 10px; max-width: 820px; margin: 0 auto;"></div>
+      <div id="text-search-container" class="hidden">
+        <div id="text-search-results"></div>
       </div>
 
       <div id="main-split">
@@ -273,10 +273,10 @@
                 <div>Actions</div>
               </div>
               <div id="track-rows"></div>
-              <div id="pagetion-controls" class="hidden" style="display:flex;justify-content:center;align-items:center;gap:8px;padding:16px 10px;margin:0 auto;max-width:100%;font-size:12px;">
-                <button id="page-prev" onclick="previousPage()" style="padding:6px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;cursor:pointer;color:var(--text2);">← Previous</button>
-                <span id="page-info" style="color:var(--muted);min-width:120px;text-align:center;font-family:'JetBrains Mono',monospace;">Page 1 of 1</span>
-                <button id="page-next" onclick="nextPage()" style="padding:6px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;cursor:pointer;color:var(--text2);">Next →</button>
+              <div id="pagetion-controls" class="hidden">
+                <button id="page-prev" class="page-btn" onclick="previousPage()">← Previous</button>
+                <span id="page-info">Page 1 of 1</span>
+                <button id="page-next" class="page-btn" onclick="nextPage()">Next →</button>
               </div>
             </div>
 
@@ -403,18 +403,18 @@
                 Browse
               </button>
             </div>
-            <div id="folder-browser-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="folder-browser-title" tabindex="-1" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:9999;">
-              <div style="background:var(--surface); border:1px solid var(--border); border-radius:12px; width:90%; max-width:500px; max-height:80vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-                <div style="padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-                  <div id="folder-browser-title" style="font-weight:600; color:var(--text);">Select Folder</div>
-                  <button onclick="closeFolderBrowser()" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:18px; padding:0; line-height:1;">×</button>
+            <div id="folder-browser-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="folder-browser-title" tabindex="-1">
+              <div class="fb-card">
+                <div class="fb-header">
+                  <div id="folder-browser-title">Select Folder</div>
+                  <button class="fb-close" onclick="closeFolderBrowser()">×</button>
                 </div>
-                <div style="padding:12px 20px; border-bottom:1px solid var(--border); display:flex; gap:8px; align-items:center;">
-                  <button id="fb-back" onclick="goFolderBrowserBack()" style="background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:6px 12px; cursor:pointer; color:var(--text); font-size:12px;">← Back</button>
-                  <input type="text" id="fb-path" readonly style="flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text2); font-size:11px; font-family:monospace;">
-                  <button onclick="setFolderPath()" style="background:var(--yellow); border:none; border-radius:6px; padding:6px 12px; cursor:pointer; color:black; font-weight:600; font-size:12px;">Select</button>
+                <div class="fb-toolbar">
+                  <button id="fb-back" onclick="goFolderBrowserBack()">← Back</button>
+                  <input type="text" id="fb-path" readonly>
+                  <button class="fb-select" onclick="setFolderPath()">Select</button>
                 </div>
-                <div id="fb-entries" style="flex:1; overflow-y:auto; padding:8px;"></div>
+                <div id="fb-entries"></div>
               </div>
             </div>
           </div>
