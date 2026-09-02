@@ -1868,6 +1868,10 @@ function renderTracks(tracks, page = 1) {
       const row = document.createElement('div');
       row.className = 'track-row';
       row.id = `track-row-${globalIndex}`;
+      // Same identity addToQueue() uses for a queue item's spotify_id — lets
+      // syncTrackRowsWithQueue() find this row even after a re-sort changes
+      // which #track-row-N id it currently holds.
+      if (t.id || t.external_url) row.dataset.spotifyId = t.id || t.external_url;
 
       const explicit = t.explicit ? `<span class="explicit-badge">E</span>` : '';
       const coverUrl = t.cover_url || t.cover || t.image || '';
@@ -3020,6 +3024,34 @@ function resetQueueDuration() {
   updateQueueDuration();
 }
 
+// Mirrors each queue item's status/progress onto its row in the (still
+// visible) track table — a queue-drawer-only view meant scrolling away to
+// check on a download in progress. Matched by data-spotifyId first (stable
+// across a re-sort, which reshuffles which #track-row-N id a track holds);
+// falls back to the original pre-sort index for tracks with neither an id
+// nor an external_url (the same fallback addToQueue() already accepts for
+// its own dedup lookup, so this isn't a new class of mismatch).
+function syncTrackRowsWithQueue() {
+  const rows = document.getElementById('track-rows');
+  if (!rows || !rows.children.length) return;
+  queue.forEach(item => {
+    let row = null;
+    if (item.spotify_id) {
+      row = rows.querySelector(`.track-row[data-spotify-id="${CSS.escape(item.spotify_id)}"]`);
+    }
+    if (!row && item.index != null) {
+      row = document.getElementById(`track-row-${item.index}`);
+    }
+    if (!row) return;
+    row.classList.toggle('dl-active', item.status === 'active');
+    row.classList.toggle('done', item.status === 'done');
+    row.classList.toggle('failed', item.status === 'error');
+    row.classList.toggle('skipped', item.status === 'skipped');
+    const pct = item.status === 'active' ? item.progress : (item.status === 'done' ? 100 : 0);
+    row.style.setProperty('--row-progress', pct + '%');
+  });
+}
+
 function renderQueue() {
   const list = $('queue-list'); list.innerHTML = '';
   let empty = $('queue-empty');
@@ -3059,6 +3091,13 @@ function renderQueue() {
     if (bar) bar.style.width = '0%';
     dock?.classList.remove('done');
     resetQueueDuration();
+    // Queue just went empty (cleared, or its last item removed) — nothing
+    // left for syncTrackRowsWithQueue() to match, so any row still carrying
+    // dl-active/done/failed/skipped from before would otherwise be stuck.
+    document.querySelectorAll('#track-rows .track-row').forEach(row => {
+      row.classList.remove('dl-active', 'done', 'failed', 'skipped');
+      row.style.removeProperty('--row-progress');
+    });
     return;
   }
 
@@ -3143,6 +3182,7 @@ function renderQueue() {
   dock?.classList.toggle('done', queue.length > 0 && done === queue.length);
 
   updateQueueDuration();
+  syncTrackRowsWithQueue();
 }
 
 function toggleQueueDrawer() {

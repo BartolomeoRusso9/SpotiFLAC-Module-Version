@@ -1276,6 +1276,22 @@
     }
     .track-row.done    { background: var(--status-done-bg); }
     .track-row.failed  { background: var(--status-failed-bg); }
+    .track-row.skipped { background: var(--status-skipped-bg); }
+    /* Per-row download progress — app.js's syncTrackRowsWithQueue() mirrors
+       each queue item onto its row (matched by data-spotify-id, so it
+       survives a re-sort) whenever the queue re-renders, setting
+       --row-progress and toggling .dl-active. A thin bar along the row's
+       own bottom edge means "how is *this* download doing" reads without
+       leaving the table for the queue drawer. */
+    .track-row.dl-active { background: var(--status-active-bg); }
+    .track-row.dl-active::after {
+      content: '';
+      position: absolute; left: 0; bottom: 0; height: 2px;
+      width: var(--row-progress, 0%);
+      background: var(--accent);
+      transition: width var(--t);
+      border-radius: 0 2px 2px 0;
+    }
 
     .tr-check input { accent-color: var(--yellow); cursor: pointer; width: 14px; height: 14px; }
     .tr-num {
