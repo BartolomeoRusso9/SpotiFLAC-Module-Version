@@ -274,7 +274,75 @@ def _track_url(track_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_spotify_url(uri: str) -> dict[str, str]:
+#: A browser UA: the share-link interstitials serve a different page — and
+#: sometimes no redirect at all — to anything that looks automated.
+_SHORT_LINK_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/145.0.0.0 Safari/537.36"
+)
+
+#: Hosts and paths that carry no entity ID at all, only a token that has to
+#: be exchanged for the real URL. These are what the mobile apps' share
+#: sheets produce, so they are what users actually paste.
+_SHORT_LINK_HOSTS = frozenset({"spotify.link", "spoti.fi"})
+
+#: The canonical URL, as it appears in a short link's landing page.
+_CANONICAL_PATTERNS = (
+    re.compile(r'<meta[^>]+property=["\']og:url["\'][^>]+content=["\']([^"\']+)'),
+    re.compile(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)'),
+    re.compile(
+        r"https://open\.spotify\.com/"
+        r"(?:intl-[a-z-]+/)?"
+        r"(?:track|album|playlist|artist)/[A-Za-z0-9]{22}",
+    ),
+)
+
+
+def _is_short_link(u: Any) -> bool:
+    if u.netloc in _SHORT_LINK_HOSTS:
+        return True
+    # open.spotify.com/s/<token> — same idea, Spotify's own host.
+    return u.netloc in ("open.spotify.com", "play.spotify.com") and u.path.startswith(
+        "/s/",
+    )
+
+
+def resolve_short_link(uri: str) -> str:
+    """A share short link expanded to the URL it points at.
+
+    A short link carries a token, not an ID, so there is nothing in it to
+    parse — the only way to learn what it means is to ask. The redirect
+    target is preferred; some of these land on an interstitial that carries
+    the real URL only in its markup, so the body is scanned as well.
+
+    Synchronous on purpose. parse_spotify_url() is called from both sync
+    and async code and changing that would reach into every caller, so the
+    one blocking request is confined here, given a short timeout, and only
+    ever runs for the handful of URLs that cannot be parsed offline.
+    """
+    import httpx
+
+    try:
+        with httpx.Client(
+            follow_redirects=True,
+            timeout=8.0,
+            headers={"User-Agent": _SHORT_LINK_UA},
+        ) as client:
+            resp = client.get(uri)
+            final = str(resp.url)
+            if not _is_short_link(urlparse(final)):
+                return final
+            for pattern in _CANONICAL_PATTERNS:
+                match = pattern.search(resp.text)
+                if match:
+                    return match.group(1) if match.groups() else match.group(0)
+    except Exception as exc:
+        logger.debug("[spotify] short link %s could not be resolved: %s", uri, exc)
+    return ""
+
+
+def parse_spotify_url(uri: str, _resolved: bool = False) -> dict[str, str]:
     u = urlparse(uri)
 
     # embed.spotify.com → redirect via the ?uri= query param
@@ -283,6 +351,18 @@ def parse_spotify_url(uri: str) -> dict[str, str]:
         if not qs.get("uri"):
             raise InvalidUrlError(uri)
         return parse_spotify_url(qs["uri"][0])
+
+    if _is_short_link(u):
+        # `_resolved` bounds this to one round trip: a short link that
+        # redirects to another short link would otherwise recurse until the
+        # stack ran out, and a chain that long is a redirect loop, not a
+        # share URL.
+        if _resolved:
+            raise InvalidUrlError(uri)
+        expanded = resolve_short_link(uri)
+        if not expanded:
+            raise InvalidUrlError(uri)
+        return parse_spotify_url(expanded, _resolved=True)
 
     if u.scheme == "spotify":
         parts = uri.split(":")
@@ -1444,8 +1524,13 @@ def _maximize_cover_url(url: str) -> str:
 
     import re
 
-    url = url.replace("ab67616d00001e02", "ab67616d0000b273")
-    url = url.replace("ab67616d00004851", "ab67616d0000b273")
+    # Spotify encodes the size in the path prefix: 64px, 300px, 640px and
+    # 1500px of the same artwork. 640 (…b273) is the one the API hands out
+    # and was as far as this went; …82c1 is the same image at 1500x1500 and
+    # is served for every cover the CDN has, so there is no reason to embed
+    # the smaller one in a lossless file.
+    for small in ("ab67616d00001e02", "ab67616d00004851", "ab67616d0000b273"):
+        url = url.replace(small, "ab67616d000082c1")
 
     url = url.replace("ab67616100005174", "ab6761610000e5eb")
     url = url.replace("ab6761610000f178", "ab6761610000e5eb")

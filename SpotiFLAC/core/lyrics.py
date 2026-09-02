@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import unicodedata
 import urllib.parse
@@ -330,6 +331,44 @@ def _apple_payload_to_lrc(data: object, word_by_word: bool = True) -> str:
     return "\n".join(lrc_lines)
 
 
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+async def _fetch_apple_ttml_async(song_id: str, word_by_word: bool = True) -> str:
+    """Apple's own lyrics for `song_id`, as LRC, or "" if unavailable.
+
+    This is the direct path: Apple's TTML rather than a third party's
+    flattened JSON of it. It carries the per-syllable timings, the backing
+    vocals and — where Apple ships them — an official translation and
+    romanisation, none of which survive the relay.
+
+    It needs a subscriber's Media-User-Token, so for most installs this
+    returns "" immediately and the relay below does the work. That is why
+    it is tried first rather than instead: it costs one skipped call when
+    unconfigured and gives strictly better lyrics when it is.
+    """
+    try:
+        from .apple_music_metadata import AppleMusicMetadataClient
+        from .apple_ttml import ttml_to_lrc
+
+        client = AppleMusicMetadataClient()
+        if not client.has_media_user_token:
+            return ""
+        ttml = await client.get_lyrics_ttml(song_id)
+        if not ttml:
+            return ""
+        return ttml_to_lrc(
+            ttml,
+            word_by_word=word_by_word,
+            translation=_env_flag("SPOTIFLAC_APPLE_LYRICS_TRANSLATION"),
+            romanization=_env_flag("SPOTIFLAC_APPLE_LYRICS_PRONUNCIATION"),
+        )
+    except Exception as exc:
+        logger.debug("[lyrics/apple] direct TTML: %s", exc)
+        return ""
+
+
 async def _fetch_apple_async(
     track_name: str,
     artist_name: str,
@@ -371,6 +410,13 @@ async def _fetch_apple_async(
         song_id = best_result.get("trackId")
         if not song_id:
             return ""
+
+        # Apple first, the relay second: same catalogue, but the relay only
+        # ever gives back words and line times.
+        direct = await _fetch_apple_ttml_async(str(song_id), word_by_word)
+        if direct:
+            return direct
+
         r_lyr = await client.get(
             _PAXSENIX_APPLE,
             params={"id": str(song_id)},

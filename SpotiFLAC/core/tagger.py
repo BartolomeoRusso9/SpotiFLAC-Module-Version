@@ -1444,6 +1444,13 @@ async def embed_metadata_async(
                 isrc=metadata.isrc,
                 providers=opts.enrich_providers,
                 qobuz_token=opts.enrich_qobuz_token,
+                # What we already know, so the providers' answers can be
+                # checked against it: an ISRC lands on a different release
+                # at Deezer often enough that its label and barcode need a
+                # release to agree with, and iTunes' search needs something
+                # to score its hits against.
+                album_name=metadata.album,
+                duration_ms=metadata.duration_ms,
             )
             enriched_tags = enriched.as_tags()
             enriched_cover_url = enriched.cover_url_hd
@@ -1530,13 +1537,24 @@ async def embed_metadata_async(
             for k in [k for k in merged_extra if k.upper() == "GENRE"]:
                 del merged_extra[k]
 
-    # Guard: do not overwrite fields already present in the base metadata
-    if metadata.composer:
-        merged_extra.pop("COMPOSER", None)
-        merged_extra.pop("composer", None)
-    if metadata.copyright:
-        merged_extra.pop("COPYRIGHT", None)
-        merged_extra.pop("copyright", None)
+    # Guard: do not overwrite fields already present in the base metadata.
+    # Everything in merged_extra is written over the base tags below, so a
+    # field the source itself knew has to be taken off the table here or
+    # enrichment silently replaces it with a guess.
+    _base_known = (
+        ("COMPOSER", bool(metadata.composer)),
+        ("COPYRIGHT", bool(metadata.copyright)),
+        ("DATE", bool(metadata.release_date)),
+        ("TRACKTOTAL", metadata.total_tracks > 0),
+        # total_discs defaults to 1 in the model, so 1 means "single disc or
+        # nobody said" — indistinguishable, and enrichment is allowed to
+        # improve on it. Anything above 1 was genuinely counted.
+        ("DISCTOTAL", metadata.total_discs > 1),
+    )
+    for key, known in _base_known:
+        if known:
+            merged_extra.pop(key, None)
+            merged_extra.pop(key.lower(), None)
 
     # Handling date originali
     orig_date = merged_extra.get("original_date") or merged_extra.get("ORIGINALDATE")

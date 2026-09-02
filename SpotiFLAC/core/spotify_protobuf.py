@@ -284,7 +284,9 @@ def parse_album(raw: bytes) -> dict[str, Any]:
 
     first_artist = artists[0] if artists else {}
     # Field 4 is a plain enum — no zigzag. See the module docstring.
-    album_type = _ALBUM_TYPES.get(int(first_value(fields, 4, _WIRE_VARINT) or 1), "album")
+    album_type = _ALBUM_TYPES.get(
+        int(first_value(fields, 4, _WIRE_VARINT) or 1), "album"
+    )
 
     return {
         "album_id": album_id,
