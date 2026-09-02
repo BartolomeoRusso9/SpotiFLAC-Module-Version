@@ -3479,7 +3479,11 @@ async function onFetch() {
   if (mode === 'search') {
     highlightRecentCard(url);
     setStatus(`Searching "${url}"...`, true);
-    logMessage(`Text search: ${url}`, 'info');
+    // -quiet: still a line in the log panel, but setFetchingState('start')
+    // above already raised a bottom-left "fetching" toast for this same
+    // search — logMessage's own auto-toast would otherwise stack a second
+    // "fetching" notice in the opposite corner for the same action.
+    logMessage(`Text search: ${url}`, 'info-quiet');
     currentUrl = url;
 
     if (window.pywebview?.api) {
@@ -3503,7 +3507,9 @@ async function onFetch() {
 
   highlightRecentCard(url);
   setStatus('Fetching metadata…', true);
-  logMessage(`Fetching: ${url}`, 'info');
+  // -quiet, same reason as the search-mode branch above: setFetchingState('start')
+  // already put up a "fetching metadata…" toast bottom-left for this fetch.
+  logMessage(`Fetching: ${url}`, 'info-quiet');
   currentUrl = url;
   showSkeletonTracks(5);
 
