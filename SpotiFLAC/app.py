@@ -370,6 +370,7 @@ class SpotiFLAC_API(
         artist_biography=None,
         release_date=None,
         track_count=None,
+        artist_url="",
     ) -> None:
         payload = {
             "title": title,
@@ -377,6 +378,8 @@ class SpotiFLAC_API(
             "cover": cover,
             "quality": quality,
         }
+        if artist_url:
+            payload["artist_url"] = artist_url
         if playlist_description is not None:
             payload["description"] = playlist_description
         if playlist_followers is not None:
@@ -1273,6 +1276,7 @@ class SpotiFLAC_API(
                         "id": track_id,
                         "title": title,
                         "artist": artist,
+                        "artist_url": getattr(t, "artist_url", ""),
                         "album": album,
                         "cover": getattr(t, "cover_url", ""),
                         "duration_ms": getattr(t, "duration_ms", 0),
@@ -1300,9 +1304,11 @@ class SpotiFLAC_API(
             if is_artist:
                 display_title = collection_name
                 display_artist = ""
+                display_artist_url = ""
             else:
                 display_title = collection_name
                 display_artist = tracks[0].artists if tracks else ""
+                display_artist_url = tracks[0].artist_url if tracks else ""
 
             if is_artist:
                 self.set_metadata(
@@ -1328,6 +1334,7 @@ class SpotiFLAC_API(
                     source=collection_meta.get("source", ""),
                     release_date=collection_meta.get("release_date"),
                     track_count=collection_meta.get("track_count"),
+                    artist_url=display_artist_url,
                 )
 
             self.log(
@@ -1691,9 +1698,50 @@ def _pick_gui_port() -> int | None:
     return GUI_HTTP_PORT
 
 
+def _purge_webview_http_cache() -> None:
+    """Drops the web view's persistent HTTP cache before the window opens.
+
+    The desktop window serves the frontend over a *stable* origin
+    (`http_server=True` on a fixed port) out of a *persistent* data store
+    (`private_mode=False`) — both deliberate, see webview.start() below —
+    and pywebview's bundled static server sends no cache headers at all.
+    WebKit therefore takes index.html from its own cache on every launch,
+    for as long as that entry lives.
+
+    That is worse than it sounds: the `?v=` cache-bust that is supposed to
+    make a frontend update visible lives *inside* index.html, on the
+    <script>/<link> tags. A cached index.html keeps pointing at the old
+    ?v= values, so the old app.js and styles.css stay cached too, and the
+    whole frontend freezes at whichever version WebKit saw first — through
+    any number of restarts, and no matter how often the version is bumped.
+    (Observed for real: a window still running a 1 September build days
+    later, `it-IT` number formatting and all.)
+
+    Wiping the cache costs one re-read of a few hundred KB from localhost
+    on startup. Nothing else in this window is worth caching: every asset
+    it loads is a local file. Best-effort — a cache that cannot be found
+    or removed is not a reason to refuse to launch.
+    """
+    caches = Path.home() / "Library" / "Caches"  # macOS; other platforms no-op
+    if not caches.is_dir():
+        return
+
+    bundle_id = "org.python.python"
+    with contextlib.suppress(Exception):
+        from Foundation import NSBundle  # pyobjc, always present with the cocoa backend
+
+        bundle_id = NSBundle.mainBundle().bundleIdentifier() or bundle_id
+
+    with contextlib.suppress(Exception):
+        import shutil
+
+        shutil.rmtree(caches / bundle_id / "WebKit" / "NetworkCache", ignore_errors=True)
+
+
 def run_gui() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
     logging.getLogger("pywebview").setLevel(logging.WARNING)
+    _purge_webview_http_cache()
     api = SpotiFLAC_API()
 
     # Try several candidate locations for the frontend files to be robust

@@ -170,6 +170,49 @@ def _join_artists(artists_data: Any) -> str:
     return ", ".join(names) if names else ""
 
 
+def _id_from_artist_node(item: Any) -> str:
+    """Pulls an id/uri out of one artist node, trying every shape this file
+    has actually seen artist data come back in:
+      - id (or uri) nested under a "profile" sub-object — the same nesting
+        _extract_artist_names checks (`item.get("profile", {}).get("name")`
+        vs. `item.get("name")` directly) — some artist nodes carry every
+        field under "profile", others flat on the item itself.
+      - id (or uri) flat on the item.
+    uri is the fallback in both cases, same as track_id/album_id/release_id
+    elsewhere in this file, parsed as the last ":"-separated segment of
+    "spotify:artist:<id>".
+    """
+    if not isinstance(item, dict):
+        return ""
+    profile = item.get("profile")
+    for src in ([profile, item] if isinstance(profile, dict) else [item]):
+        aid = src.get("id")
+        if isinstance(aid, str) and aid:
+            return aid
+        uri = src.get("uri", "")
+        if isinstance(uri, str) and ":" in uri:
+            return uri.rsplit(":", 1)[-1]
+    return ""
+
+
+def _first_artist_id(artists_data: Any) -> str:
+    """Extracts the first artist's raw Spotify ID, mirroring the shape
+    handling _extract_artist_names does for names — same "items" list vs.
+    single-artist dict vs. list-of-dicts shapes. Only the first artist: the
+    artist name shown in the UI (and made clickable from it) is only ever
+    the first one."""
+    if isinstance(artists_data, dict):
+        items = artists_data.get("items", [])
+        if isinstance(items, list) and items:
+            return _id_from_artist_node(items[0])
+        return _id_from_artist_node(artists_data)
+
+    if isinstance(artists_data, list) and artists_data:
+        return _id_from_artist_node(artists_data[0])
+
+    return ""
+
+
 def _best_cover(cover_urls: dict) -> str:
     return (
         cover_urls.get("large")
@@ -584,11 +627,13 @@ class SpotifyMetadataClient:
         # Artist extraction logic:
         # ------------------------------------------------------------------
         artists_list = []
+        artist_id = ""
 
         # 1. Extract the first artist
         first = track_union.get("firstArtist")
         if first:
             artists_list.extend(_extract_artist_names(first))
+            artist_id = _first_artist_id(first)
 
         # 2. Extract the other artists
         others = track_union.get("otherArtists")
@@ -598,10 +643,14 @@ class SpotifyMetadataClient:
         # 3. Additional support for the standard artists structure
         if not artists_list:
             artists_list.extend(_extract_artist_names(track_union.get("artists")))
+            if not artist_id:
+                artist_id = _first_artist_id(track_union.get("artists"))
 
         # 4. Fallback to the album if necessary
         if not artists_list:
             artists_list = _extract_artist_names(album_data.get("artists"))
+            if not artist_id:
+                artist_id = _first_artist_id(album_data.get("artists"))
 
         # 5. Final fallback if everything fails
         if not artists_list:
@@ -636,6 +685,7 @@ class SpotifyMetadataClient:
             album=_name(album_data, "Unknown"),
             album_artist=album_artists_str,
             album_artist_names=album_artists_list,
+            artist_id=artist_id,
             isrc=isrc_str,
             track_number=track_union.get("trackNumber") or 0,
             disc_number=track_union.get("discNumber") or 1,
@@ -745,7 +795,9 @@ class SpotifyMetadataClient:
                 _extract_artist_names(track_node.get("artists")) or album_artists_list
             )
             track_artists = ", ".join(track_artists_list) or album_artists
-
+            track_artist_id = _first_artist_id(track_node.get("artists")) or _first_artist_id(
+                album_union.get("artists"),
+            )
             tracks.append(
                 TrackMetadata(
                     id=track_id,
@@ -755,6 +807,7 @@ class SpotifyMetadataClient:
                     album=album_name,
                     album_artist=album_artists,
                     album_artist_names=album_artists_list,
+                    artist_id=track_artist_id,
                     isrc="",
                     track_number=track_node.get("trackNumber") or 0,
                     disc_number=track_node.get("discNumber") or 1,
@@ -849,10 +902,13 @@ class SpotifyMetadataClient:
 
             album_data = _dig(track_data, "albumOfTrack")
             artists_list = _extract_artist_names(track_data.get("artists"))
+            artist_id = _first_artist_id(track_data.get("artists"))
             if not artists_list:
                 artists_list = _extract_artist_names(album_data.get("artists")) or [
                     "Unknown Artist",
                 ]
+                if not artist_id:
+                    artist_id = _first_artist_id(album_data.get("artists"))
 
             cover = self.web_client.extract_cover_url(_dig(album_data, "coverArt"))
             album_artists_list = (
@@ -871,6 +927,7 @@ class SpotifyMetadataClient:
                     album=_name(album_data, "Unknown"),
                     album_artist=album_artists,
                     album_artist_names=album_artists_list,
+                    artist_id=artist_id,
                     isrc="",
                     track_number=track_data.get("trackNumber") or 0,
                     disc_number=1,
@@ -944,6 +1001,9 @@ class SpotifyMetadataClient:
                 album_node = _dig(t, "albumOfTrack")
                 track_artists_list = _extract_artist_names(t.get("artists"))
                 track_artists_str = ", ".join(track_artists_list)
+                track_artist_id = _first_artist_id(t.get("artists")) or _first_artist_id(
+                    album_node.get("artists"),
+                )
                 album_artists_list = (
                     _extract_artist_names(album_node.get("artists"))
                     or track_artists_list
@@ -960,6 +1020,7 @@ class SpotifyMetadataClient:
                         album=_name(album_node, "Unknown"),
                         album_artist=album_artists_str,
                         album_artist_names=album_artists_list,
+                        artist_id=track_artist_id,
                         isrc="",
                         track_number=0,
                         disc_number=1,

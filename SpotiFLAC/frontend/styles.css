@@ -763,6 +763,14 @@
     #album-artist {
       display: inline;
     }
+    /* Clickable artist name — app.js's artistNameHtml() only ever wraps a
+       name in this span when a real artist_url resolved, so the cursor/
+       hover treatment never shows on a name that goes nowhere. */
+    .artist-link {
+      cursor: pointer;
+      transition: color var(--t);
+    }
+    .artist-link:hover { color: var(--accent-text); text-decoration: underline; }
     #album-meta {
       font-size: var(--fs-100); color: var(--text2); margin-bottom: 12px;
       display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;

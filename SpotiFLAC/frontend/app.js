@@ -1073,7 +1073,8 @@ window.app_set_metadata = (data) => {
       d.artist_verified,
       d.artist_biography,
       d.release_date,
-      d.track_count
+      d.track_count,
+      d.artist_url
     );
   } catch(e) {}
 };
@@ -1255,9 +1256,46 @@ function applyAlbumGlow(imgEl) {
   }
 }
 
-function setAlbumCard(title, artist, coverUrl, quality, description, followers, owner, ownerAvatar, source, artistListeners, artistRank, artistVerified, artistBiography, releaseDate, trackCount) {
+// Navigates to an artist's own page the same way clicking a recent-fetch
+// card does: drop the URL in the fetch bar and run the normal fetch flow,
+// rather than a one-off code path that would skip whatever that flow does
+// (recent-card highlight, search-mode reset, etc.) and drift from it later.
+function goToArtist(url) {
+  const safeUrl = httpUrlOrNull(url);
+  if (!safeUrl) return;
+  $('urlInput').value = safeUrl;
+  if ($('searchMode').value === 'search') toggleSearchMode();
+  onFetch();
+}
+
+// One delegated listener rather than an onclick="" per artist name: the URL
+// only ever goes into a data- attribute (escHtml covers both quote chars),
+// never into a JS string built by interpolation — the cover-URL comment
+// above setAlbumCard's <img> explains why that path is avoided here too.
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('.artist-link');
+  if (!el) return;
+  e.stopPropagation();
+  goToArtist(el.dataset.artistUrl);
+});
+
+// Wraps an artist name as a clickable span when a URL is known, or leaves
+// it as plain text otherwise — used everywhere an artist name is set, so a
+// track from a provider that never returned an artist_url just shows a
+// name, same as before this existed.
+function artistNameHtml(name, url) {
+  const safeName = escHtml(name || '');
+  const safeUrl = httpUrlOrNull(url);
+  if (!safeUrl) return safeName;
+  return `<span class="artist-link" data-artist-url="${escHtml(safeUrl)}">${safeName}</span>`;
+}
+
+let g_albumArtistUrl = '';
+
+function setAlbumCard(title, artist, coverUrl, quality, description, followers, owner, ownerAvatar, source, artistListeners, artistRank, artistVerified, artistBiography, releaseDate, trackCount, artistUrl) {
   g_albumReleaseDate = releaseDate || '';
   g_albumTrackCount = trackCount || 0;
+  g_albumArtistUrl = artistUrl || '';
   
   const metaSection = $('track-meta-section');
   if (metaSection) {
@@ -1270,10 +1308,10 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   renderAlbumTech([]);
   $('album-cover').querySelector('.cover-duration')?.remove();
   $('album-subtitle').style.display = '';
-  // showSingleTrackCard()'s quality/duration chip row — stale otherwise on
-  // an album/playlist fetch (which never calls showSingleTrackCard again
-  // to refresh or remove it).
-  document.getElementById('track-quality-row')?.remove();
+  // showSingleTrackCard()'s quality/duration chip row is cleaned up from
+  // renderTracks()'s own single-track-vs-not branch, not from here — see
+  // the comment there for why (setAlbumCard and renderTracks run off two
+  // separate, not-strictly-ordered backend callbacks).
 
   $('album-actions').innerHTML = `
     <button class="act-btn primary" onclick="downloadAll()">
@@ -1295,7 +1333,11 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   $('album-title').innerHTML = escHtml(title || '—') + (artistVerified
     ? ` <span class="artist-verified-badge" title="Verified Artist"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="#1d9bf0"/><path d="M8 12.5l2.5 2.5 5.5-5.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
     : '');
-  $('album-artist').textContent  = artist || '';
+  // innerHTML, not textContent: artistNameHtml() wraps the name in a
+  // clickable span when artistUrl resolved to a real http(s) URL (empty for
+  // an artist's own page — no point linking a page to itself), plain
+  // escaped text otherwise.
+  $('album-artist').innerHTML = artistNameHtml(artist, artistUrl);
   const subtitle = $('album-subtitle');
   
   // For artists, show rank or listeners; for playlists, show quality
@@ -1487,20 +1529,23 @@ function updateAlbumMeta(trackCount) {
     const artistEl = $('album-artist');
     const artist = artistEl.textContent?.trim() || '';
     const subtitleEl = $('album-subtitle');
-    
+
+    // Built as HTML, not a joined text string: the artist segment needs to
+    // be the same clickable span as everywhere else an artist name shows,
+    // the date/track-count segments stay plain text.
     let subtitleParts = [];
-    if (artist) subtitleParts.push(artist);
+    if (artist) subtitleParts.push(artistNameHtml(artist, g_albumArtistUrl));
     if (g_albumReleaseDate) {
       const dateStr = String(g_albumReleaseDate).split('T')[0];
-      if (dateStr) subtitleParts.push(dateStr);
+      if (dateStr) subtitleParts.push(escHtml(dateStr));
     }
     if (trackCount > 0) {
-      subtitleParts.push(`${trackCount} track${trackCount !== 1 ? 's' : ''}`);
+      subtitleParts.push(escHtml(`${trackCount} track${trackCount !== 1 ? 's' : ''}`));
     }
-    
-    const subtitleText = subtitleParts.join(' · ');
-    subtitleEl.textContent = subtitleText;
-    subtitleEl.style.display = subtitleText ? '' : 'none';
+
+    const subtitleHtml = subtitleParts.join(' · ');
+    subtitleEl.innerHTML = subtitleHtml;
+    subtitleEl.style.display = subtitleHtml ? '' : 'none';
   }
 
   
@@ -1996,6 +2041,16 @@ function renderTracks(tracks, page = 1) {
       } else {
         $('track-controls').classList.remove('hidden');
         $('track-table-wrap').classList.remove('hidden');
+        // showSingleTrackCard()'s quality/duration chip row, if the previous
+        // fetch on this same card was a single track — removing it here
+        // (same render pass that decides "not a single track this time")
+        // instead of from setAlbumCard avoids a race: setAlbumCard and
+        // renderTracks are driven by two separate backend callbacks
+        // (app_set_metadata / showTracklist) that aren't guaranteed to run
+        // in a fixed order, so a removal in setAlbumCard could fire *after*
+        // showSingleTrackCard had already (re)built the row for the fetch
+        // that was actually meant to show it — silently deleting it again.
+        document.getElementById('track-quality-row')?.remove();
       }
       $('recent-wrap').style.display = 'none';
       

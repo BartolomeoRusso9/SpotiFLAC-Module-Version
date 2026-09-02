@@ -87,6 +87,18 @@ class TrackMetadata(BaseModel):
             v = [v]
         return [s for s in (str(x).strip() for x in v) if s]
 
+    @model_validator(mode="after")
+    def _fill_artist_url(self) -> TrackMetadata:
+        """Derives artist_url from artist_id when a source sets the id but
+        not the URL (most of spotify_metadata.py's call sites do — see
+        _first_artist_id there). artist_id is always a raw Spotify artist
+        ID regardless of which provider ends up serving the audio: metadata
+        always comes from Spotify in this app, only the download does not.
+        """
+        if self.artist_id and not self.artist_url:
+            self.artist_url = f"https://open.spotify.com/artist/{self.artist_id}"
+        return self
+
     @property
     def year(self) -> str:
         """Estrae l'anno dalla release_date (YYYY-MM-DD)."""
