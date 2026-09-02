@@ -49,6 +49,10 @@ if (!isMainThread) {
   // correct _progress_cbs[seq].
   let _currentCallId = null;
 
+  const BRIDGE_TIMEOUT_MS   = 60_000;
+  const TRANSFER_TIMEOUT_MS  = 30 * 60_000;
+  const TRANSFER_METHODS = new Set(['file.download', 'file.downloadSegments']);
+
   /** Calls the main thread *synchronously* via SharedArrayBuffer. */
   function bridgeCall(method, args) {
     const payload = Buffer.from(
@@ -66,11 +70,17 @@ if (!isMainThread) {
     parentPort.postMessage({ type: 'bridge_request' });
 
     // Wait for the main thread to write the response (state → 2)
+    //
+    // A whole-file transfer is the one bridge call that legitimately runs
+    // for minutes, so it gets its own cap. The flat 60s used to sit *below*
+    // nodeFileDownload's own 120s socket timeout, which meant a slow album
+    // track failed here while the main thread was still happily writing it.
+    const limit = TRANSFER_METHODS.has(method) ? TRANSFER_TIMEOUT_MS : BRIDGE_TIMEOUT_MS;
     let waited = 0;
     while (Atomics.load(STATE, 0) !== 2) {
       const r = Atomics.wait(STATE, 0, 1, 200);
       waited += 200;
-      if (waited > 60_000) throw new Error(`Bridge timeout for ${method}`);
+      if (waited > limit) throw new Error(`Bridge timeout for ${method}`);
     }
 
     const len  = LEN[0];
@@ -97,6 +107,23 @@ if (!isMainThread) {
   global.file = {
     download: (url, outputPath, opts) =>
       bridgeCall('file.download', { url, outputPath, opts: opts || {} }),
+
+    // downloadSegments@1 — one file built from an ordered list of segment
+    // URLs. A DASH/HLS provider cannot express this with download(): the
+    // manifest's init segment plus its media segments only form a playable
+    // stream once concatenated in manifest order. See
+    // nodeFileDownloadSegments in the main thread for the transfer itself.
+    //
+    // opts.onProgress is dropped on the way across (JSON.stringify does not
+    // carry functions) — deliberately: progress reaches the host from the
+    // main thread's byte-level messages, the same channel download() uses,
+    // rather than from whatever scale the extension reports on.
+    downloadSegments: (urls, outputPath, opts) =>
+      bridgeCall('file.downloadSegments', {
+        urls: urls || [],
+        outputPath,
+        opts: opts || {},
+      }),
     
     // New: synchronous methods to operate on files using native fs
     getSize: (filePath) => {
@@ -368,6 +395,10 @@ async function handleBridgeRequest() {
       result = await nodeHttpRequest('POST', args.url, args.body, args.headers);
     } else if (method === 'file.download') {
       result = await nodeFileDownload(args.url, args.outputPath, args.opts, callId); // NEW: passa callId
+    } else if (method === 'file.downloadSegments') {
+      result = await nodeFileDownloadSegments(
+        args.urls, args.outputPath, args.opts, callId,
+      );
     } else if (method === 'session.signedFetch') {
       // Not handled in pure Node: the real SignedSessionClient is in Python
       // (HMAC signing, bootstrap/challenge/verify/exchange flow, and
@@ -552,6 +583,209 @@ function nodeFileDownload(rawUrl, outputPath, opts, callId) {
       resolve({ success: false, error: 'download timeout' });
     });
     req.end();
+  });
+}
+
+/**
+ * downloadSegments@1 — writes one file at `outputPath` from an ordered list
+ * of segment URLs.
+ *
+ * `file.download` cannot express this: a DASH/HLS track is an init segment
+ * plus N media segments, and only their concatenation *in manifest order* is
+ * a stream a demuxer can open. Segments are fetched with up to
+ * `opts.maxParallel` requests in flight, staged as sibling `.segN.part`
+ * files, and then appended in index order — so the output never depends on
+ * which request happened to finish first.
+ *
+ * Returns the same shape as nodeFileDownload, plus the `error_type` values
+ * the caller distinguishes: a CDN URL that has aged out comes back as
+ * "expired_stream" so the extension can resolve a fresh manifest and retry,
+ * rather than reporting a dead track.
+ */
+function nodeFileDownloadSegments(urls, outputPath, opts, callId) {
+  if (typeof global.__spotiflacAllowWrite === 'function') {
+    // Allows the directory, which covers the .segN.part siblings staged below.
+    global.__spotiflacAllowWrite(outputPath);
+  }
+
+  const list = (urls || []).filter((u) => typeof u === 'string' && u);
+  if (!list.length) {
+    return Promise.resolve({ success: false, error: 'no segment URLs given' });
+  }
+
+  const headers = (opts && opts.headers) || {};
+  const maxParallel = Math.max(1, Math.min(8, Number((opts && opts.maxParallel) || 4)));
+  const parts = list.map((_, i) => `${outputPath}.seg${i}.part`);
+
+  try { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); } catch (_) {}
+
+  const cleanup = () => {
+    for (const part of parts) {
+      try { fs.unlinkSync(part); } catch (_) {}
+    }
+  };
+
+  // ── Progress: bytes are exact for what has landed, the total is
+  // projected from the segments finished so far. A manifest gives no
+  // overall size up front, and a bar that only moves on segment
+  // boundaries stutters badly on a 20-segment track.
+  let received = 0;
+  let done = 0;
+  let lastReportedBytes = 0;
+  let lastReportedTime = Date.now();
+
+  const emitProgress = (finalValue) => {
+    if (!callId) return;
+    const now = Date.now();
+    const elapsedS = (now - lastReportedTime) / 1000;
+    const speedMBps = elapsedS > 0
+      ? ((received - lastReportedBytes) / (1024 * 1024)) / elapsedS
+      : 0;
+    const projectedTotal = done > 0 ? Math.round((received / done) * list.length) : 0;
+    const value = finalValue !== undefined
+      ? finalValue
+      : (projectedTotal > 0 ? Math.min(0.999, received / projectedTotal) : 0);
+
+    process.stdout.write(JSON.stringify({
+      type: 'progress',
+      callId,
+      value,
+      bytesReceived: received,
+      bytesTotal: projectedTotal,
+      speedMBps,
+      segmentsCompleted: done,
+      segmentsTotal: list.length,
+    }) + '\n');
+
+    lastReportedBytes = received;
+    lastReportedTime = now;
+  };
+
+  const PROGRESS_THRESHOLD = 128 * 1024;
+
+  /** One segment to one file, following redirects. */
+  function fetchSegment(rawUrl, dest, depth) {
+    return new Promise((resolve) => {
+      if (depth > 5) { resolve({ ok: false, error: 'too many redirects' }); return; }
+      let u;
+      try { u = new URL(rawUrl); } catch (e) {
+        resolve({ ok: false, error: `Invalid URL: ${rawUrl}` }); return;
+      }
+      const lib = u.protocol === 'https:' ? https : http_;
+      const req = lib.request({
+        hostname: u.hostname,
+        port:     u.port || (u.protocol === 'https:' ? 443 : 80),
+        path:     u.pathname + u.search,
+        method:   'GET',
+        headers:  Object.assign({}, headers),
+      }, (res) => {
+        const status = res.statusCode;
+        const loc = res.headers['location'];
+        if (status >= 300 && status < 400 && loc) {
+          res.resume();
+          fetchSegment(new URL(loc, rawUrl).toString(), dest, depth + 1).then(resolve);
+          return;
+        }
+        if (status >= 400) {
+          res.resume();
+          // 403/410 is how every signed CDN says "this URL has aged out".
+          const expired = status === 403 || status === 410;
+          resolve({
+            ok: false,
+            error: `HTTP ${status}`,
+            error_type: expired ? 'expired_stream' : 'download_error',
+            retry_after_seconds: Number(res.headers['retry-after'] || 0) || 0,
+          });
+          return;
+        }
+
+        const stream = fs.createWriteStream(dest);
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (received - lastReportedBytes >= PROGRESS_THRESHOLD) emitProgress();
+        });
+        res.pipe(stream);
+        stream.on('finish', () => stream.close(() => resolve({ ok: true })));
+        stream.on('error', (e) => resolve({ ok: false, error: e.message }));
+      });
+      req.on('error', (e) => resolve({ ok: false, error: e.message }));
+      req.setTimeout(120_000, () => {
+        req.destroy();
+        resolve({ ok: false, error: 'segment timeout' });
+      });
+      req.end();
+    });
+  }
+
+  return new Promise((resolve) => {
+    let next = 0;
+    let failure = null;
+
+    const runOne = async () => {
+      while (true) {
+        if (failure) return;
+        const index = next++;
+        if (index >= list.length) return;
+        const outcome = await fetchSegment(list[index], parts[index], 0);
+        if (!outcome.ok) {
+          // First failure wins: the rest are abandoned rather than left to
+          // finish writing parts nobody will concatenate.
+          if (!failure) failure = outcome;
+          return;
+        }
+        done += 1;
+        emitProgress();
+      }
+    };
+
+    const pool = [];
+    for (let i = 0; i < Math.min(maxParallel, list.length); i++) pool.push(runOne());
+
+    Promise.all(pool).then(() => {
+      if (failure) {
+        cleanup();
+        resolve({
+          success: false,
+          error: failure.error || 'segment download failed',
+          error_type: failure.error_type || 'download_error',
+          retry_after_seconds: failure.retry_after_seconds || 0,
+        });
+        return;
+      }
+
+      try {
+        const out = fs.openSync(outputPath, 'w');
+        try {
+          for (const part of parts) {
+            const fd = fs.openSync(part, 'r');
+            try {
+              const buf = Buffer.alloc(1024 * 1024);
+              let n;
+              while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+                fs.writeSync(out, buf, 0, n);
+              }
+            } finally {
+              fs.closeSync(fd);
+            }
+          }
+        } finally {
+          fs.closeSync(out);
+        }
+      } catch (e) {
+        cleanup();
+        try { fs.unlinkSync(outputPath); } catch (_) {}
+        resolve({ success: false, error: e.message, error_type: 'download_error' });
+        return;
+      }
+
+      cleanup();
+      emitProgress(1);
+      try {
+        resolve({ success: true, path: outputPath, size: fs.statSync(outputPath).size });
+      } catch (e) {
+        resolve({ success: false, error: e.message, error_type: 'download_error' });
+      }
+    });
   });
 }
 
