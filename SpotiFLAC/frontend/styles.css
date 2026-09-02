@@ -1196,6 +1196,21 @@
 
     #track-table-wrap {
       flex: 1; overflow: visible; padding: 0 18px 14px; min-height: 0;
+      /* Column collapse below (@container tracktable) reacts to this
+         element's own width, not the viewport's — correct today since it's
+         always full-bleed, and correct if it's ever dropped into a narrower
+         split/sidebar layout later without redoing the breakpoints.
+         width:100% looks redundant next to flex:1, but it isn't: a flex
+         item with flex-basis 0% (what `flex:1` shorthand sets) normally
+         gets its size from the flex algorithm regardless of content — until
+         container-type adds size containment, which for a "flex-basis:0
+         + containment" combination made Chrome compute this item's box as
+         near-zero (confirmed live: dropped to 36px) instead of filling the
+         row. An explicit width gives it a definite size the flex algorithm
+         no longer needs to derive, sidestepping the interaction. */
+      width: 100%;
+      container-type: inline-size;
+      container-name: tracktable;
     }
     #track-table-wrap::-webkit-scrollbar { width: 4px; }
     #track-table-wrap::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
@@ -2525,33 +2540,49 @@
     border-left: none; border-top: 1px solid var(--border);
   }
   #album-tech .tech-row { flex: 0 1 auto; }
-
-  /* Nascondi Playcount e Duration in modo forzato sia nell'header che nelle righe */
-  .track-table-header > div:nth-child(4),
-  .track-table-header > div:nth-child(5),
-  .track-row > div:nth-child(4),
-  .track-row > div:nth-child(5) { 
-    display: none !important; 
-  }
-  
-  /* Layout updated per le 4 colonne rimanenti (Checkbox, #, Titolo, Azioni) */
-  .track-table-header, .track-row { 
-    grid-template-columns: 24px 30px 1fr 140px !important; 
-  }
 }
 
 @media (max-width: 600px) {
   #main-split { flex-direction: column; }
-  
+}
+
+/* Track table column collapse — was @media, now keyed off #track-table-wrap's
+   own inline size (container-type set where #track-table-wrap is defined).
+   Same two breakpoints, same nth-child hides, same !important grid override
+   — only what they measure changed, not what they do. */
+/* Thresholds are 900/600 minus 102px, not 900/600 — a container query
+   measures #track-table-wrap's own box, which sits inside the 58px sidebar
+   + the surrounding containers' padding chain, so it's consistently 102px
+   narrower than the viewport at the widths that matter here (measured live:
+   innerWidth 900/700/600 -> wrap 798/598/498, offset exactly 102px each
+   time, no dependency on #track-table-wrap's own 950px cap since that
+   never engages this low). Using literal 900/600 here would collapse the
+   table ~102px too early compared to the old @media behaviour. */
+@container tracktable (max-width: 798px) {
+  /* Nascondi Playcount e Duration in modo forzato sia nell'header che nelle righe */
+  .track-table-header > div:nth-child(4),
+  .track-table-header > div:nth-child(5),
+  .track-row > div:nth-child(4),
+  .track-row > div:nth-child(5) {
+    display: none !important;
+  }
+
+  /* Layout updated per le 4 colonne rimanenti (Checkbox, #, Titolo, Azioni) */
+  .track-table-header, .track-row {
+    grid-template-columns: 24px 30px 1fr 140px !important;
+  }
+}
+
+@container tracktable (max-width: 498px) {
   /* Also hide the index (#) on smartphones */
   .track-table-header > div:nth-child(2),
-  .track-row > div:nth-child(2) { 
-    display: none !important; 
+  .track-row > div:nth-child(2) {
+    display: none !important;
   }
-  
+
   /* Layout per 3 colonne: Checkbox, Titolo, Azioni */
-  .track-table-header, .track-row { 
-    grid-template-columns: 24px 1fr 130px !important; 
+  .track-table-header, .track-row {
+    grid-template-columns: 24px 1fr 130px !important;
   }
 }
 
