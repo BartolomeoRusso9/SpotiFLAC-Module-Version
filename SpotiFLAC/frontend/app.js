@@ -1270,6 +1270,10 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   renderAlbumTech([]);
   $('album-cover').querySelector('.cover-duration')?.remove();
   $('album-subtitle').style.display = '';
+  // showSingleTrackCard()'s quality/duration chip row — stale otherwise on
+  // an album/playlist fetch (which never calls showSingleTrackCard again
+  // to refresh or remove it).
+  document.getElementById('track-quality-row')?.remove();
 
   $('album-actions').innerHTML = `
     <button class="act-btn primary" onclick="downloadAll()">
@@ -1560,7 +1564,10 @@ function showSingleTrackCard(t) {
       ' <span class="track-explicit-title">E</span>';
   }
 
-  // Hide the subtitle (quality) — already shown elsewhere
+  // setAlbumCard() put the quality string into #album-subtitle, but that
+  // sits above the artist name — showing it there too would duplicate the
+  // quality chip added below (see track-quality-row below), just in a less
+  // useful spot. Hidden here, same as before.
   $('album-subtitle').style.display = 'none';
 
   // The old below-the-title grid is superseded by the technical sheet in the
@@ -1606,6 +1613,28 @@ function showSingleTrackCard(t) {
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
   </button>` : ''}
 `;
+
+  // The left column (cover + title + artist + actions) is almost always
+  // shorter than the right column's technical sheet, leaving the card's
+  // lower-left empty. Quality is real, relevant info that was set into
+  // #album-subtitle by setAlbumCard() but never shown here (that element
+  // sits above the artist name and stays hidden — see above); duration is
+  // otherwise only a small overlay on the cover. A quiet chip row under the
+  // actions fills the gap with facts about *this* track, not a re-listing
+  // of the technical sheet (that already covers ISRC/label/genre/etc).
+  let factsRow = document.getElementById('track-quality-row');
+  if (!factsRow) {
+    factsRow = document.createElement('div');
+    factsRow.id = 'track-quality-row';
+    factsRow.className = 'track-quality-row';
+    $('album-actions').insertAdjacentElement('afterend', factsRow);
+  }
+  const quality = $('album-subtitle').textContent?.trim() || '';
+  const chips = [];
+  if (quality) chips.push(`<span class="track-quality-chip">${escHtml(quality)}</span>`);
+  if (dur && dur !== '—') chips.push(`<span class="track-quality-chip">${escHtml(dur)}</span>`);
+  factsRow.innerHTML = chips.join('');
+  factsRow.classList.toggle('hidden', chips.length === 0);
 }
 
 function closeAlbumCard() {

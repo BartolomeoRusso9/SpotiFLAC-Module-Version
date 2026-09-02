@@ -752,8 +752,16 @@
       font-size: var(--fs-200); color: var(--text2); margin-bottom: 12px;
       line-height: 1.5;
     }
+    /* Not display:none by default — app.js's updateAlbumMeta() already
+       toggles this per fetch (hidden for an album, where the artist is
+       folded into #album-subtitle instead; shown for a track/single, where
+       #album-subtitle is hidden and this span is the only place the artist
+       name appears at all). A hardcoded display:none here silently beat
+       that toggle every time, since JS setting style.display='' just falls
+       back to this rule instead of overriding it — a single track fetch
+       showed a title with no artist under it, no matter what the JS did. */
     #album-artist {
-      display: none;
+      display: inline;
     }
     #album-meta {
       font-size: var(--fs-100); color: var(--text2); margin-bottom: 12px;
@@ -786,6 +794,19 @@
       display: block;
     }
     #album-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    /* Single-track view only (app.js's showSingleTrackCard) — quality +
+       duration chips under the action row, filling what was otherwise dead
+       space below the buttons on a short left column next to the taller
+       technical-sheet column. */
+    .track-quality-row { display: flex; gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-5); }
+    .track-quality-row.hidden { display: none; }
+    .track-quality-chip {
+      display: inline-flex; align-items: center;
+      padding: var(--sp-2) var(--sp-4); border-radius: var(--radius-pill);
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text2); font-family: var(--font-mono);
+      font-size: var(--fs-75); letter-spacing: var(--tracking-wide);
+    }
     .act-btn {
       display: flex; align-items: center; gap: 6px;
       padding: var(--sp-3) var(--sp-5); border-radius: var(--radius-sm);
