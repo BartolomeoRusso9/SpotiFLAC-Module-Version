@@ -94,7 +94,7 @@ function clearSearchUI() {
 }
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const ts = () => new Date().toLocaleTimeString('it-IT');
+const ts = () => new Date().toLocaleTimeString('en-US');
 // ── Global Initialization ──────────────────────────────────────────────────
 const toastMgr = new ToastManager();
 
@@ -1334,8 +1334,8 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   if (isArtistCard) {
     const parts = [];
     if (artistRank)      parts.push(`#${artistRank} rank`);
-    if (followers)       parts.push(`${Number(followers).toLocaleString('it-IT')} followers`);
-    if (artistListeners) parts.push(`${Number(artistListeners).toLocaleString('it-IT')} listeners`);
+    if (followers)       parts.push(`${Number(followers).toLocaleString('en-US')} followers`);
+    if (artistListeners) parts.push(`${Number(artistListeners).toLocaleString('en-US')} listeners`);
     
     artistStatsRow.innerHTML = parts.map(p => `<span>${escHtml(p)}</span>`).join('<span class="dot-sep"> · </span>');
     artistStatsRow.style.display = 'flex';
@@ -1570,7 +1570,7 @@ function showSingleTrackCard(t) {
   if (section) { section.innerHTML = ''; section.style.display = 'none'; }
   const playcountRaw = t.plays ?? t.playcount ?? t.playCount ?? t.plays_count;
   const playcountVal = playcountRaw != null && String(playcountRaw).trim() && String(playcountRaw) !== '0'
-    ? Number(playcountRaw).toLocaleString('it-IT')
+    ? Number(playcountRaw).toLocaleString('en-US')
     : null;
 
   renderAlbumTech([
@@ -4582,7 +4582,7 @@ async function loadExploreData() {
       const homeData = await window.pywebview.api.get_spotify_home_feed();
       
       if (homeData && homeData.success) {
-        if (greetingEl) greetingEl.textContent = homeData.greeting || 'Esplora';
+        if (greetingEl) greetingEl.textContent = homeData.greeting || 'Explore';
         renderHomeSections(homeData.sections);
       } else {
         sectionsContainer.innerHTML = '<div style="color:var(--red);">Unable to load feed. Check your connection.</div>';
