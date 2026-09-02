@@ -39,6 +39,25 @@ class ExtensionRuntimeError(RuntimeError):
     pass
 
 
+def quote_node_option(value: str | Path) -> str:
+    """Quotes one NODE_OPTIONS value so Node reads back the path we meant.
+
+    Node parses NODE_OPTIONS itself, and not the way a shell would: it splits
+    on whitespace — so an unquoted path with a space arrives as two arguments
+    and Node exits on the second — but inside the quotes it also treats a
+    backslash as an *escape* character. That second rule is the one that bit:
+    quoting alone turned every Windows path into nonsense, so
+    `C:\\Users\\...\\_netguard.js` reached Node as `C:Users..._netguard.js`
+    and the bridge died at startup with MODULE_NOT_FOUND before the
+    extension was ever read.
+
+    Doubling the backslashes survives that unescaping and leaves POSIX paths
+    untouched, since they have none to double.
+    """
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 class JSRuntime:
     """Manages a Node.js process that runs _bridge.js with a loaded extension.
 
@@ -162,10 +181,7 @@ class JSRuntime:
         for guard_name in ("_netguard.js", "_fsguard.js"):
             guard = Path(__file__).with_name(guard_name)
             if guard.is_file():
-                # Quoted: NODE_OPTIONS is split on whitespace like a shell
-                # word list, so an unquoted path containing a space arrives
-                # as two arguments and Node exits on the second.
-                node_options = f'{node_options} --require "{guard}"'.strip()
+                node_options = f"{node_options} --require {quote_node_option(guard)}".strip()
 
         env = build_env({"NODE_OPTIONS": node_options} if node_options else None)
         logger.debug("[ExtRuntime] %s", describe())
