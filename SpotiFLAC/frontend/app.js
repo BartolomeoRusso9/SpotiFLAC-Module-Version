@@ -4729,7 +4729,16 @@ $('urlInput').addEventListener('input', function() {
     const container = $('text-search-results');
     if (container) container.innerHTML = '';
     $('text-search-container')?.classList.add('hidden');
-    $('track-table-wrap')?.classList.remove('hidden');
+    // Was .remove('hidden') — unhid the track table without ever clearing
+    // #track-rows, so backspacing a search query back to empty didn't show
+    // "no query" at all: it showed whatever track/album was still sitting
+    // in the table from before search mode was even entered (e.g. the
+    // track you'd just fetched), looking like a stale result for a search
+    // that was never run.
+    $('track-table-wrap')?.classList.add('hidden');
+    $('track-controls')?.classList.add('hidden');
+    if ($('recent-wrap')) $('recent-wrap').style.display = ''; // showSkeletonTracks() hides this once a real query starts
+    renderRecentSearches();
     return;
   }
 
