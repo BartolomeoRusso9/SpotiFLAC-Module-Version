@@ -530,7 +530,7 @@ _FRONTEND = Path(__file__).resolve().parent.parent / "SpotiFLAC" / "frontend"
 def test_web_ui_offers_every_supported_format():
     import re
 
-    html = (_FRONTEND / "index.html").read_text()
+    html = (_FRONTEND / "index.html").read_text(encoding="utf-8")
     select = re.search(r'<select id="config-transcode".*?</select>', html, re.S).group()
     values = set(re.findall(r'value="([^"]+)"', select))
     assert values == {"none", *transcode.SUPPORTED_FORMATS}
@@ -540,7 +540,7 @@ def test_web_ui_lossless_list_matches_the_core():
     """app.js hides the bitrate row from a hard-coded list; keep it honest."""
     import re
 
-    js = (_FRONTEND / "app.js").read_text()
+    js = (_FRONTEND / "app.js").read_text(encoding="utf-8")
     listed = re.search(r"LOSSLESS_TRANSCODE_FORMATS = \[(.*?)\]", js).group(1)
     assert set(re.findall(r"'([^']+)'", listed)) == set(transcode.LOSSLESS_FORMATS)
 
@@ -740,7 +740,7 @@ def test_profile_model_keeps_every_key_save_profile_writes():
     from SpotiFLAC.core.profiles import ProfileConfig
 
     launcher = Path(__file__).resolve().parent.parent / "SpotiFLAC" / "launcher.py"
-    src = launcher.read_text()
+    src = launcher.read_text(encoding="utf-8")
     block = src[src.index("profile_cfg = {") :]
     block = block[: block.index("}\n")]
     written = set(re.findall(r'"([a-z_]+)":', block))
@@ -955,7 +955,7 @@ def test_signed_session_names_the_audio_fetch_at_info():
         / "SpotiFLAC"
         / "core"
         / "signed_session_mobile.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     block = src[src.index('is_ticket = "/tickets" in path') :][:1200]
     assert 'is_download = "/dl" in path' in block
     assert "Fetching audio" in block

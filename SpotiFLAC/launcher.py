@@ -2214,8 +2214,12 @@ async def amain() -> None:
         from .tools.library_dedup_cli import run as run_dedup
 
         if not dd_args.path and not dd_args.from_db:
-            print("Error: --dedup-library needs a folder.", file=sys.stderr)
-            return
+            print(
+                "Error: --dedup-library needs a folder, or --dedup-from-db a "
+                "database a previous run wrote.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
         run_dedup(
             dd_args.path,

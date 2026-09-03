@@ -528,6 +528,30 @@ def test_verify_splits_a_group_whose_audio_disagrees(monkeypatch):
     assert verified[0].matched_by == "tags+audio"
 
 
+def test_verification_survives_a_path_that_is_not_its_own_normal_form(monkeypatch):
+    """The group is matched back up by the fingerprint's own path object.
+
+    Matching on `str(path)` instead assumed a path string survives a round
+    trip through Path unchanged. It does not on Windows — a `/m/a.flac` goes
+    in and a `\\m\\a.flac` comes back — so every lookup missed and the
+    verified group was dropped as a singleton, quietly confirming nothing.
+    `/m/./a.flac` reproduces that on any platform.
+    """
+    same = tuple([0x0F0F0F0F] * 40)
+    entries = [
+        _entry("/m/./a.flac", title="S", artist="A"),
+        _entry("/m/./b.flac", title="S", artist="A"),
+    ]
+    groups = group_duplicates(entries)
+
+    _fake_backend(monkeypatch, {"/m/./a.flac": same, "/m/./b.flac": same})
+    verified, notes = ld.verify_groups(groups)
+
+    assert notes == []
+    assert len(verified) == 1
+    assert {f.path for f in verified[0].files} == {"/m/./a.flac", "/m/./b.flac"}
+
+
 def test_a_file_that_cannot_be_fingerprinted_leaves_the_group(monkeypatch):
     """Unsure has to mean 'keep them all' — everything downstream of a group
     is a decision to remove files."""

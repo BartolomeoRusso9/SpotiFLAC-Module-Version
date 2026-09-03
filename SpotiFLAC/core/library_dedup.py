@@ -41,6 +41,7 @@ import os
 import re
 import shutil
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -729,18 +730,16 @@ def group_duplicates(
         # What the group is *called* follows the strongest evidence in it:
         # an ISRC shared by two of its files, or failing that the folded
         # artist/title every member agreed on.
-        shared_isrc = next(
-            (
-                isrc
-                for isrc, holders in sorted(by_isrc.items())
-                if sum(1 for m in members if m.isrc == isrc) > 1
-            ),
-            "",
+        # Counted over the group, not over the library: the answer only ever
+        # depends on this group's members, and walking every ISRC in the scan
+        # for each group is quadratic in a big library for no gain.
+        isrc_counts = Counter(m.isrc for m in members if m.isrc)
+        shared_isrc = min(
+            (isrc for isrc, count in isrc_counts.items() if count > 1),
+            default="",
         )
         name_key = next((identity[i] for i in sorted(indices) if i in identity), "")
-        isrc_covered = (
-            sum(1 for m in members if m.isrc == shared_isrc) if shared_isrc else 0
-        )
+        isrc_covered = isrc_counts[shared_isrc] if shared_isrc else 0
         if shared_isrc and isrc_covered == len(members):
             matched_by = "isrc"
         elif shared_isrc:
@@ -803,7 +802,15 @@ def verify_groups(
 
     for group in groups:
         prints = []
-        by_path: dict[str, LibraryFile] = {f.path: f for f in group.files}
+        # Keyed by each fingerprint's own `path`, because that is precisely
+        # what find_duplicate_groups() hands back. Keying by `entry.path` and
+        # matching on `str(p)` assumed the string survives a round trip
+        # through Path unchanged, which it does not on Windows
+        # (`str(Path("/m/a.flac"))` is `"\\m\\a.flac"`) — every lookup
+        # missed, so a verified group came back with no members and was
+        # dropped as a singleton. Acoustic verification silently confirmed
+        # nothing there.
+        by_path: dict[Path, LibraryFile] = {}
         for entry in group.files:
             done += 1
             if progress is not None:
@@ -812,17 +819,20 @@ def verify_groups(
                 except Exception:
                     logger.debug("[dedup] progress callback raised", exc_info=True)
             try:
-                prints.append(compute_fingerprint(entry.path))
+                fingerprint = compute_fingerprint(entry.path)
             except AudioFingerprintError as exc:
                 skipped += 1
                 logger.debug("[dedup] could not fingerprint %s: %s", entry.path, exc)
+                continue
+            prints.append(fingerprint)
+            by_path[fingerprint.path] = entry
 
         for cluster in find_duplicate_groups(
             prints,
             duration_tolerance_s=duration_tolerance_s,
             similarity_threshold=similarity_threshold,
         ):
-            members = [by_path[str(p)] for p in cluster if str(p) in by_path]
+            members = [by_path[p] for p in cluster if p in by_path]
             if len(members) < 2:
                 continue
             confirmed = DuplicateGroup(
@@ -1034,6 +1044,19 @@ def _within(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _resolved_or_none(path: Path) -> Path | None:
+    """`Path.resolve()` that answers None instead of raising.
+
+    Used where the path comes off disk or out of a manifest and may be
+    unresolvable (a broken symlink loop, a name the OS refuses); callers
+    treat None as "cannot be vouched for".
+    """
+    try:
+        return path.resolve()
+    except OSError:
+        return None
 
 
 def _free_destination(target: Path) -> Path:
@@ -1294,6 +1317,14 @@ def restore_manifest(
     )
     restored_from: list[Path] = []
 
+    # A manifest is a list of moves this code will perform without asking, so
+    # both ends of every move are checked against where they are supposed to
+    # be: out of the quarantine folder the manifest sits in, back into the
+    # library it records. A hand-edited or swapped manifest can name any path
+    # on the machine otherwise.
+    quarantine_root = _resolved_or_none(path.parent)
+    library_root = _resolved_or_none(Path(str(data.get("root", ""))))
+
     for move in data.get("moves", []):
         source = Path(str(move.get("to", "")))
         target = Path(str(move.get("from", "")))
@@ -1304,8 +1335,23 @@ def restore_manifest(
         except OSError:
             pass
 
+        resolved_source = _resolved_or_none(source)
+        resolved_target = _resolved_or_none(target)
+
         problem = ""
-        if not source.exists():
+        if (
+            quarantine_root is None
+            or resolved_source is None
+            or not _within(resolved_source, quarantine_root)
+        ):
+            problem = "not inside the quarantine folder this manifest belongs to"
+        elif (
+            library_root is None
+            or resolved_target is None
+            or not _within(resolved_target, library_root)
+        ):
+            problem = "would be restored outside the folder the manifest records"
+        elif not source.exists():
             problem = "no longer in the quarantine folder"
         elif target.exists():
             problem = "something is back at the original path"

@@ -13,6 +13,7 @@ import re
 import time as _time
 import unicodedata
 import urllib.parse
+import weakref
 from typing import Any
 
 from typing_extensions import Self
@@ -212,6 +213,9 @@ class AppleMusicMetadataClient:
         )
         self._auth_token: str | None = None
         self._token_expiry: float = 0.0  # timestamp Unix; 0 = mai valido
+        self._token_locks: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, asyncio.Lock
+        ] = weakref.WeakKeyDictionary()
 
     @property
     def has_media_user_token(self) -> bool:
@@ -245,15 +249,43 @@ class AppleMusicMetadataClient:
         except Exception:
             self._token_expiry = _time.time() + 43200.0
 
+    def _token_lock(self) -> asyncio.Lock:
+        """The token-refresh lock belonging to the running loop.
+
+        Per loop rather than per client, for the same reason
+        NetworkManager keeps its clients that way: a lock created under one
+        event loop cannot be awaited from another, and one client instance
+        can be shared by everything running on any of them.
+        """
+        loop = asyncio.get_running_loop()
+        lock = self._token_locks.get(loop)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._token_locks[loop] = lock
+        return lock
+
     async def _get_token(self) -> str:
+        """The developer token, discovered once and reused until it expires.
+
+        Held behind a lock: a batch of lyric lookups starts as a burst of
+        concurrent requests with no token yet, and without it every one of
+        them would scrape the web frontend for the same JWT.
+        """
+        if self._auth_token and _time.time() < self._token_expiry:
+            return self._auth_token
+
+        async with self._token_lock():
+            # Whoever held the lock has usually just fetched one.
+            if self._auth_token and _time.time() < self._token_expiry:
+                return self._auth_token
+            return await self._discover_token()
+
+    async def _discover_token(self) -> str:
         """Extracts the anonymous JWT token from the web frontend using 3 strategies:
         1. devToken=JWT in the HTML source
         2. Known JWT prefixes in the HTML
         3. The page's JS bundles (skipping legacy ones).
         """
-        if self._auth_token and _time.time() < self._token_expiry:
-            return self._auth_token
-
         try:
             # follow_redirects, and more than one entry page: /us/browse now
             # answers 301, and without following it the client raised
@@ -373,7 +405,10 @@ class AppleMusicMetadataClient:
             self._auth_token = None
             self._token_expiry = 0.0
             token = await self._get_token()
-            headers = {"Authorization": f"Bearer {token}"}
+            # Only the Authorization header is stale: rebuilding the dict
+            # from scratch would drop the caller's Media-User-Token and turn
+            # the retry into an anonymous request (no user lyrics).
+            headers["Authorization"] = f"Bearer {token}"
             resp = await self._http.get(
                 url,
                 params=params,

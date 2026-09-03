@@ -4605,6 +4605,14 @@ function renderDuplicateGroups(groups) {
 let libDedupGroups = [];
 let libDedupManifest = '';
 
+// The seconds two durations may differ by and still count as the same track.
+// 0 is a meaningful setting — "the durations must match exactly" — so an empty
+// or non-numeric box is what falls back to the default, not every falsy parse.
+function libDedupTolerance() {
+  const parsed = parseFloat($('libdedup-tolerance')?.value ?? '');
+  return Number.isFinite(parsed) ? parsed : 4;
+}
+
 async function startLibraryDedupScan() {
   const path = $('local-path-input').value.trim();
   if (!path) {
@@ -4643,7 +4651,7 @@ async function startLibraryDedupScan() {
       path,
       true,
       $('libdedup-match')?.value || 'both',
-      parseFloat($('libdedup-tolerance')?.value || '4') || 4,
+      libDedupTolerance(),
       verify,
       0.95,
       $('libdedup-db')?.checked || false,

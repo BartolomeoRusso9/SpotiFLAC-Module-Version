@@ -9,11 +9,15 @@ import re
 import unicodedata
 import urllib.parse
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from . import get_amazon_endpoint
 from .http import NetworkManager
 from .response_cache import get as get_cached_response
 from .response_cache import put as put_cached_response
+
+if TYPE_CHECKING:
+    from .apple_music_metadata import AppleMusicMetadataClient
 
 
 @dataclass(slots=True)
@@ -335,6 +339,23 @@ def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
+#: One client for every direct-TTML lookup in the process. It holds the
+#: developer token it discovered, so a per-track instance would throw that
+#: away and scrape Apple's frontend for a new one on every single track. It
+#: owns no connection of its own — AsyncHttpClient picks the pool for the
+#: running loop — so sharing it across loops is safe.
+_apple_client: AppleMusicMetadataClient | None = None
+
+
+def _get_apple_client() -> AppleMusicMetadataClient:
+    global _apple_client
+    if _apple_client is None:
+        from .apple_music_metadata import AppleMusicMetadataClient as _Client
+
+        _apple_client = _Client()
+    return _apple_client
+
+
 async def _fetch_apple_ttml_async(song_id: str, word_by_word: bool = True) -> str:
     """Apple's own lyrics for `song_id`, as LRC, or "" if unavailable.
 
@@ -349,10 +370,9 @@ async def _fetch_apple_ttml_async(song_id: str, word_by_word: bool = True) -> st
     unconfigured and gives strictly better lyrics when it is.
     """
     try:
-        from .apple_music_metadata import AppleMusicMetadataClient
         from .apple_ttml import ttml_to_lrc
 
-        client = AppleMusicMetadataClient()
+        client = _get_apple_client()
         if not client.has_media_user_token:
             return ""
         ttml = await client.get_lyrics_ttml(song_id)

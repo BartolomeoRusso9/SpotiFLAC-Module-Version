@@ -363,6 +363,54 @@ def test_library_scan_is_confined_to_the_download_folder(tmp_path):
     assert traversal.status_code == 400
 
 
+@pytest.mark.parametrize(
+    "escape",
+    [
+        "../../../etc",  # relative traversal, no leading slash
+        "sub/../../..",  # traversal that only escapes once resolved
+        "/etc/passwd",  # absolute, elsewhere entirely
+        "~",  # the home directory, spelled the short way
+        "~/.ssh",
+    ],
+)
+def test_library_scan_refuses_every_shape_of_escape(tmp_path, escape):
+    """A relative path is resolved against the download folder, not the
+    server's working directory, and either way only the containment check
+    decides. None of these may reach a scan."""
+    client, _ = make_client(download_dir=str(tmp_path))
+
+    response = client.post("/api/v1/library/scan", json={"path": escape})
+
+    assert response.status_code == 400
+    assert "outside" in response.text
+
+
+def test_library_scan_accepts_a_path_relative_to_the_download_folder(tmp_path):
+    (tmp_path / "albums").mkdir()
+    client, _ = make_client(download_dir=str(tmp_path))
+
+    body = client.post("/api/v1/library/scan", json={"path": "albums"}).json()
+
+    assert body["scanned"] == 0
+
+
+def test_library_scan_expands_a_download_folder_written_with_a_tilde(
+    monkeypatch, tmp_path
+):
+    """`~/Music` as the configured folder must name the home directory, not a
+    folder called "~" beside the server's working directory — which would
+    reject every path a caller could name."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    library = tmp_path / "Music"
+    library.mkdir()
+    client, _ = make_client(download_dir="~/Music")
+
+    body = client.post("/api/v1/library/scan", json={"path": str(library)}).json()
+
+    assert body["scanned"] == 0
+
+
 def test_library_scan_reports_an_empty_folder(tmp_path):
     client, _ = make_client(download_dir=str(tmp_path))
     body = client.post("/api/v1/library/scan", json={"path": str(tmp_path)}).json()

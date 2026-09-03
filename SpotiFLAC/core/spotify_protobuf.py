@@ -94,6 +94,10 @@ def read_fields(data: bytes) -> dict[int, list[tuple[int, Any]]]:
             break
         field_number, wire_type = tag >> 3, tag & 7
 
+        # One binding for four wire types: an int from _read_varint or a
+        # bytes slice. Annotated up front so the branches below are not read
+        # as re-typing whatever the first one happened to assign.
+        value: Any
         if wire_type == _WIRE_VARINT:
             value, pos = _read_varint(data, pos)
             if value is None:

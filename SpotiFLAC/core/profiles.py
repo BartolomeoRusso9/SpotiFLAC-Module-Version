@@ -16,7 +16,7 @@ import time
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from .paths import cache_path
+from .paths import adopt_legacy_cache_file, cache_path
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,7 @@ class ProfileConfig(BaseModel):
 
 # Synchronous I/O helpers to be executed in a thread
 def _read_file_sync() -> str | None:
+    adopt_legacy_cache_file(_PROFILES_FILE)
     if _PROFILES_FILE.exists():
         return _PROFILES_FILE.read_text(encoding="utf-8")
     return None

@@ -26,7 +26,7 @@ from .api_mixins.subscriptions import SubscriptionsMixin
 from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
 from .core.loop_runner import run_sync
-from .core.paths import cache_dir, cache_path
+from .core.paths import adopt_legacy_cache_file, cache_dir, cache_path
 from .core.url_utils import url_host_matches
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
@@ -525,6 +525,7 @@ class SpotiFLAC_API(
     def load_settings(self) -> dict:
         try:
             settings_file = cache_path("gui-settings.json")
+            adopt_legacy_cache_file(settings_file)
             if settings_file.exists():
                 return json.loads(settings_file.read_text(encoding="utf-8"))
         except Exception as e:
@@ -1468,6 +1469,8 @@ class SpotiFLAC_API(
                 "lrclib",
             ]
             apple_lyrics_word_by_word = config.get("apple_lyrics_word_by_word", True)
+            save_lrc = config.get("save_lrc", False)
+            lrc_library_dir = config.get("lrc_library_dir") or None
             enrich_providers = config.get("enrich_providers") or [
                 "deezer",
                 "apple",
@@ -1598,6 +1601,8 @@ class SpotiFLAC_API(
                     embed_lyrics=embed_lyrics,
                     lyrics_providers=lyrics_providers,
                     apple_lyrics_word_by_word=apple_lyrics_word_by_word,
+                    save_lrc=save_lrc,
+                    lrc_library_dir=lrc_library_dir,
                     enrich_metadata=enrich_metadata,
                     enrich_providers=enrich_providers,
                     qobuz_local_api_url=qobuz_local_api_url,

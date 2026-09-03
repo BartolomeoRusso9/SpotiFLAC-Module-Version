@@ -26,7 +26,7 @@ from pathlib import Path
 
 from . import db
 from .models import TrackMetadata
-from .paths import cache_path
+from .paths import adopt_legacy_cache_file, cache_path
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,11 @@ class HistoryManager:
             return
 
         try:
+            # A pre-~/.spotiflac install left its recent-fetches.json in the
+            # old cache directory; bring it here before deciding there is
+            # nothing to import, or the one-time import happens against an
+            # empty path and the history is marked done for good.
+            adopt_legacy_cache_file(self.path)
             if not self.path.exists():
                 # Nothing to import: mark handled so we don't stat it forever.
                 db.set_meta(_LEGACY_IMPORTED_KEY)

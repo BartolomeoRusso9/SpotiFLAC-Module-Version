@@ -94,8 +94,16 @@ def _confined_path(path: str, download_dir: str) -> str:
     import os
     from pathlib import Path
 
-    resolved = os.path.realpath(str(Path(path).expanduser()))
-    root = os.path.realpath(str(download_dir))
+    root = os.path.realpath(str(Path(download_dir).expanduser()))
+    # A relative path is taken against the download folder rather than
+    # against whatever directory the server happens to have been started in,
+    # which is not something a caller can see or reason about. An absolute
+    # one is used as given. Either way it is the containment check below
+    # that decides — never the join, which an absolute path wins outright.
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path(root) / candidate
+    resolved = os.path.realpath(str(candidate))
     try:
         inside = os.path.commonpath([resolved, root]) == root
     except ValueError:

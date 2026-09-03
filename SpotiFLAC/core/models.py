@@ -5,8 +5,8 @@ Replace raw dicts to guarantee validation, coercion, and zero KeyError.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
-from typing import Any, Literal
+from collections.abc import Callable, Iterable
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
@@ -83,9 +83,10 @@ class TrackMetadata(BaseModel):
     def strip_name_list(cls, v: object) -> list[str]:
         if not v:
             return []
-        if isinstance(v, str):
-            v = [v]
-        return [s for s in (str(x).strip() for x in v) if s]
+        items: Iterable[object] = (
+            [v] if isinstance(v, str) else cast("Iterable[object]", v)
+        )
+        return [s for s in (str(x).strip() for x in items) if s]
 
     @model_validator(mode="after")
     def _fill_open_urls(self) -> TrackMetadata:

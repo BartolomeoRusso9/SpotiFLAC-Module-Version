@@ -415,8 +415,20 @@ def resolve_short_link(uri: str) -> str:
     and async code and changing that would reach into every caller, so the
     one blocking request is confined here, given a short timeout, and only
     ever runs for the handful of URLs that cannot be parsed offline.
+
+    Anything that is not an https Spotify short link is refused without a
+    request. This is the one place in the app that fetches a URL a user
+    handed it, so what may be fetched is decided here rather than left to
+    the caller: parse_spotify_url() already checks the shape before calling,
+    but this is public and a URL that reaches it from anywhere else must not
+    be able to aim it at an arbitrary host.
     """
     import httpx
+
+    parsed = urlparse(uri)
+    if parsed.scheme != "https" or not _is_short_link(parsed):
+        logger.debug("[spotify] %s is not an https short link; not resolved", uri)
+        return ""
 
     try:
         with httpx.Client(
@@ -1449,7 +1461,10 @@ class SpotifyMetadataClient:
         spotify_url: str,
         include_featuring: bool = True,
     ) -> tuple[str, list[TrackMetadata], str, dict]:
-        info = parse_spotify_url(spotify_url)
+        # Off the loop: a share short link makes parse_spotify_url() issue a
+        # blocking HTTP request to expand it (see resolve_short_link), and
+        # that would stall every other coroutine for the length of it.
+        info = await asyncio.to_thread(parse_spotify_url, spotify_url)
         t = info["type"]
         logger.info(f"[DEBUG] URL type: {t}, ID: {info['id']}")
 
