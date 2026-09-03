@@ -282,7 +282,12 @@ async def _with_musicbrainz_tags(
     try:
         from .musicbrainz import fetch_mb_metadata_async, mb_result_to_tags
 
-        mb_data = await fetch_mb_metadata_async(metadata.isrc)
+        mb_data = await fetch_mb_metadata_async(
+            metadata.isrc,
+            title=metadata.title,
+            artist=metadata.first_artist or metadata.artists,
+            duration_ms=metadata.duration_ms,
+        )
         mb_tags = mb_result_to_tags(mb_data)
     except Exception as exc:
         logger.debug(
