@@ -16,6 +16,7 @@ generation and bumping it on every static tweak would force a full
 service-worker re-install more often than needed) — bump it by hand when a
 change actually needs clients' offline cache invalidated.
 """
+
 from __future__ import annotations
 
 import re
@@ -43,7 +44,9 @@ def bump(new_version: str) -> None:
         if count:
             path.write_text(new_text, encoding="utf-8")
         total += count
-        print(f"{path.relative_to(ROOT.parent)}: {count} occurrence(s) -> ?v={new_version}")
+        print(
+            f"{path.relative_to(ROOT.parent)}: {count} occurrence(s) -> ?v={new_version}"
+        )
 
     if total == 0:
         print("Nothing matched — is the ?v=YYYYMMDD pattern still present?")

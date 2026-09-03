@@ -861,10 +861,14 @@ class SpotifyMetadataClient:
                 _extract_artist_names(track_node.get("artists")) or album_artists_list
             )
             track_artists = ", ".join(track_artists_list) or album_artists
-            track_artist_id = _first_artist_id(track_node.get("artists")) or _first_artist_id(
+            track_artist_id = _first_artist_id(
+                track_node.get("artists")
+            ) or _first_artist_id(
                 album_union.get("artists"),
             )
-            track_artist_nodes = _artist_nodes(track_node.get("artists")) or _artist_nodes(
+            track_artist_nodes = _artist_nodes(
+                track_node.get("artists")
+            ) or _artist_nodes(
                 album_union.get("artists"),
             )
             tracks.append(
@@ -1078,7 +1082,9 @@ class SpotifyMetadataClient:
                 album_node = _dig(t, "albumOfTrack")
                 track_artists_list = _extract_artist_names(t.get("artists"))
                 track_artists_str = ", ".join(track_artists_list)
-                track_artist_id = _first_artist_id(t.get("artists")) or _first_artist_id(
+                track_artist_id = _first_artist_id(
+                    t.get("artists")
+                ) or _first_artist_id(
                     album_node.get("artists"),
                 )
                 track_artist_nodes = _artist_nodes(t.get("artists")) or _artist_nodes(

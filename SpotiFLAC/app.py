@@ -1766,7 +1766,9 @@ def _purge_webview_http_cache() -> None:
     with contextlib.suppress(Exception):
         import shutil
 
-        shutil.rmtree(caches / bundle_id / "WebKit" / "NetworkCache", ignore_errors=True)
+        shutil.rmtree(
+            caches / bundle_id / "WebKit" / "NetworkCache", ignore_errors=True
+        )
 
 
 def run_gui() -> None:

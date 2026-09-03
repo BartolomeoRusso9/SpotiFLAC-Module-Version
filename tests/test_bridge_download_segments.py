@@ -164,7 +164,9 @@ def test_a_missing_segment_fails_as_an_ordinary_download_error(
 ) -> None:
     out = tmp_path / "missing.m4a"
 
-    result = runtime.call("probe", [f"{server}/seg0", f"{server}/nope"], str(out), 2, None)
+    result = runtime.call(
+        "probe", [f"{server}/seg0", f"{server}/nope"], str(out), 2, None
+    )
 
     assert result["success"] is False
     assert result["error_type"] == "download_error"

@@ -770,7 +770,9 @@ class AppleMusicMetadataClient:
             or album_attr.get(
                 "releaseDate",
                 "",
-            ).split("T")[0]
+            ).split(
+                "T"
+            )[0]
         )
 
         genre_names: list[str] = attr.get("genreNames") or []
