@@ -104,11 +104,13 @@ def _confined_path(path: str, download_dir: str) -> str:
     if not candidate.is_absolute():
         candidate = Path(root) / candidate
     resolved = os.path.realpath(str(candidate))
-    try:
-        inside = os.path.commonpath([resolved, root]) == root
-    except ValueError:
-        inside = False
-    if not inside:
+    # Compared as a prefix of the *resolved* path, so a symlink or a `..`
+    # cannot smuggle the answer past this: realpath has already flattened
+    # both. `os.path.join(root, "")` is root with exactly one trailing
+    # separator, which is what stops "/musicians" passing for "/music" and
+    # still does the right thing when root is "/".
+    prefix = os.path.join(root, "")
+    if not (resolved == root or resolved.startswith(prefix)):
         raise _fail(
             400,
             "That path is outside this instance's download folder.",

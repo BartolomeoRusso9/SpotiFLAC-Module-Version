@@ -400,8 +400,16 @@ def test_library_scan_expands_a_download_folder_written_with_a_tilde(
     """`~/Music` as the configured folder must name the home directory, not a
     folder called "~" beside the server's working directory — which would
     reject every path a caller could name."""
+    # expanduser() reads the environment, not Path.home(), and which variable
+    # it reads is per-platform: $HOME on POSIX, %USERPROFILE% on Windows.
+    # Both are set, and the redirect is verified rather than assumed — a
+    # platform that honours neither would otherwise fail this as if the code
+    # under test were wrong.
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    if Path("~").expanduser() != tmp_path:
+        pytest.skip("home directory cannot be redirected on this platform")
+
     library = tmp_path / "Music"
     library.mkdir()
     client, _ = make_client(download_dir="~/Music")
