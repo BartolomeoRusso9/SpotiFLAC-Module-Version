@@ -2106,17 +2106,16 @@ async def amain() -> None:
         return
 
     if "--trust-key-list" in sys.argv:
-        from .extensions.trust import list_trusted_keys
+        # Names only, by construction: trusted_signer_names() never returns
+        # key material, so this listing cannot print any. Read
+        # trusted_keys.json directly if you need the public key bytes.
+        from .extensions.trust import trusted_signer_names
 
-        keys = list_trusted_keys()
-        if not keys:
+        names = trusted_signer_names()
+        if not names:
             print("No trusted keys configured.")
-        for idx, k in enumerate(keys, start=1):
-            name = k.get("name", "") or "(unnamed)"
-            # Only the human-assigned name is shown; the key material itself
-            # is never written to the console. Use trusted_keys.json directly
-            # if you need to inspect or export the public key bytes.
-            print(f"key-{idx}: {name}")
+        for idx, name in enumerate(names, start=1):
+            print(f"key-{idx}: {name or '(unnamed)'}")
         return
 
     if _argv_has("--dedup-restore"):

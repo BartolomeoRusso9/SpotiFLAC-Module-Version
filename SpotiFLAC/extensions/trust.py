@@ -103,6 +103,16 @@ def list_trusted_keys() -> list[dict]:
     return [k.to_dict() for k in _load()]
 
 
+def trusted_signer_names() -> list[str]:
+    """Just the human-assigned labels, with no key material attached.
+
+    Anything that only needs to *show* which signers are trusted (the CLI
+    listing, for one) should use this instead of list_trusted_keys(): it
+    cannot leak a key by accident because it never carries one.
+    """
+    return [k.name for k in _load()]
+
+
 def add_trusted_key(name: str, public_key_b64: str) -> list[dict]:
     name = (name or "").strip()
     public_key_b64 = (public_key_b64 or "").strip()
