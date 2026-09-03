@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -159,6 +161,44 @@ def test_resolve_returns_declared_tracks(monkeypatch):
     assert body["kind"] == "album"
     assert body["total"] == 1
     assert body["tracks"][0]["isrc"] == "ITAAA0000001"
+
+
+def test_resolve_classifies_the_url_off_the_event_loop(monkeypatch):
+    """parse_spotify_url() expands a share short link over the network.
+
+    Called straight from the coroutine that is already on the event loop, one
+    of those blocks every other request for the length of the round trip.
+    """
+    from SpotiFLAC.core import spotify_metadata
+
+    class Fake:
+        async def get_url_async(self, url, include_featuring=True):
+            return ("An Album", [], "cover", {})
+
+    saw_running_loop = []
+
+    def parse(url):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            saw_running_loop.append(False)
+        else:
+            saw_running_loop.append(True)
+        return {"type": "album", "id": "0" * 22}
+
+    monkeypatch.setattr(
+        "SpotiFLAC.core.spotify_metadata.SpotifyMetadataClient", lambda *a, **k: Fake()
+    )
+    monkeypatch.setattr(spotify_metadata, "parse_spotify_url", parse)
+    client, _ = make_client()
+
+    body = client.post(
+        "/api/v1/resolve",
+        json={"url": "https://spotify.link/abc123"},
+    ).json()
+
+    assert body["kind"] == "album"
+    assert saw_running_loop == [False], "parse_spotify_url ran on the event loop"
 
 
 # ── Downloads ─────────────────────────────────────────────────────────────
@@ -452,6 +492,35 @@ def test_library_duplicates_reports_an_empty_folder(tmp_path):
     assert body["library"]["files"] == 0
     assert body["match"] == "both"
     assert body["database"] == ""
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [OSError("disk full"), sqlite3.OperationalError("database is locked")],
+)
+def test_library_duplicates_survives_an_index_it_cannot_write(
+    tmp_path, monkeypatch, failure
+):
+    """The index is a convenience on top of the scan.
+
+    Whatever the export raises, the scan itself succeeded and its answer is
+    owed to the caller. sqlite3's errors are not OSErrors, so a locked or
+    unwritable database used to come back as a 500 with no report in it.
+    """
+    from SpotiFLAC.core import library_dedup
+
+    def explode(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(library_dedup, "export_sqlite", explode)
+    client, _ = make_client(download_dir=str(tmp_path))
+
+    response = client.post(
+        "/api/v1/library/duplicates", json={"path": str(tmp_path), "export_db": True}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["database"] == ""
 
 
 def test_library_duplicates_rejects_a_match_mode_it_does_not_have(tmp_path):

@@ -13,7 +13,9 @@ and there is no second implementation to keep in agreement.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -198,7 +200,11 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
             ) from exc
 
         try:
-            kind = parse_spotify_url(payload.url)["type"]
+            # Off the loop: parse_spotify_url() issues a blocking HTTP
+            # request to expand a share short link (see resolve_short_link),
+            # and this route is already running on the event loop.
+            parsed = await asyncio.to_thread(parse_spotify_url, payload.url)
+            kind = parsed["type"]
         except Exception:
             # A non-Spotify link that link_resolver handled: it resolved
             # fine, it just has no Spotify URL shape to classify.
@@ -592,9 +598,11 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
                         Path(resolved) / TRASH_DIRNAME / "library-index.db",
                     )
                 )
-            except OSError as exc:
+            except (OSError, sqlite3.Error) as exc:
                 # The scan succeeded; the index is a convenience on top of
-                # it and must not turn a good answer into a 500.
+                # it and must not turn a good answer into a 500. sqlite3's
+                # errors are not OSErrors — a locked or unwritable database
+                # raises OperationalError, which was going straight up.
                 logger.warning("[api] could not write the dedup index: %s", exc)
 
         return LibraryDuplicatesResponse(**report.to_dict(), database=database)
