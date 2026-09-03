@@ -371,6 +371,7 @@ function applySettings(settings = {}) {
   if ($('config-acoustid-key')) $('config-acoustid-key').value = cfg.acoustid_api_key || '';
   if ($('config-loop')) $('config-loop').value = cfg.loop;
   if ($('config-loglevel')) $('config-loglevel').value = cfg.log_level;
+  if ($('config-concurrent')) $('config-concurrent').value = cfg.max_concurrent_downloads || 2;
   lastAppliedServices = Array.isArray(cfg.services) ? cfg.services : lastAppliedServices;
   applyListState('services-list', cfg.services);
   applyListState('lyrics-list', cfg.lyrics_providers);
@@ -612,6 +613,7 @@ const DEFAULT_SETTINGS = {
   acoustid_api_key: '',
   loop: 0,
   log_level: 'INFO',
+  max_concurrent_downloads: 2,
   services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
   lyrics_providers: ['apple', 'lrclib'],
   apple_lyrics_word_by_word: true,
@@ -1242,8 +1244,17 @@ window.showTracklist = (tracksJson) => {
   $('text-search-container')?.classList.add('hidden');
 };
 
-window.app_download_finished = (success = true) => {
-  const activeItems = queue.map((item, qi) => item.status === 'active' ? qi : -1).filter(i => i >= 0);
+window.app_download_finished = (success = true, indices = null) => {
+  // Close out the items of *this* batch only. Marking every active row done
+  // was wrong as soon as a second batch was queued behind the first (the
+  // backend runs them one at a time now, see _await_download_slot): the
+  // waiting batch's tracks were reported finished before they had started.
+  // `indices` is the same list the backend was given; older builds push
+  // nothing, so fall back to the previous all-active behaviour.
+  const batch = Array.isArray(indices) ? new Set(indices) : null;
+  const activeItems = queue
+    .map((item, qi) => (item.status === 'active' && (!batch || batch.has(item.index)) ? qi : -1))
+    .filter(i => i >= 0);
   
   // Close out items from the completed batch
   if (activeItems.length > 0) {
@@ -4021,6 +4032,7 @@ function buildConfig() {
     acoustid_api_key:       $('config-acoustid-key')?.value.trim() || '',
     loop:                   parseInt($('config-loop').value) || null,
     log_level:              $('config-loglevel').value,
+    max_concurrent_downloads: parseInt($('config-concurrent')?.value) || 2,
   };
 }
 

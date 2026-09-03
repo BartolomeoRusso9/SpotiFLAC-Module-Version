@@ -115,6 +115,11 @@
       --elev-pop: 0 8px 24px rgba(0,0,0,.42); /* tooltip, popover */
       --shadow-soft:   var(--elev-2);  --shadow-strong: var(--elev-3);
 
+      /* Width of the left nav rail. Shared so anything anchored to the
+         viewport (the download dock) can sit beside it instead of guessing
+         the number and ending up underneath it. */
+      --rail-w: 58px;
+
       /* Z-index — preserva l'ordine attuale */
       --z-content: 1;    --z-tooltip: 100;  --z-sidebar: 150;
       --z-titlebar: 200; --z-nav-tooltip: 250;
@@ -432,7 +437,7 @@
 
     /* ── Sidebar ── */
     #sidebar {
-      width: 58px;
+      width: var(--rail-w);
       background: var(--surface);
       border-right: 1px solid var(--border);
       display: flex; flex-direction: column;
@@ -1746,7 +1751,9 @@
 
     /* Queue drawer */
     #queue-dock {
-      position: fixed; left: 20px; bottom: 20px;
+      /* Beside the rail, not on top of it: the dock is viewport-anchored, so
+         left:20px put its icon behind the 58px nav rail. */
+      position: fixed; left: calc(var(--rail-w) + 20px); bottom: 20px;
       z-index: var(--z-dock);
       display: none; grid-template-columns: auto 1fr auto;
       align-items: center; gap: 14px;
@@ -1768,7 +1775,7 @@
       background: var(--surface2); display: grid;
       place-items: center; color: var(--accent-text); font-size: var(--fs-400);
     }
-    #queue-dock .qd-icon img {
+    #queue-dock .qd-icon svg {
       width: 20px; height: 20px; display: block;
     }
     #queue-dock .qd-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }

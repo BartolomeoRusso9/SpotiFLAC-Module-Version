@@ -323,71 +323,7 @@
               <div id="recent-grid"></div>
             </div>
           </div>
-        </div></div><div id="queue-dock" onclick="toggleQueueDrawer()" title="Open download queue">
-        <div class="qd-icon"><img src="assets/icons/download.svg" alt="Download"></div>
-        <div class="qd-body">
-          <div class="qd-downloaded" id="qd-downloaded">0.00 MB</div>
-          <div class="qd-speed" id="qd-speed">Idle</div>
-        </div>
-        <div class="qd-chevron">›</div>
-        <div class="qd-bar"><i id="qd-bar-fill"></i></div>
-      </div>
-      <div id="queue-drawer">
-        <div id="queue-backdrop" onclick="toggleQueueDrawer()"></div>
-        <div class="queue-panel" role="dialog" aria-modal="true">
-          <header>
-            <div>
-              <h3>Download Queue</h3>
-            </div>
-            <div class="queue-actions">
-              <button class="export-link" onclick="exportFailures()" title="Export Failures to File">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                <span>Export Failures</span>
-              </button>
-              <button class="clear-link" onclick="clearQueue()" title="Clear history">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-                <span>Clear History</span>
-              </button>
-              <button class="close-btn" onclick="toggleQueueDrawer()" aria-label="Close queue">✕</button>
-            </div>
-          </header>
-          
-          <!-- The counters are also the filters: pressing one narrows the
-               list below to what it counts, pressing it again clears it.
-               Buttons, not divs, so they are reachable by keyboard. -->
-          <div class="queue-summary">
-            <button type="button" class="qs-item queued" onclick="filterQueue('waiting')" aria-pressed="false"><span class="qs-icon">⏱</span><strong id="q-queued">0</strong>Queued</button>
-            <button type="button" class="qs-item completed" onclick="filterQueue('done')" aria-pressed="false"><span class="qs-icon">✓</span><strong id="q-completed">0</strong>Completed</button>
-            <button type="button" class="qs-item skipped" onclick="filterQueue('skipped')" aria-pressed="false"><span class="qs-icon">📄</span><strong id="q-skipped">0</strong>Skipped</button>
-            <button type="button" class="qs-item failed" onclick="filterQueue('error')" aria-pressed="false"><span class="qs-icon">✕</span><strong id="q-failed">0</strong>Failed</button>
-          </div>
-
-          <div class="queue-toolbar">
-            <span class="ts-icon">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
-            </span>
-            <input id="queue-search" type="text" placeholder="Search the queue…" oninput="onQueueSearch(this.value)">
-            <button type="button" id="queue-clear-filters" class="act-btn secondary hidden" onclick="clearQueueFilters()">Clear filter</button>
-          </div>
-
-          <div class="queue-stats-bar">
-            <div>Downloaded: <strong id="qsb-downloaded">0.00 MB</strong></div>
-            <div>Speed: <strong id="qsb-speed">0.00 MB/s</strong></div>
-            <div>Duration: <strong id="qd-duration">0s</strong></div>
-          </div>
-
-          <div class="queue-content">
-            <div id="queue-list">
-              <div id="queue-empty" class="queue-empty">
-                <div class="q-icon"></div>
-                <div>Add tracks to start</div>
-              </div>
-            </div>
-          </div>
-
-          <div id="queue-counter"><span id="q-count">0 tracks</span><span id="q-done"></span></div>
-        </div>
-      </div>
+        </div></div>
     </div>
     <div class="view" id="view-explore">
       <div class="explore-container" style="padding: 20px; overflow-y: auto; height: 100%;">
@@ -790,6 +726,13 @@
             </div>
           </div>
           <div class="s-section">
+            <div class="s-title">Performance</div>
+            <div class="s-row">
+              <span class="s-label">Parallel downloads<small>Tracks fetched at the same time (CLI: --max-concurrent)</small></span>
+              <input type="number" id="config-concurrent" value="2" min="1" max="8">
+            </div>
+          </div>
+          <div class="s-section">
             <div class="s-title">Retry & Loop</div>
             <div class="s-row">
               <span class="s-label">Extra retries per track<small>Cycles through all providers</small></span>
@@ -1119,7 +1062,88 @@
       </div>
     </div>
   </div>
-  </div><script src="toast-system.js?v=20260921"></script>
+  </div>
+  <!-- The download dock and its queue drawer live at body level, not
+       inside #view-home. Two things went wrong while they were: the
+       dock (and the drawer) disappeared the moment the user switched
+       view, since .view is display:none unless active — a download
+       started from Home vanished from sight as soon as you opened
+       Library — and #content carries z-index:var(--z-content), which
+       makes it a stacking context, so the dock's own --z-dock could
+       not lift it above the 58px sidebar rail: the rail painted over
+       its left edge, and the drawer's backdrop stopped at the rail. -->
+      <div id="queue-dock" onclick="toggleQueueDrawer()" title="Open download queue">
+        <!-- Inline, and stroked with currentColor, like every other icon in
+             the app: assets/icons/download.svg paints a hardcoded #231f20,
+             which as an <img> cannot inherit colour — a near-black glyph on
+             the dark theme's dark tile, i.e. an empty square. -->
+        <div class="qd-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </div>
+        <div class="qd-body">
+          <div class="qd-downloaded" id="qd-downloaded">0.00 MB</div>
+          <div class="qd-speed" id="qd-speed">Idle</div>
+        </div>
+        <div class="qd-chevron">›</div>
+        <div class="qd-bar"><i id="qd-bar-fill"></i></div>
+      </div>
+      <div id="queue-drawer">
+        <div id="queue-backdrop" onclick="toggleQueueDrawer()"></div>
+        <div class="queue-panel" role="dialog" aria-modal="true">
+          <header>
+            <div>
+              <h3>Download Queue</h3>
+            </div>
+            <div class="queue-actions">
+              <button class="export-link" onclick="exportFailures()" title="Export Failures to File">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Export Failures</span>
+              </button>
+              <button class="clear-link" onclick="clearQueue()" title="Clear history">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                <span>Clear History</span>
+              </button>
+              <button class="close-btn" onclick="toggleQueueDrawer()" aria-label="Close queue">✕</button>
+            </div>
+          </header>
+          
+          <!-- The counters are also the filters: pressing one narrows the
+               list below to what it counts, pressing it again clears it.
+               Buttons, not divs, so they are reachable by keyboard. -->
+          <div class="queue-summary">
+            <button type="button" class="qs-item queued" onclick="filterQueue('waiting')" aria-pressed="false"><span class="qs-icon">⏱</span><strong id="q-queued">0</strong>Queued</button>
+            <button type="button" class="qs-item completed" onclick="filterQueue('done')" aria-pressed="false"><span class="qs-icon">✓</span><strong id="q-completed">0</strong>Completed</button>
+            <button type="button" class="qs-item skipped" onclick="filterQueue('skipped')" aria-pressed="false"><span class="qs-icon">📄</span><strong id="q-skipped">0</strong>Skipped</button>
+            <button type="button" class="qs-item failed" onclick="filterQueue('error')" aria-pressed="false"><span class="qs-icon">✕</span><strong id="q-failed">0</strong>Failed</button>
+          </div>
+
+          <div class="queue-toolbar">
+            <span class="ts-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+            </span>
+            <input id="queue-search" type="text" placeholder="Search the queue…" oninput="onQueueSearch(this.value)">
+            <button type="button" id="queue-clear-filters" class="act-btn secondary hidden" onclick="clearQueueFilters()">Clear filter</button>
+          </div>
+
+          <div class="queue-stats-bar">
+            <div>Downloaded: <strong id="qsb-downloaded">0.00 MB</strong></div>
+            <div>Speed: <strong id="qsb-speed">0.00 MB/s</strong></div>
+            <div>Duration: <strong id="qd-duration">0s</strong></div>
+          </div>
+
+          <div class="queue-content">
+            <div id="queue-list">
+              <div id="queue-empty" class="queue-empty">
+                <div class="q-icon"></div>
+                <div>Add tracks to start</div>
+              </div>
+            </div>
+          </div>
+
+          <div id="queue-counter"><span id="q-count">0 tracks</span><span id="q-done"></span></div>
+        </div>
+      </div>
+  <script src="toast-system.js?v=20260921"></script>
   <script src="app.js?v=20260921"></script>
   <script>
     // --web mode only (see sw.js's own comment for what the service worker

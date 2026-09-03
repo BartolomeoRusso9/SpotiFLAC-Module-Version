@@ -53,6 +53,42 @@ def test_the_status_line_has_somewhere_to_land(client) -> None:
         assert f"$('{element_id}')" in app_js
 
 
+def test_the_parallel_downloads_setting_is_wired_end_to_end(client) -> None:
+    """The GUI had no equivalent of --max-concurrent, so every download ran
+    at client.SpotiFLAC's default of 2. The control is only worth having if
+    buildConfig() reads it and load_settings() puts it back.
+    """
+    html = client.get("/").text
+    assert 'id="config-concurrent"' in html
+
+    app_js = client.get("/app.js").text
+    assert "$('config-concurrent')" in app_js
+    assert "max_concurrent_downloads" in app_js
+
+
+def test_the_download_finished_event_takes_the_batch_it_closed(client) -> None:
+    app_js = client.get("/app.js").text
+    assert "window.app_download_finished = (success = true, indices = null)" in app_js
+
+
+def test_the_download_dock_lives_outside_the_views(client) -> None:
+    """It used to sit inside #view-home, which cost it two things: .view is
+    display:none unless active, so the dock and its drawer vanished the
+    moment the user opened another view mid-download; and #content is a
+    stacking context (z-index: var(--z-content)), so --z-dock could not lift
+    it over the sidebar rail — the rail painted across its left edge, and the
+    drawer's backdrop stopped where the rail began.
+    """
+    html = client.get("/").text
+    last_view = html.index('id="view-settings"')
+    assert html.index('id="queue-dock"') > last_view
+    assert html.index('id="queue-drawer"') > last_view
+
+    css = client.get("/styles.css").text
+    # And it is placed beside the rail rather than under it.
+    assert "left: calc(var(--rail-w) + 20px)" in css
+
+
 def test_discovery_directory_add_list_remove_round_trip_over_http(client) -> None:
     added = client.post(
         "/api/add_registry_directory", json=["https://example.com/dir.json"]

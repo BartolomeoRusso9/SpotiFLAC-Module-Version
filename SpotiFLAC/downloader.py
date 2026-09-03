@@ -1510,6 +1510,103 @@ class SpotiflacDownloader:
                     break
                 await asyncio.sleep(loop_minutes * 60)
 
+    #: How many metadata lookups run at once in run_tracks_async(). These
+    #: are small JSON requests, but twenty of them fired simultaneously at
+    #: the same host is how a run earns a 429 before it has downloaded
+    #: anything.
+    TRACK_RESOLVE_CONCURRENCY = 8
+
+    async def run_tracks_async(
+        self,
+        urls: list[str],
+        loop_minutes: int | None = None,
+    ) -> None:
+        """Downloads a set of *individual track* links as ONE run.
+
+        run_async() reads a list as a list of collections: one
+        _run_once_async() per URL, each with its own metadata fetch, its own
+        DownloadWorker and its own summary. That is right for two playlists
+        and wrong for twenty tracks picked out of one — the GUI's case, where
+        a partial selection cannot be expressed as a collection URL (see
+        app._download_task). Done that way, each track paid for a full
+        pipeline of its own and max_concurrent_downloads meant nothing: a
+        pool holding one track has nothing to run beside it.
+
+        Here every link is resolved first, concurrently, and the tracks then
+        go through a single worker: one [RUN] header, one progress bar, one
+        summary, one queue for the GUI to read its stats off — and the
+        semaphore finally doing what it is set to.
+
+        Folder layout is deliberately unchanged: these tracks are downloaded
+        as the individual tracks they are (is_album/is_playlist False),
+        exactly as when they each had a run to themselves, so batching moves
+        no files. The one visible difference is the numeric prefix under
+        `use_track_numbers`: a run of one track always called it position 1,
+        so a selection of twenty came out as twenty files all numbered 01;
+        numbered as one batch they count 1..N in the order selected, which is
+        what downloading the same tracks as a collection already did.
+        """
+        tracks = await self._resolve_track_list_async(urls)
+        if not tracks:
+            logger.warning(
+                "[downloader] No track could be resolved from %d link(s)",
+                len(urls),
+            )
+            return
+
+        pending = await self._resolve_isrc_bulk_async(tracks)
+        while True:
+            failed = await self._run_worker_async(pending, "", {}, False, False)
+            if not loop_minutes or loop_minutes <= 0 or not failed:
+                break
+            await asyncio.sleep(loop_minutes * 60)
+            pending = failed
+
+    async def _resolve_track_list_async(
+        self,
+        urls: list[str],
+    ) -> list[TrackMetadata]:
+        """Metadata for every link in `urls`, in the order they were given.
+
+        A link that cannot be resolved is logged and dropped rather than
+        failing the batch: with one run per track a bad link cost that track
+        only, and moving to a single run must not turn it into something that
+        costs the other nineteen.
+        """
+        semaphore = asyncio.Semaphore(self.TRACK_RESOLVE_CONCURRENCY)
+
+        async def _resolve(url: str) -> list[TrackMetadata]:
+            async with semaphore:
+                try:
+                    collection_name, tracks, info = await self._resolve_metadata_async(
+                        url,
+                    )
+                except SpotiflacError as exc:
+                    logger.error("[downloader] %s: %s", url, exc)
+                    return []
+                if not tracks:
+                    logger.warning("[downloader] No track found at %s", url)
+                    return []
+                # Same history entry the per-URL path wrote, so the recent
+                # links list looks the same after this change as before it.
+                await self._record_history_async(url, collection_name, tracks, info)
+                return tracks
+
+        resolved = await asyncio.gather(*(_resolve(url) for url in urls))
+
+        # The same track can arrive twice — a link selected in the list and
+        # the same one already in the queue — and downloading it twice in
+        # one pool means two workers writing the same file.
+        seen: set[str] = set()
+        ordered: list[TrackMetadata] = []
+        for group in resolved:
+            for track in group:
+                if track.id in seen:
+                    continue
+                seen.add(track.id)
+                ordered.append(track)
+        return ordered
+
     # ------------------------------------------------------------------
     # Multi-playlist sync
     # ------------------------------------------------------------------

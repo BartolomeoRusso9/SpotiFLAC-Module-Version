@@ -232,8 +232,27 @@ class AsyncSpotiFLAC:
         *,
         loop_minutes: int | None = None,
     ) -> None:
+        """Downloads several *collections* (or single links), one run each."""
         self._ensure_entered()
         await self._downloader.run_async(urls, loop_minutes=loop_minutes)
+
+    async def download_tracks(
+        self,
+        urls: list[str],
+        *,
+        loop_minutes: int | None = None,
+    ) -> None:
+        """Downloads a set of *individual track* links as one single run.
+
+        Use this rather than download_batch() when the URLs are tracks and
+        not collections: download_batch() gives each URL a run of its own —
+        one metadata fetch, one worker pool, one summary each — which for a
+        list of tracks means downloading them strictly one at a time no
+        matter what max_concurrent_downloads says. See
+        SpotiflacDownloader.run_tracks_async().
+        """
+        self._ensure_entered()
+        await self._downloader.run_tracks_async(urls, loop_minutes=loop_minutes)
 
     async def get_playlist(self, url: str) -> tuple[dict, list[TrackMetadata]]:
         self._ensure_entered()
@@ -342,6 +361,7 @@ def SpotiFLAC(
     sync_extensions: bool = True,
     registries: list[str] | None = None,
     verify_hires: bool = False,
+    batch_tracks: bool = False,
 ) -> None:
     """Backwards-compatible SYNCHRONOUS wrapper.
 
@@ -349,6 +369,12 @@ def SpotiFLAC(
     callers from synchronous code need to change nothing. Internally it
     instantiates `AsyncSpotiFLAC` and runs it with `asyncio.run()`, guaranteeing
     a single clean event loop for the execution.
+
+    `batch_tracks` (default off, so nothing changes for existing callers):
+    treat a list `url` as individual tracks to download in ONE run instead of
+    as one collection per URL — see AsyncSpotiFLAC.download_tracks(). This is
+    what makes `max_concurrent_downloads` mean something for a hand-picked
+    selection; without it a list of 20 tracks is 20 sequential runs.
     """
 
     async def _run() -> None:
@@ -392,10 +418,11 @@ def SpotiFLAC(
             registries=registries,
             verify_hires=verify_hires,
         ) as client:
-            await client.download_batch(
-                [url] if isinstance(url, str) else list(url),
-                loop_minutes=loop,
-            )
+            urls = [url] if isinstance(url, str) else list(url)
+            if batch_tracks:
+                await client.download_tracks(urls, loop_minutes=loop)
+            else:
+                await client.download_batch(urls, loop_minutes=loop)
 
     try:
         asyncio.run(_run())
