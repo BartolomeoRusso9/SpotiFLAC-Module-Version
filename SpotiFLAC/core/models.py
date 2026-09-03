@@ -88,15 +88,17 @@ class TrackMetadata(BaseModel):
         return [s for s in (str(x).strip() for x in v) if s]
 
     @model_validator(mode="after")
-    def _fill_artist_url(self) -> TrackMetadata:
-        """Derives artist_url from artist_id when a source sets the id but
-        not the URL (most of spotify_metadata.py's call sites do — see
-        _first_artist_id there). artist_id is always a raw Spotify artist
-        ID regardless of which provider ends up serving the audio: metadata
-        always comes from Spotify in this app, only the download does not.
+    def _fill_open_urls(self) -> TrackMetadata:
+        """Derives artist_url/album_url from their ids when a source sets the
+        id but not the URL (most of spotify_metadata.py's call sites do — see
+        _first_artist_id there). The ids are always raw Spotify ids whichever
+        provider ends up serving the audio: metadata always comes from
+        Spotify in this app, only the download does not.
         """
         if self.artist_id and not self.artist_url:
             self.artist_url = f"https://open.spotify.com/artist/{self.artist_id}"
+        if self.album_id and not self.album_url:
+            self.album_url = f"https://open.spotify.com/album/{self.album_id}"
         return self
 
     @property

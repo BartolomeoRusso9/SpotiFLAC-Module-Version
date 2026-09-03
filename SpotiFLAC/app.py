@@ -371,6 +371,7 @@ class SpotiFLAC_API(
         release_date=None,
         track_count=None,
         artist_url="",
+        artists_data=None,
     ) -> None:
         payload = {
             "title": title,
@@ -380,6 +381,8 @@ class SpotiFLAC_API(
         }
         if artist_url:
             payload["artist_url"] = artist_url
+        if artists_data:
+            payload["artists_data"] = artists_data
         if playlist_description is not None:
             payload["description"] = playlist_description
         if playlist_followers is not None:
@@ -498,6 +501,25 @@ class SpotiFLAC_API(
             return {"ok": True, "theme": mode}
         except Exception as e:
             self.log(f"Failed to save theme: {e}", "error")
+            return {"ok": False, "error": str(e)}
+
+    #: Accents the frontend has an --accent-* block for (styles.css). Kept
+    #: here as well so an unknown value can't be written to disk and then
+    #: applied at boot as a data-accent nothing styles.
+    ACCENTS = ("green", "blue", "purple", "pink", "orange", "red", "cyan", "amber")
+
+    def save_accent(self, accent: str) -> dict:
+        """Persists the accent colour, same reasoning as save_theme()."""
+        accent = str(accent or "green")
+        if accent not in self.ACCENTS:
+            return {"ok": False, "error": f"unknown accent: {accent}"}
+        try:
+            cfg = self.load_settings() or {}
+            cfg["accent"] = accent
+            self.save_settings(cfg)
+            return {"ok": True, "accent": accent}
+        except Exception as e:
+            self.log(f"Failed to save accent: {e}", "error")
             return {"ok": False, "error": str(e)}
 
     def load_settings(self) -> dict:
@@ -1277,7 +1299,13 @@ class SpotiFLAC_API(
                         "title": title,
                         "artist": artist,
                         "artist_url": getattr(t, "artist_url", ""),
+                        # One {id,name,url} per credited artist, so a row can
+                        # link each of them rather than the joined string.
+                        "artists_data": getattr(t, "artists_data", []) or [],
                         "album": album,
+                        # Lets the artist view's album cards open the album
+                        # they stand for instead of only queueing it.
+                        "album_url": getattr(t, "album_url", ""),
                         "cover": getattr(t, "cover_url", ""),
                         "duration_ms": getattr(t, "duration_ms", 0),
                         "explicit": getattr(t, "is_explicit", False),
@@ -1305,10 +1333,12 @@ class SpotiFLAC_API(
                 display_title = collection_name
                 display_artist = ""
                 display_artist_url = ""
+                display_artists_data: list = []
             else:
                 display_title = collection_name
                 display_artist = tracks[0].artists if tracks else ""
                 display_artist_url = tracks[0].artist_url if tracks else ""
+                display_artists_data = (tracks[0].artists_data if tracks else []) or []
 
             if is_artist:
                 self.set_metadata(
@@ -1335,6 +1365,7 @@ class SpotiFLAC_API(
                     release_date=collection_meta.get("release_date"),
                     track_count=collection_meta.get("track_count"),
                     artist_url=display_artist_url,
+                    artists_data=display_artists_data,
                 )
 
             self.log(

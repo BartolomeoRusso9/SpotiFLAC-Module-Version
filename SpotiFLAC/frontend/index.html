@@ -10,7 +10,7 @@
        tells itself apart from --web. Harmless to load in the desktop
        pywebview window too: manifest/theme-color are simply unused there,
        and the registration script below no-ops without that flag. -->
-  <link rel="manifest" href="manifest.json?v=20260906">
+  <link rel="manifest" href="manifest.json?v=20260917">
   <meta name="theme-color" content="#0a0a0c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="SpotiFLAC">
@@ -21,7 +21,7 @@
   <link rel="icon" type="image/svg+xml" href="assets/icons/logo.svg">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/logo-192.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260906">
+  <link rel="stylesheet" href="styles.css?v=20260917">
   <script>
     // Theme, applied before the first paint. app.js used to do this only from
     // its 'pywebviewready' handler, which meant the window painted light and
@@ -46,6 +46,13 @@
       var dark = mode === 'dark' ||
         (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.classList.add(dark ? 'dark-theme' : 'light-theme');
+      // Accent, for the same reason and in the same breath: without it the
+      // first frames paint the default green before applyAccent() runs.
+      // 'green' is the default and has no data-accent value of its own.
+      try {
+        var accent = localStorage.getItem('spotiflac-accent');
+        if (accent && accent !== 'green') document.documentElement.setAttribute('data-accent', accent);
+      } catch (e) {}
     })();
   </script>
 </head>
@@ -60,6 +67,10 @@
   document.body.classList.add(
     document.documentElement.classList.contains('dark-theme') ? 'dark-theme' : 'light-theme'
   );
+  // Same mirroring for the accent — styles.css keys its --accent-* blocks
+  // off html *and* body (see setThemeClass/applyAccent in app.js).
+  var _accent = document.documentElement.getAttribute('data-accent');
+  if (_accent) document.body.setAttribute('data-accent', _accent);
 </script>
 
 <div id="titlebar">
@@ -168,6 +179,17 @@
               placeholder="Paste Spotify, Tidal, Apple Music, YouTube or Pandora link…"
               onkeydown="if(event.key==='Enter' && $('searchMode').value === 'link') onFetch()">
           </div>
+          <!-- The gesture this app is built around is "copy a link in Spotify,
+               come back here, paste, fetch". This does the paste and the fetch
+               in one press. Hidden automatically when the browser gives no
+               clipboard read permission (see initPasteButton in app.js) rather
+               than sitting there doing nothing. -->
+          <button id="pasteBtn" type="button" class="mode-btn hidden" onclick="pasteAndFetch()"
+                  title="Paste link from clipboard and fetch" aria-label="Paste and fetch">
+            <span class="mode-btn-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+            </span>
+          </button>
           <button id="fetchBtn" onclick="onFetch()" title="Fetch" aria-label="Fetch">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           </button>
@@ -316,11 +338,22 @@
             </div>
           </header>
           
+          <!-- The counters are also the filters: pressing one narrows the
+               list below to what it counts, pressing it again clears it.
+               Buttons, not divs, so they are reachable by keyboard. -->
           <div class="queue-summary">
-            <div class="qs-item queued"><span class="qs-icon">⏱</span><strong id="q-queued">0</strong>Queued</div>
-            <div class="qs-item completed"><span class="qs-icon">✓</span><strong id="q-completed">0</strong>Completed</div>
-            <div class="qs-item skipped"><span class="qs-icon">📄</span><strong id="q-skipped">0</strong>Skipped</div>
-            <div class="qs-item failed"><span class="qs-icon">✕</span><strong id="q-failed">0</strong>Failed</div>
+            <button type="button" class="qs-item queued" onclick="filterQueue('waiting')" aria-pressed="false"><span class="qs-icon">⏱</span><strong id="q-queued">0</strong>Queued</button>
+            <button type="button" class="qs-item completed" onclick="filterQueue('done')" aria-pressed="false"><span class="qs-icon">✓</span><strong id="q-completed">0</strong>Completed</button>
+            <button type="button" class="qs-item skipped" onclick="filterQueue('skipped')" aria-pressed="false"><span class="qs-icon">📄</span><strong id="q-skipped">0</strong>Skipped</button>
+            <button type="button" class="qs-item failed" onclick="filterQueue('error')" aria-pressed="false"><span class="qs-icon">✕</span><strong id="q-failed">0</strong>Failed</button>
+          </div>
+
+          <div class="queue-toolbar">
+            <span class="ts-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+            </span>
+            <input id="queue-search" type="text" placeholder="Search the queue…" oninput="onQueueSearch(this.value)">
+            <button type="button" id="queue-clear-filters" class="act-btn secondary hidden" onclick="clearQueueFilters()">Clear filter</button>
           </div>
 
           <div class="queue-stats-bar">
@@ -482,7 +515,7 @@
             <button class="act-btn secondary" onclick="resolveLibraryDuplicates('trash')" id="btn-libdedup-trash" style="margin-left:auto;" title="Move them into .spotiflac-duplicates inside the library. Undoable.">
               Move to quarantine
             </button>
-            <button class="act-btn secondary" onclick="resolveLibraryDuplicates('delete')" id="btn-libdedup-delete" title="Delete them outright. Not undoable.">
+            <button class="act-btn danger" onclick="resolveLibraryDuplicates('delete')" id="btn-libdedup-delete" title="Delete them outright. Not undoable.">
               Delete permanently
             </button>
           </div>
@@ -649,6 +682,26 @@
               </select>
             </div>
             <div class="s-row">
+              <span class="s-label">Accent Color<small>Default: Green</small></span>
+              <div class="accent-picker">
+                <!-- A swatch of the current accent next to the select: the
+                     names alone ("Cyan" vs "Blue") don't tell you what you
+                     are choosing until you have chosen it. Painted from
+                     --accent itself, so it is always the real colour. -->
+                <span class="accent-dot" aria-hidden="true"></span>
+                <select id="config-accent" onchange="changeAccent()">
+                  <option value="green" selected>Green</option>
+                  <option value="blue">Blue</option>
+                  <option value="purple">Purple</option>
+                  <option value="pink">Pink</option>
+                  <option value="orange">Orange</option>
+                  <option value="red">Red</option>
+                  <option value="cyan">Cyan</option>
+                  <option value="amber">Amber</option>
+                </select>
+              </div>
+            </div>
+            <div class="s-row">
               <span class="s-label">App Font<small>Default: JetBrains Mono</small></span>
               <select id="config-font" onchange="changeFont()">
                 <option value="'JetBrains Mono', monospace" selected>JetBrains Mono</option>
@@ -777,7 +830,7 @@
             </div>
             <div class="s-row">
               <span class="s-label">Delete</span>
-              <button onclick="deleteProfile()" class="act-btn secondary" style="padding:5px 10px;font-size:11.5px;color:var(--red);border-color:rgba(239,68,68,.35);">Delete</button>
+              <button onclick="deleteProfile()" class="act-btn danger" style="padding:5px 10px;font-size:11.5px;">Delete</button>
             </div>
           </div>
         </div>
@@ -1037,8 +1090,8 @@
       </div>
     </div>
   </div>
-  </div><script src="toast-system.js?v=20260906"></script>
-  <script src="app.js?v=20260906"></script>
+  </div><script src="toast-system.js?v=20260917"></script>
+  <script src="app.js?v=20260917"></script>
   <script>
     // --web mode only (see sw.js's own comment for what the service worker
     // actually does — installability, not offline caching of live data).

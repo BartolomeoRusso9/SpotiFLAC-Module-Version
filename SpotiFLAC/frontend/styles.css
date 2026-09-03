@@ -180,6 +180,93 @@
       --elev-3: 0 20px 48px rgba(15,23,42,.16);
     }
 
+    /* ── Accent presets ──
+       Everything accent-coloured in the app resolves through the eight
+       --accent-* tokens, so an alternative accent is those eight values and
+       nothing else — no per-component overrides anywhere. The default green
+       stays in :root / .light-theme above; these only exist for the other
+       choices, set as data-accent on <html> and <body> (same pair the theme
+       classes go on) by applyAccent() in app.js.
+
+       The light selectors carry the extra .light-theme class deliberately:
+       that outranks the dark block regardless of source order, so a light
+       window can never pick up a dark accent value.
+
+       Values are plain hex/rgba rather than oklch()/color-mix() to match the
+       rest of the file — the desktop web view's floor is kept low on purpose.
+       Generated from one base colour per accent (hover/press are lightness
+       steps, the tints are the same alphas the green uses). */
+    html[data-accent="blue"], body[data-accent="blue"] {
+      --accent: #4d9dff;  --accent-hover: #76b3ff;  --accent-press: #2989ff;
+      --accent-fg: #0b0b0d;  --accent-text: #67abff;
+      --accent-subtle: rgba(77,157,255,.14);  --accent-border: rgba(77,157,255,.42);  --accent-ring: rgba(77,157,255,.34);
+    }
+    html.light-theme[data-accent="blue"], body.light-theme[data-accent="blue"] {
+      --accent: #1f6feb;  --accent-hover: #1463dd;  --accent-press: #1258c5;
+      --accent-fg: #ffffff;  --accent-text: #125ccf;
+      --accent-subtle: rgba(31,111,235,.12);  --accent-border: rgba(31,111,235,.4);  --accent-ring: rgba(31,111,235,.28);
+    }
+    html[data-accent="purple"], body[data-accent="purple"] {
+      --accent: #a97bff;  --accent-hover: #c4a4ff;  --accent-press: #9257ff;
+      --accent-fg: #0b0b0d;  --accent-text: #ba95ff;
+      --accent-subtle: rgba(169,123,255,.14);  --accent-border: rgba(169,123,255,.42);  --accent-ring: rgba(169,123,255,.34);
+    }
+    html.light-theme[data-accent="purple"], body.light-theme[data-accent="purple"] {
+      --accent: #7c4fd6;  --accent-hover: #6d3ad1;  --accent-press: #602ec4;
+      --accent-fg: #ffffff;  --accent-text: #6430cd;
+      --accent-subtle: rgba(124,79,214,.12);  --accent-border: rgba(124,79,214,.4);  --accent-ring: rgba(124,79,214,.28);
+    }
+    html[data-accent="pink"], body[data-accent="pink"] {
+      --accent: #ff6fae;  --accent-hover: #ff98c5;  --accent-press: #ff4b9a;
+      --accent-fg: #0b0b0d;  --accent-text: #ff89bc;
+      --accent-subtle: rgba(255,111,174,.14);  --accent-border: rgba(255,111,174,.42);  --accent-ring: rgba(255,111,174,.34);
+    }
+    html.light-theme[data-accent="pink"], body.light-theme[data-accent="pink"] {
+      --accent: #d6337b;  --accent-hover: #c7286e;  --accent-press: #b22463;
+      --accent-fg: #ffffff;  --accent-text: #bb2667;
+      --accent-subtle: rgba(214,51,123,.12);  --accent-border: rgba(214,51,123,.4);  --accent-ring: rgba(214,51,123,.28);
+    }
+    html[data-accent="orange"], body[data-accent="orange"] {
+      --accent: #ff9f45;  --accent-hover: #ffb46e;  --accent-press: #ff8d21;
+      --accent-fg: #0b0b0d;  --accent-text: #ffac5e;
+      --accent-subtle: rgba(255,159,69,.14);  --accent-border: rgba(255,159,69,.42);  --accent-ring: rgba(255,159,69,.34);
+    }
+    html.light-theme[data-accent="orange"], body.light-theme[data-accent="orange"] {
+      --accent: #c76a10;  --accent-hover: #af5d0e;  --accent-press: #98510c;
+      --accent-fg: #ffffff;  --accent-text: #a1560d;
+      --accent-subtle: rgba(199,106,16,.12);  --accent-border: rgba(199,106,16,.4);  --accent-ring: rgba(199,106,16,.28);
+    }
+    html[data-accent="red"], body[data-accent="red"] {
+      --accent: #ff6b6b;  --accent-hover: #ff9494;  --accent-press: #ff4747;
+      --accent-fg: #0b0b0d;  --accent-text: #ff8585;
+      --accent-subtle: rgba(255,107,107,.14);  --accent-border: rgba(255,107,107,.42);  --accent-ring: rgba(255,107,107,.34);
+    }
+    html.light-theme[data-accent="red"], body.light-theme[data-accent="red"] {
+      --accent: #d13a3a;  --accent-hover: #c42e2e;  --accent-press: #af2929;
+      --accent-fg: #ffffff;  --accent-text: #b72b2b;
+      --accent-subtle: rgba(209,58,58,.12);  --accent-border: rgba(209,58,58,.4);  --accent-ring: rgba(209,58,58,.28);
+    }
+    html[data-accent="cyan"], body[data-accent="cyan"] {
+      --accent: #3fd6d6;  --accent-hover: #61dddd;  --accent-press: #2ac7c7;
+      --accent-fg: #0b0b0d;  --accent-text: #54dada;
+      --accent-subtle: rgba(63,214,214,.14);  --accent-border: rgba(63,214,214,.42);  --accent-ring: rgba(63,214,214,.34);
+    }
+    html.light-theme[data-accent="cyan"], body.light-theme[data-accent="cyan"] {
+      --accent: #0d9a9a;  --accent-hover: #0b8282;  --accent-press: #096b6b;
+      --accent-fg: #ffffff;  --accent-text: #0a7474;
+      --accent-subtle: rgba(13,154,154,.12);  --accent-border: rgba(13,154,154,.4);  --accent-ring: rgba(13,154,154,.28);
+    }
+    html[data-accent="amber"], body[data-accent="amber"] {
+      --accent: #f5c451;  --accent-hover: #f7d178;  --accent-press: #f3b92f;
+      --accent-fg: #0b0b0d;  --accent-text: #f6cc69;
+      --accent-subtle: rgba(245,196,81,.14);  --accent-border: rgba(245,196,81,.42);  --accent-ring: rgba(245,196,81,.34);
+    }
+    html.light-theme[data-accent="amber"], body.light-theme[data-accent="amber"] {
+      --accent: #a67c00;  --accent-hover: #8c6900;  --accent-press: #735600;
+      --accent-fg: #ffffff;  --accent-text: #7d5e00;
+      --accent-subtle: rgba(166,124,0,.12);  --accent-border: rgba(166,124,0,.4);  --accent-ring: rgba(166,124,0,.28);
+    }
+
     html, body { height: 100%; overflow: hidden; background: var(--bg); }
     body {
       font-family: var(--app-font);
@@ -728,9 +815,24 @@
     .cover-download-btn.error { background: var(--status-failed-fg); opacity: 1; }
     .cover-download-btn.success:hover, .cover-download-btn.error:hover { cursor: default; transform: none; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    #album-info { flex: 1; min-width: 0; }
+    /* The cover is the tallest thing in the card, so the text column is
+       always shorter — the question is only where its leftover height goes.
+       Top-aligned put all of it under the buttons (a card that stopped
+       halfway down); bottom-aligned put all of it above them (a hole
+       between the artist and the actions). Centred, it splits in two and
+       reads as margin on both sides of a block set against the artwork,
+       which is what it actually is. */
+    #album-info {
+      flex: 1; min-width: 0;
+      align-self: stretch;
+      display: flex; flex-direction: column; justify-content: center;
+    }
     #album-type-badge {
       display: inline-block;
+      /* #album-info is a flex column now, and a flex item stretches to the
+         column's width by default — which turned this pill into a full-width
+         bar. It sizes to its own text again. */
+      align-self: flex-start;
       margin-bottom: 10px;
       padding: 3px 10px;
       font-size: var(--fs-75);
@@ -743,9 +845,16 @@
       border-radius: var(--radius-pill);
     }
     #album-type-badge:empty { display: none; }
+    /* The album name is the subject of the card and sits beside ~270px of
+       artwork; at --fs-600 it read as a caption next to a poster. --fs-700
+       gives the text column enough mass to hold its own half of the card,
+       which is also what stops the space between it and the buttons from
+       reading as a gap rather than as breathing room. Clamped at two lines
+       so a long title cannot push the layout around. */
     #album-title {
-      font-size: var(--fs-600); font-weight: var(--fw-bold); line-height: 1.05;
-      margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis;
+      font-size: var(--fs-700); line-height: var(--lh-700);
+      font-weight: var(--fw-bold); letter-spacing: var(--tracking-tight);
+      margin-bottom: var(--sp-2); overflow: hidden; text-overflow: ellipsis;
       display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
     }
     #album-subtitle {
@@ -771,6 +880,15 @@
       transition: color var(--t);
     }
     .artist-link:hover { color: var(--accent-text); text-decoration: underline; }
+    /* "Drake · 2026-05-15 · 18 tracks" was one flat grey line in which the
+       only clickable thing looked exactly like the two facts either side of
+       it. The artist steps forward (it is the name of the thing, and the
+       one part that does something when clicked); the date and the count
+       step back to a supporting weight. */
+    #album-subtitle .artist-link {
+      color: var(--text);
+      font-weight: var(--fw-medium);
+    }
     #album-meta {
       font-size: var(--fs-100); color: var(--text2); margin-bottom: 12px;
       display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
@@ -801,7 +919,10 @@
       display: -webkit-box;
       display: block;
     }
-    #album-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    /* margin-top, not auto: an auto margin here would eat all the free
+       height and defeat #album-info's centring. A fixed step just sets the
+       buttons apart from the text above them. */
+    #album-actions { display: flex; gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-5); }
     /* Single-track view only (app.js's showSingleTrackCard) — quality +
        duration chips under the action row, filling what was otherwise dead
        space below the buttons on a short left column next to the taller
@@ -827,6 +948,22 @@
     .act-btn.primary:hover { transform: translateY(-2px); background: var(--accent-hover); box-shadow: var(--elev-2); }
     .act-btn.secondary { background: var(--surface2); color: var(--text2); }
     .act-btn.secondary:hover { background: var(--surface3); border-color: var(--border2); color: var(--text); transform: translateY(-1px); }
+    /* Clearing a queue or a history is not the same kind of act as saving a
+       setting, and until now it looked identical to it. Tinted rather than
+       filled: a solid red button competes with the primary action for
+       attention, which is backwards — this one should be findable, not
+       inviting. Uses the same --status-failed-* tokens as a failed row, so
+       "destructive" and "went wrong" stay one colour story. */
+    .act-btn.danger {
+      background: var(--status-failed-bg);
+      color: var(--status-failed-fg);
+      border-color: var(--status-failed-bg);
+    }
+    .act-btn.danger:hover {
+      border-color: var(--status-failed-fg);
+      color: var(--status-failed-fg);
+      transform: translateY(-1px);
+    }
     .act-btn:active { transform: scale(.97); }
 
     /* Folder browser modal — was a hardcoded rgba(0,0,0,.5) scrim plus a
@@ -1460,6 +1597,17 @@
       flex-direction: column;
       min-height: 0;
     }
+    /* Same ultrawide tiers the track table below already uses, so the card
+       and the list stay the same width instead of stepping in and out of
+       alignment. It also stops #album-actions wrapping its last icon button
+       onto a line of its own: at 960px the three buttons are ~30px wider
+       than the middle column, which is the whole reason it wrapped. */
+    @media (min-width: 1200px) {
+      .list-container { max-width: 1060px; }
+    }
+    @media (min-width: 1440px) {
+      .list-container { max-width: 1160px; }
+    }
     #recent-grid {
       display: grid;
       /* auto-FILL, not auto-fit. auto-fit collapses the empty tracks and
@@ -1481,9 +1629,33 @@
        tiles — a 120px track would squeeze and truncate them — so the grid
        drops to a single full-width column for them (see the .searches class
        set by renderRecentSearches()). */
+    /* Recent *searches* are chips that wrap, not cards in a grid: each one is
+       a couple of words, and a row apiece meant five past queries filled the
+       screen. display:flex overrides the artwork grid the same element uses
+       for recent fetches. */
     #recent-grid.searches {
-      grid-template-columns: 1fr;
+      display: flex;
+      flex-wrap: wrap;
       gap: var(--sp-3);
+    }
+    .search-chip {
+      display: inline-flex; align-items: center; gap: var(--sp-3);
+      max-width: 100%;
+      padding: var(--sp-3) var(--sp-4);
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-pill);
+      color: var(--text); font-family: var(--app-font); font-size: var(--fs-100);
+      cursor: pointer;
+      transition: background var(--t), border-color var(--t), color var(--t);
+    }
+    .search-chip:hover { background: var(--surface2); border-color: var(--accent-border); color: var(--text); }
+    .search-chip .rc-search-icon { color: var(--muted); }
+    .search-chip:hover .rc-search-icon { color: var(--accent-text); }
+    /* A pasted URL can be a search too, and one of those is 90 characters —
+       it gets an ellipsis rather than a chip the width of the window. */
+    .search-chip-text {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      max-width: 340px;
     }
     .rc-search-icon {
       display: inline-flex;
@@ -1751,6 +1923,40 @@
       color: var(--text2); font-size: var(--fs-200);
     }
     .queue-summary .qs-item strong { color: var(--text); font-weight: 700; }
+    /* They are buttons now (each one filters the list below), so they need to
+       look pressable and to show which one is holding the list down. */
+    .queue-summary .qs-item {
+      cursor: pointer; font-family: var(--app-font); text-align: left;
+      transition: border-color var(--t), background var(--t);
+    }
+    .queue-summary .qs-item:hover { background: var(--surface3); border-color: var(--border2); }
+    .queue-summary .qs-item.is-filtering {
+      border-color: var(--accent);
+      background: var(--accent-subtle);
+    }
+
+    .queue-toolbar {
+      display: flex; align-items: center; gap: var(--sp-3);
+      padding: 0 24px var(--sp-4);
+      position: relative;
+    }
+    .queue-toolbar .ts-icon { left: 36px; }
+    #queue-search {
+      flex: 1; min-width: 0;
+      padding: 7px 11px 7px 30px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text);
+      font-family: var(--app-font); font-size: var(--fs-100);
+      outline: none; transition: border-color var(--t);
+      user-select: text;
+    }
+    #queue-search:focus { border-color: var(--accent); }
+    #queue-search::placeholder { color: var(--muted); }
+    .queue-toolbar .act-btn { padding: 7px 12px; font-size: var(--fs-75); }
+    .queue-no-match {
+      padding: var(--sp-8) var(--sp-5);
+      text-align: center; color: var(--muted); font-size: var(--fs-100);
+    }
     .queue-stats-bar {
       padding: 0 24px 16px;
       display: flex; gap: var(--sp-6);
@@ -1800,7 +2006,20 @@
     .queue-item .qi-title { font-size: 14px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .queue-item .qi-artist { font-size: var(--fs-100); color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .queue-item .qi-pill.done { background: var(--surface); color: var(--text2); border: 1px solid var(--border); font-weight: 600; }
-    .queue-item .qi-pill { padding: 5px var(--sp-4); border-radius: 999px; font-size: var(--fs-75); font-weight: 700; text-transform: capitalize; white-space: nowrap; }
+    /* The row the title and the status pill share. It had no rule at all, so
+       it was a plain block: the pill (also a div, also block) stretched the
+       full width of the item and rendered as a coloured bar under the title
+       instead of a pill beside it. */
+    .queue-item .qi-top {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: var(--sp-4);
+    }
+    .queue-item .qi-meta { min-width: 0; }
+    .queue-item .qi-pill {
+      display: inline-block; flex-shrink: 0;
+      padding: 5px var(--sp-4); border-radius: 999px;
+      font-size: var(--fs-75); font-weight: 700; text-transform: capitalize; white-space: nowrap;
+    }
     .queue-item .qi-pill.waiting { background: var(--status-warn-bg); color: var(--status-warn-fg); }
     .queue-item .qi-pill.active { background: var(--status-active-bg); color: var(--status-active-fg); }
     .queue-item .qi-pill.error { background: var(--status-failed-bg); color: var(--status-failed-fg); }
@@ -1936,8 +2155,41 @@
     }
     .save-toast.hidden { display: none; }
     .save-toast.show { display: block; }
+    /* Accent picker: swatch + select as one control. */
+    .accent-picker { display: inline-flex; align-items: center; gap: var(--sp-3); }
+    .accent-dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--accent);
+      border: 1px solid var(--accent-border);
+      flex-shrink: 0;
+    }
+
     .tc { display: none; }
     .tc.active { display: block; }
+    /* Two columns of setting cards once there is room for them. A settings
+       row is label-left / control-right and rarely more than ~500px of
+       actual content, so one column down the middle of a wide window meant
+       scrolling past a lot of air to reach things that could have been on
+       screen together.
+       CSS columns rather than a grid: the cards have very different heights
+       (a section with two toggles next to one with a dozen), and columns
+       fill by flowing, so the two sides stay roughly level instead of
+       leaving a grid row as tall as its tallest cell. break-inside stops a
+       card being split down the middle across the column boundary. */
+    @media (min-width: 1100px) {
+      .tc.active { columns: 2; column-gap: var(--sp-4); }
+      .tc.active .s-section {
+        break-inside: avoid;
+        -webkit-column-break-inside: avoid;
+        /* A column box has no margin collapsing to rely on, and the last
+           card in a column still needs its gap to the next one below. */
+        margin-bottom: var(--sp-4);
+      }
+      .tc.active .s-section:last-child { margin-bottom: var(--sp-4); }
+      /* Sections that are a wide table or a grid of their own read badly at
+           half width — they keep the full row. */
+      .tc.active .s-section.s-wide { column-span: all; }
+    }
     .s-section {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -1959,7 +2211,13 @@
     .s-row { display: flex; align-items: center; justify-content: space-between; min-height: 30px; margin-bottom: 8px; gap: 10px; }
     .s-row:last-child { margin-bottom: 0; }
     .s-row label { display: flex; align-items: center; gap: var(--sp-3); cursor: pointer; }
-    .s-label { color: var(--text2); font-size: 12.5px; font-weight: 500; flex-shrink: 0; }
+    /* Shrinkable, with min-width:0 so the <small> help text can wrap. It was
+       flex-shrink:0, which is fine for a two-word label but not for the ones
+       carrying a paragraph of explanation (the AcoustID key row is three
+       lines of prose): those could not wrap, so the row grew past the panel
+       and the whole section scrolled sideways. Short labels don't wrap
+       anyway — there is nothing in them to break. */
+    .s-label { color: var(--text2); font-size: 12.5px; font-weight: 500; min-width: 0; }
     .s-label small { display: block; color: var(--muted); font-size: var(--fs-50); margin-top: 1px; font-family: var(--font-mono); }
     .s-sep { height: 1px; background: var(--border); margin: 8px 0; }
 
@@ -2509,8 +2767,29 @@
   width: 100%; aspect-ratio: 1; background: var(--surface2);
   display: flex; align-items: center; justify-content: center;
   font-size: 26px; overflow: hidden;
+  position: relative;
 }
 .aac-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Downloading a whole album is now a deliberate press on this, not a side
+   effect of clicking the card (which opens the album). Hidden until the card
+   is hovered or holds focus, the same way the per-row track actions are —
+   twenty covers each wearing a button is noise. */
+.aac-dl {
+  position: absolute; right: 8px; bottom: 8px;
+  width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--accent-fg);
+  border: none; cursor: pointer;
+  box-shadow: var(--elev-2);
+  opacity: 0; transform: translateY(4px);
+  transition: opacity var(--t), transform var(--t), background var(--t);
+}
+.artist-album-card:hover .aac-dl,
+.artist-album-card:focus-within .aac-dl { opacity: 1; transform: none; }
+.aac-dl:hover { background: var(--accent-hover); }
+@media (hover: none) {
+  .aac-dl { opacity: 1; transform: none; }
+}
 .aac-body { padding: var(--sp-3) 10px 10px; }
 .aac-name {
   font-size: 11.5px; font-weight: var(--fw-semibold); color: var(--text);

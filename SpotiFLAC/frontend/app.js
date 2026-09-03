@@ -213,6 +213,49 @@ function syncSystemTheme(e) {
   if (val === 'auto') applyTheme('auto');
 }
 
+//: Must match SpotiFLAC_API.ACCENTS in app.py and the --accent-* blocks in
+//: styles.css. 'green' is the default and has no block of its own: it is
+//: what :root already says, so it is applied by removing the attribute.
+const ACCENTS = ['green', 'blue', 'purple', 'pink', 'orange', 'red', 'cyan', 'amber'];
+
+// data-accent goes on <html> *and* <body>, the same pair the theme classes
+// use (see setThemeClass) — styles.css keys the accent blocks off both, so
+// that the token values are in scope no matter which element a rule resolves
+// against.
+function applyAccent(accent) {
+  const val = ACCENTS.includes(accent) ? accent : 'green';
+  for (const el of [document.documentElement, document.body]) {
+    if (!el) continue;
+    if (val === 'green') el.removeAttribute('data-accent');
+    else el.setAttribute('data-accent', val);
+  }
+}
+
+function changeAccent() {
+  const val = $('config-accent')?.value || 'green';
+  applyAccent(val);
+  // Three copies for the same reason changeTheme() keeps three: the two
+  // localStorage writes are per-origin and can vanish, gui-settings.json is
+  // the one that survives a restart.
+  try {
+    localStorage.setItem('spotiflac-accent', val);
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
+    stored.accent = val;
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(stored));
+  } catch (e) {}
+  try {
+    window.pywebview?.api?.save_accent?.(val);
+  } catch (e) {}
+}
+
+function loadAccentFromStorage() {
+  const stored = (() => {
+    try { return localStorage.getItem('spotiflac-accent'); } catch (e) { return null; }
+  })() || 'green';
+  if ($('config-accent')) $('config-accent').value = stored;
+  applyAccent(stored);
+}
+
 function loadThemeFromStorage() {
   const stored = (() => {
     try { return localStorage.getItem('spotiflac-theme-mode'); } catch (e) { return null; }
@@ -273,9 +316,19 @@ function applySettings(settings = {}) {
     localStorage.setItem('spotiflac-theme-mode', themeMode);
   } catch (e) {}
   if ($('config-theme')) $('config-theme').value = themeMode;
+  // Same dedicated-key-wins-over-blob dance as the theme above, for the
+  // same reason: gui-settings.json is what survives, localStorage is what
+  // the next launch reads first.
+  let accent = cfg.accent || 'green';
+  try {
+    accent = localStorage.getItem('spotiflac-accent') || accent;
+    localStorage.setItem('spotiflac-accent', accent);
+  } catch (e) {}
+  if ($('config-accent')) $('config-accent').value = accent;
   if ($('config-font')) $('config-font').value = cfg.font;
   changeFont();
   changeTheme();
+  changeAccent();
   if ($('config-lyrics')) { $('config-lyrics').checked = cfg.lyrics; onLyricsChange(); }
   if ($('config-apple-wbw')) $('config-apple-wbw').checked = cfg.apple_lyrics_word_by_word !== false;
   if ($('config-enrich')) { $('config-enrich').checked = cfg.enrich_metadata; onEnrichChange(); }
@@ -345,9 +398,10 @@ async function loadSettingsFromStorage() {
       stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || 'null');
     }
     if (stored) applySettings(stored);
-    else loadThemeFromStorage();
+    else { loadThemeFromStorage(); loadAccentFromStorage(); }
   } catch(e) {
     loadThemeFromStorage();
+    loadAccentFromStorage();
   }
 }
 
@@ -367,8 +421,9 @@ function showToast(message, type = 'success') {
 async function saveSettings() {
   try {
     const cfg = buildConfig();
-    cfg.theme = $('config-theme')?.value || DEFAULT_SETTINGS.theme;
-    cfg.font  = $('config-font')?.value  || DEFAULT_SETTINGS.font;
+    cfg.theme  = $('config-theme')?.value  || DEFAULT_SETTINGS.theme;
+    cfg.accent = $('config-accent')?.value || DEFAULT_SETTINGS.accent;
+    cfg.font   = $('config-font')?.value   || DEFAULT_SETTINGS.font;
     if (window.pywebview?.api) {
       await window.pywebview.api.save_settings(cfg);
     }
@@ -510,6 +565,7 @@ const ALL_ENRICH = [
 const SETTINGS_STORAGE_KEY = 'spotiflac-settings';
 const DEFAULT_SETTINGS = {
   theme: 'auto',
+  accent: 'green',
   font: "'JetBrains Mono', monospace",
   quality: 'LOSSLESS',
   allow_fallback: false,
@@ -965,6 +1021,11 @@ let queueStats     = { downloaded:'0.00 MB', speed:'0.00 MB/s' };
 let isDownloading  = false;
 let queueStartTime = null;
 let queueDurationInterval = null;
+//: Queue view filters. A hundred-track playlist makes the queue a list you
+//: have to search rather than read — most often to find the handful that
+//: failed. null status = show everything.
+let queueFilterStatus = null;   // null | 'waiting' | 'done' | 'skipped' | 'error'
+let queueSearch = '';
 let previewAudio = null;
 let previewPlayingIndex = -1;
 // Destroy current audio to release OS media keys
@@ -1074,7 +1135,8 @@ window.app_set_metadata = (data) => {
       d.artist_biography,
       d.release_date,
       d.track_count,
-      d.artist_url
+      d.artist_url,
+      d.artists_data
     );
   } catch(e) {}
 };
@@ -1256,17 +1318,60 @@ function applyAlbumGlow(imgEl) {
   }
 }
 
+// Reads the clipboard into the fetch bar and runs the fetch — the paste and
+// the press, which are always done together for a link that was just copied
+// out of Spotify.
+async function pasteAndFetch() {
+  let text = '';
+  try {
+    text = (await navigator.clipboard.readText() || '').trim();
+  } catch (e) {
+    // Denied or unavailable: say so rather than appearing to do nothing.
+    toastMgr.warning('Could not read the clipboard. Paste with ' +
+      (navigator.platform.startsWith('Mac') ? '⌘V' : 'Ctrl+V') + ' instead.');
+    return;
+  }
+  if (!text) { toastMgr.info('The clipboard is empty.'); return; }
+  const input = $('urlInput');
+  input.value = text;
+  input.dispatchEvent(new Event('input'));
+  // In search mode a pasted string is a query, and onFetch() handles both —
+  // it reads the mode itself, so nothing here needs to know which we are in.
+  onFetch();
+}
+
+// The button is only worth showing where the clipboard can actually be read:
+// pywebview's web view and a plain browser tab differ here, and a button that
+// always fails is worse than no button. Checked once at boot via the
+// Permissions API where it exists; where it doesn't, the button stays and the
+// catch above covers the refusal.
+async function initPasteButton() {
+  const btn = $('pasteBtn');
+  if (!btn) return;
+  if (!navigator.clipboard || !navigator.clipboard.readText) return; // stays hidden
+  try {
+    const status = await navigator.permissions?.query?.({ name: 'clipboard-read' });
+    if (status && status.state === 'denied') return; // stays hidden
+  } catch (e) { /* Permissions API missing or does not know this name — show it */ }
+  btn.classList.remove('hidden');
+}
+
 // Navigates to an artist's own page the same way clicking a recent-fetch
 // card does: drop the URL in the fetch bar and run the normal fetch flow,
 // rather than a one-off code path that would skip whatever that flow does
 // (recent-card highlight, search-mode reset, etc.) and drift from it later.
-function goToArtist(url) {
+function goToUrl(url) {
   const safeUrl = httpUrlOrNull(url);
   if (!safeUrl) return;
   $('urlInput').value = safeUrl;
   if ($('searchMode').value === 'search') toggleSearchMode();
   onFetch();
 }
+
+// Kept as its own name because that is what the call sites mean, and because
+// an artist link is the one that has to survive being clicked from inside a
+// row (see the delegated listener below).
+function goToArtist(url) { goToUrl(url); }
 
 // One delegated listener rather than an onclick="" per artist name: the URL
 // only ever goes into a data- attribute (escHtml covers both quote chars),
@@ -1290,12 +1395,29 @@ function artistNameHtml(name, url) {
   return `<span class="artist-link" data-artist-url="${escHtml(safeUrl)}">${safeName}</span>`;
 }
 
-let g_albumArtistUrl = '';
+// A credit line where *each* artist is its own link. artistsData is the
+// backend's per-artist [{id,name,url}] list (see _artist_nodes in
+// core/spotify_metadata.py); when it's missing — another provider, an
+// older payload — this falls back to the joined string with one link on
+// the whole thing, which is what it did before.
+//
+// The joined string is never split back apart to do this: "Tyler, The
+// Creator" is one artist whose name contains the separator, and splitting
+// is exactly what turns that into two wrong links.
+function artistsCreditHtml(artistsData, joinedNames, fallbackUrl) {
+  const list = Array.isArray(artistsData) ? artistsData.filter(a => a && a.name) : [];
+  if (!list.length) return artistNameHtml(joinedNames, fallbackUrl);
+  return list.map(a => artistNameHtml(a.name, a.url)).join(', ');
+}
 
-function setAlbumCard(title, artist, coverUrl, quality, description, followers, owner, ownerAvatar, source, artistListeners, artistRank, artistVerified, artistBiography, releaseDate, trackCount, artistUrl) {
+let g_albumArtistUrl = '';
+let g_albumArtistsData = [];
+
+function setAlbumCard(title, artist, coverUrl, quality, description, followers, owner, ownerAvatar, source, artistListeners, artistRank, artistVerified, artistBiography, releaseDate, trackCount, artistUrl, artistsData) {
   g_albumReleaseDate = releaseDate || '';
   g_albumTrackCount = trackCount || 0;
   g_albumArtistUrl = artistUrl || '';
+  g_albumArtistsData = Array.isArray(artistsData) ? artistsData : [];
   
   const metaSection = $('track-meta-section');
   if (metaSection) {
@@ -1333,11 +1455,6 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   $('album-title').innerHTML = escHtml(title || '—') + (artistVerified
     ? ` <span class="artist-verified-badge" title="Verified Artist"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="#1d9bf0"/><path d="M8 12.5l2.5 2.5 5.5-5.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
     : '');
-  // innerHTML, not textContent: artistNameHtml() wraps the name in a
-  // clickable span when artistUrl resolved to a real http(s) URL (empty for
-  // an artist's own page — no point linking a page to itself), plain
-  // escaped text otherwise.
-  $('album-artist').innerHTML = artistNameHtml(artist, artistUrl);
   const subtitle = $('album-subtitle');
   
   // For artists, show rank or listeners; for playlists, show quality
@@ -1413,11 +1530,22 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   }
 
   // If owner present, prefer showing owner as the album artist (playlist behavior)
+  //
+  // This is the single place #album-artist is written. It used to be the
+  // second: an earlier line set the linked markup and this one overwrote it
+  // with plain textContent a few statements later, so the artist name in
+  // the single-track card — the one view where this span is what's actually
+  // on screen — was never clickable however well the backend resolved it.
+  //
+  // innerHTML: one clickable span per credited artist when the backend sent
+  // the per-artist list, a single link when it only sent one URL, plain
+  // escaped text when it sent neither (an artist's own page sends neither —
+  // no point linking a page to itself).
   const artistEl = $('album-artist');
   if (owner) {
     artistEl.textContent = "";
   } else {
-    artistEl.textContent = artist || '';
+    artistEl.innerHTML = artistsCreditHtml(artistsData, artist, artistUrl);
   }
 
   if (ownerAvatar) {
@@ -1534,7 +1662,7 @@ function updateAlbumMeta(trackCount) {
     // be the same clickable span as everywhere else an artist name shows,
     // the date/track-count segments stay plain text.
     let subtitleParts = [];
-    if (artist) subtitleParts.push(artistNameHtml(artist, g_albumArtistUrl));
+    if (artist) subtitleParts.push(artistsCreditHtml(g_albumArtistsData, artist, g_albumArtistUrl));
     if (g_albumReleaseDate) {
       const dateStr = String(g_albumReleaseDate).split('T')[0];
       if (dateStr) subtitleParts.push(escHtml(dateStr));
@@ -1571,13 +1699,18 @@ function updateAlbumMeta(trackCount) {
     const released = g_albumReleaseDate
       ? String(g_albumReleaseDate).split('T')[0]
       : (t0.release_date ? String(t0.release_date).split('T')[0] : '');
+    // Ordered by how much the fact is worth here, not by how the metadata
+    // happens to arrive: copyright is four lines of legal boilerplate and
+    // the least actionable thing in the sheet, and leading with it pushed
+    // the release date, the track count and the runtime to the bottom of
+    // the column. Those go first now; the ℗ line brings up the rear.
     renderAlbumTech([
-      ['Label', t0.publisher || t0.label],
-      ['Copyright', t0.copyright],
-      ['Released', released],
+      ['Released', withRelativeAge(released)],
       ['Tracks', trackCount > 0 ? String(trackCount) : ''],
       ['Total time', formatLongDuration(totalMs)],
+      ['Label', t0.publisher || t0.label],
       ['UPC', t0.upc],
+      ['Copyright', t0.copyright],
     ]);
   } else if (badgeType !== 'TRACK') {
     // ARTIST / SEARCH — showSingleTrackCard owns the TRACK case.
@@ -1625,14 +1758,16 @@ function showSingleTrackCard(t) {
     ? Number(playcountRaw).toLocaleString('en-US')
     : null;
 
+  // Same ordering rationale as the album sheet in updateAlbumMeta(): the
+  // facts you actually read first, with the copyright boilerplate last.
   renderAlbumTech([
     ['Album', t.album || t.album_name || t.release],
+    ['Released', withRelativeAge(t.release_date ? String(t.release_date).split('T')[0] : (t.year || ''))],
+    ['Plays', playcountVal],
+    ['Genre', t.genre],
     ['ISRC', t.isrc],
     ['Label', t.publisher || t.label],
     ['Copyright', t.copyright],
-    ['Released', t.release_date ? String(t.release_date).split('T')[0] : (t.year || '')],
-    ['Plays', playcountVal],
-    ['Genre', t.genre],
   ]);
 
   // Bottoni azione specifici per la track
@@ -1753,6 +1888,37 @@ function formatLongDuration(ms) {
   return h ? `${h} hr ${m} min` : `${m} min`;
 }
 
+// "2026-05-15 · 3 months ago" — the date on its own answers "when", but not
+// the question actually being asked of a release date in a downloader ("is
+// this new?"), which otherwise needs mental arithmetic against today. Coarse
+// on purpose: one unit, and nothing at all under a day ("today"), because a
+// release date has no time-of-day to be precise about.
+function withRelativeAge(dateStr) {
+  const raw = String(dateStr || '').trim();
+  if (!raw) return '';
+  // A year-only release ("1998") has no month or day to measure from.
+  if (!/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw;
+
+  const then = new Date(raw + 'T00:00:00');
+  if (Number.isNaN(then.getTime())) return raw;
+
+  const days = Math.floor((Date.now() - then.getTime()) / 86400000);
+  if (days < 0) return `${raw} · upcoming`;
+  if (days === 0) return `${raw} · today`;
+
+  const units = [
+    [365, 'year'],
+    [30, 'month'],
+    [7, 'week'],
+    [1, 'day'],
+  ];
+  for (const [size, label] of units) {
+    const n = Math.floor(days / size);
+    if (n >= 1) return `${raw} · ${n} ${label}${n === 1 ? '' : 's'} ago`;
+  }
+  return raw;
+}
+
 // ── Album card: the technical sheet ─────────────────────────────────────────
 // Fills the column on the right of #album-card. `rows` is [[key, value], …];
 // a row whose value is empty or "—" is dropped, and an empty result hides
@@ -1780,10 +1946,15 @@ function injectArtistTabs(tracks) {
   // Raggruppa per album
   const albumMap = new Map();
   tracks.forEach((t, idx) => {
-    const key = t.album || t.album_name || t.release || '—';
+    // Keyed on the album's own URL when the backend resolved one: two
+    // different albums can share a name (a re-release, a deluxe edition),
+    // and grouping those together put one cover on someone else's tracks.
+    const name = t.album || t.album_name || t.release || '—';
+    const key = t.album_url || name;
     if (!albumMap.has(key)) {
       albumMap.set(key, {
-        name: key,
+        name,
+        url: t.album_url || '',
         cover: t.cover_url || t.cover || t.image || '',
         year: t.release_date ? String(t.release_date).split('T')[0].substring(0, 4) : (t.year || ''),
         indices: []
@@ -1824,12 +1995,35 @@ function injectArtistTabs(tracks) {
       ? `<img src="${escHtml(album.cover)}" alt="cover" loading="lazy" onerror="this.parentElement.innerHTML='🎵'">`
       : '🎵';
     card.innerHTML = `
-      <div class="aac-cover">${coverHtml}</div>
+      <div class="aac-cover">${coverHtml}
+        <button class="aac-dl" title="Download this album" aria-label="Download this album">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+      </div>
       <div class="aac-body">
         <div class="aac-name" title="${escHtml(album.name)}">${escHtml(album.name)}</div>
         <div class="aac-meta">${album.year ? album.year + ' · ' : ''}${album.indices.length} track${album.indices.length !== 1 ? 's' : ''}</div>
       </div>`;
-    card.onclick = () => { addToQueue(album.indices); startDownloadQueue(); $('queue-drawer').classList.add('open'); };
+
+    // Clicking the card *opens* the album — the same view you would get by
+    // pasting its link. It used to queue every track and start downloading
+    // immediately, which is a surprising amount to set in motion for one
+    // click on a picture, and left no way to simply look at an album.
+    // Downloading is still one click, on the button on the cover.
+    const openAlbum = () => {
+      if (album.url) { goToUrl(album.url); return; }
+      // No album URL from this provider: fall back to selecting the album's
+      // tracks in the list below, which is at least non-destructive.
+      switchArtistTab('tracks');
+      selectOnlyTracks(album.indices);
+    };
+    card.onclick = openAlbum;
+    card.querySelector('.aac-dl').onclick = (e) => {
+      e.stopPropagation();
+      addToQueue(album.indices);
+      startDownloadQueue();
+      $('queue-drawer').classList.add('open');
+    };
     albumsPanel.appendChild(card);
   });
   section.appendChild(albumsPanel);
@@ -1991,7 +2185,7 @@ function renderTracks(tracks, page = 1) {
           ${thumb}
           <div class="tr-info">
             <div class="tr-name">${escHtml(t.title || t.name || '?')} ${explicit}</div>
-            <div class="tr-artist">${escHtml(t.artists || t.artist || '')}</div>
+            <div class="tr-artist">${artistsCreditHtml(t.artists_data, t.artists || t.artist || '', t.artist_url)}</div>
           </div>
         </div>
         <div class="tr-playcount">${playcountCell}</div>
@@ -2506,6 +2700,20 @@ function toggleAll(cb) {
   document.querySelectorAll('.track-cb').forEach(c => c.checked = cb.checked);
   onCheckChange();
 }
+// Ticks exactly the given track indices and unticks the rest — the fallback
+// for an album card with no album URL to open (a provider that never sent
+// one): you end up with that album's tracks selected in the list, ready for
+// "Download Selected", instead of a click that does nothing.
+function selectOnlyTracks(indices) {
+  const wanted = new Set(indices.map(Number));
+  document.querySelectorAll('.track-cb').forEach(cb => {
+    cb.checked = wanted.has(Number(cb.value));
+  });
+  onCheckChange();
+  const first = document.getElementById(`track-row-${indices[0]}`);
+  first?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 function onCheckChange() {
   const checked = document.querySelectorAll('.track-cb:checked').length;
   const total   = document.querySelectorAll('.track-cb').length;
@@ -2535,27 +2743,27 @@ function renderRecentSearches() {
     const searches = JSON.parse(localStorage.getItem('recent_searches') || '[]');
     const grid = $('recent-grid');
     grid.innerHTML = '';
-    // These are text rows, so the grid drops to a single full-width column
-    // instead of the 120px artwork tracks the fetches use.
+    // Chips that wrap, not one full-width row per search: a past query is
+    // two or three words, and giving each of them a row of its own pushed
+    // everything below the fold to list five words. See #recent-grid.searches
+    // in styles.css — the same grid is a track-artwork grid for fetches.
     grid.classList.add('searches');
     const label = $('recent-wrap').querySelector('.recent-label');
     if (label) label.textContent = 'RECENT SEARCHES';
-    
+
     searches.forEach(q => {
-        const card = document.createElement('div');
-        card.className = 'recent-card';
-        card.style.padding = '12px 14px';
-        card.style.display = 'flex';
-        card.style.alignItems = 'center';
-        card.style.gap = '10px';
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'search-chip';
+        chip.title = q;
         // Same stroke icon as the search-mode toggle, not an emoji: it sits
-        // in a themed card and has to take its colour from the theme.
-        card.innerHTML = `<span class="rc-search-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></span><span class="rc-title" style="font-size:13px; color:var(--text);">${escHtml(q)}</span>`;
-        card.onclick = () => {
+        // in a themed chip and has to take its colour from the theme.
+        chip.innerHTML = `<span class="rc-search-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></span><span class="search-chip-text">${escHtml(q)}</span>`;
+        chip.onclick = () => {
             $('urlInput').value = q;
             $('urlInput').dispatchEvent(new Event('input'));
         };
-        grid.appendChild(card);
+        grid.appendChild(chip);
     });
 }
 
@@ -3158,6 +3366,16 @@ function renderQueue() {
   $('q-skipped').textContent = skippedCount;
   $('q-failed').textContent = failedCount;
 
+  // Which counter is currently acting as the filter, and whether the "Clear
+  // filter" escape hatch is needed at all.
+  const filterMap = { waiting: 'queued', done: 'completed', skipped: 'skipped', error: 'failed' };
+  document.querySelectorAll('.queue-summary .qs-item').forEach(el => {
+    const on = !!queueFilterStatus && el.classList.contains(filterMap[queueFilterStatus]);
+    el.classList.toggle('is-filtering', on);
+    el.setAttribute('aria-pressed', String(on));
+  });
+  $('queue-clear-filters')?.classList.toggle('hidden', !queueFilterStatus && !queueSearch);
+
   const dock = $('queue-dock');
   if (queue.length === 0) {
     queueStats = { downloaded:'0.00 MB', speed:'0.00 MB/s' };
@@ -3187,7 +3405,36 @@ function renderQueue() {
 
   empty.style.display = 'none';
   if (dock) dock.classList.add('visible');
-  queue.forEach((item, qi) => {
+
+  // Filtering happens here, not over the rendered nodes: the counts above
+  // must keep describing the whole queue (that is what makes them useful as
+  // filter buttons), and re-rendering is what this function does anyway.
+  // 'active' counts as queued for filtering — a download in flight is one
+  // you are waiting on, and having it vanish from "Queued" the moment it
+  // starts is not what anyone means by the word.
+  const q = (queueSearch || '').toLowerCase();
+  const visibleItems = queue.filter(item => {
+    if (queueFilterStatus) {
+      const matchesStatus = queueFilterStatus === 'waiting'
+        ? (item.status === 'waiting' || item.status === 'active')
+        : item.status === queueFilterStatus;
+      if (!matchesStatus) return false;
+    }
+    if (!q) return true;
+    return `${item.title || ''} ${item.artist || ''} ${item.album || ''}`.toLowerCase().includes(q);
+  });
+
+  if (!visibleItems.length) {
+    const none = document.createElement('div');
+    none.className = 'queue-no-match';
+    none.textContent = queueFilterStatus || q
+      ? 'Nothing in the queue matches this filter.'
+      : 'Queue is empty.';
+    list.appendChild(none);
+  }
+
+  visibleItems.forEach((item) => {
+    const qi = queue.indexOf(item);
     const statusLabel = { waiting:'Queued', active:'Downloading', done:'completed', error:'Failed', skipped:'Skipped' }[item.status] || 'Queued';
     const statusText = item.status === 'active'
       ? `Downloading… ${item.progress}%`
@@ -3273,6 +3520,27 @@ function toggleQueueDrawer() {
   const drawer = $('queue-drawer');
   if (!drawer) return;
   drawer.classList.toggle('open');
+}
+
+// The four counters double as filters: the number and the way to see what it
+// counts are the same control, which is one fewer thing on screen than a
+// count plus a separate status dropdown. Clicking the active one clears it.
+function filterQueue(status) {
+  queueFilterStatus = (queueFilterStatus === status) ? null : status;
+  renderQueue();
+}
+
+function onQueueSearch(value) {
+  queueSearch = value || '';
+  renderQueue();
+}
+
+function clearQueueFilters() {
+  queueFilterStatus = null;
+  queueSearch = '';
+  const input = $('queue-search');
+  if (input) input.value = '';
+  renderQueue();
 }
 
 function updateQueueItem(qi, status, progress) {
@@ -4761,6 +5029,7 @@ window.addEventListener('pywebviewready', async () => {
   await refreshInstalledServices();
   initSettingsTracking();
   updateSearchMode();
+  initPasteButton();
 });
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncSystemTheme);
