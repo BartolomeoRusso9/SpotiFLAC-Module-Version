@@ -1462,6 +1462,13 @@ class SpotiFLAC_API(
             use_album_track_numbers = config.get("use_album_track_numbers", False)
             use_artist_subfolders = config.get("use_artist_subfolders", False)
             use_album_subfolders = config.get("use_album_subfolders", False)
+            # The CLI and the interactive picker both default this on;
+            # the GUI had no toggle at all and never passed the option,
+            # so client.SpotiFLAC's own False default applied and every
+            # playlist landed loose in the download folder.
+            create_playlist_subfolders = config.get(
+                "create_playlist_subfolders", True
+            )
             first_artist_only = config.get("first_artist_only", False)
             artist_separator = config.get("artist_separator") or None
             lyrics_providers = config.get("lyrics_providers") or [
@@ -1596,6 +1603,7 @@ class SpotiFLAC_API(
                     use_album_track_numbers=use_album_track_numbers,
                     use_artist_subfolders=use_artist_subfolders,
                     use_album_subfolders=use_album_subfolders,
+                    create_playlist_subfolders=create_playlist_subfolders,
                     first_artist_only=first_artist_only,
                     artist_separator=artist_separator,
                     embed_lyrics=embed_lyrics,

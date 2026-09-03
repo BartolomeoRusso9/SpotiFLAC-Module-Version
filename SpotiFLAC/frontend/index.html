@@ -10,7 +10,7 @@
        tells itself apart from --web. Harmless to load in the desktop
        pywebview window too: manifest/theme-color are simply unused there,
        and the registration script below no-ops without that flag. -->
-  <link rel="manifest" href="manifest.json?v=20260919">
+  <link rel="manifest" href="manifest.json?v=20260921">
   <meta name="theme-color" content="#0a0a0c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="SpotiFLAC">
@@ -21,7 +21,7 @@
   <link rel="icon" type="image/svg+xml" href="assets/icons/logo.svg">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/logo-192.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260919">
+  <link rel="stylesheet" href="styles.css?v=20260921">
   <script>
     // Theme, applied before the first paint. app.js used to do this only from
     // its 'pywebviewready' handler, which meant the window painted light and
@@ -906,6 +906,13 @@
               </label>
             </div>
             <div class="s-row">
+              <span class="s-label">Playlist subfolders</span>
+              <label class="toggle">
+                <input type="checkbox" id="config-playlist-sub">
+                <span class="toggle-sl"></span>
+              </label>
+            </div>
+            <div class="s-row">
               <span class="s-label">First artist only in tags & filename</span>
               <label class="toggle">
                 <input type="checkbox" id="config-first-artist">
@@ -1112,8 +1119,8 @@
       </div>
     </div>
   </div>
-  </div><script src="toast-system.js?v=20260919"></script>
-  <script src="app.js?v=20260919"></script>
+  </div><script src="toast-system.js?v=20260921"></script>
+  <script src="app.js?v=20260921"></script>
   <script>
     // --web mode only (see sw.js's own comment for what the service worker
     // actually does — installability, not offline caching of live data).
