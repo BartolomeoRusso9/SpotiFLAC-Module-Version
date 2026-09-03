@@ -516,6 +516,18 @@ class AsyncHttpClient:
                 msg,
             )
 
+        # Providers hand us whatever their API returned, and some of them
+        # return a base64 manifest where a URL was expected. httpx accepts a
+        # relative URL and only fails deep inside urllib, with the whole blob
+        # in the message — so reject it here, naming the provider and showing
+        # just enough of the value to identify it.
+        if not str(url).startswith(("http://", "https://")):
+            shown = str(url)[:80] + ("…" if len(str(url)) > 80 else "")
+            raise NetworkError(
+                self._provider,
+                f"not an absolute HTTP(S) URL: {shown!r}",
+            )
+
         temp = dest_path + ".part"
         headers = dict(extra_headers or {})
 

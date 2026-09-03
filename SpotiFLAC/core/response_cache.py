@@ -10,12 +10,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-_CACHE_ROOT = (
-    Path(
-        os.getenv("SPOTIFLAC_CACHE_DIR", str(Path.home() / ".cache" / "spotiflac")),
-    )
-    / "responses"
-)
+from .paths import cache_dir
+
+_CACHE_ROOT = cache_dir() / "responses"
 
 
 def _path(namespace: str, key: str) -> Path:

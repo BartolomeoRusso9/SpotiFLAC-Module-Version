@@ -2,15 +2,104 @@ import base64
 import json
 import logging
 import re
+import threading
+import time
 from typing import Any
 
 import httpx
 
 # Uses the relative import path matching spotfetch.py's actual location
 from SpotiFLAC.core.http import SAFE_ACCEPT_ENCODING
+from SpotiFLAC.core.isrc_utils import is_valid_isrc
+from SpotiFLAC.core.spotify_protobuf import (
+    id_to_gid_hex,
+    merge_fallbacks,
+    parse_album,
+    parse_track,
+)
 from SpotiFLAC.core.spotify_totp import generate_spotify_totp
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Native metadata cache
+# ---------------------------------------------------------------------------
+#
+# An album fetch is made once per *track* of that album otherwise: a 26-track
+# release would ask spclient for the same barcode 26 times. Bounded in both
+# directions — an LRU cap so a long library scan cannot grow it without limit,
+# and a TTL because market-scoped fields (availability, the album a track
+# resolves to) do change under us.
+
+_NATIVE_CACHE_LIMIT = 500
+_NATIVE_TTL_S = 300.0
+#: Misses expire faster than hits: a release the endpoint did not know about
+#: a moment ago may well be there on the next pass.
+_NEGATIVE_TTL_S = 30.0
+
+_native_track_cache: dict[str, tuple[dict[str, Any], float, float]] = {}
+_native_album_cache: dict[str, tuple[dict[str, Any], float, float]] = {}
+_native_cache_lock = threading.Lock()
+
+
+def _native_cache_get(
+    cache: dict[str, tuple[dict[str, Any], float, float]],
+    key: str,
+) -> dict[str, Any] | None:
+    """The cached entry, or None when absent or stale.
+
+    An empty dict is a *negative* entry and is returned as such — the caller
+    must distinguish it from None, or a miss would be re-fetched anyway and
+    the negative caching would buy nothing.
+    """
+    if not key:
+        return None
+    with _native_cache_lock:
+        entry = cache.get(key)
+        if entry is None:
+            return None
+        value, created_at, ttl_s = entry
+        if time.monotonic() - created_at > ttl_s:
+            cache.pop(key, None)
+            return None
+        # Refresh recency so the LRU eviction below drops genuinely cold keys.
+        cache[key] = cache.pop(key)
+        return value
+
+
+def _native_cache_put(
+    cache: dict[str, tuple[dict[str, Any], float, float]],
+    key: str,
+    value: dict[str, Any],
+    ttl_s: float = _NATIVE_TTL_S,
+) -> dict[str, Any]:
+    if not key:
+        return value
+    with _native_cache_lock:
+        cache.pop(key, None)
+        cache[key] = (value, time.monotonic(), ttl_s)
+        while len(cache) > _NATIVE_CACHE_LIMIT:
+            cache.pop(next(iter(cache)))
+    return value
+
+
+def _isrc_from_raw_body(body: bytes) -> str:
+    """Last-resort ISRC scrape, for a message the parser could not walk.
+
+    This is the heuristic the parser replaced: find "isrc" followed by field
+    control bytes and take the next 12-character alphanumeric block. It can
+    match a neighbouring field, so the candidate is always validated against
+    the real ISRC shape (2 letters + 3 alphanumeric + 7 digits) — a hit like
+    "INTERNATIONA" is 12 letters with no digits and is never an ISRC.
+
+    Kept only as a fallback: if Spotify renumbers the external-id field the
+    structured read returns nothing and this still finds the code.
+    """
+    for match in re.finditer(rb"isrc[\x00-\x1f]+([A-Za-z0-9]{12})", body):
+        candidate = match.group(1).decode(errors="ignore").upper()
+        if is_valid_isrc(candidate):
+            return candidate
+    return ""
 
 
 class SpotifyWebClient:
@@ -671,36 +760,27 @@ class SpotifyWebClient:
 
     def spotify_id_to_hex_gid(self, spotify_id: str) -> str:
         """Converte un Spotify base62 ID nel GID esadecimale richiesto dall'endpoint metadata."""
-        alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        bytes_ = []
-        for char in spotify_id:
-            value = alphabet.index(char)
-            carry = value
-            for j in range(len(bytes_)):
-                total = bytes_[j] * 62 + carry
-                bytes_[j] = total & 0xFF
-                carry = total >> 8
-            while carry > 0:
-                bytes_.append(carry & 0xFF)
-                carry >>= 8
-        while len(bytes_) < 16:
-            bytes_.append(0)
-        return "".join(f"{b:02x}" for b in reversed(bytes_))
+        return id_to_gid_hex(spotify_id)
 
-    def get_isrc_from_metadata(self, track_id: str, _retried: bool = False) -> str:
-        """Retrieves the ISRC from spclient's binary endpoint (same approach as the JS).
+    def _metadata_body(
+        self,
+        entity_type: str,
+        spotify_id: str,
+        _retried: bool = False,
+    ) -> bytes | None:
+        """The raw protobuf from spclient's binary metadata endpoint.
 
         `_retried` bounds the 401 path to a single refresh. A token that comes
         back from initialize() still unauthorised — a market the endpoint
         refuses, a revoked client token — used to recurse forever, each turn
-        costing a full session bootstrap. This method is awaited inside
+        costing a full session bootstrap. This is awaited inside
         _isrc_for_track_async(), which is gathered into every single-track
         metadata load, so that recursion did not fail: it hung the load.
         """
         try:
-            gid = self.spotify_id_to_hex_gid(track_id)
+            gid = id_to_gid_hex(spotify_id)
             resp = self._session.get(
-                f"https://spclient.wg.spotify.com/metadata/4/track/{gid}?market=from_token",
+                f"https://spclient.wg.spotify.com/metadata/4/{entity_type}/{gid}?market=from_token",
                 headers={
                     "Authorization": f"Bearer {self.access_token}",
                     "Client-Token": self.client_token,
@@ -711,44 +791,101 @@ class SpotifyWebClient:
             if resp.status_code == 401:
                 if _retried:
                     logger.debug(
-                        "[spotfetch] ISRC endpoint still 401 after a token "
-                        "refresh for %s — giving up",
-                        track_id,
+                        "[spotfetch] metadata endpoint still 401 after a token "
+                        "refresh for %s %s — giving up",
+                        entity_type,
+                        spotify_id,
                     )
-                    return ""
+                    return None
                 # force=True, as query() does on its own 401. Plain
                 # initialize() only fills in credentials that are *missing*,
                 # and a 401 here means the ones we hold are present and
                 # expired — so the retry re-sent the same dead token and got
-                # the same 401. The ISRC never recovered; it just cost a
+                # the same 401. The lookup never recovered; it just cost a
                 # second round-trip before giving up.
                 self.initialize(force=True)
-                return self.get_isrc_from_metadata(track_id, _retried=True)
+                return self._metadata_body(entity_type, spotify_id, _retried=True)
             if resp.status_code != 200:
-                return ""
-            import re
+                return None
+            return resp.content
+        except Exception as e:
+            logger.debug(
+                "[spotfetch] metadata lookup failed for %s %s: %s",
+                entity_type,
+                spotify_id,
+                e,
+            )
+            return None
 
-            from .isrc_utils import is_valid_isrc
+    def get_native_album_metadata(self, album_id: str) -> dict[str, Any]:
+        """The album's native metadata: UPC, disc layout, label, copyright.
 
-            # NOTE: this endpoint returns a binary protobuf blob
-            # (content-type: vnd.spotify/metadata-track), not JSON. There
-            # is no true protobuf parser here: we search heuristically for
-            # the string "isrc" followed by field control bytes and take
-            # the next 12-character alphanumeric block.
-            # This may erroneously match a nearby unrelated field (e.g. a
-            # restriction/territory text), so the candidate must always be
-            # validated against the true ISRC format
-            # (2 letters + 3 alphanumeric + 7 digits) before accepting:
-            # a match like "INTERNATIONA" (12 letters, zero
-            # digits) is never a valid ISRC.
-            for match in re.finditer(
-                rb"isrc[\x00-\x1f]+([A-Za-z0-9]{12})",
-                resp.content,
-            ):
-                candidate = match.group(1).decode(errors="ignore").upper()
-                if is_valid_isrc(candidate):
-                    return candidate
-            return ""
+        These have no other source in this codebase. The GraphQL album query
+        carries neither the barcode nor the disc list, so DISCTOTAL was
+        always written as 1 and UPC was never written at all.
+        """
+        if not album_id:
+            return {}
+        cached = _native_cache_get(_native_album_cache, album_id)
+        if cached is not None:
+            return cached
+
+        body = self._metadata_body("album", album_id)
+        if not body:
+            # Negative entry, on a short TTL: a release the endpoint has no
+            # answer for should not be re-asked once per track of it.
+            return _native_cache_put(_native_album_cache, album_id, {}, _NEGATIVE_TTL_S)
+
+        metadata = parse_album(body)
+        metadata.setdefault("album_id", album_id)
+        if not metadata.get("album_url"):
+            metadata["album_url"] = f"https://open.spotify.com/album/{album_id}"
+        return _native_cache_put(_native_album_cache, album_id, metadata)
+
+    def get_native_track_metadata(
+        self,
+        track_id: str,
+        album_id: str = "",
+    ) -> dict[str, Any]:
+        """The track's native metadata, completed from its album.
+
+        The album embedded in a track response is a *subset* — it has the
+        name, label and release date but no UPC, no disc list and no
+        copyright. Those only exist in a separate album fetch, so one is
+        made and merged in behind whatever the track already said.
+        """
+        if not track_id:
+            return {}
+        cached = _native_cache_get(_native_track_cache, track_id)
+        if cached is not None:
+            return cached
+
+        body = self._metadata_body("track", track_id)
+        if not body:
+            return _native_cache_put(_native_track_cache, track_id, {}, _NEGATIVE_TTL_S)
+
+        metadata = parse_track(body)
+        if not metadata.get("isrc"):
+            metadata["isrc"] = _isrc_from_raw_body(body)
+
+        resolved_album = album_id or metadata.get("album_id") or ""
+        if resolved_album:
+            metadata.setdefault("album_id", resolved_album)
+            album_metadata = self.get_native_album_metadata(resolved_album)
+            if album_metadata:
+                merge_fallbacks(metadata, album_metadata)
+
+        return _native_cache_put(_native_track_cache, track_id, metadata)
+
+    def get_isrc_from_metadata(self, track_id: str, _retried: bool = False) -> str:
+        """The track's ISRC, or "".
+
+        `_retried` is accepted for compatibility with the callers that used
+        to drive the retry themselves; the bounded refresh now lives in
+        _metadata_body().
+        """
+        try:
+            return self.get_native_track_metadata(track_id).get("isrc", "")
         except Exception as e:
             logger.debug(f"[spotfetch] ISRC lookup failed for {track_id}: {e}")
             return ""

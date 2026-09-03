@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import shlex
 import sys
@@ -20,11 +21,34 @@ from urllib.parse import urlparse
 
 from .core.health_check import run_health_check
 from .core.quality import normalize_quality
+from .core.transcode import is_lossless
 from .core.url_utils import url_host_matches
-from .extensions.catalog import SERVICE_ALIASES
+from .extensions.catalog import installed_download_services
 from .extensions.manager import ExtensionManager
 
 _NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
+
+# Menu label → core.transcode format name (None = no conversion). Spelled out
+# rather than generated from SUPPORTED_FORMATS so the wizard can say what each
+# format is actually for; the extensions come from core.transcode.
+_TRANSCODE_CHOICES: tuple[tuple[str, str | None], ...] = (
+    ("Keep the provider's format (no conversion)", None),
+    ("FLAC — lossless, the universal default", "flac"),
+    ("ALAC (.m4a) — lossless, native on macOS/iOS", "alac"),
+    ("WavPack (.wv) — lossless, smallest of the exotics", "wavpack"),
+    ("TTA (.tta) — lossless, fast to decode", "tta"),
+    ("WAV — uncompressed PCM, for DJ software and editors", "wav"),
+    ("AIFF — uncompressed PCM, the Apple flavour", "aiff"),
+    ("MP3 — lossy, for players that read nothing else", "mp3"),
+)
+
+
+def _transcode_label(fmt: str | None) -> str:
+    """Menu label for a stored format name, falling back to 'no conversion'."""
+    for label, value in _TRANSCODE_CHOICES:
+        if value == fmt:
+            return label
+    return _TRANSCODE_CHOICES[0][0]
 
 
 class _BackRequested(Exception):
@@ -169,58 +193,15 @@ def _header() -> None:
     print(DIM("  Tip: enter b/back at any question to restart the wizard."))
 
 
-def _canonical_service_name(ext_name: str) -> str | None:
-    """Normalize extension IDs such as ``tidal-web`` and ``tidal-py`` to one service name."""
-    value = (ext_name or "").lower().removeprefix("ext:")
-    if not value:
-        return None
-
-    value = value.replace("_", "-")
-    value = value.replace("-web", "").replace("-py", "")
-
-    alias_reverse = {v.lower(): k for k, v in SERVICE_ALIASES.items()}
-    if value in alias_reverse:
-        return alias_reverse[value]
-
-    if value.startswith("ytmusic"):
-        return "youtube"
-    if value.startswith("apple"):
-        return "apple"
-    if value.startswith("tidal"):
-        return "tidal"
-    if value.startswith("qobuz"):
-        return "qobuz"
-    if value.startswith("deezer"):
-        return "deezer"
-    if value.startswith("soundcloud"):
-        return "soundcloud"
-    if value.startswith("pandora"):
-        return "pandora"
-    if value.startswith("amazon"):
-        return "amazon"
-    return value
-
-
 def _installed_service_options() -> list[str]:
-    """Return the installed provider services as a deduplicated list for interactive menus."""
-    try:
-        manager = ExtensionManager(auto_install_downloads=False)
-        installed = manager.list_installed()
-    except Exception:
-        return []
+    """The installed provider services, for the interactive menus.
 
-    services: list[str] = []
-    seen: set[str] = set()
-    for ext in installed:
-        if not getattr(ext, "is_download_provider", False):
-            continue
-        service = _canonical_service_name(ext.name)
-        if not service or service in seen:
-            continue
-        seen.add(service)
-        services.append(service)
-
-    return sorted(services)
+    Thin wrapper: the discovery itself lives in extensions/catalog.py, which
+    is also what the GUI's Settings list reads — the two menus have to offer
+    the same providers, and the only way to be sure of that is for them to
+    ask the same function.
+    """
+    return [str(service["id"]) for service in installed_download_services()]
 
 
 def _require_installed_service_options() -> list[str]:
@@ -892,11 +873,14 @@ def _summary(cfg: dict) -> None:
     row("Services", " → ".join(cfg["services"]))
     row("Quality", cfg["quality"])
     if cfg.get("transcode_to"):
+        fmt = cfg["transcode_to"]
         kept = " (original kept)" if cfg.get("transcode_keep_original") else ""
-        row(
-            "Transcode",
-            f"{cfg['transcode_to'].upper()} {cfg.get('transcode_bitrate', '320k')}{kept}",
+        # The bitrate is meaningless for the lossless targets — showing
+        # "FLAC 320k" would suggest a quality setting that does not exist.
+        detail = (
+            "lossless" if is_lossless(fmt) else cfg.get("transcode_bitrate", "320k")
         )
+        row("Transcode", f"{fmt.upper()} {detail}{kept}")
     row("Filename format", cfg["filename_format"])
 
     flags = []
@@ -926,11 +910,26 @@ def _summary(cfg: dict) -> None:
     row(
         "Lyrics",
         (
-            "enabled (" + ", ".join(cfg["lyrics_providers"]) + ")"
+            "enabled ("
+            + ", ".join(cfg["lyrics_providers"])
+            + ")"
+            + (
+                ""
+                if cfg.get("apple_lyrics_word_by_word", True)
+                or "apple" not in cfg["lyrics_providers"]
+                else " [apple: line-synced]"
+            )
             if cfg["embed_lyrics"]
             else "disabled"
         ),
     )
+    if cfg.get("save_lrc") or cfg.get("lrc_library_dir"):
+        lrc_where = []
+        if cfg.get("save_lrc"):
+            lrc_where.append("next to each track")
+        if cfg.get("lrc_library_dir"):
+            lrc_where.append(str(cfg["lrc_library_dir"]))
+        row(".lrc files", " · ".join(lrc_where))
     row(
         "Enrichment",
         (
@@ -1118,6 +1117,9 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
         cfg.setdefault("first_artist_only", False)
         cfg.setdefault("embed_lyrics", True)
         cfg.setdefault("lyrics_providers", ["apple", "lrclib"])
+        cfg.setdefault("apple_lyrics_word_by_word", True)
+        cfg.setdefault("save_lrc", False)
+        cfg.setdefault("lrc_library_dir", None)
         cfg.setdefault("enrich_metadata", True)
         cfg.setdefault("enrich_providers", ["deezer", "apple"])
         cfg.setdefault("allow_fallback", True)
@@ -1403,23 +1405,28 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
 
     # ── 4.5. Transcoding ───────────────────────────────────────────────────
     _section("4.5 · Transcoding")
-    if _ask_bool(
-        "Convert every track to MP3 after download? (requires ffmpeg)",
-        bool(cfg.get("transcode_to")),
-    ):
-        cfg["transcode_to"] = "mp3"
+    fmt = _ask_choice(
+        "Convert every track after download? (requires ffmpeg)",
+        options=[label for label, _ in _TRANSCODE_CHOICES],
+        default=_transcode_label(cfg.get("transcode_to")),
+    )
+    cfg["transcode_to"] = dict(_TRANSCODE_CHOICES)[fmt]
+
+    if cfg["transcode_to"] and not is_lossless(cfg["transcode_to"]):
         cfg["transcode_bitrate"] = _ask_choice(
-            "MP3 bitrate:",
+            "Bitrate:",
             options=["320k", "256k", "192k", "128k"],
             default=cfg.get("transcode_bitrate", "320k"),
         )
+    else:
+        cfg["transcode_bitrate"] = cfg.get("transcode_bitrate", "320k")
+
+    if cfg["transcode_to"]:
         cfg["transcode_keep_original"] = _ask_bool(
-            "Keep the original lossless file as well?",
+            "Keep the original downloaded file as well?",
             cfg.get("transcode_keep_original", False),
         )
     else:
-        cfg["transcode_to"] = None
-        cfg["transcode_bitrate"] = cfg.get("transcode_bitrate", "320k")
         cfg["transcode_keep_original"] = cfg.get("transcode_keep_original", False)
 
     # ── 5. Filename format ─────────────────────────────────────────────────
@@ -1519,7 +1526,29 @@ async def _run_interactive_once(min_trust_tier: str | None = None) -> dict:
             defaults=cfg.get("lyrics_providers") or ["apple", "lrclib"],
             ordered=True,
         )
+
+        if "apple" in (cfg.get("lyrics_providers") or []):
+            cfg["apple_lyrics_word_by_word"] = _ask_bool(
+                "Apple lyrics word-by-word (off = line-by-line)?",
+                cfg.get("apple_lyrics_word_by_word", True),
+            )
+
+        # No player renders a word-by-word lyric out of an embedded tag —
+        # Apple Music strips the timing and shows flat text — so the synced
+        # display comes from an .lrc on disk read by an overlay app.
+        cfg["save_lrc"] = _ask_bool(
+            "Also save an .lrc file next to each track?",
+            cfg.get("save_lrc", False),
+        )
+        lrc_dir = _ask(
+            "Collect every .lrc in one folder as 'Artist - Title.lrc' "
+            "(for LyricsX & co., leave blank to skip)",
+            cfg.get("lrc_library_dir") or "",
+        )
+        cfg["lrc_library_dir"] = lrc_dir or None
     else:
+        cfg["save_lrc"] = False
+        cfg["lrc_library_dir"] = None
         cfg["lyrics_providers"] = cfg.get("lyrics_providers") or [
             "apple",
             "lrclib",
@@ -1699,10 +1728,25 @@ def _print_cli_command(cfg: dict) -> None:
         parts.append("--no-lyrics")
     else:
         parts.extend(["--lyrics-providers", *cfg["lyrics_providers"]])
+        if not cfg.get("apple_lyrics_word_by_word", True):
+            parts.append("--apple-lyrics-line-synced")
     if not cfg["enrich_metadata"]:
         parts.append("--no-enrich")
     else:
         parts.extend(["--enrich-providers", *cfg["enrich_providers"]])
+    if cfg.get("transcode_to"):
+        # --transcode rather than the --mp3/--alac shorthands: those cover
+        # two of the seven targets, and one spelling keeps the printed
+        # command readable however the wizard was answered.
+        parts.extend(["--transcode", cfg["transcode_to"]])
+        # Only the lossy targets read a bitrate. Printing --transcode-bitrate
+        # beside --transcode flac would advertise a knob that does nothing.
+        if not is_lossless(cfg["transcode_to"]) and (
+            cfg.get("transcode_bitrate", "320k") != "320k"
+        ):
+            parts.extend(["--transcode-bitrate", cfg["transcode_bitrate"]])
+        if cfg.get("transcode_keep_original"):
+            parts.append("--keep-original")
     if cfg.get("track_max_retries"):
         parts.extend(["--retries", str(cfg["track_max_retries"])])
     if cfg.get("max_concurrent_downloads", 2) != 2:
@@ -1715,6 +1759,30 @@ def _print_cli_command(cfg: dict) -> None:
             "post_download_command",
         ):
             parts.extend(["--post-command", cfg["post_download_command"]])
+    if cfg.get("save_lrc"):
+        parts.append("--save-lrc")
+    if cfg.get("lrc_library_dir"):
+        parts.extend(["--lrc-dir", cfg["lrc_library_dir"]])
+    if cfg.get("log_level") is not None:
+        # Profiles store the numeric constant; print the name a user would
+        # actually type, which --log-level accepts either way.
+        level = cfg["log_level"]
+        name = logging.getLevelName(level) if isinstance(level, int) else str(level)
+        parts.extend(["--log-level", name])
+    # Enabled by default, so only the opt-out is worth printing.
+    if cfg.get("allow_fallback", True) is False:
+        parts.append("--no-fallback")
+    if cfg.get("include_featuring"):
+        parts.append("--include-featuring")
+    if cfg.get("m3u_format", "m3u8") != "m3u8":
+        parts.extend(["--m3u", cfg["m3u_format"]])
+    if cfg.get("verify_hires"):
+        parts.append("--verify-hires")
+    # Resuming is the default, so only its absence is worth spelling out.
+    if cfg.get("resume", True) is False:
+        parts.append("--no-resume")
+    for hook in cfg.get("post_download_hooks") or []:
+        parts.extend(["--post-hook", hook])
     if cfg.get("qobuz_local_api_url"):
         parts.extend(["--qobuz-local-api", cfg["qobuz_local_api_url"]])
     if cfg.get("tidal_custom_api"):

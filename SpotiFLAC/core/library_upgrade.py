@@ -85,6 +85,10 @@ class AudioQuality:
     bitrate: int = 0
     channels: int = 0
     lossless: bool = False
+    #: Running time in seconds, straight off the same header read. Free
+    #: here, and a second `mutagen.File()` open per file everywhere it is
+    #: missing — core/library_dedup.py needs it for every file it scans.
+    length_s: float = 0.0
     error: str = ""
 
     @property
@@ -157,6 +161,7 @@ def inspect_file(path: str | Path) -> AudioQuality:
     quality.bitrate = int(getattr(info, "bitrate", 0) or 0)
     quality.channels = int(getattr(info, "channels", 0) or 0)
     quality.bits_per_sample = int(getattr(info, "bits_per_sample", 0) or 0)
+    quality.length_s = float(getattr(info, "length", 0.0) or 0.0)
 
     quality.lossless = _is_lossless(suffix, quality.codec)
 

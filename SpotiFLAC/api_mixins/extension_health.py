@@ -76,6 +76,28 @@ class ExtensionHealthMixin:
             },
         }
 
+    def get_download_services(self) -> dict:
+        """The download services this install can actually offer.
+
+        Settings used to render a list of twelve providers compiled into
+        app.js, whatever was installed: a fresh install offered sources that
+        could only fail, and a third-party extension appeared nowhere. This
+        is the same call the interactive wizard makes
+        (`extensions/catalog.installed_download_services`), so the two menus
+        cannot drift apart.
+
+        Shape: {"services": [{"id", "label", "extensions": [...]}, ...]}.
+        An empty list means no download provider is installed — the frontend
+        keeps its built-in list in that case rather than showing nothing,
+        since an empty picker is indistinguishable from a broken one.
+        """
+        try:
+            from ..extensions.catalog import installed_download_services
+
+            return {"services": installed_download_services()}
+        except Exception as e:
+            return {"services": [], "error": str(e)}
+
     def _installed_extension_index(self) -> dict[str, dict]:
         """{"ext:<name>": {"version": ..., "trust_tier": ...}} for what's installed.
 

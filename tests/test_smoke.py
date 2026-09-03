@@ -13,9 +13,18 @@ from SpotiFLAC.launcher import (
 )
 
 
-def test_log_level_hides_warnings_without_verbose():
-    assert _resolve_log_level(verbose=False) == logging.ERROR
+def test_default_level_reports_run_milestones():
+    # Was ERROR, which hid the info lines that say what a run is doing —
+    # the provider being tried, the ticket, the audio fetch, the transcode —
+    # so a stalled download printed nothing until it gave up. The libraries
+    # that would flood INFO are pinned separately by _quiet_noisy_libraries().
+    assert _resolve_log_level(verbose=False) == logging.INFO
     assert _resolve_log_level(verbose=True) == logging.DEBUG
+
+
+def test_a_quieter_level_is_still_reachable():
+    assert _resolve_log_level(verbose=False, explicit="ERROR") == logging.ERROR
+    assert _resolve_log_level(verbose=False, explicit="WARNING") == logging.WARNING
 
 
 def test_profile_config_accepts_named_log_levels():
@@ -159,7 +168,9 @@ def test_interactive_service_options_are_deduplicated_from_installed_extensions(
                 DummyExt("soundcloud"),
             ]
 
-    monkeypatch.setattr("SpotiFLAC.interactive.ExtensionManager", DummyManager)
+    # Patched where the discovery actually lives now: interactive and the
+    # GUI both read extensions/catalog.installed_download_services().
+    monkeypatch.setattr("SpotiFLAC.extensions.catalog.ExtensionManager", DummyManager)
 
     assert interactive._installed_service_options() == ["qobuz", "soundcloud", "tidal"]
 
@@ -176,7 +187,7 @@ def test_interactive_stops_when_no_download_providers_are_installed(
         def list_installed(self):
             return []
 
-    monkeypatch.setattr("SpotiFLAC.interactive.ExtensionManager", DummyManager)
+    monkeypatch.setattr("SpotiFLAC.extensions.catalog.ExtensionManager", DummyManager)
 
     with pytest.raises(SystemExit):
         interactive._require_installed_service_options()

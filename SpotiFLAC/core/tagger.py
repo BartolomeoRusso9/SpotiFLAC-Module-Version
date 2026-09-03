@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,6 +62,10 @@ from mutagen.id3 import (
 from mutagen.id3 import PictureType as ID3PictureType
 
 from .errors import ErrorKind, SpotiflacError
+
+# Runtime import, unlike TrackMetadata below: models imports nothing from
+# this package, so there is no cycle to avoid.
+from .models import split_credit
 
 if TYPE_CHECKING:
     from .models import TrackMetadata
@@ -163,7 +168,12 @@ _EXT_OPUS = {".opus"}
 _EXT_WAV = {".wav", ".wave"}
 _EXT_AIFF = {".aiff", ".aif", ".afc"}
 _EXT_WMA = {".wma"}
-_EXT_APEV2 = {".wv", ".ape", ".mpc", ".mp+", ".tta"}
+_EXT_APEV2 = {".wv", ".ape", ".mpc", ".mp+"}
+# TrueAudio sits apart from its WavPack/Monkey's Audio neighbours: the format
+# carries a leading ID3v2 tag, not a trailing APEv2 one, which is why mutagen
+# models it as an ID3FileType. Tagging it through _embed_apev2() raises
+# "not a Frame instance" and leaves the file untagged.
+_EXT_TTA = {".tta"}
 
 SUPPORTED_SUFFIXES = (
     _EXT_FLAC
@@ -175,6 +185,7 @@ SUPPORTED_SUFFIXES = (
     | _EXT_AIFF
     | _EXT_WMA
     | _EXT_APEV2
+    | _EXT_TTA
 )
 
 # ---------------------------------------------------------------------------
@@ -570,6 +581,33 @@ def _embed_aiff(
 
 
 # ---------------------------------------------------------------------------
+# Internal: write ID3 tags to a TTA file
+# ---------------------------------------------------------------------------
+
+
+def _embed_tta(
+    path: Path,
+    tags: dict[str, str],
+    cover_data: bytes | None,
+    lyrics: str | None,
+    lyrics_prov: str,
+    cover_mime: str = "image/jpeg",
+) -> None:
+    """Scrive tag ID3v2 su un file TTA (TrueAudio)."""
+    from mutagen.trueaudio import TrueAudio
+
+    audio = TrueAudio(str(path))
+    if audio.tags is None:
+        audio.add_tags()
+    audio.tags.clear()
+
+    _apply_id3_frames(audio.tags, tags, cover_data, lyrics, lyrics_prov, cover_mime)
+
+    audio.save()
+    logger.debug("[tagger/tta] tags written: %s", path.name)
+
+
+# ---------------------------------------------------------------------------
 # Internal: write Vorbis Comment tags to a FLAC file
 # ---------------------------------------------------------------------------
 
@@ -581,6 +619,7 @@ def _embed_flac(
     lyrics: str | None,
     lyrics_prov: str,
     multi_artist: bool,
+    credits: dict[str, list[str]] | None = None,
 ) -> None:
     """Writes all Vorbis Comment tags to a FLAC file."""
     audio = FLAC(str(path))
@@ -593,8 +632,7 @@ def _embed_flac(
     for key, val in tags.items():
         if multi_artist and key in ("ARTIST", "ALBUMARTIST") and "," in val:
             # Vorbis Comment standard: repeat the tag for each artist value
-            parts = [a.strip() for a in val.split(",") if a.strip()]
-            audio[key] = parts
+            audio[key] = split_credit(val, (credits or {}).get(key))
         else:
             audio[key] = val
 
@@ -623,6 +661,7 @@ def _embed_vorbis_comment(
     lyrics_prov: str,
     multi_artist: bool,
     file_cls: type,
+    credits: dict[str, list[str]] | None = None,
 ) -> None:
     """Writes Vorbis Comment tags to an OGG Vorbis or Opus file.
 
@@ -641,8 +680,7 @@ def _embed_vorbis_comment(
 
     for key, val in tags.items():
         if multi_artist and key in ("ARTIST", "ALBUMARTIST") and "," in val:
-            parts = [a.strip() for a in val.split(",") if a.strip()]
-            audio[key] = parts
+            audio[key] = split_credit(val, (credits or {}).get(key))
         else:
             audio[key] = val
 
@@ -668,19 +706,23 @@ def _embed_vorbis_comment(
     logger.debug("[tagger/ogg] tags written: %s", path.name)
 
 
-def _embed_oggvorbis(path, tags, cover_data, lyrics, lyrics_prov, multi_artist) -> None:
+def _embed_oggvorbis(
+    path, tags, cover_data, lyrics, lyrics_prov, multi_artist, credits=None
+) -> None:
     from mutagen.oggvorbis import OggVorbis
 
     _embed_vorbis_comment(
-        path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggVorbis
+        path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggVorbis, credits
     )
 
 
-def _embed_oggopus(path, tags, cover_data, lyrics, lyrics_prov, multi_artist) -> None:
+def _embed_oggopus(
+    path, tags, cover_data, lyrics, lyrics_prov, multi_artist, credits=None
+) -> None:
     from mutagen.oggopus import OggOpus
 
     _embed_vorbis_comment(
-        path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggOpus
+        path, tags, cover_data, lyrics, lyrics_prov, multi_artist, OggOpus, credits
     )
 
 
@@ -870,10 +912,6 @@ def _apev2_class_for(suffix: str) -> type:
         from mutagen.musepack import Musepack
 
         return Musepack
-    if suffix == ".tta":
-        from mutagen.trueaudio import TrueAudio
-
-        return TrueAudio
 
     from mutagen.apev2 import APEv2File
 
@@ -997,6 +1035,7 @@ async def _write_tags_async(
     lyrics_prov: str,
     multi_artist: bool,
     suffix: str,
+    credits: dict[str, list[str]] | None = None,
 ) -> None:
     if suffix in _EXT_FLAC:
         await asyncio.to_thread(
@@ -1007,6 +1046,7 @@ async def _write_tags_async(
             lyrics,
             lyrics_prov,
             multi_artist,
+            credits,
         )
     elif suffix in _EXT_MP3:
         await asyncio.to_thread(_embed_id3, path, tags, cover_data, lyrics, lyrics_prov)
@@ -1021,6 +1061,7 @@ async def _write_tags_async(
             lyrics,
             lyrics_prov,
             multi_artist,
+            credits,
         )
     elif suffix in _EXT_OPUS:
         await asyncio.to_thread(
@@ -1031,6 +1072,7 @@ async def _write_tags_async(
             lyrics,
             lyrics_prov,
             multi_artist,
+            credits,
         )
     elif suffix in _EXT_WAV:
         await asyncio.to_thread(_embed_wav, path, tags, cover_data, lyrics, lyrics_prov)
@@ -1038,6 +1080,8 @@ async def _write_tags_async(
         await asyncio.to_thread(
             _embed_aiff, path, tags, cover_data, lyrics, lyrics_prov
         )
+    elif suffix in _EXT_TTA:
+        await asyncio.to_thread(_embed_tta, path, tags, cover_data, lyrics, lyrics_prov)
     elif suffix in _EXT_WMA:
         await asyncio.to_thread(_embed_asf, path, tags, cover_data, lyrics, lyrics_prov)
     elif suffix in _EXT_APEV2:
@@ -1055,6 +1099,33 @@ async def _write_tags_async(
         raise SpotiflacError(ErrorKind.FILE_IO, f"Unsupported file type: {suffix}")
 
 
+def _tag_int(value: object, default: int = 0) -> int:
+    """A tag's numeric value, or `default` when it does not have one.
+
+    Track and disc numbers are text by the time they reach here, and text is
+    not always a number. MusicBrainz reports a vinyl track under the
+    designation printed on the sleeve — "B2" for side B, track 2 — and a tag
+    copied off another file can carry the "3/12" form. int() raises on both.
+
+    That mattered more than it sounds: in _embed_m4a() the conversion ran
+    *after* audio.delete(), so one "B2" from MusicBrainz raised, the caller
+    in core/transcode.py logged the failure and kept the conversion, and the
+    finished ALAC file was left with no tags whatsoever. Reported as
+    "Uuugly di Drake non va coi metadata"; the vinyl pressing of C,XOXO is
+    the release MusicBrainz picked for that ISRC.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return default
+    head = text.split("/", 1)[0].strip()
+    if head.lstrip("+-").isdigit():
+        return int(head)
+    # "B2" → 2, "A1" → 1: the digits of a printed designation are still the
+    # track's place on its side, which beats discarding the field.
+    digits = re.search(r"\d+", head)
+    return int(digits.group()) if digits else default
+
+
 def _embed_m4a(
     path: Path,
     tags: dict[str, str],
@@ -1065,13 +1136,16 @@ def _embed_m4a(
     """Writes tags to an M4A/AAC file via mutagen.mp4.MP4."""
     from mutagen.mp4 import MP4, MP4Cover
 
+    # Parsed before the delete, not after: whatever else changes here, the
+    # window in which this function can leave a file stripped of the tags it
+    # arrived with stays closed.
+    track_num = _tag_int(tags.get("TRACKNUMBER"))
+    track_total = _tag_int(tags.get("TRACKTOTAL"))
+    disc_num = _tag_int(tags.get("DISCNUMBER"), 1)
+    disc_total = _tag_int(tags.get("DISCTOTAL"), 1)
+
     audio = MP4(str(path))
     audio.delete()
-
-    track_num = int(tags.get("TRACKNUMBER", "0") or 0)
-    track_total = int(tags.get("TRACKTOTAL", "0") or 0)
-    disc_num = int(tags.get("DISCNUMBER", "1") or 1)
-    disc_total = int(tags.get("DISCTOTAL", "1") or 1)
 
     skip = {"TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL"}
 
@@ -1086,8 +1160,11 @@ def _embed_m4a(
             continue
         m4a_key = _M4A_MAP.get(key_up)
         if m4a_key == "tmpo":
+            # Strict on purpose, unlike the track and disc numbers above: a
+            # tempo is either a number or it is not, and guessing one out of
+            # surrounding text would write a BPM nobody measured.
             with contextlib.suppress(ValueError, TypeError):
-                audio[m4a_key] = [int(val)]
+                audio[m4a_key] = [int(str(val).strip())]
         elif m4a_key and m4a_key.startswith("----"):
             audio[m4a_key] = [str(val).encode("utf-8")]
         elif m4a_key:
@@ -1240,6 +1317,10 @@ def read_embedded_tags(
             from mutagen.oggopus import OggOpus
 
             return _read_vorbis_comment_tags(path, OggOpus)
+        if suffix in _EXT_TTA:
+            from mutagen.trueaudio import TrueAudio
+
+            return _read_id3_container_tags(TrueAudio(str(path)).tags)
         if suffix in _EXT_WMA:
             return _read_asf_tags(path)
         if suffix in _EXT_APEV2:
@@ -1300,6 +1381,10 @@ class EmbedOptions:
     cover_url: str = ""
     embed_lyrics: bool = False
     lyrics_providers: list[str] = field(default_factory=list)
+    #: When False, Apple lyrics are embedded as plain line-synced LRC instead
+    #: of word-by-word (per-syllable) enhanced LRC. Only affects the "apple"
+    #: lyrics provider.
+    apple_lyrics_word_by_word: bool = True
     enrich: bool = False
     enrich_providers: list[str] | None = None
     enrich_qobuz_token: str | None = None
@@ -1359,6 +1444,13 @@ async def embed_metadata_async(
                 isrc=metadata.isrc,
                 providers=opts.enrich_providers,
                 qobuz_token=opts.enrich_qobuz_token,
+                # What we already know, so the providers' answers can be
+                # checked against it: an ISRC lands on a different release
+                # at Deezer often enough that its label and barcode need a
+                # release to agree with, and iTunes' search needs something
+                # to score its hits against.
+                album_name=metadata.album,
+                duration_ms=metadata.duration_ms,
             )
             enriched_tags = enriched.as_tags()
             enriched_cover_url = enriched.cover_url_hd
@@ -1419,6 +1511,7 @@ async def embed_metadata_async(
                 track_id=metadata.id,
                 isrc=metadata.isrc,
                 providers=opts.lyrics_providers,
+                apple_word_by_word=opts.apple_lyrics_word_by_word,
             )
             if isinstance(res, tuple):
                 lyrics, lyrics_prov = res
@@ -1444,13 +1537,24 @@ async def embed_metadata_async(
             for k in [k for k in merged_extra if k.upper() == "GENRE"]:
                 del merged_extra[k]
 
-    # Guard: do not overwrite fields already present in the base metadata
-    if metadata.composer:
-        merged_extra.pop("COMPOSER", None)
-        merged_extra.pop("composer", None)
-    if metadata.copyright:
-        merged_extra.pop("COPYRIGHT", None)
-        merged_extra.pop("copyright", None)
+    # Guard: do not overwrite fields already present in the base metadata.
+    # Everything in merged_extra is written over the base tags below, so a
+    # field the source itself knew has to be taken off the table here or
+    # enrichment silently replaces it with a guess.
+    _base_known = (
+        ("COMPOSER", bool(metadata.composer)),
+        ("COPYRIGHT", bool(metadata.copyright)),
+        ("DATE", bool(metadata.release_date)),
+        ("TRACKTOTAL", metadata.total_tracks > 0),
+        # total_discs defaults to 1 in the model, so 1 means "single disc or
+        # nobody said" — indistinguishable, and enrichment is allowed to
+        # improve on it. Anything above 1 was genuinely counted.
+        ("DISCTOTAL", metadata.total_discs > 1),
+    )
+    for key, known in _base_known:
+        if known:
+            merged_extra.pop(key, None)
+            merged_extra.pop(key.lower(), None)
 
     # Handling date originali
     orig_date = merged_extra.get("original_date") or merged_extra.get("ORIGINALDATE")
@@ -1475,13 +1579,22 @@ async def embed_metadata_async(
     # enriched_tags and opts.extra_tags) have been merged — so every format
     # (FLAC, OGG/Opus, MP3, M4A, WMA, ...) gets the same single joined value
     # instead of a multi-value field.
+    # The names the source actually had, so a comma inside one of them
+    # ("Tyler, The Creator") is not mistaken for a separator — by the
+    # multi-value writers below, or by the artist_separator rejoin.
+    credits = {
+        "ARTIST": list(metadata.artist_names),
+        "ALBUMARTIST": list(metadata.album_artist_names),
+    }
+
     effective_multi_artist = multi_artist
     if opts.artist_separator is not None:
         for key in ("ARTIST", "ALBUMARTIST"):
             val = tags.get(key, "")
             if val:
-                parts = [a.strip() for a in val.split(",") if a.strip()]
-                tags[key] = opts.artist_separator.join(parts)
+                tags[key] = opts.artist_separator.join(
+                    split_credit(val, credits.get(key))
+                )
         effective_multi_artist = False
 
     try:
@@ -1493,6 +1606,7 @@ async def embed_metadata_async(
             lyrics_prov,
             effective_multi_artist,
             suffix,
+            credits,
         )
     except SpotiflacError:
         raise

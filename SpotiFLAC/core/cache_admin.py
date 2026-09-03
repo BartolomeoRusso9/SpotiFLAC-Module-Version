@@ -22,19 +22,18 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .paths import cache_dir
+
 
 #: Same resolution response_cache and provider_stats use, so an instance with
 #: SPOTIFLAC_CACHE_DIR set reports and prunes the directory it actually uses.
 def cache_root() -> Path:
-    return Path(
-        os.getenv("SPOTIFLAC_CACHE_DIR", str(Path.home() / ".cache" / "spotiflac"))
-    )
+    return cache_dir()
 
 
 #: Files that are genuinely disposable: deleting them costs a re-fetch.

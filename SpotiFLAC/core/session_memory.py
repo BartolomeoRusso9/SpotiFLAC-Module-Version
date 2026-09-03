@@ -4,17 +4,19 @@ import asyncio
 import json
 import logging
 import time
-from pathlib import Path
+
+from .paths import adopt_legacy_cache_file, cache_path
 
 logger = logging.getLogger(__name__)
 
 _io_lock = asyncio.Lock()
-_SESSION_FILE = Path.home() / ".cache" / "spotiflac" / "session.json"
+_SESSION_FILE = cache_path("session.json")
 _MAX_HISTORY = 20
 
 
 def _read_file_sync() -> dict:
     """Sync helper run in the thread pool for reading from disk."""
+    adopt_legacy_cache_file(_SESSION_FILE)
     if _SESSION_FILE.exists():
         return json.loads(_SESSION_FILE.read_text(encoding="utf-8"))
     return {"last_folder": "", "url_history": []}

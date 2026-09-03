@@ -27,3 +27,4 @@ docker-compose.yml
 .coverage
 .coverage.*
 htmlcov/
+/.claude

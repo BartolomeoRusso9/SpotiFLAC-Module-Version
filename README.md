@@ -65,7 +65,7 @@ If you just want a GUI for personal use, with no code involved, the [Desktop](ht
 - Docker support
 - Configuration Profiles
 - MusicBrainz metadata enrichment
-- Embedded synchronized lyrics
+- Synchronized lyrics — embedded in the tag and, optionally, written out as `.lrc` files; word-by-word where the source has it, or line-synced if you prefer
 - Optional MP3 320 kbps transcoding
 - Watch mode: re-sync a playlist/album/artist/URL on an interval, indefinitely
 - Optional shared-secret or per-account authentication for `--web`, plus a queued, per-user download history in multi-user mode
@@ -82,6 +82,7 @@ If you just want a GUI for personal use, with no code involved, the [Desktop](ht
 - **Durable queue and download log** (SQLite): a restart no longer loses queued work
 - **Per-account quotas and an admin role** in `--web-multiuser`
 - **Extension health panel** — success rate, latency and last error per provider
+- **Wrong-recording guard** — a provider that answers with a karaoke take, a clean edit of an explicit track, or another artist's cover is rejected and the download falls through to the next one, instead of producing a file that carries the right tags and the wrong audio
 
 ---
 

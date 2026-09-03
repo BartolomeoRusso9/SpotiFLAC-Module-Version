@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from .isrc_utils import normalize_isrc
 from .models import build_filename
 from .tagger import read_embedded_tags
+from .transcode import extension_for
 
 if TYPE_CHECKING:
     from ..downloader import DownloadOptions
@@ -35,10 +36,14 @@ AUDIO_EXTENSIONS: tuple[str, ...] = (
     ".flac",
     ".m4a",
     ".alac",
+    ".wv",
+    ".tta",
     ".ogg",
     ".opus",
     ".mp3",
     ".aac",
+    ".aiff",
+    ".aif",
     ".wav",
 )
 
@@ -303,9 +308,8 @@ def find_existing(
     """
     candidates = [p for p in index.get(stem.casefold(), ()) if _is_usable(p)]
     if transcode_to:
-        candidates = [
-            p for p in candidates if p.suffix.lower() == f".{transcode_to.lower()}"
-        ]
+        target_ext = extension_for(transcode_to)
+        candidates = [p for p in candidates if p.suffix.lower() == target_ext]
     if not candidates:
         return None
     return min(candidates, key=lambda p: (_extension_rank(p), str(p)))
@@ -329,9 +333,8 @@ def find_existing_track(
 
     candidates = [p for p in buckets if _is_usable(p)]
     if transcode_to:
-        candidates = [
-            p for p in candidates if p.suffix.lower() == f".{transcode_to.lower()}"
-        ]
+        target_ext = extension_for(transcode_to)
+        candidates = [p for p in candidates if p.suffix.lower() == target_ext]
     if not candidates:
         return find_existing(index, stem, transcode_to)
     return min(candidates, key=lambda p: (_extension_rank(p), str(p)))

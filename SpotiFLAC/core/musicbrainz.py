@@ -285,13 +285,36 @@ def _parse_mb_details(data: dict) -> dict:
                     else None
                 )
                 if rec_id == data.get("id"):
-                    details["track_number"] = str(track.get("number", ""))
+                    details["track_number"] = _track_number(track)
                     break
                 if not fallback_track and track.get("title") == data.get("title"):
                     fallback_track = track
             if not details.get("track_number") and fallback_track:
-                details["track_number"] = str(fallback_track.get("number", ""))
+                details["track_number"] = _track_number(fallback_track)
     return {key: value for key, value in details.items() if value}
+
+
+def _track_number(track: dict) -> str:
+    """A MusicBrainz track's number, as a number.
+
+    Two fields could answer: `number`, the designation printed on the
+    release, and `position`, the track's index on its medium. They agree on
+    a CD and do not on a vinyl, where `number` is "A1", "B2" and so on — and
+    a release group's vinyl pressing is a perfectly ordinary thing for
+    _release_score() to pick. "B2" then travelled all the way into the
+    tagger as TRACKNUMBER.
+
+    Returns "" when neither field is usable, so that
+    fetch_mb_metadata()'s filter drops the key and the provider's own track
+    number is left in place rather than overwritten with something worse.
+    """
+    number = str(track.get("number", "") or "").strip()
+    if number.isdigit():
+        return number
+    position = track.get("position")
+    if isinstance(position, int) and position > 0:
+        return str(position)
+    return ""
 
 
 def _query_recordings(query: str) -> dict:

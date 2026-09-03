@@ -94,7 +94,7 @@ function clearSearchUI() {
 }
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const ts = () => new Date().toLocaleTimeString('it-IT');
+const ts = () => new Date().toLocaleTimeString('en-US');
 // ── Global Initialization ──────────────────────────────────────────────────
 const toastMgr = new ToastManager();
 
@@ -213,12 +213,71 @@ function syncSystemTheme(e) {
   if (val === 'auto') applyTheme('auto');
 }
 
+//: Must match SpotiFLAC_API.ACCENTS in app.py and the --accent-* blocks in
+//: styles.css. 'green' is the default and has no block of its own: it is
+//: what :root already says, so it is applied by removing the attribute.
+const ACCENTS = ['green', 'blue', 'purple', 'pink', 'orange', 'red', 'cyan', 'amber'];
+
+// data-accent goes on <html> *and* <body>, the same pair the theme classes
+// use (see setThemeClass) — styles.css keys the accent blocks off both, so
+// that the token values are in scope no matter which element a rule resolves
+// against.
+function applyAccent(accent) {
+  const val = ACCENTS.includes(accent) ? accent : 'green';
+  for (const el of [document.documentElement, document.body]) {
+    if (!el) continue;
+    if (val === 'green') el.removeAttribute('data-accent');
+    else el.setAttribute('data-accent', val);
+  }
+}
+
+function changeAccent() {
+  const val = $('config-accent')?.value || 'green';
+  applyAccent(val);
+  // Three copies for the same reason changeTheme() keeps three: the two
+  // localStorage writes are per-origin and can vanish, gui-settings.json is
+  // the one that survives a restart.
+  try {
+    localStorage.setItem('spotiflac-accent', val);
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
+    stored.accent = val;
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(stored));
+  } catch (e) {}
+  try {
+    window.pywebview?.api?.save_accent?.(val);
+  } catch (e) {}
+}
+
+function loadAccentFromStorage() {
+  const stored = (() => {
+    try { return localStorage.getItem('spotiflac-accent'); } catch (e) { return null; }
+  })() || 'green';
+  if ($('config-accent')) $('config-accent').value = stored;
+  applyAccent(stored);
+}
+
 function loadThemeFromStorage() {
   const stored = (() => {
     try { return localStorage.getItem('spotiflac-theme-mode'); } catch (e) { return null; }
   })() || 'auto';
   if ($('config-theme')) $('config-theme').value = stored;
   applyTheme(stored);
+}
+
+// Applies the slider to the audio element (if one exists yet) and to the
+// label beside it. Called live while dragging, so a preview that is playing
+// changes volume under your hand instead of on the next clip.
+function changePreviewVolume() {
+  const el = $('config-preview-volume');
+  if (el) previewVolume = Math.max(0, Math.min(100, Number(el.value) || 0));
+  const out = $('preview-volume-value');
+  if (out) out.textContent = `${previewVolume}%`;
+  if (previewAudio) previewAudio.volume = previewVolume / 100;
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
+    stored.preview_volume = previewVolume;
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(stored));
+  } catch (e) {}
 }
 
 function changeFont() {
@@ -273,10 +332,24 @@ function applySettings(settings = {}) {
     localStorage.setItem('spotiflac-theme-mode', themeMode);
   } catch (e) {}
   if ($('config-theme')) $('config-theme').value = themeMode;
+  // Same dedicated-key-wins-over-blob dance as the theme above, for the
+  // same reason: gui-settings.json is what survives, localStorage is what
+  // the next launch reads first.
+  let accent = cfg.accent || 'green';
+  try {
+    accent = localStorage.getItem('spotiflac-accent') || accent;
+    localStorage.setItem('spotiflac-accent', accent);
+  } catch (e) {}
+  if ($('config-accent')) $('config-accent').value = accent;
   if ($('config-font')) $('config-font').value = cfg.font;
+  previewVolume = Number.isFinite(Number(cfg.preview_volume)) ? Number(cfg.preview_volume) : 100;
+  if ($('config-preview-volume')) $('config-preview-volume').value = previewVolume;
   changeFont();
   changeTheme();
+  changeAccent();
+  changePreviewVolume();
   if ($('config-lyrics')) { $('config-lyrics').checked = cfg.lyrics; onLyricsChange(); }
+  if ($('config-apple-wbw')) $('config-apple-wbw').checked = cfg.apple_lyrics_word_by_word !== false;
   if ($('config-enrich')) { $('config-enrich').checked = cfg.enrich_metadata; onEnrichChange(); }
   if ($('config-filename')) $('config-filename').value = cfg.filename_format;
   if ($('config-track-numbers')) { $('config-track-numbers').checked = cfg.use_track_numbers; onTNChange(); }
@@ -297,10 +370,23 @@ function applySettings(settings = {}) {
   if ($('config-acoustid-key')) $('config-acoustid-key').value = cfg.acoustid_api_key || '';
   if ($('config-loop')) $('config-loop').value = cfg.loop;
   if ($('config-loglevel')) $('config-loglevel').value = cfg.log_level;
+  lastAppliedServices = Array.isArray(cfg.services) ? cfg.services : lastAppliedServices;
   applyListState('services-list', cfg.services);
   applyListState('lyrics-list', cfg.lyrics_providers);
   applyListState('enrich-list', cfg.enrich_providers);
   updateAllApiConfigDisplays();
+}
+
+function renumberList(el) {
+  // The priority number is the row's position, so it has to be rewritten
+  // whenever the rows move — after a drag, and after applyListState()
+  // reorders them to match the saved settings. It was only ever written at
+  // build time, so a saved order showed its rows numbered 8, 6, 3, 1…
+  if (!el) return;
+  el.querySelectorAll('.sort-item').forEach((item, i) => {
+    const num = item.querySelector('.priority-num');
+    if (num) num.textContent = i + 1;
+  });
 }
 
 function applyListState(id, values = []) {
@@ -318,6 +404,7 @@ function applyListState(id, values = []) {
     });
     items.filter(i => !values.includes(i.dataset.value)).forEach(item => el.appendChild(item));
   }
+  renumberList(el);
 }
 
 async function loadSettingsFromStorage() {
@@ -330,9 +417,10 @@ async function loadSettingsFromStorage() {
       stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || 'null');
     }
     if (stored) applySettings(stored);
-    else loadThemeFromStorage();
+    else { loadThemeFromStorage(); loadAccentFromStorage(); }
   } catch(e) {
     loadThemeFromStorage();
+    loadAccentFromStorage();
   }
 }
 
@@ -352,8 +440,10 @@ function showToast(message, type = 'success') {
 async function saveSettings() {
   try {
     const cfg = buildConfig();
-    cfg.theme = $('config-theme')?.value || DEFAULT_SETTINGS.theme;
-    cfg.font  = $('config-font')?.value  || DEFAULT_SETTINGS.font;
+    cfg.theme  = $('config-theme')?.value  || DEFAULT_SETTINGS.theme;
+    cfg.accent = $('config-accent')?.value || DEFAULT_SETTINGS.accent;
+    cfg.font   = $('config-font')?.value   || DEFAULT_SETTINGS.font;
+    cfg.preview_volume = previewVolume;
     if (window.pywebview?.api) {
       await window.pywebview.api.save_settings(cfg);
     }
@@ -406,10 +496,20 @@ function onEnrichChange() {
 function onPostChange() {
   $('post-cmd-row').style.display = $('config-post-action').value === 'command' ? 'flex' : 'none';
 }
+// Formats that carry no bitrate knob — must match core/transcode.LOSSLESS_FORMATS.
+const LOSSLESS_TRANSCODE_FORMATS = ['flac', 'alac', 'wav', 'aiff', 'wavpack', 'tta'];
+
 function onTranscodeChange() {
-  const on = $('config-transcode') && $('config-transcode').value !== 'none';
+  const fmt = $('config-transcode') ? $('config-transcode').value : 'none';
+  const on = fmt !== 'none';
   document.querySelectorAll('.transcode-opt').forEach(row => {
     row.style.display = on ? 'flex' : 'none';
+  });
+  // Bitrate is meaningless for a lossless target: the encoder re-encodes the
+  // samples untouched, so the row would offer a setting that does nothing.
+  const lossy = on && !LOSSLESS_TRANSCODE_FORMATS.includes(fmt);
+  document.querySelectorAll('.transcode-lossy').forEach(row => {
+    row.style.display = lossy ? 'flex' : 'none';
   });
 }
 
@@ -421,6 +521,7 @@ function makeSortable(el) {
     drag?.classList.remove('dragging');
     el.querySelectorAll('.sort-item').forEach(i => i.classList.remove('drag-over'));
     drag = null;
+    renumberList(el);
   }
   function onDO(e) {
     e.preventDefault();
@@ -484,6 +585,8 @@ const ALL_ENRICH = [
 const SETTINGS_STORAGE_KEY = 'spotiflac-settings';
 const DEFAULT_SETTINGS = {
   theme: 'auto',
+  accent: 'green',
+  preview_volume: 100,
   font: "'JetBrains Mono', monospace",
   quality: 'LOSSLESS',
   allow_fallback: false,
@@ -509,6 +612,7 @@ const DEFAULT_SETTINGS = {
   log_level: 'INFO',
   services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
   lyrics_providers: ['apple', 'lrclib'],
+  apple_lyrics_word_by_word: true,
   enrich_providers: ['deezer','apple','qobuz','tidal'],
 };
 
@@ -615,6 +719,7 @@ function buildSortItem(item, index) {
     : item.icon ? `<span class="svc-icon ${item.iconClass}">${item.icon}</span>` : '';
   
   // Add the number (index + 1) and the checkbox
+  if (item.title) d.title = `Provided by ${item.title}`;
   d.innerHTML = `
     <span class="priority-num">${index + 1}</span>
     <span class="drag-h">⠿</span>
@@ -645,6 +750,53 @@ function getChecked(id) {
 populateList('services-list', ALL_SERVICES);
 populateList('lyrics-list',   ALL_LYRICS.map(x => ({ ...x, badge: null })));
 populateList('enrich-list',   ALL_ENRICH.map(x => ({ ...x, badge: null })));
+
+// ALL_SERVICES above is presentation only — the icon, the badge, the label —
+// and it paints instantly so Settings is never empty. What can actually be
+// downloaded from is decided by the installed extensions, which only the
+// backend knows: refreshInstalledServices() replaces the list with those,
+// exactly as the interactive wizard does (both read
+// extensions/catalog.installed_download_services).
+async function refreshInstalledServices() {
+  if (typeof window.pywebview?.api?.get_download_services !== 'function') return;
+  let services;
+  try {
+    const result = await window.pywebview.api.get_download_services();
+    services = result?.services;
+  } catch (e) {
+    console.warn('[services] could not read the installed providers:', e);
+    return;
+  }
+  // Nothing installed, or an older backend: keep the built-in list. An empty
+  // picker is indistinguishable from a broken one.
+  if (!Array.isArray(services) || !services.length) return;
+
+  const known = new Map(ALL_SERVICES.map(x => [x.id, x]));
+  const items = services.map(svc => {
+    const preset = known.get(svc.id);
+    if (preset) return { ...preset, title: (svc.extensions || []).join(', ') };
+    // A provider this build has no artwork or label for — a third-party
+    // extension, most likely. It still belongs in the list.
+    return {
+      id: svc.id,
+      label: svc.label || svc.id,
+      badge: null,
+      on: false,
+      icon: (svc.id || '?').slice(0, 2).toUpperCase(),
+      iconClass: svc.id,
+      title: (svc.extensions || []).join(', '),
+    };
+  });
+
+  populateList('services-list', items);
+  // Re-apply what was saved: populateList rebuilt the rows, so the order and
+  // the ticks that applySettings() put there are gone with them.
+  applyListState('services-list', lastAppliedServices.filter(id => known.has(id) || services.some(s => s.id === id)));
+}
+
+//: What applySettings() last put in the services list, so a refresh that
+//: arrives after it can restore the user's order instead of the defaults.
+let lastAppliedServices = ALL_SERVICES.filter(s => s.on).map(s => s.id);
 
 // ── HC chips ─────────────────────────────────────────────────────────────────
 const API_SOURCES = [
@@ -727,7 +879,15 @@ function renderPlatformIcon(type) {
     migu: 'migu.jpeg',
     songstats: 'songstats.png',
   };
-  const iconFile = iconMap[type] || `${type}.svg`;
+  const iconFile = iconMap[type];
+  if (!iconFile) {
+    // No artwork shipped for this one. The provider tables already carry a
+    // letter glyph for exactly this case; guessing at `${type}.svg` and then
+    // at `${type}.png` just put two 404s and a broken-image icon on screen.
+    const known = [...ALL_SERVICES, ...ALL_LYRICS, ...ALL_ENRICH].find(x => x.id === type);
+    const glyph = known?.icon || (type || '?').slice(0, 2).toUpperCase();
+    return `<span class="svc-icon icon-glyph ${type}">${escHtml(glyph)}</span>`;
+  }
   return `<span class="svc-icon icon-image ${type}"><img src="assets/icons/${iconFile}" alt="${type}" onerror="this.onerror=null; this.src='assets/icons/${type}.png';"></span>`;
 }
 
@@ -882,8 +1042,16 @@ let queueStats     = { downloaded:'0.00 MB', speed:'0.00 MB/s' };
 let isDownloading  = false;
 let queueStartTime = null;
 let queueDurationInterval = null;
+//: Queue view filters. A hundred-track playlist makes the queue a list you
+//: have to search rather than read — most often to find the handful that
+//: failed. null status = show everything.
+let queueFilterStatus = null;   // null | 'waiting' | 'done' | 'skipped' | 'error'
+let queueSearch = '';
 let previewAudio = null;
 let previewPlayingIndex = -1;
+//: 0-100. A 30-second clip at whatever the system volume happens to be is
+//: the one sound this app makes, and it was always full blast.
+let previewVolume = 100;
 // Destroy current audio to release OS media keys
 function stopCurrentPreview() {
   if (previewAudio) {
@@ -929,16 +1097,49 @@ function logMessage(msg, type = '') {
   // user with a stack of notifications they did not ask for.
   if (quiet || base === 'debug' || !base) return;
 
-  if (base === 'ok') toastMgr.success(msg);
-  else if (base === 'error') toastMgr.error(msg);
-  else if (base === 'warn') toastMgr.warning(msg);
-  else if (base === 'info') toastMgr.info(msg, { duration: 2500 });
+  // A toast is a headline, not a transcript. A provider that fails logs its
+  // whole Python traceback at error level, and passing that through put a
+  // wall of stack frames over half the window — unreadable, and it buried
+  // the one line that said what went wrong. The panel above still has all
+  // of it, which is what the panel is for.
+  const headline = toastHeadline(msg);
+
+  if (base === 'ok') toastMgr.success(headline);
+  else if (base === 'error') toastMgr.error(headline);
+  else if (base === 'warn') toastMgr.warning(headline);
+  else if (base === 'info') toastMgr.info(headline, { duration: 2500 });
+}
+
+const TOAST_MAX_CHARS = 160;
+
+function toastHeadline(msg) {
+  const text = String(msg ?? '');
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return text;
+
+  // A traceback's useful line is its last one ("SomeError: what happened"),
+  // not its first ("Traceback (most recent call last):").
+  const isTraceback = /^Traceback \(most recent call last\)/.test(lines[0]);
+  let headline = isTraceback ? lines[lines.length - 1] : lines[0];
+
+  if (headline.length > TOAST_MAX_CHARS) {
+    headline = headline.slice(0, TOAST_MAX_CHARS - 1).trimEnd() + '…';
+  } else if (lines.length === 1) {
+    return headline;
+  }
+  return `${headline} (see Logs for the rest)`;
 }
 
 function clearLog() { $('logArea').innerHTML = ''; }
 
 window.app_log = (msg, type = '') => logMessage(msg, type);
-window.app_set_progress = (label) => { if (label) setStatus(label); };
+// The backend pushes a bare string, so whether the job is still running has
+// to be read off the line itself: it ends in "…" while something is in
+// flight ("Reading the file…"), or carries a counter ("Matching 812/1875 ·
+// 806 found"), and finishes on a full stop ("Ready for download.", "Error.").
+// Getting it wrong only spins or stops a small dial, which is why a
+// heuristic is worth more here than a second event.
+window.app_set_progress = (label) => setStatus(label || '', /…|\d+\/\d+/.test(label || ''));
 window.app_set_metadata = (data) => {
   try {
     const d = typeof data === 'string' ? JSON.parse(data) : data;
@@ -957,7 +1158,9 @@ window.app_set_metadata = (data) => {
       d.artist_verified,
       d.artist_biography,
       d.release_date,
-      d.track_count
+      d.track_count,
+      d.artist_url,
+      d.artists_data
     );
   } catch(e) {}
 };
@@ -1084,9 +1287,13 @@ window.loadHistoryAndProfiles = async () => {
 // ── Status bar ────────────────────────────────────────────────────────────────
 function setStatus(msg, loading = false) {
   const statusText = $('status-text');
-  if (statusText) statusText.textContent = msg;
+  if (statusText) statusText.textContent = msg || '';
+  // The strip only exists while it has something to say; an empty message is
+  // how every caller clears it.
+  const bar = $('status-bar');
+  if (bar) bar.classList.toggle('hidden', !msg);
   const spinner = $('spinner');
-  if (spinner) spinner.style.display = loading ? 'block' : 'none';
+  if (spinner) spinner.style.display = loading && msg ? 'block' : 'none';
 }
 function setTrackRenderStatus(msg, visible = false) {
   const el = $('track-render-status');
@@ -1106,17 +1313,151 @@ function setPlaycountHeaderLabel(label) {
 let g_albumReleaseDate = '';
 let g_albumTrackCount = 0;
 
-function setAlbumCard(title, artist, coverUrl, quality, description, followers, owner, ownerAvatar, source, artistListeners, artistRank, artistVerified, artistBiography, releaseDate, trackCount) {
+// Samples the cover's average colour into --album-glow on #album-card (see
+// styles.css #album-card::before) for a soft artwork-derived tint instead of
+// a flat surface. Best-effort: a cover served without CORS headers taints
+// the canvas and getImageData() throws — caught silently, the card just
+// keeps its plain background. Never touches the <img> itself.
+function applyAlbumGlow(imgEl) {
+  const cardEl = $('album-card');
+  if (!cardEl) return;
+  try {
+    const SIZE = 24; // downsample hard — this is an average, not a picture
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE; canvas.height = SIZE;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgEl, 0, 0, SIZE, SIZE);
+    const { data } = ctx.getImageData(0, 0, SIZE, SIZE);
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 16) continue; // skip near-transparent pixels
+      r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+    }
+    if (!n) { cardEl.style.removeProperty('--album-glow'); return; }
+    r = Math.round(r / n); g = Math.round(g / n); b = Math.round(b / n);
+    cardEl.style.setProperty('--album-glow', `rgba(${r}, ${g}, ${b}, .5)`);
+  } catch (err) {
+    // Cross-origin cover, unsupported canvas, whatever — no glow this time.
+    cardEl.style.removeProperty('--album-glow');
+  }
+}
+
+// Reads the clipboard into the fetch bar and runs the fetch — the paste and
+// the press, which are always done together for a link that was just copied
+// out of Spotify.
+async function pasteAndFetch() {
+  let text = '';
+  try {
+    text = (await navigator.clipboard.readText() || '').trim();
+  } catch (e) {
+    // Denied or unavailable: say so rather than appearing to do nothing.
+    toastMgr.warning('Could not read the clipboard. Paste with ' +
+      (navigator.platform.startsWith('Mac') ? '⌘V' : 'Ctrl+V') + ' instead.');
+    return;
+  }
+  if (!text) { toastMgr.info('The clipboard is empty.'); return; }
+  const input = $('urlInput');
+  input.value = text;
+  input.dispatchEvent(new Event('input'));
+  // In search mode a pasted string is a query, and onFetch() handles both —
+  // it reads the mode itself, so nothing here needs to know which we are in.
+  onFetch();
+}
+
+// The button is only worth showing where the clipboard can actually be read:
+// pywebview's web view and a plain browser tab differ here, and a button that
+// always fails is worse than no button. Checked once at boot via the
+// Permissions API where it exists; where it doesn't, the button stays and the
+// catch above covers the refusal.
+async function initPasteButton() {
+  const btn = $('pasteBtn');
+  if (!btn) return;
+  if (!navigator.clipboard || !navigator.clipboard.readText) return; // stays hidden
+  try {
+    const status = await navigator.permissions?.query?.({ name: 'clipboard-read' });
+    if (status && status.state === 'denied') return; // stays hidden
+  } catch (e) { /* Permissions API missing or does not know this name — show it */ }
+  btn.classList.remove('hidden');
+}
+
+// Navigates to an artist's own page the same way clicking a recent-fetch
+// card does: drop the URL in the fetch bar and run the normal fetch flow,
+// rather than a one-off code path that would skip whatever that flow does
+// (recent-card highlight, search-mode reset, etc.) and drift from it later.
+function goToUrl(url) {
+  const safeUrl = httpUrlOrNull(url);
+  if (!safeUrl) return;
+  $('urlInput').value = safeUrl;
+  if ($('searchMode').value === 'search') toggleSearchMode();
+  onFetch();
+}
+
+// Kept as its own name because that is what the call sites mean, and because
+// an artist link is the one that has to survive being clicked from inside a
+// row (see the delegated listener below).
+function goToArtist(url) { goToUrl(url); }
+
+// One delegated listener rather than an onclick="" per artist name: the URL
+// only ever goes into a data- attribute (escHtml covers both quote chars),
+// never into a JS string built by interpolation — the cover-URL comment
+// above setAlbumCard's <img> explains why that path is avoided here too.
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('.artist-link');
+  if (!el) return;
+  e.stopPropagation();
+  goToArtist(el.dataset.artistUrl);
+});
+
+// Wraps an artist name as a clickable span when a URL is known, or leaves
+// it as plain text otherwise — used everywhere an artist name is set, so a
+// track from a provider that never returned an artist_url just shows a
+// name, same as before this existed.
+function artistNameHtml(name, url) {
+  const safeName = escHtml(name || '');
+  const safeUrl = httpUrlOrNull(url);
+  if (!safeUrl) return safeName;
+  return `<span class="artist-link" data-artist-url="${escHtml(safeUrl)}">${safeName}</span>`;
+}
+
+// A credit line where *each* artist is its own link. artistsData is the
+// backend's per-artist [{id,name,url}] list (see _artist_nodes in
+// core/spotify_metadata.py); when it's missing — another provider, an
+// older payload — this falls back to the joined string with one link on
+// the whole thing, which is what it did before.
+//
+// The joined string is never split back apart to do this: "Tyler, The
+// Creator" is one artist whose name contains the separator, and splitting
+// is exactly what turns that into two wrong links.
+function artistsCreditHtml(artistsData, joinedNames, fallbackUrl) {
+  const list = Array.isArray(artistsData) ? artistsData.filter(a => a && a.name) : [];
+  if (!list.length) return artistNameHtml(joinedNames, fallbackUrl);
+  return list.map(a => artistNameHtml(a.name, a.url)).join(', ');
+}
+
+let g_albumArtistUrl = '';
+let g_albumArtistsData = [];
+
+function setAlbumCard(title, artist, coverUrl, quality, description, followers, owner, ownerAvatar, source, artistListeners, artistRank, artistVerified, artistBiography, releaseDate, trackCount, artistUrl, artistsData) {
   g_albumReleaseDate = releaseDate || '';
   g_albumTrackCount = trackCount || 0;
+  g_albumArtistUrl = artistUrl || '';
+  g_albumArtistsData = Array.isArray(artistsData) ? artistsData : [];
   
   const metaSection = $('track-meta-section');
   if (metaSection) {
     metaSection.innerHTML = '';
     metaSection.style.display = 'none';
   }
+  // Cleared now, repopulated once the tracks are in (updateAlbumMeta, or
+  // showSingleTrackCard) — otherwise the previous fetch's sheet lingers
+  // while the new one loads.
+  renderAlbumTech([]);
   $('album-cover').querySelector('.cover-duration')?.remove();
   $('album-subtitle').style.display = '';
+  // showSingleTrackCard()'s quality/duration chip row is cleaned up from
+  // renderTracks()'s own single-track-vs-not branch, not from here — see
+  // the comment there for why (setAlbumCard and renderTracks run off two
+  // separate, not-strictly-ordered backend callbacks).
 
   $('album-actions').innerHTML = `
     <button class="act-btn primary" onclick="downloadAll()">
@@ -1138,7 +1479,6 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   $('album-title').innerHTML = escHtml(title || '—') + (artistVerified
     ? ` <span class="artist-verified-badge" title="Verified Artist"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="#1d9bf0"/><path d="M8 12.5l2.5 2.5 5.5-5.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
     : '');
-  $('album-artist').textContent  = artist || '';
   const subtitle = $('album-subtitle');
   
   // For artists, show rank or listeners; for playlists, show quality
@@ -1181,8 +1521,8 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   if (isArtistCard) {
     const parts = [];
     if (artistRank)      parts.push(`#${artistRank} rank`);
-    if (followers)       parts.push(`${Number(followers).toLocaleString('it-IT')} followers`);
-    if (artistListeners) parts.push(`${Number(artistListeners).toLocaleString('it-IT')} listeners`);
+    if (followers)       parts.push(`${Number(followers).toLocaleString('en-US')} followers`);
+    if (artistListeners) parts.push(`${Number(artistListeners).toLocaleString('en-US')} listeners`);
     
     artistStatsRow.innerHTML = parts.map(p => `<span>${escHtml(p)}</span>`).join('<span class="dot-sep"> · </span>');
     artistStatsRow.style.display = 'flex';
@@ -1195,8 +1535,11 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
     if (ownerRow) ownerRow.style.display = 'flex';
     
     if (ownerEl) ownerEl.textContent = owner || '';
-    const followerCount = Number(followers);
-    if (followersEl) followersEl.textContent = !Number.isNaN(followerCount) ? `${followerCount.toLocaleString()} followers` : '';
+    // Number('') and Number(null) are both 0, not NaN — so an album with no
+    // follower count was showing "0 followers", and that non-empty string
+    // then kept the whole meta-details row visible.
+    const followerCount = (followers === 0 || followers) ? Number(followers) : NaN;
+    if (followersEl) followersEl.textContent = Number.isFinite(followerCount) && followerCount > 0 ? `${followerCount.toLocaleString()} followers` : '';
     if (sourceEl) sourceEl.textContent = source || '';
   }
 
@@ -1211,11 +1554,22 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
   }
 
   // If owner present, prefer showing owner as the album artist (playlist behavior)
+  //
+  // This is the single place #album-artist is written. It used to be the
+  // second: an earlier line set the linked markup and this one overwrote it
+  // with plain textContent a few statements later, so the artist name in
+  // the single-track card — the one view where this span is what's actually
+  // on screen — was never clickable however well the backend resolved it.
+  //
+  // innerHTML: one clickable span per credited artist when the backend sent
+  // the per-artist list, a single link when it only sent one URL, plain
+  // escaped text when it sent neither (an artist's own page sends neither —
+  // no point linking a page to itself).
   const artistEl = $('album-artist');
   if (owner) {
     artistEl.textContent = "";
   } else {
-    artistEl.textContent = artist || '';
+    artistEl.innerHTML = artistsCreditHtml(artistsData, artist, artistUrl);
   }
 
   if (ownerAvatar) {
@@ -1250,11 +1604,20 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
     // attribute and a JS string literal inside onclick="" — one apostrophe in
     // a cover URL was enough to break out and run as script.
     coverEl.textContent = '';
+    $('album-card')?.style.removeProperty('--album-glow'); // don't carry the previous cover's tint while this one loads
 
     const img = document.createElement('img');
     img.alt = 'cover';
+    img.className = 'cover-loading'; // blur-up: styles.css clears it once decode() resolves
     img.src = safeCover;
-    img.addEventListener('error', () => { coverEl.textContent = '🎵'; });
+    img.addEventListener('error', () => {
+      coverEl.textContent = '🎵';
+      $('album-card')?.style.removeProperty('--album-glow');
+    });
+    (img.decode ? img.decode().catch(() => {}) : Promise.resolve()).then(() => {
+      img.classList.remove('cover-loading');
+      applyAlbumGlow(img);
+    });
     coverEl.appendChild(img);
 
     const btn = document.createElement('button');
@@ -1270,6 +1633,7 @@ function setAlbumCard(title, artist, coverUrl, quality, description, followers, 
     coverEl.appendChild(btn);
   } else {
     coverEl.textContent = '🎵';
+    $('album-card')?.style.removeProperty('--album-glow');
   }
   $('album-card').classList.remove('hidden');
   $('text-search-container')?.classList.add('hidden');
@@ -1317,20 +1681,23 @@ function updateAlbumMeta(trackCount) {
     const artistEl = $('album-artist');
     const artist = artistEl.textContent?.trim() || '';
     const subtitleEl = $('album-subtitle');
-    
+
+    // Built as HTML, not a joined text string: the artist segment needs to
+    // be the same clickable span as everywhere else an artist name shows,
+    // the date/track-count segments stay plain text.
     let subtitleParts = [];
-    if (artist) subtitleParts.push(artist);
+    if (artist) subtitleParts.push(artistsCreditHtml(g_albumArtistsData, artist, g_albumArtistUrl));
     if (g_albumReleaseDate) {
       const dateStr = String(g_albumReleaseDate).split('T')[0];
-      if (dateStr) subtitleParts.push(dateStr);
+      if (dateStr) subtitleParts.push(escHtml(dateStr));
     }
     if (trackCount > 0) {
-      subtitleParts.push(`${trackCount} track${trackCount !== 1 ? 's' : ''}`);
+      subtitleParts.push(escHtml(`${trackCount} track${trackCount !== 1 ? 's' : ''}`));
     }
-    
-    const subtitleText = subtitleParts.join(' · ');
-    subtitleEl.textContent = subtitleText;
-    subtitleEl.style.display = subtitleText ? '' : 'none';
+
+    const subtitleHtml = subtitleParts.join(' · ');
+    subtitleEl.innerHTML = subtitleHtml;
+    subtitleEl.style.display = subtitleHtml ? '' : 'none';
   }
 
   
@@ -1343,7 +1710,37 @@ function updateAlbumMeta(trackCount) {
   if (trackCountEl) {
     trackCountEl.textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
   }
-  $('album-meta').style.display = '';
+  // For an album the subtitle already reads "<artist> · <date> · <n> tracks";
+  // the standalone artist line right under it was the same word again.
+  $('album-meta').style.display = badgeType === 'ALBUM' ? 'none' : '';
+
+  // Technical sheet (right column of the card). Per-track fields are shared
+  // across an album, so the first track stands in for the release; ISRC is
+  // genuinely per-track and stays out of an album-level sheet.
+  if (badgeType === 'ALBUM' || badgeType === 'PLAYLIST') {
+    const t0 = currentTracks[0] || {};
+    const totalMs = currentTracks.reduce((s, t) => s + (Number(t.duration_ms) || 0), 0);
+    const released = g_albumReleaseDate
+      ? String(g_albumReleaseDate).split('T')[0]
+      : (t0.release_date ? String(t0.release_date).split('T')[0] : '');
+    // Ordered by how much the fact is worth here, not by how the metadata
+    // happens to arrive: copyright is four lines of legal boilerplate and
+    // the least actionable thing in the sheet, and leading with it pushed
+    // the release date, the track count and the runtime to the bottom of
+    // the column. Those go first now; the ℗ line brings up the rear.
+    renderAlbumTech([
+      ['Released', withRelativeAge(released)],
+      ['Tracks', trackCount > 0 ? String(trackCount) : ''],
+      ['Total time', formatLongDuration(totalMs)],
+      ['Label', t0.publisher || t0.label],
+      ['UPC', t0.upc],
+      ['Copyright', t0.copyright],
+    ]);
+  } else if (badgeType !== 'TRACK') {
+    // ARTIST / SEARCH — showSingleTrackCard owns the TRACK case.
+    renderAlbumTech([]);
+  }
+
   // Also update the tracks table header label
   setPlaycountHeaderLabel(badgeType === 'PLAYLIST' ? 'Album' : 'Playcount');
 }
@@ -1369,41 +1766,33 @@ function showSingleTrackCard(t) {
       ' <span class="track-explicit-title">E</span>';
   }
 
-  // Hide the subtitle (quality) — already shown elsewhere
+  // setAlbumCard() put the quality string into #album-subtitle, but that
+  // sits above the artist name — showing it there too would duplicate the
+  // quality chip added below (see track-quality-row below), just in a less
+  // useful spot. Hidden here, same as before.
   $('album-subtitle').style.display = 'none';
 
-  // Populate the meta grid
+  // The old below-the-title grid is superseded by the technical sheet in the
+  // card's right column — same facts, plus ISRC and label, in the space that
+  // was empty anyway.
   const section = $('track-meta-section');
+  if (section) { section.innerHTML = ''; section.style.display = 'none'; }
   const playcountRaw = t.plays ?? t.playcount ?? t.playCount ?? t.plays_count;
-  const playcountVal = playcountRaw != null
-    ? Number(playcountRaw).toLocaleString('it-IT')
+  const playcountVal = playcountRaw != null && String(playcountRaw).trim() && String(playcountRaw) !== '0'
+    ? Number(playcountRaw).toLocaleString('en-US')
     : null;
 
-  const metas = [
-    { label: 'Album',        value: t.album || t.album_name || t.release || null },
-    { label: 'Release Date', value: t.release_date ? String(t.release_date).split('T')[0] : (t.year || null) },
-    { label: 'Total Plays',  value: playcountVal },
-    { label: 'Copyright',    value: t.copyright || null },
-  ].filter(m => m.value);
-
-  if (metas.length) {
-    const grid = document.createElement('div');
-    grid.className = 'track-meta-grid';
-    metas.forEach(m => {
-      const item = document.createElement('div');
-      item.className = 'track-meta-item';
-      item.innerHTML = `
-        <div class="track-meta-label">${escHtml(m.label)}</div>
-        <div class="track-meta-value" title="${escHtml(String(m.value))}">${escHtml(String(m.value))}</div>
-      `;
-      grid.appendChild(item);
-    });
-    section.innerHTML = '';
-    section.appendChild(grid);
-    section.style.display = '';
-  } else {
-    section.style.display = 'none';
-  }
+  // Same ordering rationale as the album sheet in updateAlbumMeta(): the
+  // facts you actually read first, with the copyright boilerplate last.
+  renderAlbumTech([
+    ['Album', t.album || t.album_name || t.release],
+    ['Released', withRelativeAge(t.release_date ? String(t.release_date).split('T')[0] : (t.year || ''))],
+    ['Plays', playcountVal],
+    ['Genre', t.genre],
+    ['ISRC', t.isrc],
+    ['Label', t.publisher || t.label],
+    ['Copyright', t.copyright],
+  ]);
 
   // Bottoni azione specifici per la track
   const previewUrl = t.preview_url || t.previewUrl || '';
@@ -1428,6 +1817,28 @@ function showSingleTrackCard(t) {
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
   </button>` : ''}
 `;
+
+  // The left column (cover + title + artist + actions) is almost always
+  // shorter than the right column's technical sheet, leaving the card's
+  // lower-left empty. Quality is real, relevant info that was set into
+  // #album-subtitle by setAlbumCard() but never shown here (that element
+  // sits above the artist name and stays hidden — see above); duration is
+  // otherwise only a small overlay on the cover. A quiet chip row under the
+  // actions fills the gap with facts about *this* track, not a re-listing
+  // of the technical sheet (that already covers ISRC/label/genre/etc).
+  let factsRow = document.getElementById('track-quality-row');
+  if (!factsRow) {
+    factsRow = document.createElement('div');
+    factsRow.id = 'track-quality-row';
+    factsRow.className = 'track-quality-row';
+    $('album-actions').insertAdjacentElement('afterend', factsRow);
+  }
+  const quality = $('album-subtitle').textContent?.trim() || '';
+  const chips = [];
+  if (quality) chips.push(`<span class="track-quality-chip">${escHtml(quality)}</span>`);
+  if (dur && dur !== '—') chips.push(`<span class="track-quality-chip">${escHtml(dur)}</span>`);
+  factsRow.innerHTML = chips.join('');
+  factsRow.classList.toggle('hidden', chips.length === 0);
 }
 
 function closeAlbumCard() {
@@ -1452,6 +1863,7 @@ function closeAlbumCard() {
   metaSection.innerHTML = '';
   metaSection.style.display = 'none';
 }
+  renderAlbumTech([]);
   $('album-cover').querySelector('.cover-duration')?.remove();
   document.getElementById('artist-tabs-section')?.remove();
   loadHistoryAndProfiles();
@@ -1490,16 +1902,83 @@ function formatDuration(ms) {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
+// "1 hr 14 min" / "38 min" — for a whole album's runtime, where mm:ss would
+// just be a big number.
+function formatLongDuration(ms) {
+  const total = Math.round((Number(ms) || 0) / 1000);
+  if (!total) return '';
+  const h = Math.floor(total / 3600);
+  const m = Math.round((total % 3600) / 60);
+  return h ? `${h} hr ${m} min` : `${m} min`;
+}
+
+// "2026-05-15 · 3 months ago" — the date on its own answers "when", but not
+// the question actually being asked of a release date in a downloader ("is
+// this new?"), which otherwise needs mental arithmetic against today. Coarse
+// on purpose: one unit, and nothing at all under a day ("today"), because a
+// release date has no time-of-day to be precise about.
+function withRelativeAge(dateStr) {
+  const raw = String(dateStr || '').trim();
+  if (!raw) return '';
+  // A year-only release ("1998") has no month or day to measure from.
+  if (!/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw;
+
+  const then = new Date(raw + 'T00:00:00');
+  if (Number.isNaN(then.getTime())) return raw;
+
+  const days = Math.floor((Date.now() - then.getTime()) / 86400000);
+  if (days < 0) return `${raw} · upcoming`;
+  if (days === 0) return `${raw} · today`;
+
+  const units = [
+    [365, 'year'],
+    [30, 'month'],
+    [7, 'week'],
+    [1, 'day'],
+  ];
+  for (const [size, label] of units) {
+    const n = Math.floor(days / size);
+    if (n >= 1) return `${raw} · ${n} ${label}${n === 1 ? '' : 's'} ago`;
+  }
+  return raw;
+}
+
+// ── Album card: the technical sheet ─────────────────────────────────────────
+// Fills the column on the right of #album-card. `rows` is [[key, value], …];
+// a row whose value is empty or "—" is dropped, and an empty result hides
+// the whole column so artist pages (which have none of this) don't show an
+// empty rule. Values are plain text — an ISRC belongs in a box you can
+// select from, not behind a link.
+function renderAlbumTech(rows) {
+  const el = $('album-tech');
+  if (!el) return;
+  const clean = (rows || []).filter(r => {
+    const v = r && r[1] != null ? String(r[1]).trim() : '';
+    return v && v !== '—';
+  });
+  el.innerHTML = clean.map(([k, v]) => {
+    const val = String(v);
+    return `<div class="tech-row"><div class="tech-k">${escHtml(k)}</div>` +
+      `<div class="tech-v" title="${escHtml(val)}">${escHtml(val)}</div></div>`;
+  }).join('');
+  el.classList.toggle('hidden', clean.length === 0);
+}
+
 function injectArtistTabs(tracks) {
   document.getElementById('artist-tabs-section')?.remove();
 
   // Raggruppa per album
   const albumMap = new Map();
   tracks.forEach((t, idx) => {
-    const key = t.album || t.album_name || t.release || '—';
+    // Keyed on the album's own URL when the backend resolved one: two
+    // different albums can share a name (a re-release, a deluxe edition),
+    // and grouping those together put one cover on someone else's tracks.
+    const name = t.album || t.album_name || t.release || '—';
+    const key = t.album_url || name;
     if (!albumMap.has(key)) {
       albumMap.set(key, {
-        name: key,
+        name,
+        url: t.album_url || '',
         cover: t.cover_url || t.cover || t.image || '',
         year: t.release_date ? String(t.release_date).split('T')[0].substring(0, 4) : (t.year || ''),
         indices: []
@@ -1540,12 +2019,35 @@ function injectArtistTabs(tracks) {
       ? `<img src="${escHtml(album.cover)}" alt="cover" loading="lazy" onerror="this.parentElement.innerHTML='🎵'">`
       : '🎵';
     card.innerHTML = `
-      <div class="aac-cover">${coverHtml}</div>
+      <div class="aac-cover">${coverHtml}
+        <button class="aac-dl" title="Download this album" aria-label="Download this album">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+      </div>
       <div class="aac-body">
         <div class="aac-name" title="${escHtml(album.name)}">${escHtml(album.name)}</div>
         <div class="aac-meta">${album.year ? album.year + ' · ' : ''}${album.indices.length} track${album.indices.length !== 1 ? 's' : ''}</div>
       </div>`;
-    card.onclick = () => { addToQueue(album.indices); startDownloadQueue(); $('queue-drawer').classList.add('open'); };
+
+    // Clicking the card *opens* the album — the same view you would get by
+    // pasting its link. It used to queue every track and start downloading
+    // immediately, which is a surprising amount to set in motion for one
+    // click on a picture, and left no way to simply look at an album.
+    // Downloading is still one click, on the button on the cover.
+    const openAlbum = () => {
+      if (album.url) { goToUrl(album.url); return; }
+      // No album URL from this provider: fall back to selecting the album's
+      // tracks in the list below, which is at least non-destructive.
+      switchArtistTab('tracks');
+      selectOnlyTracks(album.indices);
+    };
+    card.onclick = openAlbum;
+    card.querySelector('.aac-dl').onclick = (e) => {
+      e.stopPropagation();
+      addToQueue(album.indices);
+      startDownloadQueue();
+      $('queue-drawer').classList.add('open');
+    };
     albumsPanel.appendChild(card);
   });
   section.appendChild(albumsPanel);
@@ -1658,6 +2160,10 @@ function renderTracks(tracks, page = 1) {
       const row = document.createElement('div');
       row.className = 'track-row';
       row.id = `track-row-${globalIndex}`;
+      // Same identity addToQueue() uses for a queue item's spotify_id — lets
+      // syncTrackRowsWithQueue() find this row even after a re-sort changes
+      // which #track-row-N id it currently holds.
+      if (t.id || t.external_url) row.dataset.spotifyId = t.id || t.external_url;
 
       const explicit = t.explicit ? `<span class="explicit-badge">E</span>` : '';
       const coverUrl = t.cover_url || t.cover || t.image || '';
@@ -1703,7 +2209,7 @@ function renderTracks(tracks, page = 1) {
           ${thumb}
           <div class="tr-info">
             <div class="tr-name">${escHtml(t.title || t.name || '?')} ${explicit}</div>
-            <div class="tr-artist">${escHtml(t.artists || t.artist || '')}</div>
+            <div class="tr-artist">${artistsCreditHtml(t.artists_data, t.artists || t.artist || '', t.artist_url)}</div>
           </div>
         </div>
         <div class="tr-playcount">${playcountCell}</div>
@@ -1753,6 +2259,16 @@ function renderTracks(tracks, page = 1) {
       } else {
         $('track-controls').classList.remove('hidden');
         $('track-table-wrap').classList.remove('hidden');
+        // showSingleTrackCard()'s quality/duration chip row, if the previous
+        // fetch on this same card was a single track — removing it here
+        // (same render pass that decides "not a single track this time")
+        // instead of from setAlbumCard avoids a race: setAlbumCard and
+        // renderTracks are driven by two separate backend callbacks
+        // (app_set_metadata / showTracklist) that aren't guaranteed to run
+        // in a fixed order, so a removal in setAlbumCard could fire *after*
+        // showSingleTrackCard had already (re)built the row for the fetch
+        // that was actually meant to show it — silently deleting it again.
+        document.getElementById('track-quality-row')?.remove();
       }
       $('recent-wrap').style.display = 'none';
       
@@ -2046,9 +2562,13 @@ function playPreview(i) {
     document.body.appendChild(previewAudio);
 
     previewAudio.addEventListener('ended', () => {
-      stopCurrentPreview(); 
+      stopCurrentPreview();
     });
   }
+  // The element is created lazily on the first preview, so the saved volume
+  // has to be applied here as well as in applyPreviewVolume() — otherwise the
+  // first clip of a session always plays at full volume whatever the setting.
+  previewAudio.volume = previewVolume / 100;
 
   // Toggle pause if already playing this track
   if (previewPlayingIndex === i && !previewAudio.paused) {
@@ -2208,6 +2728,20 @@ function toggleAll(cb) {
   document.querySelectorAll('.track-cb').forEach(c => c.checked = cb.checked);
   onCheckChange();
 }
+// Ticks exactly the given track indices and unticks the rest — the fallback
+// for an album card with no album URL to open (a provider that never sent
+// one): you end up with that album's tracks selected in the list, ready for
+// "Download Selected", instead of a click that does nothing.
+function selectOnlyTracks(indices) {
+  const wanted = new Set(indices.map(Number));
+  document.querySelectorAll('.track-cb').forEach(cb => {
+    cb.checked = wanted.has(Number(cb.value));
+  });
+  onCheckChange();
+  const first = document.getElementById(`track-row-${indices[0]}`);
+  first?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 function onCheckChange() {
   const checked = document.querySelectorAll('.track-cb:checked').length;
   const total   = document.querySelectorAll('.track-cb').length;
@@ -2237,27 +2771,27 @@ function renderRecentSearches() {
     const searches = JSON.parse(localStorage.getItem('recent_searches') || '[]');
     const grid = $('recent-grid');
     grid.innerHTML = '';
-    // These are text rows, so the grid drops to a single full-width column
-    // instead of the 120px artwork tracks the fetches use.
+    // Chips that wrap, not one full-width row per search: a past query is
+    // two or three words, and giving each of them a row of its own pushed
+    // everything below the fold to list five words. See #recent-grid.searches
+    // in styles.css — the same grid is a track-artwork grid for fetches.
     grid.classList.add('searches');
     const label = $('recent-wrap').querySelector('.recent-label');
     if (label) label.textContent = 'RECENT SEARCHES';
-    
+
     searches.forEach(q => {
-        const card = document.createElement('div');
-        card.className = 'recent-card';
-        card.style.padding = '12px 14px';
-        card.style.display = 'flex';
-        card.style.alignItems = 'center';
-        card.style.gap = '10px';
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'search-chip';
+        chip.title = q;
         // Same stroke icon as the search-mode toggle, not an emoji: it sits
-        // in a themed card and has to take its colour from the theme.
-        card.innerHTML = `<span class="rc-search-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></span><span class="rc-title" style="font-size:13px; color:var(--text);">${escHtml(q)}</span>`;
-        card.onclick = () => {
+        // in a themed chip and has to take its colour from the theme.
+        chip.innerHTML = `<span class="rc-search-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></span><span class="search-chip-text">${escHtml(q)}</span>`;
+        chip.onclick = () => {
             $('urlInput').value = q;
             $('urlInput').dispatchEvent(new Event('input'));
         };
-        grid.appendChild(card);
+        grid.appendChild(chip);
     });
 }
 
@@ -2622,19 +3156,39 @@ function normalizeHistoryUrl(url) {
   }
 }
 
+//: The three screens that can open on nothing say so the same way.
+const EMPTY_ICONS = {
+  disc: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>',
+  user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  chart: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
+};
+
+function emptyState(icon, title, hint) {
+  return `<div class="empty-state">
+    <div class="es-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${EMPTY_ICONS[icon] || EMPTY_ICONS.disc}</svg></div>
+    <div class="es-title">${escHtml(title)}</div>
+    <div class="es-hint">${escHtml(hint)}</div>
+  </div>`;
+}
+
 function renderRecent(hist) {
   const grid = $('recent-grid'); grid.innerHTML = '';
   // Artwork tiles, not the one-line rows renderRecentSearches() builds.
   grid.classList.remove('searches');
   if (!hist || !hist.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--muted);padding:10px 0;">No recent fetches yet.</div>';
+    grid.innerHTML = `<div style="grid-column:1/-1;">${emptyState(
+      'disc',
+      'No recent fetches yet',
+      'Paste a Spotify track, album or playlist link above — what you fetch shows up here.',
+    )}</div>`;
     return;
   }
   const BADGE_CFG = {
-    playlist: { label:'Playlist', color:'#a855f7', bg:'rgba(168,85,247,.15)', icon:'☰' },
-    artist:   { label:'Artist',  color:'#f97316', bg:'rgba(249,115,22,.15)',  icon:'♪' },
-    album:    { label:'Album',   color:'#22c55e', bg:'rgba(34,197,94,.15)',   icon:'◎' },
-    track:    { label:'Track',   color:'#3b82f6', bg:'rgba(59,130,246,.15)',  icon:'♩' },
+    playlist: { label:'Playlist', icon:'☰' },
+    artist:   { label:'Artist',  icon:'♪' },
+    album:    { label:'Album',   icon:'◎' },
+    track:    { label:'Track',   icon:'♩' },
   };
   hist.slice(0, 16).forEach(item => {
     const card = document.createElement('div');
@@ -2665,7 +3219,7 @@ function renderRecent(hist) {
     }
  
     const badgeHtml = badge
-      ? `<span class="rc-badge" style="color:${badge.color};background:${badge.bg};">${badge.icon} ${badge.label}</span>`
+      ? `<span class="rc-badge ${urlType}">${badge.icon} ${badge.label}</span>`
       : '';
     const subHtml = subtitle ? `<div class="rc-sub">${subtitle}</div>` : '';
  
@@ -2706,6 +3260,7 @@ async function removeRecent(url) {
 function addToQueue(indices) {
   console.log('addToQueue called', { indices, currentTracksLength: currentTracks.length, queueLengthBefore: queue.length });
   let added = false;
+  const skipped = [];
   indices.forEach(i => {
       const t = currentTracks[i];
       if (!t) {
@@ -2716,12 +3271,20 @@ function addToQueue(indices) {
       // Usa l'indice originale per evitare che Python scarichi la track sbagliata
       const realIndex = t._originalIndex !== undefined ? t._originalIndex : i;
 
-      if (queue.find(q => q.index === realIndex)) {
-        console.warn('Track already in queue', realIndex);
-        return;
-      }
       const itemId = t.id || t.external_url || `queue-${realIndex}-${Math.random().toString(16).slice(2)}`;
       const spotifyId = t.id || t.external_url || itemId;
+
+      // Deduped on the track's own identity, never on its position: a
+      // second fetch puts a *different* track at index 0, and matching on
+      // the index there silently refused to download it.
+      const duplicate = spotifyId
+        ? queue.find(q => q.spotify_id === spotifyId)
+        : queue.find(q => q.index === realIndex && q.title === t.title);
+      if (duplicate) {
+        console.warn('Track already in queue', spotifyId || realIndex);
+        skipped.push(duplicate);
+        return;
+      }
       queue.push({
         id: itemId,
         spotify_id: spotifyId,
@@ -2740,6 +3303,18 @@ function addToQueue(indices) {
   renderQueue();
   const emptyMsg = $('queue-empty');
   if (emptyMsg) emptyMsg.style.display = queue.length > 0 ? 'none' : 'flex';
+
+  // Nothing was added and something was recognised: say so. Refusing in
+  // silence is what made a re-queued track look like a dead button.
+  if (!added && skipped.length) {
+    const one = skipped[0];
+    const done = skipped.every(q => q.status === 'done');
+    toastMgr.info(
+      skipped.length === 1
+        ? `${one.title} is already ${done ? 'downloaded' : 'in the queue'}.`
+        : `Those ${skipped.length} tracks are already ${done ? 'downloaded' : 'in the queue'}.`,
+    );
+  }
   return added;
 }
 
@@ -2769,6 +3344,34 @@ function resetQueueDuration() {
   updateQueueDuration();
 }
 
+// Mirrors each queue item's status/progress onto its row in the (still
+// visible) track table — a queue-drawer-only view meant scrolling away to
+// check on a download in progress. Matched by data-spotifyId first (stable
+// across a re-sort, which reshuffles which #track-row-N id a track holds);
+// falls back to the original pre-sort index for tracks with neither an id
+// nor an external_url (the same fallback addToQueue() already accepts for
+// its own dedup lookup, so this isn't a new class of mismatch).
+function syncTrackRowsWithQueue() {
+  const rows = document.getElementById('track-rows');
+  if (!rows || !rows.children.length) return;
+  queue.forEach(item => {
+    let row = null;
+    if (item.spotify_id) {
+      row = rows.querySelector(`.track-row[data-spotify-id="${CSS.escape(item.spotify_id)}"]`);
+    }
+    if (!row && item.index != null) {
+      row = document.getElementById(`track-row-${item.index}`);
+    }
+    if (!row) return;
+    row.classList.toggle('dl-active', item.status === 'active');
+    row.classList.toggle('done', item.status === 'done');
+    row.classList.toggle('failed', item.status === 'error');
+    row.classList.toggle('skipped', item.status === 'skipped');
+    const pct = item.status === 'active' ? item.progress : (item.status === 'done' ? 100 : 0);
+    row.style.setProperty('--row-progress', pct + '%');
+  });
+}
+
 function renderQueue() {
   const list = $('queue-list'); list.innerHTML = '';
   let empty = $('queue-empty');
@@ -2791,6 +3394,16 @@ function renderQueue() {
   $('q-skipped').textContent = skippedCount;
   $('q-failed').textContent = failedCount;
 
+  // Which counter is currently acting as the filter, and whether the "Clear
+  // filter" escape hatch is needed at all.
+  const filterMap = { waiting: 'queued', done: 'completed', skipped: 'skipped', error: 'failed' };
+  document.querySelectorAll('.queue-summary .qs-item').forEach(el => {
+    const on = !!queueFilterStatus && el.classList.contains(filterMap[queueFilterStatus]);
+    el.classList.toggle('is-filtering', on);
+    el.setAttribute('aria-pressed', String(on));
+  });
+  $('queue-clear-filters')?.classList.toggle('hidden', !queueFilterStatus && !queueSearch);
+
   const dock = $('queue-dock');
   if (queue.length === 0) {
     queueStats = { downloaded:'0.00 MB', speed:'0.00 MB/s' };
@@ -2803,14 +3416,53 @@ function renderQueue() {
     const downloaded = $('qd-downloaded');
     const speed = $('qd-speed');
     if (downloaded) downloaded.textContent = queueStats.downloaded;
-    if (speed) speed.textContent = queueStats.speed;
+    if (speed) speed.textContent = 'Idle';
+    const bar = $('qd-bar-fill');
+    if (bar) bar.style.width = '0%';
+    dock?.classList.remove('done');
     resetQueueDuration();
+    // Queue just went empty (cleared, or its last item removed) — nothing
+    // left for syncTrackRowsWithQueue() to match, so any row still carrying
+    // dl-active/done/failed/skipped from before would otherwise be stuck.
+    document.querySelectorAll('#track-rows .track-row').forEach(row => {
+      row.classList.remove('dl-active', 'done', 'failed', 'skipped');
+      row.style.removeProperty('--row-progress');
+    });
     return;
   }
 
   empty.style.display = 'none';
   if (dock) dock.classList.add('visible');
-  queue.forEach((item, qi) => {
+
+  // Filtering happens here, not over the rendered nodes: the counts above
+  // must keep describing the whole queue (that is what makes them useful as
+  // filter buttons), and re-rendering is what this function does anyway.
+  // 'active' counts as queued for filtering — a download in flight is one
+  // you are waiting on, and having it vanish from "Queued" the moment it
+  // starts is not what anyone means by the word.
+  const q = (queueSearch || '').toLowerCase();
+  const visibleItems = queue.filter(item => {
+    if (queueFilterStatus) {
+      const matchesStatus = queueFilterStatus === 'waiting'
+        ? (item.status === 'waiting' || item.status === 'active')
+        : item.status === queueFilterStatus;
+      if (!matchesStatus) return false;
+    }
+    if (!q) return true;
+    return `${item.title || ''} ${item.artist || ''} ${item.album || ''}`.toLowerCase().includes(q);
+  });
+
+  if (!visibleItems.length) {
+    const none = document.createElement('div');
+    none.className = 'queue-no-match';
+    none.textContent = queueFilterStatus || q
+      ? 'Nothing in the queue matches this filter.'
+      : 'Queue is empty.';
+    list.appendChild(none);
+  }
+
+  visibleItems.forEach((item) => {
+    const qi = queue.indexOf(item);
     const statusLabel = { waiting:'Queued', active:'Downloading', done:'completed', error:'Failed', skipped:'Skipped' }[item.status] || 'Queued';
     const statusText = item.status === 'active'
       ? `Downloading… ${item.progress}%`
@@ -2872,15 +3524,51 @@ function renderQueue() {
   const downloaded = $('qd-downloaded');
   const speed = $('qd-speed');
   if (downloaded) downloaded.textContent = queueStats.downloaded;
-  if (speed) speed.textContent = queueStats.speed;
-  
+  if (speed) {
+    // A live rate only exists while a provider is reporting one. Printing
+    // "0.00 MB/s" the rest of the time made a working download look stalled;
+    // what is actually known then is how far through the queue we are.
+    const rate = parseFloat(queueStats.speed);
+    const active = queue.some(q => q.status === 'active');
+    speed.textContent = rate > 0
+      ? queueStats.speed
+      : active
+        ? `Downloading ${done + 1} of ${queue.length}…`
+        : `${done} of ${queue.length} done`;
+  }
+  const bar = $('qd-bar-fill');
+  if (bar) bar.style.width = `${queue.length ? Math.round((done / queue.length) * 100) : 0}%`;
+  dock?.classList.toggle('done', queue.length > 0 && done === queue.length);
+
   updateQueueDuration();
+  syncTrackRowsWithQueue();
 }
 
 function toggleQueueDrawer() {
   const drawer = $('queue-drawer');
   if (!drawer) return;
   drawer.classList.toggle('open');
+}
+
+// The four counters double as filters: the number and the way to see what it
+// counts are the same control, which is one fewer thing on screen than a
+// count plus a separate status dropdown. Clicking the active one clears it.
+function filterQueue(status) {
+  queueFilterStatus = (queueFilterStatus === status) ? null : status;
+  renderQueue();
+}
+
+function onQueueSearch(value) {
+  queueSearch = value || '';
+  renderQueue();
+}
+
+function clearQueueFilters() {
+  queueFilterStatus = null;
+  queueSearch = '';
+  const input = $('queue-search');
+  if (input) input.value = '';
+  renderQueue();
 }
 
 function updateQueueItem(qi, status, progress) {
@@ -3142,7 +3830,11 @@ async function onFetch() {
   if (mode === 'search') {
     highlightRecentCard(url);
     setStatus(`Searching "${url}"...`, true);
-    logMessage(`Text search: ${url}`, 'info');
+    // -quiet: still a line in the log panel, but setFetchingState('start')
+    // above already raised a bottom-left "fetching" toast for this same
+    // search — logMessage's own auto-toast would otherwise stack a second
+    // "fetching" notice in the opposite corner for the same action.
+    logMessage(`Text search: ${url}`, 'info-quiet');
     currentUrl = url;
 
     if (window.pywebview?.api) {
@@ -3166,7 +3858,9 @@ async function onFetch() {
 
   highlightRecentCard(url);
   setStatus('Fetching metadata…', true);
-  logMessage(`Fetching: ${url}`, 'info');
+  // -quiet, same reason as the search-mode branch above: setFetchingState('start')
+  // already put up a "fetching metadata…" toast bottom-left for this fetch.
+  logMessage(`Fetching: ${url}`, 'info-quiet');
   currentUrl = url;
   showSkeletonTracks(5);
 
@@ -3201,6 +3895,7 @@ function buildConfig() {
     allow_fallback:         $('config-fallback').checked,
     lyrics:                 $('config-lyrics').checked,
     lyrics_providers:       getChecked('lyrics-list'),
+    apple_lyrics_word_by_word: $('config-apple-wbw') ? $('config-apple-wbw').checked : true,
     enrich_metadata:        $('config-enrich').checked,
     enrich_providers:       getChecked('enrich-list'),
     filename_format:         $('config-filename').value.trim() || '{title} - {artist}',
@@ -3401,6 +4096,7 @@ async function loadProfile() {
   $('config-tidal-api').value       = data.tidal_custom_api || '';
   $('config-track-numbers').checked = !!data.use_track_numbers; onTNChange();
   $('config-lyrics').checked = data.lyrics !== false;
+  if ($('config-apple-wbw')) $('config-apple-wbw').checked = data.apple_lyrics_word_by_word !== false;
   $('config-enrich').checked        = data.enrich_metadata !== false; onEnrichChange();
   updateAllApiConfigDisplays();
   isDirty = true;
@@ -3901,6 +4597,312 @@ function renderDuplicateGroups(groups) {
   toastMgr.success(`Found ${groups.length} duplicate group(s).`);
 }
 
+// ── Library duplicates (core/library_dedup.py) ───────────────────────────────
+// The other duplicate finder: metadata first, so it scales to a real library,
+// and it can act on what it found. The report lives on the backend instance
+// between the scan and the resolve — this keeps only what the UI needs to
+// render it and to say which files the user picked.
+let libDedupGroups = [];
+let libDedupManifest = '';
+
+// The seconds two durations may differ by and still count as the same track.
+// 0 is a meaningful setting — "the durations must match exactly" — so an empty
+// or non-numeric box is what falls back to the default, not every falsy parse.
+function libDedupTolerance() {
+  const parsed = parseFloat($('libdedup-tolerance')?.value ?? '');
+  return Number.isFinite(parsed) ? parsed : 4;
+}
+
+async function startLibraryDedupScan() {
+  const path = $('local-path-input').value.trim();
+  if (!path) {
+    toastMgr.error('Please enter a valid folder or file path.');
+    return;
+  }
+
+  if (typeof window.pywebview?.api?.scan_library_duplicates !== 'function') {
+    toastMgr.error('The backend is not ready yet — try again in a moment.');
+    return;
+  }
+
+  const verify = $('libdedup-verify')?.checked || false;
+  if (verify && window.pywebview?.api?.get_dedup_status) {
+    // Same courtesy as the fingerprint scan: say the optional dependency is
+    // missing now, rather than after the user has waited for a walk.
+    try {
+      const status = await window.pywebview.api.get_dedup_status();
+      if (status && status.available === false) {
+        toastMgr.error(status.install_hint || 'Audio confirmation is not available on this machine.');
+        return;
+      }
+    } catch (e) {
+      // Fall through; the scan reports its own note if it cannot verify.
+    }
+  }
+
+  setTaBtnState($('btn-libdedup-scan'), 'loading');
+  libDedupGroups = [];
+  renderLibraryDedup(null);
+  $('libdedup-progress')?.classList.remove('hidden');
+  if ($('libdedup-progress')) $('libdedup-progress').textContent = 'Scanning…';
+
+  try {
+    const result = await window.pywebview.api.scan_library_duplicates(
+      path,
+      true,
+      $('libdedup-match')?.value || 'both',
+      libDedupTolerance(),
+      verify,
+      0.95,
+      $('libdedup-db')?.checked || false,
+    );
+    if (result && result.status === 'error') throw new Error(result.error || 'Scan failed');
+  } catch (err) {
+    console.error('[LibDedup] start failed:', err);
+    setTaBtnState($('btn-libdedup-scan'), 'error');
+    setTimeout(() => setTaBtnState($('btn-libdedup-scan'), 'default'), 2500);
+    $('libdedup-progress')?.classList.add('hidden');
+    toastMgr.error(err.message || 'Failed to start the library scan');
+  }
+}
+
+window.app_library_dedup_progress = function (payload) {
+  const el = $('libdedup-progress');
+  if (!el) return;
+  el.classList.remove('hidden');
+  el.textContent = `Scanning ${payload.done} / ${payload.total} file(s)…`;
+};
+
+window.app_library_dedup_results = function (report) {
+  setTaBtnState($('btn-libdedup-scan'), 'default');
+  $('libdedup-progress')?.classList.add('hidden');
+  renderLibraryDedup(report);
+};
+
+window.app_library_dedup_error = function (err) {
+  setTaBtnState($('btn-libdedup-scan'), 'error');
+  setTimeout(() => setTaBtnState($('btn-libdedup-scan'), 'default'), 2500);
+  $('libdedup-progress')?.classList.add('hidden');
+  toastMgr.error('Library scan failed: ' + err);
+};
+
+function renderLibraryDedup(report) {
+  const summary = $('libdedup-summary');
+  const container = $('libdedup-groups');
+  const actions = $('libdedup-actions');
+  if (!container) return;
+
+  if (!report) {
+    container.innerHTML = '';
+    summary?.classList.add('hidden');
+    actions?.classList.add('hidden');
+    return;
+  }
+
+  const lib = report.library || {};
+  const lines = [
+    `${lib.files || 0} file(s) scanned · ${lib.total_size || '0 B'}`,
+    `${report.groups || 0} duplicate group(s) · ${report.duplicate_files || 0} redundant copies · ${report.reclaimable || '0 B'} reclaimable`,
+    `${lib.missing_isrc || 0} without ISRC · ${lib.missing_tags || 0} without artist/title${lib.unreadable ? ` · ${lib.unreadable} unreadable` : ''}`,
+  ];
+  if (report.database) lines.push(`index written to ${report.database}`);
+  (report.notes || []).forEach((n) => lines.push(`note: ${n}`));
+  if (summary) {
+    summary.textContent = lines.join('\n');
+    summary.classList.remove('hidden');
+  }
+
+  // Each group keeps its own chosen keeper and its own selection, so the
+  // user can disagree with the ranking on one group without disturbing the
+  // rest. The backend is told both when they resolve.
+  libDedupGroups = (report.duplicate_groups || []).map((group) => {
+    const files = [group.keep, ...(group.duplicates || [])];
+    return {
+      key: group.key,
+      label: group.label,
+      matchedBy: group.matched_by,
+      reclaimable: group.reclaimable_bytes || 0,
+      files,
+      keepPath: group.keep?.path || '',
+      selected: new Set((group.duplicates || []).map((f) => f.path)),
+    };
+  });
+
+  if (!libDedupGroups.length) {
+    container.innerHTML = '<div class="s-label" style="font-size:11.5px;">No duplicates found.</div>';
+    actions?.classList.add('hidden');
+    toastMgr.success('No duplicates found.');
+    return;
+  }
+
+  container.innerHTML = libDedupGroups.map((group, i) => `
+    <div class="sort-item" style="flex-direction:column;align-items:stretch;gap:6px;cursor:default;">
+      <div class="s-label" style="font-size:11px;">
+        ${regEscapeHtml(group.label)} — ${group.files.length} copies, ${formatLibDedupSize(group.reclaimable)} reclaimable, matched by ${regEscapeHtml(group.matchedBy)}
+      </div>
+      ${group.files.map((file, j) => {
+        const isKeeper = file.path === group.keepPath;
+        return `
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="radio" name="libdedup-keep-${i}" ${isKeeper ? 'checked' : ''}
+                 onchange="setLibDedupKeeper(${i}, ${j})" title="Keep this copy">
+          <input type="checkbox" ${group.selected.has(file.path) ? 'checked' : ''}
+                 ${isKeeper ? 'disabled' : ''}
+                 onchange="toggleLibDedupFile(${i}, ${j}, this.checked)"
+                 title="${isKeeper ? 'The kept copy is never removed' : 'Remove this copy'}">
+          <span class="reg-url" style="flex:1;min-width:0;" title="${regEscapeHtml(file.path)}">${regEscapeHtml(file.path)}</span>
+          <span class="s-label" style="font-size:10.5px;white-space:nowrap;">${regEscapeHtml(file.quality || '')}</span>
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+
+  if (report.shown_groups !== undefined && report.shown_groups < report.groups) {
+    container.innerHTML += `<div class="s-label" style="font-size:11px;">Showing ${report.shown_groups} of ${report.groups} groups — resolve these, then scan again for the rest.</div>`;
+  }
+  actions?.classList.remove('hidden');
+  updateLibDedupCount();
+  toastMgr.success(`Found ${report.groups} duplicate group(s), ${report.reclaimable} reclaimable.`);
+}
+
+function formatLibDedupSize(bytes) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes || 0;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return `${unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
+
+function setLibDedupKeeper(groupIndex, fileIndex) {
+  const group = libDedupGroups[groupIndex];
+  if (!group) return;
+  const chosen = group.files[fileIndex];
+  if (!chosen) return;
+  // The copy being kept is never also a copy being removed; the one it
+  // replaces goes back to being selectable (and selected, since the point of
+  // the group is that it is redundant).
+  group.selected.delete(chosen.path);
+  group.selected.add(group.keepPath);
+  group.keepPath = chosen.path;
+  renderLibraryDedupGroup(groupIndex);
+  updateLibDedupCount();
+}
+
+function toggleLibDedupFile(groupIndex, fileIndex, checked) {
+  const group = libDedupGroups[groupIndex];
+  const file = group?.files[fileIndex];
+  if (!file || file.path === group.keepPath) return;
+  if (checked) group.selected.add(file.path); else group.selected.delete(file.path);
+  updateLibDedupCount();
+}
+
+function renderLibraryDedupGroup(groupIndex) {
+  // Only the radios and checkboxes of one group change when its keeper does,
+  // and re-rendering the whole list would scroll a long report back to the
+  // top under the user's cursor.
+  const group = libDedupGroups[groupIndex];
+  const container = $('libdedup-groups');
+  const item = container?.children[groupIndex];
+  if (!group || !item) return;
+  const rows = item.querySelectorAll('div[style*="display:flex"]');
+  group.files.forEach((file, j) => {
+    const row = rows[j];
+    if (!row) return;
+    const [radio, box] = row.querySelectorAll('input');
+    const isKeeper = file.path === group.keepPath;
+    if (radio) radio.checked = isKeeper;
+    if (box) {
+      box.disabled = isKeeper;
+      box.checked = group.selected.has(file.path);
+    }
+  });
+}
+
+function updateLibDedupCount() {
+  const total = libDedupGroups.reduce((sum, g) => sum + g.selected.size, 0);
+  const el = $('libdedup-selected');
+  if (el) el.textContent = `${total} selected`;
+  ['btn-libdedup-trash', 'btn-libdedup-delete'].forEach((id) => {
+    const btn = $(id);
+    if (btn) btn.disabled = total === 0;
+  });
+}
+
+async function resolveLibraryDuplicates(action) {
+  const paths = [];
+  const keepPaths = [];
+  libDedupGroups.forEach((group) => {
+    if (!group.selected.size) return;
+    keepPaths.push(group.keepPath);
+    group.selected.forEach((path) => paths.push(path));
+  });
+  if (!paths.length) {
+    toastMgr.error('Nothing selected.');
+    return;
+  }
+
+  const question = action === 'delete'
+    ? `Delete ${paths.length} file(s) permanently? This cannot be undone.`
+    : `Move ${paths.length} file(s) into the quarantine folder? You can undo this afterwards.`;
+  if (!confirm(question)) return;
+
+  const btn = $(action === 'delete' ? 'btn-libdedup-delete' : 'btn-libdedup-trash');
+  setTaBtnState(btn, 'loading');
+  try {
+    const result = await window.pywebview.api.resolve_library_duplicates(
+      paths, keepPaths, action, false,
+    );
+    if (!result || result.status === 'error') throw new Error(result?.error || 'Failed');
+
+    setTaBtnState(btn, 'default');
+    toastMgr.success(`${result.resolved} file(s) resolved, ${result.freed} reclaimed.`);
+    (result.actions || [])
+      .filter((a) => a.action === 'skip')
+      .slice(0, 10)
+      .forEach((a) => toastMgr.info(`Left alone: ${a.path} — ${a.error}`));
+
+    libDedupManifest = result.manifest || '';
+    const undo = $('libdedup-undo');
+    if (libDedupManifest && action !== 'delete') {
+      if ($('libdedup-manifest')) $('libdedup-manifest').textContent = libDedupManifest;
+      undo?.classList.remove('hidden');
+    } else {
+      undo?.classList.add('hidden');
+    }
+
+    // The scan describes a library that no longer exists; the backend has
+    // dropped the report for the same reason, so offering the stale list
+    // again would only produce "gone since the scan" for every row.
+    libDedupGroups = [];
+    renderLibraryDedup(null);
+  } catch (err) {
+    console.error('[LibDedup] resolve failed:', err);
+    setTaBtnState(btn, 'error');
+    setTimeout(() => setTaBtnState(btn, 'default'), 2500);
+    toastMgr.error(err.message || 'Could not resolve the duplicates');
+  }
+}
+
+async function undoLibraryDedup() {
+  if (!libDedupManifest) return;
+  setTaBtnState($('btn-libdedup-undo'), 'loading');
+  try {
+    const result = await window.pywebview.api.restore_library_duplicates(libDedupManifest);
+    if (!result || result.status === 'error') throw new Error(result?.error || 'Failed');
+    setTaBtnState($('btn-libdedup-undo'), 'default');
+    toastMgr.success(`${result.resolved} file(s) put back.`);
+    (result.actions || [])
+      .filter((a) => a.action === 'skip')
+      .slice(0, 10)
+      .forEach((a) => toastMgr.info(`Not restored: ${a.path} — ${a.error}`));
+    libDedupManifest = '';
+    $('libdedup-undo')?.classList.add('hidden');
+  } catch (err) {
+    setTaBtnState($('btn-libdedup-undo'), 'error');
+    setTimeout(() => setTaBtnState($('btn-libdedup-undo'), 'default'), 2500);
+    toastMgr.error(err.message || 'Could not restore the files');
+  }
+}
+
 // ── Multi-user auth (--web-multiuser; web mode only) ─────────────────────────
 // Desktop/pywebview mode has no concept of accounts, so all of this is a
 // no-op there — gated on __SPOTIFLAC_WEB_MODE__, set only by webapp.py's
@@ -3974,7 +4976,7 @@ async function loadExploreData() {
       const homeData = await window.pywebview.api.get_spotify_home_feed();
       
       if (homeData && homeData.success) {
-        if (greetingEl) greetingEl.textContent = homeData.greeting || 'Esplora';
+        if (greetingEl) greetingEl.textContent = homeData.greeting || 'Explore';
         renderHomeSections(homeData.sections);
       } else {
         sectionsContainer.innerHTML = '<div style="color:var(--red);">Unable to load feed. Check your connection.</div>';
@@ -4056,8 +5058,14 @@ window.addEventListener('pywebviewready', async () => {
   checkAuthStatus();
 
   await loadSettingsFromStorage();
+  // After the settings, so the saved order is known and can be restored on
+  // top of the narrowed list — and outside them, because a machine with no
+  // saved settings yet never calls applySettings() at all, which is exactly
+  // the fresh install that most needs to be told what it can download from.
+  await refreshInstalledServices();
   initSettingsTracking();
   updateSearchMode();
+  initPasteButton();
 });
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncSystemTheme);
@@ -4087,7 +5095,16 @@ $('urlInput').addEventListener('input', function() {
     const container = $('text-search-results');
     if (container) container.innerHTML = '';
     $('text-search-container')?.classList.add('hidden');
-    $('track-table-wrap')?.classList.remove('hidden');
+    // Was .remove('hidden') — unhid the track table without ever clearing
+    // #track-rows, so backspacing a search query back to empty didn't show
+    // "no query" at all: it showed whatever track/album was still sitting
+    // in the table from before search mode was even entered (e.g. the
+    // track you'd just fetched), looking like a stale result for a search
+    // that was never run.
+    $('track-table-wrap')?.classList.add('hidden');
+    $('track-controls')?.classList.add('hidden');
+    if ($('recent-wrap')) $('recent-wrap').style.display = ''; // showSkeletonTracks() hides this once a real query starts
+    renderRecentSearches();
     return;
   }
 
@@ -4395,15 +5412,12 @@ async function navigateFolderBrowser(path) {
         if (items.length > 0) {
             items.forEach(item => {
                 const div = document.createElement('div');
-                div.style.cssText = 'padding:8px 12px; cursor:pointer; border-radius:6px; display:flex; align-items:center; gap:8px; color:var(--text); font-size:13px; border:1px solid transparent;';
+                div.className = 'fb-entry';
                 const icon = item.type === 'dir'
                     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>'
                     : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>';
                 div.innerHTML = icon + ' ';
                 div.appendChild(document.createTextNode(item.name));
-
-                div.onmouseover = () => div.style.backgroundColor = 'var(--surface2)';
-                div.onmouseout = () => div.style.backgroundColor = 'transparent';
 
                 div.onclick = async () => {
                     if (item.type === 'dir') {
@@ -4420,11 +5434,11 @@ async function navigateFolderBrowser(path) {
                 entriesDiv.appendChild(div);
             });
         } else {
-            entriesDiv.innerHTML = '<div style="padding:20px; text-align:center; color:var(--muted); font-size:12px;">No files or subdirectories found.</div>';
+            entriesDiv.innerHTML = '<div class="fb-empty">No files or subdirectories found.</div>';
         }
 
         $('fb-back').disabled = !data.parent;
-        $('fb-back').style.opacity = data.parent ? '1' : '0.5';
+        $('fb-back').classList.toggle('is-root', !data.parent);
 
     } catch (err) {
         console.error('[FolderBrowser] Navigation error:', err);
@@ -4738,7 +5752,11 @@ function renderSubscriptions(subs) {
     return;
   }
   if (!subs || !subs.length) {
-    list.innerHTML = '<div class="s-label" style="font-size:11.5px;">Not following anyone yet.</div>';
+    list.innerHTML = emptyState(
+      'user',
+      'Not following anyone yet',
+      'Paste an artist link above to be told when they release something new.',
+    );
     return;
   }
 
@@ -4894,8 +5912,8 @@ function healthRate(rate) {
 
 function healthColour(row) {
   if (!row.attempts) return 'var(--muted)';
-  if (row.success_rate >= 0.9) return 'var(--green, #22c55e)';
-  if (row.success_rate >= 0.5) return 'var(--yellow, #eab308)';
+  if (row.success_rate >= 0.9) return 'var(--green, #1ed760)';
+  if (row.success_rate >= 0.5) return 'var(--yellow, #f0c674)';
   return 'var(--red)';
 }
 
@@ -5050,14 +6068,12 @@ function renderStats(doc) {
 
   const totals = doc.totals || {};
   if (!totals.tracks) {
-    body.innerHTML = `
-      <div class="s-section">
-        <div class="s-title">Nothing yet</div>
-        <div class="s-label" style="font-size:11.5px;">
-          This is built from the download log, which fills up as you fetch
-          tracks. Come back after a download or two.
-        </div>
-      </div>`;
+    body.innerHTML = `<div class="s-section">${emptyState(
+      'chart',
+      'Nothing to count yet',
+      'This is built from the download log, which fills up as you fetch tracks. '
+      + 'Come back after a download or two.',
+    )}</div>`;
     return;
   }
 
@@ -5219,25 +6235,32 @@ async function onCsvFileChosen(input) {
   }
 }
 
-// Pushed by api_mixins/csv_import.py while the rows are being matched.
-// Matching a CSV of titles is one catalogue lookup per row, so a large file
-// is minutes of work; without this the import button said nothing between
-// "Reading the file…" and the finished track list, and a file whose columns
-// were mapped wrong looked exactly like one that was working. Two numbers,
-// because they answer different questions: how far along it is, and how
-// much of it is actually being found.
+// Pushed by api_mixins/csv_import.py through both long phases of an import:
+// matching the rows against the catalogue, then fetching the metadata of
+// every link that matched. A large file is minutes of work in each, and
+// without this the import said nothing between "Reading the file…" and the
+// finished track list — a file whose columns were mapped wrong looked
+// exactly like one that was working, and a stalled fetch like a slow one.
+// Three numbers, because they answer different questions: how far along it
+// is, how much of it is coming back, and how much is being lost.
 window.app_csv_progress = function (payload) {
-  const { done = 0, total = 0, found = 0 } = payload || {};
+  const { phase = 'matching', done = 0, total = 0, found = 0, missing = 0 } = payload || {};
+  const matching = phase === 'matching';
+  const label =
+    `${matching ? 'Matching' : 'Fetching metadata'} ${done}/${total} · ` +
+    `${found} ${matching ? 'found' : 'ready'}` +
+    (missing ? ` · ${missing} ${matching ? 'not found' : 'without metadata'}` : '');
   // The line itself is already on screen: the same counter arrives as an
   // app_set_progress label. This puts it on the button that started the
   // import too, since that is where the pointer is, and marks the button
   // busy — without touching its innerHTML, which is the icon.
   const btn = $('csvBtn');
   if (!btn) return;
-  const label = `Matching ${done}/${total} · ${found} found`;
   btn.title = label;
   btn.setAttribute('aria-label', label);
-  btn.classList.toggle('is-busy', done < total);
+  // Only the metadata phase reaching its total ends the import; matching
+  // hits done === total and is immediately followed by the second phase.
+  btn.classList.toggle('is-busy', matching || done < total);
 };
 
 // Pushed by api_mixins/csv_import.py once the track list is ready. The table
@@ -5245,16 +6268,24 @@ window.app_csv_progress = function (payload) {
 // on the rows that did not make it.
 window.app_csv_loaded = function (payload) {
   const missed = (payload?.unresolved || []).length;
-  if (missed) {
-    showToast(
-      `${payload.tracks} track(s) loaded · ${missed} row(s) could not be matched (see the log).`,
-      'info',
-    );
+  const failed = payload?.failed || 0;
+  const btn = $('csvBtn');
+  if (btn) btn.classList.remove('is-busy');
+  if (missed || failed) {
+    const parts = [];
+    if (missed) parts.push(`${missed} row(s) could not be matched`);
+    // A row can match a link whose metadata then fails to fetch, which is
+    // why this is a separate number from the unmatched rows: together they
+    // account for the gap between the file's line count and the table's.
+    if (failed) parts.push(`${failed} link(s) returned no metadata`);
+    showToast(`${payload.tracks} track(s) loaded · ${parts.join(' · ')} (see the log).`, 'info');
   } else {
     showToast(`${payload.tracks} track(s) loaded from ${payload.file}.`, 'success');
   }
 };
 
 window.app_csv_error = function (payload) {
+  const btn = $('csvBtn');
+  if (btn) btn.classList.remove('is-busy');
   showToast(payload?.error || 'CSV import failed.', 'error');
 };

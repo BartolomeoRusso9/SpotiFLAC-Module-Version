@@ -35,15 +35,18 @@
 | `allow_fallback` | `bool` | `True` | For `HI_RES_LOSSLESS`, allows fallback to `LOSSLESS` when the higher-resolution tier is unavailable. It never downgrades lossless requests to compressed audio. |
 | `log_level` | `int` | `logging.WARNING` | Python logging level. |
 | `embed_lyrics` | `bool` | `True` | Whether to fetch and embed synchronized lyrics (LRC) into the audio file. |
-| `lyrics_providers` | `list` | `["spotify", "apple", "musixmatch", "lrclib", "amazon"]` | Priority order of lyrics providers to attempt. |
+| `lyrics_providers` | `list` | `["spotify", "apple", "musixmatch", "lrclib", "amazon"]` | Priority order of lyrics providers. All are queried at once; the answers are read back in this order, so the first entry that has lyrics wins. Put `apple` first for word-by-word timing. |
+| `apple_lyrics_word_by_word` | `bool` | `True` | Keep Apple's lyrics in their native word-by-word (per-syllable) form. Set `False` to get plain line-synced LRC from Apple instead. Only affects the `apple` provider. |
+| `save_lrc` | `bool` | `False` | Also write the lyrics as `<audio file's name>.lrc`, next to the track. |
+| `lrc_library_dir` | `str` | `None` | Also collect every lyric into this folder as `Artist - Title.lrc`, the layout overlay players (LyricsX and similar) look lyrics up by. |
 | `enrich_metadata` | `bool` | `True` | Enables multi-provider metadata enrichment (HD covers, BPM, labels, etc.). |
 | `enrich_providers` | `list` | `["deezer", "apple", "qobuz", "tidal"]` | Priority order of metadata providers to attempt. `soundcloud` is also accepted but isn't on by default. |
 | `qobuz_token` | `str` | `None` | Optional setting forwarded to the installed Qobuz extension, if it supports it. Has no built-in behavior of its own. |
 | `qobuz_local_api_url` | `str` | `None` | Optional setting forwarded to the installed `qobuz-web`-family extension, if it supports it. Has no effect on its own — see [Passing Settings to an Extension](configuration.md#passing-settings-to-an-extension-eg-a-self-hosted-api-instance). |
 | `use_extensions_fallback` | `bool` | `True` | Whether to automatically fall back to another installed extension for the same alias if one fails. Set to `False` to use only the extensions explicitly listed in `services`. |
-| `transcode_to` | `str` | `None` | Converts every finished track to this format. Currently only `"mp3"` (see [MP3 Transcoding](configuration.md#mp3-transcoding)). `None` keeps the extension's original format. Requires `ffmpeg`. |
-| `transcode_bitrate` | `str` | `"320k"` | Bitrate used by `transcode_to`, e.g. `"320k"`, `"256k"`, `"192k"`. |
-| `transcode_keep_original` | `bool` | `False` | Keeps the original lossless file next to the converted one. By default the source is deleted once the conversion succeeds. |
+| `transcode_to` | `str` | `None` | Converts every finished track to this format: `"flac"`, `"alac"` (`.m4a`), `"wav"`, `"aiff"`, `"wavpack"` (`.wv`), `"tta"` or `"mp3"` (see [Transcoding](configuration.md#transcoding)). The lossless targets keep the sample rate and bit depth of the source. `None` keeps the extension's original format. Requires `ffmpeg`. |
+| `transcode_bitrate` | `str` | `"320k"` | Bitrate used by the lossy `transcode_to` targets, e.g. `"320k"`, `"256k"`, `"192k"`. Ignored by the lossless ones. |
+| `transcode_keep_original` | `bool` | `False` | Keeps the original downloaded file next to the converted one. By default the source is deleted once the conversion succeeds. |
 | `verify_hires` | `bool` | `False` | Runs a spectral-analysis QA check after each successful lossless download, flagging files that declare a high sample rate but lack real content above standard-definition frequencies (possible upsampling / fake Hi-Res). Requires the optional `librosa`/`numpy` packages (`pip install SpotiFLAC[hires]`); silently skipped if they're not installed. Never fails or delays a download — see [Hi-Res Verification](configuration.md#hi-res-verification). |
 | `post_download_action` | `str` | `"none"` | Action after all downloads finish: `"none"`, `"open_folder"`, `"notify"`, `"command"`. |
 | `post_download_command` | `str` | `""` | Shell command to run when `post_download_action="command"`. Supports `{folder}`, `{succeeded}`, `{skipped}`, `{failed}` placeholders; quote `{folder}` in your template (e.g. `'{folder}'`) since the substituted path may contain spaces. |
@@ -144,6 +147,8 @@ SpotiFLAC(
 | `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
 | `--output-path` | `-o` | `None` | Exact output file path for single track downloads. Ignored for albums, playlists and discographies. |
 | `--quality` | `-q` | `LOSSLESS` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. `DOLBY_ATMOS` is also accepted but is Tidal-exclusive — any other provider falls back to `HI_RES_LOSSLESS` instead. Legacy provider-specific values are accepted and normalized. |
+| `--fallback` | | `True` | Let a provider serve a lower tier when the requested `--quality` is unavailable for a track. Enabled by default; the flag exists to override a profile that disabled it. |
+| `--no-fallback` | | | Fail a track outright when the requested `--quality` is not available, instead of accepting a lower tier. |
 | `--use-track-numbers` | | `False` | Prefix filenames with track numbers. |
 | `--use-album-track-numbers` | | `False` | Use the track's original album number instead of queue position. |
 | `--use-artist-subfolders` | | `False` | Organize files into per-artist subfolders. |
@@ -162,14 +167,19 @@ SpotiFLAC(
 | `--max-concurrent` | | `2` | How many tracks to download at once. Each track still tries its providers in order/fallback on its own — this only controls how many tracks run simultaneously. Use `1` for fully sequential downloads with no interleaved console output. |
 | `--playlist` | `-p` | `None` | Playlist URL to sync; repeat once per playlist. All tracks go to a single destination folder, shared tracks are downloaded once, and each playlist gets its own M3U file (see [Multiple Playlists in One Folder](configuration.md#multiple-playlists-in-one-folder)). |
 | `--m3u` | | `m3u8` | Playlist file written for each `--playlist`: `m3u8`, `m3u` or `none`. Rewritten only when its content changed. |
-| `--transcode` | | `none` | Convert every downloaded track to this format: `none` or `mp3`. Requires `ffmpeg`. |
+| `--transcode` | | `none` | Convert every downloaded track to this format: `none`, `flac`, `alac`, `wav`, `aiff`, `wavpack`, `tta` or `mp3`. Requires `ffmpeg`. |
 | `--mp3` | | | Shorthand for `--transcode mp3`. |
-| `--transcode-bitrate` | | `320k` | Bitrate used by `--transcode`, e.g. `320k`, `256k`, `192k`. |
-| `--keep-original` | | `False` | Keep the original lossless file alongside the transcoded one. |
+| `--alac` | | | Shorthand for `--transcode alac` — lossless `.m4a`, read natively by macOS. |
+| `--transcode-bitrate` | | `320k` | Bitrate used by the lossy `--transcode` targets, e.g. `320k`, `256k`, `192k`. Ignored by the lossless ones. |
+| `--keep-original` | | `False` | Keep the original downloaded file alongside the transcoded one. |
 | `--verify-hires` | | `False` | Runs a spectral-analysis QA check after each successful lossless download, flagging files that declare a high sample rate but lack real content above standard-definition frequencies (possible upsampling / fake Hi-Res). Requires the optional `librosa`/`numpy` packages (`pip install SpotiFLAC[hires]`); silently skipped if they're not installed. Never fails or delays a download — see [Hi-Res Verification](configuration.md#hi-res-verification). |
 | `--verbose` | `-v` | `False` | Enable debug logging. |
+| `--log-level` | | `INFO` | Console log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` (aliases like `WARN` and numeric values are accepted). The default reports the milestones of a run — provider tried, ticket, audio fetch, transcode. Third-party libraries (httpx, httpcore, hpack, urllib3) are held at `WARNING` unless the level is `DEBUG`, so `INFO` stays readable. Overrides `--verbose`, which is a shorthand for `DEBUG`. A level stored in a profile ranks below `--verbose`. |
 | `--no-lyrics` | | `False` | Disable lyrics embedding (lyrics are embedded by default). |
 | `--lyrics-providers` | | `apple lrclib` | Lyrics provider priority order (CLI default; the Python API default is `spotify apple musixmatch lrclib amazon` when `lyrics_providers` is left unset). |
+| `--apple-lyrics-line-synced` | | off | Get plain line-synced LRC from the Apple lyrics provider instead of word-by-word (per-syllable) enhanced LRC. |
+| `--save-lrc` | | off | Also write the lyrics as an `.lrc` file next to the track, under the audio file's own name. |
+| `--lrc-dir` | `DIR` | — | Also collect every lyric into `DIR` as `Artist - Title.lrc`. |
 | `--no-enrich` | | `False` | Disable multi-provider metadata enrichment (enrichment is enabled by default). |
 | `--enrich-providers` | | `deezer apple qobuz tidal` | Metadata enrichment provider priority order. `soundcloud` is also accepted but isn't on by default. |
 | `--post-action` | | `none` | Action after all downloads finish: `none`, `open_folder`, `notify`, `command`. |

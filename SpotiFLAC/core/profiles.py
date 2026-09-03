@@ -1,5 +1,5 @@
 """Profile management — save/load named configuration presets.
-File: ~/.cache/spotiflac/profiles.json.
+File: ~/.spotiflac/.cache/profiles.json.
 
 Async usage:
     await save_profile_async("tidal-hires", cfg)
@@ -13,15 +13,16 @@ import asyncio
 import json
 import logging
 import time
-from pathlib import Path
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
+
+from .paths import adopt_legacy_cache_file, cache_path
 
 logger = logging.getLogger(__name__)
 
 # Using asyncio.Lock instead of threading.Lock so it doesn't block the event loop
 _io_lock = asyncio.Lock()
-_PROFILES_FILE = Path.home() / ".cache" / "spotiflac" / "profiles.json"
+_PROFILES_FILE = cache_path("profiles.json")
 
 
 class ProfileConfig(BaseModel):
@@ -40,6 +41,11 @@ class ProfileConfig(BaseModel):
     lyrics_providers: list[str] = Field(
         default_factory=lambda: ["apple", "lrclib"],
     )
+    #: Apple lyrics as word-by-word (per-syllable) enhanced LRC when True,
+    #: plain line-synced LRC when False.
+    apple_lyrics_word_by_word: bool = True
+    save_lrc: bool = False
+    lrc_library_dir: str | None = None
     enrich_metadata: bool = True
     enrich_providers: list[str] = Field(
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"],
@@ -64,6 +70,10 @@ class ProfileConfig(BaseModel):
     # when a profile is saved, so anything the CLI can set has to be listed.
     resume: bool = True
     post_download_hooks: list[str] = Field(default_factory=list)
+    # Both are written by launcher's --save-profile and were being dropped
+    # here, so `--verify-hires --save-profile x` came back without it.
+    create_playlist_subfolders: bool = True
+    verify_hires: bool = False
 
     model_config = {"extra": "ignore"}
 
@@ -100,6 +110,7 @@ class ProfileConfig(BaseModel):
 
 # Synchronous I/O helpers to be executed in a thread
 def _read_file_sync() -> str | None:
+    adopt_legacy_cache_file(_PROFILES_FILE)
     if _PROFILES_FILE.exists():
         return _PROFILES_FILE.read_text(encoding="utf-8")
     return None

@@ -40,7 +40,7 @@ from .core.errors import ErrorKind, SpotiflacError
 from .core.hooks import load_hooks, run_hooks
 from .core.http import AsyncHttpClient
 from .core.isrc_helper import IsrcHelper
-from .core.models import DownloadResult, TrackMetadata, build_filename
+from .core.models import DownloadResult, TrackMetadata, build_filename, sanitize
 from .core.playlist_sync import (
     PlaylistSource,
     SyncPlan,
@@ -62,12 +62,15 @@ from .core.progress import (
     uninstall_console_interception,
 )
 from .core.quality import normalize_quality, quality_for_provider
+from .core.recording_guard import wrong_recording_reason_async
 from .core.spotify_metadata import SpotifyMetadataClient
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
     ensure_ffmpeg_available,
+    extension_for,
     normalize_bitrate,
     normalize_transcode_format,
+    result_format_for,
     transcode_file_async,
     transcoded_file_exists,
 )
@@ -152,6 +155,25 @@ class DownloadOptions:
     lyrics_providers: list[str] = field(
         default_factory=lambda: ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
     )
+    # Apple times every syllable, so its lyrics are written word-by-word
+    # (enhanced LRC with inline <mm:ss.xx> tags) by default. Set False to get
+    # plain line-synced LRC from Apple instead — for players/overlays that
+    # only understand line-level timing, or for users who prefer it.
+    apple_lyrics_word_by_word: bool = True
+
+    # Write the lyrics out as an .lrc file as well as into the tag. No player
+    # on macOS renders a *word-by-word* lyric out of an embedded tag — Apple
+    # Music strips the timing and shows flat text — so the synced display
+    # everyone actually wants comes from an overlay app (LyricsX and the like)
+    # reading a file on disk.
+    #
+    # `save_lrc` puts it next to the track under the audio file's own name,
+    # which is the convention players pair sidecars by. `lrc_library_dir`
+    # additionally collects every lyric into one folder as
+    # "Artist - Title.lrc", which is the convention the overlay apps look up
+    # by. The two answer different questions, so they are separate switches.
+    save_lrc: bool = False
+    lrc_library_dir: str | None = None
 
     enrich_metadata: bool = True
     # SoundCloud isn't checked by default — still selectable (GUI checklist,
@@ -162,8 +184,10 @@ class DownloadOptions:
     qobuz_token: str | None = None
     qobuz_local_api_url: str | None = None
 
-    # Post-download conversion: None = keep the provider format,
-    # "mp3" = convert every track to MP3 at `transcode_bitrate`.
+    # Post-download conversion: None = keep the provider format, otherwise
+    # one of core.transcode.SUPPORTED_FORMATS — a lossless target
+    # ("flac", "alac", "wav", "aiff", "wavpack", "tta") re-encodes without
+    # touching the samples, "mp3" encodes at `transcode_bitrate`.
     # The converted file uses the same name with a different extension so
     # skipping already-downloaded tracks still works (the converted file is
     # looked for directly before contacting providers).
@@ -485,7 +509,7 @@ def transcode_target_path(
     if not opts.transcode_to:
         return None
 
-    extension = f".{opts.transcode_to}"
+    extension = extension_for(opts.transcode_to)
     if opts.output_path:
         base, _ = os.path.splitext(opts.output_path)
         return Path(base + extension)
@@ -512,7 +536,9 @@ async def _transcode_result_async(
     which also covers providers that natively deliver MP3.
     """
     source = Path(result.file_path or "")
-    if not result.file_path or source.suffix.lower() == f".{opts.transcode_to}":
+    if not result.file_path or source.suffix.lower() == extension_for(
+        opts.transcode_to
+    ):
         return result
 
     try:
@@ -531,7 +557,131 @@ async def _transcode_result_async(
 
     # Even a "skipped" result (file already existing in another format) is
     # rewritten: it should be reported as a successful download, not as a skip.
-    return DownloadResult.ok(result.provider, str(dest), opts.transcode_to)
+    return DownloadResult.ok(
+        result.provider, str(dest), result_format_for(opts.transcode_to)
+    )
+
+
+#: The fields that say *which recording* this is, as opposed to the ones a
+#: provider is welcome to improve (cover art, label, release date).
+_IDENTITY_FIELDS = ("isrc", "title", "artists", "album", "duration_ms", "is_explicit")
+
+
+async def _write_lrc_sidecars_async(
+    result: DownloadResult,
+    metadata: TrackMetadata,
+    opts: DownloadOptions,
+) -> None:
+    """Write the track's lyrics out as .lrc file(s), if asked for.
+
+    Reads them back out of the finished file rather than fetching them
+    again: the tagger has already resolved the provider order and written
+    the result, so the tag is both the cheapest source and the one that is
+    guaranteed to match what the track actually carries. Runs after
+    transcoding and after any move, so the sidecar lands beside the file the
+    user ends up with.
+
+    Never raises. A missing lyric or an unwritable folder must not turn a
+    finished download into a failure.
+    """
+    if not (opts.save_lrc or opts.lrc_library_dir) or not result.file_path:
+        return
+
+    def _write() -> list[str]:
+        from .core.tagger import read_embedded_tags
+
+        audio = Path(result.file_path)
+        lyrics = (read_embedded_tags(audio, include_cover=False).lyrics or "").strip()
+        if not lyrics:
+            return []
+
+        written: list[str] = []
+        if opts.save_lrc:
+            beside = audio.with_suffix(".lrc")
+            beside.write_text(lyrics + "\n", encoding="utf-8")
+            written.append(str(beside))
+
+        if opts.lrc_library_dir:
+            # "Artist - Title", the order the overlay apps match on — the
+            # reverse of this project's default filename format, which is
+            # why this cannot simply reuse the audio file's stem.
+            artist = (
+                metadata.first_artist if opts.first_artist_only else metadata.artists
+            )
+            library = Path(opts.lrc_library_dir).expanduser()
+            library.mkdir(parents=True, exist_ok=True)
+            collected = library / f"{sanitize(artist)} - {sanitize(metadata.title)}.lrc"
+            collected.write_text(lyrics + "\n", encoding="utf-8")
+            written.append(str(collected))
+        return written
+
+    try:
+        for written in await asyncio.to_thread(_write):
+            logger.info("[lrc] wrote %s", written)
+    except Exception as exc:
+        logger.warning("[lrc] could not write sidecar for %s: %s", metadata.title, exc)
+
+
+def _restore_identity(metadata: TrackMetadata, requested: TrackMetadata) -> None:
+    """Undo any change a provider made to what names the recording.
+
+    Providers write their findings onto the TrackMetadata they are handed,
+    and the same object goes to the next provider in the list — so one
+    provider's mistake becomes the next provider's brief. The tidal
+    extension resolves an ISRC through Qobuz and writes it back *before* it
+    finds out it has no API to download from; the karaoke ISRC it collected
+    for "Like Him" then travelled to qobuz, which matched it exactly and was
+    waved through.
+
+    Only fields the request actually had are put back. A provider that fills
+    in an ISRC nobody knew is doing the next one a favour, and that survives.
+    """
+    for name in _IDENTITY_FIELDS:
+        wanted = getattr(requested, name)
+        if wanted and getattr(metadata, name) != wanted:
+            setattr(metadata, name, wanted)
+
+
+def _restore_metadata(metadata: TrackMetadata, snapshot: TrackMetadata) -> None:
+    """Put `metadata` back the way it was before a provider touched it.
+
+    The whole object, not just the identity fields: this runs when a
+    download has been rejected outright, so the cover, label and release
+    date the rejected provider supplied describe the wrong recording too.
+    """
+    for name in type(metadata).model_fields:
+        setattr(metadata, name, getattr(snapshot, name))
+
+
+async def _reject_wrong_recording_async(
+    metadata: TrackMetadata,
+    snapshot: TrackMetadata,
+    result: DownloadResult,
+    provider_name: str,
+) -> DownloadResult:
+    """`result` unchanged, or a failure if the provider fetched another take.
+
+    See core/recording_guard.py. The file is deleted rather than kept and
+    renamed: it carries the requested track's tags, so a copy left on disk
+    is indistinguishable from the real thing on the next run.
+    """
+    reason = await wrong_recording_reason_async(
+        requested_isrc=snapshot.isrc,
+        resolved_isrc=metadata.isrc,
+        title=snapshot.title,
+        artist=snapshot.artists,
+        duration_ms=snapshot.duration_ms,
+        is_explicit=snapshot.is_explicit,
+    )
+    if not reason:
+        return result
+
+    logger.warning("[%s] Wrong recording: %s", provider_name, reason)
+    if result.file_path:
+        with contextlib.suppress(OSError):
+            Path(result.file_path).unlink()
+    _restore_metadata(metadata, snapshot)
+    return DownloadResult.fail(provider_name, f"Wrong recording: {reason}")
 
 
 async def _record_provider_outcome(
@@ -570,6 +720,18 @@ async def download_one_async(
     errors: dict[str, str] = {}
     started_at = time.monotonic()
 
+    # What was asked for, before any provider gets to write its own findings
+    # onto the shared TrackMetadata. Taken once for the whole track, not once
+    # per provider: a provider that *fails* still leaves its mutations behind,
+    # so a per-provider snapshot records the previous provider's mistakes as
+    # if they were the request. That is not hypothetical — the tidal
+    # extension resolves an ISRC through Qobuz ("[tidal] ISRC from Qobuz
+    # (preferred)") and writes it back before discovering it has no API to
+    # download from; the karaoke ISRC it picked up for "Like Him" was then
+    # the thing the next provider, qobuz, was checked against. It matched,
+    # of course, and the karaoke take was accepted a second time.
+    requested = metadata.model_copy(deep=True)
+
     transcode_target = transcode_target_path(metadata, output_dir, opts, position)
     if transcode_target and transcoded_file_exists(transcode_target):
         print_track_skipped(
@@ -585,7 +747,7 @@ async def download_one_async(
         return DownloadResult.skipped_result(
             providers[0].name if providers else "none",
             str(transcode_target),
-            fmt=opts.transcode_to,
+            fmt=result_format_for(opts.transcode_to),
         )
 
     for attempt in range(opts.track_max_retries + 1):
@@ -652,6 +814,7 @@ async def download_one_async(
                     "allow_fallback": opts.allow_fallback,
                     "embed_lyrics": opts.embed_lyrics,
                     "lyrics_providers": opts.lyrics_providers,
+                    "apple_lyrics_word_by_word": opts.apple_lyrics_word_by_word,
                     "enrich_metadata": opts.enrich_metadata,
                     "enrich_providers": opts.enrich_providers,
                     "is_album": is_album,
@@ -723,6 +886,14 @@ async def download_one_async(
                 )
 
             if result.success and not result.skipped:
+                result = await _reject_wrong_recording_async(
+                    metadata,
+                    requested,
+                    result,
+                    provider.name,
+                )
+
+            if result.success and not result.skipped:
                 # Record the provider outcome the moment its download settles,
                 # before transcode/move post-processing: the latency sample
                 # should measure the provider, and a post-processing failure
@@ -738,7 +909,7 @@ async def download_one_async(
             if result.success:
                 if opts.transcode_to:
                     # A file already existing in another format is also converted:
-                    # on the next pass the skip logic will already find it in MP3.
+                    # on the next pass the skip logic finds it in the target format.
                     result = await _transcode_result_async(result, opts)
                     if not result.success:
                         return result
@@ -770,6 +941,8 @@ async def download_one_async(
                         result.format or "flac",
                     )
 
+                await _write_lrc_sidecars_async(result, metadata, opts)
+
                 print_track_done(
                     result.provider or provider.name,
                     metadata.title,
@@ -786,6 +959,8 @@ async def download_one_async(
                 _schedule_hires_check(opts, result)
                 # Success already recorded above, at provider-settle time.
                 return result
+
+            _restore_identity(metadata, requested)
 
             errors[provider.name] = result.error or "unknown error"
             await _record_provider_outcome(
@@ -927,7 +1102,16 @@ class DownloadWorker:
                 )
 
             manager = DownloadManager()
-            await manager.reset()
+            # No reset here. The tracks were put in this queue by
+            # _register_queue_async() just before the worker was built, and
+            # resetting now threw them away — after which start_download(),
+            # complete_download() and fail_download() all looked up ids that
+            # were no longer in the queue and silently did nothing. That is
+            # why every GUI download reported "0% · 0.00 MB/s" from start to
+            # finish and the queue dock never moved: the numbers were real,
+            # they were just being read off an empty queue. The reset now
+            # happens where a batch actually begins — see
+            # SpotiflacDownloader._register_queue_async().
             total = len(self._tracks)
             start = time.perf_counter()
 
@@ -1924,8 +2108,13 @@ class SpotiflacDownloader:
 
         Returns the tracks with their final ids: everything downstream (progress
         updates, per-track results) is keyed on them.
+
+        This is where a batch begins, so this is where the previous batch's
+        queue is cleared — doing it later, inside the worker, wiped the very
+        rows this method had just added.
         """
         manager = DownloadManager()
+        await manager.reset()
         updated_tracks = []
         for i, t in enumerate(tracks):
             track_item_id = t.id or t.external_url or f"queue-{i}-{uuid.uuid4().hex}"

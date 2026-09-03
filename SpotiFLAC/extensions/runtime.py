@@ -10,6 +10,7 @@ The extension's `storage` state persists for the entire runtime lifetime.
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ import queue
 import shutil
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -35,6 +37,25 @@ _BRIDGE_JS = Path(__file__).parent / "_bridge.js"
 
 class ExtensionRuntimeError(RuntimeError):
     pass
+
+
+def quote_node_option(value: str | Path) -> str:
+    """Quotes one NODE_OPTIONS value so Node reads back the path we meant.
+
+    Node parses NODE_OPTIONS itself, and not the way a shell would: it splits
+    on whitespace — so an unquoted path with a space arrives as two arguments
+    and Node exits on the second — but inside the quotes it also treats a
+    backslash as an *escape* character. That second rule is the one that bit:
+    quoting alone turned every Windows path into nonsense, so
+    `C:\\Users\\...\\_netguard.js` reached Node as `C:Users..._netguard.js`
+    and the bridge died at startup with MODULE_NOT_FOUND before the
+    extension was ever read.
+
+    Doubling the backslashes survives that unescaping and leaves POSIX paths
+    untouched, since they have none to double.
+    """
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 class JSRuntime:
@@ -80,6 +101,10 @@ class JSRuntime:
         self._lock = threading.Lock()
         self._reader: threading.Thread | None = None
         self._ready_event = threading.Event()
+        # Node's own last words. Kept because a bridge that dies during
+        # startup says exactly why on stderr, and that used to go only to a
+        # debug log nobody had enabled — see _startup_failure().
+        self._stderr_tail: collections.deque[str] = collections.deque(maxlen=40)
         self._loop: asyncio.AbstractEventLoop | None = None
 
     # ─────────────────────── lifecycle ────────────────────────
@@ -156,10 +181,9 @@ class JSRuntime:
         for guard_name in ("_netguard.js", "_fsguard.js"):
             guard = Path(__file__).with_name(guard_name)
             if guard.is_file():
-                # Quoted: NODE_OPTIONS is split on whitespace like a shell
-                # word list, so an unquoted path containing a space arrives
-                # as two arguments and Node exits on the second.
-                node_options = f'{node_options} --require "{guard}"'.strip()
+                node_options = (
+                    f"{node_options} --require {quote_node_option(guard)}".strip()
+                )
 
         env = build_env({"NODE_OPTIONS": node_options} if node_options else None)
         logger.debug("[ExtRuntime] %s", describe())
@@ -184,17 +208,48 @@ class JSRuntime:
         # Thread that drains stderr (extension logs)
         threading.Thread(target=self._drain_stderr, daemon=True).start()
 
-        # Waits for "ready" signal from the extension
-        if not self._ready_event.wait(timeout=self.startup_timeout):
-            self.stop()
-            msg = (
-                f"Extension did not respond within {self.startup_timeout}s. "
-                "Verify that the JS file is valid."
-            )
-            raise ExtensionRuntimeError(
-                msg,
-            )
+        # Waits for "ready" signal from the extension.
+        #
+        # Polled rather than a single wait() so a Node process that has
+        # already exited is noticed straight away. It usually exits in well
+        # under a second — a rejected NODE_OPTIONS flag, a missing module, a
+        # syntax error in the extension — and waiting out the full timeout
+        # only to blame the JS file turned every one of those into the same
+        # opaque report, with the actual cause sitting unread on stderr.
+        deadline = time.monotonic() + self.startup_timeout
+        while not self._ready_event.wait(timeout=0.05):
+            if self._proc.poll() is not None:
+                raise self._startup_failure(
+                    f"Node exited with code {self._proc.returncode} "
+                    "before the extension was ready",
+                )
+            if time.monotonic() >= deadline:
+                raise self._startup_failure(
+                    f"Extension did not respond within {self.startup_timeout}s",
+                )
         logger.debug("[JSRuntime] extension ready: %s", self.ext_path.name)
+
+    def _startup_failure(self, reason: str) -> ExtensionRuntimeError:
+        """Builds the startup error, carrying whatever Node managed to say."""
+        # Give the drain thread a moment to catch the dying process's last
+        # lines; they are the whole point of this message.
+        for _ in range(20):
+            if self._stderr_tail:
+                break
+            time.sleep(0.05)
+        tail = list(self._stderr_tail)
+        self.stop()
+
+        parts = [f"{reason} ({self.ext_path.name})."]
+        if tail:
+            parts.append("Node said:\n" + "\n".join(f"  {line}" for line in tail))
+        else:
+            parts.append(
+                "Node printed nothing to stderr. Check that `node --version` "
+                "works, and try SPOTIFLAC_EXT_NO_SANDBOX=1 to rule out the "
+                "environment allowlist.",
+            )
+        return ExtensionRuntimeError(" ".join(parts))
 
     def stop(self) -> None:
         if self._proc and self._proc.poll() is None:
@@ -407,8 +462,9 @@ class JSRuntime:
     def _drain_stderr(self) -> None:
         try:
             for raw in self._proc.stderr:
-                line = raw.rstrip(b"\n").decode("utf-8", errors="replace")
+                line = raw.rstrip(b"\n").decode("utf-8", errors="replace").rstrip()
                 if line:
+                    self._stderr_tail.append(line)
                     logger.debug("[EXT stderr] %s", line)
         except Exception:
             pass

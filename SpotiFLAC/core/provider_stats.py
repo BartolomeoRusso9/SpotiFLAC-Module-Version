@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .atomic_io import write_json_atomic
+from .paths import cache_path
 
 #: Key prefix used by the download path (see downloader.download_one_async),
 #: as opposed to the per-API-URL keys a provider uses internally for its own
@@ -15,20 +15,11 @@ from .atomic_io import write_json_atomic
 #: the health view which is which.
 PROVIDER_KIND = "provider"
 
-_CACHE_DIR_NAME = "spotiflac"
 _CACHE_FILE_NAME = "provider_priority.json"
 
 
 def _get_cache_file() -> Path:
-    override = os.getenv("SPOTIFLAC_CACHE_DIR")
-    if override:
-        return Path(override) / _CACHE_FILE_NAME
-
-    xdg_cache_home = os.getenv("XDG_CACHE_HOME")
-    if xdg_cache_home:
-        return Path(xdg_cache_home) / _CACHE_DIR_NAME / _CACHE_FILE_NAME
-
-    return Path.home() / ".cache" / _CACHE_DIR_NAME / _CACHE_FILE_NAME
+    return cache_path(_CACHE_FILE_NAME)
 
 
 def get_cache_path() -> Path:

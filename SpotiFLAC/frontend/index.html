@@ -10,13 +10,18 @@
        tells itself apart from --web. Harmless to load in the desktop
        pywebview window too: manifest/theme-color are simply unused there,
        and the registration script below no-ops without that flag. -->
-  <link rel="manifest" href="manifest.json?v=20260817">
-  <meta name="theme-color" content="#0a0a0a">
+  <link rel="manifest" href="manifest.json?v=20260919">
+  <meta name="theme-color" content="#0a0a0c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="SpotiFLAC">
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
-  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260817">
+  <!-- Without these the browser asks for /favicon.ico on every load and
+       gets a 404 in the server log for a file that was never going to
+       be there. The artwork already ships. -->
+  <link rel="icon" type="image/svg+xml" href="assets/icons/logo.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/logo-192.png">
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=20260919">
   <script>
     // Theme, applied before the first paint. app.js used to do this only from
     // its 'pywebviewready' handler, which meant the window painted light and
@@ -41,6 +46,13 @@
       var dark = mode === 'dark' ||
         (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.classList.add(dark ? 'dark-theme' : 'light-theme');
+      // Accent, for the same reason and in the same breath: without it the
+      // first frames paint the default green before applyAccent() runs.
+      // 'green' is the default and has no data-accent value of its own.
+      try {
+        var accent = localStorage.getItem('spotiflac-accent');
+        if (accent && accent !== 'green') document.documentElement.setAttribute('data-accent', accent);
+      } catch (e) {}
     })();
   </script>
 </head>
@@ -55,6 +67,10 @@
   document.body.classList.add(
     document.documentElement.classList.contains('dark-theme') ? 'dark-theme' : 'light-theme'
   );
+  // Same mirroring for the accent — styles.css keys its --accent-* blocks
+  // off html *and* body (see setThemeClass/applyAccent in app.js).
+  var _accent = document.documentElement.getAttribute('data-accent');
+  if (_accent) document.body.setAttribute('data-accent', _accent);
 </script>
 
 <div id="titlebar">
@@ -65,6 +81,20 @@
   </div>
   
   <div class="pywebview-drag-region" style="flex: 1; height: 100%; -webkit-app-region: drag;"></div>
+
+  <!-- Which country the app's requests appear to come from. It matters here
+       because catalogues are region-locked: a track "not available" is very
+       often not-available-*there*. Shown only on the Settings view (see
+       switchView in app.js, which also triggers the lookup) — the styling
+       and the fetch have existed for a while, this markup was the missing
+       piece. Country only: togglePublicIp() in app.js is a stub marked
+       "removed by design", so the IP itself stays out of the window. -->
+  <div id="titlebar-network" class="hidden" title="Country your connection appears to come from">
+    <span class="network-pill">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      <span id="network-country">—</span>
+    </span>
+  </div>
 
   <div id="tb-logo">
     <span>SpotiFLAC</span>
@@ -163,15 +193,38 @@
               placeholder="Paste Spotify, Tidal, Apple Music, YouTube or Pandora link…"
               onkeydown="if(event.key==='Enter' && $('searchMode').value === 'link') onFetch()">
           </div>
+          <!-- The gesture this app is built around is "copy a link in Spotify,
+               come back here, paste, fetch". This does the paste and the fetch
+               in one press. Hidden automatically when the browser gives no
+               clipboard read permission (see initPasteButton in app.js) rather
+               than sitting there doing nothing. -->
+          <button id="pasteBtn" type="button" class="mode-btn hidden" onclick="pasteAndFetch()"
+                  title="Paste link from clipboard and fetch" aria-label="Paste and fetch">
+            <span class="mode-btn-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+            </span>
+          </button>
           <button id="fetchBtn" onclick="onFetch()" title="Fetch" aria-label="Fetch">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           </button>
         </div>
+        <!-- Where set_progress() lands. Every long job in the app has been
+             pushing a line here — reading a CSV, matching its rows, fetching
+             metadata, downloading — at an element that did not exist, so
+             setStatus() wrote to nothing and a 1875-row import was several
+             minutes indistinguishable from a frozen window. aria-live so the
+             counter is announced as it changes, not only when focus lands on
+             it; hidden until there is something to say, so it costs no space
+             at rest. -->
+        <div id="status-bar" class="status-bar hidden" role="status" aria-live="polite">
+          <span id="spinner" class="status-spinner"></span>
+          <span id="status-text"></span>
+        </div>
       </div>
 
       <!-- Text Search Results Container -->
-      <div id="text-search-container" class="hidden" style="padding: 0 18px 14px; border-bottom: 1px solid var(--border); max-width: 100%;">
-        <div id="text-search-results" style="display: flex; flex-direction: column; gap: 10px; max-width: 820px; margin: 0 auto;"></div>
+      <div id="text-search-container" class="hidden">
+        <div id="text-search-results"></div>
       </div>
 
       <div id="main-split">
@@ -213,6 +266,7 @@
                   </button>
                 </div>
               </div>
+              <aside id="album-tech" class="hidden" aria-label="Technical details"></aside>
               <button onclick="closeAlbumCard()" style="background:none;border:none;color:var(--muted);cursor:pointer;position:absolute;top:10px;right:10px;font-size:16px;line-height:1;padding:3px;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
@@ -255,10 +309,10 @@
                 <div>Actions</div>
               </div>
               <div id="track-rows"></div>
-              <div id="pagetion-controls" class="hidden" style="display:flex;justify-content:center;align-items:center;gap:8px;padding:16px 10px;margin:0 auto;max-width:100%;font-size:12px;">
-                <button id="page-prev" onclick="previousPage()" style="padding:6px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;cursor:pointer;color:var(--text2);">← Previous</button>
-                <span id="page-info" style="color:var(--muted);min-width:120px;text-align:center;font-family:'JetBrains Mono',monospace;">Page 1 of 1</span>
-                <button id="page-next" onclick="nextPage()" style="padding:6px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;cursor:pointer;color:var(--text2);">Next →</button>
+              <div id="pagetion-controls" class="hidden">
+                <button id="page-prev" class="page-btn" onclick="previousPage()">← Previous</button>
+                <span id="page-info">Page 1 of 1</span>
+                <button id="page-next" class="page-btn" onclick="nextPage()">Next →</button>
               </div>
             </div>
 
@@ -273,9 +327,10 @@
         <div class="qd-icon"><img src="assets/icons/download.svg" alt="Download"></div>
         <div class="qd-body">
           <div class="qd-downloaded" id="qd-downloaded">0.00 MB</div>
-          <div class="qd-speed" id="qd-speed">0.00 MB/s</div>
+          <div class="qd-speed" id="qd-speed">Idle</div>
         </div>
         <div class="qd-chevron">›</div>
+        <div class="qd-bar"><i id="qd-bar-fill"></i></div>
       </div>
       <div id="queue-drawer">
         <div id="queue-backdrop" onclick="toggleQueueDrawer()"></div>
@@ -297,11 +352,22 @@
             </div>
           </header>
           
+          <!-- The counters are also the filters: pressing one narrows the
+               list below to what it counts, pressing it again clears it.
+               Buttons, not divs, so they are reachable by keyboard. -->
           <div class="queue-summary">
-            <div class="qs-item queued"><span class="qs-icon">⏱</span><strong id="q-queued">0</strong>Queued</div>
-            <div class="qs-item completed"><span class="qs-icon">✓</span><strong id="q-completed">0</strong>Completed</div>
-            <div class="qs-item skipped"><span class="qs-icon">📄</span><strong id="q-skipped">0</strong>Skipped</div>
-            <div class="qs-item failed"><span class="qs-icon">✕</span><strong id="q-failed">0</strong>Failed</div>
+            <button type="button" class="qs-item queued" onclick="filterQueue('waiting')" aria-pressed="false"><span class="qs-icon">⏱</span><strong id="q-queued">0</strong>Queued</button>
+            <button type="button" class="qs-item completed" onclick="filterQueue('done')" aria-pressed="false"><span class="qs-icon">✓</span><strong id="q-completed">0</strong>Completed</button>
+            <button type="button" class="qs-item skipped" onclick="filterQueue('skipped')" aria-pressed="false"><span class="qs-icon">📄</span><strong id="q-skipped">0</strong>Skipped</button>
+            <button type="button" class="qs-item failed" onclick="filterQueue('error')" aria-pressed="false"><span class="qs-icon">✕</span><strong id="q-failed">0</strong>Failed</button>
+          </div>
+
+          <div class="queue-toolbar">
+            <span class="ts-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+            </span>
+            <input id="queue-search" type="text" placeholder="Search the queue…" oninput="onQueueSearch(this.value)">
+            <button type="button" id="queue-clear-filters" class="act-btn secondary hidden" onclick="clearQueueFilters()">Clear filter</button>
           </div>
 
           <div class="queue-stats-bar">
@@ -325,7 +391,7 @@
     </div>
     <div class="view" id="view-explore">
       <div class="explore-container" style="padding: 20px; overflow-y: auto; height: 100%;">
-        <h2 id="explore-greeting" style="margin-bottom: 24px; font-size: 28px;">Esplora</h2>
+        <h2 id="explore-greeting" style="margin-bottom: 24px; font-size: 28px;">Explore</h2>
         <div id="explore-sections"></div>
       </div>
     </div>
@@ -384,18 +450,18 @@
                 Browse
               </button>
             </div>
-            <div id="folder-browser-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="folder-browser-title" tabindex="-1" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:9999;">
-              <div style="background:var(--surface); border:1px solid var(--border); border-radius:12px; width:90%; max-width:500px; max-height:80vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-                <div style="padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-                  <div id="folder-browser-title" style="font-weight:600; color:var(--text);">Select Folder</div>
-                  <button onclick="closeFolderBrowser()" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:18px; padding:0; line-height:1;">×</button>
+            <div id="folder-browser-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="folder-browser-title" tabindex="-1">
+              <div class="fb-card">
+                <div class="fb-header">
+                  <div id="folder-browser-title">Select Folder</div>
+                  <button class="fb-close" onclick="closeFolderBrowser()">×</button>
                 </div>
-                <div style="padding:12px 20px; border-bottom:1px solid var(--border); display:flex; gap:8px; align-items:center;">
-                  <button id="fb-back" onclick="goFolderBrowserBack()" style="background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:6px 12px; cursor:pointer; color:var(--text); font-size:12px;">← Back</button>
-                  <input type="text" id="fb-path" readonly style="flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text2); font-size:11px; font-family:monospace;">
-                  <button onclick="setFolderPath()" style="background:var(--yellow); border:none; border-radius:6px; padding:6px 12px; cursor:pointer; color:black; font-weight:600; font-size:12px;">Select</button>
+                <div class="fb-toolbar">
+                  <button id="fb-back" onclick="goFolderBrowserBack()">← Back</button>
+                  <input type="text" id="fb-path" readonly>
+                  <button class="fb-select" onclick="setFolderPath()">Select</button>
                 </div>
-                <div id="fb-entries" style="flex:1; overflow-y:auto; padding:8px;"></div>
+                <div id="fb-entries"></div>
               </div>
             </div>
           </div>
@@ -422,6 +488,55 @@
             anything; a match is a strong hint, not a certification.
           </p>
           <div id="dedup-groups" class="sort-list"></div>
+        </div>
+
+        <!-- Library-wide duplicates (core/library_dedup.py). Different tool
+             from the fingerprint scan above: metadata first, so it scales to
+             a whole library, and it can act on what it finds. -->
+        <div class="s-section" style="padding:16px 20px;">
+          <div class="s-title">Library Duplicates</div>
+          <p style="font-size:11.5px;color:var(--muted);margin:-4px 0 12px;line-height:1.5;">
+            Groups every copy of the same recording in the folder above — by ISRC, then by
+            artist/title and duration for the files that have none — and keeps the best copy of
+            each. Fast enough for a library of thousands, where the fingerprint scan is not.
+          </p>
+          <div class="s-row" style="gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+            <select id="libdedup-match" style="max-width:210px;" title="Which signal decides that two files are one recording">
+              <option value="both">ISRC, then tags</option>
+              <option value="isrc">ISRC only (safest)</option>
+              <option value="tags">Tags only</option>
+            </select>
+            <label class="s-label" style="display:flex;align-items:center;gap:6px;font-size:11.5px;" title="How far two durations may differ and still be the same recording">
+              Duration slack
+              <input type="number" id="libdedup-tolerance" value="4" min="0" max="60" step="0.5" style="width:64px;">s
+            </label>
+            <label class="s-label" style="display:flex;align-items:center;gap:6px;font-size:11.5px;" title="Fingerprint each group and split it where the audio disagrees. Slower; needs the 'dedup' extra.">
+              <input type="checkbox" id="libdedup-verify"> Confirm with audio
+            </label>
+            <label class="s-label" style="display:flex;align-items:center;gap:6px;font-size:11.5px;" title="Also write a SQLite index of the whole library next to the quarantine folder">
+              <input type="checkbox" id="libdedup-db"> Write index .db
+            </label>
+            <button class="act-btn primary" onclick="startLibraryDedupScan()" id="btn-libdedup-scan" style="margin-left:auto;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              Scan Library
+            </button>
+          </div>
+          <div id="libdedup-progress" class="hidden s-label" style="font-size:11.5px;margin-bottom:10px;"></div>
+          <div id="libdedup-summary" class="hidden" style="font-size:11.5px;color:var(--text2);line-height:1.7;margin-bottom:12px;white-space:pre-wrap;font-family:monospace;"></div>
+          <div id="libdedup-groups" class="sort-list"></div>
+          <div id="libdedup-actions" class="hidden s-row" style="gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;">
+            <span id="libdedup-selected" style="font-weight:600;font-size:12px;color:var(--text);">0 selected</span>
+            <button class="act-btn secondary" onclick="resolveLibraryDuplicates('trash')" id="btn-libdedup-trash" style="margin-left:auto;" title="Move them into .spotiflac-duplicates inside the library. Undoable.">
+              Move to quarantine
+            </button>
+            <button class="act-btn danger" onclick="resolveLibraryDuplicates('delete')" id="btn-libdedup-delete" title="Delete them outright. Not undoable.">
+              Delete permanently
+            </button>
+          </div>
+          <div id="libdedup-undo" class="hidden" style="margin-top:12px;font-size:11.5px;color:var(--muted);display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <span id="libdedup-manifest" class="reg-url" style="flex:1;min-width:0;"></span>
+            <button class="act-btn secondary" onclick="undoLibraryDedup()" id="btn-libdedup-undo">Undo</button>
+          </div>
         </div>
       </div>
 
@@ -581,6 +696,34 @@
               </select>
             </div>
             <div class="s-row">
+              <span class="s-label">Accent Color<small>Default: Green</small></span>
+              <div class="accent-picker">
+                <!-- A swatch of the current accent next to the select: the
+                     names alone ("Cyan" vs "Blue") don't tell you what you
+                     are choosing until you have chosen it. Painted from
+                     --accent itself, so it is always the real colour. -->
+                <span class="accent-dot" aria-hidden="true"></span>
+                <select id="config-accent" onchange="changeAccent()">
+                  <option value="green" selected>Green</option>
+                  <option value="blue">Blue</option>
+                  <option value="purple">Purple</option>
+                  <option value="pink">Pink</option>
+                  <option value="orange">Orange</option>
+                  <option value="red">Red</option>
+                  <option value="cyan">Cyan</option>
+                  <option value="amber">Amber</option>
+                </select>
+              </div>
+            </div>
+            <div class="s-row">
+              <span class="s-label">Preview Volume<small>The 30-second clips played from the ▶ button on a track</small></span>
+              <div class="volume-control">
+                <input type="range" id="config-preview-volume" min="0" max="100" step="5" value="100"
+                       oninput="changePreviewVolume()" aria-label="Preview volume">
+                <span id="preview-volume-value" class="volume-value">100%</span>
+              </div>
+            </div>
+            <div class="s-row">
               <span class="s-label">App Font<small>Default: JetBrains Mono</small></span>
               <select id="config-font" onchange="changeFont()">
                 <option value="'JetBrains Mono', monospace" selected>JetBrains Mono</option>
@@ -616,10 +759,20 @@
               <span class="s-label">Output format<small>Converted after download — requires ffmpeg</small></span>
               <select id="config-transcode" onchange="onTranscodeChange()">
                 <option value="none">Original (FLAC/M4A)</option>
-                <option value="mp3">MP3</option>
+                <optgroup label="Lossless">
+                  <option value="flac">FLAC — universal default</option>
+                  <option value="alac">ALAC (.m4a) — native on macOS/iOS</option>
+                  <option value="wavpack">WavPack (.wv)</option>
+                  <option value="tta">TTA (.tta)</option>
+                  <option value="wav">WAV — uncompressed PCM</option>
+                  <option value="aiff">AIFF — uncompressed PCM</option>
+                </optgroup>
+                <optgroup label="Lossy">
+                  <option value="mp3">MP3</option>
+                </optgroup>
               </select>
             </div>
-            <div class="s-row transcode-opt" style="display:none;padding-left:16px;border-left:2px solid var(--border2);margin-left:4px;">
+            <div class="s-row transcode-lossy" style="display:none;padding-left:16px;border-left:2px solid var(--border2);margin-left:4px;">
               <span class="s-label">Bitrate</span>
               <select id="config-transcode-bitrate">
                 <option value="320k">320 kbps</option>
@@ -629,7 +782,7 @@
               </select>
             </div>
             <div class="s-row transcode-opt" style="display:none;padding-left:16px;border-left:2px solid var(--border2);margin-left:4px;">
-              <span class="s-label">Keep original file<small>Off = the lossless source is deleted after conversion</small></span>
+              <span class="s-label">Keep original file<small>Off = the downloaded source is deleted after conversion</small></span>
               <label class="toggle">
                 <input type="checkbox" id="config-transcode-keep">
                 <span class="toggle-sl"></span>
@@ -699,7 +852,7 @@
             </div>
             <div class="s-row">
               <span class="s-label">Delete</span>
-              <button onclick="deleteProfile()" class="act-btn secondary" style="padding:5px 10px;font-size:11.5px;color:var(--red);border-color:rgba(239,68,68,.35);">Delete</button>
+              <button onclick="deleteProfile()" class="act-btn danger" style="padding:5px 10px;font-size:11.5px;">Delete</button>
             </div>
           </div>
         </div>
@@ -780,6 +933,13 @@
             <div id="lyrics-prov-wrap">
               <div class="s-title" style="margin-top:8px;">Lyrics Providers</div>
               <div id="lyrics-list" class="sort-list"></div>
+              <div class="s-row" style="margin-top:8px;">
+                <span class="s-label">Apple: word-by-word sync<small>(off = line-by-line sync)</small></span>
+                <label class="toggle">
+                  <input type="checkbox" id="config-apple-wbw" checked>
+                  <span class="toggle-sl"></span>
+                </label>
+              </div>
             </div>
           </div>
           <div class="s-section">
@@ -952,8 +1112,8 @@
       </div>
     </div>
   </div>
-  </div><script src="toast-system.js?v=20260817"></script>
-  <script src="app.js?v=20260817"></script>
+  </div><script src="toast-system.js?v=20260919"></script>
+  <script src="app.js?v=20260919"></script>
   <script>
     // --web mode only (see sw.js's own comment for what the service worker
     // actually does — installability, not offline caching of live data).

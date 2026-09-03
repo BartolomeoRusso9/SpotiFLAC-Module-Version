@@ -65,6 +65,46 @@ def _dig(node: Any, *keys: str) -> dict:
     return node if isinstance(node, dict) else {}
 
 
+def _iso_date(node: Any) -> str:
+    """The release date of an album node, which Spotify may send as null.
+
+    A track the account cannot play — country-restricted, taken down — comes
+    back with the shape intact but the fields emptied: `"date": null`,
+    `"name": ""`. `node.get("date", {}).get("isoString", "")` then raises
+    `'NoneType' object has no attribute 'get'`, and a whole CSV import lost
+    that row to a "Metadata fetch failed" with nothing pointing at the cause.
+    """
+    value = _dig(node, "date").get("isoString")
+    return value if isinstance(value, str) else ""
+
+
+def _copyright_text(node: Any) -> str:
+    """The joined copyright line of an album node. Null-safe, see _iso_date."""
+    items = _dig(node, "copyright").get("items")
+    if not isinstance(items, list):
+        return ""
+    return " \u00b7 ".join(
+        c.get("text", "") for c in items if isinstance(c, dict) and c.get("text")
+    )
+
+
+def _is_explicit(node: Any) -> bool:
+    """Whether a track node is marked explicit. Null-safe, see _iso_date."""
+    return _dig(node, "contentRating").get("label") == "EXPLICIT"
+
+
+def _name(node: Any, default: str) -> str:
+    """A node's name, falling back when it is absent, null or blank.
+
+    Blank counts: a restricted track carries `"name": ""`, and a track
+    titled "" is a file named "".
+    """
+    if not isinstance(node, dict):
+        return default
+    value = node.get("name")
+    return value if isinstance(value, str) and value.strip() else default
+
+
 def _safe_playcount(raw: Any) -> str:
     """Reads the playcount from either a dict or a scalar value."""
     if isinstance(raw, dict):
@@ -128,6 +168,101 @@ def _extract_artist_names(artists_data: Any) -> list[str]:
 def _join_artists(artists_data: Any) -> str:
     names = _extract_artist_names(artists_data)
     return ", ".join(names) if names else ""
+
+
+def _node_id(node: Any) -> str:
+    """The Spotify id of any GraphQL node: its "id", or the last segment of
+    its "spotify:<type>:<id>" uri when the id isn't spelled out. The same
+    two-step this file already does by hand for track_id and release_id."""
+    if not isinstance(node, dict):
+        return ""
+    nid = node.get("id")
+    if isinstance(nid, str) and nid:
+        return nid
+    uri = node.get("uri", "")
+    return uri.rsplit(":", 1)[-1] if isinstance(uri, str) and ":" in uri else ""
+
+
+def _id_from_artist_node(item: Any) -> str:
+    """Pulls an id/uri out of one artist node, trying every shape this file
+    has actually seen artist data come back in:
+      - id (or uri) nested under a "profile" sub-object — the same nesting
+        _extract_artist_names checks (`item.get("profile", {}).get("name")`
+        vs. `item.get("name")` directly) — some artist nodes carry every
+        field under "profile", others flat on the item itself.
+      - id (or uri) flat on the item.
+    uri is the fallback in both cases, same as track_id/album_id/release_id
+    elsewhere in this file, parsed as the last ":"-separated segment of
+    "spotify:artist:<id>".
+    """
+    if not isinstance(item, dict):
+        return ""
+    profile = item.get("profile")
+    for src in ([profile, item] if isinstance(profile, dict) else [item]):
+        aid = src.get("id")
+        if isinstance(aid, str) and aid:
+            return aid
+        uri = src.get("uri", "")
+        if isinstance(uri, str) and ":" in uri:
+            return uri.rsplit(":", 1)[-1]
+    return ""
+
+
+def _artist_nodes(artists_data: Any) -> list[dict]:
+    """Every credited artist as {"id", "name", "url"}, in credit order.
+
+    Pairing name with id per artist is the point: the joined `artists`
+    string cannot be split back apart safely (an artist whose own name
+    contains a comma — "Tyler, The Creator" — is exactly the case that
+    breaks it, see TrackMetadata.artist_names), so a UI that wants one
+    link per artist has to be handed the individual names, not a string
+    to re-split. Entries with no resolvable id keep their name and an
+    empty url, so a partially-known credit list still renders in full.
+    """
+    if isinstance(artists_data, dict):
+        items = artists_data.get("items", [])
+        if not (isinstance(items, list) and items):
+            items = [artists_data]
+    elif isinstance(artists_data, list):
+        items = artists_data
+    else:
+        return []
+
+    nodes: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        profile = item.get("profile")
+        name = profile.get("name") if isinstance(profile, dict) else item.get("name")
+        if not (isinstance(name, str) and name):
+            continue
+        aid = _id_from_artist_node(item)
+        nodes.append(
+            {
+                "id": aid,
+                "name": name,
+                "url": f"https://open.spotify.com/artist/{aid}" if aid else "",
+            },
+        )
+    return nodes
+
+
+def _first_artist_id(artists_data: Any) -> str:
+    """Extracts the first artist's raw Spotify ID, mirroring the shape
+    handling _extract_artist_names does for names — same "items" list vs.
+    single-artist dict vs. list-of-dicts shapes. Only the first artist,
+    for the fields (artist_id/artist_url) that carry one; _artist_nodes
+    above is what a per-artist UI wants."""
+    if isinstance(artists_data, dict):
+        items = artists_data.get("items", [])
+        if isinstance(items, list) and items:
+            return _id_from_artist_node(items[0])
+        return _id_from_artist_node(artists_data)
+
+    if isinstance(artists_data, list) and artists_data:
+        return _id_from_artist_node(artists_data[0])
+
+    return ""
 
 
 def _best_cover(cover_urls: dict) -> str:
@@ -234,7 +369,87 @@ def _track_url(track_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_spotify_url(uri: str) -> dict[str, str]:
+#: A browser UA: the share-link interstitials serve a different page — and
+#: sometimes no redirect at all — to anything that looks automated.
+_SHORT_LINK_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/145.0.0.0 Safari/537.36"
+)
+
+#: Hosts and paths that carry no entity ID at all, only a token that has to
+#: be exchanged for the real URL. These are what the mobile apps' share
+#: sheets produce, so they are what users actually paste.
+_SHORT_LINK_HOSTS = frozenset({"spotify.link", "spoti.fi"})
+
+#: The canonical URL, as it appears in a short link's landing page.
+_CANONICAL_PATTERNS = (
+    re.compile(r'<meta[^>]+property=["\']og:url["\'][^>]+content=["\']([^"\']+)'),
+    re.compile(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)'),
+    re.compile(
+        r"https://open\.spotify\.com/"
+        r"(?:intl-[a-z-]+/)?"
+        r"(?:track|album|playlist|artist)/[A-Za-z0-9]{22}",
+    ),
+)
+
+
+def _is_short_link(u: Any) -> bool:
+    if u.netloc in _SHORT_LINK_HOSTS:
+        return True
+    # open.spotify.com/s/<token> — same idea, Spotify's own host.
+    return u.netloc in ("open.spotify.com", "play.spotify.com") and u.path.startswith(
+        "/s/",
+    )
+
+
+def resolve_short_link(uri: str) -> str:
+    """A share short link expanded to the URL it points at.
+
+    A short link carries a token, not an ID, so there is nothing in it to
+    parse — the only way to learn what it means is to ask. The redirect
+    target is preferred; some of these land on an interstitial that carries
+    the real URL only in its markup, so the body is scanned as well.
+
+    Synchronous on purpose. parse_spotify_url() is called from both sync
+    and async code and changing that would reach into every caller, so the
+    one blocking request is confined here, given a short timeout, and only
+    ever runs for the handful of URLs that cannot be parsed offline.
+
+    Anything that is not an https Spotify short link is refused without a
+    request. This is the one place in the app that fetches a URL a user
+    handed it, so what may be fetched is decided here rather than left to
+    the caller: parse_spotify_url() already checks the shape before calling,
+    but this is public and a URL that reaches it from anywhere else must not
+    be able to aim it at an arbitrary host.
+    """
+    import httpx
+
+    parsed = urlparse(uri)
+    if parsed.scheme != "https" or not _is_short_link(parsed):
+        logger.debug("[spotify] %s is not an https short link; not resolved", uri)
+        return ""
+
+    try:
+        with httpx.Client(
+            follow_redirects=True,
+            timeout=8.0,
+            headers={"User-Agent": _SHORT_LINK_UA},
+        ) as client:
+            resp = client.get(uri)
+            final = str(resp.url)
+            if not _is_short_link(urlparse(final)):
+                return final
+            for pattern in _CANONICAL_PATTERNS:
+                match = pattern.search(resp.text)
+                if match:
+                    return match.group(1) if match.groups() else match.group(0)
+    except Exception as exc:
+        logger.debug("[spotify] short link %s could not be resolved: %s", uri, exc)
+    return ""
+
+
+def parse_spotify_url(uri: str, _resolved: bool = False) -> dict[str, str]:
     u = urlparse(uri)
 
     # embed.spotify.com → redirect via the ?uri= query param
@@ -243,6 +458,18 @@ def parse_spotify_url(uri: str) -> dict[str, str]:
         if not qs.get("uri"):
             raise InvalidUrlError(uri)
         return parse_spotify_url(qs["uri"][0])
+
+    if _is_short_link(u):
+        # `_resolved` bounds this to one round trip: a short link that
+        # redirects to another short link would otherwise recurse until the
+        # stack ran out, and a chain that long is a redirect loop, not a
+        # share URL.
+        if _resolved:
+            raise InvalidUrlError(uri)
+        expanded = resolve_short_link(uri)
+        if not expanded:
+            raise InvalidUrlError(uri)
+        return parse_spotify_url(expanded, _resolved=True)
 
     if u.scheme == "spotify":
         parts = uri.split(":")
@@ -366,7 +593,7 @@ class SpotifyMetadataClient:
     # Single track
     # ------------------------------------------------------------------
 
-    async def _get_album_artists_async(self, album_id: str) -> str:
+    async def _get_album_artists_async(self, album_id: str) -> list[str]:
         """Lightweight query: album metadata only, no track."""
         payload = {
             "operationName": "getAlbum",
@@ -386,10 +613,10 @@ class SpotifyMetadataClient:
         try:
             data = await asyncio.to_thread(self.web_client.query, payload)
             album_union = _dig(data, "data", "albumUnion")
-            return _join_artists(album_union.get("artists", {}))
+            return _extract_artist_names(album_union.get("artists", {}))
         except Exception as e:
             logger.debug(f"[spotify] Failed to fetch album artists for {album_id}: {e}")
-            return ""
+            return []
 
     async def _isrc_for_track_async(self, track_id: str) -> str:
         """The track's ISRC, or "" — never raises.
@@ -420,45 +647,86 @@ class SpotifyMetadataClient:
         }
         data = await asyncio.to_thread(self.web_client.query, payload)
         track_union = _dig(data, "data", "trackUnion")
+        if not track_union:
+            raise SpotiflacError(
+                ErrorKind.TRACK_NOT_FOUND,
+                f"Spotify returned no metadata for track {track_id}.",
+            )
 
-        album_data = track_union.get("albumOfTrack", {})
-        cover = self.web_client.extract_cover_url(album_data.get("coverArt", {}))
+        # A track this account cannot see — pulled from the catalogue, or
+        # released only in other countries — answers with the shape intact
+        # and every field emptied: no name, no duration, null `date`. That
+        # null is what raised "'NoneType' object has no attribute 'get'"
+        # halfway through a CSV import; parsing it instead would put an
+        # untitled row in the track list that nothing can download. Saying
+        # which track and why is more use than either.
+        playability = _dig(track_union, "playability")
+        if not _name(track_union, "") and playability.get("playable") is False:
+            reason = str(playability.get("reason") or "").replace("_", " ").lower()
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"Track {track_id} is unavailable"
+                + (f" ({reason})" if reason else "")
+                + " — Spotify sent no metadata for it.",
+            )
+
+        album_data = _dig(track_union, "albumOfTrack")
+        cover = self.web_client.extract_cover_url(_dig(album_data, "coverArt"))
+
+        # Hoisted out of the album-artists branch below, which used to be the
+        # only thing that needed it: the id also travels to the GUI as
+        # album_url (see TrackMetadata._fill_open_urls), which is what lets a
+        # card link to the album it belongs to.
+        album_id = album_data.get("id") or ""
+        if not album_id:
+            _album_uri = album_data.get("uri", "")
+            if isinstance(_album_uri, str) and ":" in _album_uri:
+                album_id = _album_uri.split(":")[-1]
 
         # albumOfTrack in getTrack non include artists → fetch separato
-        album_artists_str = _join_artists(album_data.get("artists", {}))
-        if not album_artists_str:
-            album_id = album_data.get("id") or ""
-            if not album_id:
-                uri = album_data.get("uri", "")
-                if isinstance(uri, str) and ":" in uri:
-                    album_id = uri.split(":")[-1]
+        album_artists_list = _extract_artist_names(album_data.get("artists"))
+        if not album_artists_list:
             if album_id:
-                album_artists_str = await self._get_album_artists_async(album_id)
-            if not album_artists_str:
-                album_artists_str = "Unknown Artist"
+                album_artists_list = await self._get_album_artists_async(album_id)
+            if not album_artists_list:
+                album_artists_list = ["Unknown Artist"]
+        album_artists_str = ", ".join(album_artists_list)
 
         # ------------------------------------------------------------------
         # Artist extraction logic:
         # ------------------------------------------------------------------
         artists_list = []
+        artist_id = ""
+        # Same sources as the names, kept as one {id,name,url} per credited
+        # artist so the GUI can link each of them separately.
+        artist_nodes: list[dict] = []
 
         # 1. Extract the first artist
         first = track_union.get("firstArtist")
         if first:
             artists_list.extend(_extract_artist_names(first))
+            artist_id = _first_artist_id(first)
+            artist_nodes.extend(_artist_nodes(first))
 
         # 2. Extract the other artists
         others = track_union.get("otherArtists")
         if others:
             artists_list.extend(_extract_artist_names(others))
+            artist_nodes.extend(_artist_nodes(others))
 
         # 3. Additional support for the standard artists structure
         if not artists_list:
-            artists_list.extend(_extract_artist_names(track_union.get("artists", {})))
+            artists_list.extend(_extract_artist_names(track_union.get("artists")))
+            artist_nodes.extend(_artist_nodes(track_union.get("artists")))
+            if not artist_id:
+                artist_id = _first_artist_id(track_union.get("artists"))
 
         # 4. Fallback to the album if necessary
         if not artists_list:
-            artists_list = _extract_artist_names(album_data.get("artists", {}))
+            artists_list = _extract_artist_names(album_data.get("artists"))
+            artist_nodes = _artist_nodes(album_data.get("artists"))
+            if not artist_id:
+                artist_id = _first_artist_id(album_data.get("artists"))
 
         # 5. Final fallback if everything fails
         if not artists_list:
@@ -483,34 +751,32 @@ class SpotifyMetadataClient:
             self._isrc_for_track_async(track_id),
         )
 
-        c_items = album_data.get("copyright", {}).get("items", [])
-        copyright_str = (
-            " \u00b7 ".join([c.get("text", "") for c in c_items if c.get("text")])
-            if c_items
-            else ""
-        )
+        copyright_str = _copyright_text(album_data)
 
         return TrackMetadata(
             id=track_id,
-            title=track_union.get("name", "Unknown"),
+            title=_name(track_union, "Unknown"),
             artists=artists_str,
-            album=album_data.get("name", "Unknown"),
+            artist_names=artists_list,
+            album=_name(album_data, "Unknown"),
             album_artist=album_artists_str,
+            album_artist_names=album_artists_list,
+            artist_id=artist_id,
+            artists_data=artist_nodes,
+            album_id=album_id,
             isrc=isrc_str,
             track_number=track_union.get("trackNumber") or 0,
             disc_number=track_union.get("discNumber") or 1,
             total_tracks=0,
             duration_ms=_safe_duration_ms(track_union.get("duration")),
-            release_date=album_data.get("date", {}).get("isoString", ""),
+            release_date=_iso_date(album_data),
             cover_url=cover,
             external_url=_track_url(track_id),
             copyright=copyright_str,
             composer=composer_str,
             preview_url="",
             plays=_safe_playcount(track_union.get("playcount")),
-            is_explicit=(
-                track_union.get("contentRating", {}).get("label") == "EXPLICIT"
-            ),
+            is_explicit=_is_explicit(track_union),
         )
 
     # ------------------------------------------------------------------
@@ -570,8 +836,8 @@ class SpotifyMetadataClient:
             if not album_union:
                 album_union = au
 
-            tracks_v2 = au.get("tracksV2", {})
-            items = tracks_v2.get("items", [])
+            tracks_v2 = _dig(au, "tracksV2")
+            items = tracks_v2.get("items") or []
             if not items:
                 break
 
@@ -581,22 +847,18 @@ class SpotifyMetadataClient:
                 break
             offset += limit
 
-        album_name = album_union.get("name", "Unknown Album")
-        cover = self.web_client.extract_cover_url(album_union.get("coverArt", {}))
-        album_artists = _join_artists(album_union.get("artists", {}))
-        release_date = album_union.get("date", {}).get("isoString", "")
-        total_tracks = album_union.get("tracksV2", {}).get("totalCount", 0)
+        album_name = _name(album_union, "Unknown Album")
+        cover = self.web_client.extract_cover_url(_dig(album_union, "coverArt"))
+        album_artists_list = _extract_artist_names(album_union.get("artists"))
+        album_artists = ", ".join(album_artists_list)
+        release_date = _iso_date(album_union)
+        total_tracks = _dig(album_union, "tracksV2").get("totalCount") or 0
 
-        c_items = album_union.get("copyright", {}).get("items", [])
-        copyright_str = (
-            " \u00b7 ".join([c.get("text", "") for c in c_items if c.get("text")])
-            if c_items
-            else ""
-        )
+        copyright_str = _copyright_text(album_union)
 
         tracks: list[TrackMetadata] = []
         for item in all_items:
-            track_node = item.get("track", {})
+            track_node = _dig(item, "track")
 
             track_id = track_node.get("id")
             if not track_id:
@@ -607,17 +869,33 @@ class SpotifyMetadataClient:
             if not track_id:
                 continue
 
-            track_artists = (
-                _join_artists(track_node.get("artists", {})) or album_artists
+            track_artists_list = (
+                _extract_artist_names(track_node.get("artists")) or album_artists_list
             )
-
+            track_artists = ", ".join(track_artists_list) or album_artists
+            track_artist_id = _first_artist_id(
+                track_node.get("artists")
+            ) or _first_artist_id(
+                album_union.get("artists"),
+            )
+            track_artist_nodes = _artist_nodes(
+                track_node.get("artists")
+            ) or _artist_nodes(
+                album_union.get("artists"),
+            )
             tracks.append(
                 TrackMetadata(
                     id=track_id,
-                    title=track_node.get("name", "Unknown"),
+                    title=_name(track_node, "Unknown"),
                     artists=track_artists,
+                    artist_names=track_artists_list,
                     album=album_name,
                     album_artist=album_artists,
+                    album_artist_names=album_artists_list,
+                    artist_id=track_artist_id,
+                    artists_data=track_artist_nodes,
+                    # The album being fetched — this function's own argument.
+                    album_id=album_id,
                     isrc="",
                     track_number=track_node.get("trackNumber") or 0,
                     disc_number=track_node.get("discNumber") or 1,
@@ -630,9 +908,7 @@ class SpotifyMetadataClient:
                     composer="",
                     preview_url="",
                     plays=_safe_playcount(track_node.get("playcount")),
-                    is_explicit=(
-                        track_node.get("contentRating", {}).get("label") == "EXPLICIT"
-                    ),
+                    is_explicit=_is_explicit(track_node),
                 ),
             )
 
@@ -691,19 +967,19 @@ class SpotifyMetadataClient:
                 ) or _extract_playlist_cover(playlist_v2)
                 playlist_owner_avatar = _extract_playlist_owner_avatar(playlist_v2)
 
-            content = playlist_v2.get("content", {})
-            items = content.get("items", [])
+            content = _dig(playlist_v2, "content")
+            items = content.get("items") or []
             if not items:
                 break
 
             all_items.extend(items)
-            if len(all_items) >= content.get("totalCount", 0) or len(items) < limit:
+            if len(all_items) >= (content.get("totalCount") or 0) or len(items) < limit:
                 break
             offset += limit
 
         tracks: list[TrackMetadata] = []
         for item in all_items:
-            track_data = item.get("itemV2", {}).get("data", {})
+            track_data = _dig(item, "itemV2", "data")
             track_id = track_data.get("id")
             if not track_id:
                 uri = track_data.get("uri", "")
@@ -712,32 +988,39 @@ class SpotifyMetadataClient:
             if not track_id:
                 continue
 
-            album_data = track_data.get("albumOfTrack", {})
-            artists_list = _extract_artist_names(track_data.get("artists", {}))
+            album_data = _dig(track_data, "albumOfTrack")
+            track_album_id = _node_id(album_data)
+            artists_list = _extract_artist_names(track_data.get("artists"))
+            artist_id = _first_artist_id(track_data.get("artists"))
+            artist_nodes = _artist_nodes(track_data.get("artists"))
             if not artists_list:
-                artists_list = _extract_artist_names(album_data.get("artists", {})) or [
+                artists_list = _extract_artist_names(album_data.get("artists")) or [
                     "Unknown Artist",
                 ]
+                artist_nodes = _artist_nodes(album_data.get("artists"))
+                if not artist_id:
+                    artist_id = _first_artist_id(album_data.get("artists"))
 
-            cover = self.web_client.extract_cover_url(album_data.get("coverArt", {}))
-            album_artists = (
-                _join_artists(album_data.get("artists", {})) or artists_list[0]
+            cover = self.web_client.extract_cover_url(_dig(album_data, "coverArt"))
+            album_artists_list = (
+                _extract_artist_names(album_data.get("artists")) or artists_list[:1]
             )
+            album_artists = ", ".join(album_artists_list)
 
-            c_items = album_data.get("copyright", {}).get("items", [])
-            copyright_str = (
-                " \u00b7 ".join([c.get("text", "") for c in c_items if c.get("text")])
-                if c_items
-                else ""
-            )
+            copyright_str = _copyright_text(album_data)
 
             tracks.append(
                 TrackMetadata(
                     id=track_id,
-                    title=track_data.get("name", "Unknown"),
+                    title=_name(track_data, "Unknown"),
                     artists=", ".join(artists_list) if artists_list else "Unknown",
-                    album=album_data.get("name", "Unknown"),
+                    artist_names=artists_list,
+                    album=_name(album_data, "Unknown"),
                     album_artist=album_artists,
+                    album_artist_names=album_artists_list,
+                    artist_id=artist_id,
+                    artists_data=artist_nodes,
+                    album_id=track_album_id,
                     isrc="",
                     track_number=track_data.get("trackNumber") or 0,
                     disc_number=1,
@@ -750,9 +1033,7 @@ class SpotifyMetadataClient:
                     composer="",
                     preview_url="",
                     plays=_safe_playcount(track_data.get("playcount")),
-                    is_explicit=(
-                        track_data.get("contentRating", {}).get("label") == "EXPLICIT"
-                    ),
+                    is_explicit=_is_explicit(track_data),
                 ),
             )
 
@@ -807,25 +1088,39 @@ class SpotifyMetadataClient:
         def _parse_tracks(items: list) -> list[TrackMetadata]:
             results = []
             for item in items:
-                t = item.get("item", {}).get("data", {})
+                t = _dig(item, "item", "data")
                 if not t.get("id"):
                     continue
-                album_node = t.get("albumOfTrack", {})
-                track_artists_str = _join_artists(t.get("artists", {}))
-                album_artists_str = (
-                    _join_artists(album_node.get("artists", {})) or track_artists_str
+                album_node = _dig(t, "albumOfTrack")
+                track_artists_list = _extract_artist_names(t.get("artists"))
+                track_artists_str = ", ".join(track_artists_list)
+                track_artist_id = _first_artist_id(
+                    t.get("artists")
+                ) or _first_artist_id(
+                    album_node.get("artists"),
                 )
+                track_artist_nodes = _artist_nodes(t.get("artists")) or _artist_nodes(
+                    album_node.get("artists"),
+                )
+                album_artists_list = (
+                    _extract_artist_names(album_node.get("artists"))
+                    or track_artists_list
+                )
+                album_artists_str = ", ".join(album_artists_list)
 
-                cover = self.web_client.extract_cover_url(
-                    album_node.get("coverArt", {}),
-                )
+                cover = self.web_client.extract_cover_url(_dig(album_node, "coverArt"))
                 results.append(
                     TrackMetadata(
                         id=t["id"],
-                        title=t.get("name", "Unknown"),
+                        title=_name(t, "Unknown"),
                         artists=track_artists_str,
-                        album=album_node.get("name", "Unknown"),
+                        artist_names=track_artists_list,
+                        album=_name(album_node, "Unknown"),
                         album_artist=album_artists_str,
+                        album_artist_names=album_artists_list,
+                        artist_id=track_artist_id,
+                        artists_data=track_artist_nodes,
+                        album_id=_node_id(album_node),
                         isrc="",
                         track_number=0,
                         disc_number=1,
@@ -838,9 +1133,7 @@ class SpotifyMetadataClient:
                         composer="",
                         preview_url="",
                         plays=_safe_playcount(t.get("playcount")),
-                        is_explicit=(
-                            t.get("contentRating", {}).get("label") == "EXPLICIT"
-                        ),
+                        is_explicit=_is_explicit(t),
                     ),
                 )
             return results
@@ -848,7 +1141,7 @@ class SpotifyMetadataClient:
         def _parse_simple(items: list, kind: str) -> list[dict]:
             results = []
             for item in items:
-                node = item.get("data") or item.get("item", {}).get("data", {})
+                node = item.get("data") or _dig(item, "item", "data")
                 # La GraphQL di Spotify non espone sempre un campo `id` diretto su
                 # album/artist/playlist: the ID is embedded in the URI
                 # (es. "spotify:album:4aawyAB9vmqN3uQ7FjRGTy").
@@ -864,33 +1157,30 @@ class SpotifyMetadataClient:
                     "id": node_id,
                     "type": kind,
                     "subtitle": kind.capitalize(),
-                    "name": node.get("name")
-                    or node.get("profile", {}).get("name", "Unknown"),
+                    "name": node.get("name") or _name(_dig(node, "profile"), "Unknown"),
                     "external_url": f"https://open.spotify.com/{kind}/{node_id}",
                 }
                 if kind == "album":
-                    entry["artists"] = _join_artists(node.get("artists", {}))
-                    entry["release_date"] = node.get("date", {}).get("isoString", "")
+                    entry["artists"] = _join_artists(node.get("artists"))
+                    entry["release_date"] = _iso_date(node)
                     entry["cover_url"] = self.web_client.extract_cover_url(
-                        node.get("coverArt", {}),
+                        _dig(node, "coverArt"),
                     )
                 elif kind == "artist":
                     cover_url = self.web_client.extract_cover_url(
-                        node.get("visualIdentity", {}),
+                        _dig(node, "visualIdentity"),
                     )
                     if not cover_url:
-                        alt_cover_data = node.get("visuals", {}).get("avatarImage", {})
+                        alt_cover_data = _dig(node, "visuals", "avatarImage")
                         cover_url = self.web_client.extract_cover_url(alt_cover_data)
                     entry["cover_url"] = cover_url
                 elif kind == "playlist":
-                    owner = node.get("owner", {})
+                    owner = _dig(node, "owner")
                     if not owner:
-                        owner_v2 = node.get("ownerV2", {})
-                        if isinstance(owner_v2, dict):
-                            owner = owner_v2.get("data") or {}
+                        owner = _dig(node, "ownerV2", "data")
                     entry["owner"] = owner.get("displayName") or owner.get("name") or ""
                     entry["cover_url"] = self.web_client.extract_cover_url(
-                        node.get("images", {}),
+                        _dig(node, "images"),
                     ) or _extract_playlist_cover(node)
                 results.append(entry)
             return results
@@ -903,10 +1193,10 @@ class SpotifyMetadataClient:
         )
 
         return {
-            "tracks": _parse_tracks(tracks_data.get("items", [])),
-            "albums": _parse_simple(albums_data.get("items", []), "album"),
-            "artists": _parse_simple(artists_data.get("items", []), "artist"),
-            "playlists": _parse_simple(playlists_data.get("items", []), "playlist"),
+            "tracks": _parse_tracks(tracks_data.get("items") or []),
+            "albums": _parse_simple(albums_data.get("items") or [], "album"),
+            "artists": _parse_simple(artists_data.get("items") or [], "artist"),
+            "playlists": _parse_simple(playlists_data.get("items") or [], "playlist"),
         }
 
     async def search_by_type_async(
@@ -1171,7 +1461,10 @@ class SpotifyMetadataClient:
         spotify_url: str,
         include_featuring: bool = True,
     ) -> tuple[str, list[TrackMetadata], str, dict]:
-        info = parse_spotify_url(spotify_url)
+        # Off the loop: a share short link makes parse_spotify_url() issue a
+        # blocking HTTP request to expand it (see resolve_short_link), and
+        # that would stall every other coroutine for the length of it.
+        info = await asyncio.to_thread(parse_spotify_url, spotify_url)
         t = info["type"]
         logger.info(f"[DEBUG] URL type: {t}, ID: {info['id']}")
 
@@ -1395,8 +1688,13 @@ def _maximize_cover_url(url: str) -> str:
 
     import re
 
-    url = url.replace("ab67616d00001e02", "ab67616d0000b273")
-    url = url.replace("ab67616d00004851", "ab67616d0000b273")
+    # Spotify encodes the size in the path prefix: 64px, 300px, 640px and
+    # 1500px of the same artwork. 640 (…b273) is the one the API hands out
+    # and was as far as this went; …82c1 is the same image at 1500x1500 and
+    # is served for every cover the CDN has, so there is no reason to embed
+    # the smaller one in a lossless file.
+    for small in ("ab67616d00001e02", "ab67616d00004851", "ab67616d0000b273"):
+        url = url.replace(small, "ab67616d000082c1")
 
     url = url.replace("ab67616100005174", "ab6761610000e5eb")
     url = url.replace("ab6761610000f178", "ab6761610000e5eb")

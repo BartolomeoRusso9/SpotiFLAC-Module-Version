@@ -65,6 +65,18 @@ async def confirm_isrc_with_qobuz_async(
     if not track:
         return False, None
 
+    # The search this confirmation runs is a *text* search that happens to be
+    # given an ISRC as its query, so a catalogue that does not carry the ISRC
+    # answers with whatever its full-text index liked best. Without this the
+    # function confirmed an ISRC by asking for it and being handed something
+    # else — "Like Him" (USQX92405794) was confirmed by a ZZang KARAOKE
+    # release whose ISRC is QZYD92602058, because the two run within a second
+    # of each other. An answer that does not carry the ISRC that was asked
+    # for confirms nothing.
+    found_isrc = normalize_isrc(str(track.get("isrc") or ""))
+    if found_isrc and found_isrc != normalize_isrc(isrc):
+        return False, None
+
     candidate_dur = 0
     if isinstance(track.get("duration"), (int, float)):
         candidate_dur = int(track.get("duration") or 0) * 1000

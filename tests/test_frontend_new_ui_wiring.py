@@ -37,6 +37,22 @@ def test_index_page_contains_the_new_sections(client) -> None:
     assert 'id="account-signout-row"' in html
 
 
+def test_the_status_line_has_somewhere_to_land(client) -> None:
+    """setStatus() writes to #status-text and spins #spinner, and for a long
+    while neither element existed — so every set_progress() the backend
+    pushed (reading a CSV, matching its rows, fetching metadata, downloading)
+    went nowhere, and minutes of work looked like a frozen window.
+    """
+    html = client.get("/").text
+    assert 'id="status-bar"' in html
+    assert 'id="status-text"' in html
+    assert 'id="spinner"' in html
+
+    app_js = client.get("/app.js").text
+    for element_id in ("status-bar", "status-text", "spinner"):
+        assert f"$('{element_id}')" in app_js
+
+
 def test_discovery_directory_add_list_remove_round_trip_over_http(client) -> None:
     added = client.post(
         "/api/add_registry_directory", json=["https://example.com/dir.json"]
@@ -87,6 +103,44 @@ def test_dedup_status_reachable_over_http(client) -> None:
     assert resp.status_code == 200
     result = resp.json()["result"]
     assert "available" in result
+
+
+def test_the_library_dedup_panel_is_in_the_page(client) -> None:
+    html = client.get("/").text
+    for element_id in (
+        "libdedup-match",
+        "libdedup-tolerance",
+        "libdedup-verify",
+        "libdedup-db",
+        "libdedup-groups",
+        "libdedup-actions",
+        "libdedup-undo",
+    ):
+        assert f'id="{element_id}"' in html
+    assert 'onclick="startLibraryDedupScan()"' in html
+    assert "onclick=\"resolveLibraryDuplicates('trash')\"" in html
+    assert "onclick=\"resolveLibraryDuplicates('delete')\"" in html
+
+
+def test_library_dedup_calls_line_up_with_the_mixin_signature(client) -> None:
+    """web-shim.js calls these with a positional array; this is the check
+    that the array the frontend sends still fits the Python signature."""
+    resp = client.post(
+        "/api/scan_library_duplicates",
+        json=["/does/not/exist", True, "both", 4.0, False, 0.95, False],
+    )
+    assert resp.status_code == 200
+    assert "does not exist" in resp.json()["result"]["error"]
+
+    resp = client.post(
+        "/api/resolve_library_duplicates", json=[["/a"], ["/b"], "trash", False]
+    )
+    assert resp.status_code == 200
+    assert "run a library duplicate scan first" in resp.json()["result"]["error"]
+
+    resp = client.post("/api/restore_library_duplicates", json=[""])
+    assert resp.status_code == 200
+    assert resp.json()["result"]["error"] == "No path given"
 
 
 def test_the_dashboard_and_csv_import_are_in_the_page(client) -> None:

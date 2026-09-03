@@ -5,8 +5,8 @@ Replace raw dicts to guarantee validation, coercion, and zero KeyError.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
-from typing import Any, Literal
+from collections.abc import Callable, Iterable
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
@@ -45,6 +45,15 @@ class TrackMetadata(BaseModel):
     artist_id: str = ""
     artist_url: str = ""
     artists_data: list = Field(default_factory=list)
+    #: The credited artists as a *list*, when the source knew them as one.
+    #: `artists` is that list joined with ", ", and the join is lossy: an
+    #: artist whose own name contains a comma ("Tyler, The Creator") cannot
+    #: be recovered from the joined string, which is how the artist
+    #: subfolder for CHROMAKOPIA came out as "Tyler". Sources that have the
+    #: real list (Spotify's GraphQL payloads) fill this in; everything else
+    #: leaves it empty and first_artist falls back to splitting.
+    artist_names: list[str] = Field(default_factory=list)
+    album_artist_names: list[str] = Field(default_factory=list)
     plays: str = "0"
     is_explicit: bool = False
     status: str = ""
@@ -69,6 +78,30 @@ class TrackMetadata(BaseModel):
             s = ", ".join(parts)
         return s or "Unknown"
 
+    @field_validator("artist_names", "album_artist_names", mode="before")
+    @classmethod
+    def strip_name_list(cls, v: object) -> list[str]:
+        if not v:
+            return []
+        items: Iterable[object] = (
+            [v] if isinstance(v, str) else cast("Iterable[object]", v)
+        )
+        return [s for s in (str(x).strip() for x in items) if s]
+
+    @model_validator(mode="after")
+    def _fill_open_urls(self) -> TrackMetadata:
+        """Derives artist_url/album_url from their ids when a source sets the
+        id but not the URL (most of spotify_metadata.py's call sites do — see
+        _first_artist_id there). The ids are always raw Spotify ids whichever
+        provider ends up serving the audio: metadata always comes from
+        Spotify in this app, only the download does not.
+        """
+        if self.artist_id and not self.artist_url:
+            self.artist_url = f"https://open.spotify.com/artist/{self.artist_id}"
+        if self.album_id and not self.album_url:
+            self.album_url = f"https://open.spotify.com/album/{self.album_id}"
+        return self
+
     @property
     def year(self) -> str:
         """Estrae l'anno dalla release_date (YYYY-MM-DD)."""
@@ -79,14 +112,41 @@ class TrackMetadata(BaseModel):
         """Converte la durata da millisecondi a secondi."""
         return self.duration_ms / 1000
 
+    @staticmethod
+    def _lead(names: list[str], joined: str) -> str:
+        """The first credited name out of `names`, or out of `joined`.
+
+        Splitting `joined` on the comma is only ever a guess — it is exactly
+        the guess that turned "Tyler, The Creator" into "Tyler" — so it is
+        used only when the source never told us the individual names.
+        """
+        for name in names:
+            cleaned = str(name).strip()
+            if cleaned:
+                return cleaned
+        return joined.split(",")[0].strip()
+
     @property
     def first_artist(self) -> str:
         """Returns only the first artist from the list."""
-        return self.artists.split(",")[0].strip()
+        return self._lead(self.artist_names, self.artists)
+
+    @property
+    def first_album_artist(self) -> str:
+        """The first credited album artist.
+
+        Separate from first_artist because the two credit lists differ: a
+        featured track is "Tyler, The Creator, Lola Young" by artist and
+        "Tyler, The Creator" by album artist, and taking the lead of the
+        wrong one drops the feature or keeps it where it does not belong.
+        """
+        return self._lead(self.album_artist_names, self.album_artist)
 
     def as_flac_tags(self, *, first_artist_only: bool = False) -> dict[str, str]:
         artist = self.first_artist if first_artist_only else self.artists
-        album_artist = self.first_artist if first_artist_only else self.album_artist
+        album_artist = (
+            self.first_album_artist if first_artist_only else self.album_artist
+        )
 
         tags: dict[str, str] = {
             "TITLE": self.title,
@@ -154,13 +214,20 @@ class TrackMetadata(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+#: Container a finished file can be in — the extension without its dot, which
+#: is what extensions/provider._ext_to_fmt() produces. Every value of
+#: core.transcode.extension_for() must appear here or a transcoded download
+#: fails validation; tests/test_transcode_lossless.py enforces that.
+AudioFormat = Literal["flac", "mp3", "m4a", "wav", "aiff", "wv", "tta"]
+
+
 class DownloadResult(BaseModel):
     """Represents the outcome of a download operation."""
 
     success: bool
     provider: str
     file_path: str | None = None
-    format: Literal["flac", "mp3", "m4a"] | None = None
+    format: AudioFormat | None = None
     error: str | None = None
     skipped: bool = False
 
@@ -177,7 +244,7 @@ class DownloadResult(BaseModel):
         cls,
         provider: str,
         file_path: str,
-        fmt: Literal["flac", "mp3", "m4a"] = "flac",
+        fmt: AudioFormat = "flac",
     ) -> DownloadResult:
         return cls(success=True, provider=provider, file_path=file_path, format=fmt)
 
@@ -186,7 +253,7 @@ class DownloadResult(BaseModel):
         cls,
         provider: str,
         file_path: str,
-        fmt: Literal["flac", "mp3", "m4a"] | None = None,
+        fmt: AudioFormat | None = None,
     ) -> DownloadResult:
         return cls(
             success=True,
@@ -207,6 +274,46 @@ class DownloadResult(BaseModel):
 
 _UNSAFE_RE = re.compile(r'[\\/*?:"<>|]')
 _WHITESPACE = re.compile(r"\s+")
+
+
+def split_credit(value: str, known: list[str] | None = None) -> list[str]:
+    """A joined credit string broken back into the artists it names.
+
+    The comma is both the separator and an ordinary character inside a name,
+    so splitting on it alone turns "Tyler, The Creator, Lola Young" into
+    three artists — which is how a FLAC ended up with ARTIST written twice,
+    as "Tyler" and "The Creator". `known` is the list the source actually
+    had (TrackMetadata.artist_names); the names in it are matched first and
+    kept whole, and only what is left over is split.
+    """
+    text = (value or "").strip()
+    if not text:
+        return []
+
+    remaining = text
+    names: list[str] = []
+    # Longest first: a name that is a prefix of another ("Tyler" of "Tyler,
+    # The Creator") must not claim the match.
+    candidates = sorted(
+        {n.strip() for n in (known or []) if n and n.strip()},
+        key=len,
+        reverse=True,
+    )
+    while remaining:
+        for candidate in candidates:
+            if remaining[: len(candidate)].casefold() == candidate.casefold():
+                names.append(remaining[: len(candidate)])
+                remaining = remaining[len(candidate) :].lstrip().lstrip(",").lstrip()
+                break
+        else:
+            head, sep, remaining = remaining.partition(",")
+            head = head.strip()
+            if head:
+                names.append(head)
+            remaining = remaining.strip()
+            if not sep:
+                break
+    return names
 
 
 def sanitize(value: str, fallback: str = "Unknown") -> str:
@@ -297,7 +404,7 @@ def build_filename(
 
     artist = sanitize(metadata.first_artist if first_artist_only else metadata.artists)
     album_artist = sanitize(
-        metadata.first_artist if first_artist_only else metadata.album_artist,
+        metadata.first_album_artist if first_artist_only else metadata.album_artist,
     )
     title = sanitize(metadata.title)
     album = sanitize(metadata.album)

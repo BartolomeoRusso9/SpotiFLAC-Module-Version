@@ -31,6 +31,7 @@ from .core.notifiers import EVENTS as NOTIFY_EVENTS
 from .core.notifiers import KINDS as NOTIFY_KINDS
 from .core.notifiers import NOTIFY_TOKEN_ENV, NOTIFY_URL_ENV
 from .core.report import RunReport
+from .core.transcode import LOSSLESS_FORMATS, SUPPORTED_FORMATS
 from .downloader import DownloadOptions, SpotiflacDownloader
 from .core.web_users import ROLES as WEB_USER_ROLES
 from .extensions.trust import TRUST_TIERS
@@ -294,9 +295,78 @@ async def _load_profile_into_defaults(profile_name: str) -> dict:
     return {}
 
 
-def _resolve_log_level(verbose: bool) -> int:
-    """Hide warnings unless the user explicitly asked for verbose logging."""
-    return logging.DEBUG if verbose else logging.ERROR
+_LOG_LEVEL_NAMES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+
+def _coerce_log_level(value: str | int) -> int:
+    """Turns a level name, alias or number into a logging constant.
+
+    Accepts what a profile stores (an int) as readily as what a user types
+    (`debug`, `WARN`), so the same value survives a save/load round trip.
+    """
+    if isinstance(value, int):
+        return value
+
+    name = str(value).strip().upper()
+    if not name:
+        msg = "log level cannot be empty"
+        raise argparse.ArgumentTypeError(msg)
+    if name.isdigit():
+        return int(name)
+
+    name = {
+        "WARN": "WARNING",
+        "ERR": "ERROR",
+        "CRIT": "CRITICAL",
+        "FATAL": "CRITICAL",
+    }.get(name, name)
+    resolved = logging.getLevelName(name)
+    if not isinstance(resolved, int):
+        msg = f"invalid log level {value!r}; choose from {', '.join(_LOG_LEVEL_NAMES)}"
+        raise argparse.ArgumentTypeError(msg)
+    return resolved
+
+
+#: Chatty libraries whose own INFO records say nothing about what SpotiFLAC
+#: is doing — httpx alone emits a line per request. They are pinned to
+#: WARNING so the default level can be INFO and stay readable; --verbose
+#: lifts the pin, because a network problem is exactly when their frames
+#: are worth reading.
+_NOISY_LIBRARY_LOGGERS = ("httpx", "httpcore", "hpack", "urllib3", "asyncio")
+
+
+def _quiet_noisy_libraries(level: int) -> None:
+    """Pins third-party loggers to WARNING unless we are debugging."""
+    pinned = logging.NOTSET if level <= logging.DEBUG else logging.WARNING
+    for name in _NOISY_LIBRARY_LOGGERS:
+        logging.getLogger(name).setLevel(pinned)
+
+
+def _resolve_log_level(
+    verbose: bool,
+    explicit: str | int | None = None,
+    profile_default: str | int | None = None,
+) -> int:
+    """Report what the run is doing, and no more.
+
+    Precedence: --log-level, then --verbose (a shorthand for DEBUG), then
+    whatever a profile stored, then the default. A profile value ranks
+    *below* --verbose on purpose: it is a saved preference, and a flag typed
+    for this one run has to be able to win over it.
+
+    The default is INFO, not ERROR: the milestones of a download — which
+    provider was tried, the ticket, the audio fetch, the transcode — are all
+    logged at info, and at ERROR a run that hung showed nothing at all until
+    it gave up. The libraries that would flood that level are pinned
+    separately, see _quiet_noisy_libraries().
+    """
+    if explicit is not None:
+        return _coerce_log_level(explicit)
+    if verbose:
+        return logging.DEBUG
+    if profile_default is not None:
+        return _coerce_log_level(profile_default)
+    return logging.INFO
 
 
 def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
@@ -455,6 +525,24 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "provider falls back to HI_RES_LOSSLESS instead of using it. "
         "Legacy provider-specific values remain accepted. Default: LOSSLESS",
     )
+    # A pair rather than a lone --no-fallback: a profile can set
+    # allow_fallback=False, and without --fallback there would be no way to
+    # turn it back on for a single run.
+    parser.add_argument(
+        "--fallback",
+        action="store_true",
+        dest="allow_fallback",
+        default=pd.get("allow_fallback", True),
+        help="Let a provider serve a lower tier when the requested --quality "
+        "is unavailable for a track (default: enabled).",
+    )
+    parser.add_argument(
+        "--no-fallback",
+        action="store_false",
+        dest="allow_fallback",
+        help="Fail a track outright when the requested --quality is not "
+        "available, instead of accepting a lower tier.",
+    )
     parser.add_argument(
         "--use-track-numbers",
         action="store_true",
@@ -585,6 +673,21 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         default=pd.get("verbose", False),
     )
     parser.add_argument(
+        "--log-level",
+        dest="log_level",
+        type=_coerce_log_level,
+        default=None,
+        metavar="LEVEL",
+        help="Console log level: "
+        + ", ".join(_LOG_LEVEL_NAMES)
+        + ". Overrides --verbose, which is a shorthand for DEBUG. "
+        "Default: INFO (the milestones of the run). Third-party libraries "
+        "are held at WARNING unless the level is DEBUG.",
+    )
+    # Kept apart from --log-level's own default so the resolver can tell a
+    # saved preference from a flag typed for this run.
+    parser.set_defaults(profile_log_level=pd.get("log_level"))
+    parser.add_argument(
         "--interactive",
         action="store_true",
         default=pd.get("interactive", False),
@@ -684,6 +787,38 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
             "lrclib",
         ],
     )
+    lyrics_grp.add_argument(
+        "--apple-lyrics-line-synced",
+        action="store_false",
+        dest="apple_lyrics_word_by_word",
+        help=(
+            "get plain line-synced LRC from the Apple lyrics provider instead "
+            "of word-by-word (per-syllable) enhanced LRC"
+        ),
+    )
+    lyrics_grp.set_defaults(
+        apple_lyrics_word_by_word=pd.get("apple_lyrics_word_by_word", True),
+    )
+    lyrics_grp.add_argument(
+        "--save-lrc",
+        action="store_true",
+        default=pd.get("save_lrc", False),
+        dest="save_lrc",
+        help=(
+            "also write the lyrics as an .lrc file next to the track, under "
+            "the audio file's own name"
+        ),
+    )
+    lyrics_grp.add_argument(
+        "--lrc-dir",
+        default=pd.get("lrc_library_dir") or None,
+        dest="lrc_library_dir",
+        metavar="DIR",
+        help=(
+            "also collect every lyric into DIR as 'Artist - Title.lrc', the "
+            "layout overlay players (LyricsX and the like) look lyrics up by"
+        ),
+    )
 
     # ── Metadata enrichment ─────────────────────────────────────────────────
     enrich_grp = parser.add_argument_group("Metadata Enrichment")
@@ -712,12 +847,16 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     transcode_grp = parser.add_argument_group("Transcoding")
     transcode_grp.add_argument(
         "--transcode",
-        choices=["none", "mp3"],
+        choices=["none", *SUPPORTED_FORMATS],
         default=pd.get("transcode_to") or "none",
         dest="transcode_to",
         help="Convert every downloaded track to this format (default: none — "
-        "keep the provider's original format). Requires ffmpeg. Tracks already "
-        "present in the target format are skipped without contacting a provider.",
+        "keep the provider's original format). Lossless targets ("
+        + ", ".join(LOSSLESS_FORMATS)
+        + ") re-encode the samples untouched — same rate, same bit depth; "
+        "'mp3' encodes at --transcode-bitrate. ALAC lands in a .m4a and "
+        "wavpack in a .wv. Requires ffmpeg. Tracks already present in the "
+        "target format are skipped without contacting a provider.",
     )
     transcode_grp.add_argument(
         "--mp3",
@@ -727,18 +866,27 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         help="Shorthand for --transcode mp3 (320 kbps unless --transcode-bitrate is given)",
     )
     transcode_grp.add_argument(
+        "--alac",
+        action="store_const",
+        const="alac",
+        dest="transcode_to",
+        help="Shorthand for --transcode alac — lossless .m4a, the format "
+        "macOS reads natively (Finder artwork, Music.app, QuickLook)",
+    )
+    transcode_grp.add_argument(
         "--transcode-bitrate",
         default=pd.get("transcode_bitrate", "320k"),
         dest="transcode_bitrate",
         metavar="RATE",
-        help="Bitrate for --transcode (default: 320k)",
+        help="Bitrate for the lossy --transcode targets (default: 320k). "
+        "Ignored by the lossless ones.",
     )
     transcode_grp.add_argument(
         "--keep-original",
         action="store_true",
         dest="transcode_keep_original",
         default=pd.get("transcode_keep_original", False),
-        help="Keep the original lossless file next to the transcoded one "
+        help="Keep the original downloaded file next to the transcoded one "
         "(default: the source is deleted after a successful conversion)",
     )
 
@@ -1156,6 +1304,9 @@ def _subscription_downloader(profile_defaults: dict, output_dir_override: str | 
             allow_fallback=pd.get("allow_fallback", True),
             embed_lyrics=pd.get("embed_lyrics", True),
             lyrics_providers=pd.get("lyrics_providers") or ["apple", "lrclib"],
+            apple_lyrics_word_by_word=pd.get("apple_lyrics_word_by_word", True),
+            save_lrc=pd.get("save_lrc", False),
+            lrc_library_dir=pd.get("lrc_library_dir") or None,
             enrich_metadata=pd.get("enrich_metadata", True),
             enrich_providers=pd.get("enrich_providers")
             or ["deezer", "apple", "qobuz", "tidal"],
@@ -1341,6 +1492,7 @@ async def _run_download_async(
     allow_fallback: bool,
     embed_lyrics: bool,
     lyrics_providers: list[str],
+    apple_lyrics_word_by_word: bool = True,
     enrich_metadata: bool,
     enrich_providers: list[str],
     qobuz_local_api_url: str | None,
@@ -1361,6 +1513,8 @@ async def _run_download_async(
     m3u_format: str = "m3u8",
     max_concurrent_downloads: int = 2,
     verify_hires: bool = False,
+    save_lrc: bool = False,
+    lrc_library_dir: str | None = None,
     resume: bool = True,
     post_download_hooks: list[str] | None = None,
     json_report: bool = False,
@@ -1447,6 +1601,7 @@ async def _run_download_async(
         output_path=output_path,
         embed_lyrics=embed_lyrics,
         lyrics_providers=lyrics_providers,
+        apple_lyrics_word_by_word=apple_lyrics_word_by_word,
         enrich_metadata=enrich_metadata,
         enrich_providers=enrich_providers,
         qobuz_local_api_url=qobuz_local_api_url,
@@ -1460,6 +1615,8 @@ async def _run_download_async(
         transcode_keep_original=transcode_keep_original,
         max_concurrent_downloads=max(1, max_concurrent_downloads),
         verify_hires=verify_hires,
+        save_lrc=save_lrc,
+        lrc_library_dir=lrc_library_dir,
         resume=resume,
         post_download_hooks=hooks,
     )
@@ -1962,6 +2119,128 @@ async def amain() -> None:
             print(f"key-{idx}: {name}")
         return
 
+    if _argv_has("--dedup-restore"):
+        restore_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        restore_parser.add_argument("--dedup-restore", dest="manifest", required=True)
+        restore_parser.add_argument("--json", dest="as_json", action="store_true")
+        restore_parser.add_argument("--verbose", "-v", action="store_true")
+        restore_args, _ = restore_parser.parse_known_args(sys.argv[1:])
+
+        from .tools.library_dedup_cli import run_restore
+
+        run_restore(
+            restore_args.manifest,
+            as_json=restore_args.as_json,
+            verbose=restore_args.verbose,
+        )
+        return
+
+    if _argv_has("--dedup-library", "--dedup-from-db"):
+        # allow_abbrev=False for the same reason the upgrade block below
+        # needs it: `--dedup-library` is a prefix of `--dedup-library-…`
+        # were one ever added, and an ambiguous flag exits(2) instead of
+        # running.
+        dd_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        # Not required: --dedup-from-db carries the library's identity in
+        # the database itself, so a resolution run needs no folder.
+        dd_parser.add_argument("--dedup-library", dest="path", default="")
+        dd_parser.add_argument(
+            "--dedup-match",
+            dest="match",
+            choices=("isrc", "tags", "both"),
+            default="both",
+            help="Which signal decides that two files are one recording "
+            "(default: both — ISRC first, artist/title+duration for the rest).",
+        )
+        dd_parser.add_argument(
+            "--dedup-tolerance", dest="tolerance", type=float, default=4.0
+        )
+        dd_parser.add_argument(
+            "--dedup-keep-version-noise",
+            dest="keep_version_noise",
+            action="store_true",
+            help="Treat '(2011 Remaster)' as part of the title, so a "
+            "remaster is not a duplicate of the original.",
+        )
+        dd_parser.add_argument(
+            "--dedup-verify",
+            dest="verify",
+            action="store_true",
+            help="Confirm each group against the audio with Chromaprint "
+            "before offering it. Needs the 'dedup' extra.",
+        )
+        dd_parser.add_argument(
+            "--dedup-threshold", dest="threshold", type=float, default=0.95
+        )
+        dd_parser.add_argument(
+            "--dedup-no-cache", dest="use_cache", action="store_false"
+        )
+        dd_parser.add_argument(
+            "--dedup-apply",
+            dest="apply",
+            action="store_true",
+            help="Actually resolve them. Without it the command only reports "
+            "(a scan is safe; removing files is not).",
+        )
+        dd_parser.add_argument(
+            "--dedup-delete",
+            dest="delete",
+            action="store_true",
+            help="With --dedup-apply, unlink instead of quarantining. Not undoable.",
+        )
+        dd_parser.add_argument("--dedup-trash", dest="trash_dir", default=None)
+        dd_parser.add_argument("--dedup-limit", dest="limit", type=int, default=None)
+        dd_parser.add_argument(
+            "--dedup-db",
+            dest="db_path",
+            default=None,
+            metavar="FILE.db",
+            help="Also write the scan to a SQLite database: one row per "
+            "file, duplicate groups on top of it.",
+        )
+        dd_parser.add_argument(
+            "--dedup-from-db",
+            dest="from_db",
+            default=None,
+            metavar="FILE.db",
+            help="Skip the scan and read the report back from a database a "
+            "previous run wrote.",
+        )
+        dd_parser.add_argument("--no-recursive", dest="recursive", action="store_false")
+        dd_parser.add_argument("--json", dest="as_json", action="store_true")
+        dd_parser.add_argument("--verbose", "-v", action="store_true")
+        dd_args, _ = dd_parser.parse_known_args(sys.argv[1:])
+
+        from .tools.library_dedup_cli import run as run_dedup
+
+        if not dd_args.path and not dd_args.from_db:
+            print(
+                "Error: --dedup-library needs a folder, or --dedup-from-db a "
+                "database a previous run wrote.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        run_dedup(
+            dd_args.path,
+            recursive=dd_args.recursive,
+            match=dd_args.match,
+            duration_tolerance_s=dd_args.tolerance,
+            keep_version_noise=dd_args.keep_version_noise,
+            verify=dd_args.verify,
+            threshold=dd_args.threshold,
+            use_cache=dd_args.use_cache,
+            apply=dd_args.apply,
+            delete=dd_args.delete,
+            trash_dir=dd_args.trash_dir,
+            limit=dd_args.limit,
+            db_path=dd_args.db_path,
+            from_db=dd_args.from_db,
+            as_json=dd_args.as_json,
+            verbose=dd_args.verbose,
+        )
+        return
+
     if _argv_has("--upgrade-library"):
         # allow_abbrev=False: `--upgrade-library` is a prefix of
         # `--upgrade-library-target`, and argparse would call a bare
@@ -2054,7 +2333,7 @@ async def amain() -> None:
         verbose = (
             cfg.get("verbose", False) or "--verbose" in sys.argv or "-v" in sys.argv
         )
-        log_level = _resolve_log_level(verbose)
+        log_level = _resolve_log_level(verbose, None, cfg.get("log_level"))
         _root_handler = logging.StreamHandler(sys.stdout)
         _root_handler.setFormatter(
             _CleanConsoleFormatter(
@@ -2062,6 +2341,7 @@ async def amain() -> None:
             )
         )
         logging.basicConfig(level=log_level, handlers=[_root_handler])
+        _quiet_noisy_libraries(log_level)
 
         async def _run_once() -> None:
             await _run_download_async(
@@ -2084,6 +2364,9 @@ async def amain() -> None:
                 allow_fallback=cfg.get("allow_fallback", True),
                 embed_lyrics=cfg["embed_lyrics"],
                 lyrics_providers=cfg["lyrics_providers"],
+                apple_lyrics_word_by_word=cfg.get("apple_lyrics_word_by_word", True),
+                save_lrc=cfg.get("save_lrc", False),
+                lrc_library_dir=cfg.get("lrc_library_dir") or None,
                 enrich_metadata=cfg["enrich_metadata"],
                 enrich_providers=cfg["enrich_providers"],
                 qobuz_local_api_url=cfg.get("qobuz_local_api_url"),
@@ -2229,7 +2512,7 @@ async def amain() -> None:
         else merged_defaults.get("track_max_retries", 0)
     )
 
-    log_level = _resolve_log_level(args.verbose)
+    log_level = _resolve_log_level(args.verbose, args.log_level, args.profile_log_level)
     log_format = (
         "%(levelname)s:%(name)s: %(message)s"
         if args.verbose
@@ -2238,6 +2521,7 @@ async def amain() -> None:
     _cli_handler = logging.StreamHandler(sys.stdout)
     _cli_handler.setFormatter(_CleanConsoleFormatter(log_format))
     logging.basicConfig(level=log_level, handlers=[_cli_handler])
+    _quiet_noisy_libraries(log_level)
 
     async def _run_once() -> None:
         await _run_download_async(
@@ -2257,9 +2541,12 @@ async def amain() -> None:
             include_featuring=args.include_featuring,
             log_level=log_level,
             output_path=args.output_path,
-            allow_fallback=True,
+            allow_fallback=args.allow_fallback,
             embed_lyrics=args.embed_lyrics,
             lyrics_providers=args.lyrics_providers,
+            apple_lyrics_word_by_word=args.apple_lyrics_word_by_word,
+            save_lrc=args.save_lrc,
+            lrc_library_dir=args.lrc_library_dir,
             enrich_metadata=args.enrich,
             enrich_providers=args.enrich_providers,
             qobuz_local_api_url=qobuz_local_api_url,
@@ -2316,11 +2603,13 @@ async def amain() -> None:
                 "first_artist_only": args.first_artist_only,
                 "artist_separator": args.artist_separator,
                 "include_featuring": args.include_featuring,
-                "allow_fallback": True,
+                "allow_fallback": args.allow_fallback,
                 "embed_lyrics": args.embed_lyrics,
                 "lyrics_providers": args.lyrics_providers,
+                "apple_lyrics_word_by_word": args.apple_lyrics_word_by_word,
                 "enrich_metadata": args.enrich,
                 "enrich_providers": args.enrich_providers,
+                "log_level": log_level,
                 "transcode_to": args.transcode_to,
                 "transcode_bitrate": args.transcode_bitrate,
                 "transcode_keep_original": args.transcode_keep_original,
@@ -2337,6 +2626,8 @@ async def amain() -> None:
                 "watch": args.watch,
                 "max_concurrent_downloads": args.max_concurrent,
                 "verify_hires": args.verify_hires,
+                "save_lrc": args.save_lrc,
+                "lrc_library_dir": args.lrc_library_dir,
             }
             await save_profile_async(args.save_profile, profile_cfg)
         except Exception:

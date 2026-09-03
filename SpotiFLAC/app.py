@@ -26,6 +26,7 @@ from .api_mixins.subscriptions import SubscriptionsMixin
 from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
 from .core.loop_runner import run_sync
+from .core.paths import adopt_legacy_cache_file, cache_dir, cache_path
 from .core.url_utils import url_host_matches
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
@@ -369,6 +370,8 @@ class SpotiFLAC_API(
         artist_biography=None,
         release_date=None,
         track_count=None,
+        artist_url="",
+        artists_data=None,
     ) -> None:
         payload = {
             "title": title,
@@ -376,6 +379,10 @@ class SpotiFLAC_API(
             "cover": cover,
             "quality": quality,
         }
+        if artist_url:
+            payload["artist_url"] = artist_url
+        if artists_data:
+            payload["artists_data"] = artists_data
         if playlist_description is not None:
             payload["description"] = playlist_description
         if playlist_followers is not None:
@@ -465,7 +472,7 @@ class SpotiFLAC_API(
 
     def save_settings(self, cfg: dict) -> None:
         try:
-            settings_file = Path.home() / ".cache" / "spotiflac" / "gui-settings.json"
+            settings_file = cache_path("gui-settings.json")
             settings_file.parent.mkdir(parents=True, exist_ok=True)
             settings_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         except Exception as e:
@@ -496,9 +503,29 @@ class SpotiFLAC_API(
             self.log(f"Failed to save theme: {e}", "error")
             return {"ok": False, "error": str(e)}
 
+    #: Accents the frontend has an --accent-* block for (styles.css). Kept
+    #: here as well so an unknown value can't be written to disk and then
+    #: applied at boot as a data-accent nothing styles.
+    ACCENTS = ("green", "blue", "purple", "pink", "orange", "red", "cyan", "amber")
+
+    def save_accent(self, accent: str) -> dict:
+        """Persists the accent colour, same reasoning as save_theme()."""
+        accent = str(accent or "green")
+        if accent not in self.ACCENTS:
+            return {"ok": False, "error": f"unknown accent: {accent}"}
+        try:
+            cfg = self.load_settings() or {}
+            cfg["accent"] = accent
+            self.save_settings(cfg)
+            return {"ok": True, "accent": accent}
+        except Exception as e:
+            self.log(f"Failed to save accent: {e}", "error")
+            return {"ok": False, "error": str(e)}
+
     def load_settings(self) -> dict:
         try:
-            settings_file = Path.home() / ".cache" / "spotiflac" / "gui-settings.json"
+            settings_file = cache_path("gui-settings.json")
+            adopt_legacy_cache_file(settings_file)
             if settings_file.exists():
                 return json.loads(settings_file.read_text(encoding="utf-8"))
         except Exception as e:
@@ -1047,7 +1074,7 @@ class SpotiFLAC_API(
         return {"ok": True, "download_dir": self.download_dir}
 
     def open_config_folder(self) -> None:
-        config_dir = os.path.join(os.path.expanduser("~"), ".cache", "spotiflac")
+        config_dir = str(cache_dir())
         try:
             os.makedirs(config_dir, exist_ok=True)
             if sys.platform == "darwin":
@@ -1272,7 +1299,14 @@ class SpotiFLAC_API(
                         "id": track_id,
                         "title": title,
                         "artist": artist,
+                        "artist_url": getattr(t, "artist_url", ""),
+                        # One {id,name,url} per credited artist, so a row can
+                        # link each of them rather than the joined string.
+                        "artists_data": getattr(t, "artists_data", []) or [],
                         "album": album,
+                        # Lets the artist view's album cards open the album
+                        # they stand for instead of only queueing it.
+                        "album_url": getattr(t, "album_url", ""),
                         "cover": getattr(t, "cover_url", ""),
                         "duration_ms": getattr(t, "duration_ms", 0),
                         "explicit": getattr(t, "is_explicit", False),
@@ -1282,6 +1316,12 @@ class SpotiFLAC_API(
                         "playcount": playcount,
                         "release_date": getattr(t, "release_date", ""),
                         "copyright": getattr(t, "copyright", ""),
+                        # For the album card's technical sheet. Every provider
+                        # fills these in unevenly, so the frontend drops any
+                        # row that comes back empty rather than showing a gap.
+                        "publisher": getattr(t, "publisher", ""),
+                        "upc": getattr(t, "upc", ""),
+                        "genre": getattr(t, "genre", ""),
                     },
                 )
 
@@ -1293,9 +1333,13 @@ class SpotiFLAC_API(
             if is_artist:
                 display_title = collection_name
                 display_artist = ""
+                display_artist_url = ""
+                display_artists_data: list = []
             else:
                 display_title = collection_name
                 display_artist = tracks[0].artists if tracks else ""
+                display_artist_url = tracks[0].artist_url if tracks else ""
+                display_artists_data = (tracks[0].artists_data if tracks else []) or []
 
             if is_artist:
                 self.set_metadata(
@@ -1321,6 +1365,8 @@ class SpotiFLAC_API(
                     source=collection_meta.get("source", ""),
                     release_date=collection_meta.get("release_date"),
                     track_count=collection_meta.get("track_count"),
+                    artist_url=display_artist_url,
+                    artists_data=display_artists_data,
                 )
 
             self.log(
@@ -1422,6 +1468,9 @@ class SpotiFLAC_API(
                 "apple",
                 "lrclib",
             ]
+            apple_lyrics_word_by_word = config.get("apple_lyrics_word_by_word", True)
+            save_lrc = config.get("save_lrc", False)
+            lrc_library_dir = config.get("lrc_library_dir") or None
             enrich_providers = config.get("enrich_providers") or [
                 "deezer",
                 "apple",
@@ -1429,7 +1478,7 @@ class SpotiFLAC_API(
                 "tidal",
                 "soundcloud",
             ]
-            from .core.transcode import normalize_transcode_format
+            from .core.transcode import is_lossless, normalize_transcode_format
 
             # The GUI sends "none" when conversion is disabled
             transcode_to = normalize_transcode_format(config.get("transcode_to"))
@@ -1506,9 +1555,12 @@ class SpotiFLAC_API(
                 return
 
             if transcode_to:
+                # The bitrate only applies to the lossy targets: printing it
+                # next to FLAC or ALAC would imply a knob that isn't there.
+                detail = "lossless" if is_lossless(transcode_to) else transcode_bitrate
                 self.log(
                     f"Transcoding enabled — tracks will be saved as "
-                    f"{transcode_to.upper()} {transcode_bitrate}"
+                    f"{transcode_to.upper()} {detail}"
                     + ("" if transcode_keep_original else " (originals removed)"),
                     "debug",
                 )
@@ -1548,6 +1600,9 @@ class SpotiFLAC_API(
                     artist_separator=artist_separator,
                     embed_lyrics=embed_lyrics,
                     lyrics_providers=lyrics_providers,
+                    apple_lyrics_word_by_word=apple_lyrics_word_by_word,
+                    save_lrc=save_lrc,
+                    lrc_library_dir=lrc_library_dir,
                     enrich_metadata=enrich_metadata,
                     enrich_providers=enrich_providers,
                     qobuz_local_api_url=qobuz_local_api_url,
@@ -1679,9 +1734,52 @@ def _pick_gui_port() -> int | None:
     return GUI_HTTP_PORT
 
 
+def _purge_webview_http_cache() -> None:
+    """Drops the web view's persistent HTTP cache before the window opens.
+
+    The desktop window serves the frontend over a *stable* origin
+    (`http_server=True` on a fixed port) out of a *persistent* data store
+    (`private_mode=False`) — both deliberate, see webview.start() below —
+    and pywebview's bundled static server sends no cache headers at all.
+    WebKit therefore takes index.html from its own cache on every launch,
+    for as long as that entry lives.
+
+    That is worse than it sounds: the `?v=` cache-bust that is supposed to
+    make a frontend update visible lives *inside* index.html, on the
+    <script>/<link> tags. A cached index.html keeps pointing at the old
+    ?v= values, so the old app.js and styles.css stay cached too, and the
+    whole frontend freezes at whichever version WebKit saw first — through
+    any number of restarts, and no matter how often the version is bumped.
+    (Observed for real: a window still running a 1 September build days
+    later, `it-IT` number formatting and all.)
+
+    Wiping the cache costs one re-read of a few hundred KB from localhost
+    on startup. Nothing else in this window is worth caching: every asset
+    it loads is a local file. Best-effort — a cache that cannot be found
+    or removed is not a reason to refuse to launch.
+    """
+    caches = Path.home() / "Library" / "Caches"  # macOS; other platforms no-op
+    if not caches.is_dir():
+        return
+
+    bundle_id = "org.python.python"
+    with contextlib.suppress(Exception):
+        from Foundation import NSBundle  # pyobjc, always present with the cocoa backend
+
+        bundle_id = NSBundle.mainBundle().bundleIdentifier() or bundle_id
+
+    with contextlib.suppress(Exception):
+        import shutil
+
+        shutil.rmtree(
+            caches / bundle_id / "WebKit" / "NetworkCache", ignore_errors=True
+        )
+
+
 def run_gui() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
     logging.getLogger("pywebview").setLevel(logging.WARNING)
+    _purge_webview_http_cache()
     api = SpotiFLAC_API()
 
     # Try several candidate locations for the frontend files to be robust
@@ -1770,7 +1868,7 @@ def run_gui() -> None:
     # on it either (save_theme() writes it to gui-settings.json — see
     # changeTheme() in frontend/app.js), but a stable origin is what keeps
     # the window from painting light for a frame first.
-    storage_path = str(Path.home() / ".cache" / "spotiflac" / "webview")
+    storage_path = str(cache_path("webview"))
     with contextlib.suppress(Exception):
         Path(storage_path).mkdir(parents=True, exist_ok=True)
 

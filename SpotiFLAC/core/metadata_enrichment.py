@@ -20,6 +20,7 @@ from .isrc_utils import normalize_isrc
 from .loop_runner import run_sync
 from .response_cache import get as get_cached_response
 from .response_cache import put as put_cached_response
+from .text_match import fold, ratio, score_track_match
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,19 @@ _UA = (
 _HTTP_TIMEOUT = 4
 _GLOBAL_TIMEOUT = 6.0
 _ENRICHMENT_CACHE_TTL = 3600.0
+#: A lookup that found nothing is remembered too, but only briefly: the
+#: providers do add releases, and an hour of "not there" for a track that
+#: appeared five minutes ago is worse than the repeat request costs.
+#: Without this a miss was simply never cached, so a failing ISRC paid the
+#: full four-provider fan-out again on every single pass over a library.
+_NEGATIVE_CACHE_TTL = 300.0
 _ENRICHMENT_CACHE_MAX = 2000
+
+#: Below this, a search result is not the track we asked for. iTunes
+#: always answers *something* — searching an ISRC it does not know
+#: returns whatever the digits look like — so taking results[0] on faith
+#: tagged tracks with a stranger's genre and cover art.
+_APPLE_MATCH_MIN = 0.55
 _TIDAL_MAX_APIS = 10
 _TIDAL_MAX_WORKERS = 5
 
@@ -50,6 +63,25 @@ def _run_async_sync(coro):
 # ---------------------------------------------------------------------------
 
 
+#: Everything merge() carries across, in the order the tag names are built
+#: from. `explicit` is handled apart because it is a flag: absent and False
+#: are the same value, so "already set" cannot mean "do not replace".
+_MERGE_ATTRS = (
+    "genre",
+    "label",
+    "bpm",
+    "upc",
+    "isrc",
+    "cover_url_hd",
+    "composer",
+    "copyright",
+    "release_date",
+    "album_type",
+    "total_tracks",
+    "total_discs",
+)
+
+
 @dataclass
 class EnrichedMetadata:
     genre: str = ""
@@ -59,6 +91,15 @@ class EnrichedMetadata:
     upc: str = ""
     isrc: str = ""
     cover_url_hd: str = ""
+    composer: str = ""
+    copyright: str = ""
+    release_date: str = ""
+    album_type: str = ""
+    #: The release's own totals. These matter more than they look: nothing
+    #: else in the pipeline knows the disc count, so a two-disc album was
+    #: tagged DISCTOTAL=1 — the model's default — on every track of it.
+    total_tracks: int = 0
+    total_discs: int = 0
     _sources: dict[str, str] = field(default_factory=dict, repr=False)
 
     def as_tags(self) -> dict[str, str]:
@@ -75,12 +116,24 @@ class EnrichedMetadata:
             isrc_n = normalize_isrc(self.isrc)
             if isrc_n:
                 tags["ISRC"] = isrc_n
+        if self.composer:
+            tags["COMPOSER"] = self.composer
+        if self.copyright:
+            tags["COPYRIGHT"] = self.copyright
+        if self.release_date:
+            tags["DATE"] = self.release_date
+        if self.album_type:
+            tags["RELEASETYPE"] = self.album_type
+        if self.total_tracks > 0:
+            tags["TRACKTOTAL"] = str(self.total_tracks)
+        if self.total_discs > 0:
+            tags["DISCTOTAL"] = str(self.total_discs)
         if self.explicit:
             tags["ITUNESADVISORY"] = "1"
         return tags
 
     def merge(self, other: EnrichedMetadata, source: str) -> None:
-        for attr in ("genre", "label", "bpm", "upc", "isrc", "cover_url_hd"):
+        for attr in _MERGE_ATTRS:
             if not getattr(self, attr) and getattr(other, attr):
                 setattr(self, attr, getattr(other, attr))
                 self._sources[attr] = source
@@ -96,7 +149,9 @@ class EnrichedMetadata:
 # In-memory cache (invariata)
 # ---------------------------------------------------------------------------
 
-_enrichment_cache: dict[str, tuple[EnrichedMetadata, float]] = {}
+#: (value, stored_at, ttl_s) — the TTL is per entry so a negative result can
+#: expire sooner than a real one. See _NEGATIVE_CACHE_TTL.
+_enrichment_cache: dict[str, tuple[EnrichedMetadata, float, float]] = {}
 _cache_lock = threading.Lock()
 
 
@@ -107,7 +162,7 @@ def _get_cached(isrc: str) -> EnrichedMetadata | None:
         return None
     with _cache_lock:
         entry = _enrichment_cache.get(isrc.upper())
-        if entry and (time.time() - entry[1]) < _ENRICHMENT_CACHE_TTL:
+        if entry and (time.time() - entry[1]) < entry[2]:
             return entry[0]
     persisted = get_cached_response("metadata-enrichment", isrc.upper(), 24 * 60 * 60)
     if isinstance(persisted, dict):
@@ -119,12 +174,16 @@ def _get_cached(isrc: str) -> EnrichedMetadata | None:
     return None
 
 
-def _put_cached_memory(isrc: str, data: EnrichedMetadata) -> None:
+def _put_cached_memory(
+    isrc: str,
+    data: EnrichedMetadata,
+    ttl_s: float = _ENRICHMENT_CACHE_TTL,
+) -> None:
     if not isrc:
         return
     with _cache_lock:
         key = isrc.upper()
-        _enrichment_cache[key] = (data, time.time())
+        _enrichment_cache[key] = (data, time.time(), ttl_s)
         if len(_enrichment_cache) > _ENRICHMENT_CACHE_MAX:
             oldest_key = min(_enrichment_cache.items(), key=lambda kv: kv[1][1])[0]
             with contextlib.suppress(Exception):
@@ -132,21 +191,34 @@ def _put_cached_memory(isrc: str, data: EnrichedMetadata) -> None:
 
 
 def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
+    if not isrc:
+        return
+    if not (data.genre or data.label or data.cover_url_hd or data.upc):
+        # Nothing usable came back. Remember that, in memory only and on the
+        # short TTL — persisting a miss to disk would keep a track starved of
+        # metadata across restarts long after the provider learned about it.
+        _put_cached_memory(isrc, data, _NEGATIVE_CACHE_TTL)
+        return
     _put_cached_memory(isrc, data)
-    if isrc and (data.genre or data.label or data.cover_url_hd or data.upc):
-        put_cached_response(
-            "metadata-enrichment",
-            isrc.upper(),
-            {
-                "genre": data.genre,
-                "label": data.label,
-                "bpm": data.bpm,
-                "explicit": data.explicit,
-                "upc": data.upc,
-                "isrc": data.isrc,
-                "cover_url_hd": data.cover_url_hd,
-            },
-        )
+    put_cached_response(
+        "metadata-enrichment",
+        isrc.upper(),
+        {
+            "genre": data.genre,
+            "label": data.label,
+            "bpm": data.bpm,
+            "explicit": data.explicit,
+            "upc": data.upc,
+            "isrc": data.isrc,
+            "cover_url_hd": data.cover_url_hd,
+            "composer": data.composer,
+            "copyright": data.copyright,
+            "release_date": data.release_date,
+            "album_type": data.album_type,
+            "total_tracks": data.total_tracks,
+            "total_discs": data.total_discs,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -185,16 +257,50 @@ def _get_dynamic_python_provider(base_name: str, **kwargs) -> Any:
     return None
 
 
+#: Deezer labels every credited person with a role. Most are "Main" or
+#: "Featured"; these are the ones that mean "wrote it".
+_DEEZER_COMPOSER_ROLES = frozenset(
+    {"composer", "writer", "songwriter", "author", "lyricist", "compositor"},
+)
+
+
+def _same_release(expected: str, found: str) -> bool:
+    """Whether two album titles name the same release.
+
+    Deliberately loose — "Abbey Road" and "Abbey Road (Remastered)" are the
+    same record for tagging purposes — but not blind: fold() already strips
+    case, accents and punctuation, and the containment test catches the
+    edition suffixes that folding leaves behind.
+    """
+    left, right = fold(expected), fold(found)
+    if not left or not right:
+        return False
+    if left == right or left in right or right in left:
+        return True
+    return ratio(expected, found) >= 0.85
+
+
 class _DeezerMeta:
     BASE = "https://api.deezer.com/2.0"
 
     def __init__(self) -> None:
         self._client = None
 
-    def fetch(self, isrc: str) -> EnrichedMetadata:
-        return _run_async_sync(self.fetch_async(isrc))
+    def fetch(self, isrc: str, album_name: str = "") -> EnrichedMetadata:
+        return _run_async_sync(self.fetch_async(isrc, album_name))
 
-    async def fetch_async(self, isrc: str) -> EnrichedMetadata:
+    async def fetch_async(self, isrc: str, album_name: str = "") -> EnrichedMetadata:
+        """Deezer's view of one recording, looked up by ISRC.
+
+        `album_name` guards the release-scoped fields. An ISRC identifies a
+        *recording*, not a release, so Deezer routinely answers with the
+        compilation or the deluxe edition it happens to file that recording
+        under. Its label, barcode, date and track count then describe a
+        record the user is not tagging — a UPC pointing at a greatest-hits
+        disc is worse than no UPC at all. When the caller tells us which
+        album it wanted, those fields are taken only if Deezer agrees; when
+        it does not, we cannot check and the previous behaviour stands.
+        """
         out = EnrichedMetadata()
         if not isrc:
             return out
@@ -210,7 +316,16 @@ class _DeezerMeta:
             d = r.json()
             if "error" in d:
                 return out
-            album_id = d.get("album", {}).get("id")
+
+            composers = []
+            for contributor in d.get("contributors") or []:
+                role = str(contributor.get("role") or "").strip().lower()
+                name = str(contributor.get("name") or "").strip()
+                if name and role in _DEEZER_COMPOSER_ROLES:
+                    composers.append(name)
+            out.composer = "; ".join(dict.fromkeys(composers))
+
+            album_id = (d.get("album") or {}).get("id")
             if album_id:
                 ar = await client.get(
                     f"{self.BASE}/album/{album_id}",
@@ -219,18 +334,74 @@ class _DeezerMeta:
                 )
                 if ar.is_success:
                     ad = ar.json()
-                    genres = ad.get("genres", {}).get("data", [])
-                    if genres:
-                        out.genre = genres[0].get("name", "")
-                    out.label = ad.get("label", "")
-                    out.upc = ad.get("upc", "")
-                    out.cover_url_hd = ad.get("cover_xl") or ad.get("cover_big", "")
+                    # Genre describes the music, not the pressing, so it is
+                    # taken whichever release this turned out to be. All of
+                    # them, not just the first: Deezer files "Rock" and
+                    # "Classic Rock" side by side and picking [0] threw away
+                    # a genre the user could have had for free.
+                    genres = [
+                        str(g.get("name") or "").strip()
+                        for g in (ad.get("genres") or {}).get("data") or []
+                    ]
+                    out.genre = "; ".join(
+                        dict.fromkeys(name for name in genres if name),
+                    )
+
+                    found_title = str(ad.get("title") or "")
+                    release_ok = not album_name or _same_release(
+                        album_name,
+                        found_title,
+                    )
+                    if release_ok:
+                        out.label = ad.get("label", "")
+                        out.upc = ad.get("upc", "")
+                        out.release_date = str(ad.get("release_date") or "")
+                        out.album_type = str(ad.get("record_type") or "")
+                        out.total_tracks = int(ad.get("nb_tracks") or 0)
+                        out.cover_url_hd = ad.get("cover_xl") or ad.get(
+                            "cover_big",
+                            "",
+                        )
+                    else:
+                        logger.debug(
+                            "[meta/deezer] release mismatch: wanted %r, got %r "
+                            "— keeping genre only",
+                            album_name,
+                            found_title,
+                        )
             out.bpm = int(d.get("bpm") or 0)
             out.explicit = bool(d.get("explicit_lyrics"))
             out.isrc = d.get("isrc", "")
         except Exception as exc:
             logger.debug("[meta/deezer] async %s", exc)
         return out
+
+
+@dataclass
+class _ItunesCandidate:
+    """One iTunes search hit, in the shape score_track_match() reads.
+
+    The scorer speaks in title/artists/album/duration_ms and is already
+    tuned and tested against the download providers; adapting to it beats
+    writing a second, subtly different comparison here.
+    """
+
+    title: str
+    artists: str
+    first_artist: str
+    album: str
+    duration_ms: int
+
+    @classmethod
+    def of(cls, item: dict[str, Any]) -> _ItunesCandidate:
+        name = str(item.get("artistName") or "")
+        return cls(
+            title=str(item.get("trackName") or ""),
+            artists=name,
+            first_artist=name,
+            album=str(item.get("collectionName") or ""),
+            duration_ms=int(item.get("trackTimeMillis") or 0),
+        )
 
 
 class _AppleMusicMeta:
@@ -244,17 +415,77 @@ class _AppleMusicMeta:
         track_name: str,
         artist_name: str,
         isrc: str = "",
+        album_name: str = "",
+        duration_ms: int = 0,
     ) -> EnrichedMetadata:
-        return _run_async_sync(self.fetch_async(track_name, artist_name, isrc))
+        return _run_async_sync(
+            self.fetch_async(track_name, artist_name, isrc, album_name, duration_ms),
+        )
 
-    def _search(self, title: str, artist: str, isrc: str) -> dict[str, Any] | None:
-        return _run_async_sync(self._search_async(title, artist, isrc))
+    def _search(
+        self,
+        title: str,
+        artist: str,
+        isrc: str,
+        album: str = "",
+        duration_ms: int = 0,
+    ) -> dict[str, Any] | None:
+        return _run_async_sync(
+            self._search_async(title, artist, isrc, album, duration_ms),
+        )
+
+    def _best(
+        self,
+        results: list[dict[str, Any]],
+        title: str,
+        artist: str,
+        album: str,
+        duration_ms: int,
+    ) -> dict[str, Any] | None:
+        """The best-scoring hit, or None if none of them is good enough.
+
+        None is a real answer here. iTunes has no "no match" response: an
+        unknown ISRC or a misspelt title still comes back with songs, and
+        the old code returned results[0] regardless — so a track iTunes had
+        never heard of was tagged with the genre, the explicit flag and the
+        cover art of whatever happened to rank first.
+        """
+        if not results:
+            return None
+        if not title:
+            return results[0]
+
+        best: dict[str, Any] | None = None
+        best_score = 0.0
+        for item in results:
+            score = score_track_match(
+                title=title,
+                artist=artist,
+                album=album,
+                duration_ms=duration_ms,
+                candidate=_ItunesCandidate.of(item),
+            )
+            if score > best_score:
+                best, best_score = item, score
+
+        if best is None or best_score < _APPLE_MATCH_MIN:
+            logger.debug(
+                "[meta/apple] no result above %.2f for %r / %r (best %.2f)",
+                _APPLE_MATCH_MIN,
+                title,
+                artist,
+                best_score,
+            )
+            return None
+        return best
 
     async def _search_async(
         self,
         title: str,
         artist: str,
         isrc: str,
+        album: str = "",
+        duration_ms: int = 0,
     ) -> dict[str, Any] | None:
         try:
             client = await NetworkManager.get_async_client_safe()
@@ -265,16 +496,26 @@ class _AppleMusicMeta:
                         "term": isrc,
                         "media": "music",
                         "entity": "song",
-                        "limit": 1,
+                        "limit": 5,
                         "country": "US",
                     },
                     headers={"User-Agent": _UA},
                     timeout=_HTTP_TIMEOUT,
                 )
                 if r.is_success:
-                    results = r.json().get("results", [])
-                    if results:
-                        return results[0]
+                    # Not a lookup by identifier — iTunes has no such
+                    # endpoint publicly, this is a full-text search whose
+                    # term happens to be an ISRC — so the hits are checked
+                    # like any others rather than trusted for their query.
+                    item = self._best(
+                        r.json().get("results", []),
+                        title,
+                        artist,
+                        album,
+                        duration_ms,
+                    )
+                    if item:
+                        return item
             r = await client.get(
                 self.SEARCH,
                 params={
@@ -289,14 +530,13 @@ class _AppleMusicMeta:
             )
             if not r.is_success:
                 return None
-            results = r.json().get("results", [])
-            if not results:
-                return None
-            artist_lc = artist.lower()
-            for item in results:
-                if artist_lc in item.get("artistName", "").lower():
-                    return item
-            return results[0]
+            return self._best(
+                r.json().get("results", []),
+                title,
+                artist,
+                album,
+                duration_ms,
+            )
         except Exception as exc:
             logger.debug("[meta/apple] async %s", exc)
             return None
@@ -306,15 +546,32 @@ class _AppleMusicMeta:
         track_name: str,
         artist_name: str,
         isrc: str = "",
+        album_name: str = "",
+        duration_ms: int = 0,
     ) -> EnrichedMetadata:
         out = EnrichedMetadata()
-        item = await self._search_async(track_name, artist_name, isrc)
+        item = await self._search_async(
+            track_name,
+            artist_name,
+            isrc,
+            album_name,
+            duration_ms,
+        )
         if not item:
             return out
         out.genre = item.get("primaryGenreName", "")
         out.explicit = item.get("trackExplicitness") == "explicit"
         raw_art = item.get("artworkUrl100", "")
         out.cover_url_hd = raw_art.replace("100x100", "600x600")
+        # ISO-8601 with a time part; only the date half is a release date.
+        out.release_date = str(item.get("releaseDate") or "")[:10]
+        out.total_tracks = int(item.get("trackCount") or 0)
+        out.total_discs = int(item.get("discCount") or 0)
+        # A song result carries no collectionType — that only appears on
+        # album lookups — so the release kind is inferred from its size,
+        # which is all iTunes actually tells us here.
+        if out.total_tracks:
+            out.album_type = "single" if out.total_tracks == 1 else "album"
         return out
 
 
@@ -580,16 +837,24 @@ def _get_sc() -> _SoundCloudMeta:
 # ---------------------------------------------------------------------------
 
 
-async def _deezer_fetch_async(isrc: str) -> EnrichedMetadata:
-    return await _get_deezer().fetch_async(isrc)
+async def _deezer_fetch_async(isrc: str, album_name: str = "") -> EnrichedMetadata:
+    return await _get_deezer().fetch_async(isrc, album_name)
 
 
 async def _apple_fetch_async(
     track_name: str,
     artist_name: str,
     isrc: str,
+    album_name: str = "",
+    duration_ms: int = 0,
 ) -> EnrichedMetadata:
-    return await _get_apple().fetch_async(track_name, artist_name, isrc)
+    return await _get_apple().fetch_async(
+        track_name,
+        artist_name,
+        isrc,
+        album_name,
+        duration_ms,
+    )
 
 
 async def _tidal_fetch_async(track_name: str, artist_name: str) -> EnrichedMetadata:
@@ -619,9 +884,17 @@ async def enrich_metadata_async(
     providers: list[str] | None = None,
     timeout_s: float = _GLOBAL_TIMEOUT,
     qobuz_token: str | None = None,
+    album_name: str = "",
+    duration_ms: int = 0,
 ) -> EnrichedMetadata:
     """Queries providers in parallel with asyncio.gather + global timeout.
     Replaces the sync version's ThreadPoolExecutor.
+
+    `album_name` and `duration_ms` are what the caller already knows about
+    the track, and they are what lets a provider's answer be *checked*
+    rather than accepted: they gate Deezer's release-scoped fields and feed
+    the iTunes match score. Both are optional and both default to the old,
+    unverified behaviour when the caller has nothing to offer.
     """
     if providers is None:
         providers = ["deezer", "apple", "qobuz", "tidal"]
@@ -634,9 +907,15 @@ async def enrich_metadata_async(
     async def run_provider(name: str) -> tuple[str, EnrichedMetadata]:
         try:
             if name == "deezer":
-                return name, await _deezer_fetch_async(isrc)
+                return name, await _deezer_fetch_async(isrc, album_name)
             if name == "apple":
-                return name, await _apple_fetch_async(track_name, artist_name, isrc)
+                return name, await _apple_fetch_async(
+                    track_name,
+                    artist_name,
+                    isrc,
+                    album_name,
+                    duration_ms,
+                )
             if name == "tidal":
                 return name, await _tidal_fetch_async(track_name, artist_name)
             if name == "qobuz":
@@ -659,19 +938,26 @@ async def enrich_metadata_async(
         logger.warning("[meta/enrich] async timeout %.1fs", timeout_s)
         results = {}
 
+    # Every provider has already answered — gather() above waits for all of
+    # them — so this loop spends nothing but the merge. It used to stop at
+    # the first is_complete(), which saved no request and threw away fields
+    # already in hand: the disc count only Apple reports was discarded
+    # whenever Deezer had happened to supply genre, label and cover.
+    # merge() only ever fills blanks, in the caller's provider order, so
+    # reading them all cannot change which provider wins a field.
     merged = EnrichedMetadata()
     for name in providers:
-        if name in results:
-            data = results[name]
-            if isinstance(data, EnrichedMetadata):
-                merged.merge(data, name)
-            if merged.is_complete():
-                break
+        data = results.get(name)
+        if isinstance(data, EnrichedMetadata):
+            merged.merge(data, name)
 
     if merged._sources:
         logger.debug("[meta/enrich] async enriched: %s", merged._sources)
 
-    if isrc and (merged.genre or merged.label or merged.cover_url_hd):
+    if isrc:
+        # Unconditional now: _put_cached() decides for itself whether this
+        # is worth persisting, and stores a miss in memory on the short TTL
+        # so the same barren ISRC does not re-run four providers per pass.
         _put_cached(isrc, merged)
 
     return merged

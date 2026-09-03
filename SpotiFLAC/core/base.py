@@ -104,6 +104,7 @@ class BaseProvider(ABC):
         allow_fallback: bool = True,
         embed_lyrics: bool = False,
         lyrics_providers: list[str] | None = None,
+        apple_lyrics_word_by_word: bool = True,
         enrich_metadata: bool = False,
         enrich_providers: list[str] | None = None,
         is_album: bool = False,
@@ -160,7 +161,17 @@ class BaseProvider(ABC):
             ),
             native_id=native_id,
         )
-        path = Path(output_dir) / filename
+        # Absolute, always. A relative output_dir ("Downloads", "./out") is
+        # resolved against the *caller's* working directory — but this path is
+        # handed to JS extensions as a plain string, and their Node process
+        # runs with its own cwd, the extension folder (extensions/runtime.py).
+        # The two then disagree about where the track goes: the extension
+        # writes under ~/.spotiflac/extensions/<name>/<output_dir>/, the host
+        # looks in ./<output_dir>/, finds nothing, and the download fails as
+        # "no usable audio". Resolving here fixes it for every provider at
+        # once and gives _sanctioned_output() a real directory to compare
+        # against, instead of one that depends on who is asking.
+        path = (Path(output_dir) / filename).resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 

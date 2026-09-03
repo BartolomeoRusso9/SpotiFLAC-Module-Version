@@ -8,10 +8,12 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import re
 import time as _time
 import unicodedata
 import urllib.parse
+import weakref
 from typing import Any
 
 from typing_extensions import Self
@@ -37,6 +39,16 @@ _JWT_CHARS = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.",
 )
 
+#: Where to look for the anonymous developer token, in order. More than one
+#: because Apple retires these paths without notice — /us/browse became a
+#: redirect — and a single hard-coded entry page takes the whole provider
+#: down with it.
+_TOKEN_ENTRY_PAGES = (
+    "https://music.apple.com/us/new",
+    "https://music.apple.com/us/browse",
+    "https://music.apple.com/us/listen-now",
+)
+
 
 def _extract_jwt_from_string(text: str) -> str | None:
     """Estrae un token JWT Apple Music da una stringa usando i prefissi noti
@@ -54,6 +66,50 @@ def _extract_jwt_from_string(text: str) -> str | None:
         if len(parts) == 3 and all(parts):
             return candidate
     return None
+
+
+#: attributes.audioTraits, best first. Apple lists every tier a release is
+#: available in, so the entry that matters is the highest one present.
+_AUDIO_TRAITS_RANK = (
+    ("hi-res-lossless", "HI_RES_LOSSLESS"),
+    ("lossless", "LOSSLESS"),
+    ("atmos", "DOLBY_ATMOS"),
+    ("spatial", "SPATIAL_AUDIO"),
+    ("lossy-stereo", "LOSSY"),
+)
+
+
+def _quality_from_traits(traits: list[str]) -> str:
+    """The best audio tier named in `audioTraits`, in this codebase's terms.
+
+    Informational only. Apple does not serve the audio here — the catalogue
+    API gives previews — so this records what the release *is*, which is
+    what makes it useful when deciding whether a local copy is worth
+    upgrading, not what was downloaded.
+    """
+    present = {t.strip().lower() for t in traits}
+    for trait, name in _AUDIO_TRAITS_RANK:
+        if trait in present:
+            return name
+    return ""
+
+
+def _album_type_from_attrs(album_attr: dict[str, Any]) -> str:
+    """The release kind, from the flags Apple sets on an album.
+
+    Checked most specific first: a compilation single would otherwise be
+    reported as a single, and "compilation" is the more useful of the two
+    for anything deciding where the file belongs.
+    """
+    if not album_attr:
+        return ""
+    if album_attr.get("isCompilation"):
+        return "compilation"
+    if album_attr.get("isSingle"):
+        return "single"
+    if album_attr.get("name"):
+        return "album"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -124,8 +180,27 @@ def _artist_in_track(artist_name: str, track_artists: str) -> bool:
 
 
 class AppleMusicMetadataClient:
-    def __init__(self, timeout_s: int = 15) -> None:
+    def __init__(
+        self,
+        timeout_s: int = 15,
+        media_user_token: str | None = None,
+        storefront: str | None = None,
+    ) -> None:
         self._timeout = timeout_s
+        # The anonymous developer token opens the catalogue; the lyrics
+        # endpoints additionally want a *subscriber*, which is what the
+        # Media-User-Token identifies. It belongs to the user, so it is
+        # never fetched or guessed — supplied, or the feature is off.
+        self._media_user_token = (
+            media_user_token
+            if media_user_token is not None
+            else os.environ.get("SPOTIFLAC_APPLE_MEDIA_USER_TOKEN", "")
+        ).strip()
+        self._storefront = (
+            storefront
+            if storefront is not None
+            else os.environ.get("SPOTIFLAC_APPLE_STOREFRONT", "us")
+        ).strip().lower() or "us"
         self._http = AsyncHttpClient(
             provider="apple_metadata",
             timeout_s=timeout_s,
@@ -138,6 +213,18 @@ class AppleMusicMetadataClient:
         )
         self._auth_token: str | None = None
         self._token_expiry: float = 0.0  # timestamp Unix; 0 = mai valido
+        self._token_locks: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, asyncio.Lock
+        ] = weakref.WeakKeyDictionary()
+
+    @property
+    def has_media_user_token(self) -> bool:
+        """Whether the subscriber-only endpoints can be called at all."""
+        return bool(self._media_user_token)
+
+    @property
+    def storefront(self) -> str:
+        return self._storefront
 
     async def __aenter__(self) -> Self:
         return self
@@ -162,21 +249,67 @@ class AppleMusicMetadataClient:
         except Exception:
             self._token_expiry = _time.time() + 43200.0
 
+    def _token_lock(self) -> asyncio.Lock:
+        """The token-refresh lock belonging to the running loop.
+
+        Per loop rather than per client, for the same reason
+        NetworkManager keeps its clients that way: a lock created under one
+        event loop cannot be awaited from another, and one client instance
+        can be shared by everything running on any of them.
+        """
+        loop = asyncio.get_running_loop()
+        lock = self._token_locks.get(loop)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._token_locks[loop] = lock
+        return lock
+
     async def _get_token(self) -> str:
+        """The developer token, discovered once and reused until it expires.
+
+        Held behind a lock: a batch of lyric lookups starts as a burst of
+        concurrent requests with no token yet, and without it every one of
+        them would scrape the web frontend for the same JWT.
+        """
+        if self._auth_token and _time.time() < self._token_expiry:
+            return self._auth_token
+
+        async with self._token_lock():
+            # Whoever held the lock has usually just fetched one.
+            if self._auth_token and _time.time() < self._token_expiry:
+                return self._auth_token
+            return await self._discover_token()
+
+    async def _discover_token(self) -> str:
         """Extracts the anonymous JWT token from the web frontend using 3 strategies:
         1. devToken=JWT in the HTML source
         2. Known JWT prefixes in the HTML
         3. The page's JS bundles (skipping legacy ones).
         """
-        if self._auth_token and _time.time() < self._token_expiry:
-            return self._auth_token
-
         try:
-            res = await self._http.get(
-                "https://music.apple.com/us/browse",
-                timeout=self._timeout,
-            )
-            html = res.text
+            # follow_redirects, and more than one entry page: /us/browse now
+            # answers 301, and without following it the client raised
+            # "HTTP 301" before it ever looked for a token — every Apple
+            # Music lookup failed at the first request.
+            html = ""
+            for entry in _TOKEN_ENTRY_PAGES:
+                try:
+                    res = await self._http.get(
+                        entry,
+                        timeout=self._timeout,
+                        follow_redirects=True,
+                    )
+                except Exception as exc:
+                    logger.debug("[apple_metadata] %s unusable: %s", entry, exc)
+                    continue
+                if res.text:
+                    html = res.text
+                    break
+            if not html:
+                raise SpotiflacError(
+                    ErrorKind.NETWORK_ERROR,
+                    "Apple Music web frontend unreachable for token extraction.",
+                )
             unquoted_html = urllib.parse.unquote(html)
 
             # Strategia 1: devToken=JWT nel parametro URL
@@ -207,7 +340,11 @@ class AppleMusicMetadataClient:
                     continue
                 js_url = "https://music.apple.com" + src
                 try:
-                    js_res = await self._http.get(js_url, timeout=self._timeout)
+                    js_res = await self._http.get(
+                        js_url,
+                        timeout=self._timeout,
+                        follow_redirects=True,
+                    )
                     token = _extract_jwt_from_string(urllib.parse.unquote(js_res.text))
                     if token:
                         logger.debug(
@@ -238,9 +375,16 @@ class AppleMusicMetadataClient:
         self,
         path: str,
         params: dict[str, Any] | None = None,
+        _media_user_token: str = "",
     ) -> dict[str, Any]:
         token = await self._get_token()
         headers = {"Authorization": f"Bearer {token}"}
+        if _media_user_token:
+            # Only sent where it is needed. The catalogue endpoints work
+            # anonymously, and attaching a user identity to them would tie
+            # ordinary metadata reads to the user's Apple account for no
+            # gain.
+            headers["Media-User-Token"] = _media_user_token
 
         url = (
             path
@@ -261,7 +405,10 @@ class AppleMusicMetadataClient:
             self._auth_token = None
             self._token_expiry = 0.0
             token = await self._get_token()
-            headers = {"Authorization": f"Bearer {token}"}
+            # Only the Authorization header is stale: rebuilding the dict
+            # from scratch would drop the caller's Media-User-Token and turn
+            # the retry into an anonymous request (no user lyrics).
+            headers["Authorization"] = f"Bearer {token}"
             resp = await self._http.get(
                 url,
                 params=params,
@@ -370,6 +517,17 @@ class AppleMusicMetadataClient:
         )
 
         tracks = [self._parse_item(item, album_data) for item in tracks_items]
+
+        # The disc count exists nowhere in the album's own attributes — it is
+        # only visible as the highest discNumber across the track list, which
+        # we have here and _parse_item does not. Without this every track of
+        # a two-disc release was tagged DISCTOTAL=1.
+        total_discs = max((track.disc_number for track in tracks), default=1)
+        if total_discs > 1:
+            tracks = [
+                track.model_copy(update={"total_discs": total_discs})
+                for track in tracks
+            ]
 
         album_attr = album_data.get("attributes", {})
         artwork_url = (
@@ -573,6 +731,55 @@ class AppleMusicMetadataClient:
         )
 
     # ------------------------------------------------------------------
+    # Lyrics (subscriber-only)
+    # ------------------------------------------------------------------
+
+    async def get_lyrics_ttml(
+        self,
+        song_id: str,
+        storefront: str = "",
+        syllable: bool = True,
+    ) -> str:
+        """The song's lyrics as raw TTML, or "" when unavailable.
+
+        Two endpoints, tried in that order: `syllable-lyrics` carries a
+        time for every syllable and is what word-by-word display needs;
+        `lyrics` is the same words timed per line. Not every track has the
+        syllable version — Apple rolls it out per catalogue — so falling
+        back is the normal case, not the error case.
+
+        Returns "" rather than raising for the expected refusals (no token,
+        401/403 from an expired one, 404 for a track with no lyrics),
+        because the caller's next move is the same in all of them: try
+        another lyrics provider.
+        """
+        if not self._media_user_token:
+            logger.debug(
+                "[apple_metadata] no Media-User-Token configured; direct "
+                "lyrics are unavailable (set SPOTIFLAC_APPLE_MEDIA_USER_TOKEN)",
+            )
+            return ""
+        if not song_id:
+            return ""
+
+        store = (storefront or self._storefront).lower()
+        paths = ["syllable-lyrics", "lyrics"] if syllable else ["lyrics"]
+        for path in paths:
+            try:
+                data = await self._get(
+                    f"/{store}/songs/{song_id}/{path}",
+                    _media_user_token=self._media_user_token,
+                )
+            except SpotiflacError as exc:
+                logger.debug("[apple_metadata] %s for %s: %s", path, song_id, exc)
+                continue
+            for entry in data.get("data") or []:
+                ttml = (entry.get("attributes") or {}).get("ttml") or ""
+                if ttml:
+                    return ttml
+        return ""
+
+    # ------------------------------------------------------------------
     # Conversione dati API → TrackMetadata
     # ------------------------------------------------------------------
 
@@ -593,10 +800,43 @@ class AppleMusicMetadataClient:
                 .replace("{w}x{h}", "3000x3000")
             )
 
-        release_date = attr.get("releaseDate", "").split("T")[0]
+        release_date = (
+            attr.get("releaseDate", "").split("T")[0]
+            or album_attr.get(
+                "releaseDate",
+                "",
+            ).split(
+                "T"
+            )[0]
+        )
 
         genre_names: list[str] = attr.get("genreNames") or []
         genre = ", ".join(g for g in genre_names if g != "Music")
+
+        # A preview is the only stream the catalogue API hands out without
+        # a subscription, and it is what the rest of the pipeline uses to
+        # fingerprint or audition a track.
+        previews = attr.get("previews") or []
+        preview_url = ""
+        if previews and isinstance(previews[0], dict):
+            preview_url = previews[0].get("url", "")
+
+        # Apple states the rating as a word, and only on the tracks that
+        # carry it — the album's own "explicit" means *some* track is, so
+        # falling back to it would mark every clean track on the record
+        # explicit too. Verified on The Dark Side of the Moon, where the
+        # album is rated explicit and eight of its ten tracks are not.
+        rating = attr.get("contentRating") or ""
+
+        extra_info: dict[str, Any] = {}
+        traits = [str(t) for t in (attr.get("audioTraits") or [])]
+        if traits:
+            extra_info["apple_audio_traits"] = traits
+            quality = _quality_from_traits(traits)
+            if quality:
+                extra_info["apple_audio_quality"] = quality
+        if attr.get("hasLyrics"):
+            extra_info["apple_has_lyrics"] = True
 
         return TrackMetadata(
             id=f"apple_{item.get('id', '')}",
@@ -610,12 +850,21 @@ class AppleMusicMetadataClient:
             isrc=attr.get("isrc", ""),
             track_number=attr.get("trackNumber", 1),
             disc_number=attr.get("discNumber", 1),
+            total_tracks=int(album_attr.get("trackCount") or 0),
             duration_ms=attr.get("durationInMillis", 0),
             release_date=release_date,
             cover_url=cover_url,
             external_url=attr.get("url", ""),
             genre=genre,
-            label=album_attr.get("recordLabel", ""),
+            # `publisher`, not `label`: TrackMetadata has no `label` field and
+            # pydantic drops unknown keyword arguments without complaint, so
+            # the record label Apple returns was being thrown away here.
+            publisher=album_attr.get("recordLabel", ""),
             copyright=album_attr.get("copyright", ""),
             composer=attr.get("composerName", ""),
+            upc=album_attr.get("upc", ""),
+            preview_url=preview_url,
+            album_type=_album_type_from_attrs(album_attr),
+            is_explicit=rating == "explicit",
+            extra_info=extra_info,
         )

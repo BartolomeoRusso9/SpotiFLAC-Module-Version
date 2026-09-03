@@ -180,6 +180,13 @@ ALLOWED_METHODS: set[str] = {
     "apply_local_tags",
     "get_dedup_status",
     "scan_for_duplicates",
+    "scan_library_duplicates",
+    # Removes files — but only ones the last scan reported as redundant
+    # copies of a file it is keeping, and by default into a quarantine
+    # folder it can undo from. See api_mixins/dedup.py.
+    "resolve_library_duplicates",
+    "restore_library_duplicates",
+    "get_download_services",
     "get_trusted_keys",
     # Subscriptions (see core/subscriptions.py). Read and write, but every
     # write here only edits a list of URLs to follow — the same category of
@@ -1057,12 +1064,34 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
             "<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n"
-            '<script src="/web-shim.js?v=20260817"></script>\n'
+            '<script src="/web-shim.js?v=20260919"></script>\n'
         )
         html = html.replace(
-            '<script src="toast-system.js?v=20260817"></script>',
-            inject + '<script src="toast-system.js?v=20260817"></script>',
+            '<script src="toast-system.js?v=20260919"></script>',
+            inject + '<script src="toast-system.js?v=20260919"></script>',
         )
+        # Marks the document as browser-served before the first paint, so CSS
+        # can drop the chrome that only makes sense in the pywebview window
+        # (the frameless titlebar and its traffic-light buttons, which call
+        # window methods that don't exist here). The desktop build loads
+        # index.html straight from disk and never hits this route, so its
+        # <body> stays unclassed.
+        #
+        # Anchored after </head> rather than replacing the first "<body>" in
+        # the file: index.html's pre-paint script carries a comment that says
+        # "not at the top of <body>", and a plain first-occurrence replace
+        # rewrote *that* — leaving the real tag unclassed, so every
+        # body.web-mode rule silently did nothing in the browser (the desktop
+        # titlebar stayed visible there, complete with buttons that call
+        # pywebview methods a browser doesn't have).
+        head_end = html.find("</head>")
+        body_at = html.find("<body>", head_end if head_end != -1 else 0)
+        if body_at != -1:
+            html = (
+                html[:body_at]
+                + '<body class="web-mode">'
+                + html[body_at + len("<body>") :]
+            )
         return HTMLResponse(html)
 
     @app.get("/web-shim.js")

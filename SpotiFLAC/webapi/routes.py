@@ -13,7 +13,9 @@ and there is no second implementation to keep in agreement.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -37,6 +39,8 @@ from .schemas import (
     HistoryResponse,
     JobListResponse,
     JobOut,
+    LibraryDuplicatesRequest,
+    LibraryDuplicatesResponse,
     LibraryScanRequest,
     LibraryScanResponse,
     ResolveRequest,
@@ -79,6 +83,49 @@ class ApiDeps:
 
 def _owner(deps: ApiDeps, request: Request) -> str:
     return (deps.username_for(request) or "") if deps.multiuser else ""
+
+
+def _confined_path(path: str, download_dir: str) -> str:
+    """A request's path, resolved, or a 400 if it escapes the download folder.
+
+    The path comes from a request, so it is confined the same way
+    /api/browse-folder confines its own: a caller must not be able to
+    enumerate — or, for the routes that go on to act, touch — the filesystem
+    by asking about "/".
+    """
+    import os
+    from pathlib import Path
+
+    root = os.path.realpath(str(Path(download_dir).expanduser()))
+    # The request's own path stays a plain string until it has been checked.
+    # Building a Path (or anything else that can touch a disk) out of it
+    # first would mean the caller's value had already been turned into a
+    # handle on whatever they named, with the check an afterthought — so
+    # every step to the check below is string arithmetic, and nothing here
+    # reaches the filesystem except realpath, which only reads.
+    #
+    # A relative path is taken against the download folder rather than
+    # against whatever directory the server happens to have been started in,
+    # which is not something a caller can see or reason about. An absolute
+    # one is used as given. Either way it is the containment check below
+    # that decides — never the join, which an absolute path wins outright.
+    candidate = os.path.expanduser(path)
+    if not os.path.isabs(candidate):
+        candidate = os.path.join(root, candidate)
+    resolved = os.path.realpath(candidate)
+    # Compared as a prefix of the *resolved* path, so a symlink or a `..`
+    # cannot smuggle the answer past this: realpath has already flattened
+    # both. `os.path.join(root, "")` is root with exactly one trailing
+    # separator, which is what stops "/musicians" passing for "/music" and
+    # still does the right thing when root is "/".
+    prefix = os.path.join(root, "")
+    if not (resolved == root or resolved.startswith(prefix)):
+        raise _fail(
+            400,
+            "That path is outside this instance's download folder.",
+            "Scans are confined to the folder this account downloads into.",
+        )
+    return resolved
 
 
 def _fail(status: int, message: str, detail: str | None = None) -> HTTPException:
@@ -160,7 +207,11 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
             ) from exc
 
         try:
-            kind = parse_spotify_url(payload.url)["type"]
+            # Off the loop: parse_spotify_url() issues a blocking HTTP
+            # request to expand a share short link (see resolve_short_link),
+            # and this route is already running on the event loop.
+            parsed = await asyncio.to_thread(parse_spotify_url, payload.url)
+            kind = parsed["type"]
         except Exception:
             # A non-Spotify link that link_resolver handled: it resolved
             # fine, it just has no Spotify URL shape to classify.
@@ -496,27 +547,10 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
     async def library_scan(
         request: Request, payload: LibraryScanRequest
     ) -> LibraryScanResponse:
-        import os
-        from pathlib import Path
-
         from ..core.library_upgrade import scan_library
 
         api = deps.api_for(request)
-        # The path comes from a request, so it is confined the same way
-        # /api/browse-folder confines its own: a caller must not be able to
-        # enumerate the filesystem by asking for a scan of "/".
-        resolved = os.path.realpath(str(Path(payload.path).expanduser()))
-        root = os.path.realpath(str(api.download_dir))
-        try:
-            inside = os.path.commonpath([resolved, root]) == root
-        except ValueError:
-            inside = False
-        if not inside:
-            raise _fail(
-                400,
-                "That path is outside this instance's download folder.",
-                "Scans are confined to the folder this account downloads into.",
-            )
+        resolved = _confined_path(payload.path, api.download_dir)
 
         report = await run_in_threadpool(
             scan_library,
@@ -526,5 +560,58 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
             verify_hires=payload.verify_hires,
         )
         return LibraryScanResponse(**report.to_dict())
+
+    @router.post(
+        "/library/duplicates",
+        response_model=LibraryDuplicatesResponse,
+        responses=_ERRORS,
+        summary="Find duplicate recordings in a library (read-only)",
+    )
+    async def library_duplicates(
+        request: Request, payload: LibraryDuplicatesRequest
+    ) -> LibraryDuplicatesResponse:
+        """Groups every copy of the same recording under `path`.
+
+        Read-only, like /library/scan next to it: it reports which copy of
+        each group is worth keeping and never acts on that. Resolving —
+        quarantining or deleting — is deliberately not on this surface;
+        `spotiflac --dedup-library … --dedup-apply` and the GUI panel are
+        where files get moved, both behind a second explicit step.
+        """
+        from pathlib import Path
+
+        from ..core.library_dedup import TRASH_DIRNAME, export_sqlite, scan_duplicates
+
+        api = deps.api_for(request)
+        resolved = _confined_path(payload.path, api.download_dir)
+
+        report = await run_in_threadpool(
+            scan_duplicates,
+            resolved,
+            recursive=payload.recursive,
+            match=payload.match,
+            duration_tolerance_s=payload.duration_tolerance_s,
+            verify=payload.verify,
+            similarity_threshold=payload.similarity_threshold,
+        )
+
+        database = ""
+        if payload.export_db:
+            try:
+                database = str(
+                    await run_in_threadpool(
+                        export_sqlite,
+                        report,
+                        Path(resolved) / TRASH_DIRNAME / "library-index.db",
+                    )
+                )
+            except (OSError, sqlite3.Error) as exc:
+                # The scan succeeded; the index is a convenience on top of
+                # it and must not turn a good answer into a 500. sqlite3's
+                # errors are not OSErrors — a locked or unwritable database
+                # raises OperationalError, which was going straight up.
+                logger.warning("[api] could not write the dedup index: %s", exc)
+
+        return LibraryDuplicatesResponse(**report.to_dict(), database=database)
 
     return router

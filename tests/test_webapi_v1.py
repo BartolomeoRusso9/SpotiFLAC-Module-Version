@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import shutil
+import sqlite3
+import subprocess
+from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -155,6 +161,44 @@ def test_resolve_returns_declared_tracks(monkeypatch):
     assert body["kind"] == "album"
     assert body["total"] == 1
     assert body["tracks"][0]["isrc"] == "ITAAA0000001"
+
+
+def test_resolve_classifies_the_url_off_the_event_loop(monkeypatch):
+    """parse_spotify_url() expands a share short link over the network.
+
+    Called straight from the coroutine that is already on the event loop, one
+    of those blocks every other request for the length of the round trip.
+    """
+    from SpotiFLAC.core import spotify_metadata
+
+    class Fake:
+        async def get_url_async(self, url, include_featuring=True):
+            return ("An Album", [], "cover", {})
+
+    saw_running_loop = []
+
+    def parse(url):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            saw_running_loop.append(False)
+        else:
+            saw_running_loop.append(True)
+        return {"type": "album", "id": "0" * 22}
+
+    monkeypatch.setattr(
+        "SpotiFLAC.core.spotify_metadata.SpotifyMetadataClient", lambda *a, **k: Fake()
+    )
+    monkeypatch.setattr(spotify_metadata, "parse_spotify_url", parse)
+    client, _ = make_client()
+
+    body = client.post(
+        "/api/v1/resolve",
+        json={"url": "https://spotify.link/abc123"},
+    ).json()
+
+    assert body["kind"] == "album"
+    assert saw_running_loop == [False], "parse_spotify_url ran on the event loop"
 
 
 # ── Downloads ─────────────────────────────────────────────────────────────
@@ -359,6 +403,62 @@ def test_library_scan_is_confined_to_the_download_folder(tmp_path):
     assert traversal.status_code == 400
 
 
+@pytest.mark.parametrize(
+    "escape",
+    [
+        "../../../etc",  # relative traversal, no leading slash
+        "sub/../../..",  # traversal that only escapes once resolved
+        "/etc/passwd",  # absolute, elsewhere entirely
+        "~",  # the home directory, spelled the short way
+        "~/.ssh",
+    ],
+)
+def test_library_scan_refuses_every_shape_of_escape(tmp_path, escape):
+    """A relative path is resolved against the download folder, not the
+    server's working directory, and either way only the containment check
+    decides. None of these may reach a scan."""
+    client, _ = make_client(download_dir=str(tmp_path))
+
+    response = client.post("/api/v1/library/scan", json={"path": escape})
+
+    assert response.status_code == 400
+    assert "outside" in response.text
+
+
+def test_library_scan_accepts_a_path_relative_to_the_download_folder(tmp_path):
+    (tmp_path / "albums").mkdir()
+    client, _ = make_client(download_dir=str(tmp_path))
+
+    body = client.post("/api/v1/library/scan", json={"path": "albums"}).json()
+
+    assert body["scanned"] == 0
+
+
+def test_library_scan_expands_a_download_folder_written_with_a_tilde(
+    monkeypatch, tmp_path
+):
+    """`~/Music` as the configured folder must name the home directory, not a
+    folder called "~" beside the server's working directory — which would
+    reject every path a caller could name."""
+    # expanduser() reads the environment, not Path.home(), and which variable
+    # it reads is per-platform: $HOME on POSIX, %USERPROFILE% on Windows.
+    # Both are set, and the redirect is verified rather than assumed — a
+    # platform that honours neither would otherwise fail this as if the code
+    # under test were wrong.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    if Path("~").expanduser() != tmp_path:
+        pytest.skip("home directory cannot be redirected on this platform")
+
+    library = tmp_path / "Music"
+    library.mkdir()
+    client, _ = make_client(download_dir="~/Music")
+
+    body = client.post("/api/v1/library/scan", json={"path": str(library)}).json()
+
+    assert body["scanned"] == 0
+
+
 def test_library_scan_reports_an_empty_folder(tmp_path):
     client, _ = make_client(download_dir=str(tmp_path))
     body = client.post("/api/v1/library/scan", json={"path": str(tmp_path)}).json()
@@ -366,6 +466,117 @@ def test_library_scan_reports_an_empty_folder(tmp_path):
     assert body["scanned"] == 0
     assert body["candidates"] == []
     assert body["target"] == "LOSSLESS"
+
+
+def test_library_duplicates_is_confined_to_the_download_folder(tmp_path):
+    client, _ = make_client(download_dir=str(tmp_path))
+
+    outside = client.post("/api/v1/library/duplicates", json={"path": "/"})
+    assert outside.status_code == 400
+    assert "outside" in outside.text
+
+    traversal = client.post(
+        "/api/v1/library/duplicates", json={"path": str(tmp_path / ".." / "..")}
+    )
+    assert traversal.status_code == 400
+
+
+def test_library_duplicates_reports_an_empty_folder(tmp_path):
+    client, _ = make_client(download_dir=str(tmp_path))
+    body = client.post(
+        "/api/v1/library/duplicates", json={"path": str(tmp_path)}
+    ).json()
+
+    assert body["groups"] == 0
+    assert body["duplicate_groups"] == []
+    assert body["library"]["files"] == 0
+    assert body["match"] == "both"
+    assert body["database"] == ""
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [OSError("disk full"), sqlite3.OperationalError("database is locked")],
+)
+def test_library_duplicates_survives_an_index_it_cannot_write(
+    tmp_path, monkeypatch, failure
+):
+    """The index is a convenience on top of the scan.
+
+    Whatever the export raises, the scan itself succeeded and its answer is
+    owed to the caller. sqlite3's errors are not OSErrors, so a locked or
+    unwritable database used to come back as a 500 with no report in it.
+    """
+    from SpotiFLAC.core import library_dedup
+
+    def explode(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(library_dedup, "export_sqlite", explode)
+    client, _ = make_client(download_dir=str(tmp_path))
+
+    response = client.post(
+        "/api/v1/library/duplicates", json={"path": str(tmp_path), "export_db": True}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["database"] == ""
+
+
+def test_library_duplicates_rejects_a_match_mode_it_does_not_have(tmp_path):
+    client, _ = make_client(download_dir=str(tmp_path))
+    resp = client.post(
+        "/api/v1/library/duplicates", json={"path": str(tmp_path), "match": "vibes"}
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None, reason="needs ffmpeg to build audio fixtures"
+)
+def test_library_duplicates_groups_and_can_write_its_index(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path / "cache"))
+    library = tmp_path / "music"
+    library.mkdir()
+    for name, codec in (("a.flac", "flac"), ("b.mp3", "libmp3lame")):
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=2:sample_rate=44100",
+                "-c:a",
+                codec,
+                "-metadata",
+                "title=Song",
+                "-metadata",
+                "artist=A",
+                str(library / name),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    client, _ = make_client(download_dir=str(tmp_path))
+    body = client.post(
+        "/api/v1/library/duplicates", json={"path": str(library), "export_db": True}
+    ).json()
+
+    assert body["library"]["files"] == 2
+    assert body["groups"] == 1
+    group = body["duplicate_groups"][0]
+    assert group["keep"]["path"].endswith(".flac")
+    assert [f["path"].endswith(".mp3") for f in group["duplicates"]] == [True]
+    assert body["reclaimable_bytes"] > 0
+    assert Path(body["database"]).exists()
+
+    # Read-only: the endpoint reports the duplicate, it does not remove it.
+    assert (library / "b.mp3").exists()
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────

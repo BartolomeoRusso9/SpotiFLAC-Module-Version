@@ -45,12 +45,16 @@ class CoversLyricsMixin:
 
             from ..core.lyrics import fetch_lyrics_async
 
+            settings = self.load_settings() or {}
+
             lyrics_text, provider = await fetch_lyrics_async(
                 track_name=title,
                 artist_name=artist,
                 duration_s=dur_ms // 1000 if dur_ms else 0,
                 track_id=track_id,
                 isrc=isrc,
+                providers=settings.get("lyrics_providers") or None,
+                apple_word_by_word=settings.get("apple_lyrics_word_by_word", True),
             )
 
             if not lyrics_text:
@@ -334,6 +338,10 @@ class CoversLyricsMixin:
 
         from ..core.lyrics import fetch_lyrics_async
 
+        settings = self.load_settings() or {}
+        lyrics_providers = settings.get("lyrics_providers") or None
+        apple_word_by_word = settings.get("apple_lyrics_word_by_word", True)
+
         # Same reasoning as _async_download_all_covers above: per-item lines
         # stay in the Logs panel as "debug" instead of raising one toast per
         # track, and the closing summary reports the failures.
@@ -358,6 +366,8 @@ class CoversLyricsMixin:
                     duration_s=dur_ms // 1000 if dur_ms else 0,
                     track_id=track_id,
                     isrc=isrc,
+                    providers=lyrics_providers,
+                    apple_word_by_word=apple_word_by_word,
                 )
 
                 if not lyrics_text:

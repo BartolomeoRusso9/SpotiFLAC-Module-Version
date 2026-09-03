@@ -492,3 +492,94 @@ class LibraryScanResponse(BaseModel):
     already_ok: int
     upgradable: int
     candidates: list[UpgradeCandidateOut]
+
+
+class LibraryDuplicatesRequest(BaseModel):
+    path: str = Field(min_length=1, description="Folder to scan, on the server.")
+    recursive: bool = True
+    match: Literal["isrc", "tags", "both"] = Field(
+        default="both",
+        description="Which signal decides that two files are one recording: "
+        "'isrc' only, 'tags' only (artist/title + duration), or 'both' — "
+        "ISRC first, tags for the files that carry none.",
+    )
+    duration_tolerance_s: float = Field(
+        default=4.0,
+        ge=0.0,
+        le=600.0,
+        description="How far two durations may differ and still be the same "
+        "recording. Keeps a live take out of the studio cut's group.",
+    )
+    verify: bool = Field(
+        default=False,
+        description="Confirm each group against the audio with Chromaprint "
+        "before reporting it. Needs the optional 'dedup' extra; if it is "
+        "missing the scan says so in `notes` rather than failing.",
+    )
+    similarity_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
+    export_db: bool = Field(
+        default=False,
+        description="Also write a SQLite index of the whole library to "
+        "`.spotiflac-duplicates/library-index.db` inside the scanned folder. "
+        "Its path comes back in `database`.",
+    )
+
+
+class DuplicateFileOut(BaseModel):
+    path: str
+    size: int
+    duration_ms: int
+    title: str
+    artist: str
+    album: str
+    isrc: str
+    quality: str = Field(description="Human-readable codec/rate/depth summary.")
+    tier: int
+    lossless: bool
+
+
+class DuplicateGroupOut(BaseModel):
+    key: str
+    matched_by: str = Field(description="'isrc', 'tags', 'isrc+tags' or 'tags+audio'.")
+    label: str
+    count: int
+    reclaimable_bytes: int
+    keep: DuplicateFileOut = Field(description="The copy worth keeping.")
+    duplicates: list[DuplicateFileOut] = Field(
+        description="The redundant copies. Nothing here has been touched — "
+        "this endpoint only reads."
+    )
+
+
+class LibraryStatsOut(BaseModel):
+    files: int
+    total_bytes: int
+    total_size: str
+    unreadable: int
+    missing_tags: int
+    missing_isrc: int
+    by_extension: dict[str, int]
+    by_tier: dict[str, int]
+
+
+class LibraryDuplicatesResponse(BaseModel):
+    root: str
+    match: str
+    verified: bool = Field(
+        description="Whether every group was confirmed against the audio. "
+        "False when `verify` was not asked for, and when it was asked for "
+        "but could not run — `notes` says which."
+    )
+    duration_tolerance_s: float
+    elapsed_s: float
+    cache_hits: int
+    library: LibraryStatsOut = Field(description="The recap, duplicates aside.")
+    groups: int
+    duplicate_files: int
+    reclaimable_bytes: int
+    reclaimable: str
+    notes: list[str]
+    database: str = Field(
+        default="", description="Path of the SQLite index, if one was asked for."
+    )
+    duplicate_groups: list[DuplicateGroupOut]
