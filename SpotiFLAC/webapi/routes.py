@@ -97,15 +97,22 @@ def _confined_path(path: str, download_dir: str) -> str:
     from pathlib import Path
 
     root = os.path.realpath(str(Path(download_dir).expanduser()))
+    # The request's own path stays a plain string until it has been checked.
+    # Building a Path (or anything else that can touch a disk) out of it
+    # first would mean the caller's value had already been turned into a
+    # handle on whatever they named, with the check an afterthought — so
+    # every step to the check below is string arithmetic, and nothing here
+    # reaches the filesystem except realpath, which only reads.
+    #
     # A relative path is taken against the download folder rather than
     # against whatever directory the server happens to have been started in,
     # which is not something a caller can see or reason about. An absolute
     # one is used as given. Either way it is the containment check below
     # that decides — never the join, which an absolute path wins outright.
-    candidate = Path(path).expanduser()
-    if not candidate.is_absolute():
-        candidate = Path(root) / candidate
-    resolved = os.path.realpath(str(candidate))
+    candidate = os.path.expanduser(path)
+    if not os.path.isabs(candidate):
+        candidate = os.path.join(root, candidate)
+    resolved = os.path.realpath(candidate)
     # Compared as a prefix of the *resolved* path, so a symlink or a `..`
     # cannot smuggle the answer past this: realpath has already flattened
     # both. `os.path.join(root, "")` is root with exactly one trailing
