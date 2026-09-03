@@ -75,24 +75,34 @@
          grossi (wordmark, titolo album, H3 pannelli) dove un peso reale
          invece del solito 600 dà più presenza; il resto della UI resta su
          --fw-semibold così la gerarchia non diventa tutta grassetto. */
+      /* Aligned to the scale the Wails build uses (Tailwind's), because the
+         two apps sat side by side and ours read a size smaller throughout:
+         its body text is text-sm/14 (223 uses) with text-xs/12 for secondary
+         (167), against our 13/12-11. The steps below are Tailwind's own
+         values, so "the same size" means the same numbers rather than an
+         approximation of them. */
       --fs-50:  10px; --lh-50:  1.4;   /* micro label, badge */
       --fs-75:  11px; --lh-75:  1.45;  /* meta, caption */
-      --fs-100: 12px; --lh-100: 1.5;   /* UI secondaria */
-      --fs-200: 13px; --lh-200: 1.55;  /* body base */
-      --fs-300: 15px; --lh-300: 1.4;   /* titoli riga, enfasi */
-      --fs-400: 18px; --lh-400: 1.3;   /* titoli card, H2 sezione */
-      --fs-500: 22px; --lh-500: 1.25;  /* H1 vista */
-      --fs-600: 28px; --lh-600: 1.15;  /* titolo album */
-      --fs-700: 34px; --lh-700: 1.1;   /* wordmark hero */
+      --fs-100: 12px; --lh-100: 1.5;   /* UI secondaria — text-xs */
+      --fs-200: 14px; --lh-200: 1.45;  /* body base — text-sm */
+      --fs-300: 16px; --lh-300: 1.4;   /* titoli riga, enfasi — text-base */
+      --fs-400: 18px; --lh-400: 1.3;   /* titoli card, H2 sezione — text-lg */
+      --fs-500: 24px; --lh-500: 1.25;  /* H1 vista — text-2xl */
+      --fs-600: 30px; --lh-600: 1.15;  /* titolo album — text-3xl */
+      --fs-700: 36px; --lh-700: 1.1;   /* wordmark hero — text-4xl */
       --fw-regular:  400; --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
       --tracking-tight: -0.02em; --tracking-label: 0.12em; --tracking-wide: 0.04em;
       --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;   /* NON sostituibile */
       --app-font:  'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;   /* sostituita da changeFont() */
 
       /* Radius */
+      /* Same source as the type scale above: their --radius is 0.625rem/10px
+         and rounded-lg (10px) is the most used corner in the app, with
+         rounded-md (8px) on controls. Ours had 12px in the middle step,
+         which is what made the same card read as slightly softer. */
       --radius-xs:   4px;    /* badge, checkbox */
       --radius-sm:   8px;    /* input, bottoni piccoli, thumbnail */
-      --radius-md:   12px;   /* card, riga, nav button */
+      --radius-md:   10px;   /* card, riga, nav button */
       --radius-lg:   14px;   /* pannelli, album card, modali, drawer */
       --radius-pill: 999px;  /* SOLO status chip / contatori / toggle / avatar */
       --radius:    var(--radius-md);  /* alias back-compat (era 16) */
@@ -623,9 +633,9 @@
       flex-shrink: 0;
     }
     .mode-btn {
-      width: 40px;
-      height: 40px;
-      border-radius: 8px;
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-sm);
       border: 1px solid var(--button-border);
       background: var(--button-bg);
       color: var(--button-text);
@@ -668,9 +678,13 @@
       min-width: 0; 
     }
     .url-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+    /* 36px is the control height the whole app now uses — their h-9, applied
+       to the input, the two mode buttons and the fetch button so the search
+       bar is one continuous band of equal-height controls rather than three
+       different heights (40 / 40 / 44) sharing a row. */
     #urlInput {
-      width: 100%; height: 40px; padding: 0 32px 0 40px; font-size: 14px;
-      border-radius: 8px; background: var(--input-bg); color: var(--input-text);
+      width: 100%; height: 36px; padding: 0 32px 0 40px; font-size: var(--fs-200);
+      border-radius: var(--radius-sm); background: var(--input-bg); color: var(--input-text);
       border: 1px solid var(--input-border);
     }
     #urlInput:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
@@ -678,11 +692,11 @@
     #urlInput:disabled { opacity: .45; }
 
     #fetchBtn {
-      width: 44px;
-      height: 44px;
+      width: 36px;
+      height: 36px;
       padding: 0;
-      border-radius: var(--radius-md);
-      font-size: 14px;
+      border-radius: var(--radius-sm);
+      font-size: var(--fs-200);
       font-weight: 600;
       display: inline-flex;
       align-items: center;
@@ -936,10 +950,14 @@
       color: var(--text2); font-family: var(--font-mono);
       font-size: var(--fs-75); letter-spacing: var(--tracking-wide);
     }
+    /* Their button default: h-9 (36px), px-4 (16px), text-sm, gap-2, and a
+       rounded-md corner. Height set rather than implied by padding so every
+       button lines up with the inputs beside it whatever its label. */
     .act-btn {
-      display: flex; align-items: center; gap: 6px;
-      padding: var(--sp-3) var(--sp-5); border-radius: var(--radius-sm);
-      font-family: var(--app-font); font-size: var(--fs-100); font-weight: 600;
+      display: flex; align-items: center; justify-content: center; gap: var(--sp-3);
+      min-height: 36px;
+      padding: 0 var(--sp-5); border-radius: var(--radius-sm);
+      font-family: var(--app-font); font-size: var(--fs-200); font-weight: 600;
       cursor: pointer; border: 1px solid var(--border);
       transition: all 0.2s var(--ease-spring);
       box-shadow: var(--elev-1);
@@ -2098,7 +2116,10 @@
     .s-header { padding: var(--sp-6) var(--sp-5) var(--sp-4); flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); flex-wrap: wrap; }
     .s-header h1 { font-size: var(--fs-500); font-weight: var(--fw-semibold); letter-spacing: -.04em; }
     .s-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .s-actions .act-btn { padding: var(--sp-4) 18px; font-size: var(--fs-200); min-height: 44px; border-radius: var(--radius-md); }
+    /* The settings header buttons follow the same 36px control height as the
+       rest now; they were 44, which made that one row noticeably chunkier
+       than every other button in the app. */
+    .s-actions .act-btn { padding: 0 18px; font-size: var(--fs-200); min-height: 36px; border-radius: var(--radius-sm); }
     .s-actions .act-btn.secondary { background: var(--surface); color: var(--text2); border-color: var(--border); }
     .s-actions .act-btn.secondary:hover { background: var(--surface2); color: var(--text); }
     .s-actions .act-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
@@ -2155,6 +2176,19 @@
     }
     .save-toast.hidden { display: none; }
     .save-toast.show { display: block; }
+    /* Volume slider + its readout as one control. The native range input is
+       themed rather than replaced: accent-color is enough to make it follow
+       the app's accent, and a hand-built slider would be a lot of markup to
+       reproduce keyboard and drag behaviour that already works. */
+    .volume-control { display: inline-flex; align-items: center; gap: var(--sp-3); }
+    .volume-control input[type="range"] {
+      width: 140px; accent-color: var(--accent); cursor: pointer;
+    }
+    .volume-value {
+      font-family: var(--font-mono); font-size: var(--fs-75); color: var(--text2);
+      min-width: 38px; text-align: right;
+    }
+
     /* Accent picker: swatch + select as one control. */
     .accent-picker { display: inline-flex; align-items: center; gap: var(--sp-3); }
     .accent-dot {

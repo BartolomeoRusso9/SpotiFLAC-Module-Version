@@ -10,7 +10,7 @@
        tells itself apart from --web. Harmless to load in the desktop
        pywebview window too: manifest/theme-color are simply unused there,
        and the registration script below no-ops without that flag. -->
-  <link rel="manifest" href="manifest.json?v=20260917">
+  <link rel="manifest" href="manifest.json?v=20260919">
   <meta name="theme-color" content="#0a0a0c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="SpotiFLAC">
@@ -21,7 +21,7 @@
   <link rel="icon" type="image/svg+xml" href="assets/icons/logo.svg">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/logo-192.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260917">
+  <link rel="stylesheet" href="styles.css?v=20260919">
   <script>
     // Theme, applied before the first paint. app.js used to do this only from
     // its 'pywebviewready' handler, which meant the window painted light and
@@ -81,6 +81,20 @@
   </div>
   
   <div class="pywebview-drag-region" style="flex: 1; height: 100%; -webkit-app-region: drag;"></div>
+
+  <!-- Which country the app's requests appear to come from. It matters here
+       because catalogues are region-locked: a track "not available" is very
+       often not-available-*there*. Shown only on the Settings view (see
+       switchView in app.js, which also triggers the lookup) — the styling
+       and the fetch have existed for a while, this markup was the missing
+       piece. Country only: togglePublicIp() in app.js is a stub marked
+       "removed by design", so the IP itself stays out of the window. -->
+  <div id="titlebar-network" class="hidden" title="Country your connection appears to come from">
+    <span class="network-pill">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      <span id="network-country">—</span>
+    </span>
+  </div>
 
   <div id="tb-logo">
     <span>SpotiFLAC</span>
@@ -702,6 +716,14 @@
               </div>
             </div>
             <div class="s-row">
+              <span class="s-label">Preview Volume<small>The 30-second clips played from the ▶ button on a track</small></span>
+              <div class="volume-control">
+                <input type="range" id="config-preview-volume" min="0" max="100" step="5" value="100"
+                       oninput="changePreviewVolume()" aria-label="Preview volume">
+                <span id="preview-volume-value" class="volume-value">100%</span>
+              </div>
+            </div>
+            <div class="s-row">
               <span class="s-label">App Font<small>Default: JetBrains Mono</small></span>
               <select id="config-font" onchange="changeFont()">
                 <option value="'JetBrains Mono', monospace" selected>JetBrains Mono</option>
@@ -1090,8 +1112,8 @@
       </div>
     </div>
   </div>
-  </div><script src="toast-system.js?v=20260917"></script>
-  <script src="app.js?v=20260917"></script>
+  </div><script src="toast-system.js?v=20260919"></script>
+  <script src="app.js?v=20260919"></script>
   <script>
     // --web mode only (see sw.js's own comment for what the service worker
     // actually does — installability, not offline caching of live data).

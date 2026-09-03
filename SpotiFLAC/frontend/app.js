@@ -264,6 +264,22 @@ function loadThemeFromStorage() {
   applyTheme(stored);
 }
 
+// Applies the slider to the audio element (if one exists yet) and to the
+// label beside it. Called live while dragging, so a preview that is playing
+// changes volume under your hand instead of on the next clip.
+function changePreviewVolume() {
+  const el = $('config-preview-volume');
+  if (el) previewVolume = Math.max(0, Math.min(100, Number(el.value) || 0));
+  const out = $('preview-volume-value');
+  if (out) out.textContent = `${previewVolume}%`;
+  if (previewAudio) previewAudio.volume = previewVolume / 100;
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
+    stored.preview_volume = previewVolume;
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(stored));
+  } catch (e) {}
+}
+
 function changeFont() {
   const font = $('config-font').value;
   document.documentElement.style.setProperty('--app-font', font);
@@ -326,9 +342,12 @@ function applySettings(settings = {}) {
   } catch (e) {}
   if ($('config-accent')) $('config-accent').value = accent;
   if ($('config-font')) $('config-font').value = cfg.font;
+  previewVolume = Number.isFinite(Number(cfg.preview_volume)) ? Number(cfg.preview_volume) : 100;
+  if ($('config-preview-volume')) $('config-preview-volume').value = previewVolume;
   changeFont();
   changeTheme();
   changeAccent();
+  changePreviewVolume();
   if ($('config-lyrics')) { $('config-lyrics').checked = cfg.lyrics; onLyricsChange(); }
   if ($('config-apple-wbw')) $('config-apple-wbw').checked = cfg.apple_lyrics_word_by_word !== false;
   if ($('config-enrich')) { $('config-enrich').checked = cfg.enrich_metadata; onEnrichChange(); }
@@ -424,6 +443,7 @@ async function saveSettings() {
     cfg.theme  = $('config-theme')?.value  || DEFAULT_SETTINGS.theme;
     cfg.accent = $('config-accent')?.value || DEFAULT_SETTINGS.accent;
     cfg.font   = $('config-font')?.value   || DEFAULT_SETTINGS.font;
+    cfg.preview_volume = previewVolume;
     if (window.pywebview?.api) {
       await window.pywebview.api.save_settings(cfg);
     }
@@ -566,6 +586,7 @@ const SETTINGS_STORAGE_KEY = 'spotiflac-settings';
 const DEFAULT_SETTINGS = {
   theme: 'auto',
   accent: 'green',
+  preview_volume: 100,
   font: "'JetBrains Mono', monospace",
   quality: 'LOSSLESS',
   allow_fallback: false,
@@ -1028,6 +1049,9 @@ let queueFilterStatus = null;   // null | 'waiting' | 'done' | 'skipped' | 'erro
 let queueSearch = '';
 let previewAudio = null;
 let previewPlayingIndex = -1;
+//: 0-100. A 30-second clip at whatever the system volume happens to be is
+//: the one sound this app makes, and it was always full blast.
+let previewVolume = 100;
 // Destroy current audio to release OS media keys
 function stopCurrentPreview() {
   if (previewAudio) {
@@ -2538,9 +2562,13 @@ function playPreview(i) {
     document.body.appendChild(previewAudio);
 
     previewAudio.addEventListener('ended', () => {
-      stopCurrentPreview(); 
+      stopCurrentPreview();
     });
   }
+  // The element is created lazily on the first preview, so the saved volume
+  // has to be applied here as well as in applyPreviewVolume() — otherwise the
+  // first clip of a session always plays at full volume whatever the setting.
+  previewAudio.volume = previewVolume / 100;
 
   // Toggle pause if already playing this track
   if (previewPlayingIndex === i && !previewAudio.paused) {
