@@ -106,6 +106,16 @@ def installed_download_services(
     ]
 
 
+def installed_service_ids(manager: ExtensionManager | None = None) -> list[str]:
+    """Just the ids from `installed_download_services()`, for menus.
+
+    Every guided frontend needs the same thing — a list of provider ids to
+    offer — and each one used to unwrap the rows itself. One function, so a
+    provider that appears in one menu appears in all of them.
+    """
+    return [str(service["id"]) for service in installed_download_services(manager)]
+
+
 #: Spellings a title-cased id gets wrong.
 _SERVICE_LABELS = {
     "amazon": "Amazon Music",

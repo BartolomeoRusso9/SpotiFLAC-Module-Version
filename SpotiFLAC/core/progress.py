@@ -17,6 +17,7 @@ from tqdm import tqdm
 from typing_extensions import Self
 
 from .console import print_track_progress
+from .output_sink import STDERR, STDOUT, emit, sink_active
 
 # tqdm.get_lock() remains the native tqdm lock (this is not our own hack;
 # it is the library's internal synchronization for writing to stderr).
@@ -35,11 +36,16 @@ _PROGRESS_LOG_MIN_INTERVAL_S = 10.0
 def progress_bars_enabled() -> bool:
     """Whether animated tqdm bars may be drawn.
 
-    ``SPOTIFLAC_PROGRESS_BARS`` forces the answer either way (useful to keep
-    the bars when piping to a terminal-aware pager, or to drop them while
-    debugging locally); otherwise bars are drawn only when stderr is an
-    interactive terminal.
+    An installed output sink settles it first and without appeal: a bar
+    writes carriage returns straight to the real stderr, so drawing one
+    underneath a UI that owns the screen tears the frame no matter where the
+    surrounding lines were routed. ``SPOTIFLAC_PROGRESS_BARS`` forces the
+    answer either way below that (useful to keep the bars when piping to a
+    terminal-aware pager, or to drop them while debugging locally);
+    otherwise bars are drawn only when stderr is an interactive terminal.
     """
+    if sink_active():
+        return False
     forced = os.getenv("SPOTIFLAC_PROGRESS_BARS")
     if forced is not None:
         return forced.strip().lower() in {"1", "true", "yes", "on"}
@@ -51,13 +57,11 @@ def progress_bars_enabled() -> bool:
 
 def safe_print(*args: object, **kwargs: Any) -> None:
     content = " ".join(str(a) for a in args)
-    with tqdm.get_lock():
-        tqdm.write(content, file=kwargs.get("file", sys.stdout))
+    emit(content, stream=STDOUT, file=kwargs.get("file"))
 
 
 def safe_tqdm_write(msg: str, file: io.TextIOBase | None = None) -> None:
-    with tqdm.get_lock():
-        tqdm.write(msg, file=file or sys.stdout)
+    emit(msg, stream=STDOUT, file=file)
 
 
 class TqdmLoggingHandler(logging.Handler):
@@ -81,33 +85,35 @@ class TqdmLoggingHandler(logging.Handler):
                 for k, v in self._message_cache.items()
                 if now - v < self._cache_ttl * 2
             }
-            with tqdm.get_lock():
-                tqdm.write(msg, file=sys.stderr)
+            emit(msg, stream=STDERR)
         except Exception:
             self.handleError(record)
 
 
 class _TqdmTextIOProxy(io.TextIOBase):
-    def __init__(self, original: io.TextIOBase) -> None:
+    def __init__(self, original: io.TextIOBase, stream: str = STDOUT) -> None:
         self._original = original
+        self._stream = stream
         self._buf = ""
 
     def write(self, s: str) -> int:
-        with tqdm.get_lock():
-            s = s.replace("\r", "")
-            self._buf += s
-            while "\n" in self._buf:
-                line, self._buf = self._buf.split("\n", 1)
-                tqdm.write(line, file=self._original)
-        return len(s)
+        # Whole lines only, and through emit(): a bare print() anywhere in
+        # the codebase is the one output path nobody remembers to route, and
+        # it is the one that tears a full-screen UI.
+        written = len(s)
+        s = s.replace("\r", "")
+        self._buf += s
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            emit(line, stream=self._stream, file=self._original)
+        return written
 
     def flush(self) -> None:
-        with tqdm.get_lock():
-            if self._buf:
-                tqdm.write(self._buf, file=self._original)
-                self._buf = ""
-            with contextlib.suppress(Exception):
-                self._original.flush()
+        if self._buf:
+            emit(self._buf, stream=self._stream, file=self._original)
+            self._buf = ""
+        with contextlib.suppress(Exception):
+            self._original.flush()
 
     @property
     def encoding(self) -> str:
@@ -139,9 +145,9 @@ def install_console_interception() -> None:
     global _tqdm_handler
 
     if not isinstance(sys.stdout, _TqdmTextIOProxy):
-        sys.stdout = _TqdmTextIOProxy(sys.__stdout__)
+        sys.stdout = _TqdmTextIOProxy(sys.__stdout__, STDOUT)
     if not isinstance(sys.stderr, _TqdmTextIOProxy):
-        sys.stderr = _TqdmTextIOProxy(sys.__stderr__)
+        sys.stderr = _TqdmTextIOProxy(sys.__stderr__, STDERR)
 
     if _tqdm_handler is not None:
         return
@@ -583,6 +589,8 @@ class ProgressManager:
                     bar = cls._bars.get(item_id)
                     if bar is None:
                         bar = cls.create_bar(item_id, track_name, total_bytes)
+                    if bar is None:
+                        continue
 
                     if total_bytes != bar.total:
                         bar.total = total_bytes
@@ -674,9 +682,23 @@ class ProgressManager:
         return slot + (1 if cls._master_enabled else 0)
 
     @classmethod
-    def create_bar(cls, item_id: str, track_name: str, total_bytes: int | None) -> tqdm:
+    def create_bar(
+        cls,
+        item_id: str,
+        track_name: str,
+        total_bytes: int | None,
+    ) -> tqdm | None:
+        """Returns the bar for *item_id*, or None when bars have no screen.
+
+        A disabled tqdm draws nothing, but it still allocates a slot, holds
+        a file handle and takes part in the position bookkeeping — all of it
+        pointless once a sink owns the output, so with one installed no bar
+        is built at all and the callers fall back to the textual path.
+        """
         if item_id in cls._bars:
             return cls._bars[item_id]
+        if sink_active():
+            return None
 
         slot = cls._allocate_slot(item_id)
         display_name = track_name.strip()
@@ -744,6 +766,8 @@ class ProgressManager:
             )
         with tqdm.get_lock():
             cls.clear_master_bar()
+            if sink_active():
+                return
             cls._master_enabled = True
             cls._master_bar = tqdm(
                 total=total_items,

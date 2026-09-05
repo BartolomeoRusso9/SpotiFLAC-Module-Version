@@ -1,8 +1,14 @@
-"""Tests for interactive.py's CSV picker — the helper that lets the wizard
-browse for a track list instead of making someone type its path by hand.
+"""Browsing for a track list, instead of typing its path by hand.
 
-The picker's input() loop is driven with a fed sequence of answers; the
-scanning and formatting helpers around it are pure and tested directly.
+Two layers, and they now live in two places. The path handling and the
+folder scan are pure and belong to `core/csv_picker.py`, where both guided
+frontends read them; those are tested directly, and they are the half that
+actually decides whether the right file is found.
+
+The wizard's `input()` loop on top of them is still here, driven with a fed
+sequence of answers, and goes when the wizard does — the terminal UI's
+equivalent is a modal screen with its own tests in
+`tests/test_tui_csv_picker.py`.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ import os
 import pytest
 
 from SpotiFLAC import interactive
+from SpotiFLAC.core import csv_picker
 
 _EXPORT = (
     "Track Name,Artist Name(s),Album Name,ISRC\n"
@@ -72,16 +79,16 @@ def test_clean_path_input_undoes_terminal_escaping(monkeypatch):
     two behaviours are opposites — see the Windows test below.
     """
     monkeypatch.setattr(os, "name", "posix")
-    assert interactive._clean_path_input("/tmp/My\\ tracks.csv") == "/tmp/My tracks.csv"
+    assert csv_picker.clean_path_input("/tmp/My\\ tracks.csv") == "/tmp/My tracks.csv"
 
 
 def test_clean_path_input_strips_quotes_anywhere(monkeypatch):
     """Quoting is what both shells do with a path that has a space in it."""
     for name in ("posix", "nt"):
         monkeypatch.setattr(os, "name", name)
-        assert interactive._clean_path_input("'/tmp/a b.csv'") == "/tmp/a b.csv"
-        assert interactive._clean_path_input('  "/tmp/x.csv" ') == "/tmp/x.csv"
-        assert interactive._clean_path_input("") == ""
+        assert csv_picker.clean_path_input("'/tmp/a b.csv'") == "/tmp/a b.csv"
+        assert csv_picker.clean_path_input('  "/tmp/x.csv" ') == "/tmp/x.csv"
+        assert csv_picker.clean_path_input("") == ""
 
 
 def test_clean_path_input_keeps_unquoted_spaces(monkeypatch):
@@ -89,7 +96,7 @@ def test_clean_path_input_keeps_unquoted_spaces(monkeypatch):
     for name in ("posix", "nt"):
         monkeypatch.setattr(os, "name", name)
         assert (
-            interactive._clean_path_input("/tmp/My tracks.csv") == "/tmp/My tracks.csv"
+            csv_picker.clean_path_input("/tmp/My tracks.csv") == "/tmp/My tracks.csv"
         )
 
 
@@ -101,23 +108,23 @@ def test_clean_path_input_leaves_windows_separators_alone(monkeypatch):
     "No such file".
     """
     monkeypatch.setattr(os, "name", "nt")
-    assert interactive._clean_path_input(r"C:\Users\me\list.csv") == (
+    assert csv_picker.clean_path_input(r"C:\Users\me\list.csv") == (
         r"C:\Users\me\list.csv"
     )
     # Dragging a path with a space into a Windows shell quotes it instead.
-    assert interactive._clean_path_input(r'"C:\Users\me\my list.csv"') == (
+    assert csv_picker.clean_path_input(r'"C:\Users\me\my list.csv"') == (
         r"C:\Users\me\my list.csv"
     )
 
 
 def test_looks_like_csv_path_is_case_insensitive():
-    assert interactive._looks_like_csv_path("a.CSV")
-    assert interactive._looks_like_csv_path("a.tsv")
-    assert not interactive._looks_like_csv_path("a.txt")
+    assert csv_picker.looks_like_csv_path("a.CSV")
+    assert csv_picker.looks_like_csv_path("a.tsv")
+    assert not csv_picker.looks_like_csv_path("a.txt")
 
 
 def test_scan_lists_only_track_lists(csv_dir):
-    found = interactive._scan_csv_files([str(csv_dir)])
+    found = csv_picker.scan_csv_files([str(csv_dir)])
     names = sorted(os.path.basename(path) for path, _mtime, _size in found)
     assert names == ["export.csv", "list.tsv"]
 
@@ -131,27 +138,27 @@ def test_scan_orders_by_folder_then_recency(tmp_path):
     (second / "new.csv").write_text(_EXPORT, encoding="utf-8")
     os.utime(first / "old.csv", (1_000, 1_000))
 
-    found = interactive._scan_csv_files([str(first), str(second)])
+    found = csv_picker.scan_csv_files([str(first), str(second)])
     assert [os.path.basename(path) for path, _m, _s in found] == ["old.csv", "new.csv"]
 
 
 def test_scan_skips_unreadable_folders(tmp_path):
-    assert interactive._scan_csv_files([str(tmp_path / "missing")]) == []
+    assert csv_picker.scan_csv_files([str(tmp_path / "missing")]) == []
 
 
 def test_scan_respects_the_limit(tmp_path):
     for i in range(5):
         (tmp_path / f"f{i}.csv").write_text(_EXPORT, encoding="utf-8")
-    assert len(interactive._scan_csv_files([str(tmp_path)], limit=3)) == 3
+    assert len(csv_picker.scan_csv_files([str(tmp_path)], limit=3)) == 3
 
 
 def test_scan_dirs_puts_the_named_folder_first(csv_dir):
-    dirs = interactive._csv_scan_dirs(str(csv_dir))
+    dirs = csv_picker.csv_scan_dirs(str(csv_dir))
     assert dirs[0] == str(csv_dir)
 
 
 def test_scan_dirs_drops_paths_that_are_not_folders(tmp_path):
-    assert str(tmp_path / "nope") not in interactive._csv_scan_dirs(
+    assert str(tmp_path / "nope") not in csv_picker.csv_scan_dirs(
         str(tmp_path / "nope")
     )
 
@@ -202,21 +209,21 @@ def test_back_restarts_the_wizard(csv_dir, feed):
 
 
 def test_browse_words_cover_what_the_prompt_advertises():
-    assert "csv" in interactive._CSV_BROWSE_WORDS
+    assert "csv" in csv_picker.CSV_BROWSE_WORDS
 
 
 def test_short_dir_uses_a_tilde(monkeypatch, tmp_path):
     # expanduser() reads HOME on Unix and USERPROFILE on Windows.
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    assert interactive._short_dir(str(tmp_path)) == "~"
-    assert interactive._short_dir(str(tmp_path / "Downloads")) == os.path.join(
+    assert csv_picker.short_dir(str(tmp_path)) == "~"
+    assert csv_picker.short_dir(str(tmp_path / "Downloads")) == os.path.join(
         "~", "Downloads"
     )
-    assert interactive._short_dir("/etc") == "/etc"
+    assert csv_picker.short_dir("/etc") == "/etc"
 
 
 def test_format_size_reads_as_a_file_manager_would():
-    assert interactive._format_size(512) == "512 B"
-    assert interactive._format_size(2048) == "2.0 KB"
-    assert interactive._format_size(5 * 1024 * 1024) == "5.0 MB"
+    assert csv_picker.format_size(512) == "512 B"
+    assert csv_picker.format_size(2048) == "2.0 KB"
+    assert csv_picker.format_size(5 * 1024 * 1024) == "5.0 MB"

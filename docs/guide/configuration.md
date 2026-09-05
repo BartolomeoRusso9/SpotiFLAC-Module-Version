@@ -370,7 +370,7 @@ Every download path already indexes what's on disk and skips it (by ISRC/tags fo
 spotiflac https://open.spotify.com/album/... ./Music --watch 1440 --loop 30
 ```
 
-`--watch` is saved/restored by `--save-profile`/`--profile` like any other flag. Not available in `--interactive` mode, and it does not cover Spotify's "Liked Songs" — that's a private, per-account list that would need a full Spotify login (OAuth) to read, which this project deliberately doesn't implement (see the "no-account" design goal throughout this README). Point `--watch` at a public playlist, album, or artist URL instead.
+`--watch` is saved/restored by `--save-profile`/`--profile` like any other flag. Not available in the terminal UI (`--tui`), and it does not cover Spotify's "Liked Songs" — that's a private, per-account list that would need a full Spotify login (OAuth) to read, which this project deliberately doesn't implement (see the "no-account" design goal throughout this README). Point `--watch` at a public playlist, album, or artist URL instead.
 
 ### Post-Download Actions
 

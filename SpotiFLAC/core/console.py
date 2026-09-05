@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sys
-
-from tqdm import tqdm
+from .output_sink import STDERR, emit
 
 _BANNER_WIDTH = 60
 _MAX_API_FAILURES_PER_PROVIDER = 20
@@ -10,9 +8,13 @@ _api_failure_state: dict[str, dict[str, object]] = {}
 
 
 def _write(line: str) -> None:
-    """Writes one console line without tearing an active progress bar."""
-    with tqdm.get_lock():
-        tqdm.write(line, file=sys.stderr)
+    """Writes one console line without tearing whatever is drawing the screen.
+
+    Which is a progress bar on a plain terminal, and a full-screen UI when
+    one has installed an output sink; ``emit`` is the single place that
+    knows the difference.
+    """
+    emit(line, stream=STDERR)
 
 
 def _reset_api_failure_state() -> None:

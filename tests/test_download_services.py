@@ -110,19 +110,56 @@ def test_labels_read_like_a_menu(service, label):
     assert service_label(service) == label
 
 
-def test_the_gui_reads_the_same_list_as_the_wizard(monkeypatch):
-    """The point of the refactor: one machine, one answer, both menus."""
+def test_every_frontend_reads_the_same_list(monkeypatch):
+    """The point of the refactor: one machine, one answer, every menu.
+
+    This is the class of test that protects against the real hazard of
+    having several frontends — one of them quietly falling behind. It used to
+    compare the wizard against the GUI; it now compares the TUI too, and the
+    wizard until it goes.
+    """
     installed = [_Ext("tidal-web"), _Ext("tidal-py"), _Ext("gdstudio-py")]
     monkeypatch.setattr(
         "SpotiFLAC.extensions.catalog.ExtensionManager",
         lambda *a, **k: _Manager(installed),
     )
     from SpotiFLAC import interactive
+    from SpotiFLAC.extensions.catalog import installed_service_ids
 
-    wizard = interactive._installed_service_options()
+    shared = installed_service_ids()
     gui = [s["id"] for s in SpotiFLAC_API().get_download_services()["services"]]
+    wizard = interactive._installed_service_options()
 
-    assert wizard == gui == ["gdstudio", "tidal"]
+    assert shared == gui == wizard == ["gdstudio", "tidal"]
+
+
+def test_the_tui_offers_exactly_the_installed_providers(monkeypatch):
+    """The TUI's provider list is the same list, mounted as a widget.
+
+    Read off the running screen rather than off the function it calls: what
+    can go wrong here is the panel filtering or reordering the answer on its
+    way into the SelectionList, and only the mounted widget shows that.
+    """
+    import asyncio
+
+    installed = [_Ext("tidal-web"), _Ext("tidal-py"), _Ext("gdstudio-py")]
+    monkeypatch.setattr(
+        "SpotiFLAC.extensions.catalog.ExtensionManager",
+        lambda *a, **k: _Manager(installed),
+    )
+
+    from SpotiFLAC.tui.app import SpotiFLACTui
+    from SpotiFLAC.tui.config_state import ConfigState
+
+    async def _offered():
+        state = ConfigState(output_dir="/tmp/o", services=["tidal"])
+        async with SpotiFLACTui(state).run_test() as pilot:
+            from textual.widgets import SelectionList
+
+            listing = pilot.app.query_one("#cfg-services", SelectionList)
+            return [str(selection.value) for selection in listing.options]
+
+    assert asyncio.run(_offered()) == ["gdstudio", "tidal"]
 
 
 def test_the_method_is_reachable_from_the_frontend():

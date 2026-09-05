@@ -21,11 +21,13 @@ from .api_mixins.dedup import DedupMixin
 from .api_mixins.discovery import DiscoveryMixin
 from .api_mixins.extension_health import ExtensionHealthMixin
 from .api_mixins.local_tagging import LocalTaggingMixin
+from .api_mixins.search import SearchMixin
 from .api_mixins.stats import StatsMixin
 from .api_mixins.subscriptions import SubscriptionsMixin
 from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
 from .core.loop_runner import run_sync
+from .core.output_sink import CallbackLogHandler
 from .core.paths import adopt_legacy_cache_file, cache_dir, cache_path
 from .core.url_utils import url_host_matches
 
@@ -129,7 +131,7 @@ def configure_console_logging(level: int) -> None:
     _quiet_noisy_libraries(level)
 
 
-class UILogHandler(logging.Handler):
+class UILogHandler(CallbackLogHandler):
     """Mirrors the `SpotiFLAC` logger into the GUI's Logs panel.
 
     Every record still reaches the panel; what changes with the level is
@@ -142,27 +144,19 @@ class UILogHandler(logging.Handler):
     by, so INFO and DEBUG now map to "debug": panel-only. Only WARNING
     and above, which the user does need to see without opening the
     panel, still toast.
+
+    The formatting, the severity buckets and the never-raise guarantee now
+    live in `core.output_sink.CallbackLogHandler`, because the TUI needs the
+    same three of them and a second copy would only be the one that drifts.
     """
 
     def __init__(self, api) -> None:
-        super().__init__()
+        super().__init__(api.log)
         self.api = api
-
-    def emit(self, record) -> None:
-        try:
-            msg = self.format(record)
-            if record.levelno >= logging.ERROR:
-                ltype = "error"
-            elif record.levelno >= logging.WARNING:
-                ltype = "warn"
-            else:
-                ltype = "debug"
-            self.api.log(msg, ltype)
-        except Exception:
-            pass
 
 
 class SpotiFLAC_API(
+    SearchMixin,
     LocalTaggingMixin,
     CoversLyricsMixin,
     DiscoveryMixin,
@@ -672,211 +666,6 @@ class SpotiFLAC_API(
 
             logging.exception(f"Error retrieving Home Feed: {e}")
             return {"success": False, "error": str(e)}
-
-    def search_provider(self, query, limit=50):
-        """Search music providers (Spotify) for metadata matching `query`.
-
-        Returns a dictionary with 4 sections: tracks, albums, artists, playlists (max 50 results each).
-        """
-        try:
-            from .core.spotify_metadata import SpotifyMetadataClient
-
-            client = SpotifyMetadataClient()
-            # client.search() already returns a dictionary with the 4 arrays
-            results = client.search(query, limit=limit)
-
-            out = {"tracks": [], "albums": [], "artists": [], "playlists": []}
-
-            # --- Tracks ---
-            for t in results.get("tracks", [])[:limit]:
-                out["tracks"].append(
-                    {
-                        "id": getattr(t, "id", ""),
-                        "name": getattr(t, "title", ""),  # Formato Go
-                        "title": getattr(t, "title", ""),  # Formato Legacy
-                        "type": "track",
-                        "artists": getattr(t, "artists", ""),  # Formato Go
-                        "artist": getattr(t, "artists", ""),  # Formato Legacy
-                        "album_name": getattr(t, "album", ""),
-                        "album": getattr(t, "album", ""),
-                        "duration_ms": getattr(t, "duration_ms", 0),
-                        "images": getattr(t, "cover_url", ""),  # Formato Go
-                        "cover": getattr(t, "cover_url", ""),  # Formato Legacy
-                        "external_urls": getattr(t, "external_url", ""),
-                        "external_url": getattr(t, "external_url", ""),
-                        "preview_url": getattr(t, "preview_url", ""),
-                        "playcount": getattr(t, "plays", ""),
-                        "is_explicit": getattr(t, "is_explicit", False),
-                        "explicit": getattr(t, "is_explicit", False),
-                        "isrc": getattr(t, "isrc", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Albums ---
-            for a in results.get("albums", [])[:limit]:
-                out["albums"].append(
-                    {
-                        "id": a.get("id", ""),
-                        "name": a.get("name", ""),
-                        "title": a.get("name", ""),
-                        "type": "album",
-                        "artists": a.get("artists", ""),
-                        "artist": a.get("artists", ""),
-                        "images": a.get("cover_url", ""),
-                        "cover": a.get("cover_url", ""),
-                        "release_date": a.get("release_date", ""),
-                        "external_urls": a.get("external_url", ""),
-                        "external_url": a.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Artists ---
-            for art in results.get("artists", [])[:limit]:
-                out["artists"].append(
-                    {
-                        "id": art.get("id", ""),
-                        "name": art.get("name", ""),
-                        "title": art.get("name", ""),
-                        "type": "artist",
-                        "images": art.get("cover_url", ""),
-                        "cover": art.get("cover_url", ""),
-                        "external_urls": art.get("external_url", ""),
-                        "external_url": art.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Playlists ---
-            for p in results.get("playlists", [])[:limit]:
-                out["playlists"].append(
-                    {
-                        "id": p.get("id", ""),
-                        "name": p.get("name", ""),
-                        "title": p.get("name", ""),
-                        "type": "playlist",
-                        "owner": p.get("owner", ""),
-                        "images": p.get("cover_url", ""),
-                        "cover": p.get("cover_url", ""),
-                        "external_urls": p.get("external_url", ""),
-                        "external_url": p.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            return out
-        except Exception as e:
-            self.log(f"search_provider error: {e}", "error")
-            return {"tracks": [], "albums": [], "artists": [], "playlists": []}
-
-    def _search_provider_thread(self, query, limit) -> None:
-        try:
-            from .core.spotify_metadata import SpotifyMetadataClient
-
-            client = SpotifyMetadataClient()
-            results = client.search(query, limit=limit)
-
-            out = {"tracks": [], "albums": [], "artists": [], "playlists": []}
-
-            # --- Tracks ---
-            for t in results.get("tracks", [])[:limit]:
-                out["tracks"].append(
-                    {
-                        "id": getattr(t, "id", ""),
-                        "name": getattr(t, "title", ""),
-                        "title": getattr(t, "title", ""),
-                        "type": "track",
-                        "artists": getattr(t, "artists", ""),
-                        "artist": getattr(t, "artists", ""),
-                        "album_name": getattr(t, "album", ""),
-                        "album": getattr(t, "album", ""),
-                        "duration_ms": getattr(t, "duration_ms", 0),
-                        "images": getattr(t, "cover_url", ""),
-                        "cover": getattr(t, "cover_url", ""),
-                        "external_urls": getattr(t, "external_url", ""),
-                        "external_url": getattr(t, "external_url", ""),
-                        "preview_url": getattr(t, "preview_url", ""),
-                        "playcount": getattr(t, "plays", ""),
-                        "is_explicit": getattr(t, "is_explicit", False),
-                        "explicit": getattr(t, "is_explicit", False),
-                        "isrc": getattr(t, "isrc", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Albums ---
-            for a in results.get("albums", [])[:limit]:
-                out["albums"].append(
-                    {
-                        "id": a.get("id", ""),
-                        "name": a.get("name", ""),
-                        "title": a.get("name", ""),
-                        "type": "album",
-                        "artists": a.get("artists", ""),
-                        "artist": a.get("artists", ""),
-                        "images": a.get("cover_url", ""),
-                        "cover": a.get("cover_url", ""),
-                        "release_date": a.get("release_date", ""),
-                        "external_urls": a.get("external_url", ""),
-                        "external_url": a.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Artists ---
-            for art in results.get("artists", [])[:limit]:
-                out["artists"].append(
-                    {
-                        "id": art.get("id", ""),
-                        "name": art.get("name", ""),
-                        "title": art.get("name", ""),
-                        "type": "artist",
-                        "images": art.get("cover_url", ""),
-                        "cover": art.get("cover_url", ""),
-                        "external_urls": art.get("external_url", ""),
-                        "external_url": art.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Playlists ---
-            for p in results.get("playlists", [])[:limit]:
-                out["playlists"].append(
-                    {
-                        "id": p.get("id", ""),
-                        "name": p.get("name", ""),
-                        "title": p.get("name", ""),
-                        "type": "playlist",
-                        "owner": p.get("owner", ""),
-                        "images": p.get("cover_url", ""),
-                        "cover": p.get("cover_url", ""),
-                        "external_urls": p.get("external_url", ""),
-                        "external_url": p.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            try:
-                # The JS will now receive a complete object as in the Go version
-                self._push("app_handle_provider_search_results", out)
-            except Exception:
-                pass
-        except Exception as e:
-            try:
-                self._push("app_handle_provider_search_error", str(e))
-            except Exception:
-                pass
-
-    def search_provider_async(self, query, limit=50):  # Limite di default updated a 50
-        if not query:
-            return {"status": "empty"}
-        threading.Thread(
-            target=self._search_provider_thread,
-            args=(query, limit),
-            daemon=True,
-        ).start()
-        return {"status": "started"}
 
     def search_code(self, query, path=".", limit=200):
         """Search the SpotiFLAC package source (substring, case-insensitive).

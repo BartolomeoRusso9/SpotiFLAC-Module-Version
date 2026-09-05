@@ -67,17 +67,28 @@ The web GUI shows a sign-in screen automatically when it detects `--web-multiuse
 
 `--web` mode is installable — "Add to Home Screen" on a phone, or a standalone window from a desktop browser's install prompt. This needs a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts): it works out of the box at `127.0.0.1`/`localhost` (browsers treat those as secure even over plain HTTP), but a LAN address (`--host 0.0.0.0` and a phone visiting `http://192.168.x.x:8000`) needs HTTPS in front of it — the same reverse-proxy setup the security note above already recommends for auth. The service worker behind this only exists for installability and a same-page-reload fallback; it's deliberately network-first for everything so it can never make you look at stale frontend code, and it never touches `/api/*` or the WebSocket.
 
-### Interactive Mode (step-by-step wizard)
+### Terminal UI (guided mode)
 
-SpotiFLAC features a smart Interactive Wizard that guides you step-by-step. To launch the wizard, use the `--interactive` flag:
+`--tui` is the guided mode: one screen with every setting on it, and the
+download queue live in front of you while it runs.
 
 ```bash
-spotiflac --interactive
+spotiflac --tui
 ```
 
-*(Or `python launcher.py --interactive` if running from source)*
+*(Or `python launcher.py --tui` if running from source)*
 
-On launch it automatically runs a lyrics-provider health check before asking any questions, so you always know which of your configured lyric sources are reachable.
+A sidebar picks the panel — **Download** for the settings, **Queue** for the
+run, **Session** for recent URLs and saved profiles, **Command** for the
+equivalent `spotiflac …` invocation, rebuilt as you type. `Ctrl+R` starts the
+download, `Ctrl+L` shows the log, `q` quits.
+
+The [Terminal UI page](tui.md) covers it in full.
+
+> **`--interactive` is deprecated.** It still works and opens the same
+> screen, with a warning, and it will be removed in a future release. The
+> notes below describe the wizard it used to open; see
+> [Coming from the wizard](tui.md#coming-from-the-wizard) for what changed.
 
 **What the wizard does at startup:**
 

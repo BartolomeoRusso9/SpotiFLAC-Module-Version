@@ -49,6 +49,11 @@ dependencies = [
     "yt-dlp>=2026.7.4",
     "tqdm>=4.66.3",
     "pywebview>=5.0.0",
+    # Base, not an extra: --tui is the guided mode, so it cannot be the one
+    # that might not be installed. Textual is pure Python (rich, markdown-it-py,
+    # platformdirs) and lighter than the pywebview line above it, which pulls
+    # native bindings — pyobjc on macOS, GTK/Qt on Linux.
+    "textual>=1.0",
     "aiofiles>=23.2.1",
     "tenacity>=8.3.0",
     "python-dotenv>=1.2.2",
@@ -79,6 +84,10 @@ include-package-data = true
     "extensions/**/*.js",
     "frontend/*",
     "frontend/assets/icons/*",
+    # Textual reads the TUI's stylesheet from disk at startup (CSS_PATH), so
+    # an install without it opens on an unstyled screen rather than failing
+    # loudly — worth listing here explicitly.
+    "tui/*.tcss",
 ]
 
 [project.optional-dependencies]

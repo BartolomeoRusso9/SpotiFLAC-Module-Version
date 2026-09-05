@@ -6,7 +6,8 @@ usefully. The text is unchanged by the split.
 
 | Page | What's in it |
 | --- | --- |
-| [Quick Start](quick-start.md) | Every way to run it — GUI, web, CLI, interactive wizard, Python — and the URL types it accepts |
+| [Quick Start](quick-start.md) | Every way to run it — GUI, web, CLI, terminal UI, Python — and the URL types it accepts |
+| [Terminal UI](tui.md) | `--tui`, the guided mode: every setting on one screen, and the download queue live |
 | [Extensions](extensions.md) | Registries, installing providers, signature verification and trust tiers |
 | [Writing a Python Extension](python-extensions.md) | Building a download-provider extension: `BaseProvider`, the `core` toolbox, a full example, packaging and publishing |
 | [Downloading from a CSV](csv.md) | Feeding it a file of tracks instead of a link: supported exports, how rows without a link are matched, and the unmatched-row report |

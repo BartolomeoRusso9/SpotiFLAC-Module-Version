@@ -195,7 +195,8 @@ SpotiFLAC(
 | `--web-user-add` | | | Create a `--web-multiuser` account: `--web-user-add USERNAME PASSWORD`. |
 | `--web-user-remove` | | | Delete a `--web-multiuser` account by username. |
 | `--web-user-list` | | | List configured `--web-multiuser` usernames. |
-| `--interactive` | | `False` | Launch the interactive step-by-step wizard. See [Interactive Mode](quick-start.md#interactive-mode-step-by-step-wizard). |
+| `--tui` | | `False` | Launch the terminal UI, the guided mode. See [Terminal UI](tui.md). |
+| `--interactive` | | `False` | **Deprecated** — an alias for `--tui`, with a warning. Removed in a future release. |
 | `--registry-directories` | | `None` | A directory JSON URL to add before running (lists registries, not extensions — repeat once per URL). Alternative to `SPOTIFLAC_REGISTRY_DIRECTORIES`. See [Extension Discovery](extensions.md#extension-discovery-directories). |
 | `--trust-key-add` | | | Trust a registry-signing public key: `--trust-key-add NAME PUBLIC_KEY_B64`. See [Registry Trust](extensions.md#registry-trust-signed-extensions). |
 | `--trust-key-remove` | | | Remove a trusted key by name. |

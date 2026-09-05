@@ -145,10 +145,10 @@ def test_js_extension_provider_initializes_base_validation_cache(monkeypatch, tm
     assert isinstance(provider._validated_flac_files, dict)
 
 
-def test_interactive_service_options_are_deduplicated_from_installed_extensions(
+def test_service_options_are_deduplicated_from_installed_extensions(
     monkeypatch,
 ):
-    from SpotiFLAC import interactive
+    from SpotiFLAC.extensions.catalog import installed_service_ids
 
     class DummyExt:
         def __init__(self, name, is_download_provider=True):
@@ -168,11 +168,12 @@ def test_interactive_service_options_are_deduplicated_from_installed_extensions(
                 DummyExt("soundcloud"),
             ]
 
-    # Patched where the discovery actually lives now: interactive and the
-    # GUI both read extensions/catalog.installed_download_services().
+    # Patched where the discovery actually lives: every menu — the TUI, the
+    # GUI's Settings list, and the wizard while it lasts — reads
+    # extensions/catalog.installed_download_services().
     monkeypatch.setattr("SpotiFLAC.extensions.catalog.ExtensionManager", DummyManager)
 
-    assert interactive._installed_service_options() == ["qobuz", "soundcloud", "tidal"]
+    assert installed_service_ids() == ["qobuz", "soundcloud", "tidal"]
 
 
 def test_interactive_stops_when_no_download_providers_are_installed(

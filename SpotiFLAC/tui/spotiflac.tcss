@@ -1,0 +1,292 @@
+/* The TUI's look. Colours come from Textual's theme variables rather than
+   literals, so every built-in theme (`t` cycles them) restyles the whole
+   screen — including the light ones, where a hard-coded dark grey would
+   quietly become unreadable. */
+
+Screen {
+    layers: base;
+}
+
+#body {
+    height: 1fr;
+}
+
+#sidebar {
+    width: 20;
+    border-right: solid $panel-lighten-2;
+    background: $surface;
+}
+
+#sidebar > ListItem {
+    padding: 0 2;
+}
+
+#main {
+    width: 1fr;
+}
+
+#panels {
+    height: 1fr;
+    padding: 1 2;
+}
+
+/* ── Configuration ─────────────────────────────────────────────────── */
+
+.setting-row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.setting-label {
+    width: 32;
+    padding-top: 1;
+    color: $text-muted;
+}
+
+.setting-hint {
+    padding-top: 1;
+    padding-left: 2;
+    color: $text-disabled;
+    text-style: italic;
+}
+
+.setting-row Input {
+    width: 1fr;
+}
+
+.setting-row Select {
+    width: 1fr;
+}
+
+SelectionList {
+    height: auto;
+    max-height: 12;
+    margin-bottom: 1;
+    border: round $panel-lighten-2;
+}
+
+Collapsible {
+    margin-bottom: 1;
+}
+
+#config-problems {
+    padding: 1 2;
+    margin-top: 1;
+    border: round $success;
+    color: $text-muted;
+}
+
+#config-problems.blocking {
+    border: round $warning;
+    color: $warning;
+}
+
+/* ── Queue ─────────────────────────────────────────────────────────── */
+
+#queue-header {
+    height: auto;
+    padding-bottom: 1;
+    border-bottom: solid $panel-lighten-2;
+}
+
+#queue-summary {
+    color: $text-muted;
+}
+
+#queue-empty {
+    padding: 2 0;
+    color: $text-disabled;
+}
+
+.track-row {
+    height: auto;
+    padding: 0 0 1 0;
+}
+
+.track-title {
+    width: 48;
+}
+
+.track-bar {
+    width: 1fr;
+}
+
+.track-row.completed .track-title {
+    color: $success;
+}
+
+.track-row.failed .track-title {
+    color: $error;
+}
+
+.track-row.active .track-title {
+    text-style: bold;
+}
+
+/* ── Command preview ───────────────────────────────────────────────── */
+
+.command-panel {
+    padding: 1 2;
+    color: $text-muted;
+}
+
+/* ── Log and status ────────────────────────────────────────────────── */
+
+#log-pane {
+    height: 14;
+    border-top: solid $panel-lighten-2;
+}
+
+#log {
+    height: 1fr;
+    padding: 0 2;
+    background: $surface;
+}
+
+#status {
+    height: 1;
+    padding: 0 2;
+    background: $panel;
+    color: $text-muted;
+}
+
+/* ── Session ───────────────────────────────────────────────────────── */
+
+.section-heading {
+    padding: 1 0 0 0;
+    text-style: bold;
+    color: $text;
+}
+
+#history-list, #profile-list {
+    height: auto;
+    max-height: 12;
+    margin-bottom: 1;
+    border: round $panel-lighten-2;
+}
+
+#profile-name {
+    width: 1fr;
+}
+
+#session-status {
+    padding: 1 0;
+    color: $text-muted;
+}
+
+/* ── Help ──────────────────────────────────────────────────────────── */
+
+HelpScreen {
+    align: center middle;
+    background: $background 70%;
+}
+
+#help-box {
+    width: 72;
+    max-width: 90%;
+    height: auto;
+    max-height: 80%;
+    padding: 1 3;
+    border: round $primary;
+    background: $surface;
+}
+
+.help-heading {
+    padding: 1 0 0 0;
+    text-style: bold;
+    color: $primary;
+}
+
+.help-keys {
+    padding: 1 0;
+}
+
+.help-notes {
+    padding: 1 0;
+    color: $text-muted;
+}
+
+.help-footer {
+    padding: 1 0 0 0;
+    color: $text-disabled;
+    text-align: center;
+}
+
+/* ── Health ────────────────────────────────────────────────────────── */
+
+.panel-intro {
+    padding-bottom: 1;
+    color: $text-muted;
+}
+
+#health-status {
+    padding: 1 0;
+    color: $text-muted;
+}
+
+#health-table {
+    height: auto;
+    max-height: 20;
+}
+
+/* ── CSV picker ────────────────────────────────────────────────────── */
+
+CsvPickerScreen {
+    align: center middle;
+    background: $background 70%;
+}
+
+#csv-box {
+    width: 84;
+    max-width: 92%;
+    height: auto;
+    max-height: 85%;
+    padding: 1 3;
+    border: round $primary;
+    background: $surface;
+}
+
+#csv-candidates {
+    height: auto;
+    max-height: 14;
+    margin-bottom: 1;
+    border: round $panel-lighten-2;
+}
+
+#csv-preview {
+    padding: 1 0;
+    color: $text-muted;
+}
+
+/* ── Search ────────────────────────────────────────────────────────── */
+
+#search-query {
+    margin-bottom: 1;
+}
+
+#search-status {
+    padding-bottom: 1;
+    color: $text-muted;
+}
+
+#search-results {
+    height: auto;
+    max-height: 24;
+}
+
+/* ── Extensions ────────────────────────────────────────────────────── */
+
+#registry-table {
+    height: auto;
+    max-height: 16;
+    margin-bottom: 1;
+}
+
+#registry-url {
+    width: 1fr;
+}
+
+#registry-status {
+    padding: 1 0;
+    color: $text-muted;
+}

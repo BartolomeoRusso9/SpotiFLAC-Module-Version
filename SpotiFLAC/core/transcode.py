@@ -49,6 +49,31 @@ TTA = "tta"
 
 DEFAULT_MP3_BITRATE = "320k"
 
+#: Menu label → format name (None = no conversion), for every UI that offers
+#: the choice. Spelled out rather than generated from SUPPORTED_FORMATS so a
+#: menu can say what each format is actually *for*; the extensions still come
+#: from `extension_for()`. It lives here rather than in one frontend because
+#: the wizard, the TUI and the GUI have to offer the same seven targets, and
+#: the only way to be sure of that is for them to read the same tuple.
+TRANSCODE_CHOICES: tuple[tuple[str, str | None], ...] = (
+    ("Keep the provider's format (no conversion)", None),
+    ("FLAC — lossless, the universal default", "flac"),
+    ("ALAC (.m4a) — lossless, native on macOS/iOS", "alac"),
+    ("WavPack (.wv) — lossless, smallest of the exotics", "wavpack"),
+    ("TTA (.tta) — lossless, fast to decode", "tta"),
+    ("WAV — uncompressed PCM, for DJ software and editors", "wav"),
+    ("AIFF — uncompressed PCM, the Apple flavour", "aiff"),
+    ("MP3 — lossy, for players that read nothing else", "mp3"),
+)
+
+
+def transcode_label(fmt: str | None) -> str:
+    """Menu label for a stored format name, falling back to 'no conversion'."""
+    for label, value in TRANSCODE_CHOICES:
+        if value == fmt:
+            return label
+    return TRANSCODE_CHOICES[0][0]
+
 #: ffmpeg's FLAC compression level. 8 is the strongest setting the encoder
 #: offers; it buys ~1-2% over the default 5 for roughly twice the CPU time.
 #: A download is converted once and kept forever, so the trade favours size.
