@@ -1091,6 +1091,39 @@ class DownloadWorker:
                 with contextlib.suppress(Exception):
                     close()
 
+    async def _close_shared_browser_sessions(self) -> None:
+        """Tears down the persistent Monochrome browser once the run is over.
+
+        The Amazon provider's mono path (amz.geeked.wtf) keeps a real Chrome
+        alive on purpose: the JWT it gets back is tied to that browser's TLS
+        session, so closing it between tracks would cost a Turnstile solve
+        every time. Between *runs* there is nothing left to keep.
+
+        It was never being closed, though. The session is a module-level
+        singleton in `core.signed_session_mono` rather than a provider
+        object, so `_close_providers()` above never saw it, and the only
+        thing that ever shut it down was the `atexit` hook — i.e. the process
+        exiting. The CLI exits after a run and got away with it; the TUI and
+        the desktop window do not, so Chrome stayed on screen after the
+        download had finished.
+
+        Read out of `sys.modules` rather than imported: `signed_session_mono`
+        pulls in pydoll, and importing it here to ask whether a browser needs
+        closing would load it for every run that never went near Amazon. If
+        the module was never imported, no mono browser was ever started and
+        there is nothing to close.
+
+        Bounded and suppressed because a browser that will not close is not a
+        reason to fail a download that already succeeded — and
+        `close_mono_browser_session()` falls back to killing by profile
+        directory when the polite stop fails.
+        """
+        mono = sys.modules.get("SpotiFLAC.core.signed_session_mono")
+        if mono is None:
+            return
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(mono.close_mono_browser_session(), timeout=20.0)
+
     async def run_async(self) -> list[tuple[str, str, str]]:
         try:
             if self._opts.transcode_to:
@@ -1140,6 +1173,7 @@ class DownloadWorker:
                 await _await_pending_hires_checks()
         finally:
             self._close_providers()
+            await self._close_shared_browser_sessions()
 
     async def _run_downloads_async(
         self,
