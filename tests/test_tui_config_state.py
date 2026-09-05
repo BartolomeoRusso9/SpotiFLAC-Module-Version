@@ -280,7 +280,7 @@ def test_only_the_three_meaningful_tiers_survive() -> None:
 
 
 def test_atmos_needs_tidal_to_mean_anything() -> None:
-    """Every other provider is served Hi-Res Lossless, as on the CLI.
+    """Every other provider is served HI_RES_LOSSLESS, as on the CLI.
 
     So Atmos alongside Deezer is not an error — Tidal gets Atmos and Deezer
     gets its best lossless. With Tidal absent altogether it means nothing,
