@@ -24,6 +24,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
+from .branding import panel_tag, panel_title
 from ..core.csv_picker import (
     clean_path_input,
     csv_scan_dirs,
@@ -52,8 +53,9 @@ class CsvPickerScreen(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Center():
-            with VerticalScroll(id="csv-box"):
-                yield Static("Pick a track list", classes="help-heading")
+            with VerticalScroll(id="csv-box") as box:
+                box.border_title = panel_title("Pick a track list")
+                box.border_subtitle = panel_tag("--csv")
                 yield Label(
                     "Files found in the folders a track list usually lands in.",
                     classes="panel-intro",

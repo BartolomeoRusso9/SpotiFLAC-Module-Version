@@ -11,8 +11,8 @@ survive a path dragged in from a shell, quotes and escapes and all), and
 *what is lying around that looks like a track list* (`scan_csv_files` over
 `csv_scan_dirs`).
 
-None of it prints. It started inside the interactive wizard, where it did,
-and moved here so the terminal UI could offer the same picker without
+None of it prints. It started inside the old interactive wizard, where it
+did, and moved here so the terminal UI could offer the same picker without
 inheriting a wizard's idea of how to draw one.
 """
 

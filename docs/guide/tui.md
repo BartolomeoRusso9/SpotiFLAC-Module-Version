@@ -9,8 +9,8 @@ spotiflac --tui
 
 *(Or `python launcher.py --tui` if running from source.)*
 
-`--interactive` still works and opens this same screen, but it warns that it
-is deprecated and it will be removed in a future release. See
+`--interactive` still works and opens this same screen, with a warning that
+it is deprecated. The wizard it used to open is gone. See
 [Coming from the wizard](#coming-from-the-wizard) below.
 
 ---
@@ -23,6 +23,7 @@ A sidebar on the left picks the panel; everything else is that panel.
 | --- | --- |
 | **Download** | Every setting, all editable, in whatever order you like |
 | **Search** | Find something in the catalogue and make it the URL |
+| **Tracks** | What is behind the link, and which of it you want |
 | **Queue** | The live run: one bar per track, plus the totals |
 | **Session** | Recent URLs and saved profiles |
 | **Extensions** | The registry links providers are installed from |
@@ -32,6 +33,32 @@ A sidebar on the left picks the panel; everything else is that panel.
 Along the bottom: a status line, and a log pane that appears when a run
 starts (`Ctrl+L` toggles it).
 
+## How it looks
+
+The design follows [MovieBox-Tui](https://github.com/mesamirh/MovieBox-Tui),
+which the same grammar throughout:
+
+- a **block-letter wordmark** across the top, with the version and a line
+  saying what this is;
+- **rounded cards** with titles marked `✦  Name` and a tag in the corner
+  naming the flag or key that does the same job;
+- **badges** — a short label on a solid colour — for the quality tier and for
+  each track's outcome, so neither depends on colour alone to be read;
+- **`[key] action` hints** along the bottom, dropped from the right as the
+  terminal narrows;
+- a status line marked `ℹ` / `✔` / `⚠` / `✖`.
+
+Nine themes, cycled with `t`, starting at Catppuccin Mocha: Mocha, Latte,
+Macchiato, Frappé, Nord, Tokyo Night, Dracula, Gruvbox, Rosé Pine. Every
+colour on the screen is a theme variable, so all nine look deliberate rather
+than one looking right and eight looking tinted.
+
+Everything degrades. `NO_COLOR`, `TERM=dumb`, or `SPOTIFLAC_PLAIN_TUI=1`
+switch the block art for a word, the box glyphs for ASCII, and the filled
+badges for `[LOSSLESS]`. The wordmark also shrinks on its own: six rows of
+letterform become two on a narrow terminal, and a word below that — a logo
+that eats a quarter of a short screen is a logo in the way.
+
 ## Keys
 
 | Key | Does |
@@ -40,7 +67,9 @@ starts (`Ctrl+L` toggles it).
 | `Ctrl+C` | Stop a running download (or quit when nothing is running) |
 | `Ctrl+L` | Show or hide the log pane |
 | `/` | Jump to the search box |
-| `t` | Cycle the theme |
+| `space` | On the Tracks panel: pick the track under the cursor |
+| `a` / `n` / `i` | On the Tracks panel: all, none, invert |
+| `t` | Cycle the theme (nine of them) |
 | `?` | The key list, and a note on why settings go grey |
 | `q` | Quit |
 | `Tab` / `Shift+Tab`, `j` / `k` | Move between controls |
@@ -90,6 +119,28 @@ It does one thing on purpose. A search panel that also started downloads
 would be a second copy of the Download panel's rules, and the two would drift
 apart — so this one answers "which link did you mean" and hands the answer
 over.
+
+## The Tracks panel
+
+The one thing the command line cannot do: fetch part of an album.
+
+Press **Load tracks** and it reads what is behind the URL — title, artist,
+album, one row each. Everything starts selected, because the panel exists to
+take tracks away rather than to make you add them one at a time. `space`
+toggles the row under the cursor, `a` selects all, `n` none, `i` inverts.
+
+Loading is deliberate, not automatic: it is a network round trip against a
+link you may still be typing.
+
+Selecting **everything** downloads the collection URL itself, exactly as it
+would without this panel — one resolution, and the album's own ordering and
+numbering. Selecting **some** downloads those tracks individually. A track
+whose provider gives no link of its own says `no link` in the album column;
+it can be fetched as part of the whole collection, but not on its own, and
+the log names any that get skipped.
+
+Picking tracks has no command-line equivalent, and the **Command** panel says
+so rather than showing you a command that would fetch the whole album.
 
 ## The Queue panel
 
@@ -142,9 +193,10 @@ for it.
 ## Coming from the wizard
 
 `--interactive` opened a sequence of questions and produced a configuration
-at the end. `--tui` holds the same configuration as state you can edit in any
-order, so there is no "going back" — every answer is always visible and
-always changeable.
+at the end. That wizard has been removed; `--interactive` is now just a
+deprecated spelling of `--tui`, which holds the same configuration as state
+you can edit in any order. There is no "going back" — every answer is always
+visible and always changeable.
 
 Two things worked differently and are worth knowing about:
 

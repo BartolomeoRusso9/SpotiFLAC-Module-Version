@@ -10,9 +10,10 @@ source* of the two modules that consume the dict, `launcher.py` and
 `core/cli_preview.py`. Add a flag to either and this test tells you the TUI
 has not learned about it yet.
 
-The comparison against `interactive.py` is the migration net, and it goes
-away with the wizard: while both exist, anything the wizard collects has to
-survive in the state, or the option was lost in the port.
+The wizard it replaced is gone, and with it the parity check that compared
+the two dicts key for key. What is left is the check that outlives it: the
+expected key set is read out of the code that consumes the dict, so it cannot
+drift from what a run actually needs.
 """
 
 from __future__ import annotations
@@ -106,21 +107,6 @@ def test_to_cfg_produces_nothing_the_run_ignores() -> None:
     assert not unread, (
         f"ConfigState.to_cfg() emits keys nothing consumes: {sorted(unread)}. "
         "Either the reader was removed, or the key is misspelled."
-    )
-
-
-def test_nothing_the_wizard_collects_was_lost_in_the_port() -> None:
-    """The migration net — retire this with `interactive.py`."""
-    wizard_keys = _cfg_keys_in(_ROOT / "interactive.py")
-    # Not a setting: the wizard's own marker for "this came from a profile",
-    # which ConfigState carries as `profile_loaded` and never sends onward.
-    wizard_keys.discard("_profile_loaded")
-
-    produced = set(ConfigState().to_cfg())
-    lost = wizard_keys - produced
-
-    assert not lost, (
-        f"the wizard collects settings the TUI has no home for: {sorted(lost)}"
     )
 
 

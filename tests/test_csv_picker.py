@@ -1,25 +1,20 @@
-"""Browsing for a track list, instead of typing its path by hand.
+"""Finding the track list someone meant.
 
-Two layers, and they now live in two places. The path handling and the
-folder scan are pure and belong to `core/csv_picker.py`, where both guided
-frontends read them; those are tested directly, and they are the half that
-actually decides whether the right file is found.
+The path handling and the folder scan, which are the half that actually
+decides whether the right file is found. They are pure, they live in
+`core/csv_picker.py`, and both the terminal UI and anything else that wants
+to offer a picker read them from there.
 
-The wizard's `input()` loop on top of them is still here, driven with a fed
-sequence of answers, and goes when the wizard does — the terminal UI's
-equivalent is a modal screen with its own tests in
+The UI on top of them is tested separately, against the screen that draws it:
 `tests/test_tui_csv_picker.py`.
 """
 
 from __future__ import annotations
 
-import asyncio
-import builtins
 import os
 
 import pytest
 
-from SpotiFLAC import interactive
 from SpotiFLAC.core import csv_picker
 
 _EXPORT = (
@@ -43,17 +38,6 @@ def csv_dir(tmp_path):
     return tmp_path
 
 
-@pytest.fixture
-def feed(monkeypatch):
-    """Answer the picker's prompts with a fixed sequence."""
-
-    def _feed(*answers: str) -> None:
-        pending = iter(answers)
-        monkeypatch.setattr(builtins, "input", lambda _prompt="": next(pending))
-
-    return _feed
-
-
 @pytest.fixture(autouse=True)
 def isolated_home(monkeypatch, tmp_path_factory):
     """Keep the picker inside the test's own folders.
@@ -67,9 +51,6 @@ def isolated_home(monkeypatch, tmp_path_factory):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.chdir(workdir)
-    monkeypatch.setattr(
-        interactive, "_last_output_folder", lambda: asyncio.sleep(0, result="")
-    )
 
 
 def test_clean_path_input_undoes_terminal_escaping(monkeypatch):
@@ -161,51 +142,6 @@ def test_scan_dirs_drops_paths_that_are_not_folders(tmp_path):
     assert str(tmp_path / "nope") not in csv_picker.csv_scan_dirs(
         str(tmp_path / "nope")
     )
-
-
-def test_pick_by_number_returns_a_validated_path(csv_dir, feed, capsys):
-    feed("1")
-    picked = asyncio.run(interactive._pick_csv_file(str(csv_dir)))
-    assert picked == str(csv_dir / "export.csv")
-    out = capsys.readouterr().out
-    # The preview is what tells someone they chose last month's export.
-    assert "2 tracks" in out
-    assert "Blinding Lights" in out
-
-
-def test_pasted_path_is_accepted(csv_dir, feed):
-    feed(f"'{csv_dir / 'list.tsv'}'")
-    assert asyncio.run(interactive._pick_csv_file()) == str(csv_dir / "list.tsv")
-
-
-def test_a_folder_rescans_instead_of_failing(csv_dir, feed, capsys):
-    feed(str(csv_dir), "1")
-    assert asyncio.run(interactive._pick_csv_file()) == str(csv_dir / "export.csv")
-
-
-def test_missing_file_asks_again_rather_than_returning_it(csv_dir, feed, capsys):
-    feed(str(csv_dir / "nope.csv"), "")
-    assert asyncio.run(interactive._pick_csv_file(str(csv_dir))) is None
-    assert "No such file" in capsys.readouterr().out
-
-
-def test_unparsable_file_is_rejected(tmp_path, feed, capsys):
-    empty = tmp_path / "empty.csv"
-    empty.write_text("", encoding="utf-8")
-    feed(str(empty), "")
-    assert asyncio.run(interactive._pick_csv_file(str(tmp_path))) is None
-    assert "empty.csv" in capsys.readouterr().out
-
-
-def test_empty_answer_cancels(csv_dir, feed):
-    feed("")
-    assert asyncio.run(interactive._pick_csv_file(str(csv_dir))) is None
-
-
-def test_back_restarts_the_wizard(csv_dir, feed):
-    feed("b")
-    with pytest.raises(interactive._BackRequested):
-        asyncio.run(interactive._pick_csv_file(str(csv_dir)))
 
 
 def test_browse_words_cover_what_the_prompt_advertises():

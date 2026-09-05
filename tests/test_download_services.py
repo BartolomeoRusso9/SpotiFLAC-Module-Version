@@ -114,23 +114,21 @@ def test_every_frontend_reads_the_same_list(monkeypatch):
     """The point of the refactor: one machine, one answer, every menu.
 
     This is the class of test that protects against the real hazard of
-    having several frontends — one of them quietly falling behind. It used to
-    compare the wizard against the GUI; it now compares the TUI too, and the
-    wizard until it goes.
+    having several frontends — one of them quietly falling behind. It began
+    as wizard-against-GUI; the wizard is gone and the TUI took its place, in
+    the test below.
     """
     installed = [_Ext("tidal-web"), _Ext("tidal-py"), _Ext("gdstudio-py")]
     monkeypatch.setattr(
         "SpotiFLAC.extensions.catalog.ExtensionManager",
         lambda *a, **k: _Manager(installed),
     )
-    from SpotiFLAC import interactive
     from SpotiFLAC.extensions.catalog import installed_service_ids
 
     shared = installed_service_ids()
     gui = [s["id"] for s in SpotiFLAC_API().get_download_services()["services"]]
-    wizard = interactive._installed_service_options()
 
-    assert shared == gui == wizard == ["gdstudio", "tidal"]
+    assert shared == gui == ["gdstudio", "tidal"]
 
 
 def test_the_tui_offers_exactly_the_installed_providers(monkeypatch):

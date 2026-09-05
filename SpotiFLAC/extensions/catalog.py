@@ -75,8 +75,8 @@ def installed_download_services(
     """The download services this install can actually offer, one per row.
 
     The single source of truth for every "choose your providers" surface:
-    the interactive wizard, and the Settings list in the GUI. Both used to
-    answer the question their own way — the wizard from the installed
+    the terminal UI, and the Settings list in the GUI. They used to answer
+    the question their own way — the guided mode from the installed
     extensions, the GUI from a list hard-coded in app.js — so a fresh
     install offered twelve services in Settings and only the installed ones
     on the command line, and a third-party provider appeared in neither.

@@ -176,10 +176,15 @@ def test_service_options_are_deduplicated_from_installed_extensions(
     assert installed_service_ids() == ["qobuz", "soundcloud", "tidal"]
 
 
-def test_interactive_stops_when_no_download_providers_are_installed(
-    monkeypatch, capsys
-):
-    from SpotiFLAC import interactive
+def test_the_tui_says_so_when_no_download_provider_is_installed(monkeypatch):
+    """An empty provider list is a setup step, not a wrong choice.
+
+    The wizard used to refuse to start and print where to fix it. The TUI
+    cannot refuse to open — you configure the registry from inside it — so it
+    says the same thing in the two places you would look: beside the empty
+    provider list, and in the readiness banner.
+    """
+    import asyncio
 
     class DummyManager:
         def __init__(self, auto_install_downloads=False):
@@ -190,10 +195,20 @@ def test_interactive_stops_when_no_download_providers_are_installed(
 
     monkeypatch.setattr("SpotiFLAC.extensions.catalog.ExtensionManager", DummyManager)
 
-    with pytest.raises(SystemExit):
-        interactive._require_installed_service_options()
+    from SpotiFLAC.tui.app import SpotiFLACTui
+    from SpotiFLAC.tui.config_state import ConfigState
 
-    assert (
-        "No download provider found. Configure your extension registry first."
-        in capsys.readouterr().out
-    )
+    async def _shown():
+        state = ConfigState(url="https://open.spotify.com/track/x", output_dir="/tmp/o")
+        async with SpotiFLACTui(state).run_test() as pilot:
+            for _ in range(4):
+                await pilot.pause()
+            notice = pilot.app.query_one("#no-providers")
+            banner = pilot.app.query_one("#config-problems")
+            return notice.display, str(notice.render()), str(banner.render())
+
+    displayed, notice, banner = asyncio.run(_shown())
+    assert displayed is True
+    assert "No download provider is installed" in notice
+    assert "Extensions panel" in notice
+    assert "registry is configured" in banner

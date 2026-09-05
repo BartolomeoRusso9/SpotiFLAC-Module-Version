@@ -17,50 +17,61 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Label, ProgressBar, Static
 
-#: Status → the glyph that leads the row. Deliberately monochrome-safe: a
-#: terminal with no colour, or a user who cannot rely on it, still gets the
-#: outcome from the shape alone.
-_STATUS_MARK = {
-    "queued": "·",
-    "downloading": "⬇",
-    "completed": "✓",
-    "failed": "✗",
-    "skipped": "⏭",
-}
+from .branding import status_badge
+
+_BADGE_CLASSES = (
+    "badge-gold",
+    "badge-sapphire",
+    "badge-teal",
+    "badge-lavender",
+    "badge-success",
+    "badge-error",
+    "badge-muted",
+)
 
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "skipped"})
 
 
-class TrackRow(Static):
-    """One track: what it is, how far along, and how it ended."""
+class TrackRow(Horizontal):
+    """One track: what it is, how far along, and how it ended.
+
+    A container, not a `Static`. A Static sizes itself from its own
+    renderable, and this one's is empty — so with `height: auto` every row
+    came out zero rows tall and the queue looked empty while it was in fact
+    full.
+    """
 
     def __init__(self, item: dict) -> None:
         super().__init__(classes="track-row")
         self._item = item
         self._bar: ProgressBar | None = None
         self._label: Label | None = None
+        self._badge: Label | None = None
 
     def compose(self) -> ComposeResult:
+        # The badge is MovieBox's resolution chip, doing the same job: the
+        # outcome, readable at a glance from colour and shape together, so
+        # colour alone is never carrying it.
+        self._badge = Label("", classes="track-badge", markup=False)
         self._label = Label(self._title_for(self._item), classes="track-title")
         # `total` is not known until the first chunk arrives, and a bar with
         # no total renders as indeterminate — which is exactly the honest
         # thing to show while the provider is still being asked.
         self._bar = ProgressBar(total=None, show_eta=False, classes="track-bar")
-        yield Horizontal(self._label, self._bar)
+        yield self._badge
+        yield self._label
+        yield self._bar
 
     def on_mount(self) -> None:
         self.apply(self._item)
 
     @staticmethod
     def _title_for(item: dict) -> str:
-        mark = _STATUS_MARK.get(str(item.get("status", "")), "·")
         title = str(item.get("track_name") or "unknown")
         artist = str(item.get("artist_name") or "")
-        line = f"{mark} {title}"
-        if artist:
-            line += f" — {artist}"
+        line = title if not artist else f"{title} — {artist}"
         if item.get("status") == "failed" and item.get("error_message"):
-            line += f"  ({str(item['error_message'])[:40]})"
+            line += f"  ({str(item['error_message'])[:36]})"
         return line
 
     def apply(self, item: dict) -> None:
@@ -70,6 +81,11 @@ class TrackRow(Static):
 
         if self._label is not None:
             self._label.update(self._title_for(item))
+        if self._badge is not None:
+            text, css = status_badge(status)
+            self._badge.update(text)
+            for candidate in _BADGE_CLASSES:
+                self._badge.set_class(candidate == css, candidate)
         self.set_class(status == "failed", "failed")
         self.set_class(status == "completed", "completed")
         self.set_class(status == "downloading", "active")
@@ -79,11 +95,14 @@ class TrackRow(Static):
 
         total = float(item.get("total_size") or 0.0)
         progress = float(item.get("progress") or 0.0)
-        if status in _TERMINAL_STATUSES:
-            # Completed means the bar is full; skipped and failed have no
-            # meaningful fraction, so they get a full bar too and say what
-            # happened in the label rather than pretending to a percentage.
+        if status == "completed":
             self._bar.update(total=1.0, progress=1.0)
+        elif status in _TERMINAL_STATUSES or status == "queued":
+            # Empty, not full and not pulsing. A failed track with a full bar
+            # reads as a success, and a queued one with the indeterminate
+            # animation reads as busy — both say the opposite of the truth.
+            # The badge carries the outcome; the bar only carries progress.
+            self._bar.update(total=1.0, progress=0.0)
         elif total > 0:
             self._bar.update(total=total, progress=min(progress, total))
         else:

@@ -233,6 +233,42 @@ async def test_a_log_line_is_not_delivered_twice(monkeypatch, capfd) -> None:
     assert len(warnings) == 1
 
 
+def test_a_bar_never_contradicts_its_badge() -> None:
+    """A full bar means finished; a moving one means moving.
+
+    Both were wrong before: a failed track drew a full bar, which reads as a
+    success, and a queued one drew the indeterminate pulse, which reads as
+    busy. The badge says what happened — the bar must not say otherwise.
+    """
+    from SpotiFLAC.tui.queue_view import TrackRow
+
+    class _Bar:
+        def __init__(self):
+            self.calls = []
+
+        def update(self, **kwargs):
+            self.calls.append(kwargs)
+
+    def _applied(status: str, **extra) -> dict:
+        row = TrackRow({"id": "t", "track_name": "x", "status": status})
+        row._bar = _Bar()
+        row._label = None
+        row._badge = None
+        row.apply({"id": "t", "track_name": "x", "status": status, **extra})
+        return row._bar.calls[-1]
+
+    assert _applied("completed") == {"total": 1.0, "progress": 1.0}
+    assert _applied("failed") == {"total": 1.0, "progress": 0.0}
+    assert _applied("skipped") == {"total": 1.0, "progress": 0.0}
+    assert _applied("queued") == {"total": 1.0, "progress": 0.0}
+    assert _applied("downloading", total_size=40.0, progress=12.0) == {
+        "total": 40.0,
+        "progress": 12.0,
+    }
+    # Only a track actually being fetched, with no size yet, may pulse.
+    assert _applied("downloading") == {"total": None}
+
+
 def test_the_status_line_says_what_is_happening() -> None:
     line = make_status_line(
         {
@@ -281,7 +317,11 @@ async def test_the_queue_panel_fills_from_broadcaster_events(monkeypatch) -> Non
 
         row = next(iter(queue._rows.values()))
         assert "Fake Song" in str(row._label.content)
-        assert "✓" in str(row._label.content)
+        # The outcome lives in the badge, MovieBox-style: a short label on a
+        # solid colour, next to the title rather than crammed into it.
+        assert "DONE" in str(row._badge.content)
+        assert row._badge.has_class("badge-success")
+        assert row.has_class("completed")
 
         # The run's console output ends up in the log pane, which the run
         # itself reveals — there is nowhere else for it to go.

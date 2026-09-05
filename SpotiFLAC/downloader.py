@@ -177,7 +177,7 @@ class DownloadOptions:
 
     enrich_metadata: bool = True
     # SoundCloud isn't checked by default — still selectable (GUI checklist,
-    # --enrich-providers, the interactive wizard), just opt-in now.
+    # --enrich-providers, the terminal UI), just opt-in now.
     enrich_providers: list[str] = field(
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"],
     )

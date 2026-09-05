@@ -1007,25 +1007,12 @@ class SpotiFLAC_API(
             stripped = url.strip()
             is_url = stripped.startswith(("http", "spotify:"))
 
-            if is_url:
-                # ── Scelta client in base al dominio ───────────────────────────
-                if url_host_matches(url, "tidal.com"):
-                    from .core.tidal_metadata import TidalMetadataClient
+            # Domain → client. Shared with the terminal UI's track picker
+            # via core/tracklist.py: a provider added to one mapping and not
+            # the other is a link that works in one window and not the other.
+            from .core.tracklist import metadata_client_for
 
-                    client = TidalMetadataClient()
-                elif url_host_matches(url, "music.apple.com"):
-                    from .core.apple_music_metadata import AppleMusicMetadataClient
-
-                    client = AppleMusicMetadataClient()
-                else:
-                    from .core.spotify_metadata import SpotifyMetadataClient
-
-                    client = SpotifyMetadataClient()
-            else:
-                # ── Text search — always SpotifyMetadataClient ─────────────
-                from .core.spotify_metadata import SpotifyMetadataClient
-
-                client = SpotifyMetadataClient()
+            client = metadata_client_for(url)
             if not is_url:
                 self.log("Text search: use search_provider_async.", "error")
                 self.set_progress("")

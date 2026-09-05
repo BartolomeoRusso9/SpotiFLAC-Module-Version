@@ -82,7 +82,7 @@ class ExtensionHealthMixin:
         Settings used to render a list of twelve providers compiled into
         app.js, whatever was installed: a fresh install offered sources that
         could only fail, and a third-party extension appeared nowhere. This
-        is the same call the interactive wizard makes
+        is the same call the terminal UI makes
         (`extensions/catalog.installed_download_services`), so the two menus
         cannot drift apart.
 

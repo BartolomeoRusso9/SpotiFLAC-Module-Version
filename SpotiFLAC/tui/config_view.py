@@ -37,6 +37,7 @@ from textual.widgets import (
 )
 
 from ..core.transcode import TRANSCODE_CHOICES
+from .branding import quality_badge
 from ..extensions.catalog import installed_service_ids
 from .config_state import (
     ENRICH_PROVIDERS,
@@ -158,13 +159,26 @@ class ConfigPanel(VerticalScroll):
             )
 
         with Collapsible(title="Providers & quality", collapsed=False):
+            installed = installed_service_ids()
             yield Label("Providers, in order of preference", classes="setting-label")
             yield SelectionList[str](
                 *[
                     (service, service, service in state.services)
-                    for service in installed_service_ids()
+                    for service in installed
                 ],
                 id=_field_id("services"),
+            )
+            # "None selected" and "none installed" need different advice, and
+            # only the second one is a dead end: the wizard used to refuse to
+            # start at all here, which was right — an empty provider list is
+            # not a choice the user got wrong, it is a setup step they have
+            # not done. Saying where to do it is the useful half.
+            yield Label(
+                "No download provider is installed — add a registry in the "
+                "Extensions panel, or run spotiflac --help for the registry "
+                "flags.",
+                id="no-providers",
+                classes="blocking",
             )
             yield Row(
                 "Quality",
@@ -175,6 +189,10 @@ class ConfigPanel(VerticalScroll):
                     id=_field_id("quality"),
                 ),
             )
+            # The chosen tier, as MovieBox shows a resolution: a short label
+            # on a solid colour, so the most consequential setting on this
+            # screen is legible without reading the dropdown.
+            yield Label("", id="quality-badge", markup=False)
             yield Row(
                 "Allow quality fallback",
                 Switch(value=state.allow_fallback, id=_field_id("allow_fallback")),
@@ -416,6 +434,7 @@ class ConfigPanel(VerticalScroll):
 
     def on_mount(self) -> None:
         self._refresh_dependencies()
+        self.query_one("#no-providers", Label).display = not installed_service_ids()
 
     # ------------------------------------------------------------------
     # Binding
@@ -533,7 +552,24 @@ class ConfigPanel(VerticalScroll):
             state.post_download_action == "command",
         )
 
+        self._show_quality_badge()
         self._show_problems()
+
+    def _show_quality_badge(self) -> None:
+        try:
+            badge = self.query_one("#quality-badge", Label)
+        except Exception:
+            return
+        text, css = quality_badge(self.state.quality)
+        badge.update(text)
+        for candidate in (
+            "badge-gold",
+            "badge-sapphire",
+            "badge-teal",
+            "badge-lavender",
+            "badge-muted",
+        ):
+            badge.set_class(candidate == css, candidate)
 
     def _show_problems(self) -> None:
         try:
@@ -541,6 +577,13 @@ class ConfigPanel(VerticalScroll):
         except Exception:
             return
         problems = self.state.missing_requirements()
+        if not installed_service_ids():
+            banner.update(
+                "No download provider is installed — nothing can be fetched "
+                "until a registry is configured.",
+            )
+            banner.add_class("blocking")
+            return
         if problems:
             banner.update("Still needed: " + ", ".join(problems))
             banner.add_class("blocking")

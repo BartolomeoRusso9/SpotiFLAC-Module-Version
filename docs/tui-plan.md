@@ -23,7 +23,7 @@ Righe di codice citate: verificate sul branch `3.9.1`.
 | 6.1 · Estrarre gli helper | **fatta** |
 | 6.2 · Ripuntare i test | **fatta** |
 | 6.3 · Deprecare | **fatta** — `--interactive` avvisa e apre `--tui` |
-| 6.4 · Rimuovere `interactive.py` | **da fare, una release dopo** |
+| 6.4 · Rimuovere `interactive.py` | **fatta** — il file non esiste più |
 
 Fuori dal piano ma emerso strada facendo:
 
@@ -36,9 +36,16 @@ Fuori dal piano ma emerso strada facendo:
 - `format_command()` raggruppa i flag con i loro valori invece di una riga per
   token: il wizard lo stampava una volta, la TUI lo ridisegna di continuo.
 
-Ancora scoperto rispetto alla §10: la selezione di singoli brani prima del
-download (la `DataTable` con selezione multipla a spazio). Oggi la TUI scarica
-l'URL intero, come la CLI; sceglierne una parte resta cosa da GUI.
+La §10 è coperta: il pannello **Tracks** è la `DataTable` con selezione
+multipla a spazio. La logica sta in `core/tracklist.py`, condivisa con la GUI
+— selezionare tutto restituisce l'URL della raccolta (una sola risoluzione,
+ordinamento e numerazione dell'album intatti), selezionarne una parte
+restituisce la lista dei link per traccia. `_run_download_async` accetta
+entrambi, ed è ciò che rende possibili tutte e due le strade.
+
+Anche la grafica è stata rifatta sul riferimento MovieBox: wordmark
+ANSI-Shadow, bordi arrotondati, titoli `✦  Nome` con tag d'accento, badge a
+fondo pieno, hint `[key] action`, i 9 temi con Mocha di default.
 
 ---
 

@@ -17,6 +17,8 @@ from textual.containers import Center, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
+from .branding import key_hint, panel_tag, panel_title
+
 #: (key, what it does). Kept as data so the screen and any future cheat-sheet
 #: cannot disagree about what is bound.
 KEYS: tuple[tuple[str, str], ...] = (
@@ -51,11 +53,17 @@ class HelpScreen(ModalScreen[None]):
     ]
 
     def compose(self) -> ComposeResult:
-        rows = "\n".join(f"  {key:<18}{what}" for key, what in KEYS)
+        # `[Ctrl+R] Run`, the same shape as the bar along the bottom — the
+        # help should teach the notation it is already using at you.
+        rows = "\n".join(
+            f"  {key_hint(key):<20}{what}" for key, what in KEYS
+        )
         with Center():
-            with VerticalScroll(id="help-box"):
-                yield Static("Keys", classes="help-heading")
-                yield Static(rows, classes="help-keys")
+            with VerticalScroll(id="help-box") as box:
+                box.border_title = panel_title("Keys")
+                box.border_subtitle = panel_tag("Esc to close")
+                # markup=False: every line here contains square brackets,
+                # which Textual would otherwise read as markup tags.
+                yield Static(rows, classes="help-keys", markup=False)
                 yield Static("Worth knowing", classes="help-heading")
                 yield Static(_NOTES, classes="help-notes")
-                yield Static("Esc or ? to close", classes="help-footer")

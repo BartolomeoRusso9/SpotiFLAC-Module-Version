@@ -1,9 +1,9 @@
 """config_state.py — Everything `--tui` needs to ask, as state rather than steps.
 
-The wizard in `interactive.py` is a sequence: ask a question, branch on the
-answer, ask the next one. That shape is why answering it takes fifteen
-screens and why going back means starting over — and it is the reason a
-straight port would have been the wrong move. Here the same ~40 settings are
+The wizard this replaced was a sequence: ask a question, branch on the
+answer, ask the next one. That shape is why answering it took fifteen screens
+and why going back meant starting over — and it is the reason a straight port
+would have been the wrong move. Here the same ~40 settings are
 one dataclass that is always complete and always valid, and the screen is a
 view onto it: change a field and every dependent field settles at once, in
 any order, as many times as you like.

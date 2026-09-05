@@ -1,8 +1,8 @@
 """cli_preview.py — The command line a configuration is equivalent to.
 
-Born inside the interactive wizard, which printed it as a parting gift: the
-wizard is fifteen questions, and the CLI does the same run in one line that
-can be scripted, scheduled, or pasted into an issue. Printing the equivalent
+Born inside the guided mode, which printed it as a parting gift: the guided
+mode is fifteen questions, and the CLI does the same run in one line that can
+be scripted, scheduled, or pasted into an issue. Showing the equivalent
 command is how somebody graduates from the one to the other.
 
 It lives here rather than in a frontend because the TUI shows the same thing

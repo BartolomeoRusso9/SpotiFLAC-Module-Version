@@ -10,11 +10,10 @@ guided modes can now be awaited in the same loop instead of opening a new
 one each time.
 
 === Guided mode ===
-`--tui` is it. `--interactive` still parses, warns, and opens the same
-screen; `SpotiFLAC/interactive.py` is no longer reachable from here and goes
-away a release from now. A terminal that cannot host the TUI should use the
-command line, which is better suited to that anyway — there is deliberately
-no second wizard to fall back to.
+`--tui` is it. `--interactive` still parses and still warns, but it opens the
+same screen: the old wizard is gone. A terminal that cannot host the TUI
+should use the command line, which is better suited to that anyway — there is
+deliberately no second wizard to fall back to.
 """
 
 from __future__ import annotations
@@ -199,10 +198,10 @@ def _print_welcome_banner() -> None:
     core/console._write already goes to stderr; this was the one thing that
     didn't.
 
-    Shown for every launch mode (CLI, --interactive, --gui, --web) since it
+    Shown for every launch mode (CLI, --tui, --gui, --web) since it
     runs as the very first thing in amain(), before any mode-specific setup.
     Colors and links are skipped for non-tty output (piped/redirected) or when
-    NO_COLOR is set, matching the convention used elsewhere (interactive.py).
+    NO_COLOR is set, matching the convention used elsewhere.
     """
     if "--json" in sys.argv:
         return
@@ -668,7 +667,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "*failed* tracks for a bounded time after one session), --watch "
         "re-runs the whole sync indefinitely. Combine both if you want "
         "each cycle to also retry transient failures. Not available in "
-        "--interactive mode. Does NOT cover Spotify 'Liked Songs' — that "
+        "the terminal UI. Does NOT cover Spotify 'Liked Songs' — that "
         "needs an authenticated Spotify session, which this project "
         "deliberately doesn't implement (see the 'no-account' design goal "
         "in the README); point --watch at a public playlist/album/artist "
@@ -1772,10 +1771,10 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
             # These are CLI-only flags, and `args` does not exist yet on
             # this path — it is parsed further down, in the branch this
             # one returns before reaching, so reading it here raised
-            # NameError as soon as an interactive run started
-            # downloading. The wizard does not ask about any of them, so
-            # the interactive defaults are simply "off"; cfg.get() leaves
-            # room for it to start asking.
+            # NameError as soon as a guided run started downloading.
+            # The guided mode does not ask about any of them, so its
+            # defaults are simply "off"; cfg.get() leaves room for it to
+            # start asking.
             json_report=cfg.get("json_report", False),
             library_type=cfg.get("library_type"),
             library_url=cfg.get("library_url"),
@@ -1789,7 +1788,7 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
             max_concurrent_downloads=cfg.get("max_concurrent_downloads", 2),
             verify_hires=cfg.get("verify_hires", False),
             # The wizard takes a .csv where it takes a link (see
-            # interactive.py's URL step); everything after that point is
+            # the TUI's Source panel); everything after that point is
             # the same run.
             csv_path=cfg.get("csv_path") or None,
         )
@@ -1801,7 +1800,7 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
 
 
 async def amain() -> None:
-    """Coordinate GUI, interactive, and command-line execution for SpotiFLAC.
+    """Coordinate GUI, terminal-UI, and command-line execution for SpotiFLAC.
 
     Handles startup checks, extension installation, configuration loading, profile management, argument parsing, and download execution across the supported application modes.
     """

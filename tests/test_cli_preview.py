@@ -1,11 +1,10 @@
 """The "equivalent CLI command" builder.
 
-It began as `interactive._print_cli_command`, shown at the end of the wizard;
-it now lives in `core/cli_preview.py`, where the TUI renders it as a panel
-that updates while the options change and the wizard still prints it. This
-tests the builder rather than either frontend's way of showing it, so it says
-nothing about how a run was configured — only about what the configuration
-would look like as a command.
+It began as `interactive._print_cli_command`, shown once at the end of the
+wizard; it lives in `core/cli_preview.py` now, and the TUI renders it as a
+panel that updates while the options change. This tests the builder rather
+than any frontend's way of showing it, so it says nothing about how a run was
+configured — only about what the configuration would look like as a command.
 """
 
 from __future__ import annotations
@@ -71,12 +70,3 @@ def test_the_rendered_command_still_parses_as_a_shell_line() -> None:
     assert shlex.split(rendered.replace("\\\n", " ")) == build_command_parts(
         dict(_BASE_CFG, post_download_command="echo 'a b'"),
     )
-
-
-def test_the_wizard_still_prints_what_the_builder_produces(capsys) -> None:
-    """One release left: the wizard's printer must stay in step."""
-    from SpotiFLAC import interactive
-
-    cfg = dict(_BASE_CFG, watch=60)
-    interactive._print_cli_command(cfg)
-    assert format_command(cfg) in capsys.readouterr().out

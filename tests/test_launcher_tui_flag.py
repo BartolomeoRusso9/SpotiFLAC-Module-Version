@@ -1,10 +1,10 @@
 """`--tui`, and `--interactive` as its deprecated alias.
 
-The wizard is gone from the launcher: `--interactive` now opens the terminal
-UI and says so. These tests drive the real branch in `launcher.amain()`
-rather than a copy of the condition, so they still hold if the dispatch
-moves — and they are the thing that would catch the alias quietly ceasing to
-warn, which is the whole substance of a deprecation.
+The wizard is gone: `--interactive` now opens the terminal UI and says so.
+These tests drive the real branch in `launcher.amain()` rather than a copy of
+the condition, so they still hold if the dispatch moves — and they are the
+thing that would catch the alias quietly ceasing to warn, which is the whole
+substance of a deprecation.
 """
 
 from __future__ import annotations
@@ -119,19 +119,21 @@ def test_tui_alone_does_not_warn(run_launcher) -> None:
     assert not [w for w in raised if w.category is DeprecationWarning]
 
 
-def test_the_wizard_is_no_longer_reachable_from_the_launcher() -> None:
-    """`interactive.py` survives one more release, but nothing routes to it."""
+def test_the_wizard_is_gone() -> None:
+    """`SpotiFLAC/interactive.py` was deleted, not merely bypassed.
+
+    `--interactive` still parses and still warns — that is the deprecation —
+    but there is no second guided frontend behind it any more, which was the
+    whole point of the exercise.
+    """
+    import importlib.util
+
+    assert importlib.util.find_spec("SpotiFLAC.interactive") is None
+
     import ast
     import inspect
 
     tree = ast.parse(inspect.getsource(launcher))
-    called = {
-        node.func.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    }
-    assert "run_interactive" not in called
-
     imported = {
         alias.name
         for node in ast.walk(tree)
