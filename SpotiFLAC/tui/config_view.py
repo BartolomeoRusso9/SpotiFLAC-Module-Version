@@ -40,6 +40,7 @@ from ..core.transcode import TRANSCODE_CHOICES
 from .branding import quality_badge
 from ..extensions.catalog import installed_service_ids
 from .config_state import (
+    ATMOS_PROVIDER,
     ENRICH_PROVIDERS,
     LYRICS_PROVIDERS,
     POST_DOWNLOAD_ACTIONS,
@@ -49,15 +50,30 @@ from .config_state import (
 
 _FIELD_PREFIX = "cfg-"
 
-#: Canonical tiers, best first, with what each one actually means.
-QUALITY_CHOICES: tuple[tuple[str, str], ...] = (
-    ("Hi-Res Lossless — best available anywhere", "HI_RES_LOSSLESS"),
-    ("Hi-Res — 24-bit where the provider has it", "HI_RES"),
-    ("Lossless — CD quality FLAC/ALAC", "LOSSLESS"),
-    ("Dolby Atmos — Tidal only", "DOLBY_ATMOS"),
-    ("High — lossy, largest", "HIGH"),
-    ("Low — lossy, smallest", "LOW"),
-)
+#: The three tiers worth choosing between, best first. Labels only — the
+#: values come from `config_state.QUALITY_TIERS`, so the menu cannot drift
+#: from what the state will accept.
+QUALITY_LABELS: dict[str, str] = {
+    "HI_RES_LOSSLESS": "Hi-Res Lossless — best available anywhere",
+    "LOSSLESS": "Lossless — CD quality FLAC/ALAC",
+    "DOLBY_ATMOS": "Dolby Atmos — Tidal only",
+}
+
+
+def quality_choices(services: list[str]) -> list[tuple[str, str]]:
+    """The tiers to offer, given the providers currently picked.
+
+    Atmos is dropped when Tidal is not among them: no other provider serves
+    it, so offering it would promise something nothing can deliver. With
+    Tidal present it stays, and the providers alongside Tidal quietly get
+    their best lossless instead — which is what the command line already
+    does, in `core.quality.quality_for_provider`.
+    """
+    return [
+        (QUALITY_LABELS[tier], tier)
+        for tier in ("HI_RES_LOSSLESS", "LOSSLESS", "DOLBY_ATMOS")
+        if tier != "DOLBY_ATMOS" or ATMOS_PROVIDER in services
+    ]
 
 #: Fields whose value is an int, so the Input has to be parsed rather than
 #: assigned. A blank one means "unset", which for `loop`/`watch` is None and
@@ -183,8 +199,8 @@ class ConfigPanel(VerticalScroll):
             yield Row(
                 "Quality",
                 Select(
-                    QUALITY_CHOICES,
-                    value=state.quality,
+                    quality_choices(state.services),
+                    value=state.normalized().quality,
                     allow_blank=False,
                     id=_field_id("quality"),
                 ),
@@ -552,8 +568,29 @@ class ConfigPanel(VerticalScroll):
             state.post_download_action == "command",
         )
 
+        self._refresh_quality_choices()
         self._show_quality_badge()
         self._show_problems()
+
+    def _refresh_quality_choices(self) -> None:
+        """Adds or removes Atmos as Tidal is picked or dropped."""
+        try:
+            select = self.query_one(_field_id_selector("quality"), Select)
+        except Exception:
+            return
+
+        wanted = quality_choices(self.state.services)
+        if [value for _label, value in wanted] == [
+            value for _label, value in select._options if value is not Select.BLANK
+        ]:
+            return
+
+        # Rebuilding clears the selection, so the state decides what it
+        # becomes — and the state has already dropped Atmos if Tidal went.
+        chosen = self.state.normalized().quality
+        select.set_options(wanted)
+        select.value = chosen
+        self.state.quality = chosen
 
     def _show_quality_badge(self) -> None:
         try:

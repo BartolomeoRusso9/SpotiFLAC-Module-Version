@@ -17,7 +17,8 @@ from textual.app import ComposeResult
 from textual.containers import Container
 from textual.widgets import Static
 
-from .branding import hint_bar, subtitle, wordmark_for
+from .branding import TAGLINE as TAGLINE_ONLY
+from .branding import hint_bar, hint_bar_markup, version, wordmark_for
 
 #: Hints, most important first — the tail is what gets dropped when narrow.
 DEFAULT_HINTS: tuple[tuple[str, str], ...] = (
@@ -36,7 +37,7 @@ class Banner(Container):
 
     def compose(self) -> ComposeResult:
         yield Static("", id="wordmark")
-        yield Static(subtitle(), id="wordmark-subtitle")
+        yield Static("", id="wordmark-subtitle")
 
     def on_mount(self) -> None:
         self._redraw()
@@ -53,6 +54,9 @@ class Banner(Container):
         rows = len(art.split("\n"))
 
         self.query_one("#wordmark", Static).update(art)
+        self.query_one("#wordmark-subtitle", Static).update(
+            self._subtitle_for(art, self.size.width or 80),
+        )
         # +1 for the subtitle, +1 for the container's own top padding — leave
         # the second one out and the subtitle is the row that gets clipped.
         # Sized here rather than in CSS because the art is the only thing that
@@ -61,13 +65,34 @@ class Banner(Container):
         self.set_class(rows == 1, "banner-plain")
 
 
+    @staticmethod
+    def _subtitle_for(art: str, width: int) -> str:
+        """The version, hung off the wordmark's right edge.
+
+        MovieBox tucks `v0.1.13` under the last letter rather than centring
+        it, which is what stops the two lines reading as one centred block
+        with a stray number in it. Reproduced by padding rather than by
+        alignment, because the wordmark is centred and only its own width
+        says where its right edge fell.
+        """
+        released = version()
+        if not released:
+            return TAGLINE_ONLY
+
+        art_width = max(len(line) for line in art.split("\n"))
+        if art_width <= 1 or art_width >= width:
+            return f"v{released}  ·  {TAGLINE_ONLY}"
+
+        left_margin = (width - art_width) // 2
+        label = f"v{released}"
+        pad = max(0, left_margin + art_width - len(label))
+        return " " * pad + label
+
+
 class HintBar(Static):
     """``[Ctrl+R] Run   [/] Search   …`` along the bottom."""
 
     def __init__(self, hints: tuple[tuple[str, str], ...] = DEFAULT_HINTS, **kwargs):
-        # markup=False is load-bearing: a hint is literally `[/] Search`, and
-        # Textual reads square brackets as markup — `[/]` is its close-tag.
-        kwargs.setdefault("markup", False)
         super().__init__("", **kwargs)
         self._hints = hints
 
@@ -80,8 +105,9 @@ class HintBar(Static):
     def _redraw(self) -> None:
         width = self.size.width or 80
         hints = list(self._hints)
-        # Drop from the right until it fits: the leftmost hints are the ones
-        # someone actually needs, and a truncated hint helps nobody.
+        # Measured on the plain form and rendered as markup: the colour codes
+        # take no columns, so measuring the marked-up string would drop hints
+        # that fit perfectly well.
         while hints and len(hint_bar(*hints)) > width - 2:
             hints.pop()
-        self.update(hint_bar(*hints))
+        self.update(hint_bar_markup(*hints))

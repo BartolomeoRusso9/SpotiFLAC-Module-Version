@@ -107,6 +107,10 @@ def wordmark_height(width: int, height: int = 24, *, plain: bool | None = None) 
 _RULE = ("─", "-")
 _MARK = ("✦", "*")
 _POINTER = ("·", "-")
+#: The filled dot on the live pane's title.
+_FOCUS_MARK = ("●", "*")
+#: The bar down the left of the selected row.
+_SELECTION_BAR = ("▎", ">")
 
 
 def glyph(fancy: str, fallback: str, *, plain: bool | None = None) -> str:
@@ -115,15 +119,32 @@ def glyph(fancy: str, fallback: str, *, plain: bool | None = None) -> str:
     return fallback if plain else fancy
 
 
-def panel_title(text: str, *, plain: bool | None = None) -> str:
-    """``✦  Providers`` — a border title that reads as deliberate.
+def panel_title(
+    text: str,
+    *facts: str,
+    focused: bool = False,
+    plain: bool | None = None,
+) -> str:
+    """``● Streams · 2 available`` — a title that says which pane is live.
 
-    MovieBox writes ``─ ✦  Name`` because ratatui drops a title onto the
-    border line at the corner, so the leading rule continues the box. Textual
-    insets its titles and draws the rule on both sides already; repeating it
-    here only produced ``╭─ ─ ✦  Name ─╮``.
+    MovieBox writes its panel titles as a marker, a name, and then whatever
+    is worth knowing about the contents, `·`-separated: how many there are,
+    which one you are on. The marker is the part that carries focus — the
+    live pane gets a filled dot, the others lose it and go dim — so you can
+    tell where the keyboard is pointing without hunting for a highlight.
+
+    No leading rule, unlike MovieBox: ratatui drops a title onto the border
+    line at the corner so a leading ``─`` continues the box, while Textual
+    insets its titles and draws the rule on both sides already. Repeating it
+    produced ``╭─ ─ ✦  Name ─╮``.
     """
-    return f"{glyph(*_MARK, plain=plain)}  {text}"
+    parts = " · ".join([text, *[fact for fact in facts if fact]])
+    if not focused:
+        # No marker at all, not a blank one: MovieBox's idle titles start at
+        # the name, and a placeholder space would leave `─   Audio` sitting
+        # oddly far from the corner.
+        return parts
+    return f"{glyph(*_FOCUS_MARK, plain=plain)} {parts}"
 
 
 def panel_tag(command: str) -> str:
@@ -206,12 +227,34 @@ def badge_text(label: str, *, plain: bool | None = None) -> str:
 
 
 def key_hint(key: str, action: str = "") -> str:
-    """``[Ctrl+R] Run`` — MovieBox's footer idiom."""
+    """``[Ctrl+R] Run`` as plain text — for measuring, and for plain mode."""
     return f"[{key}]" if not action else f"[{key}] {action}"
+
+
+def key_hint_markup(key: str, action: str = "") -> str:
+    """The same, with the key picked out in the accent colour.
+
+    MovieBox colours the bracketed key and leaves the verb dim, which is what
+    makes a row of eight hints scannable instead of a wall of grey. The
+    brackets are escaped because Textual reads them as markup otherwise.
+    """
+    if plain_terminal():
+        return key_hint(key, action)
+    lit = f"[$warning]\\[{key}][/]"
+    return lit if not action else f"{lit} {action}"
 
 
 def hint_bar(*pairs: tuple[str, str], separator: str = "   ") -> str:
     return separator.join(key_hint(key, action) for key, action in pairs)
+
+
+def hint_bar_markup(*pairs: tuple[str, str], separator: str = "   ") -> str:
+    return separator.join(key_hint_markup(key, action) for key, action in pairs)
+
+
+def selection_bar(*, plain: bool | None = None) -> str:
+    """The bar MovieBox draws down the left of the row you are on."""
+    return glyph(*_SELECTION_BAR, plain=plain)
 
 
 # ---------------------------------------------------------------------------

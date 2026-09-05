@@ -235,7 +235,9 @@ async def test_starting_a_run_without_the_essentials_says_what_is_missing() -> N
 
         status = str(pilot.app.query_one("#status").content)
         assert "Cannot start" in status
-        assert "a destination folder" in status
+        assert "a URL or a CSV track list" in status
+        # Not the folder: that one has a default, so it is never missing.
+        assert "a destination folder" not in status
         assert pilot.app._download_running is False
 
 

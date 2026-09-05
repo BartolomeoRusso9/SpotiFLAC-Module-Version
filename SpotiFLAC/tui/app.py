@@ -25,7 +25,6 @@ those lines would land on the terminal underneath and tear the layout.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from textual import on
@@ -43,6 +42,7 @@ from textual.widgets import (
 )
 
 from .banner import Banner, HintBar
+from ..core.paths import default_download_dir
 from .branding import notice, panel_tag, panel_title, pointer
 
 from .config_state import ConfigState
@@ -96,7 +96,9 @@ PANEL_TITLES: dict[str, tuple[str, str]] = {
     "command": ("Equivalent command", "copy me"),
 }
 
-DEFAULT_OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
+#: `~/Music/SpotiFLAC`, from `core.paths` so the desktop window and this
+#: agree. Two frontends with two defaults is two libraries on one machine.
+DEFAULT_OUTPUT_DIR = default_download_dir()
 
 
 class SpotiFLACTui(App[None]):
@@ -109,7 +111,10 @@ class SpotiFLACTui(App[None]):
     BINDINGS = [
         Binding("ctrl+r", "start_download", "Run", priority=True),
         Binding("ctrl+c", "stop_download", "Stop", priority=True),
-        Binding("ctrl+l", "toggle_log", "Log"),
+        # priority: a focused widget must never be able to swallow this.
+        # Safe here in a way `j`/`q`/`t` are not — Ctrl+L types nothing.
+        Binding("ctrl+l", "toggle_log", "Log", priority=True),
+        Binding("escape", "close_log", "Close log", show=False),
         Binding("slash", "search", "Search"),
         Binding("question_mark", "help", "Help"),
         Binding("t", "cycle_theme", "Theme", show=False),
@@ -125,7 +130,7 @@ class SpotiFLACTui(App[None]):
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.state = state or ConfigState(output_dir=DEFAULT_OUTPUT_DIR)
+        self.state = state or ConfigState()
         # Forwarded from --min-trust-tier: without it, an install started
         # from the Extensions panel would fall back to $SPOTIFLAC_MIN_TRUST
         # and ignore what the operator typed on this very command line.
@@ -135,6 +140,8 @@ class SpotiFLACTui(App[None]):
         # running" and sets it True on startup, so a guard reading it would
         # have refused every download and every quit.
         self._download_running = False
+        #: Severity words waiting for their toast widget to mount.
+        self._pending_toast_labels: list[str] = []
 
     # ------------------------------------------------------------------
     # Layout
@@ -175,44 +182,71 @@ class SpotiFLACTui(App[None]):
         self.query_one("#sidebar", ListView).index = 0
         self._refresh_command_panel()
         self._set_status("Pick a URL and press Ctrl+R.", "info")
-        self.run_worker(self._restore_last_folder(), exclusive=False)
+
 
     def _decorate_panels(self) -> None:
-        """Gives every card MovieBox's title: a mark on the left, a tag right."""
-        self.query_one("#sidebar").border_title = panel_title("Modes")
+        """Gives every card MovieBox's title: a marker, a name, a tag right."""
         self.query_one("#log-pane").border_title = panel_title("Log")
-        for panel_id, (title, tag) in PANEL_TITLES.items():
+        for panel_id, (_title, tag) in PANEL_TITLES.items():
             try:
                 panel = self.query_one(f"#{panel_id}")
             except Exception:
                 continue
-            panel.border_title = panel_title(title)
             panel.border_subtitle = panel_tag(tag)
+        self._refresh_panel_markers()
 
-    async def _restore_last_folder(self) -> None:
-        """Offers last run's folder, the way the wizard pre-filled it.
+    def _panel_facts(self, panel_id: str) -> list[str]:
+        """What is worth putting in a pane's title besides its name."""
+        try:
+            if panel_id == "tracks":
+                tracks = self.query_one("#tracks", TracklistPanel)
+                if tracks.has_selection:
+                    chosen = len(tracks.selected_indices())
+                    return [f"{chosen}/{len(tracks.tracklist)}"]
+            elif panel_id == "download":
+                return [] if self.state.is_runnable else ["not ready"]
+            elif panel_id == "queue":
+                queue = self.query_one("#queue", QueuePanel)
+                if queue._rows:
+                    return [f"{len(queue._rows)} track(s)"]
+        except Exception:
+            return []
+        return []
 
-        Best-effort by design: session memory is a convenience, and a missing
-        or unreadable one is not worth a message — the default is already a
-        sensible place for music to land.
+    def _refresh_panel_markers(self) -> None:
+        """Fills the dot on whichever pane the keyboard is pointing at.
+
+        Called on every focus change, which sounds expensive and is not: it
+        rewrites at most nine short strings, and the alternative — a
+        highlight you have to go looking for — is the thing MovieBox's filled
+        dot exists to avoid.
         """
-        if self.state.output_dir != DEFAULT_OUTPUT_DIR:
-            return
-        try:
-            from ..core.session_memory import get_last_folder_async
+        focused = self.focused
+        for panel_id, (title, _tag) in PANEL_TITLES.items():
+            try:
+                panel = self.query_one(f"#{panel_id}")
+            except Exception:
+                continue
+            live = focused is not None and (
+                focused is panel or panel in focused.ancestors
+            )
+            panel.border_title = panel_title(
+                title,
+                *self._panel_facts(panel_id),
+                focused=live,
+            )
 
-            folder = await get_last_folder_async()
+        try:
+            sidebar = self.query_one("#sidebar", ListView)
         except Exception:
             return
-        if not folder:
-            return
-        self.state.output_dir = folder
-        try:
-            from textual.widgets import Input
+        sidebar.border_title = panel_title("Modes", focused=focused is sidebar)
 
-            self.query_one("#cfg-output_dir", Input).value = folder
-        except Exception:
-            pass
+    def on_descendant_focus(self) -> None:
+        self._refresh_panel_markers()
+
+    def on_descendant_blur(self) -> None:
+        self._refresh_panel_markers()
 
     # ------------------------------------------------------------------
     # Navigation
@@ -241,6 +275,9 @@ class SpotiFLACTui(App[None]):
             self._set_status(
                 f"{event.selected} of {event.total} tracks — Ctrl+R to start.",
             )
+        # The count lives in the pane's title too, so it stays visible once
+        # you have moved on to another panel.
+        self._refresh_panel_markers()
         self._refresh_command_panel()
 
     @on(SessionPanel.UrlChosen)
@@ -258,7 +295,7 @@ class SpotiFLACTui(App[None]):
     def _adopt_search_result(self, event: SearchPanel.UrlChosen) -> None:
         self.query_one("#cfg-url", Input).value = event.url
         self._show_panel("download")
-        self._set_status(f"“{event.label}” is the target — Ctrl+R to start.", "success")
+        self._announce(f"“{event.label}” is the target — Ctrl+R to start.", "success")
 
     @on(SessionPanel.StateLoaded)
     async def _adopt_state(self, event: SessionPanel.StateLoaded) -> None:
@@ -276,7 +313,7 @@ class SpotiFLACTui(App[None]):
         self._show_panel("download")
         self._refresh_command_panel()
         name = event.state.profile_loaded or "profile"
-        self._set_status(f"Loaded {name}.", "success")
+        self._announce(f"Loaded {name}.", "success")
 
     def _show_panel(self, key: str) -> None:
         """Moves the sidebar, and lets its handler switch the panel.
@@ -324,13 +361,71 @@ class SpotiFLACTui(App[None]):
             ]
         panel.update("\n".join(lines) + "\n")
 
+    #: kind → what Textual calls that severity, and what MovieBox labels it.
+    _SEVERITIES = {
+        "info": ("information", "INFO"),
+        "success": ("information", "DONE"),
+        "warning": ("warning", "WARNING"),
+        "error": ("error", "ERROR"),
+    }
+
     def _set_status(self, text: str, kind: str = "info") -> None:
-        """One status line, marked the way MovieBox marks its toasts."""
+        """One status line, marked the way MovieBox marks its notices."""
         status = self.query_one("#status", Static)
         message, css = notice(kind, text)
         status.update(message)
         for candidate in ("notice-info", "notice-success", "notice-warning", "notice-error"):
             status.set_class(candidate == css, candidate)
+
+    def _toast(self, text: str, kind: str = "info", title: str = "") -> None:
+        """A notice that appears, is read, and goes away.
+
+        The status line says what is true right now — how a run is going,
+        what is still missing. A toast says what just happened. MovieBox
+        keeps the two apart and so does this: a message that scrolls the
+        standing state off the screen has cost you the thing you were
+        watching.
+        """
+        severity, label = self._SEVERITIES.get(kind, self._SEVERITIES["info"])
+        # No title on the notification itself: Textual renders it as the
+        # toast's first line, and it belongs on the border. Queued instead,
+        # to be claimed by the widget once it mounts.
+        self._pending_toast_labels.append(title or label)
+        self.notify(text, severity=severity, timeout=6)
+        self.call_after_refresh(self._label_toast_borders)
+
+    def _label_toast_borders(self) -> None:
+        """Moves a toast's severity from its first line onto its border.
+
+        Which is where MovieBox puts it, and it buys back a line in a box
+        that is three tall. Textual gives no hook for this — `ToastRack`
+        builds its `Toast` widgets itself — so this reaches for the widget
+        class from a private module and stops quietly if a future version
+        moves it. Failing here costs the border label and nothing else: the
+        toast still carries the message, the colour and the border that say
+        which kind it is.
+
+        Labels are handed out in the order they were queued, because toasts
+        mount in the order they were raised and the widget carries nothing
+        that would tell `DONE` from `INFO` — Textual has one severity for
+        both.
+        """
+        try:
+            from textual.widgets._toast import Toast
+        except Exception:
+            self._pending_toast_labels.clear()
+            return
+        if not self._pending_toast_labels:
+            return
+        for toast in self.screen.query(Toast):
+            if toast.border_title or not self._pending_toast_labels:
+                continue
+            toast.border_title = self._pending_toast_labels.pop(0)
+
+    def _announce(self, text: str, kind: str = "info") -> None:
+        """Says it in both places: it is both news and the current state."""
+        self._set_status(text, kind)
+        self._toast(text, kind)
 
     def _write_log(self, line: str, severity: str = "") -> None:
         self.query_one("#log", RichLog).write(line)
@@ -340,8 +435,33 @@ class SpotiFLACTui(App[None]):
     # ------------------------------------------------------------------
 
     def action_toggle_log(self) -> None:
+        self._set_log_visible(not self.query_one("#log-pane").display)
+
+    def action_close_log(self) -> None:
+        """Esc closes it, for when Ctrl+L is spoken for elsewhere.
+
+        Terminal multiplexers and a few terminals claim Ctrl+L for their own
+        clear-screen, and a pane you can open but not close is worse than no
+        pane at all.
+        """
+        if self.query_one("#log-pane").display:
+            self._set_log_visible(False)
+
+    def _set_log_visible(self, visible: bool) -> None:
+        """Shows or hides the log, and never leaves the focus inside it.
+
+        Textual drops focus entirely when the focused widget is hidden, so
+        closing the log while reading it left nothing focused at all — no
+        cursor, no arrow keys, an interface that looks broken. Focus goes
+        back to the sidebar, which is somewhere you can always steer from.
+        """
         pane = self.query_one("#log-pane")
-        pane.display = not pane.display
+        focus_was_inside = self.focused is not None and (
+            self.focused is pane or pane in self.focused.ancestors
+        )
+        pane.display = visible
+        if not visible and focus_was_inside:
+            self.query_one("#sidebar", ListView).focus()
 
     def action_search(self) -> None:
         """`/` goes to the search box, wherever you were."""
@@ -366,7 +486,7 @@ class SpotiFLACTui(App[None]):
 
     def action_request_quit(self) -> None:
         if self._download_running:
-            self._set_status("A download is running — Ctrl+C stops it first.", "warning")
+            self._announce("A download is running — Ctrl+C stops it first.", "warning")
             return
         self.exit()
 
@@ -377,7 +497,7 @@ class SpotiFLACTui(App[None]):
 
         problems = self.state.missing_requirements()
         if problems:
-            self._set_status(
+            self._announce(
                 "Cannot start — still needed: " + ", ".join(problems),
                 "warning",
             )
@@ -386,7 +506,7 @@ class SpotiFLACTui(App[None]):
 
         tracks = self.query_one("#tracks", TracklistPanel)
         if tracks.has_selection and not tracks.selected_indices():
-            self._set_status(
+            self._announce(
                 "Nothing selected on the Tracks panel — pick at least one, "
                 "or press a for all.",
                 "warning",
@@ -397,7 +517,7 @@ class SpotiFLACTui(App[None]):
         self._download_running = True
         self.query_one("#queue", QueuePanel).reset()
         self._show_panel("queue")
-        self.query_one("#log-pane").display = True
+        self._set_log_visible(True)
         self._set_status("Starting…")
         self.run_worker(self._download(), exclusive=True, group="download")
 
@@ -407,7 +527,7 @@ class SpotiFLACTui(App[None]):
             return
         self.workers.cancel_group(self, "download")
         self._download_running = False
-        self._set_status("Stopped.", "warning")
+        self._announce("Stopped.", "warning")
 
     # ------------------------------------------------------------------
     # The run
@@ -458,7 +578,7 @@ class SpotiFLACTui(App[None]):
                     queue.apply_stats(payload)
                     self._set_status(_status_for(payload))
                 elif kind in (FINISHED, FAILED):
-                    self._set_status(
+                    self._announce(
                         _outcome_line(payload),
                         "error" if kind == FAILED else "success",
                     )
@@ -468,6 +588,13 @@ class SpotiFLACTui(App[None]):
             await self._remember_folder()
 
     async def _remember_folder(self) -> None:
+        """Records where this run landed, for the other frontends.
+
+        Not read back on the way in: `~/Music/SpotiFLAC` is the default and
+        stays the default, so a one-off download somewhere else does not
+        quietly become where everything goes next. The wizard's old
+        folder-memory did read it back, which is exactly the surprise.
+        """
         try:
             from ..core.session_memory import set_last_folder_async
 

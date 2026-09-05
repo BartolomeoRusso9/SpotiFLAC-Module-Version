@@ -28,6 +28,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..core.cli_preview import format_command, is_playlist_url
+from ..core.paths import default_download_dir
 from ..core.quality import normalize_quality
 from ..core.transcode import is_lossless
 
@@ -53,6 +54,19 @@ DEFAULT_LYRICS_PROVIDERS: tuple[str, ...] = ("apple", "lrclib")
 DEFAULT_ENRICH_PROVIDERS: tuple[str, ...] = ("deezer", "apple", "qobuz", "tidal")
 
 POST_DOWNLOAD_ACTIONS: tuple[str, ...] = ("none", "open_folder", "notify", "command")
+
+#: The tiers worth offering. The canonical list in `core/quality` has six,
+#: but three of them are not choices anyone should be making: HI_RES is a
+#: Qobuz-only spelling of the same thing, and HIGH/LOW are lossy tiers on a
+#: tool whose point is lossless. The wizard offered these three too.
+QUALITY_TIERS: tuple[str, ...] = ("LOSSLESS", "HI_RES_LOSSLESS", "DOLBY_ATMOS")
+
+#: Atmos is a Tidal-exclusive stream. `core.quality.quality_for_provider`
+#: already turns it into HI_RES_LOSSLESS for every other provider, so asking
+#: for it alongside Deezer is not an error — it just means "the best each one
+#: has". With Tidal absent altogether it means nothing at all, and the state
+#: settles it back to HI_RES_LOSSLESS rather than carrying a dead value.
+ATMOS_PROVIDER = "tidal"
 TRANSCODE_BITRATES: tuple[str, ...] = ("320k", "256k", "192k", "128k")
 
 DEFAULT_FILENAME_FORMAT = "{title} - {artist}"
@@ -73,7 +87,8 @@ class ConfigState:
     csv_path: str = ""
 
     # ── Where it lands ──────────────────────────────────────────────────
-    output_dir: str = ""
+    #: `~/Music/SpotiFLAC`, the same default the desktop window uses.
+    output_dir: str = field(default_factory=default_download_dir)
     output_path: str | None = None
 
     # ── Providers and quality ───────────────────────────────────────────
@@ -170,6 +185,16 @@ class ConfigState:
         return bool(self.csv_path)
 
     @property
+    def atmos_applies(self) -> bool:
+        """Whether Dolby Atmos is worth offering at all.
+
+        Only Tidal serves it. With Tidal among the providers the choice is
+        real — Tidal gets Atmos, the others get their best lossless — and
+        without it the option would be a lie.
+        """
+        return ATMOS_PROVIDER in self.services
+
+    @property
     def bitrate_applies(self) -> bool:
         """Only a lossy target reads a bitrate; for the rest it is a no-op."""
         return bool(self.transcode_to) and not is_lossless(self.transcode_to)
@@ -237,6 +262,15 @@ class ConfigState:
             state.url = ""
 
         state.quality = normalize_quality(state.quality)
+        if state.quality == "DOLBY_ATMOS" and ATMOS_PROVIDER not in state.services:
+            state.quality = "HI_RES_LOSSLESS"
+        if state.quality not in QUALITY_TIERS:
+            # HI_RES, HIGH and LOW can still arrive from a saved profile or
+            # a hand-edited config; they map onto the tier that means the
+            # same thing here rather than being offered back.
+            state.quality = (
+                "HI_RES_LOSSLESS" if state.quality == "HI_RES" else "LOSSLESS"
+            )
 
         # Numbering the files and filing them into folders are the two ways
         # of organising a library, and the wizard never offered both.

@@ -28,10 +28,17 @@ from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
 from .core.loop_runner import run_sync
 from .core.output_sink import CallbackLogHandler
-from .core.paths import adopt_legacy_cache_file, cache_dir, cache_path
+from .core.paths import (
+    adopt_legacy_cache_file,
+    cache_dir,
+    cache_path,
+    default_download_dir,
+)
 from .core.url_utils import url_host_matches
 
-DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
+#: One definition, shared with the terminal UI via core/paths, so the two
+#: frontends cannot default to different folders on the same machine.
+DEFAULT_DOWNLOAD_DIR = default_download_dir()
 
 # Opt-in required before the GUI/web bridge may run post_download_action
 # ="command" (see _post_command_allowed / _download_task).

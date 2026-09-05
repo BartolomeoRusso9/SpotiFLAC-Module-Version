@@ -32,7 +32,7 @@ Screen {
 
 #wordmark-subtitle {
     width: 100%;
-    text-align: center;
+    text-align: left;
     color: $text-muted;
 }
 
@@ -67,6 +67,8 @@ Screen {
     background: $panel;
     color: $text;
     text-style: bold;
+    border-left: thick $accent;
+    padding-left: 0;
 }
 
 #main {
@@ -84,6 +86,13 @@ Screen {
     border-subtitle-align: right;
     padding: 1 2;
     background: $surface;
+}
+
+/* The pane the keyboard is pointing at. MovieBox lights its border and
+   fills the dot in its title; the two together say it twice, which is the
+   point — a highlight you have to hunt for is not a highlight. */
+#panels > *:focus-within {
+    border: round $accent;
 }
 
 /* ── Settings form ─────────────────────────────────────────────────── */
@@ -275,6 +284,13 @@ DataTable > .datatable--cursor {
     text-style: bold;
 }
 
+OptionList > .option-list--option-highlighted,
+SelectionList > .option-list--option-highlighted {
+    background: $panel;
+    color: $text;
+    text-style: bold;
+}
+
 #history-list,
 #profile-list {
     max-height: 10;
@@ -388,4 +404,49 @@ CsvPickerScreen {
     height: auto;
     max-height: 24;
     border: round $panel-lighten-1;
+}
+
+/* ── Toasts ────────────────────────────────────────────────────────── */
+
+/* Textual's own notifications, restyled to MovieBox's: a bordered box in
+   the bottom-right corner, its severity named in the border's colour, the
+   message under it. Using the built-in rather than a hand-rolled rack buys
+   stacking, timeouts and click-to-dismiss for nothing. */
+
+Toast {
+    width: 44;
+    max-width: 50%;
+    padding: 0 1;
+    background: $surface;
+    border: round $primary;
+    border-title-align: left;
+}
+
+Toast .toast--title {
+    text-style: bold;
+    color: $text;
+}
+
+Toast.-information {
+    border: round $primary;
+}
+
+Toast.-information .toast--title {
+    color: $primary;
+}
+
+Toast.-warning {
+    border: round $warning;
+}
+
+Toast.-warning .toast--title {
+    color: $warning;
+}
+
+Toast.-error {
+    border: round $error;
+}
+
+Toast.-error .toast--title {
+    color: $error;
 }

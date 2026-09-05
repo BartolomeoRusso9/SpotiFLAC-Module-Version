@@ -96,11 +96,28 @@ def test_every_flourish_has_an_ascii_fallback() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_panel_title_carries_the_mark() -> None:
-    assert branding.panel_title("Queue", plain=False) == "✦  Queue"
+def test_a_panel_title_says_whether_its_pane_is_live() -> None:
+    """The dot is the marker MovieBox fills in on the focused pane."""
+    live = branding.panel_title("Queue", focused=True, plain=False)
+    idle = branding.panel_title("Queue", focused=False, plain=False)
+
+    assert live == "● Queue"
+    assert idle == "Queue", "an idle title starts at the name, not at a gap"
+
     # No leading rule: Textual draws its own on both sides, and repeating it
     # produced `╭─ ─ ✦  Queue ─╮`.
-    assert not branding.panel_title("Queue", plain=False).startswith("─")
+    assert not live.startswith("─")
+
+
+def test_a_panel_title_carries_what_is_worth_knowing() -> None:
+    """MovieBox puts the counts in the title, `·`-separated."""
+    assert branding.panel_title(
+        "Streams", "2 available", "1/2", focused=True, plain=False,
+    ) == "● Streams · 2 available · 1/2"
+
+    # Empty facts are dropped rather than leaving a dangling separator.
+    assert branding.panel_title("Queue", "", focused=True, plain=False) == "● Queue"
+    assert branding.panel_title("Audio", "4", focused=False, plain=False) == "Audio · 4"
 
 
 def test_a_panel_tag_escapes_its_bracket() -> None:
@@ -154,6 +171,16 @@ def test_hints_read_as_key_then_action() -> None:
     assert branding.key_hint("?") == "[?]"
 
 
+def test_the_key_is_the_coloured_part_of_a_hint() -> None:
+    """A row of eight identically grey hints is a wall, not a legend."""
+    marked = branding.key_hint_markup("Ctrl+R", "Run")
+
+    assert "$warning" in marked
+    assert marked.endswith(" Run"), "only the key is lit"
+    # Escaped, or Textual reads `[Ctrl+R]` as a style tag.
+    assert "\\[Ctrl+R]" in marked
+
+
 # ---------------------------------------------------------------------------
 # On the running screen
 # ---------------------------------------------------------------------------
@@ -181,7 +208,12 @@ async def test_the_banner_and_hint_bar_replace_the_default_chrome() -> None:
 
         wordmark = str(pilot.app.query_one("#wordmark").content)
         assert wordmark == branding.WORDMARK_FULL
-        assert "lossless" in str(pilot.app.query_one("#wordmark-subtitle").content)
+
+        # The version hangs off the wordmark's right edge, as MovieBox tucks
+        # its own under the last letter — not centred under the whole block.
+        subtitle = str(pilot.app.query_one("#wordmark-subtitle").content)
+        assert subtitle.strip().startswith("v")
+        assert subtitle.startswith(" "), "the version is positioned by padding"
 
 
 @drives_the_ui
@@ -200,10 +232,102 @@ async def test_every_panel_is_a_titled_card() -> None:
     async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         for key, _label in MODES:
             panel = pilot.app.query_one(f"#{key}")
-            assert panel.border_title, f"#{key} has no title"
-            assert "✦" in str(panel.border_title)
+            assert str(panel.border_title).strip(), f"#{key} has no title"
             assert panel.border_subtitle, f"#{key} has no tag"
             assert panel.styles.border.top[0] == "round"
+
+
+@drives_the_ui
+async def test_a_transient_message_becomes_a_toast() -> None:
+    """News goes to a toast; standing state stays on the status line.
+
+    Asserted through `App.notify` rather than by looking for the widget:
+    Textual does not mount a Toast under `run_test`, so the only honest
+    check here is the call. The rendering is verified against a real
+    terminal instead.
+    """
+    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+        sent: list[dict] = []
+        pilot.app.notify = lambda message, **kwargs: sent.append(
+            {"message": message, **kwargs},
+        )
+
+        pilot.app._toast("it worked", "success")
+        pilot.app._toast("it did not", "error")
+        pilot.app._toast("careful", "warning")
+
+        assert [note["severity"] for note in sent] == [
+            "information",
+            "error",
+            "warning",
+        ]
+        assert sent[0]["message"] == "it worked"
+
+        # No title on the notification: it goes on the toast's border, which
+        # is where MovieBox has it and where it costs no line inside a box
+        # three rows tall. The words are queued for the widget to claim.
+        assert all("title" not in note for note in sent)
+        assert pilot.app._pending_toast_labels == ["DONE", "ERROR", "WARNING"]
+
+
+@drives_the_ui
+async def test_a_missing_toast_widget_does_not_leak_labels() -> None:
+    """`Toast` is a private Textual class; this must survive it moving."""
+    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+        pilot.app.notify = lambda message, **kwargs: None
+        pilot.app._toast("something happened", "warning")
+        assert pilot.app._pending_toast_labels == ["WARNING"]
+
+        # Textual mounts no Toast under run_test, so this exercises the same
+        # path a future version without `_toast` would take.
+        pilot.app._label_toast_borders()
+        await pilot.pause()
+
+        assert len(pilot.app._pending_toast_labels) <= 1
+
+
+@drives_the_ui
+async def test_announcing_says_it_in_both_places() -> None:
+    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+        sent: list[str] = []
+        pilot.app.notify = lambda message, **kwargs: sent.append(message)
+
+        pilot.app._announce("the run finished", "success")
+        await pilot.pause()
+
+        assert sent == ["the run finished"]
+        assert "the run finished" in str(pilot.app.query_one("#status").content)
+
+
+@drives_the_ui
+async def test_progress_ticks_never_toast() -> None:
+    """One toast per progress event would bury what you are watching."""
+    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+        sent: list[str] = []
+        pilot.app.notify = lambda message, **kwargs: sent.append(message)
+
+        pilot.app._set_status("2 done · 3 queued · 4.1 MB/s")
+        await pilot.pause()
+
+        assert sent == []
+        assert "2 done" in str(pilot.app.query_one("#status").content)
+
+
+@drives_the_ui
+async def test_a_panes_title_fills_in_when_it_takes_focus() -> None:
+    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+        sidebar = pilot.app.query_one("#sidebar")
+        sidebar.focus()
+        await pilot.pause()
+
+        assert str(sidebar.border_title).startswith("●")
+        assert not str(pilot.app.query_one("#download").border_title).startswith("●")
+
+        pilot.app.query_one("#cfg-output_dir").focus()
+        await pilot.pause()
+
+        assert str(pilot.app.query_one("#download").border_title).startswith("●")
+        assert not str(sidebar.border_title).startswith("●")
 
 
 @drives_the_ui
@@ -227,9 +351,10 @@ async def test_the_hint_bar_drops_hints_rather_than_truncating() -> None:
     async with SpotiFLACTui(_ready_state()).run_test(size=(60, 30)) as pilot:
         bar = pilot.app.query_one("#hints", HintBar)
         await pilot.pause()
-        rendered = str(bar.content)
+        # `content` is the markup; what has to fit is the text it renders to.
+        rendered = str(bar.render())
 
-        assert len(rendered) <= 60
+        assert len(rendered) <= 60, rendered
         # The first hint is the one nobody can work without.
         assert "[Ctrl+R] Run" in rendered
         assert "[q] Quit" not in rendered

@@ -242,12 +242,66 @@ def test_quality_is_normalized() -> None:
 
 
 def test_a_fresh_state_says_exactly_what_it_is_missing() -> None:
+    """The folder is not on the list: it has a default and always will."""
     missing = ConfigState().missing_requirements()
     assert missing == [
         "a URL or a CSV track list",
-        "a destination folder",
         "at least one download provider",
     ]
+
+
+def test_downloads_land_in_music_spotiflac_unless_told_otherwise() -> None:
+    from SpotiFLAC.core.paths import default_download_dir
+
+    assert ConfigState().output_dir == default_download_dir()
+    assert ConfigState().to_cfg()["output_dir"].endswith("Music/SpotiFLAC")
+
+
+def test_a_blank_folder_is_still_reported_as_missing() -> None:
+    """Emptying the field is a choice, and an unrunnable one."""
+    assert "a destination folder" in ConfigState(output_dir="").missing_requirements()
+
+
+# ---------------------------------------------------------------------------
+# Quality tiers
+# ---------------------------------------------------------------------------
+
+
+def test_only_the_three_meaningful_tiers_survive() -> None:
+    """HI_RES, HIGH and LOW are not choices worth offering here."""
+    from SpotiFLAC.tui.config_state import QUALITY_TIERS
+
+    assert QUALITY_TIERS == ("LOSSLESS", "HI_RES_LOSSLESS", "DOLBY_ATMOS")
+
+    # A saved profile can still carry one of the others.
+    assert ConfigState(quality="HI_RES").to_cfg()["quality"] == "HI_RES_LOSSLESS"
+    assert ConfigState(quality="HIGH").to_cfg()["quality"] == "LOSSLESS"
+    assert ConfigState(quality="LOW").to_cfg()["quality"] == "LOSSLESS"
+
+
+def test_atmos_needs_tidal_to_mean_anything() -> None:
+    """Every other provider is served Hi-Res Lossless, as on the CLI.
+
+    So Atmos alongside Deezer is not an error — Tidal gets Atmos and Deezer
+    gets its best lossless. With Tidal absent altogether it means nothing,
+    and carrying it would be a promise nothing can keep.
+    """
+    with_tidal = ConfigState(quality="DOLBY_ATMOS", services=["tidal", "deezer"])
+    assert with_tidal.atmos_applies is True
+    assert with_tidal.to_cfg()["quality"] == "DOLBY_ATMOS"
+
+    without = ConfigState(quality="DOLBY_ATMOS", services=["deezer", "qobuz"])
+    assert without.atmos_applies is False
+    assert without.to_cfg()["quality"] == "HI_RES_LOSSLESS"
+
+
+def test_the_engine_already_downgrades_atmos_per_provider() -> None:
+    """The state's rule must agree with what the downloader does anyway."""
+    from SpotiFLAC.core.quality import quality_for_provider
+
+    assert quality_for_provider("tidal", "DOLBY_ATMOS") == "DOLBY_ATMOS"
+    assert quality_for_provider("deezer", "DOLBY_ATMOS") == "FLAC"
+    assert quality_for_provider("qobuz", "DOLBY_ATMOS") == "27"
 
 
 def test_a_command_action_needs_a_command() -> None:

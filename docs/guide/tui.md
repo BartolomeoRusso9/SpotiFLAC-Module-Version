@@ -36,17 +36,23 @@ starts (`Ctrl+L` toggles it).
 ## How it looks
 
 The design follows [MovieBox-Tui](https://github.com/mesamirh/MovieBox-Tui),
-which the same grammar throughout:
+with the same grammar throughout:
 
-- a **block-letter wordmark** across the top, with the version and a line
-  saying what this is;
-- **rounded cards** with titles marked `✦  Name` and a tag in the corner
-  naming the flag or key that does the same job;
+- a **block-letter wordmark** across the top, with the version tucked under
+  its right edge;
+- **rounded cards** whose titles say what is in them and which one is live —
+  `● Tracks · 3/5` on the pane the keyboard is pointing at, plain on the
+  rest, with a lit border to match — and a tag in the corner naming the flag
+  or key that does the same job;
 - **badges** — a short label on a solid colour — for the quality tier and for
   each track's outcome, so neither depends on colour alone to be read;
-- **`[key] action` hints** along the bottom, dropped from the right as the
-  terminal narrows;
-- a status line marked `ℹ` / `✔` / `⚠` / `✖`.
+- **`[key] action` hints** along the bottom with the key picked out in
+  colour, dropped from the right as the terminal narrows;
+- **toasts** in the bottom-right for things that just happened, labelled
+  `DONE` / `WARNING` / `ERROR`, stacked and self-dismissing;
+- a **status line** for what is true right now — how a run is going, what is
+  still missing. The two are deliberately separate: a message that scrolls
+  the standing state away has cost you the thing you were watching.
 
 Nine themes, cycled with `t`, starting at Catppuccin Mocha: Mocha, Latte,
 Macchiato, Frappé, Nord, Tokyo Night, Dracula, Gruvbox, Rosé Pine. Every
@@ -58,6 +64,12 @@ switch the block art for a word, the box glyphs for ASCII, and the filled
 badges for `[LOSSLESS]`. The wordmark also shrinks on its own: six rows of
 letterform become two on a narrow terminal, and a word below that — a logo
 that eats a quarter of a short screen is a logo in the way.
+
+Two things from MovieBox are deliberately not copied. It has **no sidebar** —
+its screens are a linear flow (search, then details, then play) navigated with
+`Tab`, where this has seven panels that are all live at once and a list of
+them is the honest way to show that. And its posters are **images**, which a
+terminal cannot draw without sixel support that most do not have.
 
 ## Keys
 
