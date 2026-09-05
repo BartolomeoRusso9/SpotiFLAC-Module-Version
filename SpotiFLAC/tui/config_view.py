@@ -54,9 +54,9 @@ _FIELD_PREFIX = "cfg-"
 #: values come from `config_state.QUALITY_TIERS`, so the menu cannot drift
 #: from what the state will accept.
 QUALITY_LABELS: dict[str, str] = {
-    "HI_RES_LOSSLESS": "Hi-Res Lossless — best available anywhere",
-    "LOSSLESS": "Lossless — CD quality FLAC/ALAC",
-    "DOLBY_ATMOS": "Dolby Atmos — Tidal only",
+    "HI_RES_LOSSLESS": "HI_RES_LOSSLESS — best available anywhere",
+    "LOSSLESS": "LOSSLESS — CD quality FLAC/ALAC",
+    "DOLBY_ATMOS": "DOLBY_ATMOS — Tidal only",
 }
 
 
