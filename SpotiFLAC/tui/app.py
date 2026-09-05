@@ -43,7 +43,7 @@ from textual.widgets import (
 
 from .banner import Banner, HintBar
 from ..core.paths import default_download_dir
-from .branding import notice, panel_tag, panel_title, pointer
+from .branding import mode_glyph, notice, panel_tag, panel_title
 
 from .config_state import ConfigState
 from .config_view import ConfigPanel
@@ -87,13 +87,13 @@ THEMES: tuple[str, ...] = (
 #: shortcut that does the same job, which is the same favour.
 PANEL_TITLES: dict[str, tuple[str, str]] = {
     "download": ("Configuration", "Ctrl+R to run"),
-    "search": ("Search", "/"),
+    "search": ("Search", "/ to search"),
     "tracks": ("Tracks", "space to pick"),
     "queue": ("Queue", "live"),
     "session": ("Session", "history · profiles"),
     "extensions": ("Extensions", "registries"),
-    "health": ("Health", "--health-check"),
-    "command": ("Equivalent command", "copy me"),
+    "health": ("Health", "providers"),
+    "command": ("Equivalent command", "Ctrl+Y to copy"),
 }
 
 #: `~/Music/SpotiFLAC`, from `core.paths` so the desktop window and this
@@ -117,6 +117,7 @@ class SpotiFLACTui(App[None]):
         Binding("escape", "close_log", "Close log", show=False),
         Binding("slash", "search", "Search"),
         Binding("question_mark", "help", "Help"),
+        Binding("ctrl+y", "copy_command", "Copy CLI", priority=True),
         Binding("t", "cycle_theme", "Theme", show=False),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
@@ -150,10 +151,12 @@ class SpotiFLACTui(App[None]):
     def compose(self) -> ComposeResult:
         yield Banner(id="banner")
         with Horizontal(id="body"):
-            mark = pointer()
             yield ListView(
                 *[
-                    ListItem(Label(f" {mark} {label}"), id=f"mode-{key}")
+                    ListItem(
+                        Label(f" {mode_glyph(key)} {label}"),
+                        id=f"mode-{key}",
+                    )
                     for key, label in MODES
                 ],
                 id="sidebar",
@@ -175,13 +178,32 @@ class SpotiFLACTui(App[None]):
         yield Static("", id="status")
         yield HintBar(id="hints")
 
+    #: Below this many rows the three-row nav does not fit alongside a
+    #: panel worth reading, and it drops to one row a mode.
+    _ROOMY_SIDEBAR_MIN_HEIGHT = 30
+
     def on_mount(self) -> None:
         self.theme = THEMES[0]
         self._decorate_panels()
         self.query_one("#log-pane").display = False
         self.query_one("#sidebar", ListView).index = 0
+        self._fit_sidebar()
         self._refresh_command_panel()
         self._set_status("Pick a URL and press Ctrl+R.", "info")
+
+    def on_resize(self) -> None:
+        self._fit_sidebar()
+
+    def _fit_sidebar(self) -> None:
+        """Three rows a mode when there is room, one when there is not."""
+        try:
+            sidebar = self.query_one("#sidebar", ListView)
+        except Exception:
+            return
+        sidebar.set_class(
+            self.size.height < self._ROOMY_SIDEBAR_MIN_HEIGHT,
+            "sidebar-compact",
+        )
 
 
     def _decorate_panels(self) -> None:
@@ -327,20 +349,32 @@ class SpotiFLACTui(App[None]):
             self.query_one("#sidebar", ListView).index = keys.index(key)
 
     def _refresh_command_panel(self) -> None:
+        """Rebuilds the command preview from the state as it stands.
+
+        The command is generated whether or not the run is complete. It used
+        to be withheld until every requirement was met, which made the panel
+        useless for the thing it is best at — flipping options and watching
+        which flag each one is. What an incomplete state produces is still a
+        real command; it is just one with a placeholder where the answer goes,
+        so the gaps are named above it rather than shown instead of it.
+        """
         panel = self.query_one("#command", Static)
         problems = self.state.missing_requirements()
+        lines: list[str] = []
         if problems:
-            panel.update(
-                "Not runnable yet — still needed: " + ", ".join(problems) + "\n\n"
-                "The command appears here as soon as the run has everything "
-                "it needs.",
-            )
-            return
-        lines = [
-            "The same run, as a command you can script or schedule:",
-            "",
-            f"    {self.state.cli_command()}",
-        ]
+            lines += [
+                "Not runnable yet — still needed: " + ", ".join(problems),
+                "",
+                "The command below is built from the options set so far.",
+                "",
+            ]
+        else:
+            lines += [
+                "The same run, as a command you can script or schedule:",
+                "",
+            ]
+        lines.append(f"    {self.state.for_preview().cli_command()}")
+        lines += ["", "Ctrl+Y copies it."]
 
         # A partial selection has no command-line equivalent: the CLI takes a
         # link and fetches what is behind it. Showing the whole-album command
@@ -474,9 +508,30 @@ class SpotiFLACTui(App[None]):
         if not isinstance(self.screen, HelpScreen):
             self.push_screen(HelpScreen())
 
+    def action_copy_command(self) -> None:
+        """Puts the generated command on the clipboard, from any panel.
+
+        The panel has always been able to *show* the command; a preview you
+        cannot get out of the terminal is a thing to retype, so this is the
+        half that was missing. `copy_to_clipboard` speaks OSC 52, which is
+        what carries over ssh as well as locally — and when the terminal
+        refuses it, the command is still on screen in the Command panel.
+        """
+        command = self.state.for_preview().cli_command()
+        self.copy_to_clipboard(command)
+        flags = command.count(" \\\n")
+        self._set_status(
+            f"Command copied — {flags + 1} line(s). Command panel shows it in full.",
+            "success",
+        )
+
     def action_cycle_theme(self) -> None:
         current = THEMES.index(self.theme) if self.theme in THEMES else 0
         self.theme = THEMES[(current + 1) % len(THEMES)]
+        # `t` is unlisted and cycles nine themes. Repainting without naming
+        # what you landed on leaves you pressing it again to find out, and
+        # with no way back to the one you liked two presses ago.
+        self._set_status(f"Theme: {self.theme}", "info")
 
     def action_cursor_down(self) -> None:
         self.screen.focus_next()

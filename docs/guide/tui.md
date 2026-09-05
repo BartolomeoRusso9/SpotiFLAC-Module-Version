@@ -78,6 +78,7 @@ terminal cannot draw without sixel support that most do not have.
 | `Ctrl+R` | Start the download |
 | `Ctrl+C` | Stop a running download (or quit when nothing is running) |
 | `Ctrl+L` | Show or hide the log pane |
+| `Esc` | Close the log pane |
 | `/` | Jump to the search box |
 | `space` | On the Tracks panel: pick the track under the cursor |
 | `a` / `n` / `i` | On the Tracks panel: all, none, invert |
@@ -109,6 +110,37 @@ you can see *why* they are unavailable:
 
 These are the same rules the wizard enforced by skipping questions. Here you
 can see all of them at once.
+
+### Quality
+
+Three tiers, and no more:
+
+| Tier | What it means |
+| --- | --- |
+| **Hi-Res Lossless** | The best each provider has |
+| **Lossless** | CD-quality FLAC/ALAC |
+| **Dolby Atmos** | Tidal only — offered only when Tidal is one of your providers |
+
+The canonical list in the code has six, but the other three are not choices
+worth making: `HI_RES` is a Qobuz-only spelling of the same thing, and `HIGH`
+and `LOW` are lossy tiers in a tool whose point is lossless. A saved profile
+carrying one of them is read as the tier that means the same thing.
+
+**Dolby Atmos** is a Tidal-exclusive stream. Pick it alongside other
+providers and Tidal serves Atmos while the rest serve their best lossless —
+which is what the command line already does, in
+`core.quality.quality_for_provider`. With Tidal not selected at all it means
+nothing, so it disappears from the menu and the setting falls back to Hi-Res
+Lossless.
+
+*Allow quality fallback* — on by default — covers a tier a given provider
+will not serve.
+
+### Where downloads land
+
+`~/Music/SpotiFLAC`, the same folder the desktop window uses, unless you type
+somewhere else in **Folder**. It stays the default: a one-off download
+somewhere else does not quietly become where everything goes next.
 
 ### A CSV instead of a URL
 
@@ -212,11 +244,8 @@ visible and always changeable.
 
 Two things worked differently and are worth knowing about:
 
-- **Quality** is offered as the six canonical tiers rather than a menu
-  tailored to the providers you picked. The wizard could narrow the question
-  because it had already asked about providers; a screen where both are
-  editable at once cannot. *Allow quality fallback* — on by default — covers
-  a tier a given provider will not serve.
+- **Quality** is three tiers rather than the wizard's provider-by-provider
+  question. See [Quality](#quality) below.
 - **The health check** no longer runs before every session. It is the
   **Health** panel, on demand.
 - **The extension registry menu** is the **Extensions** panel. The registry

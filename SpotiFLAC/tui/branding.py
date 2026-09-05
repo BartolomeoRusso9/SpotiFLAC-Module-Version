@@ -49,8 +49,8 @@ def plain_terminal() -> bool:
 # The wordmark
 # ---------------------------------------------------------------------------
 
-#: ANSI Shadow, the same letterform MovieBox uses. 69 columns wide.
-WORDMARK_FULL = r"""
+#: ANSI Shadow, the same letterform MovieBox uses.
+_WORDMARK_FULL_ART = r"""
 ███████╗ ██████╗  ██████╗ ████████╗██╗███████╗██╗      █████╗  ██████╗
 ██╔════╝ ██╔══██╗██╔═══██╗╚══██╔══╝██║██╔════╝██║     ██╔══██╗██╔════╝
 ███████╗ ██████╔╝██║   ██║   ██║   ██║█████╗  ██║     ███████║██║
@@ -58,6 +58,18 @@ WORDMARK_FULL = r"""
 ███████║ ██║     ╚██████╔╝   ██║   ██║██║     ███████╗██║  ██║╚██████╗
 ╚══════╝ ╚═╝      ╚═════╝    ╚═╝   ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝ ╚═════╝
 """.strip("\n")
+
+#: The art, every row padded to the width of the widest.
+#:
+#: Two of the six rows end five columns early, and `text-align: center`
+#: centres each line of a Static on its own — so the short rows sat two
+#: columns right of the others and the wordmark visibly bowed. Padding here
+#: rather than in the literal above keeps it fixed: trailing whitespace in
+#: source is exactly what an editor or a linter strips back out.
+WORDMARK_FULL = "\n".join(
+    row.ljust(max(len(r) for r in _WORDMARK_FULL_ART.split("\n")))
+    for row in _WORDMARK_FULL_ART.split("\n")
+)
 
 #: Two rows of half blocks, for when the full one will not fit. 33 columns.
 WORDMARK_COMPACT = "\n".join(
@@ -164,6 +176,30 @@ def pointer(*, plain: bool | None = None) -> str:
     return glyph(*_POINTER, plain=plain)
 
 
+#: A glyph per sidebar mode. Eight identical `·` bullets are a list you have
+#: to read; eight different marks are a list you can aim at, and the column
+#: costs nothing that was being used. Plain terminals get an ASCII stand-in
+#: rather than a blank, so the labels still line up.
+_MODE_GLYPHS: dict[str, tuple[str, str]] = {
+    "download": ("↓", "v"),
+    "search": ("⌕", "?"),
+    "tracks": ("♪", "#"),
+    "queue": ("≡", "="),
+    "session": ("◷", "@"),
+    "extensions": ("⧉", "+"),
+    "health": ("♥", "!"),
+    "command": ("⌘", "$"),
+}
+
+
+def mode_glyph(key: str, *, plain: bool | None = None) -> str:
+    """The sidebar marker for one mode, or the generic pointer if unknown."""
+    pair = _MODE_GLYPHS.get(key)
+    if pair is None:
+        return pointer(plain=plain)
+    return glyph(*pair, plain=plain)
+
+
 # ---------------------------------------------------------------------------
 # Badges
 # ---------------------------------------------------------------------------
@@ -172,12 +208,10 @@ def pointer(*, plain: bool | None = None) -> str:
 #: so a badge follows the theme rather than a hard-coded colour, which is
 #: what MovieBox gets by reading its palette instead of literals.
 QUALITY_BADGES: dict[str, tuple[str, str]] = {
-    "HI_RES_LOSSLESS": ("HI-RES", "badge-gold"),
-    "HI_RES": ("24-BIT", "badge-gold"),
+    "HI_RES_LOSSLESS": ("HI-RES-LOSSLESS", "badge-gold"),
+    "HI_RES": ("HI-RES", "badge-gold"),
     "DOLBY_ATMOS": ("ATMOS", "badge-lavender"),
     "LOSSLESS": ("LOSSLESS", "badge-sapphire"),
-    "HIGH": ("HIGH", "badge-teal"),
-    "LOW": ("LOW", "badge-muted"),
 }
 
 STATUS_BADGES: dict[str, tuple[str, str, str]] = {

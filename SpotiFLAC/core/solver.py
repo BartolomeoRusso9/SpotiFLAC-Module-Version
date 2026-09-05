@@ -400,9 +400,26 @@ def _default_browser_path_macos() -> str | None:
         macos_dir = os.path.join(app_bundle, "Contents", "MacOS")
         if not os.path.isdir(macos_dir):
             return None
-        for entry in os.listdir(macos_dir):
-            candidate = os.path.join(macos_dir, entry)
+
+        # Info.plist names the bundle's real entry point. Ask it first: the
+        # scan below returns whatever os.listdir() happens to yield first
+        # that carries the exec bit, and in a Gecko bundle that is a shipped
+        # .dylib (libEGL.dylib in Zen's case), not the browser.
+        try:
+            with open(os.path.join(app_bundle, "Contents", "Info.plist"), "rb") as f:
+                executable = plistlib.load(f).get("CFBundleExecutable")
+        except Exception:
+            executable = None
+        if executable:
+            candidate = os.path.join(macos_dir, executable)
             if os.access(candidate, os.X_OK) and not os.path.isdir(candidate):
+                return candidate
+
+        for entry in sorted(os.listdir(macos_dir)):
+            candidate = os.path.join(macos_dir, entry)
+            if entry.endswith((".dylib", ".so")) or os.path.isdir(candidate):
+                continue
+            if os.access(candidate, os.X_OK):
                 return candidate
     except Exception:
         return None

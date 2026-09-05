@@ -47,8 +47,8 @@ class ExtensionsPanel(VerticalScroll):
 
     def compose(self) -> ComposeResult:
         yield Label(
-            "Registry links. Providers are installed from these; without one "
-            "there is nothing to download with.",
+            "Registry links. Providers install from these; without one "
+            "there is nothing to download.",
             classes="panel-intro",
         )
         table: DataTable = DataTable(id="registry-table", zebra_stripes=True)

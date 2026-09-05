@@ -122,7 +122,11 @@ class QueuePanel(VerticalScroll):
         self._empty: Label | None = None
 
     def compose(self) -> ComposeResult:
-        self._master = ProgressBar(total=None, show_eta=False, id="master-bar")
+        # `total=1.0` rather than `None`. A bar with no total renders as the
+        # indeterminate animation, so an idle queue sat there pulsing under
+        # the words "Nothing running" — the same lie `TrackRow.apply()`
+        # already refuses to tell for a queued row.
+        self._master = ProgressBar(total=1.0, show_eta=False, id="master-bar")
         self._summary = Label("Nothing running", id="queue-summary")
         self._empty = Label(
             "The queue fills up once a download starts.",
@@ -139,7 +143,7 @@ class QueuePanel(VerticalScroll):
         if self._empty is not None:
             self._empty.display = True
         if self._master is not None:
-            self._master.update(total=None, progress=0)
+            self._master.update(total=1.0, progress=0)
         if self._summary is not None:
             self._summary.update("Nothing running")
 
@@ -175,7 +179,7 @@ class QueuePanel(VerticalScroll):
             + int(stats.get("skipped", 0))
         )
         if self._master is not None:
-            self._master.update(total=total_items or None, progress=done)
+            self._master.update(total=total_items or 1.0, progress=done)
 
         if self._summary is None:
             return

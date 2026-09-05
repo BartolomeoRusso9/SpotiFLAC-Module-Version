@@ -121,14 +121,26 @@ async def test_a_dependent_setting_is_disabled_rather_than_ignored() -> None:
 
 
 @drives_the_ui
-async def test_the_command_panel_refuses_to_show_an_unrunnable_command() -> None:
+async def test_an_unrunnable_command_is_generated_with_the_gaps_named() -> None:
+    """The panel used to withhold the command until the run was complete.
+
+    That made it useless for the thing it is best at — flipping options and
+    watching which flag each one is. An incomplete state still produces a
+    real command; what it must not do is pass an empty string off as an
+    answer, so every unmet requirement shows as a placeholder and is listed
+    above the command as well.
+    """
     async with SpotiFLACTui(ConfigState()).run_test() as pilot:
         pilot.app.query_one("#sidebar").index = 2
         await pilot.pause()
 
         rendered = str(pilot.app.query_one("#command").content)
         assert "Not runnable yet" in rendered
-        assert "spotiflac" not in rendered
+        assert "spotiflac" in rendered
+        # The gaps are named, never rendered as `spotiflac '' … -s`.
+        assert "<URL-or-CSV>" in rendered
+        assert "<PROVIDER>" in rendered
+        assert "''" not in rendered
 
 
 @drives_the_ui

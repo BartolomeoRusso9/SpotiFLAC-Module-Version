@@ -214,6 +214,30 @@ class ConfigState:
         """
         return not self.use_track_numbers
 
+    def _requirements(self) -> list[tuple[bool, str, tuple[str, ...]]]:
+        """Every requirement once: whether it is unmet, how to say so, and
+        which controls it is about.
+
+        Both `missing_requirements()` and `missing_fields()` read this, so
+        the banner's wording and the markers on the form cannot drift apart
+        — the panel never has to match on English to know what to flag.
+        """
+        return [
+            (
+                not self.url and not self.csv_path,
+                "a URL or a CSV track list",
+                ("url", "csv_path"),
+            ),
+            (not self.output_dir, "a destination folder", ("output_dir",)),
+            (not self.services, "at least one download provider", ("services",)),
+            (
+                self.post_download_action == "command"
+                and not self.post_download_command,
+                "a command to run after the download",
+                ("post_download_command",),
+            ),
+        ]
+
     def missing_requirements(self) -> list[str]:
         """What still stops this run from starting, in plain words.
 
@@ -221,16 +245,16 @@ class ConfigState:
         refused to move on. A screen where everything is editable needs to be
         able to say, at any moment, what is not yet answered.
         """
-        problems: list[str] = []
-        if not self.url and not self.csv_path:
-            problems.append("a URL or a CSV track list")
-        if not self.output_dir:
-            problems.append("a destination folder")
-        if not self.services:
-            problems.append("at least one download provider")
-        if self.post_download_action == "command" and not self.post_download_command:
-            problems.append("a command to run after the download")
-        return problems
+        return [phrase for unmet, phrase, _ in self._requirements() if unmet]
+
+    def missing_fields(self) -> set[str]:
+        """The same, as the field names of the controls to mark."""
+        return {
+            name
+            for unmet, _, names in self._requirements()
+            if unmet
+            for name in names
+        }
 
     @property
     def is_runnable(self) -> bool:
@@ -414,6 +438,26 @@ class ConfigState:
     # ------------------------------------------------------------------
     # Presentation
     # ------------------------------------------------------------------
+
+    def for_preview(self) -> ConfigState:
+        """A copy with a visible placeholder wherever a requirement is unmet.
+
+        Only the command preview uses this. A state with no URL and no
+        providers renders as `spotiflac \'\' …  -s` — an empty quoted string
+        and a flag with nothing after it, which reads like a bug in the
+        generator rather than like a question still to answer. Naming the
+        gap makes the preview usable as a template you fill in.
+        """
+        gaps: dict[str, object] = {}
+        if not self.url and not self.csv_path:
+            gaps["url"] = "<URL-or-CSV>"
+        if not self.output_dir:
+            gaps["output_dir"] = "<FOLDER>"
+        if not self.services:
+            gaps["services"] = ["<PROVIDER>"]
+        if self.post_download_action == "command" and not self.post_download_command:
+            gaps["post_download_command"] = "<COMMAND>"
+        return replace(self, **gaps) if gaps else self
 
     def cli_command(self) -> str:
         """The equivalent `spotiflac ...` invocation, for the live panel.

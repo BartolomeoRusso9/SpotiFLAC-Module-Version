@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import fields as dataclass_fields
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.widgets import (
     Button,
@@ -37,7 +37,7 @@ from textual.widgets import (
 )
 
 from ..core.transcode import TRANSCODE_CHOICES
-from .branding import quality_badge
+from .branding import glyph, quality_badge
 from ..extensions.catalog import installed_service_ids
 from .config_state import (
     ATMOS_PROVIDER,
@@ -100,20 +100,70 @@ def _field_name(widget_id: str | None) -> str | None:
     return widget_id[len(_FIELD_PREFIX) :]
 
 
-class Row(Horizontal):
-    """A label and its control, side by side."""
+#: The marker in front of a required control: filled while it is still
+#: unanswered, a tick once it is not. Two columns in both states, so the
+#: labels stay in a column as the answers come in.
+_MARK_UNMET = ("●", "*")
+_MARK_MET = ("✓", "+")
 
-    def __init__(self, label: str, control, hint: str = "") -> None:
+
+class Row(Vertical):
+    """A labelled control.
+
+    Two shapes, because two kinds of control are read differently. A switch
+    is a yes/no you scan down a column, so it comes first and its words
+    follow it — the shape of a checklist. Anything you type into or pick
+    from puts its label on the line above and takes the full width beneath.
+
+    This replaces a fixed label gutter beside the control, which could not be
+    right at any width: at 30 columns "URL" sat in a field of nothing, and at
+    18 a third of the labels — "Use the album\'s own numbering" among them —
+    wrapped onto a second line.
+    """
+
+    def __init__(
+        self,
+        label: str,
+        control,
+        hint: str = "",
+        required: str = "",
+    ) -> None:
         super().__init__(classes="setting-row")
         self._label = label
         self._control = control
         self._hint = hint
+        self._required = required
+        if isinstance(control, Switch):
+            self.add_class("setting-row-switch")
 
     def compose(self) -> ComposeResult:
-        yield Label(self._label, classes="setting-label")
-        yield self._control
-        if self._hint:
-            yield Label(self._hint, classes="setting-hint")
+        with Horizontal(classes="setting-line"):
+            if isinstance(self._control, Switch):
+                yield self._control
+            else:
+                # Emitted whether or not this row is required: the marker is
+                # a column, and a row that simply omitted it would start its
+                # label two cells left of every row that has one.
+                yield required_mark(self._required)
+            yield Label(self._label, classes="setting-label")
+            if self._hint:
+                yield Label(self._hint, classes="setting-hint")
+        if not isinstance(self._control, Switch):
+            yield self._control
+
+
+def required_mark(field_name: str = "") -> Label:
+    """The two-column marker `_show_problems()` keeps up to date.
+
+    With no field name it is the blank spacer that keeps an optional row's
+    label in the same column as a required one's.
+    """
+    return Label(
+        "",
+        classes="setting-mark",
+        id=f"mark-{field_name}" if field_name else None,
+        markup=False,
+    )
 
 
 class ConfigPanel(VerticalScroll):
@@ -148,6 +198,7 @@ class ConfigPanel(VerticalScroll):
                     placeholder="https://open.spotify.com/…",
                     id=_field_id("url"),
                 ),
+                required="url",
             )
             yield Row(
                 "CSV track list",
@@ -157,6 +208,7 @@ class ConfigPanel(VerticalScroll):
                     id=_field_id("csv_path"),
                 ),
                 hint="wins over the URL",
+                required="csv_path",
             )
             yield Button("Browse for a track list…", id="csv-browse")
 
@@ -164,6 +216,7 @@ class ConfigPanel(VerticalScroll):
             yield Row(
                 "Folder",
                 Input(value=state.output_dir, id=_field_id("output_dir")),
+                required="output_dir",
             )
             yield Row(
                 "Exact file path",
@@ -176,7 +229,11 @@ class ConfigPanel(VerticalScroll):
 
         with Collapsible(title="Providers & quality", collapsed=False):
             installed = installed_service_ids()
-            yield Label("Providers, in order of preference", classes="setting-label")
+            yield Horizontal(
+                required_mark("services"),
+                Label("Providers, in order of preference", classes="setting-label"),
+                classes="setting-line",
+            )
             yield SelectionList[str](
                 *[
                     (service, service, service in state.services)
@@ -405,6 +462,7 @@ class ConfigPanel(VerticalScroll):
                     placeholder="echo 'Done: {succeeded} tracks in {folder}'",
                     id=_field_id("post_download_command"),
                 ),
+                required="post_download_command",
             )
             yield Row(
                 "Repeat every N minutes",
@@ -608,7 +666,26 @@ class ConfigPanel(VerticalScroll):
         ):
             badge.set_class(candidate == css, candidate)
 
+    def _refresh_marks(self) -> None:
+        """Points the markers at whatever is still unanswered.
+
+        `missing_fields()` names the controls the readiness banner is talking
+        about, so the two always agree — the banner says what is needed and
+        the marker says where, without the panel having to parse the words.
+        """
+        unmet = self.state.missing_fields()
+        for mark in self.query(".setting-mark").results(Label):
+            if not mark.id:
+                continue  # a spacer on an optional row
+            name = mark.id.removeprefix("mark-")
+            still_needed = name in unmet
+            mark.update(
+                glyph(*(_MARK_UNMET if still_needed else _MARK_MET)),
+            )
+            mark.set_class(still_needed, "unmet")
+
     def _show_problems(self) -> None:
+        self._refresh_marks()
         try:
             banner = self.query_one("#config-problems", Static)
         except Exception:

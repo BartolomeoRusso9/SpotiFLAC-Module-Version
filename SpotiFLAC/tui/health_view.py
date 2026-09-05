@@ -29,8 +29,8 @@ class HealthPanel(VerticalScroll):
 
     def compose(self) -> ComposeResult:
         yield Label(
-            "Lyrics providers, probed directly. A provider that is down here "
-            "is why its lyrics came back empty.",
+            "Lyrics providers, probed directly. One that is down is why "
+            "its lyrics came back empty.",
             classes="panel-intro",
         )
         yield Button("Check now", id="health-check", variant="primary")

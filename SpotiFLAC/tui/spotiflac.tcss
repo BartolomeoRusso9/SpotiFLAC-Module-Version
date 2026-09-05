@@ -48,27 +48,53 @@ Screen {
 }
 
 #sidebar {
-    width: 22;
+    width: 26;
     height: 100%;
-    padding: 0 1;
+    padding: 1 1;
     border: round $panel;
     border-title-align: left;
     background: $surface;
 }
 
+/* Three rows a mode, not one. Eight single-row entries in a 22-column
+   column read as a table of contents; the nav you steer the whole app
+   with should be the second thing you see after the wordmark. */
 #sidebar > ListItem {
-    padding: 0 1;
+    height: 3;
+    padding: 1 1;
     background: $surface;
     color: $text-muted;
 }
 
+/* …but a 24-row terminal has about 14 rows of body, and eight three-row
+   entries do not fit in that. Below the threshold the nav goes back to one
+   row a mode, the same trade the wordmark makes. The class is set from
+   `SpotiFLACTui.on_resize`, which is the only thing that knows the height. */
+#sidebar.sidebar-compact {
+    width: 22;
+    padding: 0 1;
+}
+
+#sidebar.sidebar-compact > ListItem {
+    height: 1;
+    padding: 0 1;
+}
+
 /* Selection: bold on a raised surface, not an inverted bar. */
-#sidebar > ListItem.--highlight {
+/* `padding: 1 1 1 0`, not `padding-left: 0` — Textual's `padding-left`
+   resets the whole box rather than the one edge, which dropped the label of
+   the selected row to the top of its three while every other row kept its
+   text centred. The left edge goes to 0 so the accent bar has a column. */
+#sidebar > ListItem.-highlight {
     background: $panel;
     color: $text;
     text-style: bold;
     border-left: thick $accent;
-    padding-left: 0;
+    padding: 1 1 1 0;
+}
+
+#sidebar.sidebar-compact > ListItem.-highlight {
+    padding: 0 1 0 0;
 }
 
 #main {
@@ -102,22 +128,54 @@ Screen {
     margin-bottom: 1;
 }
 
+/* No fixed gutter. The label sits on its own line above the control (or
+   after the switch it belongs to), so it is as wide as its words and the
+   control gets the panel. */
 .setting-label {
-    width: 30;
-    padding-top: 1;
+    width: auto;
     color: $text-muted;
 }
 
-.setting-hint {
+.setting-line {
+    height: auto;
+}
+
+/* The switch is three rows tall — its words have to drop to the middle one
+   or they read as the label of the row above. */
+.setting-row-switch .setting-label,
+.setting-row-switch .setting-hint {
     padding-top: 1;
+}
+
+.setting-row-switch Switch {
+    margin-right: 1;
+}
+
+.setting-hint {
     padding-left: 2;
     color: $text-disabled;
     text-style: italic;
 }
 
+/* Two columns, always — the marker changes glyph as a field is answered,
+   never width, so the labels do not shuffle sideways while you type. */
+.setting-mark {
+    width: 2;
+    color: $success;
+}
+
+.setting-mark.unmet {
+    color: $warning;
+    text-style: bold;
+}
+
+/* One width for every field. They were coming out 52, 33 and 52 columns
+   depending on placeholder length, which read as accidental — because it
+   was. The max keeps a full-width input from becoming a 90-column ribbon. */
 .setting-row Input,
 .setting-row Select {
     width: 1fr;
+    max-width: 72;
 }
 
 Input {
@@ -212,8 +270,13 @@ Button {
     color: $text-muted;
 }
 
+/* Centred, with room above it. Flush against the top-left corner of an
+   otherwise empty card, the line read as a label for something missing
+   rather than as the state of the panel. */
 #queue-empty {
-    padding: 2 0;
+    width: 100%;
+    padding: 4 0;
+    text-align: center;
     color: $text-disabled;
 }
 

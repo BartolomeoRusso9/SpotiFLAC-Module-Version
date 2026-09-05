@@ -153,11 +153,17 @@ async def test_every_panel_tag_actually_draws() -> None:
 
 
 def test_a_badge_is_padded_so_the_colour_reads_as_a_label() -> None:
+    # The subject here is the padding, not the wording: a background colour
+    # flush against the text reads as a highlight rather than a label. The
+    # label is read back from the table instead of spelled out again, so
+    # renaming a tier is a one-line change there and not a test failure.
+    label, expected_css = branding.QUALITY_BADGES["HI_RES_LOSSLESS"]
+
     text, css = branding.quality_badge("HI_RES_LOSSLESS", plain=False)
-    assert text == " HI-RES "
-    assert css == "badge-gold"
+    assert text == f" {label} "
+    assert css == expected_css == "badge-gold"
     # Bracketed instead when there is no colour to pad.
-    assert branding.quality_badge("HI_RES_LOSSLESS", plain=True)[0] == "[HI-RES]"
+    assert branding.quality_badge("HI_RES_LOSSLESS", plain=True)[0] == f"[{label}]"
 
 
 def test_an_unknown_quality_still_gets_a_badge() -> None:

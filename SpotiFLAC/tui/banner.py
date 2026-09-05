@@ -25,6 +25,7 @@ DEFAULT_HINTS: tuple[tuple[str, str], ...] = (
     ("Ctrl+R", "Run"),
     ("Ctrl+C", "Stop"),
     ("/", "Search"),
+    ("Ctrl+Y", "Copy CLI"),
     ("Ctrl+L", "Log"),
     ("?", "Help"),
     ("t", "Theme"),

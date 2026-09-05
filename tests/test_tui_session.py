@@ -143,8 +143,11 @@ async def test_loading_a_profile_replaces_every_setting(stub_session) -> None:
         assert state.profile_loaded == "weekend"
         assert state.output_dir == "/tmp/from-profile"
         assert state.services == ["qobuz"]
-        assert state.quality == "HI_RES"
         assert state.track_max_retries == 4
+        # The profile stores HI_RES, which is a Qobuz-only spelling of the
+        # same tier; the menu offers three tiers and settles it onto the one
+        # that means the same thing rather than showing a fourth.
+        assert state.quality == "HI_RES_LOSSLESS"
 
         # The form was rebuilt, not merely the state reassigned — a control
         # left showing the old profile is the failure this guards against.
