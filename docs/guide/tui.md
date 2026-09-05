@@ -117,9 +117,9 @@ Three tiers, and no more:
 
 | Tier | What it means |
 | --- | --- |
-| **Hi-Res Lossless** | The best each provider has |
-| **Lossless** | CD-quality FLAC/ALAC |
-| **Dolby Atmos** | Tidal only — offered only when Tidal is one of your providers |
+| **HI_RES_LOSSLESS** | The best each provider has |
+| **LOSSLESS** | CD-quality FLAC/ALAC |
+| **DOLBY ATMOS** | Tidal only — offered only when Tidal is one of your providers |
 
 The canonical list in the code has six, but the other three are not choices
 worth making: `HI_RES` is a Qobuz-only spelling of the same thing, and `HIGH`
