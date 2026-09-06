@@ -1546,9 +1546,20 @@ async def embed_metadata_async(
         ("COPYRIGHT", bool(metadata.copyright)),
         ("DATE", bool(metadata.release_date)),
         ("TRACKTOTAL", metadata.total_tracks > 0),
-        # total_discs defaults to 1 in the model, so 1 means "single disc or
-        # nobody said" — indistinguishable, and enrichment is allowed to
-        # improve on it. Anything above 1 was genuinely counted.
+        # The record the source actually served. MusicBrainz answers an ISRC
+        # with a *recording*, which lives on every compilation it was ever
+        # licensed to, so letting it write these back turned tracks of
+        # "Famoso" into track 21 of "Hot Party Winter 2021" — and left
+        # TRACKNUMBER numbered against a release TRACKTOTAL did not come
+        # from. musicbrainz._release_score() now prefers the right release,
+        # but the source's own answer is the better one either way.
+        ("ALBUM", bool(metadata.album)),
+        ("TRACKNUMBER", metadata.track_number > 0),
+        # disc_number and total_discs both default to 1 in the model, so 1
+        # means "single disc or nobody said" — indistinguishable, and
+        # enrichment is allowed to improve on it. Above 1 was genuinely
+        # counted.
+        ("DISCNUMBER", metadata.disc_number > 1),
         ("DISCTOTAL", metadata.total_discs > 1),
     )
     for key, known in _base_known:

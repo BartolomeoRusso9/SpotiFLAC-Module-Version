@@ -671,11 +671,17 @@ class JSExtensionProvider(BaseProvider):
                         # ISRC turns out not to be linked on MusicBrainz —
                         # which is most of some national catalogues. See
                         # musicbrainz._pick_fallback_recording().
+                        # album/total_tracks decide which of the
+                        # recording's releases the release-scoped tags come
+                        # from; without them a compilation reprint can win
+                        # and rewrite ALBUM and TRACKNUMBER.
                         mb_data = await fetch_mb_metadata_async(
                             isrc_clean,
                             title=metadata.title,
                             artist=metadata.first_artist or metadata.artists,
                             duration_ms=metadata.duration_ms,
+                            album=metadata.album,
+                            total_tracks=metadata.total_tracks,
                         )
                         mb_tags = mb_result_to_tags(mb_data)
                 except Exception as e:
