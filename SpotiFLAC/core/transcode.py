@@ -74,6 +74,7 @@ def transcode_label(fmt: str | None) -> str:
             return label
     return TRANSCODE_CHOICES[0][0]
 
+
 #: ffmpeg's FLAC compression level. 8 is the strongest setting the encoder
 #: offers; it buys ~1-2% over the default 5 for roughly twice the CPU time.
 #: A download is converted once and kept forever, so the trade favours size.

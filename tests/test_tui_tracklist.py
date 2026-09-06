@@ -107,7 +107,9 @@ async def test_nothing_is_fetched_until_you_ask(stub_album) -> None:
 
         panel = pilot.app.query_one("#tracks", TracklistPanel)
         assert len(panel.tracklist) == 0
-        assert "Press Load tracks" in str(pilot.app.query_one("#tracks-status").render())
+        assert "Press Load tracks" in str(
+            pilot.app.query_one("#tracks-status").render()
+        )
 
 
 @drives_the_ui
@@ -214,7 +216,9 @@ async def test_loading_without_a_url_says_where_to_set_one() -> None:
 
 
 @drives_the_ui
-async def test_the_whole_album_is_fetched_as_the_album(stub_album, capture_runs) -> None:
+async def test_the_whole_album_is_fetched_as_the_album(
+    stub_album, capture_runs
+) -> None:
     """All selected keeps the collection URL, ordering and numbering intact."""
     seen = capture_runs
 
@@ -230,7 +234,9 @@ async def test_the_whole_album_is_fetched_as_the_album(stub_album, capture_runs)
 
 
 @drives_the_ui
-async def test_a_pick_reaches_the_downloader_as_track_links(stub_album, capture_runs) -> None:
+async def test_a_pick_reaches_the_downloader_as_track_links(
+    stub_album, capture_runs
+) -> None:
     """The failure this guards: a pick that looks right and downloads the lot."""
     seen = capture_runs
 
@@ -259,7 +265,9 @@ async def test_a_pick_reaches_the_downloader_as_track_links(stub_album, capture_
 
 
 @drives_the_ui
-async def test_starting_with_nothing_picked_is_refused(stub_album, capture_runs) -> None:
+async def test_starting_with_nothing_picked_is_refused(
+    stub_album, capture_runs
+) -> None:
     """An empty pick used to mean 'no opinion', which downloaded everything."""
     seen = capture_runs
 

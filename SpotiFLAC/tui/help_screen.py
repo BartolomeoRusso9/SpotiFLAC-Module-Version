@@ -56,9 +56,7 @@ class HelpScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         # `[Ctrl+R] Run`, the same shape as the bar along the bottom — the
         # help should teach the notation it is already using at you.
-        rows = "\n".join(
-            f"  {key_hint(key):<20}{what}" for key, what in KEYS
-        )
+        rows = "\n".join(f"  {key_hint(key):<20}{what}" for key, what in KEYS)
         with Center():
             with VerticalScroll(id="help-box") as box:
                 box.border_title = panel_title("Keys")

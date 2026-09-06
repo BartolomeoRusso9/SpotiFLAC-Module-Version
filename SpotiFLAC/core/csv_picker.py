@@ -32,6 +32,7 @@ CSV_SCAN_LIMIT = 15
 #: Typed where a URL goes, these mean "let me look for the file instead".
 CSV_BROWSE_WORDS = frozenset({"csv", "tsv", "file", "browse", "pick"})
 
+
 def clean_path_input(value: str) -> str:
     """Turn what a terminal hands us into a path that can be opened.
 

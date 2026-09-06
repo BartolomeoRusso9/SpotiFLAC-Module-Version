@@ -155,9 +155,11 @@ async def test_the_menu_follows_the_providers() -> None:
 
         providers = pilot.app.query_one("#cfg-services", SelectionList)
         if "tidal" in [str(option.value) for option in providers.options]:
-            providers.select(providers.get_option_at_index(
-                [str(o.value) for o in providers.options].index("tidal"),
-            ))
+            providers.select(
+                providers.get_option_at_index(
+                    [str(o.value) for o in providers.options].index("tidal"),
+                )
+            )
             await _settled(pilot)
             assert "DOLBY_ATMOS" in offered()
 

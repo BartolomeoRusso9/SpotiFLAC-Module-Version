@@ -76,9 +76,7 @@ def test_clean_path_input_keeps_unquoted_spaces(monkeypatch):
     """Neither branch may drop half the line when nothing was escaped."""
     for name in ("posix", "nt"):
         monkeypatch.setattr(os, "name", name)
-        assert (
-            csv_picker.clean_path_input("/tmp/My tracks.csv") == "/tmp/My tracks.csv"
-        )
+        assert csv_picker.clean_path_input("/tmp/My tracks.csv") == "/tmp/My tracks.csv"
 
 
 def test_clean_path_input_leaves_windows_separators_alone(monkeypatch):

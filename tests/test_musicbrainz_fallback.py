@@ -46,7 +46,9 @@ def _recording(
         "score": score,
         "title": title,
         "length": length,
-        "artist-credit": [{"artist": {"id": f"a{i}", "name": n}} for i, n in enumerate(artists)],
+        "artist-credit": [
+            {"artist": {"id": f"a{i}", "name": n}} for i, n in enumerate(artists)
+        ],
     }
 
 
@@ -104,7 +106,13 @@ def test_a_joined_credit_is_searched_for_by_its_first_name() -> None:
 # ── the guards ────────────────────────────────────────────────────────────
 
 
-def _pick(recordings, *, title="Butterfly Knife", artist="Noyz Narcos, Chicoria", duration_ms=231266):
+def _pick(
+    recordings,
+    *,
+    title="Butterfly Knife",
+    artist="Noyz Narcos, Chicoria",
+    duration_ms=231266,
+):
     return mb._pick_fallback_recording(
         recordings, title=title, artist=artist, duration_ms=duration_ms
     )

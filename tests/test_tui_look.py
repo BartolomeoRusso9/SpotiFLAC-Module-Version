@@ -12,8 +12,6 @@ from __future__ import annotations
 import asyncio
 import functools
 
-import pytest
-
 from SpotiFLAC.tui import branding
 from SpotiFLAC.tui.app import THEMES, SpotiFLACTui
 from SpotiFLAC.tui.banner import Banner, HintBar
@@ -111,9 +109,16 @@ def test_a_panel_title_says_whether_its_pane_is_live() -> None:
 
 def test_a_panel_title_carries_what_is_worth_knowing() -> None:
     """MovieBox puts the counts in the title, `·`-separated."""
-    assert branding.panel_title(
-        "Streams", "2 available", "1/2", focused=True, plain=False,
-    ) == "● Streams · 2 available · 1/2"
+    assert (
+        branding.panel_title(
+            "Streams",
+            "2 available",
+            "1/2",
+            focused=True,
+            plain=False,
+        )
+        == "● Streams · 2 available · 1/2"
+    )
 
     # Empty facts are dropped rather than leaving a dangling separator.
     assert branding.panel_title("Queue", "", focused=True, plain=False) == "● Queue"

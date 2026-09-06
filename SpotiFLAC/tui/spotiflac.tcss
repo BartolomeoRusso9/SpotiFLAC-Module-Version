@@ -10,17 +10,34 @@
    as bold text on a raised surface rather than an inverted bar; and badges —
    a short label on a solid colour, with contrasting text. */
 
+/* The whole app sits on the panel surface. $background is a shade darker,
+   and wherever it showed through — the column of padding either side of
+   #body, the status line — it read as a black gap rather than as depth.
+   The rounded $panel borders are what separate the cards, not the ground. */
 Screen {
-    background: $background;
+    background: $surface;
+}
+
+/* Textual's default scrollbar track is near-black (#040216 under Mocha),
+   which punched a dark stripe down the side of every scrollable panel.
+   The track takes the surface it sits on, so only the thumb is drawn. */
+* {
+    scrollbar-background: $surface;
+    scrollbar-background-hover: $surface;
+    scrollbar-background-active: $surface;
+    scrollbar-corner-color: $surface;
 }
 
 /* ── Wordmark ──────────────────────────────────────────────────────── */
 
+/* The wordmark sits on the same raised surface as the panels below it, so
+   the top of the screen reads as one band rather than a logo floating on
+   the void. Full width, unlike #body, which is inset by a column. */
 #banner {
     width: 100%;
     height: auto;
     padding-top: 1;
-    background: $background;
+    background: $surface;
 }
 
 #wordmark {
@@ -28,12 +45,14 @@ Screen {
     text-align: center;
     color: $primary;
     text-style: bold;
+    background: transparent;
 }
 
 #wordmark-subtitle {
     width: 100%;
     text-align: left;
     color: $text-muted;
+    background: transparent;
 }
 
 .banner-plain #wordmark {

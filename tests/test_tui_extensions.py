@@ -16,7 +16,6 @@ import pytest
 
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
-from SpotiFLAC.tui.extensions_view import ExtensionsPanel
 
 
 def drives_the_ui(test):
@@ -52,7 +51,9 @@ def stub_registries(monkeypatch):
 
     import SpotiFLAC.extensions.registry_config as registry_config
 
-    monkeypatch.setattr(registry_config, "list_registries", lambda: list(state["links"]))
+    monkeypatch.setattr(
+        registry_config, "list_registries", lambda: list(state["links"])
+    )
     monkeypatch.setattr(
         registry_config,
         "add_registry",
@@ -117,7 +118,8 @@ async def test_adding_a_link_installs_from_it_immediately(stub_registries) -> No
         await _settled(pilot)
 
         assert any(
-            link["url"] == "https://new.test/r.json" for link in stub_registries["links"]
+            link["url"] == "https://new.test/r.json"
+            for link in stub_registries["links"]
         )
         assert stub_registries["installed"] == 1
         assert pilot.app.query_one("#registry-table", DataTable).row_count == 3

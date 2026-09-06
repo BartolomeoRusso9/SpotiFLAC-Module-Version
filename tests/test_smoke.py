@@ -2,8 +2,6 @@ import argparse
 import json
 import logging
 
-import pytest
-
 from SpotiFLAC.core.profiles import ProfileConfig
 from SpotiFLAC.launcher import (
     _resolve_log_level,

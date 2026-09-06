@@ -250,10 +250,7 @@ class ConfigState:
     def missing_fields(self) -> set[str]:
         """The same, as the field names of the controls to mark."""
         return {
-            name
-            for unmet, _, names in self._requirements()
-            if unmet
-            for name in names
+            name for unmet, _, names in self._requirements() if unmet for name in names
         }
 
     @property
@@ -423,13 +420,24 @@ class ConfigState:
         if "_profile_loaded" in cfg:
             data["profile_loaded"] = cfg["_profile_loaded"]
 
-        for key in ("services", "lyrics_providers", "enrich_providers",
-                    "post_download_hooks"):
+        for key in (
+            "services",
+            "lyrics_providers",
+            "enrich_providers",
+            "post_download_hooks",
+        ):
             if key in data and data[key] is not None:
                 data[key] = list(data[key])
 
-        for key in ("url", "csv_path", "output_dir", "filename_format",
-                    "post_download_command", "transcode_bitrate", "m3u_format"):
+        for key in (
+            "url",
+            "csv_path",
+            "output_dir",
+            "filename_format",
+            "post_download_command",
+            "transcode_bitrate",
+            "m3u_format",
+        ):
             if data.get(key) is None:
                 data.pop(key, None)
 

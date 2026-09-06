@@ -153,7 +153,9 @@ async def test_loading_a_profile_replaces_every_setting(stub_session) -> None:
         # left showing the old profile is the failure this guards against.
         from textual.widgets import Input
 
-        assert pilot.app.query_one("#cfg-output_dir", Input).value == "/tmp/from-profile"
+        assert (
+            pilot.app.query_one("#cfg-output_dir", Input).value == "/tmp/from-profile"
+        )
         assert pilot.app.query_one("#panels").current == "download"
 
 

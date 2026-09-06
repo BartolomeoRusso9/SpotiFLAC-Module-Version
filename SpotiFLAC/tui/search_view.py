@@ -29,9 +29,19 @@ def _row_for(kind: str, item: dict) -> tuple[str, str, str, str]:
     """One result as the four columns, whichever section it came from."""
     name = str(item.get("name") or item.get("title") or "")
     if kind == "tracks":
-        return ("track", name, str(item.get("artists") or ""), str(item.get("album") or ""))
+        return (
+            "track",
+            name,
+            str(item.get("artists") or ""),
+            str(item.get("album") or ""),
+        )
     if kind == "albums":
-        return ("album", name, str(item.get("artists") or ""), str(item.get("release_date") or ""))
+        return (
+            "album",
+            name,
+            str(item.get("artists") or ""),
+            str(item.get("release_date") or ""),
+        )
     if kind == "artists":
         return ("artist", name, "", "")
     return ("playlist", name, str(item.get("owner") or ""), "")

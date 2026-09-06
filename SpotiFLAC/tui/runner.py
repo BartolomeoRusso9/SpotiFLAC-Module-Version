@@ -85,7 +85,9 @@ class DownloadRunner:
         if loop is None:
             return
         with contextlib.suppress(RuntimeError):
-            loop.call_soon_threadsafe(self._events.put_nowait, (kind, payload, severity))
+            loop.call_soon_threadsafe(
+                self._events.put_nowait, (kind, payload, severity)
+            )
 
     def _on_line(self, line: str, stream: str = "stdout") -> None:
         self._push(OUTPUT, line, "warn" if stream == "stderr" else "")

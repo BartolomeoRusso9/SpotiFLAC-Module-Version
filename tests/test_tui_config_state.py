@@ -176,7 +176,9 @@ def test_playlist_subfolders_only_apply_to_a_playlist() -> None:
 
 
 def test_a_csv_replaces_the_url() -> None:
-    state = ConfigState(url="https://open.spotify.com/track/x", csv_path="/tmp/list.csv")
+    state = ConfigState(
+        url="https://open.spotify.com/track/x", csv_path="/tmp/list.csv"
+    )
     cfg = state.to_cfg()
 
     assert state.uses_csv is True
@@ -221,7 +223,10 @@ def test_blank_endpoints_become_none() -> None:
 
 
 def test_an_unknown_post_download_action_falls_back_to_none() -> None:
-    assert ConfigState(post_download_action="rm -rf").to_cfg()["post_download_action"] == "none"
+    assert (
+        ConfigState(post_download_action="rm -rf").to_cfg()["post_download_action"]
+        == "none"
+    )
 
 
 def test_normalizing_does_not_mutate_the_original() -> None:
@@ -345,7 +350,11 @@ def test_from_cfg_round_trips_through_to_cfg() -> None:
 
 def test_from_cfg_ignores_keys_it_does_not_know() -> None:
     state = ConfigState.from_cfg(
-        {"output_dir": "/tmp/o", "a_setting_from_2019": True, "_profile_loaded": "mine"},
+        {
+            "output_dir": "/tmp/o",
+            "a_setting_from_2019": True,
+            "_profile_loaded": "mine",
+        },
     )
     assert state.output_dir == "/tmp/o"
     assert state.profile_loaded == "mine"

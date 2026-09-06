@@ -224,7 +224,13 @@ def test_callback_log_handler_swallows_a_broken_callback() -> None:
     handler = CallbackLogHandler(explode)
     handler.setFormatter(logging.Formatter("%(message)s"))
     record = logging.LogRecord(
-        "SpotiFLAC.test", logging.ERROR, __file__, 1, "boom", None, None,
+        "SpotiFLAC.test",
+        logging.ERROR,
+        __file__,
+        1,
+        "boom",
+        None,
+        None,
     )
     handler.emit(record)  # must not raise
 

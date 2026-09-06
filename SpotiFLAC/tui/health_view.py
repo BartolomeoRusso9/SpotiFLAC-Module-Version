@@ -83,8 +83,10 @@ class HealthPanel(VerticalScroll):
         reachable = sum(1 for result in results if result.ok)
         total = len(results)
         self.query_one("#health-status", Label).update(
-            f"{reachable} of {total} reachable."
-            if reachable == total
-            else f"{reachable} of {total} reachable — the rest will fall back.",
+            (
+                f"{reachable} of {total} reachable."
+                if reachable == total
+                else f"{reachable} of {total} reachable — the rest will fall back."
+            ),
         )
         self._checking = False

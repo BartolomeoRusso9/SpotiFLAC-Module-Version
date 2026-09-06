@@ -65,7 +65,6 @@ class Banner(Container):
         self.styles.height = rows + 2
         self.set_class(rows == 1, "banner-plain")
 
-
     @staticmethod
     def _subtitle_for(art: str, width: int) -> str:
         """The version, hung off the wordmark's right edge.

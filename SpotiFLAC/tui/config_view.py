@@ -75,6 +75,7 @@ def quality_choices(services: list[str]) -> list[tuple[str, str]]:
         if tier != "DOLBY_ATMOS" or ATMOS_PROVIDER in services
     ]
 
+
 #: Fields whose value is an int, so the Input has to be parsed rather than
 #: assigned. A blank one means "unset", which for `loop`/`watch` is None and
 #: for the rest is the field's default.
@@ -610,7 +611,11 @@ class ConfigPanel(VerticalScroll):
         self._set_enabled("artist_separator", state.separator_applies)
 
         self._set_enabled("use_album_track_numbers", state.use_track_numbers)
-        for name in ("use_artist_subfolders", "use_album_subfolders", "first_artist_only"):
+        for name in (
+            "use_artist_subfolders",
+            "use_album_subfolders",
+            "first_artist_only",
+        ):
             self._set_enabled(name, state.subfolders_apply)
         self._set_enabled("create_playlist_subfolders", state.is_playlist)
 

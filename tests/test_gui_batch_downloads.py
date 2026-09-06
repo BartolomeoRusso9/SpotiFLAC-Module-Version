@@ -97,10 +97,10 @@ def test_the_setting_is_clamped(captured_calls, sent, expected) -> None:
     assert opts["max_concurrent_downloads"] == expected
 
 
-@pytest.mark.parametrize(
-    "picked", ["HI_RES_LOSSLESS", "LOSSLESS", "DOLBY_ATMOS"]
-)
-def test_the_quality_picker_reaches_the_client_untouched(captured_calls, picked) -> None:
+@pytest.mark.parametrize("picked", ["HI_RES_LOSSLESS", "LOSSLESS", "DOLBY_ATMOS"])
+def test_the_quality_picker_reaches_the_client_untouched(
+    captured_calls, picked
+) -> None:
     assert captured_calls([0], {"quality": picked})[0]["quality"] == picked
 
 
@@ -202,9 +202,7 @@ def test_the_sync_wrapper_routes_a_batch_to_the_single_run_path(monkeypatch) -> 
 
     monkeypatch.setattr(client_mod, "AsyncSpotiFLAC", _FakeClient)
 
-    client_mod.SpotiFLAC(
-        url=["u1", "u2"], output_dir="/tmp/out", batch_tracks=True
-    )
+    client_mod.SpotiFLAC(url=["u1", "u2"], output_dir="/tmp/out", batch_tracks=True)
     assert seen["tracks"] == ["u1", "u2"]
     assert "batch" not in seen
 
@@ -299,7 +297,5 @@ def test_the_same_track_twice_is_downloaded_once(batching_downloader) -> None:
 
 def test_nothing_resolvable_means_no_run_at_all(batching_downloader) -> None:
     downloader, runs = batching_downloader
-    asyncio.run(
-        downloader.run_tracks_async(["https://open.spotify.com/track/missing"])
-    )
+    asyncio.run(downloader.run_tracks_async(["https://open.spotify.com/track/missing"]))
     assert runs == []

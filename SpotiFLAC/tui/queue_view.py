@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Label, ProgressBar, Static
+from textual.widgets import Label, ProgressBar
 
 from .branding import status_badge
 

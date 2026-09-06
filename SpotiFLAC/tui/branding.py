@@ -38,7 +38,12 @@ def plain_terminal() -> bool:
     purpose: ``NO_COLOR`` (the convention), ``TERM=dumb`` (no capabilities at
     all), and ``SPOTIFLAC_PLAIN_TUI`` for anyone who simply prefers it.
     """
-    if os.getenv("SPOTIFLAC_PLAIN_TUI", "").strip().lower() in {"1", "true", "yes", "on"}:
+    if os.getenv("SPOTIFLAC_PLAIN_TUI", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         return True
     if os.getenv("NO_COLOR") is not None:
         return True

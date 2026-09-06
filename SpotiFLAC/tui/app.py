@@ -205,7 +205,6 @@ class SpotiFLACTui(App[None]):
             "sidebar-compact",
         )
 
-
     def _decorate_panels(self) -> None:
         """Gives every card MovieBox's title: a marker, a name, a tag right."""
         self.query_one("#log-pane").border_title = panel_title("Log")
@@ -384,7 +383,11 @@ class SpotiFLACTui(App[None]):
             tracks = self.query_one("#tracks", TracklistPanel)
         except Exception:
             tracks = None
-        if tracks is not None and tracks.has_selection and not tracks.is_whole_collection:
+        if (
+            tracks is not None
+            and tracks.has_selection
+            and not tracks.is_whole_collection
+        ):
             chosen = len(tracks.selected_indices())
             lines += [
                 "",
@@ -408,7 +411,12 @@ class SpotiFLACTui(App[None]):
         status = self.query_one("#status", Static)
         message, css = notice(kind, text)
         status.update(message)
-        for candidate in ("notice-info", "notice-success", "notice-warning", "notice-error"):
+        for candidate in (
+            "notice-info",
+            "notice-success",
+            "notice-warning",
+            "notice-error",
+        ):
             status.set_class(candidate == css, candidate)
 
     def _toast(self, text: str, kind: str = "info", title: str = "") -> None:

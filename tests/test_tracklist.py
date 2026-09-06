@@ -191,6 +191,7 @@ def test_resolving_unpacks_whatever_shape_the_provider_returns(monkeypatch) -> N
     }
 
     for name, shape in shapes.items():
+
         async def _get(client, url, shape=shape, **kwargs):
             return shape
 
