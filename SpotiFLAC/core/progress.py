@@ -170,6 +170,15 @@ def install_console_interception() -> None:
         if logger_obj is not root:
             logger_obj.propagate = True
 
+    # A UI that owns the screen and already mirrors log records itself (the
+    # TUI attaches a CallbackLogHandler before starting the run) needs no
+    # handler from us: both would end up in the same pane, once formatted by
+    # the UI and once as "[INFO] name: ...", and every line would appear
+    # twice. The bars a tqdm handler exists to protect are switched off under
+    # a sink anyway, so there is nothing left for it to do here.
+    if sink_active() and _sink_log_handler_installed(targets):
+        return
+
     # Keep the host's own formatter — its timestamps are usually the only way
     # to tell when something happened once the log is read back.
     formatter = next(
@@ -180,6 +189,17 @@ def install_console_interception() -> None:
     _tqdm_handler.setFormatter(formatter or logging.Formatter(_DEFAULT_LOG_FORMAT))
     _tqdm_handler.setLevel(root.level or logging.WARNING)
     root.addHandler(_tqdm_handler)
+
+
+def _sink_log_handler_installed(targets: list[logging.Logger]) -> bool:
+    """Whether one of *targets* already routes records to the output sink."""
+    from .output_sink import CallbackLogHandler
+
+    return any(
+        isinstance(handler, CallbackLogHandler)
+        for logger_obj in targets
+        for handler in logger_obj.handlers
+    )
 
 
 def uninstall_console_interception() -> None:

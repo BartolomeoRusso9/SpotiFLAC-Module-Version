@@ -196,6 +196,42 @@ def test_a_simulated_download_writes_nothing_to_the_terminal(capfd) -> None:
     assert "a stray print nobody routed" in text
 
 
+def test_a_ui_with_its_own_log_handler_sees_each_line_once() -> None:
+    """The TUI's pane, not two copies of it.
+
+    The TUI installs a sink *and* a CallbackLogHandler on the root logger,
+    and then the download installs console interception on top. Both of
+    those end at the same log pane — the handler through its callback, a
+    tqdm handler through `emit()` — so a tqdm handler added on top of one
+    that is already there shows every record twice, once as the UI formatted
+    it and once as "[INFO] name: ...".
+    """
+    lines: list[tuple[str, str]] = []
+    sink = RecordingSink()
+
+    ui = CallbackLogHandler(lambda msg, severity: lines.append(("ui", msg)))
+    ui.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    ui.setLevel(logging.INFO)
+
+    root = logging.getLogger()
+    previous_level = root.level
+    root.addHandler(ui)
+    root.setLevel(logging.INFO)
+    try:
+        with output_sink_ctx(sink):
+            progress.install_console_interception()
+            try:
+                logging.getLogger("SpotiFLAC.downloader").info("[amazon] one track")
+            finally:
+                progress.uninstall_console_interception()
+    finally:
+        root.removeHandler(ui)
+        root.setLevel(previous_level)
+
+    assert lines == [("ui", "SpotiFLAC.downloader: [amazon] one track")]
+    assert "one track" not in sink.text
+
+
 def test_callback_log_handler_buckets_severity() -> None:
     seen: list[tuple[str, str]] = []
     handler = CallbackLogHandler(lambda msg, severity: seen.append((msg, severity)))

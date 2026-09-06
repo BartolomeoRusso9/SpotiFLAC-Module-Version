@@ -327,3 +327,113 @@ async def test_the_queue_panel_fills_from_broadcaster_events(monkeypatch) -> Non
         # itself reveals — there is nowhere else for it to go.
         assert pilot.app.query_one("#log-pane").display is True
         assert "downloaded" in str(pilot.app.query_one("#status").content)
+
+# ---------------------------------------------------------------------------
+# Where the log sits
+# ---------------------------------------------------------------------------
+
+
+@drives_the_ui
+async def test_the_log_is_a_column_beside_the_panel_when_there_is_room() -> None:
+    """Two columns, and both of them usable.
+
+    The width matters as much as the arrangement: `RichLog` renders a line
+    at its `min_width` (78 by default) before the view clips it, so a column
+    narrower than that silently drops characters out of the middle of every
+    path it prints.
+    """
+    async with SpotiFLACTui().run_test(size=(170, 62)) as pilot:
+        pilot.app._set_log_visible(True)
+        await pilot.pause()
+
+        panels = pilot.app.query_one("#panels")
+        log_pane = pilot.app.query_one("#log-pane")
+        log = pilot.app.query_one("#log")
+
+        assert log_pane.region.x > panels.region.x, "the log should be to the right"
+        assert log_pane.region.y == panels.region.y, "and start at the same line"
+        assert log.min_width <= log.size.width, "lines would be clipped, not wrapped"
+
+
+@drives_the_ui
+async def test_a_narrow_terminal_puts_the_log_back_under_the_panel() -> None:
+    """Two columns out of 100 cells is two unreadable ones."""
+    async with SpotiFLACTui().run_test(size=(100, 40)) as pilot:
+        pilot.app._set_log_visible(True)
+        await pilot.pause()
+
+        panels = pilot.app.query_one("#panels")
+        log_pane = pilot.app.query_one("#log-pane")
+
+        assert log_pane.region.y > panels.region.y, "the log should be underneath"
+        # `region`, not `size`: the log pane draws its own border and the
+        # switcher does not, so their content widths differ by two even when
+        # the boxes line up exactly.
+        assert log_pane.region.width == panels.region.width
+        assert log_pane.region.x == panels.region.x, "and line up with it"
+
+
+@drives_the_ui
+async def test_the_hidden_log_leaves_the_panel_the_whole_width() -> None:
+    """It is off until Ctrl+L or a run turns it on; off should cost nothing."""
+    async with SpotiFLACTui().run_test(size=(170, 62)) as pilot:
+        await pilot.pause()
+        wide = pilot.app.query_one("#panels").size.width
+
+        pilot.app._set_log_visible(True)
+        await pilot.pause()
+
+        assert pilot.app.query_one("#panels").size.width < wide
+
+# ---------------------------------------------------------------------------
+# Which track the header is about
+# ---------------------------------------------------------------------------
+
+
+def _queue_item(**overrides) -> dict:
+    item = {
+        "id": "t1",
+        "track_name": "So What",
+        "artist_name": "Miles Davis",
+        "status": "queued",
+        "end_time": 0.0,
+    }
+    item.update(overrides)
+    return item
+
+
+def test_the_header_follows_the_track_being_fetched():
+    from SpotiFLAC.tui.queue_view import QueuePanel
+
+    items = [
+        _queue_item(id="t1", status="completed", end_time=10.0),
+        _queue_item(id="t2", status="downloading"),
+        _queue_item(id="t3", status="queued"),
+    ]
+
+    assert QueuePanel._current_item(items)["id"] == "t2"
+
+
+def test_when_nothing_is_running_the_header_holds_the_last_one_done():
+    from SpotiFLAC.tui.queue_view import QueuePanel
+
+    items = [
+        _queue_item(id="t1", status="completed", end_time=10.0),
+        _queue_item(id="t2", status="completed", end_time=42.0),
+    ]
+
+    assert QueuePanel._current_item(items)["id"] == "t2"
+
+
+def test_before_anything_starts_the_header_shows_the_first_in_the_queue():
+    from SpotiFLAC.tui.queue_view import QueuePanel
+
+    items = [_queue_item(id="t1"), _queue_item(id="t2")]
+
+    assert QueuePanel._current_item(items)["id"] == "t1"
+
+
+def test_an_empty_queue_has_no_current_track():
+    from SpotiFLAC.tui.queue_view import QueuePanel
+
+    assert QueuePanel._current_item([]) is None

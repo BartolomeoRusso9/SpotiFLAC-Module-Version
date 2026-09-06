@@ -24,14 +24,13 @@ those lines would land on the terminal underneath and tear the layout.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from typing import Any
 
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.widgets import (
     ContentSwitcher,
     Input,
@@ -162,7 +161,10 @@ class SpotiFLACTui(App[None]):
                 ],
                 id="sidebar",
             )
-            with Vertical(id="main"):
+            # A `Container`, so the stylesheet owns the direction: side by
+            # side on a wide terminal, stacked on a narrow one, decided by
+            # `_fit_log_pane()` rather than by which class was composed.
+            with Container(id="main"):
                 with ContentSwitcher(initial="download", id="panels"):
                     yield ConfigPanel(self.state, id="download")
                     yield SearchPanel(id="search")
@@ -173,7 +175,21 @@ class SpotiFLACTui(App[None]):
                     yield HealthPanel(id="health")
                     yield Static(id="command", classes="command-panel")
                 yield Container(
-                    RichLog(id="log", wrap=True, markup=False, max_lines=2000),
+                    # `min_width` is not a minimum for the widget, it is the
+                    # width `write()` renders at when the caller names none —
+                    # and Textual's default is 78. In a column narrower than
+                    # that every line was laid out at 78 and then clipped, so
+                    # a path lost eight characters out of its middle and the
+                    # wrap points landed nowhere near the visible edge. Small
+                    # enough here that the shrink-to-the-content-region path
+                    # is the one that decides.
+                    RichLog(
+                        id="log",
+                        wrap=True,
+                        markup=False,
+                        max_lines=2000,
+                        min_width=20,
+                    ),
                     id="log-pane",
                 )
         yield Static("", id="status")
@@ -182,6 +198,12 @@ class SpotiFLACTui(App[None]):
     #: Below this many rows the three-row nav does not fit alongside a
     #: panel worth reading, and it drops to one row a mode.
     _ROOMY_SIDEBAR_MIN_HEIGHT = 30
+
+    #: Below this many columns the log stops being a second column and goes
+    #: back to a strip under the panel. Two columns out of anything narrower
+    #: gives a queue whose track titles are ellipses and a log wrapping every
+    #: path across four lines — worse than the stack it replaced.
+    _TWO_COLUMN_MIN_WIDTH = 150
 
     def on_mount(self) -> None:
         self.theme = THEMES[0]
@@ -194,6 +216,15 @@ class SpotiFLACTui(App[None]):
 
     def on_resize(self) -> None:
         self._fit_sidebar()
+        self._fit_log_pane()
+
+    def _fit_log_pane(self) -> None:
+        """The log beside the panel where there is room, under it where not."""
+        try:
+            main = self.query_one("#main")
+        except Exception:
+            return
+        main.set_class(self.size.width < self._TWO_COLUMN_MIN_WIDTH, "main-stacked")
 
     def _fit_sidebar(self) -> None:
         """Three rows a mode when there is room, one when there is not."""
@@ -684,22 +715,6 @@ def _outcome_line(outcome) -> str:
     return "Done · " + " · ".join(parts)
 
 
-def _probe_terminal() -> None:
-    """Asks the terminal what it can draw, while the question still works.
-
-    Both entry points do this, and both do it *before* the app starts.
-    Detecting Sixel or Kitty graphics support means writing a query and
-    reading the terminal's reply off stdin, and once Textual is running its
-    input thread takes that reply first. Asked too late the question answers
-    "no", the Queue panel quietly falls back to half-cell covers, and
-    nothing anywhere says why.
-    """
-    from .cover_art import probe_image_support
-
-    with contextlib.suppress(Exception):
-        probe_image_support()
-
-
 async def run_tui_async(
     state: ConfigState | None = None,
     min_trust_tier: str | None = None,
@@ -712,8 +727,10 @@ async def run_tui_async(
     single frame is drawn. `--gui` gets away with the sync call next door
     because pywebview has no loop of its own.
     """
-    _probe_terminal()
-    await SpotiFLACTui(state, min_trust_tier).run_async()
+    from .window_size import enlarged_window
+
+    with enlarged_window():
+        await SpotiFLACTui(state, min_trust_tier).run_async()
 
 
 def run_tui(
@@ -721,5 +738,7 @@ def run_tui(
     min_trust_tier: str | None = None,
 ) -> None:
     """The same, for a caller that has no event loop of its own."""
-    _probe_terminal()
-    SpotiFLACTui(state, min_trust_tier).run()
+    from .window_size import enlarged_window
+
+    with enlarged_window():
+        SpotiFLACTui(state, min_trust_tier).run()

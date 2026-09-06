@@ -26,6 +26,13 @@ Screen {
     scrollbar-background-hover: $surface;
     scrollbar-background-active: $surface;
     scrollbar-corner-color: $surface;
+    /* One cell, not Textual's two. At two the thumb is a solid block wide
+       enough to read as a column of the layout — next to the queue it
+       looked like a fourth element in every row. */
+    scrollbar-size-vertical: 1;
+    scrollbar-color: $panel;
+    scrollbar-color-hover: $accent;
+    scrollbar-color-active: $accent;
 }
 
 /* ── Wordmark ──────────────────────────────────────────────────────── */
@@ -116,12 +123,27 @@ Screen {
     padding: 0 1 0 0;
 }
 
+/* Two columns: the panel you are working in, and the log beside it. The
+   log used to be a fourteen-row strip across the bottom, which on a wide
+   terminal meant a very long line of text under a very wide panel and a lot
+   of unused width in both. `_fit_log_pane()` puts the strip back on a
+   terminal too narrow to carry two columns. */
 #main {
     width: 1fr;
+    layout: horizontal;
 }
 
 #panels {
+    width: 1fr;
     height: 1fr;
+}
+
+#main.main-stacked {
+    layout: vertical;
+}
+
+#main.main-stacked > #panels {
+    width: 1fr;
 }
 
 /* Every panel is a rounded card with a decorated title. */
@@ -280,24 +302,11 @@ Button {
 
 /* ── Queue ─────────────────────────────────────────────────────────── */
 
-/* The artwork and the totals, side by side. `height: auto` throughout:
-   the cover sets its own height from its width, and when there is no cover
-   to show it hides itself and this row collapses back to the two lines the
-   header has always been. */
-#queue-top {
+/* The totals and the caption, above the rows and scrolling with them. */
+#queue-header {
+    width: 100%;
     height: auto;
     padding-bottom: 1;
-}
-
-#queue-header {
-    width: 1fr;
-    height: auto;
-}
-
-/* Only when the cover is actually up. A margin held open by a hidden
-   widget is a gap with nothing on the other side of it. */
-#queue-cover {
-    margin-right: 2;
 }
 
 #queue-summary {
@@ -328,27 +337,90 @@ Button {
 
 .track-badge {
     width: 11;
-    padding-right: 1;
+    /* Two cells, not one. The badge is a solid block of colour and the
+       title starts right after it; a single space read as the two of them
+       touching. */
+    padding-right: 2;
 }
 
+/* The title takes what the row has left, the bar is a fixed strip at the
+   end. It used to be the other way round — a title pinned at 40 cells and a
+   bar taking the rest — which was fine when the row had the whole panel.
+   Sharing the width with the artwork it is not: a fixed title is the first
+   thing that stops the cover from growing, and a 40-cell bar is 40 cells of
+   nothing much. */
 .track-title {
-    width: 40;
+    width: 1fr;
+    min-width: 20;
+    /* A row is one cell tall. Without this a title too long for the column
+       wraps onto a second line that the row has no room for, and what you
+       see is the first half of a name with no sign the rest exists. */
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+    /* A truncated title ends in an ellipsis, and with the bar starting in
+       the very next cell the two ran together into one word-shaped smear. */
+    padding-right: 2;
 }
 
 .track-bar {
+    width: 14;
+}
+
+/* The strip is 14 cells; Textual's `Bar` is 32 and its percentage another
+   5, so both used to be laid out and then clipped — the bar came out
+   whatever 14 cells of a 32-cell bar happens to be, and the number was
+   simply gone. Ask for what the row actually shows: a bar the width of the
+   strip, and no number, because the badge beside it already says how the
+   track ended and a per-row percentage is noise on a list this long. */
+.track-bar > Bar {
     width: 1fr;
+}
+
+.track-bar > PercentageStatus,
+.track-bar > ETAStatus {
+    display: none;
 }
 
 .track-row.completed .track-title { color: $success; }
 .track-row.failed .track-title    { color: $error; }
 .track-row.active .track-title    { text-style: bold; color: $text; }
 
+/* Textual reads the *background* of these classes as the colour of the
+   unfilled part of the bar (`Bar.render` passes `bar_style.bgcolor` as the
+   renderable's `background_style`). Left at the default `$surface` that is
+   the panel's own ground, so the groove was invisible and a bar at 24% read
+   as a stub of colour floating next to a number. `$panel` is the same tone
+   the card borders use: present, and not competing with the fill. */
 ProgressBar > Bar > .bar--bar {
     color: $primary;
+    background: $panel;
 }
 
 ProgressBar > Bar > .bar--complete {
     color: $success;
+    background: $panel;
+}
+
+ProgressBar > Bar > .bar--indeterminate {
+    color: $accent;
+    background: $panel;
+}
+
+/* The run's own bar, across the column. Textual's `Bar` is 32 cells wide by
+   default and the percentage sits after it, which in a column wider than
+   that stranded the number in the middle of the panel with empty space on
+   both sides. */
+#master-bar {
+    width: 100%;
+}
+
+#master-bar > Bar {
+    width: 1fr;
+}
+
+#master-bar > PercentageStatus {
+    padding-left: 1;
+    color: $text-muted;
 }
 
 /* ── Command preview ───────────────────────────────────────────────── */
@@ -408,10 +480,21 @@ SelectionList > .option-list--option-highlighted {
 /* ── Log and status ────────────────────────────────────────────────── */
 
 #log-pane {
-    height: 14;
-    margin: 0 1;
+    width: 1fr;
+    height: 1fr;
+    margin-left: 1;
     border: round $panel;
     border-title-align: left;
+}
+
+/* Under the panel instead of beside it: back to the strip. No side margin,
+   unlike the version this replaces — inset by a column it sat a cell to the
+   right of the card above it, which reads as a misalignment rather than as
+   a gap. */
+#main.main-stacked > #log-pane {
+    width: 1fr;
+    height: 14;
+    margin: 0;
 }
 
 #log {

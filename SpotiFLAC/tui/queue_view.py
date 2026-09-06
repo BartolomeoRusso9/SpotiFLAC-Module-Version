@@ -10,10 +10,12 @@ list. A queue that empties as it succeeds shows you least when the run is
 going well, and leaves you unable to answer the question you actually have
 afterwards — which of these did *not* work.
 
-The artwork in the header comes from the same events. `cover_url` rides
-along on every queue entry (`core/progress.py`), so showing the cover of the
-track being fetched costs no extra request and no second resolution of the
-link — see `cover_art.py` for how an image becomes text cells.
+One column, and only text in it. The panel carried the track's cover art
+for a while, first above the list and then beside it, and both cost the
+queue the thing it is for: above, every row of artwork was a row of queue
+given up; beside, the rows lost half the width and their titles turned into
+ellipses. The screen is two columns now — this panel and the log next to it
+(`app.py`) — and the queue gets all of one.
 """
 
 from __future__ import annotations
@@ -23,7 +25,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Label, ProgressBar
 
 from .branding import status_badge
-from .cover_art import CoverArt
 
 _BADGE_CLASSES = (
     "badge-gold",
@@ -116,7 +117,7 @@ class TrackRow(Horizontal):
 
 
 class QueuePanel(VerticalScroll):
-    """The whole queue: a master bar over one row per track."""
+    """The whole queue: the totals, then one row per track."""
 
     BORDER_TITLE = "Queue"
 
@@ -127,7 +128,6 @@ class QueuePanel(VerticalScroll):
         self._summary: Label | None = None
         self._now: Label | None = None
         self._empty: Label | None = None
-        self._cover: CoverArt | None = None
 
     def compose(self) -> ComposeResult:
         # `total=1.0` rather than `None`. A bar with no total renders as the
@@ -136,20 +136,14 @@ class QueuePanel(VerticalScroll):
         # already refuses to tell for a queued row.
         self._master = ProgressBar(total=1.0, show_eta=False, id="master-bar")
         self._summary = Label("Nothing running", id="queue-summary")
-        # The cover needs something to be the cover *of*, and the rows below
-        # scroll away. Naming the track next to the artwork is what turns a
-        # decoration into a caption.
+        # Which track the totals are about. Without it the master bar is a
+        # percentage of nothing you can name.
         self._now = Label("", id="queue-now", markup=False)
         self._empty = Label(
             "The queue fills up once a download starts.",
             id="queue-empty",
         )
-        self._cover = CoverArt(id="queue-cover")
-        yield Horizontal(
-            self._cover,
-            Vertical(self._summary, self._now, self._master, id="queue-header"),
-            id="queue-top",
-        )
+        yield Vertical(self._summary, self._now, self._master, id="queue-header")
         yield self._empty
 
     def reset(self) -> None:
@@ -165,10 +159,6 @@ class QueuePanel(VerticalScroll):
             self._summary.update("Nothing running")
         if self._now is not None:
             self._caption("")
-        if self._cover is not None:
-            # The previous run's artwork left up over an empty queue would
-            # be the most confident wrong thing on the screen.
-            self._cover.set_source("")
 
     def apply_stats(self, stats: dict) -> None:
         """Folds one broadcaster event into the panel.
@@ -215,18 +205,6 @@ class QueuePanel(VerticalScroll):
             return max(finished, key=lambda i: float(i.get("end_time") or 0.0))
         return items[0] if items else None
 
-    #: The share of the panel the artwork may take. Half leaves the queue
-    #: itself the other half, which is the thing the cover is a caption for;
-    #: a cover sized for a full-screen terminal on a short one pushes every
-    #: track row off the bottom.
-    _COVER_SHARE = 0.55
-
-    def on_resize(self) -> None:
-        """Sizes the cover to the panel it is sitting in."""
-        if self._cover is None:
-            return
-        self._cover.set_cell_height(int(self.size.height * self._COVER_SHARE))
-
     def _caption(self, text: str) -> None:
         """The line under the totals, gone entirely when it says nothing.
 
@@ -243,8 +221,6 @@ class QueuePanel(VerticalScroll):
         item = self._current_item(items)
         if item is None:
             return
-        if self._cover is not None:
-            self._cover.set_source(str(item.get("cover_url") or ""))
         self._caption(TrackRow._title_for(item))
 
     def _update_totals(self, stats: dict, total_items: int) -> None:

@@ -116,18 +116,6 @@ hires = [
 dedup = [
     "pyacoustid>=1.3.0",
 ]
-images = [
-    # Real pixels for the Queue panel's cover art in `--tui`, on the
-    # terminals that can carry them: Sixel (iTerm2, WezTerm) or the Kitty
-    # graphics protocol (kitty, Ghostty). An extra rather than a dependency
-    # for two reasons — Apple Terminal implements neither protocol, and
-    # there textual-image falls back to the same coloured half-cells
-    # `tui/cover_art.py` already draws by itself; and it needs Python 3.12,
-    # while this package supports 3.10. The marker is what keeps
-    # `pip install SpotiFLAC[images]` from failing outright on 3.10 and 3.11
-    # rather than simply installing nothing.
-    "textual-image[textual]>=0.13.2; python_version >= '3.12'",
-]
 
 [tool.black]
 line-length = 88

@@ -30,8 +30,9 @@ A sidebar on the left picks the panel; everything else is that panel.
 | **Health** | Whether the lyrics providers are reachable |
 | **Command** | The equivalent `spotiflac …` command, rebuilt as you type |
 
-Along the bottom: a status line, and a log pane that appears when a run
-starts (`Ctrl+L` toggles it).
+The log appears when a run starts (`Ctrl+L` toggles it): a column beside the
+panel on a terminal wide enough for one, a strip underneath on anything
+narrower. A status line runs along the bottom either way.
 
 ## How it looks
 
