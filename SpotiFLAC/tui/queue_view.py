@@ -9,6 +9,11 @@ A track keeps its row when it finishes rather than disappearing from the
 list. A queue that empties as it succeeds shows you least when the run is
 going well, and leaves you unable to answer the question you actually have
 afterwards — which of these did *not* work.
+
+The artwork in the header comes from the same events. `cover_url` rides
+along on every queue entry (`core/progress.py`), so showing the cover of the
+track being fetched costs no extra request and no second resolution of the
+link — see `cover_art.py` for how an image becomes text cells.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Label, ProgressBar
 
 from .branding import status_badge
+from .cover_art import CoverArt
 
 _BADGE_CLASSES = (
     "badge-gold",
@@ -119,7 +125,9 @@ class QueuePanel(VerticalScroll):
         self._rows: dict[str, TrackRow] = {}
         self._master: ProgressBar | None = None
         self._summary: Label | None = None
+        self._now: Label | None = None
         self._empty: Label | None = None
+        self._cover: CoverArt | None = None
 
     def compose(self) -> ComposeResult:
         # `total=1.0` rather than `None`. A bar with no total renders as the
@@ -128,11 +136,20 @@ class QueuePanel(VerticalScroll):
         # already refuses to tell for a queued row.
         self._master = ProgressBar(total=1.0, show_eta=False, id="master-bar")
         self._summary = Label("Nothing running", id="queue-summary")
+        # The cover needs something to be the cover *of*, and the rows below
+        # scroll away. Naming the track next to the artwork is what turns a
+        # decoration into a caption.
+        self._now = Label("", id="queue-now", markup=False)
         self._empty = Label(
             "The queue fills up once a download starts.",
             id="queue-empty",
         )
-        yield Vertical(self._summary, self._master, id="queue-header")
+        self._cover = CoverArt(id="queue-cover")
+        yield Horizontal(
+            self._cover,
+            Vertical(self._summary, self._now, self._master, id="queue-header"),
+            id="queue-top",
+        )
         yield self._empty
 
     def reset(self) -> None:
@@ -146,6 +163,12 @@ class QueuePanel(VerticalScroll):
             self._master.update(total=1.0, progress=0)
         if self._summary is not None:
             self._summary.update("Nothing running")
+        if self._now is not None:
+            self._caption("")
+        if self._cover is not None:
+            # The previous run's artwork left up over an empty queue would
+            # be the most confident wrong thing on the screen.
+            self._cover.set_source("")
 
     def apply_stats(self, stats: dict) -> None:
         """Folds one broadcaster event into the panel.
@@ -170,7 +193,59 @@ class QueuePanel(VerticalScroll):
             else:
                 row.apply(item)
 
+        self._show_current(items)
         self._update_totals(stats, len(items))
+
+    @staticmethod
+    def _current_item(items: list[dict]) -> dict | None:
+        """Which track the header is about.
+
+        The one being fetched, if there is one. Otherwise the most recent to
+        have finished — at the end of a run that leaves the last track on
+        screen rather than blanking the header the moment the work is done.
+        And failing both, the first in the queue, so the artwork is up while
+        the providers are still being asked rather than appearing a beat
+        into the download.
+        """
+        for item in items:
+            if str(item.get("status", "")) == "downloading":
+                return item
+        finished = [i for i in items if float(i.get("end_time") or 0.0) > 0]
+        if finished:
+            return max(finished, key=lambda i: float(i.get("end_time") or 0.0))
+        return items[0] if items else None
+
+    #: The share of the panel the artwork may take. Half leaves the queue
+    #: itself the other half, which is the thing the cover is a caption for;
+    #: a cover sized for a full-screen terminal on a short one pushes every
+    #: track row off the bottom.
+    _COVER_SHARE = 0.55
+
+    def on_resize(self) -> None:
+        """Sizes the cover to the panel it is sitting in."""
+        if self._cover is None:
+            return
+        self._cover.set_cell_height(int(self.size.height * self._COVER_SHARE))
+
+    def _caption(self, text: str) -> None:
+        """The line under the totals, gone entirely when it says nothing.
+
+        An empty caption is still a row of the layout, and a blank line
+        holding the queue open above an idle panel looks like something
+        failed to load.
+        """
+        if self._now is None:
+            return
+        self._now.update(text)
+        self._now.display = bool(text)
+
+    def _show_current(self, items: list[dict]) -> None:
+        item = self._current_item(items)
+        if item is None:
+            return
+        if self._cover is not None:
+            self._cover.set_source(str(item.get("cover_url") or ""))
+        self._caption(TrackRow._title_for(item))
 
     def _update_totals(self, stats: dict, total_items: int) -> None:
         done = (

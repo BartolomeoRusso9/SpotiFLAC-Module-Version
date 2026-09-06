@@ -2256,6 +2256,7 @@ class SpotiflacDownloader:
                 t.artists,
                 t.album,
                 track_spotify_id,
+                getattr(t, "cover_url", "") or "",
             )
             if not t.id:
                 t = t.model_copy(update={"id": track_item_id})

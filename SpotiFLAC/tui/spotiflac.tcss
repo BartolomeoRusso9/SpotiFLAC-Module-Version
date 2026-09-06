@@ -280,13 +280,35 @@ Button {
 
 /* ── Queue ─────────────────────────────────────────────────────────── */
 
-#queue-header {
+/* The artwork and the totals, side by side. `height: auto` throughout:
+   the cover sets its own height from its width, and when there is no cover
+   to show it hides itself and this row collapses back to the two lines the
+   header has always been. */
+#queue-top {
     height: auto;
     padding-bottom: 1;
 }
 
+#queue-header {
+    width: 1fr;
+    height: auto;
+}
+
+/* Only when the cover is actually up. A margin held open by a hidden
+   widget is a gap with nothing on the other side of it. */
+#queue-cover {
+    margin-right: 2;
+}
+
 #queue-summary {
     color: $text-muted;
+}
+
+/* The caption under the totals: what the artwork above is of. */
+#queue-now {
+    color: $text;
+    text-style: bold;
+    padding-bottom: 1;
 }
 
 /* Centred, with room above it. Flush against the top-left corner of an

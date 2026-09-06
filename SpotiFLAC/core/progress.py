@@ -223,6 +223,11 @@ class DownloadItem:
     end_time: float = 0.0
     error_message: str = ""
     file_path: str = ""
+    #: The artwork the provider named for this track, as a URL. Carried
+    #: rather than fetched: whoever registered the queue already had it on
+    #: the TrackMetadata, and a frontend that wants to show it should not
+    #: have to resolve the link a second time to get it back.
+    cover_url: str = ""
 
 
 class DownloadBroadcaster:
@@ -307,6 +312,7 @@ class DownloadManager:
         artist_name: str,
         album_name: str,
         spotify_id: str,
+        cover_url: str = "",
     ) -> None:
         async with self._lock:
             self._queue.append(
@@ -316,6 +322,7 @@ class DownloadManager:
                     artist_name=artist_name,
                     album_name=album_name,
                     spotify_id=spotify_id,
+                    cover_url=cover_url,
                 ),
             )
             if self.session_start == 0.0:
@@ -436,6 +443,7 @@ class DownloadManager:
                     "file_path": i.file_path,
                     "end_time": i.end_time,
                     "error_message": i.error_message,
+                    "cover_url": i.cover_url,
                 }
                 queue_items.append(item_data)
 

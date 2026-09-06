@@ -24,6 +24,7 @@ those lines would land on the terminal underneath and tear the layout.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -683,6 +684,22 @@ def _outcome_line(outcome) -> str:
     return "Done · " + " · ".join(parts)
 
 
+def _probe_terminal() -> None:
+    """Asks the terminal what it can draw, while the question still works.
+
+    Both entry points do this, and both do it *before* the app starts.
+    Detecting Sixel or Kitty graphics support means writing a query and
+    reading the terminal's reply off stdin, and once Textual is running its
+    input thread takes that reply first. Asked too late the question answers
+    "no", the Queue panel quietly falls back to half-cell covers, and
+    nothing anywhere says why.
+    """
+    from .cover_art import probe_image_support
+
+    with contextlib.suppress(Exception):
+        probe_image_support()
+
+
 async def run_tui_async(
     state: ConfigState | None = None,
     min_trust_tier: str | None = None,
@@ -695,6 +712,7 @@ async def run_tui_async(
     single frame is drawn. `--gui` gets away with the sync call next door
     because pywebview has no loop of its own.
     """
+    _probe_terminal()
     await SpotiFLACTui(state, min_trust_tier).run_async()
 
 
@@ -703,4 +721,5 @@ def run_tui(
     min_trust_tier: str | None = None,
 ) -> None:
     """The same, for a caller that has no event loop of its own."""
+    _probe_terminal()
     SpotiFLACTui(state, min_trust_tier).run()

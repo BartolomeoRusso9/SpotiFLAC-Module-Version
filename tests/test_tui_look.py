@@ -385,3 +385,35 @@ async def test_the_quality_badge_follows_the_selected_tier() -> None:
         assert "HI-RES" in str(badge.content)
         assert badge.has_class("badge-gold")
         assert not badge.has_class("badge-sapphire")
+
+
+def test_a_hint_is_valid_markup_in_both_modes(monkeypatch) -> None:
+    """`[/]` — the slash hint — is an auto-closing tag to Textual's parser.
+
+    Plain mode used to hand the bar its unescaped form, and rendering it
+    raised `MarkupError` before the first frame: `NO_COLOR=1 spotiflac --tui`
+    died on startup. The bar renders markup whichever mode it is in, so both
+    forms have to be markup.
+    """
+    from textual.content import Content
+
+    from SpotiFLAC.tui.banner import DEFAULT_HINTS
+
+    for plain in (False, True):
+        if plain:
+            monkeypatch.setenv("NO_COLOR", "1")
+        else:
+            monkeypatch.delenv("NO_COLOR", raising=False)
+        # Parses, rather than raises. Nothing here asserts how it looks.
+        Content.from_markup(branding.hint_bar_markup(*DEFAULT_HINTS))
+
+
+def test_the_plain_hint_still_reads_as_a_key(monkeypatch) -> None:
+    """Escaping is for the parser; what lands on screen is unchanged."""
+    from textual.content import Content
+
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    rendered = Content.from_markup(branding.key_hint_markup("/", "Search")).plain
+
+    assert rendered == "[/] Search"

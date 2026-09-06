@@ -276,10 +276,19 @@ def key_hint_markup(key: str, action: str = "") -> str:
     MovieBox colours the bracketed key and leaves the verb dim, which is what
     makes a row of eight hints scannable instead of a wall of grey. The
     brackets are escaped because Textual reads them as markup otherwise.
+
+    Escaped in plain mode too, which is the whole point of this branch
+    returning something built here rather than `key_hint()` verbatim. What
+    this function promises its caller is markup, and the caller renders it
+    as markup in both modes. The plain form of the `/` hint is the literal
+    `[/]` — an auto-closing tag with nothing open — so under `NO_COLOR` the
+    hint bar raised `MarkupError: auto closing tag ('[/]') has nothing to
+    close` and took the whole TUI down before it drew a frame.
     """
+    braced = f"\\[{key}]"
     if plain_terminal():
-        return key_hint(key, action)
-    lit = f"[$warning]\\[{key}][/]"
+        return braced if not action else f"{braced} {action}"
+    lit = f"[$warning]{braced}[/]"
     return lit if not action else f"{lit} {action}"
 
 
