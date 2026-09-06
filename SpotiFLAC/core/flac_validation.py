@@ -108,8 +108,12 @@ def repair_flac_file(
         return False, "Input file does not exist"
 
     if output_path is None:
-        # Use a temp file and replace original
-        output_path = input_path + ".repaired"
+        # Use a temp file and replace original. The ".flac" has to come last:
+        # ffmpeg picks its muxer from the output extension, and a bare
+        # ".repaired" makes it bail with "Unable to find a suitable output
+        # format". It also keeps validate_flac_file() from short-circuiting on
+        # the repaired file, which only inspects paths ending in ".flac".
+        output_path = input_path + ".repaired.flac"
         replace_original = True
     else:
         replace_original = False
@@ -141,6 +145,8 @@ def repair_flac_file(
                 "flac",
                 "-compression_level",
                 "8",
+                "-f",
+                "flac",
                 output_path,
             ],
             capture_output=True,
