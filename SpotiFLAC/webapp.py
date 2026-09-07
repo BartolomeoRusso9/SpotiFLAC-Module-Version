@@ -1064,11 +1064,11 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
             "<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n"
-            '<script src="/web-shim.js?v=20260919"></script>\n'
+            '<script src="/web-shim.js?v=20260921"></script>\n'
         )
         html = html.replace(
-            '<script src="toast-system.js?v=20260919"></script>',
-            inject + '<script src="toast-system.js?v=20260919"></script>',
+            '<script src="toast-system.js?v=20260921"></script>',
+            inject + '<script src="toast-system.js?v=20260921"></script>',
         )
         # Marks the document as browser-served before the first paint, so CSS
         # can drop the chrome that only makes sense in the pywebview window
@@ -1147,6 +1147,12 @@ async def run_async(
     """
     import uvicorn
 
+    from .app import configure_console_logging, saved_log_level
+
+    # Same console the desktop window configures for itself: web mode shares
+    # every download path with it, so it has to share the level and the
+    # traceback-free formatter too. See app.configure_console_logging().
+    configure_console_logging(saved_log_level())
     _warn_if_exposed(host, token)
     config = uvicorn.Config(
         create_app(token=token, multiuser=multiuser),
@@ -1171,6 +1177,9 @@ def run(
     """
     import uvicorn
 
+    from .app import configure_console_logging, saved_log_level
+
+    configure_console_logging(saved_log_level())
     _warn_if_exposed(host, token)
     uvicorn.run(
         create_app(token=token, multiuser=multiuser),

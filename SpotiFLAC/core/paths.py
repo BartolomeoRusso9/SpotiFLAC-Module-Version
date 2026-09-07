@@ -28,6 +28,17 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def default_download_dir() -> str:
+    """Where downloads go unless told otherwise: ``~/Music/SpotiFLAC``.
+
+    One definition, because every frontend offers it and they must agree —
+    a GUI that defaults somewhere the terminal UI does not is two libraries
+    on one machine. Returned as a string: it is handed straight to the
+    downloader and shown in a text field, and neither wants a Path.
+    """
+    return os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
+
+
 def data_dir() -> Path:
     """The one directory everything SpotiFLAC writes lives under."""
     return Path.home() / ".spotiflac"

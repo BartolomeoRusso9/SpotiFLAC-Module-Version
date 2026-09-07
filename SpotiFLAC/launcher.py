@@ -5,9 +5,15 @@
 The entire entry point now runs on a single shared event loop instead of
 delegating to `SpotiFLAC(...)` (a sync wrapper that opens its own
 asyncio.run() internally). It uses `SpotiflacDownloader` directly, which is
-already 100% async-native, and that is why `check_for_updates_async`
-and `run_interactive()` can now be awaited in the same loop instead of
-opening a new one each time.
+already 100% async-native, and that is why `check_for_updates_async` and the
+guided modes can now be awaited in the same loop instead of opening a new
+one each time.
+
+=== Guided mode ===
+`--tui` is it. `--interactive` still parses and still warns, but it opens the
+same screen: the old wizard is gone. A terminal that cannot host the TUI
+should use the command line, which is better suited to that anyway — there is
+deliberately no second wizard to fall back to.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ import logging
 import os
 import sys
 import time
+import warnings
 from collections.abc import Awaitable, Callable
 
 from .check_update import check_for_updates_async
@@ -30,12 +37,12 @@ from .core.library_notify import SUPPORTED as LIBRARY_SUPPORTED
 from .core.notifiers import EVENTS as NOTIFY_EVENTS
 from .core.notifiers import KINDS as NOTIFY_KINDS
 from .core.notifiers import NOTIFY_TOKEN_ENV, NOTIFY_URL_ENV
+from .core.output_sink import sink_active
 from .core.report import RunReport
 from .core.transcode import LOSSLESS_FORMATS, SUPPORTED_FORMATS
 from .downloader import DownloadOptions, SpotiflacDownloader
 from .core.web_users import ROLES as WEB_USER_ROLES
 from .extensions.trust import TRUST_TIERS
-from .interactive import run_interactive
 
 
 def _match_score(value: str) -> float:
@@ -191,10 +198,10 @@ def _print_welcome_banner() -> None:
     core/console._write already goes to stderr; this was the one thing that
     didn't.
 
-    Shown for every launch mode (CLI, --interactive, --gui, --web) since it
+    Shown for every launch mode (CLI, --tui, --gui, --web) since it
     runs as the very first thing in amain(), before any mode-specific setup.
     Colors and links are skipped for non-tty output (piped/redirected) or when
-    NO_COLOR is set, matching the convention used elsewhere (interactive.py).
+    NO_COLOR is set, matching the convention used elsewhere.
     """
     if "--json" in sys.argv:
         return
@@ -660,7 +667,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "*failed* tracks for a bounded time after one session), --watch "
         "re-runs the whole sync indefinitely. Combine both if you want "
         "each cycle to also retry transient failures. Not available in "
-        "--interactive mode. Does NOT cover Spotify 'Liked Songs' — that "
+        "the terminal UI. Does NOT cover Spotify 'Liked Songs' — that "
         "needs an authenticated Spotify session, which this project "
         "deliberately doesn't implement (see the 'no-account' design goal "
         "in the README); point --watch at a public playlist/album/artist "
@@ -688,10 +695,16 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     # saved preference from a flag typed for this run.
     parser.set_defaults(profile_log_level=pd.get("log_level"))
     parser.add_argument(
+        "--tui",
+        action="store_true",
+        default=pd.get("tui", False),
+        help="Launch the terminal UI (the guided mode)",
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         default=pd.get("interactive", False),
-        help="Launch interactive mode (wizard)",
+        help="Deprecated alias for --tui",
     )
     parser.add_argument(
         "--gui",
@@ -1534,7 +1547,12 @@ async def _run_download_async(
     fallirebbe).
     """
     logger = logging.getLogger("SpotiFLAC")
-    if not logger.handlers:
+    # With an output sink installed, something else owns the screen and has
+    # already arranged to receive log records (see core/output_sink). Adding
+    # a StreamHandler here would do two things wrong at once: write straight
+    # to the terminal underneath that UI, and — via `propagate = False` —
+    # cut off the handler the UI attached further up the chain.
+    if not logger.handlers and not sink_active():
         # stderr under --json: stdout carries the report document and
         # nothing else, so the output stays pipeable into jq.
         handler = logging.StreamHandler(sys.stderr if json_report else sys.stdout)
@@ -1707,8 +1725,86 @@ def _split_positionals(args: argparse.Namespace) -> tuple[list[str], str | None]
     return playlists, args.output_dir or args.url
 
 
+async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
+    """Runs one guided-mode configuration, `--loop`/`--watch` included.
+
+    The single place a `cfg` dict becomes a download. Both guided frontends
+    call it — the wizard and the TUI — because the alternative is two copies
+    of a forty-argument call, and the second copy is the one that stops
+    getting new flags. `tests/test_tui_config_state.py` reads the keys out of
+    this function to check the TUI still produces all of them.
+    """
+
+    async def _run_once() -> None:
+        await _run_download_async(
+            cfg["url"],
+            output_dir=cfg["output_dir"],
+            services=cfg["services"],
+            filename_format=cfg["filename_format"],
+            use_track_numbers=cfg["use_track_numbers"],
+            use_album_track_numbers=cfg["use_album_track_numbers"],
+            use_artist_subfolders=cfg["use_artist_subfolders"],
+            use_album_subfolders=cfg["use_album_subfolders"],
+            create_playlist_subfolders=cfg.get("create_playlist_subfolders", True),
+            loop=cfg.get("loop"),
+            quality=cfg["quality"],
+            first_artist_only=cfg["first_artist_only"],
+            artist_separator=cfg.get("artist_separator"),
+            include_featuring=cfg.get("include_featuring", True),
+            log_level=log_level,
+            output_path=cfg.get("output_path"),
+            allow_fallback=cfg.get("allow_fallback", True),
+            embed_lyrics=cfg["embed_lyrics"],
+            lyrics_providers=cfg["lyrics_providers"],
+            apple_lyrics_word_by_word=cfg.get("apple_lyrics_word_by_word", True),
+            save_lrc=cfg.get("save_lrc", False),
+            lrc_library_dir=cfg.get("lrc_library_dir") or None,
+            enrich_metadata=cfg["enrich_metadata"],
+            enrich_providers=cfg["enrich_providers"],
+            qobuz_local_api_url=cfg.get("qobuz_local_api_url"),
+            tidal_custom_api=cfg.get("tidal_custom_api") or None,
+            track_max_retries=cfg.get("track_max_retries", 0),
+            post_download_action=cfg.get("post_download_action", "none"),
+            post_download_command=cfg.get("post_download_command", ""),
+            resume=cfg.get("resume", True),
+            post_download_hooks=cfg.get("post_download_hooks", []),
+            # These are CLI-only flags, and `args` does not exist yet on
+            # this path — it is parsed further down, in the branch this
+            # one returns before reaching, so reading it here raised
+            # NameError as soon as a guided run started downloading.
+            # The guided mode does not ask about any of them, so its
+            # defaults are simply "off"; cfg.get() leaves room for it to
+            # start asking.
+            json_report=cfg.get("json_report", False),
+            library_type=cfg.get("library_type"),
+            library_url=cfg.get("library_url"),
+            library_token=cfg.get("library_token"),
+            library_user=cfg.get("library_user"),
+            write_m3u=cfg.get("write_m3u"),
+            timeout_s=cfg.get("timeout_s"),
+            transcode_to=cfg.get("transcode_to"),
+            transcode_bitrate=cfg.get("transcode_bitrate", "320k"),
+            transcode_keep_original=cfg.get("transcode_keep_original", False),
+            max_concurrent_downloads=cfg.get("max_concurrent_downloads", 2),
+            verify_hires=cfg.get("verify_hires", False),
+            # The wizard takes a .csv where it takes a link (see
+            # the TUI's Source panel); everything after that point is
+            # the same run.
+            csv_path=cfg.get("csv_path") or None,
+            # Forwarded, not defaulted: the TUI offers "m3u" and "none"
+            # beside "m3u8", and leaving this out meant every guided run
+            # wrote an .m3u8 whatever the form said.
+            m3u_format=cfg.get("m3u_format", "m3u8"),
+        )
+
+    await _run_once()
+
+    if cfg.get("watch"):
+        await watch_forever(_run_once, cfg["watch"])
+
+
 async def amain() -> None:
-    """Coordinate GUI, interactive, and command-line execution for SpotiFLAC.
+    """Coordinate GUI, terminal-UI, and command-line execution for SpotiFLAC.
 
     Handles startup checks, extension installation, configuration loading, profile management, argument parsing, and download execution across the supported application modes.
     """
@@ -1746,6 +1842,33 @@ async def amain() -> None:
         from .app import run_gui
 
         run_gui()
+        return
+
+    if _argv_has("--tui", "--interactive"):
+        if "--interactive" in sys.argv and "--tui" not in sys.argv:
+            # A warning rather than a silent redirect: the two are not the
+            # same shape, and somebody driving the wizard from a script
+            # deserves to be told before the screen changes under them.
+            warnings.warn(
+                "--interactive is deprecated and now opens --tui, the "
+                "terminal UI. It will be removed in a future release; use "
+                "--tui, or the command line for a scripted run.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            print(
+                "--interactive now opens the terminal UI (--tui). "
+                "For a scripted or piped run, use the command line instead: "
+                "spotiflac --help",
+                file=sys.stderr,
+            )
+
+        print_ffmpeg_warning()
+        print_node_warning()
+
+        from .tui.app import run_tui_async
+
+        await run_tui_async(min_trust_tier=_early_min_trust_from_argv())
         return
 
     if "--web" in sys.argv:
@@ -2106,17 +2229,19 @@ async def amain() -> None:
         return
 
     if "--trust-key-list" in sys.argv:
-        from .extensions.trust import list_trusted_keys
+        # Names only, by construction: signer_names() never returns key
+        # material, so this listing cannot print any. Read trusted_keys.json
+        # directly if you need the public key bytes.
+        #
+        # Labelled `signer-N` rather than `key-N` because what is on the line
+        # is the label you chose when adding the key, not the key.
+        from .extensions.trust import signer_names
 
-        keys = list_trusted_keys()
-        if not keys:
+        names = signer_names()
+        if not names:
             print("No trusted keys configured.")
-        for idx, k in enumerate(keys, start=1):
-            name = k.get("name", "") or "(unnamed)"
-            # Only the human-assigned name is shown; the key material itself
-            # is never written to the console. Use trusted_keys.json directly
-            # if you need to inspect or export the public key bytes.
-            print(f"key-{idx}: {name}")
+        for idx, name in enumerate(names, start=1):
+            print(f"signer-{idx}: {name or '(unnamed)'}")
         return
 
     if _argv_has("--dedup-restore"):
@@ -2325,88 +2450,6 @@ async def amain() -> None:
         await _handle_subscriptions()
         return
 
-    if "--interactive" in sys.argv:
-        print_ffmpeg_warning()
-        print_node_warning()
-        cfg = await run_interactive(_early_min_trust_from_argv())
-
-        verbose = (
-            cfg.get("verbose", False) or "--verbose" in sys.argv or "-v" in sys.argv
-        )
-        log_level = _resolve_log_level(verbose, None, cfg.get("log_level"))
-        _root_handler = logging.StreamHandler(sys.stdout)
-        _root_handler.setFormatter(
-            _CleanConsoleFormatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-            )
-        )
-        logging.basicConfig(level=log_level, handlers=[_root_handler])
-        _quiet_noisy_libraries(log_level)
-
-        async def _run_once() -> None:
-            await _run_download_async(
-                cfg["url"],
-                output_dir=cfg["output_dir"],
-                services=cfg["services"],
-                filename_format=cfg["filename_format"],
-                use_track_numbers=cfg["use_track_numbers"],
-                use_album_track_numbers=cfg["use_album_track_numbers"],
-                use_artist_subfolders=cfg["use_artist_subfolders"],
-                use_album_subfolders=cfg["use_album_subfolders"],
-                create_playlist_subfolders=cfg.get("create_playlist_subfolders", True),
-                loop=cfg.get("loop"),
-                quality=cfg["quality"],
-                first_artist_only=cfg["first_artist_only"],
-                artist_separator=cfg.get("artist_separator"),
-                include_featuring=cfg.get("include_featuring", True),
-                log_level=log_level,
-                output_path=cfg.get("output_path"),
-                allow_fallback=cfg.get("allow_fallback", True),
-                embed_lyrics=cfg["embed_lyrics"],
-                lyrics_providers=cfg["lyrics_providers"],
-                apple_lyrics_word_by_word=cfg.get("apple_lyrics_word_by_word", True),
-                save_lrc=cfg.get("save_lrc", False),
-                lrc_library_dir=cfg.get("lrc_library_dir") or None,
-                enrich_metadata=cfg["enrich_metadata"],
-                enrich_providers=cfg["enrich_providers"],
-                qobuz_local_api_url=cfg.get("qobuz_local_api_url"),
-                tidal_custom_api=cfg.get("tidal_custom_api") or None,
-                track_max_retries=cfg.get("track_max_retries", 0),
-                post_download_action=cfg.get("post_download_action", "none"),
-                post_download_command=cfg.get("post_download_command", ""),
-                resume=cfg.get("resume", True),
-                post_download_hooks=cfg.get("post_download_hooks", []),
-                # These are CLI-only flags, and `args` does not exist yet on
-                # this path — it is parsed further down, in the branch this
-                # one returns before reaching, so reading it here raised
-                # NameError as soon as an interactive run started
-                # downloading. The wizard does not ask about any of them, so
-                # the interactive defaults are simply "off"; cfg.get() leaves
-                # room for it to start asking.
-                json_report=cfg.get("json_report", False),
-                library_type=cfg.get("library_type"),
-                library_url=cfg.get("library_url"),
-                library_token=cfg.get("library_token"),
-                library_user=cfg.get("library_user"),
-                write_m3u=cfg.get("write_m3u"),
-                timeout_s=cfg.get("timeout_s"),
-                transcode_to=cfg.get("transcode_to"),
-                transcode_bitrate=cfg.get("transcode_bitrate", "320k"),
-                transcode_keep_original=cfg.get("transcode_keep_original", False),
-                max_concurrent_downloads=cfg.get("max_concurrent_downloads", 2),
-                verify_hires=cfg.get("verify_hires", False),
-                # The wizard takes a .csv where it takes a link (see
-                # interactive.py's URL step); everything after that point is
-                # the same run.
-                csv_path=cfg.get("csv_path") or None,
-            )
-
-        await _run_once()
-
-        if cfg.get("watch"):
-            await watch_forever(_run_once, cfg["watch"])
-        return
-
     if len(sys.argv) == 1:
         parser = argparse.ArgumentParser(
             prog="spotiflac",
@@ -2419,9 +2462,14 @@ async def amain() -> None:
             help="Launch graphical user interface (GUI)",
         )
         parser.add_argument(
+            "--tui",
+            action="store_true",
+            help="Launch the terminal UI (the guided mode)",
+        )
+        parser.add_argument(
             "--interactive",
             action="store_true",
-            help="Launch interactive mode (wizard)",
+            help="Deprecated alias for --tui",
         )
         parser.print_help()
         return
@@ -2489,9 +2537,14 @@ async def amain() -> None:
             help="Launch graphical user interface (GUI)",
         )
         parser.add_argument(
+            "--tui",
+            action="store_true",
+            help="Launch the terminal UI (the guided mode)",
+        )
+        parser.add_argument(
             "--interactive",
             action="store_true",
-            help="Launch interactive mode (wizard)",
+            help="Deprecated alias for --tui",
         )
         parser.print_help()
         return

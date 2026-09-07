@@ -75,8 +75,8 @@ def installed_download_services(
     """The download services this install can actually offer, one per row.
 
     The single source of truth for every "choose your providers" surface:
-    the interactive wizard, and the Settings list in the GUI. Both used to
-    answer the question their own way — the wizard from the installed
+    the terminal UI, and the Settings list in the GUI. They used to answer
+    the question their own way — the guided mode from the installed
     extensions, the GUI from a list hard-coded in app.js — so a fresh
     install offered twelve services in Settings and only the installed ones
     on the command line, and a third-party provider appeared in neither.
@@ -104,6 +104,16 @@ def installed_download_services(
         {"id": service, "label": service_label(service), "extensions": sorted(names)}
         for service, names in sorted(services.items())
     ]
+
+
+def installed_service_ids(manager: ExtensionManager | None = None) -> list[str]:
+    """Just the ids from `installed_download_services()`, for menus.
+
+    Every guided frontend needs the same thing — a list of provider ids to
+    offer — and each one used to unwrap the rows itself. One function, so a
+    provider that appears in one menu appears in all of them.
+    """
+    return [str(service["id"]) for service in installed_download_services(manager)]
 
 
 #: Spellings a title-cased id gets wrong.

@@ -356,6 +356,7 @@ function applySettings(settings = {}) {
   if ($('config-album-track-numbers')) $('config-album-track-numbers').checked = cfg.use_album_track_numbers;
   if ($('config-artist-sub')) $('config-artist-sub').checked = cfg.use_artist_subfolders;
   if ($('config-album-sub')) $('config-album-sub').checked = cfg.use_album_subfolders;
+  if ($('config-playlist-sub')) $('config-playlist-sub').checked = cfg.create_playlist_subfolders !== false;
   if ($('config-first-artist')) $('config-first-artist').checked = cfg.first_artist_only;
   if ($('config-artist-separator')) $('config-artist-separator').value = cfg.artist_separator || '';
   updateArtistSeparatorState(cfg.first_artist_only);
@@ -370,6 +371,7 @@ function applySettings(settings = {}) {
   if ($('config-acoustid-key')) $('config-acoustid-key').value = cfg.acoustid_api_key || '';
   if ($('config-loop')) $('config-loop').value = cfg.loop;
   if ($('config-loglevel')) $('config-loglevel').value = cfg.log_level;
+  if ($('config-concurrent')) $('config-concurrent').value = cfg.max_concurrent_downloads || 2;
   lastAppliedServices = Array.isArray(cfg.services) ? cfg.services : lastAppliedServices;
   applyListState('services-list', cfg.services);
   applyListState('lyrics-list', cfg.lyrics_providers);
@@ -597,6 +599,7 @@ const DEFAULT_SETTINGS = {
   use_album_track_numbers: false,
   use_artist_subfolders: true,
   use_album_subfolders: true,
+  create_playlist_subfolders: true,
   first_artist_only: false,
   artist_separator: '',
   track_max_retries: 0,
@@ -610,6 +613,7 @@ const DEFAULT_SETTINGS = {
   acoustid_api_key: '',
   loop: 0,
   log_level: 'INFO',
+  max_concurrent_downloads: 2,
   services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
   lyrics_providers: ['apple', 'lrclib'],
   apple_lyrics_word_by_word: true,
@@ -1045,6 +1049,10 @@ let queueDurationInterval = null;
 //: Queue view filters. A hundred-track playlist makes the queue a list you
 //: have to search rather than read — most often to find the handful that
 //: failed. null status = show everything.
+// One Set of queue-item ids per dispatched batch, oldest first. The backend
+// runs batches one at a time (see _await_download_slot), so the batch that
+// reports finished is the one at the front.
+let dispatchedBatches = [];
 let queueFilterStatus = null;   // null | 'waiting' | 'done' | 'skipped' | 'error'
 let queueSearch = '';
 let previewAudio = null;
@@ -1196,17 +1204,23 @@ window.updateFolderLabel = (path) => {
             }
           }
         }
-        if (Array.isArray(data.queue)) {
+        if (Array.isArray(data.queue) && data.queue.length) {
+          // The queue is indexed once per push instead of being scanned once
+          // per stat entry: those scans were quadratic in the queue length,
+          // and Python pushes this payload four times a second for the whole
+          // queue. First match wins, as findIndex() did here before.
+          const byId = new Map(), bySpotifyId = new Map(), byName = new Map();
+          queue.forEach(q => {
+            if (q.id && !byId.has(q.id)) byId.set(q.id, q);
+            if (q.spotify_id && !bySpotifyId.has(q.spotify_id)) bySpotifyId.set(q.spotify_id, q);
+            const nameKey = `${q.title}\u0000${q.artist}`;
+            if (!byName.has(nameKey)) byName.set(nameKey, q);
+          });
           data.queue.forEach(stat => {
-            let qi = queue.findIndex(q => q.id && stat.id && q.id === stat.id);
-            if (qi < 0 && stat.spotify_id) {
-              qi = queue.findIndex(q => q.spotify_id && q.spotify_id === stat.spotify_id);
-            }
-            if (qi < 0 && stat.track_name) {
-              qi = queue.findIndex(q => q.title === stat.track_name && q.artist === stat.artist_name);
-            }
-            if (qi < 0) return;
-            const item = queue[qi];
+            const item = (stat.id ? byId.get(stat.id) : null)
+              || (stat.spotify_id ? bySpotifyId.get(stat.spotify_id) : null)
+              || (stat.track_name ? byName.get(`${stat.track_name}\u0000${stat.artist_name}`) : null);
+            if (!item) return;
             if (stat.status === 'downloading') item.status = 'active';
             else if (stat.status === 'skipped') item.status = 'skipped';
             else if (stat.status === 'completed') item.status = 'done';
@@ -1234,8 +1248,26 @@ window.showTracklist = (tracksJson) => {
   $('text-search-container')?.classList.add('hidden');
 };
 
-window.app_download_finished = (success = true) => {
-  const activeItems = queue.map((item, qi) => item.status === 'active' ? qi : -1).filter(i => i >= 0);
+window.app_download_finished = (success = true, indices = null) => {
+  // Close out the items of *this* batch only. Marking every active row done
+  // was wrong as soon as a second batch was queued behind the first (the
+  // backend runs them one at a time now, see _await_download_slot): the
+  // waiting batch's tracks were reported finished before they had started.
+  // Matched on the ids startDownloadQueue dispatched, not on `indices`:
+  // those are tracklist positions, and two fetches put two different tracks
+  // at index 0, so a queue holding both closed out the wrong rows. `indices`
+  // is still accepted for older builds, and a build that pushes neither
+  // falls back to the previous all-active behaviour.
+  const dispatched = dispatchedBatches.shift() || null;
+  const byIndex = !dispatched && Array.isArray(indices) ? new Set(indices) : null;
+  const inBatch = (item) => {
+    if (dispatched) return dispatched.has(item.id);
+    if (byIndex) return byIndex.has(item.index);
+    return true;
+  };
+  const activeItems = queue
+    .map((item, qi) => (item.status === 'active' && inBatch(item) ? qi : -1))
+    .filter(i => i >= 0);
   
   // Close out items from the completed batch
   if (activeItems.length > 0) {
@@ -3354,11 +3386,17 @@ function resetQueueDuration() {
 function syncTrackRowsWithQueue() {
   const rows = document.getElementById('track-rows');
   if (!rows || !rows.children.length) return;
+  // The rows are indexed once per call instead of running a document query
+  // per queue item: with a few hundred tracks queued those N queries were
+  // the bulk of a render, and a render happens four times a second while a
+  // download is running.
+  const byId = new Map();
+  for (const row of rows.children) {
+    const sid = row.dataset && row.dataset.spotifyId;
+    if (sid) byId.set(sid, row);
+  }
   queue.forEach(item => {
-    let row = null;
-    if (item.spotify_id) {
-      row = rows.querySelector(`.track-row[data-spotify-id="${CSS.escape(item.spotify_id)}"]`);
-    }
+    let row = (item.spotify_id && byId.get(item.spotify_id)) || null;
     if (!row && item.index != null) {
       row = document.getElementById(`track-row-${item.index}`);
     }
@@ -3368,12 +3406,121 @@ function syncTrackRowsWithQueue() {
     row.classList.toggle('failed', item.status === 'error');
     row.classList.toggle('skipped', item.status === 'skipped');
     const pct = item.status === 'active' ? item.progress : (item.status === 'done' ? 100 : 0);
-    row.style.setProperty('--row-progress', pct + '%');
+    // Writing the custom property unconditionally invalidates the row's
+    // style on every render even when the number has not moved.
+    if (row._rowProgress !== pct) {
+      row._rowProgress = pct;
+      row.style.setProperty('--row-progress', pct + '%');
+    }
   });
 }
 
+// Rendering the queue used to mean `list.innerHTML = ''` followed by one
+// innerHTML parse per item, on every single state change. "Download All"
+// fired one full rebuild per track (startDownloadQueue marks each waiting
+// item active one at a time) and Python pushes download stats four times a
+// second on top of that, so a long tracklist locked the window solid.
+// Item nodes are now built once, reused, and only the fields that actually
+// changed are written; renders are coalesced into at most one per frame.
+const queueNodes = new Map();
+let queueRenderScheduled = false;
+
 function renderQueue() {
-  const list = $('queue-list'); list.innerHTML = '';
+  if (queueRenderScheduled) return;
+  queueRenderScheduled = true;
+  const run = () => {
+    if (!queueRenderScheduled) return;
+    queueRenderScheduled = false;
+    renderQueueNow();
+  };
+  // The frame callback is the fast path, but it never fires while the window
+  // is hidden or minimised — which would leave the queue frozen mid-download
+  // until it came back — so a timer races it and whichever arrives first
+  // renders.
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+  setTimeout(run, 120);
+}
+
+function queueItemNode(item) {
+  let el = queueNodes.get(item.id);
+  if (el) return el;
+  el = document.createElement('div');
+  el.className = 'queue-item';
+  el.innerHTML = `
+      <div class="qi-top">
+        <div class="qi-meta">
+          <div class="qi-title"></div>
+          <div class="qi-artist"></div>
+        </div>
+        <div class="qi-pill"></div>
+      </div>
+      <div class="qi-bottom"></div>
+      <div class="qi-bottom-meta"><span class="qi-bm-size"></span><span class="qi-bm-path"></span></div>
+    `;
+  el._parts = {
+    title:  el.querySelector('.qi-title'),
+    artist: el.querySelector('.qi-artist'),
+    pill:   el.querySelector('.qi-pill'),
+    bottom: el.querySelector('.qi-bottom'),
+    meta:   el.querySelector('.qi-bottom-meta'),
+    size:   el.querySelector('.qi-bm-size'),
+    path:   el.querySelector('.qi-bm-path'),
+  };
+  queueNodes.set(item.id, el);
+  return el;
+}
+
+function paintQueueItem(el, item, qi) {
+  const id = `qi-${qi}`;
+  if (el.id !== id) el.id = id;
+
+  const artistAlbum = item.album
+    ? `${item.artist || ''} • ${item.album}`
+    : (item.artist || '');
+  // Nothing below depends on anything outside this signature, so an item
+  // whose signature is unchanged needs no DOM write at all.
+  const sig = [item.status, item.progress, item.title, artistAlbum,
+               item.file_path, item.file_size_mb].join('\u0000');
+  if (el._sig === sig) return;
+  el._sig = sig;
+
+  const p = el._parts;
+  const statusLabel = { waiting:'Queued', active:'Downloading', done:'completed', error:'Failed', skipped:'Skipped' }[item.status] || 'Queued';
+  const statusText = item.status === 'active'
+    ? `Downloading… ${item.progress}%`
+    : item.status === 'done'
+    ? 'Completed'
+    : item.status === 'error'
+    ? 'Failed'
+    : item.status === 'skipped'
+    ? 'Skipped'
+    : 'Queued';
+
+  p.title.textContent  = item.title || '';
+  p.artist.textContent = artistAlbum;
+  p.pill.className = `qi-pill ${item.status}`;
+  p.pill.textContent = statusLabel;
+
+  if (item.status === 'done') {
+    const hasSize = item.file_size_mb > 0;
+    const hasPath = !!item.file_path;
+    p.size.textContent = hasSize ? `${item.file_size_mb.toFixed(2)} MB` : '';
+    p.size.style.display = hasSize ? '' : 'none';
+    p.path.textContent = hasPath ? item.file_path : '';
+    p.path.title = hasPath ? item.file_path : '';
+    p.path.style.display = hasPath ? '' : 'none';
+    p.meta.style.display = (hasSize || hasPath) ? '' : 'none';
+    p.bottom.style.display = 'none';
+  } else {
+    p.meta.style.display = 'none';
+    p.bottom.style.display = '';
+    p.bottom.textContent = statusText;
+  }
+}
+
+function renderQueueNow() {
+  const list = $('queue-list');
+  if (!list) return;
   let empty = $('queue-empty');
   if (!empty) {
     empty = document.createElement('div');
@@ -3411,7 +3558,9 @@ function renderQueue() {
     $('queue-drawer')?.classList.remove('open');
 
     empty.style.display = 'flex';
-    list.appendChild(empty);
+    if (list.firstChild !== empty) list.insertBefore(empty, list.firstChild);
+    while (list.children.length > 1) list.removeChild(list.lastChild);
+    queueNodes.clear();
     $('q-count').textContent = '0 tracks'; $('q-done').textContent = '';
     const downloaded = $('qd-downloaded');
     const speed = $('qd-speed');
@@ -3441,74 +3590,53 @@ function renderQueue() {
   // you are waiting on, and having it vanish from "Queued" the moment it
   // starts is not what anyone means by the word.
   const q = (queueSearch || '').toLowerCase();
-  const visibleItems = queue.filter(item => {
+  const visible = [];
+  queue.forEach((item, qi) => {
     if (queueFilterStatus) {
       const matchesStatus = queueFilterStatus === 'waiting'
         ? (item.status === 'waiting' || item.status === 'active')
         : item.status === queueFilterStatus;
-      if (!matchesStatus) return false;
+      if (!matchesStatus) return;
     }
-    if (!q) return true;
-    return `${item.title || ''} ${item.artist || ''} ${item.album || ''}`.toLowerCase().includes(q);
+    if (q && !`${item.title || ''} ${item.artist || ''} ${item.album || ''}`.toLowerCase().includes(q)) return;
+    visible.push([item, qi]);
   });
 
-  if (!visibleItems.length) {
-    const none = document.createElement('div');
-    none.className = 'queue-no-match';
+  // Reconcile in place: existing nodes are moved at most once and dropped
+  // only when they leave the list, so a filter keystroke or a progress tick
+  // no longer rebuilds every row from scratch.
+  let cursor = 0;
+  const place = (node) => {
+    if (list.children[cursor] !== node) list.insertBefore(node, list.children[cursor] || null);
+    cursor++;
+  };
+
+  if (!visible.length) {
+    let none = list.querySelector('.queue-no-match');
+    if (!none) {
+      none = document.createElement('div');
+      none.className = 'queue-no-match';
+    }
     none.textContent = queueFilterStatus || q
       ? 'Nothing in the queue matches this filter.'
       : 'Queue is empty.';
-    list.appendChild(none);
+    place(none);
   }
 
-  visibleItems.forEach((item) => {
-    const qi = queue.indexOf(item);
-    const statusLabel = { waiting:'Queued', active:'Downloading', done:'completed', error:'Failed', skipped:'Skipped' }[item.status] || 'Queued';
-    const statusText = item.status === 'active'
-      ? `Downloading… ${item.progress}%`
-      : item.status === 'done'
-      ? 'Completed'
-      : item.status === 'error'
-      ? 'Failed'
-      : item.status === 'skipped'
-      ? 'Skipped'
-      : 'Queued';
-    const pillClass = `qi-pill ${item.status}`;
-
-    // Define the bottom section HTML (size and path for completed tracks, status text for others)
-    let bottomHtml;
-    if (item.status === 'done') {
-      const sizeHtml = item.file_size_mb > 0
-        ? `<span>${item.file_size_mb.toFixed(2)} MB</span>`
-        : '';
-      const pathHtml = item.file_path
-        ? `<span class="qi-bm-path" title="${escHtml(item.file_path)}">${escHtml(item.file_path)}</span>`
-        : '';
-      bottomHtml = (sizeHtml || pathHtml) ? `<div class="qi-bottom-meta">${sizeHtml}${pathHtml}</div>` : '';
-    } else {
-      bottomHtml = `<div class="qi-bottom">${statusText}</div>`;
-    }
-
-    const el = document.createElement('div');
-    el.className = 'queue-item'; el.id = `qi-${qi}`;
-    
-    // Combine artist and album with a middle dot (•) if the album metadata exists
-    const artistAlbumText = item.album
-      ? `${escHtml(item.artist)} • ${escHtml(item.album)}`
-      : escHtml(item.artist);
-    
-    el.innerHTML = `
-      <div class="qi-top">
-        <div class="qi-meta">
-          <div class="qi-title">${escHtml(item.title)}</div>
-          <div class="qi-artist">${artistAlbumText}</div>
-        </div>
-        <div class="${pillClass}">${statusLabel}</div>
-      </div>
-      ${bottomHtml}
-    `;
-    list.appendChild(el);
+  visible.forEach(([item, qi]) => {
+    const el = queueItemNode(item);
+    paintQueueItem(el, item, qi);
+    place(el);
   });
+
+  while (list.children.length > cursor) list.removeChild(list.lastChild);
+
+  // Drop the cached nodes of items that are no longer in the queue (removed
+  // or cleared), otherwise the map would grow for the life of the session.
+  if (queueNodes.size > queue.length) {
+    const live = new Set(queue.map(item => item.id));
+    for (const key of [...queueNodes.keys()]) if (!live.has(key)) queueNodes.delete(key);
+  }
   
   $('q-count').textContent = `${queue.length} track${queue.length !== 1 ? 's' : ''}`;
   const done = queue.filter(q => q.status === 'done').length;
@@ -3686,11 +3814,19 @@ async function startDownloadQueue() {
 
   const config = buildConfig();
   const indices = waiting.map(w => w.index);
+  // The ids, not the indices, are what identifies these rows later: `index`
+  // is a position in the fetched tracklist, and a second fetch puts a
+  // different track at index 0 — the same trap the dedup above sidesteps.
+  const batchIds = new Set(waiting.map(w => w.id));
   console.log('[startDownloadQueue] Indices to download:', indices);
   console.log('[startDownloadQueue] Config:', config);
   console.log('[startDownloadQueue] pywebview available:', !!window.pywebview?.api);
 
   if (window.pywebview?.api) {
+    // Recorded only on the path that actually produces an
+    // app_download_finished callback, or the demo fallback below would leave
+    // a batch queued up for the next real one to consume.
+    dispatchedBatches.push(batchIds);
     try {
       console.log('[startDownloadQueue] Calling download_tracks with indices:', indices);
       // Send the tracks directly to the Python backend
@@ -3699,9 +3835,9 @@ async function startDownloadQueue() {
       if (op && typeof op.catch === 'function') {
         op.catch(e => {
           console.error('[startDownloadQueue] Download error:', e);
-          indices.forEach(idx => {
-            const qi = queue.findIndex(q => q.index === idx);
-            if (qi >= 0 && queue[qi].status === 'active') updateQueueItem(qi, 'error', 0);
+          dispatchedBatches = dispatchedBatches.filter(b => b !== batchIds);
+          queue.forEach((item, qi) => {
+            if (batchIds.has(item.id) && item.status === 'active') updateQueueItem(qi, 'error', 0);
           });
           logMessage('Download error: ' + e, 'error');
           setStatus('Error during download.');
@@ -3903,6 +4039,7 @@ function buildConfig() {
     use_album_track_numbers:$('config-album-track-numbers').checked,
     use_artist_subfolders:  $('config-artist-sub').checked,
     use_album_subfolders:   $('config-album-sub').checked,
+    create_playlist_subfolders: $('config-playlist-sub') ? $('config-playlist-sub').checked : true,
     first_artist_only:       $('config-first-artist').checked,
     artist_separator:        $('config-artist-separator')?.value.trim() || null,
     transcode_to:           $('config-transcode')?.value || 'none',
@@ -3916,6 +4053,7 @@ function buildConfig() {
     acoustid_api_key:       $('config-acoustid-key')?.value.trim() || '',
     loop:                   parseInt($('config-loop').value) || null,
     log_level:              $('config-loglevel').value,
+    max_concurrent_downloads: parseInt($('config-concurrent')?.value) || 2,
   };
 }
 

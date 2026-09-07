@@ -21,15 +21,24 @@ from .api_mixins.dedup import DedupMixin
 from .api_mixins.discovery import DiscoveryMixin
 from .api_mixins.extension_health import ExtensionHealthMixin
 from .api_mixins.local_tagging import LocalTaggingMixin
+from .api_mixins.search import SearchMixin
 from .api_mixins.stats import StatsMixin
 from .api_mixins.subscriptions import SubscriptionsMixin
 from .api_mixins.trust import TrustMixin
 from .core.http import AsyncHttpClient
 from .core.loop_runner import run_sync
-from .core.paths import adopt_legacy_cache_file, cache_dir, cache_path
+from .core.output_sink import CallbackLogHandler
+from .core.paths import (
+    adopt_legacy_cache_file,
+    cache_dir,
+    cache_path,
+    default_download_dir,
+)
 from .core.url_utils import url_host_matches
 
-DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
+#: One definition, shared with the terminal UI via core/paths, so the two
+#: frontends cannot default to different folders on the same machine.
+DEFAULT_DOWNLOAD_DIR = default_download_dir()
 
 # Opt-in required before the GUI/web bridge may run post_download_action
 # ="command" (see _post_command_allowed / _download_task).
@@ -69,7 +78,67 @@ def _post_command_allowed() -> bool:
     )
 
 
-class UILogHandler(logging.Handler):
+#: Console formats launcher.py uses for the same records (see its
+#: --log-level/--verbose plumbing). Reused verbatim so a GUI started from a
+#: terminal reads exactly like `spotiflac <url>` does.
+_CONSOLE_LOG_FORMAT = "%(levelname)s: %(message)s"
+_VERBOSE_CONSOLE_LOG_FORMAT = "%(levelname)s:%(name)s: %(message)s"
+
+
+def saved_log_level() -> int:
+    """The level the Settings form last saved — "Standard (INFO)" by default.
+
+    Read straight off gui-settings.json rather than through
+    SpotiFLAC_API.load_settings(), because the console has to be configured
+    before the bridge object (and its logging handlers) exist.
+    """
+    with contextlib.suppress(Exception):
+        cfg = json.loads(cache_path("gui-settings.json").read_text(encoding="utf-8"))
+        if str(cfg.get("log_level", "")).strip().upper() == "DEBUG":
+            return logging.DEBUG
+    return logging.INFO
+
+
+def configure_console_logging(level: int) -> None:
+    """Configures the terminal the GUI (or the `--web` server) was started
+    from exactly like the CLI configures its own.
+
+    This used to be `basicConfig(level=WARNING, format=...)` while only the
+    `SpotiFLAC` logger was raised to INFO by the download task. Two things
+    followed, both of them visible in the terminal behind the window:
+
+      * every provider fallback dumped a full multi-frame traceback, because
+        plenty of call sites log an expected failure (a missing API config, a
+        track not found) with exc_info=True, and only the CLI installed the
+        _CleanConsoleFormatter that drops it below DEBUG;
+      * httpx/asyncio and the extensions' own loggers were still judged
+        against WARNING, so the two levels the Settings form offers — INFO
+        and DEBUG — applied to nothing but our own logger, and the same
+        records reached the root handler a second time as "INFO: ...".
+
+    Mirroring launcher.py means the GUI honours "Standard (INFO)" the way
+    `spotiflac --log-level INFO` does: one clean line per event, tracebacks
+    only when the level really is DEBUG.
+    """
+    from .client import _CleanConsoleFormatter
+    from .launcher import _quiet_noisy_libraries
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        _CleanConsoleFormatter(
+            _VERBOSE_CONSOLE_LOG_FORMAT
+            if level <= logging.DEBUG
+            else _CONSOLE_LOG_FORMAT
+        )
+    )
+    # force=True: this also runs from _download_task when the picker changed
+    # the level, and basicConfig is otherwise a no-op once root has handlers.
+    logging.basicConfig(level=level, handlers=[handler], force=True)
+    logging.getLogger("pywebview").setLevel(logging.WARNING)
+    _quiet_noisy_libraries(level)
+
+
+class UILogHandler(CallbackLogHandler):
     """Mirrors the `SpotiFLAC` logger into the GUI's Logs panel.
 
     Every record still reaches the panel; what changes with the level is
@@ -82,27 +151,19 @@ class UILogHandler(logging.Handler):
     by, so INFO and DEBUG now map to "debug": panel-only. Only WARNING
     and above, which the user does need to see without opening the
     panel, still toast.
+
+    The formatting, the severity buckets and the never-raise guarantee now
+    live in `core.output_sink.CallbackLogHandler`, because the TUI needs the
+    same three of them and a second copy would only be the one that drifts.
     """
 
     def __init__(self, api) -> None:
-        super().__init__()
+        super().__init__(api.log)
         self.api = api
-
-    def emit(self, record) -> None:
-        try:
-            msg = self.format(record)
-            if record.levelno >= logging.ERROR:
-                ltype = "error"
-            elif record.levelno >= logging.WARNING:
-                ltype = "warn"
-            else:
-                ltype = "debug"
-            self.api.log(msg, ltype)
-        except Exception:
-            pass
 
 
 class SpotiFLAC_API(
+    SearchMixin,
     LocalTaggingMixin,
     CoversLyricsMixin,
     DiscoveryMixin,
@@ -134,6 +195,9 @@ class SpotiFLAC_API(
         # merely nice to have — the playcount column — waits on this rather
         # than competing with the download for the same API and IP.
         self._download_active = threading.Event()
+        # Held for the whole of a download batch, so two of them never share
+        # a process — see _await_download_slot().
+        self._download_lock = threading.Lock()
         # Optional callable set by webapp.py in web mode: fn(event_name, args_list).
         # Desktop (pywebview) mode never sets this and is completely unaffected.
         self._ws_broadcast = None
@@ -610,211 +674,6 @@ class SpotiFLAC_API(
             logging.exception(f"Error retrieving Home Feed: {e}")
             return {"success": False, "error": str(e)}
 
-    def search_provider(self, query, limit=50):
-        """Search music providers (Spotify) for metadata matching `query`.
-
-        Returns a dictionary with 4 sections: tracks, albums, artists, playlists (max 50 results each).
-        """
-        try:
-            from .core.spotify_metadata import SpotifyMetadataClient
-
-            client = SpotifyMetadataClient()
-            # client.search() already returns a dictionary with the 4 arrays
-            results = client.search(query, limit=limit)
-
-            out = {"tracks": [], "albums": [], "artists": [], "playlists": []}
-
-            # --- Tracks ---
-            for t in results.get("tracks", [])[:limit]:
-                out["tracks"].append(
-                    {
-                        "id": getattr(t, "id", ""),
-                        "name": getattr(t, "title", ""),  # Formato Go
-                        "title": getattr(t, "title", ""),  # Formato Legacy
-                        "type": "track",
-                        "artists": getattr(t, "artists", ""),  # Formato Go
-                        "artist": getattr(t, "artists", ""),  # Formato Legacy
-                        "album_name": getattr(t, "album", ""),
-                        "album": getattr(t, "album", ""),
-                        "duration_ms": getattr(t, "duration_ms", 0),
-                        "images": getattr(t, "cover_url", ""),  # Formato Go
-                        "cover": getattr(t, "cover_url", ""),  # Formato Legacy
-                        "external_urls": getattr(t, "external_url", ""),
-                        "external_url": getattr(t, "external_url", ""),
-                        "preview_url": getattr(t, "preview_url", ""),
-                        "playcount": getattr(t, "plays", ""),
-                        "is_explicit": getattr(t, "is_explicit", False),
-                        "explicit": getattr(t, "is_explicit", False),
-                        "isrc": getattr(t, "isrc", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Albums ---
-            for a in results.get("albums", [])[:limit]:
-                out["albums"].append(
-                    {
-                        "id": a.get("id", ""),
-                        "name": a.get("name", ""),
-                        "title": a.get("name", ""),
-                        "type": "album",
-                        "artists": a.get("artists", ""),
-                        "artist": a.get("artists", ""),
-                        "images": a.get("cover_url", ""),
-                        "cover": a.get("cover_url", ""),
-                        "release_date": a.get("release_date", ""),
-                        "external_urls": a.get("external_url", ""),
-                        "external_url": a.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Artists ---
-            for art in results.get("artists", [])[:limit]:
-                out["artists"].append(
-                    {
-                        "id": art.get("id", ""),
-                        "name": art.get("name", ""),
-                        "title": art.get("name", ""),
-                        "type": "artist",
-                        "images": art.get("cover_url", ""),
-                        "cover": art.get("cover_url", ""),
-                        "external_urls": art.get("external_url", ""),
-                        "external_url": art.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Playlists ---
-            for p in results.get("playlists", [])[:limit]:
-                out["playlists"].append(
-                    {
-                        "id": p.get("id", ""),
-                        "name": p.get("name", ""),
-                        "title": p.get("name", ""),
-                        "type": "playlist",
-                        "owner": p.get("owner", ""),
-                        "images": p.get("cover_url", ""),
-                        "cover": p.get("cover_url", ""),
-                        "external_urls": p.get("external_url", ""),
-                        "external_url": p.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            return out
-        except Exception as e:
-            self.log(f"search_provider error: {e}", "error")
-            return {"tracks": [], "albums": [], "artists": [], "playlists": []}
-
-    def _search_provider_thread(self, query, limit) -> None:
-        try:
-            from .core.spotify_metadata import SpotifyMetadataClient
-
-            client = SpotifyMetadataClient()
-            results = client.search(query, limit=limit)
-
-            out = {"tracks": [], "albums": [], "artists": [], "playlists": []}
-
-            # --- Tracks ---
-            for t in results.get("tracks", [])[:limit]:
-                out["tracks"].append(
-                    {
-                        "id": getattr(t, "id", ""),
-                        "name": getattr(t, "title", ""),
-                        "title": getattr(t, "title", ""),
-                        "type": "track",
-                        "artists": getattr(t, "artists", ""),
-                        "artist": getattr(t, "artists", ""),
-                        "album_name": getattr(t, "album", ""),
-                        "album": getattr(t, "album", ""),
-                        "duration_ms": getattr(t, "duration_ms", 0),
-                        "images": getattr(t, "cover_url", ""),
-                        "cover": getattr(t, "cover_url", ""),
-                        "external_urls": getattr(t, "external_url", ""),
-                        "external_url": getattr(t, "external_url", ""),
-                        "preview_url": getattr(t, "preview_url", ""),
-                        "playcount": getattr(t, "plays", ""),
-                        "is_explicit": getattr(t, "is_explicit", False),
-                        "explicit": getattr(t, "is_explicit", False),
-                        "isrc": getattr(t, "isrc", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Albums ---
-            for a in results.get("albums", [])[:limit]:
-                out["albums"].append(
-                    {
-                        "id": a.get("id", ""),
-                        "name": a.get("name", ""),
-                        "title": a.get("name", ""),
-                        "type": "album",
-                        "artists": a.get("artists", ""),
-                        "artist": a.get("artists", ""),
-                        "images": a.get("cover_url", ""),
-                        "cover": a.get("cover_url", ""),
-                        "release_date": a.get("release_date", ""),
-                        "external_urls": a.get("external_url", ""),
-                        "external_url": a.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Artists ---
-            for art in results.get("artists", [])[:limit]:
-                out["artists"].append(
-                    {
-                        "id": art.get("id", ""),
-                        "name": art.get("name", ""),
-                        "title": art.get("name", ""),
-                        "type": "artist",
-                        "images": art.get("cover_url", ""),
-                        "cover": art.get("cover_url", ""),
-                        "external_urls": art.get("external_url", ""),
-                        "external_url": art.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            # --- Playlists ---
-            for p in results.get("playlists", [])[:limit]:
-                out["playlists"].append(
-                    {
-                        "id": p.get("id", ""),
-                        "name": p.get("name", ""),
-                        "title": p.get("name", ""),
-                        "type": "playlist",
-                        "owner": p.get("owner", ""),
-                        "images": p.get("cover_url", ""),
-                        "cover": p.get("cover_url", ""),
-                        "external_urls": p.get("external_url", ""),
-                        "external_url": p.get("external_url", ""),
-                        "provider": "spotify",
-                    },
-                )
-
-            try:
-                # The JS will now receive a complete object as in the Go version
-                self._push("app_handle_provider_search_results", out)
-            except Exception:
-                pass
-        except Exception as e:
-            try:
-                self._push("app_handle_provider_search_error", str(e))
-            except Exception:
-                pass
-
-    def search_provider_async(self, query, limit=50):  # Limite di default updated a 50
-        if not query:
-            return {"status": "empty"}
-        threading.Thread(
-            target=self._search_provider_thread,
-            args=(query, limit),
-            daemon=True,
-        ).start()
-        return {"status": "started"}
-
     def search_code(self, query, path=".", limit=200):
         """Search the SpotiFLAC package source (substring, case-insensitive).
 
@@ -1155,29 +1014,22 @@ class SpotiFLAC_API(
             stripped = url.strip()
             is_url = stripped.startswith(("http", "spotify:"))
 
-            if is_url:
-                # ── Scelta client in base al dominio ───────────────────────────
-                if url_host_matches(url, "tidal.com"):
-                    from .core.tidal_metadata import TidalMetadataClient
-
-                    client = TidalMetadataClient()
-                elif url_host_matches(url, "music.apple.com"):
-                    from .core.apple_music_metadata import AppleMusicMetadataClient
-
-                    client = AppleMusicMetadataClient()
-                else:
-                    from .core.spotify_metadata import SpotifyMetadataClient
-
-                    client = SpotifyMetadataClient()
-            else:
-                # ── Text search — always SpotifyMetadataClient ─────────────
-                from .core.spotify_metadata import SpotifyMetadataClient
-
-                client = SpotifyMetadataClient()
             if not is_url:
                 self.log("Text search: use search_provider_async.", "error")
                 self.set_progress("")
                 return
+
+            # Domain → client. Shared with the terminal UI's track picker
+            # via core/tracklist.py: a provider added to one mapping and not
+            # the other is a link that works in one window and not the other.
+            #
+            # After the guard, not before it: a text query resolved to a
+            # client it was never going to use, which for the Spotify default
+            # means constructing SpotifyMetadataClient — and its credential
+            # setup — for every search typed into the box.
+            from .core.tracklist import metadata_client_for
+
+            client = metadata_client_for(url)
 
             # ── Universal call ──────────────────────────────────────────────────
             # get_url() is sync on SpotifyMetadataClient but async on
@@ -1433,21 +1285,92 @@ class SpotiFLAC_API(
             daemon=True,
         ).start()
 
+    def _await_download_slot(self, selected_indices) -> None:
+        """Blocks until no other download batch is running.
+
+        The frontend deliberately does not serialize its calls (see
+        startDownloadQueue(): "do NOT block concurrent executions"), and
+        every click on a track or an album cover starts another batch. Each
+        one used to open its own event loop, its own provider set and its own
+        semaphore, so "2 in parallel" quietly became 2 per batch — and worse,
+        they fought over process-wide state: install_console_interception()
+        and ProgressManager in core/progress.py are module-level, so the
+        second run silently returned from the early-exit guard and the first
+        one to finish put the console handlers back while the other was still
+        printing.
+
+        One session at a time, therefore. The batches still run, just in the
+        order they arrived.
+        """
+        if self._download_lock.acquire(blocking=False):
+            return
+        self.log(
+            f"Waiting for the running download to finish before starting "
+            f"{len(selected_indices)} more track(s)…",
+            "debug",
+        )
+        self._download_lock.acquire()
+
     def _download_task(self, selected_indices, config) -> None:
+        """Runs one batch start to finish, never overlapping another one.
+
+        The lock is taken and released here rather than around the body
+        below: anything raising between acquiring it and reaching that
+        method's own try/finally — the console reconfiguration, a handler
+        that would not build — would otherwise leave it held, and every
+        later download in the process would wait on it forever.
+        """
+        self._await_download_slot(selected_indices)
+        try:
+            self._run_download_batch(selected_indices, config)
+        finally:
+            self._download_lock.release()
+
+    def _run_download_batch(self, selected_indices, config) -> None:
         self._download_active.set()
+        from .client import _CleanConsoleFormatter
+
         sf_logger = logging.getLogger("SpotiFLAC")
         handler = UILogHandler(self)
         handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
         sf_logger.addHandler(handler)
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(logging.Formatter("  %(message)s"))
+        # Same formatter the CLI uses: an expected provider failure logged
+        # with exc_info=True is one line here, not a traceback, until the
+        # level really is DEBUG.
+        console_handler.setFormatter(_CleanConsoleFormatter("  %(message)s"))
         sf_logger.addHandler(console_handler)
+        # Ours is the handler that prints these, so stop the same record from
+        # also reaching the root handler configured by
+        # configure_console_logging() — that is what printed every library
+        # line twice, once indented and once as "INFO: ...". Restored in the
+        # finally below.
+        sf_propagate = sf_logger.propagate
+        sf_logger.propagate = False
         monitor_stop = None
         monitor_thread = None
 
         log_level_str = config.get("log_level", "INFO")
         current_log_level = logging.DEBUG if log_level_str == "DEBUG" else logging.INFO
         sf_logger.setLevel(current_log_level)
+        # The picker in Settings is this GUI's --log-level, so it has to move
+        # the console the process was started from too: the tracebacks and the
+        # httpx chatter come from loggers we do not own.
+        #
+        # That reaches further than one batch, though: configure_console_logging
+        # goes through basicConfig(force=True), which removes *and closes*
+        # every handler the root logger already had. In --web mode that root
+        # belongs to the host process, so one download left the server logging
+        # through this batch's handler, at this batch's level, for the rest of
+        # its life. Detached by hand first — removeHandler does not close —
+        # so the saved handlers are still usable when the finally puts them
+        # back.
+        root_logger = logging.getLogger()
+        prior_root_handlers = root_logger.handlers[:]
+        prior_root_level = root_logger.level
+        for prior_handler in prior_root_handlers:
+            root_logger.removeHandler(prior_handler)
+        configure_console_logging(current_log_level)
 
         try:
             os.makedirs(self.download_dir, exist_ok=True)
@@ -1462,6 +1385,11 @@ class SpotiFLAC_API(
             use_album_track_numbers = config.get("use_album_track_numbers", False)
             use_artist_subfolders = config.get("use_artist_subfolders", False)
             use_album_subfolders = config.get("use_album_subfolders", False)
+            # The CLI and the interactive picker both default this on;
+            # the GUI had no toggle at all and never passed the option,
+            # so client.SpotiFLAC's own False default applied and every
+            # playlist landed loose in the download folder.
+            create_playlist_subfolders = config.get("create_playlist_subfolders", True)
             first_artist_only = config.get("first_artist_only", False)
             artist_separator = config.get("artist_separator") or None
             lyrics_providers = config.get("lyrics_providers") or [
@@ -1485,6 +1413,16 @@ class SpotiFLAC_API(
             transcode_bitrate = config.get("transcode_bitrate") or "320k"
             transcode_keep_original = config.get("transcode_keep_original", False)
             track_max_retries = int(config.get("track_max_retries", 0))
+            # The GUI had no equivalent of --max-concurrent, so every
+            # download ran at client.SpotiFLAC's default of 2 no matter what
+            # the machine or the connection could take. Clamped rather than
+            # trusted: this dict is an HTTP body in --web mode, and a
+            # semaphore of 500 is a way to get every provider to rate-limit
+            # the user at once.
+            max_concurrent = max(
+                1,
+                min(8, int(config.get("max_concurrent_downloads", 2) or 2)),
+            )
             post_download_action = config.get("post_download_action", "none")
             post_download_command = config.get("post_download_command", "")
             if post_download_action == "command" and not _post_command_allowed():
@@ -1520,17 +1458,15 @@ class SpotiFLAC_API(
             else:
                 urls_to_download = []
                 unresolved: list[str] = []
+                # core.tracklist.track_url, not a second copy of the same
+                # id-to-link rules: this one matched on substrings of the
+                # whole URL and minted `music.apple.com/track/{id}`, a path
+                # Apple Music does not have and the parser rejects.
+                from .core.tracklist import track_url
+
                 for i in selected_indices:
                     t = self.current_tracks[i]
-                    t_url = getattr(t, "external_url", None) or getattr(t, "url", None)
-                    t_id = getattr(t, "id", None)
-                    if not t_url and t_id:
-                        if "spotify" in self.current_url:
-                            t_url = f"https://open.spotify.com/track/{t_id}"
-                        elif "tidal" in self.current_url:
-                            t_url = f"https://tidal.com/browse/track/{t_id}"
-                        elif "apple" in self.current_url:
-                            t_url = f"https://music.apple.com/track/{t_id}"
+                    t_url = track_url(t, self.current_url)
                     if t_url:
                         urls_to_download.append(t_url)
                     else:
@@ -1584,45 +1520,66 @@ class SpotiFLAC_API(
             # people who never touch the CLI.
             log_hook = record_hook(self.owner)
 
-            for u in urls_to_download:
-                SpotiFLAC(
-                    url=u,
-                    output_dir=self.download_dir,
-                    services=services,
-                    quality=quality,
-                    allow_fallback=allow_fallback,
-                    filename_format=filename_format,
-                    use_track_numbers=use_track_numbers,
-                    use_album_track_numbers=use_album_track_numbers,
-                    use_artist_subfolders=use_artist_subfolders,
-                    use_album_subfolders=use_album_subfolders,
-                    first_artist_only=first_artist_only,
-                    artist_separator=artist_separator,
-                    embed_lyrics=embed_lyrics,
-                    lyrics_providers=lyrics_providers,
-                    apple_lyrics_word_by_word=apple_lyrics_word_by_word,
-                    save_lrc=save_lrc,
-                    lrc_library_dir=lrc_library_dir,
-                    enrich_metadata=enrich_metadata,
-                    enrich_providers=enrich_providers,
-                    qobuz_local_api_url=qobuz_local_api_url,
-                    tidal_custom_api=tidal_custom_api,
-                    transcode_to=transcode_to,
-                    transcode_bitrate=transcode_bitrate,
-                    transcode_keep_original=transcode_keep_original,
-                    track_max_retries=track_max_retries,
-                    post_download_action=post_download_action,
-                    post_download_command=post_download_command,
-                    log_level=current_log_level,
-                    loop=loop_minutes,
-                    post_download_hooks=[log_hook],
-                )
+            # ONE call, not one per URL. client.SpotiFLAC() is a one-shot
+            # entry point: it opens an event loop, an httpx pool, an
+            # ExtensionManager and a set of providers, and closes all of it
+            # on the way out (see core/loop_runner.py's docstring on why the
+            # loop matters — NetworkManager keys its clients by loop, so a
+            # new one is always a cold pool). Calling it per track paid that
+            # bill per track — the repeated "[tidal] API list unavailable"
+            # bootstrap in the console was exactly this — and left
+            # max_concurrent_downloads with nothing to do, since a run
+            # holding a single track has nothing to download beside it.
+            # batch_tracks sends the whole selection through one worker pool
+            # instead; the files land exactly where they did before (see
+            # SpotiflacDownloader.run_tracks_async).
+            batch_tracks = len(urls_to_download) > 1
+            SpotiFLAC(
+                url=urls_to_download if batch_tracks else urls_to_download[0],
+                batch_tracks=batch_tracks,
+                output_dir=self.download_dir,
+                services=services,
+                quality=quality,
+                allow_fallback=allow_fallback,
+                filename_format=filename_format,
+                use_track_numbers=use_track_numbers,
+                use_album_track_numbers=use_album_track_numbers,
+                use_artist_subfolders=use_artist_subfolders,
+                use_album_subfolders=use_album_subfolders,
+                create_playlist_subfolders=create_playlist_subfolders,
+                first_artist_only=first_artist_only,
+                artist_separator=artist_separator,
+                embed_lyrics=embed_lyrics,
+                lyrics_providers=lyrics_providers,
+                apple_lyrics_word_by_word=apple_lyrics_word_by_word,
+                save_lrc=save_lrc,
+                lrc_library_dir=lrc_library_dir,
+                enrich_metadata=enrich_metadata,
+                enrich_providers=enrich_providers,
+                qobuz_local_api_url=qobuz_local_api_url,
+                tidal_custom_api=tidal_custom_api,
+                transcode_to=transcode_to,
+                transcode_bitrate=transcode_bitrate,
+                transcode_keep_original=transcode_keep_original,
+                track_max_retries=track_max_retries,
+                post_download_action=post_download_action,
+                post_download_command=post_download_command,
+                log_level=current_log_level,
+                loop=loop_minutes,
+                post_download_hooks=[log_hook],
+                max_concurrent_downloads=max_concurrent,
+            )
 
             self._push_download_stats()
             self.set_progress("Complete!")
             self.log(f"All tracks saved to: {self.download_dir}", "ok")
             try:
-                self._push("app_download_finished", True)
+                # The indices are echoed back so the frontend closes the
+                # items of *this* batch: app_download_finished() used to mark
+                # every 'active' row done, which with a second batch queued
+                # behind this one meant marking tracks finished before they
+                # had started.
+                self._push("app_download_finished", True, list(selected_indices))
             except Exception:
                 pass
 
@@ -1631,7 +1588,7 @@ class SpotiFLAC_API(
             self.set_progress("Error.")
             self._push_download_stats()
             try:
-                self._push("app_download_finished", False)
+                self._push("app_download_finished", False, list(selected_indices))
             except Exception:
                 pass
         finally:
@@ -1643,6 +1600,16 @@ class SpotiFLAC_API(
             sf_logger.removeHandler(handler)
             if "console_handler" in locals():
                 sf_logger.removeHandler(console_handler)
+            sf_logger.propagate = sf_propagate
+            # Root put back the way this batch found it, so the next request
+            # starts from the host's configuration rather than from ours.
+            for batch_handler in root_logger.handlers[:]:
+                root_logger.removeHandler(batch_handler)
+                with contextlib.suppress(Exception):
+                    batch_handler.close()
+            for prior_handler in prior_root_handlers:
+                root_logger.addHandler(prior_handler)
+            root_logger.setLevel(prior_root_level)
             self._download_active.clear()
 
     # ── Health Check ──────────────────────────────────────────────────────────
@@ -1777,8 +1744,7 @@ def _purge_webview_http_cache() -> None:
 
 
 def run_gui() -> None:
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
-    logging.getLogger("pywebview").setLevel(logging.WARNING)
+    configure_console_logging(saved_log_level())
     _purge_webview_http_cache()
     api = SpotiFLAC_API()
 

@@ -61,7 +61,7 @@ If you just want a GUI for personal use, with no code involved, the [Desktop](ht
 - Modular JavaScript and Python Extension system (bring-your-own registry — nothing bundled)
 - Automatic fallback among the extensions *you* have installed
 - Built-in GUI, as a native window or served locally in a browser (`--gui` / `--web`)
-- Interactive CLI Wizard
+- Guided terminal UI (`--tui`), with the download queue live on screen
 - Docker support
 - Configuration Profiles
 - MusicBrainz metadata enrichment
@@ -104,7 +104,8 @@ renders it usefully. Every page below is the same text that used to be here.
 
 | Page | What's in it |
 | --- | --- |
-| [Quick Start](docs/guide/quick-start.md) | Every way to run it — GUI, web, CLI, interactive wizard, Python — and the URL types it accepts |
+| [Quick Start](docs/guide/quick-start.md) | Every way to run it — GUI, web, CLI, terminal UI, Python — and the URL types it accepts |
+| [Terminal UI](docs/guide/tui.md) | `--tui`, the guided mode: every setting on one screen, and the download queue live |
 | [Extensions](docs/guide/extensions.md) | Registries, installing providers, signature verification and trust tiers |
 | [Downloading from a CSV](docs/guide/csv.md) | Feeding it a file of tracks instead of a link: supported exports, how rows without a link are matched, and the unmatched-row report |
 | [Your library in numbers](docs/guide/dashboard.md) | The dashboard built from what you have actually downloaded — top artists, genres, decades, activity |

@@ -78,7 +78,20 @@ class LinkResolver:
         )
 
     async def _safe_get_html(self, url: str):
-        """Robust helper that emulates a desktop browser for HTML scraping requests."""
+        """Robust helper that emulates a desktop browser for HTML scraping requests.
+
+        `follow_redirects=True` because for some of these endpoints the
+        redirect *is* the answer. Songstats' ISRC lookup is the clearest
+        case: `songstats.com/<isrc>` is a lookup, not a page, and it answers
+        `301 -> songstats.com/track/<slug>/<title>` where the data actually
+        lives. The shared client is built without a redirect policy
+        (`core/http.py`), so httpx's default of not following applied here,
+        and `_raise_for_status` turns any non-2xx into a `NetworkError` —
+        which is in the retry set. Every songstats lookup therefore cost
+        three identical requests and ~3.6s of backoff before being
+        swallowed, and the fallback it guards had never once returned a
+        link.
+        """
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -89,11 +102,15 @@ class LinkResolver:
         # Prefer async http client method if available (tests mock get_async).
         if hasattr(self.http, "get_async"):
             return await self._request_with_retry(
-                lambda: self.http.get_async(url, headers=headers),
+                lambda: self.http.get_async(
+                    url,
+                    headers=headers,
+                    follow_redirects=True,
+                ),
             )
         # fallback to synchronous get wrapped for retry (kept for real client compatibility)
         return await self._request_with_retry(
-            lambda: self.http.get(url, headers=headers),
+            lambda: self.http.get(url, headers=headers, follow_redirects=True),
         )
 
     async def _request_with_retry(self, request_callable):
@@ -263,6 +280,16 @@ class LinkResolver:
                 self._collect_songstats_links(item, results)
 
     def _assign_songstats_link(self, link: str, results: dict[str, str]) -> None:
+        """Takes the track link for each platform, and only the track link.
+
+        A songstats page lists the artist, the album and the track on every
+        platform, and `sameAs` happens to put the artist first. Tidal was the
+        only one asked to be a `/track` URL, so Amazon and Deezer took
+        whichever link matched their host first — the artist — and handed it
+        on as if it were the song. That is worse than finding nothing: the
+        caller has no way to tell a wrong link from a right one, and every
+        provider downstream would go looking for a track at an artist page.
+        """
         link = link.strip()
         if not link:
             return
@@ -275,8 +302,19 @@ class LinkResolver:
         elif url_host_matches(link, "music.amazon.com") and not results.get(
             "amazonMusic"
         ):
-            results["amazonMusic"] = self._normalize_amazon_url(link)
-        elif url_host_matches(link, "deezer.com") and not results.get("deezer"):
+            # Asking the normaliser rather than matching shapes here: it
+            # already knows the three ways Amazon spells a track
+            # (`/tracks/<asin>`, `/albums/<asin>/<asin>`, `?trackAsin=`) and
+            # rewrites all of them to the first. Anything it cannot turn
+            # into a track URL — an artist, a bare album — is not one.
+            normalized = self._normalize_amazon_url(link)
+            if url_path_contains(normalized, "tracks"):
+                results["amazonMusic"] = normalized
+        elif (
+            url_host_matches(link, "deezer.com")
+            and url_path_contains(link, "track")
+            and not results.get("deezer")
+        ):
             results["deezer"] = self._normalize_deezer_url(link)
 
     async def _get_isrc_from_deezer_async(self, deezer_url: str) -> str:

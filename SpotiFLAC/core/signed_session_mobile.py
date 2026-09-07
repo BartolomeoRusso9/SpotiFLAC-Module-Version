@@ -285,10 +285,14 @@ class SignedSessionClient:
             return self.pending_auth_url
 
         self._ensure_client()
+        # 30, not 15. When the origin behind Cloudflare is down, the 522 takes
+        # about 19.5s to come back — so a 15s read timeout always fired first
+        # and turned a diagnosable "Error 522: connection timed out" into a
+        # bare timeout with no message at all.
         resp = await self._client.get(
             f"{self.base_url}{self.endpoints['bootstrap']}",
             params={"install_id": self.install_id, "app_version": self.app_version},
-            timeout=15,
+            timeout=30,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -953,12 +957,20 @@ async def perform_signed_fetch(
                             msg = "turnstile automation disabled"
                             raise RuntimeError(msg)
                     except Exception as exc:
+                        # `str(exc)` is empty for httpx's timeout classes —
+                        # `str(ReadTimeout(TimeoutError()))` is "" — which is
+                        # what turned a dead endpoint into the unreadable
+                        # "Turnstile automatico fallito ()". The type name is
+                        # always there, so lead with it and fall back to it.
+                        detail = str(exc) or type(exc).__name__
                         logger.info(
-                            "[signed_session:%s] Turnstile automatico fallito (%s)",
+                            "[signed_session:%s] Turnstile automatico fallito "
+                            "(%s: %s)",
                             client.namespace,
-                            exc,
+                            type(exc).__name__,
+                            detail,
                         )
-                        return {"error": str(exc)}
+                        return {"error": f"{type(exc).__name__}: {detail}"}
 
         # At this point the session is guaranteed for all parallel tracks
         #

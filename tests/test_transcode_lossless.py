@@ -545,11 +545,17 @@ def test_web_ui_lossless_list_matches_the_core():
     assert set(re.findall(r"'([^']+)'", listed)) == set(transcode.LOSSLESS_FORMATS)
 
 
-def test_cli_and_wizard_offer_every_supported_format():
-    from SpotiFLAC.interactive import _TRANSCODE_CHOICES
-
-    offered = {value for _, value in _TRANSCODE_CHOICES}
+def test_every_frontend_offers_every_supported_format():
+    """One menu, read by the CLI help, the wizard and the TUI alike."""
+    offered = {value for _, value in transcode.TRANSCODE_CHOICES}
     assert offered == {None, *transcode.SUPPORTED_FORMATS}
+
+    # The TUI builds its Select straight from it, and "" stands in for None
+    # because a Select cannot hold None as an ordinary value.
+    from SpotiFLAC.tui.config_view import ConfigPanel  # noqa: F401
+
+    assert transcode.transcode_label(None) == transcode.TRANSCODE_CHOICES[0][0]
+    assert transcode.transcode_label("mp3").startswith("MP3")
 
 
 # ---------------------------------------------------------------------------
@@ -617,16 +623,15 @@ _WIZARD_BASE = {
 
 
 def _printed_command(cfg: dict) -> list[str]:
-    import contextlib
-    import io
-    import shlex
+    """The argv a configuration corresponds to.
 
-    from SpotiFLAC.interactive import _print_cli_command
+    Straight from the builder in core/cli_preview.py rather than through a
+    frontend's printing of it: what these tests are about is which flags a
+    configuration produces, not how any one UI renders them.
+    """
+    from SpotiFLAC.core.cli_preview import build_command_parts
 
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        _print_cli_command(cfg)
-    return shlex.split(buf.getvalue().replace("\\\n", " "))
+    return build_command_parts(cfg)
 
 
 def _reparse(argv: list[str]):

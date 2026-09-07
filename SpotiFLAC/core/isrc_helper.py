@@ -9,13 +9,11 @@ class IsrcHelper:
     """Centralized handler for ISRC resolution with fallback and cross-platform translation."""
 
     def __init__(self, http_client) -> None:
-        from SpotiFLAC.core.songstats import SongstatsProvider
         from SpotiFLAC.core.soundplate import SoundplateProvider
 
         self.http = http_client
         self.finder = IsrcFinder(http_client)
         self.soundplate = SoundplateProvider(http_client)
-        self.songstats = SongstatsProvider(http_client)
         self.resolver = LinkResolver(http_client)
 
     async def get_isrc_async(self, track_id: str) -> str:
@@ -45,8 +43,15 @@ class IsrcHelper:
         if not isrc:
             isrc = await self.soundplate.get_isrc_async(search_id)
 
-        if not isrc:
-            isrc = await self.songstats.get_isrc_async(search_id)
+        # Songstats used to be the third link in this chain and is gone: it
+        # was asked to turn a Spotify id into an ISRC, and songstats has no
+        # page that can answer that. Its lookup is keyed by ISRC — the thing
+        # we are here to find — and `songstats.com/spotify/<id>`, the one
+        # route that takes a Spotify id, is a client-rendered shell with no
+        # ISRC, no links and not even the track title in the HTML. So the
+        # call cost a request per track and returned None every time, with
+        # no error and no log line to say so. The link resolver still reads
+        # songstats where it genuinely works, from an ISRC we already have.
 
         # 3. Salvataggio
         if isrc:

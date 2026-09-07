@@ -38,6 +38,19 @@ DURATION_TOLERANCE_MS = 7000
 #: Within this the running times agree closely enough to be corroboration.
 DURATION_MATCH_MS = 3000
 
+#: Below this the two titles are not the same song, whatever else agrees.
+#: ratio() already folds case, accents and the "(feat. …)" / "- Live" tails,
+#: so genuine variants of one title land at or very near 1.0 and the near
+#: misses that matter ("Gelosi" against "Gelosa") at 0.83; unrelated tracks
+#: by the same artist score 0.2–0.43. Anything under this floor is scaled
+#: down by TITLE_MISMATCH_PENALTY.
+TITLE_FLOOR = 0.5
+
+#: What a title below TITLE_FLOOR does to the score. Chosen to put such a
+#: candidate under every consumer's accept threshold even when the artist
+#: matches exactly and the running time corroborates.
+TITLE_MISMATCH_PENALTY = 0.5
+
 _NON_WORD_RE = re.compile(r"\W+", re.UNICODE)
 
 #: "(feat. X)", "[Remastered]", " - 2011 Remaster", " - Live at …"
@@ -383,6 +396,17 @@ def score_track_match(
     matching artist name, and an artist written under a different alias
     ("2Pac" / "Tupac Shakur") cannot sink a title that agrees exactly.
 
+    The artist term alone was still enough to carry a candidate, though:
+    0.4 for the right artist plus 0.05 for a plausible running time is a
+    floor of 0.45 that a completely unrelated title cannot pull below an
+    accept threshold on its own. iTunes, searched for Sfera Ebbasta's
+    "Bottiglie Privè" — a track its store does not carry — answered with
+    "Visiera A Becco" from a different album four years earlier, scored it
+    0.67 on the artist and a running time 1.4s away, and the file was
+    tagged with that album's cover art. So a title under TITLE_FLOOR now
+    scales the whole score down, the same way a running time outside
+    DURATION_TOLERANCE_MS does.
+
     Album and duration only adjust the result, because a source that has
     them is not necessarily a source that agrees with Spotify about them (a
     single vs. its album, a remaster's running time). A duration out by more
@@ -400,6 +424,9 @@ def score_track_match(
         score = 0.6 * title_score + 0.4 * artist_score
     else:
         score = title_score
+
+    if title and title_score < TITLE_FLOOR:
+        score *= TITLE_MISMATCH_PENALTY
 
     if album and getattr(candidate, "album", ""):
         score = min(1.0, score + 0.05 * ratio(album, candidate.album))

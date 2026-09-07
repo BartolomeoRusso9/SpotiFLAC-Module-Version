@@ -75,6 +75,41 @@ class NetworkError(SpotiflacError):
         super().__init__(ErrorKind.NETWORK_ERROR, msg, provider, cause)
 
 
+class RedirectNotFollowedError(NetworkError):
+    """A 3xx arrived at a caller that did not ask to follow redirects.
+
+    A `NetworkError` subclass so every existing handler keeps working, but
+    its own type so the retry logic can tell it apart. Retrying a redirect
+    is the one retry guaranteed to be pointless: the server will answer with
+    the same `Location` every time, and three round trips buy nothing.
+
+    Worth its own class rather than a message check because a 3xx is often
+    not a failure at all — it is how a lookup endpoint answers. Songstats'
+    ISRC lookup is exactly that, and reading its 301 as a network fault is
+    what kept an entire fallback path dead. When this is raised, the fix is
+    almost always `follow_redirects=True` at the call site, so the message
+    says where the server was pointing.
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        status: int,
+        url: str,
+        location: str = "",
+        cause: BaseException | None = None,
+    ) -> None:
+        target = f" -> {location}" if location else ""
+        super().__init__(
+            provider,
+            f"HTTP {status} redirect from {url}{target} "
+            f"(the caller did not pass follow_redirects=True)",
+            cause,
+        )
+        self.status = status
+        self.location = location
+
+
 class ParseError(SpotiflacError):
     def __init__(
         self,

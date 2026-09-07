@@ -10,6 +10,7 @@ import logging
 import threading
 import threading as _threading
 import time
+import unicodedata
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 
@@ -32,6 +33,23 @@ _MB_THROTTLE_COOLDOWN = 5.0
 _USER_AGENT = "SpotiFLAC/2.0 ( support@spotbye.qzz.io )"
 
 _LOOKUP_FAILED = object()
+
+#: Guards for the title/artist fallback (see _pick_fallback_recording()).
+#: MusicBrainz knows plenty of recordings whose ISRC nobody ever linked —
+#: whole national catalogues of them — and for those the isrc: search comes
+#: back empty while a title/artist search finds the track at score 100. The
+#: fallback exists for exactly that case, and these are what keep it from
+#: writing another recording's MBIDs into the file: the search must be
+#: confident, the title and a credited artist must line up, and the running
+#: time must match to within a few seconds.
+_MB_FALLBACK_MIN_SCORE = 95
+_MB_FALLBACK_MAX_DELTA_MS = 3000
+#: Plenty of MusicBrainz recordings carry no length at all — nobody entered
+#: one — and refusing those outright left the fallback firing almost never.
+#: They are accepted on a stricter reading instead: a top search score, a
+#: title that is equal rather than merely compatible, and a credit list that
+#: is *the same set of artists*, not just an overlapping one.
+_MB_FALLBACK_STRICT_SCORE = 99
 
 _mb_cache: dict[str, object] = {}
 _MB_CACHE_MAX = 2000
@@ -70,12 +88,23 @@ def set_mb_status(online: bool) -> None:
 
 
 def should_skip_mb() -> bool:
+    return mb_skip_remaining() > 0.0
+
+
+def mb_skip_remaining() -> float:
+    """Seconds left of the post-failure pause, 0.0 when lookups are live.
+
+    One failed request pauses *every* lookup for _MB_STATUS_SKIP_WINDOW, so
+    a single timeout can leave a whole batch of tracks untagged. That is
+    deliberate — MusicBrainz rate-limits hard and hammering it while it is
+    refusing helps nobody — but it has to be visible in the log, which is
+    what this is for.
+    """
     with _mb_status_lock:
-        if _mb_last_checked_at == 0.0:
-            return False
-        if _mb_last_online:
-            return False
-        return (time.time() - _mb_last_checked_at) < _MB_STATUS_SKIP_WINDOW
+        if _mb_last_checked_at == 0.0 or _mb_last_online:
+            return 0.0
+        remaining = _MB_STATUS_SKIP_WINDOW - (time.time() - _mb_last_checked_at)
+    return max(0.0, remaining)
 
 
 def _wait_for_request_slot() -> None:
@@ -221,7 +250,105 @@ def _join_relation_artists(relations: list[dict], relation_type: str) -> str:
     return "; ".join(names)
 
 
-def _parse_mb_details(data: dict) -> dict:
+def _album_matches(ours: str, theirs: str) -> bool:
+    """True when two album titles name the same record.
+
+    Deliberately loose — "Famoso" and "Famoso (Deluxe Edition)" are the same
+    release for tagging purposes — but containment only, never fuzz: "Hot
+    Party Winter 2021" must not meet "Famoso".
+    """
+    left, right = _norm_text(ours), _norm_text(theirs)
+    if not left or not right:
+        return False
+    return left == right or left in right or right in left
+
+
+def _release_score(
+    release: dict,
+    album_name: str = "",
+    total_tracks: int = 0,
+    release_date: str = "",
+) -> int:
+    """How well a release answers "which record was this downloaded from?".
+
+    An ISRC identifies a *recording*, not a release, so a recording search
+    comes back carrying every compilation the track ever landed on. Ranking
+    those on catalogue completeness alone — a barcode, a label, a country —
+    hands the win to whichever big-label sampler happens to be filled in
+    most thoroughly: "UHLALA" scored "Hot Party Winter 2021" above "Famoso"
+    and the file came out tagged as track 21 of a 43-track compilation.
+
+    So the album the caller already knows it asked for outranks all of it.
+    The track-count tie-break then separates that album's own editions from
+    each other — the 13-track original from the 17-track reissue — which is
+    what keeps TRACKNUMBER consistent with the TRACKTOTAL the source gave
+    us. With no `album_name` to go on the old catalogue-completeness order
+    is what is left, unchanged.
+
+    `release_date` separates those same editions when the source did not
+    say how many tracks the album has — which is the ordinary case for a
+    single-track download, where Spotify answers a track URL with
+    total_tracks=0. "Famoso" is two releases a year apart, a 13-track
+    original and a 17-track reissue, and the track is number 1 on one and
+    number 2 on the other; without a way to tell them apart the file came
+    out numbered "2/13", holding the reissue's track number against the
+    original's total.
+    """
+    score = 0
+    if album_name and _album_matches(album_name, release.get("title", "")):
+        score += 100
+        media = release.get("media") or []
+        counted = sum(
+            m.get("track-count") or 0
+            for m in media
+            if isinstance(m.get("track-count"), int)
+        )
+        # Both edition signals are worth more than every catalogue-
+        # completeness point below put together (6). Once the title says
+        # these are the same album, which *edition* it is decides the track
+        # numbering, and a filled-in barcode has nothing to say about that.
+        # A counted total outranks a date: dates get restamped on reissues.
+        if total_tracks and counted == total_tracks:
+            score += 40
+        # Spotify hands dates over as "2021-10-14T00:00:00Z"; MusicBrainz
+        # stores "2021-10-14", and plenty of releases carry only a year.
+        theirs = str(release.get("date") or "")
+        ours = str(release_date or "")[:10]
+        if ours and theirs:
+            if theirs[:10] == ours:
+                score += 20
+            elif theirs[:4] == ours[:4]:
+                score += 10
+    if release.get("barcode"):
+        score += 2
+    if release.get("label-info"):
+        score += 2
+    if release.get("country"):
+        score += 1
+    if release.get("status") == "Official":
+        score += 1
+    return score
+
+
+def _pick_release(
+    releases: list[dict],
+    album_name: str = "",
+    total_tracks: int = 0,
+    release_date: str = "",
+) -> dict:
+    """The release `_release_score` likes best."""
+    return max(
+        releases,
+        key=lambda r: _release_score(r, album_name, total_tracks, release_date),
+    )
+
+
+def _parse_mb_details(
+    data: dict,
+    album_name: str = "",
+    total_tracks: int = 0,
+    release_date: str = "",
+) -> dict:
     details: dict[str, str] = {}
     if not data:
         return details
@@ -250,19 +377,7 @@ def _parse_mb_details(data: dict) -> dict:
     releases = data.get("releases", [])
     if releases:
 
-        def _release_score(r: dict) -> int:
-            score = 0
-            if r.get("barcode"):
-                score += 2
-            if r.get("label-info"):
-                score += 2
-            if r.get("country"):
-                score += 1
-            if r.get("status") == "Official":
-                score += 1
-            return score
-
-        release = max(releases, key=_release_score)
+        release = _pick_release(releases, album_name, total_tracks, release_date)
         details["album"] = release.get("title", "")
         packaging = release.get("packaging", "")
         if packaging and packaging.lower() != "none":
@@ -274,23 +389,32 @@ def _parse_mb_details(data: dict) -> dict:
         )
         media = release.get("media", [])
         if media:
+            # Which disc the recording is actually on. Reading media[0]
+            # unconditionally put every track of a multi-disc release on
+            # disc 1 and then totalled it against disc 1's track count — so
+            # a disc-2 track came out numbered against the wrong medium.
             medium = media[0]
+            found_track = None
+            fallback: tuple[dict, dict] | None = None
+            for candidate in media:
+                for track in candidate.get("tracks", []):
+                    recording = track.get("recording")
+                    rec_id = (
+                        recording.get("id") if isinstance(recording, dict) else None
+                    )
+                    if rec_id and rec_id == data.get("id"):
+                        medium, found_track = candidate, track
+                        break
+                    if fallback is None and track.get("title") == data.get("title"):
+                        fallback = (candidate, track)
+                if found_track is not None:
+                    break
+            if found_track is None and fallback is not None:
+                medium, found_track = fallback
             details["disc_number"] = str(medium.get("position", ""))
             details["track_total"] = str(medium.get("track-count", ""))
-            fallback_track = None
-            for track in medium.get("tracks", []):
-                rec_id = (
-                    track.get("recording", {}).get("id")
-                    if isinstance(track.get("recording"), dict)
-                    else None
-                )
-                if rec_id == data.get("id"):
-                    details["track_number"] = _track_number(track)
-                    break
-                if not fallback_track and track.get("title") == data.get("title"):
-                    fallback_track = track
-            if not details.get("track_number") and fallback_track:
-                details["track_number"] = _track_number(fallback_track)
+            if found_track is not None:
+                details["track_number"] = _track_number(found_track)
     return {key: value for key, value in details.items() if value}
 
 
@@ -321,7 +445,12 @@ def _query_recordings(query: str) -> dict:
     return _run_async_sync(_query_recordings_async(query))
 
 
-def _parse_mb_response(data: dict) -> dict:
+def _parse_mb_response(
+    data: dict,
+    album_name: str = "",
+    total_tracks: int = 0,
+    release_date: str = "",
+) -> dict:
     """Logica di parsing estratta per riutilizzo da sync e async."""
     parsed: dict = {
         "genre": "",
@@ -385,19 +514,7 @@ def _parse_mb_response(data: dict) -> dict:
     releases = rec.get("releases", [])
     if releases:
 
-        def _release_score(r: dict) -> int:
-            score = 0
-            if r.get("barcode"):
-                score += 2
-            if r.get("label-info"):
-                score += 2
-            if r.get("country"):
-                score += 1
-            if r.get("status") == "Official":
-                score += 1
-            return score
-
-        rel = max(releases, key=_release_score)
+        rel = _pick_release(releases, album_name, total_tracks, release_date)
         parsed["mbid_album"] = rel.get("id", "")
         parsed["mbid_relgroup"] = rel.get("release-group", {}).get("id", "")
         parsed["status"] = rel.get("status", "")
@@ -424,7 +541,12 @@ def _parse_mb_response(data: dict) -> dict:
             parsed["mbid_albumartist"] = "; ".join(aa_ids)
             parsed["albumartist_sort"] = "".join(aa_sort_names)
 
-        for r in releases:
+        # The chosen release first. Scanning `releases` in list order took
+        # the barcode, label and catalogue number off whichever release
+        # happened to carry them, so a file could end up with one release's
+        # MUSICBRAINZ_ALBUMID and another's UPC. The others are still read
+        # afterwards, to fill in what the chosen release left blank.
+        for r in [rel, *(x for x in releases if x is not rel)]:
             if not parsed.get("barcode") and r.get("barcode"):
                 parsed["barcode"] = r["barcode"]
             for li in r.get("label-info", []):
@@ -445,15 +567,280 @@ def _parse_mb_response(data: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Title/artist fallback — used only when the ISRC is unknown to MusicBrainz
+# ---------------------------------------------------------------------------
+
+
+def _norm_text(value: str) -> str:
+    """Lowercased, accent-free, punctuation-free form for comparison.
+
+    Accents are folded rather than kept because the same artist is written
+    both ways in the wild — "Guè" here, "Gué Pequeno" on MusicBrainz — and a
+    comparison that treats those as different names throws away the match
+    this fallback exists to find.
+    """
+    decomposed = unicodedata.normalize("NFKD", str(value or ""))
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    cleaned = "".join(c if c.isalnum() else " " for c in stripped.lower())
+    return " ".join(cleaned.split())
+
+
+def _norm_title(value: str) -> str:
+    """`_norm_text` minus the decorations a title picks up on the way here.
+
+    Spotify hands us "Cyborg (feat. Geolier)", "L'ultima volta - feat.
+    Massimo Pericolo", "MI Fist (2004 Remaster)"; MusicBrainz stores the bare
+    recording title. Cutting the bracketed and dashed tails is what lets the
+    two meet.
+    """
+    text = str(value or "")
+    for opener, closer in (("(", ")"), ("[", "]")):
+        while opener in text and closer in text[text.index(opener) :]:
+            start = text.index(opener)
+            end = text.index(closer, start)
+            inner = text[start + 1 : end].lower()
+            if any(k in inner for k in ("feat", "with", "remaster", "version")):
+                text = text[:start] + text[end + 1 :]
+            else:
+                break
+    for separator in (" - ", " – "):
+        head, sep, tail = text.partition(separator)
+        if sep and any(
+            k in tail.lower() for k in ("feat", "remaster", "version", "edit", "mix")
+        ):
+            text = head
+    return _norm_text(text)
+
+
+def _title_matches(ours: str, theirs: str) -> bool:
+    """True when the two name the same recording.
+
+    Prefixes only count at a word boundary: "Phra (Outro)" may meet "Phra",
+    but "Love" must not meet "Lovers".
+    """
+    a_core, b_core = _norm_title(ours), _norm_title(theirs)
+    if not a_core or not b_core:
+        return False
+    return (
+        _norm_text(ours) == _norm_text(theirs)
+        or a_core == b_core
+        or a_core.startswith(b_core + " ")
+        or b_core.startswith(a_core + " ")
+    )
+
+
+def _artist_matches(ours: str, theirs: str) -> bool:
+    """True when one credit is contained in the other.
+
+    Subset in either direction, because both happen: our "Guè" against
+    MusicBrainz's "Gué Pequeno" (the same person, renamed), and our "Noyz
+    Narcos, Chicoria" against a MusicBrainz credit for either of the two.
+    "Gemello" against "Guè" shares nothing and is refused.
+    """
+    a = set(_norm_text(ours).split())
+    b = set(_norm_text(theirs).split())
+    if not a or not b:
+        return False
+    return a <= b or b <= a
+
+
+def _credited_names(recording: dict) -> list[str]:
+    names = []
+    for credit in recording.get("artist-credit") or []:
+        artist = credit.get("artist") or {}
+        name = artist.get("name") or credit.get("name") or ""
+        if name:
+            names.append(name)
+    return names
+
+
+#: How a joined credit ("Noyz Narcos, Chicoria", "Drake & Future") is cut
+#: back to the name to search MusicBrainz for.
+_CREDIT_SEPARATORS = (",", "&", " feat.", " feat ", " ft.", " ft ", " with ", " x ")
+
+
+def _split_credits(value: str) -> list[str]:
+    """A joined credit as the list of names it holds."""
+    text = str(value or "")
+    parts = [text]
+    for separator in _CREDIT_SEPARATORS:
+        split_parts: list[str] = []
+        for part in parts:
+            lowered = part.lower()
+            start = 0
+            while True:
+                found = lowered.find(separator, start)
+                if found < 0:
+                    split_parts.append(part[start:])
+                    break
+                split_parts.append(part[start:found])
+                start = found + len(separator)
+        parts = split_parts
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _primary_artist(value: str) -> str:
+    """The first name in a joined credit.
+
+    MusicBrainz stores one artist per credit and matches the query against
+    each; searching for the whole joined string ("noyz narcos chicoria")
+    finds nothing at all, even when the recording is right there under the
+    first of those names.
+    """
+    names = _split_credits(value)
+    return names[0] if names else str(value or "").strip()
+
+
+def _artist_credits_equivalent(ours: str, theirs: list[str]) -> bool:
+    """True when both sides credit exactly the same set of artists."""
+    ours_set = {_norm_text(name) for name in _split_credits(ours)} - {""}
+    theirs_set = {_norm_text(name) for name in theirs} - {""}
+    return bool(ours_set) and ours_set == theirs_set
+
+
+def _fallback_query(title: str, artist: str) -> str:
+    """A Lucene query for the bare title and the primary artist."""
+    safe_title = _norm_title(title) or _norm_text(title)
+    safe_artist = _norm_text(_primary_artist(artist))
+    return f'recording:"{safe_title}" AND artist:"{safe_artist}"'
+
+
+def _pick_fallback_recording(
+    recordings: list[dict],
+    *,
+    title: str,
+    artist: str,
+    duration_ms: int,
+) -> dict | None:
+    """The first candidate that clears every guard, or None.
+
+    MusicBrainz returns them best-first. With a running time on both sides a
+    candidate needs a score of at least _MB_FALLBACK_MIN_SCORE, a title that
+    matches, a credited artist that matches, and a duration within
+    _MB_FALLBACK_MAX_DELTA_MS — that last one being what keeps a live
+    version, a re-recording or a cover from being accepted as this exact
+    recording, which is what the MusicBrainz IDs written afterwards claim.
+
+    Without a running time (MusicBrainz often has none) the duration check
+    is replaced rather than waived: near-perfect score, an equal title, and
+    the same set of credited artists. See _MB_FALLBACK_STRICT_SCORE.
+    """
+    for recording in recordings:
+        try:
+            score = int(recording.get("score") or 0)
+        except (TypeError, ValueError):
+            score = 0
+        if score < _MB_FALLBACK_MIN_SCORE:
+            continue
+
+        mb_title = recording.get("title") or ""
+        names = _credited_names(recording)
+        try:
+            length = int(recording.get("length") or 0)
+        except (TypeError, ValueError):
+            length = 0
+
+        if length and duration_ms:
+            if not _title_matches(title, mb_title):
+                continue
+            if not any(_artist_matches(artist, name) for name in names):
+                continue
+            if abs(length - int(duration_ms)) > _MB_FALLBACK_MAX_DELTA_MS:
+                continue
+            return recording
+
+        # No running time to compare on either side — see
+        # _MB_FALLBACK_STRICT_SCORE.
+        if score < _MB_FALLBACK_STRICT_SCORE:
+            continue
+        if _norm_title(title) != _norm_title(mb_title) and _norm_text(
+            title
+        ) != _norm_text(mb_title):
+            continue
+        if not _artist_credits_equivalent(artist, names):
+            continue
+        return recording
+    return None
+
+
+def _log_fallback_hit(isrc: str, recording: dict) -> None:
+    logger.info(
+        "[musicbrainz] ISRC %s is not linked on MusicBrainz; matched "
+        "'%s — %s' by title, artist and duration instead (%s)",
+        isrc,
+        recording.get("title", "?"),
+        ", ".join(_credited_names(recording)) or "?",
+        recording.get("id", "?"),
+    )
+
+
+def _log_no_match(isrc: str, title: str, artist: str) -> None:
+    where = f" ({title} — {artist})" if title and artist else ""
+    logger.info(
+        "[musicbrainz] no match for ISRC %s%s — the recording is not on "
+        "MusicBrainz, or its ISRC is not linked there; no MusicBrainz tags "
+        "for this track",
+        isrc,
+        where,
+    )
+
+
+def _log_paused(isrc: str) -> None:
+    logger.info(
+        "[musicbrainz] lookups paused for another %.0fs after a failed "
+        "request — no MusicBrainz tags for ISRC %s",
+        mb_skip_remaining(),
+        isrc,
+    )
+
+
+def _log_failed(isrc: str, exc: Exception) -> None:
+    logger.warning(
+        "[musicbrainz] lookup failed for ISRC %s (%s) — no MusicBrainz tags "
+        "for this track",
+        isrc,
+        exc,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Sync fetch_mb_metadata (invariato)
 # ---------------------------------------------------------------------------
 
 
-def fetch_mb_metadata(isrc: str) -> dict:
+def fetch_mb_metadata(
+    isrc: str,
+    *,
+    title: str = "",
+    artist: str = "",
+    duration_ms: int = 0,
+    album: str = "",
+    total_tracks: int = 0,
+    release_date: str = "",
+) -> dict:
+    """MusicBrainz tags for `isrc`, `{}` when there is no confident match.
+
+    `title`/`artist`/`duration_ms` are optional and only used when the ISRC
+    itself is unknown to MusicBrainz — see _pick_fallback_recording() for
+    what a match has to satisfy before it is accepted. Callers that pass
+    nothing behave exactly as before: ISRC or nothing.
+
+    `album`/`total_tracks`/`release_date` name the record being downloaded
+    and pick which of the recording's releases the release-scoped tags come
+    from — see _release_score(). They are part of the cache key, because
+    the same ISRC asked for as part of two different albums — or two
+    editions of one album — has two different answers.
+    """
     if not isrc:
         return {}
 
     cache_key = isrc.strip().upper()
+    if album:
+        # Every input _release_score() weighs belongs in the key, or a
+        # lookup made for one edition answers for another.
+        cache_key = (
+            f"{cache_key}|{_norm_text(album)}|{total_tracks}|{release_date[:10]}"
+        )
     cached = _mb_cache.get(cache_key)
     if cached is not None:
         return {} if cached is _LOOKUP_FAILED else cached  # type: ignore
@@ -463,7 +850,7 @@ def fetch_mb_metadata(isrc: str) -> dict:
         return persisted
 
     if should_skip_mb():
-        logger.debug("[musicbrainz] skipped (offline recently)")
+        _log_paused(cache_key)
         return {}
 
     with _mb_inflight_mu:
@@ -484,10 +871,30 @@ def fetch_mb_metadata(isrc: str) -> dict:
     try:
         data = _query_recordings(f"isrc:{isrc}")
         set_mb_status(True)
-        res = _parse_mb_response(data)
+        res = _parse_mb_response(data, album, total_tracks, release_date)
+        if not any(res.values()) and title and artist:
+            candidates = _query_recordings(_fallback_query(title, artist))
+            match = _pick_fallback_recording(
+                candidates.get("recordings", []),
+                title=title,
+                artist=artist,
+                duration_ms=duration_ms,
+            )
+            if match is not None:
+                res = _parse_mb_response(
+                    {"recordings": [match]}, album, total_tracks, release_date
+                )
+                _log_fallback_hit(cache_key, match)
+        if not any(res.values()):
+            _log_no_match(cache_key, title, artist)
         try:
             res.update(
-                _parse_mb_details(_query_recording_details(res.get("mbid_track", "")))
+                _parse_mb_details(
+                    _query_recording_details(res.get("mbid_track", "")),
+                    album,
+                    total_tracks,
+                    release_date,
+                )
             )
         except (RuntimeError, httpx.RequestError) as detail_err:
             logger.debug(
@@ -498,7 +905,7 @@ def fetch_mb_metadata(isrc: str) -> dict:
             put_cached_response("musicbrainz", cache_key, res)
     except Exception as e:
         set_mb_status(False)
-        logger.debug("[musicbrainz] lookup failed: %s", e)
+        _log_failed(cache_key, e)
         res = _LOOKUP_FAILED
     finally:
         _mb_cache[cache_key] = res
@@ -521,15 +928,32 @@ def fetch_mb_metadata(isrc: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def fetch_mb_metadata_async(isrc: str) -> dict:
+async def fetch_mb_metadata_async(
+    isrc: str,
+    *,
+    title: str = "",
+    artist: str = "",
+    duration_ms: int = 0,
+    album: str = "",
+    total_tracks: int = 0,
+    release_date: str = "",
+) -> dict:
     """Async version of fetch_mb_metadata.
     Uses asyncio.Event for in-flight deduplication instead of threading.Event.
-    Same caching logic as the sync version.
+    Same caching logic — and the same optional title/artist fallback and
+    `album`/`total_tracks`/`release_date` release pick — as the sync
+    version.
     """
     if not isrc:
         return {}
 
     cache_key = isrc.strip().upper()
+    if album:
+        # Every input _release_score() weighs belongs in the key, or a
+        # lookup made for one edition answers for another.
+        cache_key = (
+            f"{cache_key}|{_norm_text(album)}|{total_tracks}|{release_date[:10]}"
+        )
     cached = _mb_cache.get(cache_key)
     if cached is not None:
         return {} if cached is _LOOKUP_FAILED else cached  # type: ignore
@@ -539,7 +963,7 @@ async def fetch_mb_metadata_async(isrc: str) -> dict:
         return persisted
 
     if should_skip_mb():
-        logger.debug("[musicbrainz] async: skipped (offline recently)")
+        _log_paused(cache_key)
         return {}
 
     inflight_lock = _get_async_inflight_lock()
@@ -557,10 +981,25 @@ async def fetch_mb_metadata_async(isrc: str) -> dict:
     res: dict | object = _LOOKUP_FAILED
     try:
         data = await _query_recordings_async(f"isrc:{isrc}")
-        res = _parse_mb_response(data)
+        res = _parse_mb_response(data, album, total_tracks, release_date)
+        if not any(res.values()) and title and artist:
+            candidates = await _query_recordings_async(_fallback_query(title, artist))
+            match = _pick_fallback_recording(
+                candidates.get("recordings", []),
+                title=title,
+                artist=artist,
+                duration_ms=duration_ms,
+            )
+            if match is not None:
+                res = _parse_mb_response(
+                    {"recordings": [match]}, album, total_tracks, release_date
+                )
+                _log_fallback_hit(cache_key, match)
+        if not any(res.values()):
+            _log_no_match(cache_key, title, artist)
         try:
             details = await _query_recording_details_async(res.get("mbid_track", ""))
-            res.update(_parse_mb_details(details))
+            res.update(_parse_mb_details(details, album, total_tracks, release_date))
         except (RuntimeError, httpx.RequestError) as detail_err:
             logger.debug(
                 "[musicbrainz] async detail query failed, keeping search result: %s",
@@ -571,7 +1010,7 @@ async def fetch_mb_metadata_async(isrc: str) -> dict:
         set_mb_status(True)
     except Exception as e:
         set_mb_status(False)
-        logger.debug("[musicbrainz] async lookup failed: %s", e)
+        _log_failed(cache_key, e)
         res = _LOOKUP_FAILED
     finally:
         _mb_cache[cache_key] = res

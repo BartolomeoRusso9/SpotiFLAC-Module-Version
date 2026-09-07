@@ -25,7 +25,7 @@ import httpx
 from tenacity import (
     AsyncRetrying,
     RetryCallState,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
 )
 
@@ -34,6 +34,7 @@ from .errors import (
     NetworkError,
     ParseError,
     RateLimitedError,
+    RedirectNotFollowedError,
     TrackNotFoundError,
 )
 
@@ -135,6 +136,20 @@ logger = logging.getLogger(__name__)
 # invites a server to send a body nothing here can decode. Add it back the
 # day Brotli support becomes a required dependency, not before.
 SAFE_ACCEPT_ENCODING = "gzip, deflate"
+
+
+def _is_worth_retrying(exc: BaseException) -> bool:
+    """Whether repeating the request could plausibly answer differently.
+
+    Rate limits and transport failures can: waiting is the entire remedy for
+    one and the other is usually a blip. A redirect cannot — the server has
+    stated where the resource is and will state it again, identically, for
+    as many attempts as it is given. Retrying one is three round trips and
+    the backoff between them spent to arrive at the same `Location`.
+    """
+    if isinstance(exc, RedirectNotFollowedError):
+        return False
+    return isinstance(exc, (RateLimitedError, NetworkError))
 
 
 _CONTENT_RANGE_RE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(?:\d+|\*)\s*$", re.IGNORECASE)
@@ -386,7 +401,7 @@ class AsyncHttpClient:
 
         retryer = AsyncRetrying(
             stop=stop_after_attempt(self._retry.max_attempts),
-            retry=retry_if_exception_type((RateLimitedError, NetworkError)),
+            retry=retry_if_exception(_is_worth_retrying),
             wait=self._wait_strategy,
             reraise=True,
         )
@@ -481,6 +496,19 @@ class AsyncHttpClient:
             raise RateLimitedError(
                 self._provider,
                 int(resp.headers.get("Retry-After", 5)),
+            )
+        if resp.is_redirect or 300 <= sc < 400:
+            # Its own error, and not a retryable one — see
+            # `RedirectNotFollowedError`. This used to be an ordinary
+            # `NetworkError`, which the retryer below treats as worth another
+            # go, so every unfollowed redirect cost three identical requests
+            # and the backoff between them before failing exactly as it had
+            # the first time.
+            raise RedirectNotFollowedError(
+                self._provider,
+                sc,
+                str(resp.url),
+                resp.headers.get("location", ""),
             )
         if not resp.is_success:
             raise NetworkError(self._provider, f"HTTP {sc} from {resp.url}")

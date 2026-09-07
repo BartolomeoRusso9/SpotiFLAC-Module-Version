@@ -43,6 +43,40 @@ def _no_registry_bootstrap(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_download_dir(request, monkeypatch, tmp_path_factory):
+    """Keeps the suite out of the user's real music library.
+
+    `SpotiFLAC_API.__init__` starts every instance at DEFAULT_DOWNLOAD_DIR —
+    ~/Music/SpotiFLAC — and several code paths mkdir it before doing
+    anything else. `--web-multiuser` is the loud one: webapp's ApiRegistry
+    gives each account its own folder under the base download dir, so
+    merely logging a test account in left `alice-2bd806c9` and
+    `bob-81b637d8` sitting in the developer's library, in among their
+    actual albums (tests/test_webapp_multiuser.py,
+    test_webapp_isolation.py, test_webapi_integration.py all did it).
+    test_playcount_throttle.py had already worked around the same thing one
+    test at a time; this closes it for the whole suite.
+
+    Only the constant is moved, not `paths.default_download_dir()` itself.
+    Modules and tests that did `from ... import default_download_dir` at
+    import time hold the original function and would not see a patch there
+    anyway, so patching it buys nothing and makes the two disagree — which
+    is a difference some tests quite reasonably assert on.
+
+    The stand-in still ends in "Music/SpotiFLAC": that suffix is itself
+    asserted, and a temporary directory is no reason to change the shape of
+    the path under test.
+    """
+    if request.node.get_closest_marker("uses_real_download_dir"):
+        return
+
+    import os
+
+    stand_in = os.path.join(str(tmp_path_factory.mktemp("home")), "Music", "SpotiFLAC")
+    monkeypatch.setattr("SpotiFLAC.app.DEFAULT_DOWNLOAD_DIR", stand_in)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_extension_dir(request, monkeypatch, tmp_path_factory):
     """Keeps anything that *does* install from touching ~/.spotiflac."""
     if request.node.get_closest_marker("uses_real_ext_dir"):
@@ -59,6 +93,11 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "uses_real_ext_dir: test needs the configured extension directory "
+        "rather than a temporary one",
+    )
+    config.addinivalue_line(
+        "markers",
+        "uses_real_download_dir: test needs the configured download directory "
         "rather than a temporary one",
     )
 
@@ -78,3 +117,23 @@ def _isolated_database(monkeypatch, tmp_path_factory):
     db.reset_for_tests()
     yield
     db.reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def _capable_terminal(monkeypatch):
+    """Pins the terminal capabilities the TUI reads, instead of inheriting.
+
+    `branding.plain_terminal()` answers from NO_COLOR / TERM /
+    SPOTIFLAC_PLAIN_TUI, so every test that asserts how the TUI *looks* was
+    really asserting something about the terminal that happened to run it:
+    green under a developer's xterm, red under `NO_COLOR=1` and red on the
+    Windows runner, which sets no TERM at all. Same class of leak as the
+    fixtures above — the suite's result depended on the machine.
+
+    Pinned to the fancy form because that is what those tests describe. The
+    handful that want the ASCII fallback set their own variable with
+    monkeypatch and still win: this only fills in a baseline.
+    """
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("SPOTIFLAC_PLAIN_TUI", raising=False)

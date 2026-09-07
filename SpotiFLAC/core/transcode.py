@@ -49,6 +49,32 @@ TTA = "tta"
 
 DEFAULT_MP3_BITRATE = "320k"
 
+#: Menu label → format name (None = no conversion), for every UI that offers
+#: the choice. Spelled out rather than generated from SUPPORTED_FORMATS so a
+#: menu can say what each format is actually *for*; the extensions still come
+#: from `extension_for()`. It lives here rather than in one frontend because
+#: the wizard, the TUI and the GUI have to offer the same seven targets, and
+#: the only way to be sure of that is for them to read the same tuple.
+TRANSCODE_CHOICES: tuple[tuple[str, str | None], ...] = (
+    ("Keep the provider's format (no conversion)", None),
+    ("FLAC — lossless, the universal default", "flac"),
+    ("ALAC (.m4a) — lossless, native on macOS/iOS", "alac"),
+    ("WavPack (.wv) — lossless, smallest of the exotics", "wavpack"),
+    ("TTA (.tta) — lossless, fast to decode", "tta"),
+    ("WAV — uncompressed PCM, for DJ software and editors", "wav"),
+    ("AIFF — uncompressed PCM, the Apple flavour", "aiff"),
+    ("MP3 — lossy, for players that read nothing else", "mp3"),
+)
+
+
+def transcode_label(fmt: str | None) -> str:
+    """Menu label for a stored format name, falling back to 'no conversion'."""
+    for label, value in TRANSCODE_CHOICES:
+        if value == fmt:
+            return label
+    return TRANSCODE_CHOICES[0][0]
+
+
 #: ffmpeg's FLAC compression level. 8 is the strongest setting the encoder
 #: offers; it buys ~1-2% over the default 5 for roughly twice the CPU time.
 #: A download is converted once and kept forever, so the trade favours size.
@@ -344,11 +370,15 @@ def _probe_with_mutagen(src: Path) -> tuple[int, bool | None]:
             return 0, None
 
         if src.suffix.lower() in _EXT_MP4:
-            # AAC and ALAC share the MPEG-4 container and both report a bit
-            # depth, so only the codec tells a lossy download from a
-            # lossless one.
+            # AAC, ALAC *and* FLAC all share the MPEG-4 container and all
+            # report a bit depth, so only the codec tells a lossy download
+            # from a lossless one. mutagen spells them "mp4a", "alac" and
+            # "fLaC" — and the last of those, which is what a Tidal stream
+            # arrives as, fell through as lossy: converting one to ALAC
+            # warned that quality could not be restored from a source that
+            # had lost none.
             codec = str(getattr(info, "codec", "") or "").lower()
-            return depth, codec.startswith("alac")
+            return depth, codec.startswith(("alac", "flac"))
         return depth, True
     except Exception as exc:
         logger.debug("[transcode] mutagen could not probe %s: %s", src.name, exc)
@@ -410,19 +440,66 @@ def _probe_source(src: Path) -> tuple[int, bool]:
     return 16, False
 
 
+def _audio_codec(src: Path) -> str:
+    """The first audio stream's codec, lower-cased; "" when unknown."""
+    try:
+        return (
+            subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=codec_name",
+                    "-of",
+                    "default=nw=1:nk=1",
+                    str(src),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            .stdout.strip()
+            .lower()
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def _already_in_target_format(src: Path, spec: FormatSpec) -> bool:
     """True when the provider already delivered exactly what was requested.
 
-    The extension alone is not enough for ALAC: a lossy AAC download also
-    lands in an `.m4a`, and returning it as "already ALAC" would mislabel
-    it as lossless.
+    The extension alone is not enough for ALAC, because `.m4a` is a
+    container and not a codec: a lossy AAC download lands in one, and so
+    does the FLAC-in-MP4 that Tidal serves. Testing only that the source is
+    *lossless* accepted that FLAC-in-MP4 as "already ALAC" and returned it
+    untouched — an `.m4a` no ordinary player would open. The codec name is
+    the question actually being asked, so it is the one now asked.
     """
     if src.suffix.lower() != spec.extension:
         return False
     if spec.name != ALAC:
         return True
-    _, lossless = _probe_source(src)
-    return lossless
+    codec = _audio_codec(src)
+    if not codec:
+        # ffprobe had no answer. Fall back to the older, looser test rather
+        # than re-encoding a file that may well already be right.
+        _, lossless = _probe_source(src)
+        return lossless
+    return codec == spec.encoder
+
+
+def already_in_target_format(src: Path | str, fmt: str) -> bool:
+    """Whether `src` is already exactly `fmt`. The orchestrator's own check.
+
+    Public so that downloader.py asks this one question in one place: it
+    used to compare extensions itself, which is the test this module had
+    already found insufficient.
+    """
+    return _already_in_target_format(Path(src), format_spec(fmt))
 
 
 def _encode_command(

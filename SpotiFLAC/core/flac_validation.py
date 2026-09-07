@@ -63,11 +63,25 @@ def validate_flac_file(filepath: str) -> tuple[bool, str]:
             return False, f"FLAC validation failed: {tail}"
 
         flac_binary = shutil.which("flac")
-        # The external `flac` utility is required for a full integrity check.
-        # If it's missing, treat the validation as failed to avoid silently
-        # accepting potentially corrupted files.
+        # The external `flac` utility is a *second* opinion, not the only
+        # one: the ffmpeg run above already decoded every frame of the audio
+        # stream, and returning 0 from that is what "the file is readable"
+        # means here. `flac -t` is kept because it also verifies the per-frame
+        # MD5 the encoder wrote, which ffmpeg does not check.
+        #
+        # So a missing binary is an unavailable extra check, not a failed one.
+        # Reporting it as failure condemned every FLAC on any machine without
+        # the (entirely optional) flac CLI — and worse, sent them through
+        # repair_flac_file(), which re-encoded the file, validated the result
+        # with this same function, got the same "failure" and deleted the
+        # perfectly good repair as "still invalid".
         if flac_binary is None:
-            return False, "flac binary not found"
+            logger.debug(
+                "[flac_validation] flac CLI not installed; accepting %s on the "
+                "ffmpeg decode alone",
+                filepath,
+            )
+            return True, ""
 
         integrity_result = subprocess.run(
             [flac_binary, "-t", filepath],
@@ -108,8 +122,12 @@ def repair_flac_file(
         return False, "Input file does not exist"
 
     if output_path is None:
-        # Use a temp file and replace original
-        output_path = input_path + ".repaired"
+        # Use a temp file and replace original. The ".flac" has to come last:
+        # ffmpeg picks its muxer from the output extension, and a bare
+        # ".repaired" makes it bail with "Unable to find a suitable output
+        # format". It also keeps validate_flac_file() from short-circuiting on
+        # the repaired file, which only inspects paths ending in ".flac".
+        output_path = input_path + ".repaired.flac"
         replace_original = True
     else:
         replace_original = False
@@ -141,6 +159,8 @@ def repair_flac_file(
                 "flac",
                 "-compression_level",
                 "8",
+                "-f",
+                "flac",
                 output_path,
             ],
             capture_output=True,

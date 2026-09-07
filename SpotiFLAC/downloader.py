@@ -66,6 +66,7 @@ from .core.recording_guard import wrong_recording_reason_async
 from .core.spotify_metadata import SpotifyMetadataClient
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
+    already_in_target_format,
     ensure_ffmpeg_available,
     extension_for,
     normalize_bitrate,
@@ -177,7 +178,7 @@ class DownloadOptions:
 
     enrich_metadata: bool = True
     # SoundCloud isn't checked by default — still selectable (GUI checklist,
-    # --enrich-providers, the interactive wizard), just opt-in now.
+    # --enrich-providers, the terminal UI), just opt-in now.
     enrich_providers: list[str] = field(
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"],
     )
@@ -534,11 +535,18 @@ async def _transcode_result_async(
 
     A result whose file is already in the target format is returned untouched,
     which also covers providers that natively deliver MP3.
+
+    "Already in the target format" is asked of transcode.py rather than
+    answered here by comparing extensions. `.m4a` is a container, not a
+    codec: the FLAC-in-MP4 some providers serve matched `.m4a` on the
+    extension and was handed back unconverted, so `--transcode alac`
+    produced a file that was not ALAC.
     """
-    source = Path(result.file_path or "")
-    if not result.file_path or source.suffix.lower() == extension_for(
-        opts.transcode_to
-    ):
+    if not result.file_path:
+        return result
+
+    source = Path(result.file_path)
+    if await asyncio.to_thread(already_in_target_format, source, opts.transcode_to):
         return result
 
     try:
@@ -823,6 +831,10 @@ async def download_one_async(
                         normalize_quality(opts.quality),
                     ),
                     "qobuz_token": opts.qobuz_token,
+                    # Lets a provider skip work the transcode step would
+                    # only undo — see provider._m4a_is_the_final_container.
+                    # Ignored by providers that do not take it.
+                    "transcode_to": opts.transcode_to,
                 }
 
                 # Use signature inspection to check if artist_separator is supported
@@ -851,6 +863,16 @@ async def download_one_async(
                 else:
                     result = await download_task
 
+            except asyncio.CancelledError:
+                # The only thing that ever raises this event. It is handed to
+                # every provider above ("cooperative shutdown propagation"),
+                # is checked at the top of each retry — and was never set by
+                # anything, so a cancelled run (the TUI's stop key, a closed
+                # window) left the provider's own blocking work running,
+                # still downloading and still printing, over a UI that had
+                # already torn its output sink down.
+                stop_event.set()
+                raise
             except asyncio.TimeoutError:
                 wait_for_idle = getattr(provider, "wait_for_idle_async", None)
                 if callable(wait_for_idle):
@@ -1039,6 +1061,45 @@ def _quote_for_shell(value: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+async def _close_shared_browser_sessions() -> None:
+    """Tears down the persistent Monochrome browser once a batch is over.
+
+    The Amazon provider's mono path (amz.geeked.wtf) keeps a real Chrome
+    alive on purpose: the JWT it gets back is tied to that browser's TLS
+    session, so closing it between tracks would cost a Turnstile solve every
+    time. Between *batches* there is nothing left to keep.
+
+    It was never being closed at all, once. The session is a module-level
+    singleton in `core.signed_session_mono` rather than a provider object, so
+    `DownloadWorker._close_providers()` never saw it, and the only thing that
+    ever shut it down was the `atexit` hook — i.e. the process exiting. The
+    CLI exits after a run and got away with it; the TUI and the desktop
+    window do not, so Chrome stayed on screen after the download finished.
+
+    Called per batch, not per worker. It lived in `DownloadWorker.run_async`,
+    which runs once per *collection*: three albums in one command therefore
+    tore the browser down and stood it back up twice mid-run, paying a
+    Turnstile solve each time — the exact cost the shared session exists to
+    avoid. The batch entry points own it now.
+
+    Read out of `sys.modules` rather than imported: `signed_session_mono`
+    pulls in pydoll, and importing it here to ask whether a browser needs
+    closing would load it for every run that never went near Amazon. If the
+    module was never imported, no mono browser was ever started and there is
+    nothing to close.
+
+    Bounded and suppressed because a browser that will not close is not a
+    reason to fail a download that already succeeded — and
+    `close_mono_browser_session()` falls back to killing by profile directory
+    when the polite stop fails.
+    """
+    mono = sys.modules.get("SpotiFLAC.core.signed_session_mono")
+    if mono is None:
+        return
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(mono.close_mono_browser_session(), timeout=20.0)
+
+
 class DownloadWorker:
     def __init__(
         self,
@@ -1139,6 +1200,9 @@ class DownloadWorker:
                 # silently dropping them.
                 await _await_pending_hires_checks()
         finally:
+            # Providers only: the shared mono browser outlives one worker on
+            # purpose, and is closed by whichever batch entry point started
+            # this one (see _close_shared_browser_sessions).
             self._close_providers()
 
     async def _run_downloads_async(
@@ -1496,19 +1560,122 @@ class SpotiflacDownloader:
         """Starts downloading one or more URLs using the async worker pipeline."""
         urls = [input_url] if isinstance(input_url, str) else list(input_url)
 
-        for _idx, url in enumerate(urls):
-            if len(urls) > 1:
-                pass
+        try:
+            for _idx, url in enumerate(urls):
+                if len(urls) > 1:
+                    pass
 
-            failed_tracks = None
+                failed_tracks = None
+                while True:
+                    failed_tracks = await self._run_once_async(
+                        url,
+                        target_tracks=failed_tracks,
+                    )
+                    if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
+                        break
+                    await asyncio.sleep(loop_minutes * 60)
+        finally:
+            await _close_shared_browser_sessions()
+
+    #: How many metadata lookups run at once in run_tracks_async(). These
+    #: are small JSON requests, but twenty of them fired simultaneously at
+    #: the same host is how a run earns a 429 before it has downloaded
+    #: anything.
+    TRACK_RESOLVE_CONCURRENCY = 8
+
+    async def run_tracks_async(
+        self,
+        urls: list[str],
+        loop_minutes: int | None = None,
+    ) -> None:
+        """Downloads a set of *individual track* links as ONE run.
+
+        run_async() reads a list as a list of collections: one
+        _run_once_async() per URL, each with its own metadata fetch, its own
+        DownloadWorker and its own summary. That is right for two playlists
+        and wrong for twenty tracks picked out of one — the GUI's case, where
+        a partial selection cannot be expressed as a collection URL (see
+        app._download_task). Done that way, each track paid for a full
+        pipeline of its own and max_concurrent_downloads meant nothing: a
+        pool holding one track has nothing to run beside it.
+
+        Here every link is resolved first, concurrently, and the tracks then
+        go through a single worker: one [RUN] header, one progress bar, one
+        summary, one queue for the GUI to read its stats off — and the
+        semaphore finally doing what it is set to.
+
+        Folder layout is deliberately unchanged: these tracks are downloaded
+        as the individual tracks they are (is_album/is_playlist False),
+        exactly as when they each had a run to themselves, so batching moves
+        no files. The one visible difference is the numeric prefix under
+        `use_track_numbers`: a run of one track always called it position 1,
+        so a selection of twenty came out as twenty files all numbered 01;
+        numbered as one batch they count 1..N in the order selected, which is
+        what downloading the same tracks as a collection already did.
+        """
+        tracks = await self._resolve_track_list_async(urls)
+        if not tracks:
+            logger.warning(
+                "[downloader] No track could be resolved from %d link(s)",
+                len(urls),
+            )
+            return
+
+        pending = await self._resolve_isrc_bulk_async(tracks)
+        try:
             while True:
-                failed_tracks = await self._run_once_async(
-                    url,
-                    target_tracks=failed_tracks,
-                )
-                if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
+                failed = await self._run_worker_async(pending, "", {}, False, False)
+                if not loop_minutes or loop_minutes <= 0 or not failed:
                     break
                 await asyncio.sleep(loop_minutes * 60)
+                pending = failed
+        finally:
+            await _close_shared_browser_sessions()
+
+    async def _resolve_track_list_async(
+        self,
+        urls: list[str],
+    ) -> list[TrackMetadata]:
+        """Metadata for every link in `urls`, in the order they were given.
+
+        A link that cannot be resolved is logged and dropped rather than
+        failing the batch: with one run per track a bad link cost that track
+        only, and moving to a single run must not turn it into something that
+        costs the other nineteen.
+        """
+        semaphore = asyncio.Semaphore(self.TRACK_RESOLVE_CONCURRENCY)
+
+        async def _resolve(url: str) -> list[TrackMetadata]:
+            async with semaphore:
+                try:
+                    collection_name, tracks, info = await self._resolve_metadata_async(
+                        url,
+                    )
+                except SpotiflacError as exc:
+                    logger.error("[downloader] %s: %s", url, exc)
+                    return []
+                if not tracks:
+                    logger.warning("[downloader] No track found at %s", url)
+                    return []
+                # Same history entry the per-URL path wrote, so the recent
+                # links list looks the same after this change as before it.
+                await self._record_history_async(url, collection_name, tracks, info)
+                return tracks
+
+        resolved = await asyncio.gather(*(_resolve(url) for url in urls))
+
+        # The same track can arrive twice — a link selected in the list and
+        # the same one already in the queue — and downloading it twice in
+        # one pool means two workers writing the same file.
+        seen: set[str] = set()
+        ordered: list[TrackMetadata] = []
+        for group in resolved:
+            for track in group:
+                if track.id in seen:
+                    continue
+                seen.add(track.id)
+                ordered.append(track)
+        return ordered
 
     # ------------------------------------------------------------------
     # Multi-playlist sync
@@ -1803,7 +1970,12 @@ class SpotiflacDownloader:
             is_playlist=False,
             positions=[p.position for p in pending],
         )
-        await worker.run_async()
+        try:
+            await worker.run_async()
+        finally:
+            # The single batch of the --playlist and --csv paths, both of
+            # which reach the worker only through here.
+            await _close_shared_browser_sessions()
 
         completed = worker.completed_paths
         return {
@@ -2125,6 +2297,7 @@ class SpotiflacDownloader:
                 t.artists,
                 t.album,
                 track_spotify_id,
+                getattr(t, "cover_url", "") or "",
             )
             if not t.id:
                 t = t.model_copy(update={"id": track_item_id})

@@ -155,8 +155,10 @@ The file is read *in the browser* and only its text is sent to Python, so this
 works the same in the desktop window and over `--web` — a server never needs
 to be able to see your disk.
 
-**The wizard** (`--interactive`) takes a path to a `.csv` where it takes a
-link.
+**The terminal UI** (`--tui`) has a *CSV track list* field next to the URL
+one, and a **Browse for a track list…** button that scans the usual folders
+and previews a file before accepting it. A path there takes precedence over
+the link. See the [Terminal UI](tui.md#a-csv-instead-of-a-url) page.
 
 **REST** — `POST /api/v1/csv/resolve` with the file's contents; see the
 [REST API](rest-api.md) page.

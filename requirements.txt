@@ -3,6 +3,7 @@ aiofiles>=23.2.1
 tenacity>=8.3.0
 tqdm>=4.66.3
 pywebview>=5.0.0
+textual>=1.0
 mutagen>=1.47.0
 Pillow>=12.3.0
 pydantic>=2.7.0

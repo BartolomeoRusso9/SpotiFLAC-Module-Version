@@ -1,2 +1,3 @@
 recursive-include SpotiFLAC/frontend *
 recursive-include SpotiFLAC/extensions *
+recursive-include SpotiFLAC/tui *.tcss
