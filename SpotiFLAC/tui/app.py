@@ -352,20 +352,33 @@ class SpotiFLACTui(App[None]):
 
     @on(SessionPanel.StateLoaded)
     async def _adopt_state(self, event: SessionPanel.StateLoaded) -> None:
+        await self._rebuild_config(event.state)
+
+    @on(ConfigPanel.ProfileChosen)
+    async def _adopt_profile(self, event: ConfigPanel.ProfileChosen) -> None:
+        """The same replacement, asked for from the Configuration panel.
+
+        The picker there lives inside the panel this rebuilds, so the message
+        has to carry the new state rather than a name to go and read: by the
+        time the form is gone, so is the widget that was holding the answer.
+        """
+        await self._rebuild_config(event.state)
+
+    async def _rebuild_config(self, state: ConfigState) -> None:
         """A loaded profile replaces every setting, so the form is rebuilt.
 
         Cheaper than it looks, and far safer than assigning ~40 widget values
         one by one: a control missed in that loop would keep showing the old
         profile while the state held the new one.
         """
-        self.state = event.state
+        self.state = state
         switcher = self.query_one("#panels", ContentSwitcher)
         await self.query_one("#download", ConfigPanel).remove()
         await switcher.mount(ConfigPanel(self.state, id="download"))
         switcher.current = "download"
         self._show_panel("download")
         self._refresh_command_panel()
-        name = event.state.profile_loaded or "profile"
+        name = state.profile_loaded or "profile"
         self._announce(f"Loaded {name}.", "success")
 
     def _show_panel(self, key: str) -> None:

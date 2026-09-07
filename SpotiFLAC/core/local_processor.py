@@ -289,6 +289,7 @@ async def _with_musicbrainz_tags(
             duration_ms=metadata.duration_ms,
             album=metadata.album,
             total_tracks=metadata.total_tracks,
+            release_date=metadata.release_date,
         )
         mb_tags = mb_result_to_tags(mb_data)
     except Exception as exc:

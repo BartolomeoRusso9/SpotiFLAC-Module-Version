@@ -54,6 +54,7 @@ from mutagen.id3 import (
     TSOP,
     TSRC,
     TXXX,
+    UFID,
     USLT,
     WXXX,
     ID3NoHeaderError,
@@ -234,6 +235,29 @@ _M4A_MAP: dict[str, str] = {
     "ORGANIZATION": "----:com.apple.iTunes:LABEL",
     "LABEL": "----:com.apple.iTunes:LABEL",
     "BPM": "tmpo",
+    # MusicBrainz, spelled the way every reader of it expects. The
+    # underscored "MUSICBRAINZ_ALBUMID" is the *Vorbis* spelling, right for
+    # FLAC and OGG; handed to the freeform fallback below it produced
+    # "----:com.apple.iTunes:MUSICBRAINZ_ALBUMID" — a perfectly valid atom
+    # that nothing looks for, so the IDs were in the file and invisible to
+    # Picard, foobar2000, beets and the rest.
+    #
+    # Names verified against what mutagen's own EasyMP4 writes. Note that
+    # the country field is "MusicBrainz Release Country" here and
+    # "MusicBrainz Album Release Country" in ID3 — the two dialects really
+    # do differ, so neither can be derived from the other.
+    "MUSICBRAINZ_TRACKID": "----:com.apple.iTunes:MusicBrainz Track Id",
+    "MUSICBRAINZ_ALBUMID": "----:com.apple.iTunes:MusicBrainz Album Id",
+    "MUSICBRAINZ_ARTISTID": "----:com.apple.iTunes:MusicBrainz Artist Id",
+    "MUSICBRAINZ_ALBUMARTISTID": (
+        "----:com.apple.iTunes:MusicBrainz Album Artist Id"
+    ),
+    "MUSICBRAINZ_RELEASEGROUPID": (
+        "----:com.apple.iTunes:MusicBrainz Release Group Id"
+    ),
+    "RELEASESTATUS": "----:com.apple.iTunes:MusicBrainz Album Status",
+    "RELEASETYPE": "----:com.apple.iTunes:MusicBrainz Album Type",
+    "RELEASECOUNTRY": "----:com.apple.iTunes:MusicBrainz Release Country",
 }
 
 # Vorbis tag → chiave ASF/WMA
@@ -383,6 +407,34 @@ _ID3_REVERSE_MAP: dict[str, str] = {
     v.__name__: k for k, v in _ID3_FRAME_MAP.items() if k != "LABEL"
 }
 
+#: The owner string MusicBrainz claims in a UFID frame. The *recording* MBID
+#: goes there in ID3, not in a TXXX of its own — which is why writing it as
+#: "TXXX:MUSICBRAINZ_TRACKID" left it somewhere no reader looks.
+_MB_UFID_OWNER = "http://musicbrainz.org"
+
+#: Vorbis name → the TXXX description ID3 readers expect. Verified against
+#: what mutagen's own EasyID3 writes. See the note in _M4A_MAP: the country
+#: field is spelled differently in the two dialects, so this table is
+#: written out rather than derived from that one.
+_ID3_TXXX_DESC: dict[str, str] = {
+    "MUSICBRAINZ_ALBUMID": "MusicBrainz Album Id",
+    "MUSICBRAINZ_ARTISTID": "MusicBrainz Artist Id",
+    "MUSICBRAINZ_ALBUMARTISTID": "MusicBrainz Album Artist Id",
+    "MUSICBRAINZ_RELEASEGROUPID": "MusicBrainz Release Group Id",
+    "MUSICBRAINZ_RELEASETRACKID": "MusicBrainz Release Track Id",
+    "RELEASESTATUS": "MusicBrainz Album Status",
+    "RELEASETYPE": "MusicBrainz Album Type",
+    "RELEASECOUNTRY": "MusicBrainz Album Release Country",
+}
+
+#: Read back by description, upper-cased because that is how the reader
+#: compares them. Files written before this mapping existed carry the
+#: underscored spelling as the description, and the reader's own
+#: `desc.upper()` fallback still recognises those.
+_ID3_TXXX_REVERSE: dict[str, str] = {
+    desc.upper(): name for name, desc in _ID3_TXXX_DESC.items()
+}
+
 _ID3_SKIP = {
     "TRACKNUMBER",
     "TRACKTOTAL",
@@ -432,6 +484,12 @@ def _apply_id3_frames(
         elif key_up == "URL":
             audio.add(WXXX(encoding=3, desc="", url=str(val)))
 
+        elif key_up == "MUSICBRAINZ_TRACKID":
+            audio.add(UFID(owner=_MB_UFID_OWNER, data=str(val).encode("utf-8")))
+
+        elif key_up in _ID3_TXXX_DESC:
+            audio.add(TXXX(encoding=3, desc=_ID3_TXXX_DESC[key_up], text=str(val)))
+
         elif key_up in _TXXX_TAGS or key_up.startswith("MUSICBRAINZ_"):
             audio.add(TXXX(encoding=3, desc=key_up, text=str(val)))
 
@@ -479,7 +537,15 @@ def _read_id3_container_tags(id3: ID3 | None) -> EmbeddedTags:
             result.lyrics = str(frame.text)
         elif fid == "TXXX":
             if frame.text:
-                result.tags[str(frame.desc).upper()] = str(frame.text[0])
+                desc = str(frame.desc).upper()
+                result.tags[_ID3_TXXX_REVERSE.get(desc, desc)] = str(frame.text[0])
+        elif fid == "UFID":
+            # Only MusicBrainz's own. Another owner's identifier is not a
+            # MusicBrainz recording id and must not be read back as one.
+            if frame.owner == _MB_UFID_OWNER and frame.data:
+                result.tags["MUSICBRAINZ_TRACKID"] = frame.data.decode(
+                    "utf-8", "replace"
+                )
         elif fid == "WXXX":
             result.tags["URL"] = frame.url
         elif fid == "TRCK":

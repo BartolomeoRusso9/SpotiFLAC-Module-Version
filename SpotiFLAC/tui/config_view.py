@@ -50,6 +50,12 @@ from .config_state import (
 
 _FIELD_PREFIX = "cfg-"
 
+#: The profile picker is deliberately *not* a `cfg-` id. Every widget with
+#: that prefix writes one field of ConfigState; this one replaces the whole
+#: state, so it must not be picked up by the generic binding handlers.
+_PROFILE_PICKER_ID = "profile-picker"
+_PROFILE_STATUS_ID = "profile-status"
+
 #: The three tiers worth choosing between, best first. Labels only — the
 #: values come from `config_state.QUALITY_TIERS`, so the menu cannot drift
 #: from what the state will accept.
@@ -179,6 +185,20 @@ class ConfigPanel(VerticalScroll):
             super().__init__()
             self.state = state
 
+    class ProfileChosen(Message):
+        """A saved profile was picked; every setting is replaced.
+
+        Deliberately not a `Changed`: that one carries an edit to the state
+        this panel already owns, and the app answers it by refreshing the
+        preview. This one means the state itself is a different object, and
+        the form has to be rebuilt around it.
+        """
+
+        def __init__(self, state: ConfigState, name: str) -> None:
+            super().__init__()
+            self.state = state
+            self.name = name
+
     def __init__(self, state: ConfigState | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.state = state or ConfigState()
@@ -227,6 +247,21 @@ class ConfigPanel(VerticalScroll):
                     id=_field_id("output_path"),
                 ),
             )
+
+        with Collapsible(title="Profile", collapsed=False):
+            # The names are read from disk, which compose() cannot wait for,
+            # so the menu starts empty and on_mount fills it.
+            yield Row(
+                "Saved profile",
+                Select(
+                    [],
+                    prompt="Choose a saved profile…",
+                    allow_blank=True,
+                    id=_PROFILE_PICKER_ID,
+                ),
+                hint="replaces every setting",
+            )
+            yield Static("", id=_PROFILE_STATUS_ID)
 
         with Collapsible(title="Providers & quality", collapsed=False):
             installed = installed_service_ids()
@@ -510,6 +545,83 @@ class ConfigPanel(VerticalScroll):
     def on_mount(self) -> None:
         self._refresh_dependencies()
         self.query_one("#no-providers", Label).display = not installed_service_ids()
+        # After a refresh, not straight away: Select builds its overlay as a
+        # child, and set_options() goes looking for it. Started from
+        # on_mount() it can arrive before that child exists.
+        self.call_after_refresh(
+            lambda: self.run_worker(self._fill_profile_picker(), exclusive=False)
+        )
+
+    # ------------------------------------------------------------------
+    # Profiles
+    # ------------------------------------------------------------------
+
+    def _profile_say(self, message: str) -> None:
+        try:
+            self.query_one(f"#{_PROFILE_STATUS_ID}", Static).update(message)
+        except Exception:
+            # The panel can be torn down between a worker starting and its
+            # first await returning — a profile load rebuilds this very
+            # panel — and a missing status line is not worth an exception.
+            pass
+
+    async def _fill_profile_picker(self) -> None:
+        """Offers the saved profiles, and shows which one is loaded."""
+        try:
+            from ..core.profiles import list_profiles_async
+
+            names = await list_profiles_async()
+        except Exception as exc:
+            self._profile_say(f"Could not read the saved profiles — {exc}")
+            return
+
+        # Loading a profile replaces this panel with a fresh one, so a run
+        # of this worker can outlive the widgets it was started for.
+        if not self.is_mounted:
+            return
+
+        loaded = self.state.profile_loaded
+        try:
+            picker = self.query_one(f"#{_PROFILE_PICKER_ID}", Select)
+            picker.set_options([(name, name) for name in names])
+            if loaded in names:
+                picker.value = loaded
+            else:
+                # clear(), not `value = Select.BLANK`: in Textual 8.2.8 that
+                # attribute is the boolean False and assigning it raises
+                # InvalidSelectValueError. The sentinel is Select.NULL.
+                picker.clear()
+        except Exception:
+            # A panel torn down mid-flight, on any of the three calls above.
+            # Nothing to show and nothing to fix — the replacement panel
+            # runs this again for itself.
+            return
+
+        if not names:
+            self._profile_say(
+                "No profiles saved yet — set this screen up as you want it, "
+                "then save it from the Session panel."
+            )
+        else:
+            self._profile_say(f"Loaded: {loaded}" if loaded in names else "")
+
+    async def _apply_profile(self, name: str) -> None:
+        try:
+            from ..core.profiles import get_profile_async
+
+            data = await get_profile_async(name)
+        except Exception as exc:
+            self._profile_say(f"Could not read '{name}' — {exc}")
+            return
+        if not data:
+            self._profile_say(f"Profile '{name}' is empty")
+            return
+
+        # Profiles store the wizard's cfg, bookkeeping keys included;
+        # from_cfg() keeps what it recognises and drops the rest.
+        state = ConfigState.from_cfg(data)
+        state.profile_loaded = name
+        self.post_message(self.ProfileChosen(state, name))
 
     # ------------------------------------------------------------------
     # Binding
@@ -566,6 +678,26 @@ class ConfigPanel(VerticalScroll):
             self._assign(name, event.value)
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == _PROFILE_PICKER_ID:
+            # Every option this menu holds is a profile name, so anything
+            # that is not a string is the blank sentinel — tested that way
+            # rather than against Select.NULL, which has changed name and
+            # type between Textual versions.
+            if not isinstance(event.value, str):
+                return
+            # Showing which profile is loaded means assigning the picker's
+            # value, and that raises Changed just as a click does. Changed
+            # is delivered through the message queue, so a flag set around
+            # the assignment is already back down by the time this runs —
+            # the picker settling on the profile it has just loaded read as
+            # a request to load it again, and each load rebuilds this panel.
+            # Comparing against the state is not a race, and it makes
+            # re-picking the current profile the no-op it looks like.
+            if event.value == self.state.profile_loaded:
+                return
+            self.run_worker(self._apply_profile(event.value), exclusive=False)
+            return
+
         name = _field_name(event.select.id)
         if name is None:
             return

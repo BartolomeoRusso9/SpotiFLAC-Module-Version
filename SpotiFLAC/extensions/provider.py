@@ -367,6 +367,7 @@ class JSExtensionProvider(BaseProvider):
         qobuz_token: str | None = None,
         is_album: bool = False,
         quality: str = "best",
+        transcode_to: str | None = None,
         **kwargs,
     ) -> DownloadResult:
         try:
@@ -388,6 +389,7 @@ class JSExtensionProvider(BaseProvider):
                 enrich_providers=enrich_providers,
                 qobuz_token=qobuz_token,
                 is_album=is_album,
+                transcode_to=transcode_to,
             )
         except SpotiflacError as e:
             return DownloadResult.fail(self.name, str(e))
@@ -415,6 +417,7 @@ class JSExtensionProvider(BaseProvider):
         enrich_providers: list | None = None,
         qobuz_token: str | None = None,
         is_album: bool = False,
+        transcode_to: str | None = None,
     ) -> DownloadResult:
         avail = await asyncio.to_thread(
             self.check_availability,
@@ -626,16 +629,30 @@ class JSExtensionProvider(BaseProvider):
 
             if Path(actual_path).suffix.lower() in [".m4a", ".mp4"]:
                 codec = await _get_codec_async(actual_path)
-                if codec == "flac":
+                d_key = dl_result.get("decryption_key") or dl_result.get(
+                    "decryptionKey",
+                )
+                if codec == "flac" and _m4a_is_the_final_container(
+                    transcode_to, d_key
+                ):
+                    # The download is already in the container the run is
+                    # heading for, so extracting the FLAC would only be
+                    # undone: m4a → flac → m4a, two full encodes to arrive
+                    # where one gets us. The transcode step reads
+                    # FLAC-in-MP4 perfectly well and encodes ALAC straight
+                    # from it.
+                    logger.info(
+                        "[%s] FLAC inside M4A, and M4A is the requested "
+                        "output — leaving the container alone for the "
+                        "transcode step.",
+                        self.name,
+                    )
+                elif codec == "flac":
                     logger.info(
                         "[%s] FLAC hidden inside M4A container detected. Starting extraction (remux)...",
                         self.name,
                     )
                     flac_path = str(Path(actual_path).with_suffix(".flac"))
-
-                    d_key = dl_result.get("decryption_key") or dl_result.get(
-                        "decryptionKey",
-                    )
 
                     if await _remux_to_flac_async(actual_path, flac_path, d_key):
                         import os
@@ -671,10 +688,11 @@ class JSExtensionProvider(BaseProvider):
                         # ISRC turns out not to be linked on MusicBrainz —
                         # which is most of some national catalogues. See
                         # musicbrainz._pick_fallback_recording().
-                        # album/total_tracks decide which of the
-                        # recording's releases the release-scoped tags come
-                        # from; without them a compilation reprint can win
-                        # and rewrite ALBUM and TRACKNUMBER.
+                        # album/total_tracks/release_date decide which of
+                        # the recording's releases the release-scoped tags
+                        # come from; without them a compilation reprint can
+                        # win and rewrite ALBUM and TRACKNUMBER, and two
+                        # editions of the one album cannot be told apart.
                         mb_data = await fetch_mb_metadata_async(
                             isrc_clean,
                             title=metadata.title,
@@ -682,6 +700,7 @@ class JSExtensionProvider(BaseProvider):
                             duration_ms=metadata.duration_ms,
                             album=metadata.album,
                             total_tracks=metadata.total_tracks,
+                            release_date=metadata.release_date,
                         )
                         mb_tags = mb_result_to_tags(mb_data)
                 except Exception as e:
@@ -1092,6 +1111,36 @@ async def _get_codec_async(filepath: str) -> str:
         return stdout.decode().strip().lower()
     except Exception:
         return "m4a"
+
+
+def _m4a_is_the_final_container(
+    transcode_to: str | None,
+    decryption_key: str | None,
+) -> bool:
+    """Whether extracting the FLAC would only be undone by the transcode.
+
+    A decryption key vetoes it however the run is configured: the remux is
+    the only step that passes `-decryption_key` to ffmpeg, so skipping it
+    would hand the transcode a file it cannot read.
+    """
+    if decryption_key:
+        return False
+    if not transcode_to:
+        return False
+    try:
+        from SpotiFLAC.core.transcode import (
+            extension_for,
+            normalize_transcode_format,
+        )
+
+        # Normalised here rather than trusted from the caller: "m4a" and
+        # "Apple Lossless" are aliases of "alac", and extension_for() only
+        # takes the canonical name.
+        return extension_for(normalize_transcode_format(transcode_to)) == ".m4a"
+    except Exception:
+        # An unknown target is not a reason to change what we do with the
+        # download; the old path still produces a file that plays.
+        return False
 
 
 async def _remux_to_flac_async(

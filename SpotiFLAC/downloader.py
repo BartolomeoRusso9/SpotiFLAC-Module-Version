@@ -66,6 +66,7 @@ from .core.recording_guard import wrong_recording_reason_async
 from .core.spotify_metadata import SpotifyMetadataClient
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
+    already_in_target_format,
     ensure_ffmpeg_available,
     extension_for,
     normalize_bitrate,
@@ -534,10 +535,19 @@ async def _transcode_result_async(
 
     A result whose file is already in the target format is returned untouched,
     which also covers providers that natively deliver MP3.
+
+    "Already in the target format" is asked of transcode.py rather than
+    answered here by comparing extensions. `.m4a` is a container, not a
+    codec: the FLAC-in-MP4 some providers serve matched `.m4a` on the
+    extension and was handed back unconverted, so `--transcode alac`
+    produced a file that was not ALAC.
     """
-    source = Path(result.file_path or "")
-    if not result.file_path or source.suffix.lower() == extension_for(
-        opts.transcode_to
+    if not result.file_path:
+        return result
+
+    source = Path(result.file_path)
+    if await asyncio.to_thread(
+        already_in_target_format, source, opts.transcode_to
     ):
         return result
 
@@ -823,6 +833,10 @@ async def download_one_async(
                         normalize_quality(opts.quality),
                     ),
                     "qobuz_token": opts.qobuz_token,
+                    # Lets a provider skip work the transcode step would
+                    # only undo — see provider._m4a_is_the_final_container.
+                    # Ignored by providers that do not take it.
+                    "transcode_to": opts.transcode_to,
                 }
 
                 # Use signature inspection to check if artist_separator is supported

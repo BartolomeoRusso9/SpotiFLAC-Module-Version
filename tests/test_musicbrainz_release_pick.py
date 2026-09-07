@@ -164,3 +164,54 @@ def test_no_track_number_when_the_recording_is_on_no_medium():
         17,
     )
     assert "track_number" not in details
+
+
+# --- telling two editions of one album apart ------------------------------
+
+
+def _famoso_editions():
+    """The real shape of ISRC ITUM72001137's two releases."""
+    original = _release(
+        "Famoso",
+        rel_id="original",
+        barcode="2222222222222",
+        label="Universal",
+        media=[{"position": 1, "track-count": 13}],
+    )
+    original["date"] = "2020-11-20"
+    reissue = _release("Famoso", rel_id="reissue", media=[{"position": 1, "track-count": 17}])
+    reissue["date"] = "2021-10-14"
+    return original, reissue
+
+
+def test_release_date_separates_editions_when_the_total_is_unknown():
+    """Spotify answers a *track* URL with total_tracks=0.
+
+    The track is number 1 on the 13-track original and number 2 on the
+    17-track reissue, so picking the wrong one numbered the file "2/13".
+    """
+    original, reissue = _famoso_editions()
+
+    assert (
+        _pick := mb._pick_release(
+            [original, reissue], "Famoso", 0, "2021-10-14T00:00:00Z"
+        )
+    ) is reissue, _pick
+    assert mb._pick_release([original, reissue], "Famoso", 0, "2020-11-20") is original
+
+
+def test_a_year_only_match_still_beats_no_match():
+    original, reissue = _famoso_editions()
+    assert mb._pick_release([original, reissue], "Famoso", 0, "2021-03-01") is reissue
+
+
+def test_track_count_outranks_the_date_when_both_are_known():
+    """A counted total is the harder fact; a date can be a reissue stamp."""
+    original, reissue = _famoso_editions()
+    assert mb._pick_release([original, reissue], "Famoso", 13, "2021-10-14") is original
+
+
+def test_no_date_from_the_source_leaves_the_earlier_ordering_alone():
+    original, reissue = _famoso_editions()
+    assert mb._pick_release([original, reissue], "Famoso", 17) is reissue
+    assert mb._pick_release([original, reissue], "Famoso", 0) is original

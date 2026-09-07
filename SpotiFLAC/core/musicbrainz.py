@@ -263,7 +263,12 @@ def _album_matches(ours: str, theirs: str) -> bool:
     return left == right or left in right or right in left
 
 
-def _release_score(release: dict, album_name: str = "", total_tracks: int = 0) -> int:
+def _release_score(
+    release: dict,
+    album_name: str = "",
+    total_tracks: int = 0,
+    release_date: str = "",
+) -> int:
     """How well a release answers "which record was this downloaded from?".
 
     An ISRC identifies a *recording*, not a release, so a recording search
@@ -279,6 +284,15 @@ def _release_score(release: dict, album_name: str = "", total_tracks: int = 0) -
     what keeps TRACKNUMBER consistent with the TRACKTOTAL the source gave
     us. With no `album_name` to go on the old catalogue-completeness order
     is what is left, unchanged.
+
+    `release_date` separates those same editions when the source did not
+    say how many tracks the album has — which is the ordinary case for a
+    single-track download, where Spotify answers a track URL with
+    total_tracks=0. "Famoso" is two releases a year apart, a 13-track
+    original and a 17-track reissue, and the track is number 1 on one and
+    number 2 on the other; without a way to tell them apart the file came
+    out numbered "2/13", holding the reissue's track number against the
+    original's total.
     """
     score = 0
     if album_name and _album_matches(album_name, release.get("title", "")):
@@ -289,8 +303,22 @@ def _release_score(release: dict, album_name: str = "", total_tracks: int = 0) -
             for m in media
             if isinstance(m.get("track-count"), int)
         )
+        # Both edition signals are worth more than every catalogue-
+        # completeness point below put together (6). Once the title says
+        # these are the same album, which *edition* it is decides the track
+        # numbering, and a filled-in barcode has nothing to say about that.
+        # A counted total outranks a date: dates get restamped on reissues.
         if total_tracks and counted == total_tracks:
-            score += 20
+            score += 40
+        # Spotify hands dates over as "2021-10-14T00:00:00Z"; MusicBrainz
+        # stores "2021-10-14", and plenty of releases carry only a year.
+        theirs = str(release.get("date") or "")
+        ours = str(release_date or "")[:10]
+        if ours and theirs:
+            if theirs[:10] == ours:
+                score += 20
+            elif theirs[:4] == ours[:4]:
+                score += 10
     if release.get("barcode"):
         score += 2
     if release.get("label-info"):
@@ -303,14 +331,23 @@ def _release_score(release: dict, album_name: str = "", total_tracks: int = 0) -
 
 
 def _pick_release(
-    releases: list[dict], album_name: str = "", total_tracks: int = 0
+    releases: list[dict],
+    album_name: str = "",
+    total_tracks: int = 0,
+    release_date: str = "",
 ) -> dict:
     """The release `_release_score` likes best."""
-    return max(releases, key=lambda r: _release_score(r, album_name, total_tracks))
+    return max(
+        releases,
+        key=lambda r: _release_score(r, album_name, total_tracks, release_date),
+    )
 
 
 def _parse_mb_details(
-    data: dict, album_name: str = "", total_tracks: int = 0
+    data: dict,
+    album_name: str = "",
+    total_tracks: int = 0,
+    release_date: str = "",
 ) -> dict:
     details: dict[str, str] = {}
     if not data:
@@ -340,7 +377,7 @@ def _parse_mb_details(
     releases = data.get("releases", [])
     if releases:
 
-        release = _pick_release(releases, album_name, total_tracks)
+        release = _pick_release(releases, album_name, total_tracks, release_date)
         details["album"] = release.get("title", "")
         packaging = release.get("packaging", "")
         if packaging and packaging.lower() != "none":
@@ -409,7 +446,10 @@ def _query_recordings(query: str) -> dict:
 
 
 def _parse_mb_response(
-    data: dict, album_name: str = "", total_tracks: int = 0
+    data: dict,
+    album_name: str = "",
+    total_tracks: int = 0,
+    release_date: str = "",
 ) -> dict:
     """Logica di parsing estratta per riutilizzo da sync e async."""
     parsed: dict = {
@@ -474,7 +514,7 @@ def _parse_mb_response(
     releases = rec.get("releases", [])
     if releases:
 
-        rel = _pick_release(releases, album_name, total_tracks)
+        rel = _pick_release(releases, album_name, total_tracks, release_date)
         parsed["mbid_album"] = rel.get("id", "")
         parsed["mbid_relgroup"] = rel.get("release-group", {}).get("id", "")
         parsed["status"] = rel.get("status", "")
@@ -776,6 +816,7 @@ def fetch_mb_metadata(
     duration_ms: int = 0,
     album: str = "",
     total_tracks: int = 0,
+    release_date: str = "",
 ) -> dict:
     """MusicBrainz tags for `isrc`, `{}` when there is no confident match.
 
@@ -784,17 +825,22 @@ def fetch_mb_metadata(
     what a match has to satisfy before it is accepted. Callers that pass
     nothing behave exactly as before: ISRC or nothing.
 
-    `album`/`total_tracks` name the record being downloaded and pick which
-    of the recording's releases the release-scoped tags come from — see
-    _release_score(). They are part of the cache key, because the same ISRC
-    asked for as part of two different albums has two different answers.
+    `album`/`total_tracks`/`release_date` name the record being downloaded
+    and pick which of the recording's releases the release-scoped tags come
+    from — see _release_score(). They are part of the cache key, because
+    the same ISRC asked for as part of two different albums — or two
+    editions of one album — has two different answers.
     """
     if not isrc:
         return {}
 
     cache_key = isrc.strip().upper()
     if album:
-        cache_key = f"{cache_key}|{_norm_text(album)}"
+        # Every input _release_score() weighs belongs in the key, or a
+        # lookup made for one edition answers for another.
+        cache_key = (
+            f"{cache_key}|{_norm_text(album)}|{total_tracks}|{release_date[:10]}"
+        )
     cached = _mb_cache.get(cache_key)
     if cached is not None:
         return {} if cached is _LOOKUP_FAILED else cached  # type: ignore
@@ -825,7 +871,7 @@ def fetch_mb_metadata(
     try:
         data = _query_recordings(f"isrc:{isrc}")
         set_mb_status(True)
-        res = _parse_mb_response(data, album, total_tracks)
+        res = _parse_mb_response(data, album, total_tracks, release_date)
         if not any(res.values()) and title and artist:
             candidates = _query_recordings(_fallback_query(title, artist))
             match = _pick_fallback_recording(
@@ -836,7 +882,7 @@ def fetch_mb_metadata(
             )
             if match is not None:
                 res = _parse_mb_response(
-                    {"recordings": [match]}, album, total_tracks
+                    {"recordings": [match]}, album, total_tracks, release_date
                 )
                 _log_fallback_hit(cache_key, match)
         if not any(res.values()):
@@ -847,6 +893,7 @@ def fetch_mb_metadata(
                     _query_recording_details(res.get("mbid_track", "")),
                     album,
                     total_tracks,
+                    release_date,
                 )
             )
         except (RuntimeError, httpx.RequestError) as detail_err:
@@ -889,18 +936,24 @@ async def fetch_mb_metadata_async(
     duration_ms: int = 0,
     album: str = "",
     total_tracks: int = 0,
+    release_date: str = "",
 ) -> dict:
     """Async version of fetch_mb_metadata.
     Uses asyncio.Event for in-flight deduplication instead of threading.Event.
     Same caching logic — and the same optional title/artist fallback and
-    `album`/`total_tracks` release pick — as the sync version.
+    `album`/`total_tracks`/`release_date` release pick — as the sync
+    version.
     """
     if not isrc:
         return {}
 
     cache_key = isrc.strip().upper()
     if album:
-        cache_key = f"{cache_key}|{_norm_text(album)}"
+        # Every input _release_score() weighs belongs in the key, or a
+        # lookup made for one edition answers for another.
+        cache_key = (
+            f"{cache_key}|{_norm_text(album)}|{total_tracks}|{release_date[:10]}"
+        )
     cached = _mb_cache.get(cache_key)
     if cached is not None:
         return {} if cached is _LOOKUP_FAILED else cached  # type: ignore
@@ -928,7 +981,7 @@ async def fetch_mb_metadata_async(
     res: dict | object = _LOOKUP_FAILED
     try:
         data = await _query_recordings_async(f"isrc:{isrc}")
-        res = _parse_mb_response(data, album, total_tracks)
+        res = _parse_mb_response(data, album, total_tracks, release_date)
         if not any(res.values()) and title and artist:
             candidates = await _query_recordings_async(_fallback_query(title, artist))
             match = _pick_fallback_recording(
@@ -939,14 +992,16 @@ async def fetch_mb_metadata_async(
             )
             if match is not None:
                 res = _parse_mb_response(
-                    {"recordings": [match]}, album, total_tracks
+                    {"recordings": [match]}, album, total_tracks, release_date
                 )
                 _log_fallback_hit(cache_key, match)
         if not any(res.values()):
             _log_no_match(cache_key, title, artist)
         try:
             details = await _query_recording_details_async(res.get("mbid_track", ""))
-            res.update(_parse_mb_details(details, album, total_tracks))
+            res.update(
+                _parse_mb_details(details, album, total_tracks, release_date)
+            )
         except (RuntimeError, httpx.RequestError) as detail_err:
             logger.debug(
                 "[musicbrainz] async detail query failed, keeping search result: %s",

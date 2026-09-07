@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import functools
 
+import pytest
+
 from SpotiFLAC.core.paths import default_download_dir
 from SpotiFLAC.tui.app import SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
@@ -218,10 +220,13 @@ async def test_last_run_folder_no_longer_overrides_the_default(monkeypatch) -> N
         assert pilot.app.state.output_dir == default_download_dir()
 
 
+@pytest.mark.uses_real_download_dir
 def test_the_gui_and_the_tui_default_to_the_same_folder() -> None:
-    """Two frontends with two defaults is two libraries on one machine."""
-    import pytest
+    """Two frontends with two defaults is two libraries on one machine.
 
+    Asserts the real constants, so it opts out of the suite's temporary
+    download directory — it is testing the default itself, not using it.
+    """
     pytest.importorskip("webview")
     from SpotiFLAC.app import DEFAULT_DOWNLOAD_DIR
     from SpotiFLAC.tui.app import DEFAULT_OUTPUT_DIR
