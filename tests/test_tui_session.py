@@ -9,23 +9,14 @@ which has its own tests.
 
 from __future__ import annotations
 
-import asyncio
-import functools
 
 import pytest
+
+from tui_harness import drives_the_ui
 
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
 from SpotiFLAC.tui.session_view import SessionPanel
-
-
-def drives_the_ui(test):
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(test(*args, **kwargs))
-
-    return wrapper
-
 
 _SESSION_INDEX = [key for key, _ in MODES].index("session")
 
@@ -220,6 +211,40 @@ async def test_an_unreadable_store_is_reported_not_raised(monkeypatch) -> None:
         history = pilot.app.query_one("#history-list", OptionList)
         assert history.option_count == 1
         assert "Nothing fetched yet" in str(history.get_option_at_index(0).prompt)
+
+        # Reported, not just survived: an unreadable profile store used to
+        # look exactly like an empty one.
+        status = str(pilot.app.query_one("#session-status").content)
+        assert "Could not read the saved profiles" in status
+        assert "profiles are corrupt" in status
+
+
+@drives_the_ui
+async def test_the_same_link_fetched_twice_is_listed_once(monkeypatch) -> None:
+    """The Option id is the URL, so a repeat raised DuplicateID mid-list."""
+    import SpotiFLAC.core.history as history_module
+
+    repeated = "https://open.spotify.com/album/same"
+    monkeypatch.setattr(
+        history_module,
+        "get_recent_fetches",
+        lambda: [
+            {"url": repeated, "label": "Kind of Blue"},
+            {"url": repeated, "label": "Kind of Blue"},
+            {"url": "https://open.spotify.com/album/other", "label": "Other"},
+        ],
+    )
+
+    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+        pilot.app.query_one("#sidebar").index = _SESSION_INDEX
+        await _settled(pilot)
+
+        from textual.widgets import OptionList
+
+        history = pilot.app.query_one("#history-list", OptionList)
+        # Two, not one: the duplicate is dropped and the entry *after* it
+        # still makes it in, which is what DuplicateID cost before.
+        assert history.option_count == 2
 
 
 @drives_the_ui

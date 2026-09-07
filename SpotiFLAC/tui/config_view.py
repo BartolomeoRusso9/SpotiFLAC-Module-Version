@@ -203,6 +203,10 @@ class ConfigPanel(VerticalScroll):
         super().__init__(**kwargs)
         self.state = state or ConfigState()
         self._known_fields = {f.name for f in dataclass_fields(ConfigState)}
+        #: The quality values this panel last put in the menu. Kept here
+        #: because the alternative is reading `Select._options`, a private
+        #: attribute of somebody else's widget.
+        self._quality_values: list[str] = []
 
     # ------------------------------------------------------------------
     # Layout
@@ -289,10 +293,12 @@ class ConfigPanel(VerticalScroll):
                 id="no-providers",
                 classes="blocking",
             )
+            quality_options = quality_choices(state.services)
+            self._quality_values = [value for _label, value in quality_options]
             yield Row(
                 "Quality",
                 Select(
-                    quality_choices(state.services),
+                    quality_options,
                     value=state.normalized().quality,
                     allow_blank=False,
                     id=_field_id("quality"),
@@ -774,16 +780,16 @@ class ConfigPanel(VerticalScroll):
         except Exception:
             return
 
-        wanted = quality_choices(self.state.services)
-        if [value for _label, value in wanted] == [
-            value for _label, value in select._options if value is not Select.BLANK
-        ]:
+        wanted = [value for _label, value in quality_choices(self.state.services)]
+        if wanted == self._quality_values:
             return
 
         # Rebuilding clears the selection, so the state decides what it
         # becomes — and the state has already dropped Atmos if Tidal went.
         chosen = self.state.normalized().quality
-        select.set_options(wanted)
+        options = quality_choices(self.state.services)
+        select.set_options(options)
+        self._quality_values = wanted
         select.value = chosen
         self.state.quality = chosen
 

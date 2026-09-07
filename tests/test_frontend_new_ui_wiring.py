@@ -7,6 +7,8 @@ name-parity check in test_web_shim_methods_in_sync.py.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
@@ -67,8 +69,19 @@ def test_the_parallel_downloads_setting_is_wired_end_to_end(client) -> None:
 
 
 def test_the_download_finished_event_takes_the_batch_it_closed(client) -> None:
+    """Both parameters, in order, with their defaults — reformatting-proof.
+
+    Matched with a pattern rather than one exact string: the assertion was a
+    verbatim copy of the declaration, so re-indenting the file or putting a
+    space either side of an `=` failed a test about the callback's shape.
+    """
     app_js = client.get("/app.js").text
-    assert "window.app_download_finished = (success = true, indices = null)" in app_js
+    declaration = re.compile(
+        r"window\.app_download_finished\s*=\s*\(\s*"
+        r"success\s*=\s*true\s*,\s*"
+        r"indices\s*=\s*null\s*\)",
+    )
+    assert declaration.search(app_js), "app_download_finished changed shape"
 
 
 def test_the_download_dock_lives_outside_the_views(client) -> None:

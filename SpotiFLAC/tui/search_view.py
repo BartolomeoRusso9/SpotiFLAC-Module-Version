@@ -105,15 +105,25 @@ class SearchPanel(VerticalScroll):
         self.run_worker(self._search(query), exclusive=True)
 
     async def _search(self, query: str) -> None:
+        # The flag is what stops a second search starting on top of this one,
+        # so it has to come back on *every* exit: cleared by hand it survived
+        # the two paths that were thought of and none of the others — a raise
+        # anywhere past the results (query_one, clear(), add_row) left the
+        # panel refusing every later search with no way back.
         try:
-            from ..api_mixins.search import search_metadata_async
+            try:
+                from ..api_mixins.search import search_metadata_async
 
-            results = await search_metadata_async(query)
-        except Exception as exc:
-            self.query_one("#search-status", Label).update(f"Search failed — {exc}")
+                results = await search_metadata_async(query)
+            except Exception as exc:
+                self.query_one("#search-status", Label).update(f"Search failed — {exc}")
+                return
+
+            self._render_results(query, results)
+        finally:
             self._searching = False
-            return
 
+    def _render_results(self, query: str, results: dict) -> None:
         table = self.query_one("#search-results", DataTable)
         table.clear()
         self._urls.clear()
@@ -135,7 +145,6 @@ class SearchPanel(VerticalScroll):
         self.query_one("#search-status", Label).update(
             f"{found} result(s) for “{query}”." if found else f"Nothing for “{query}”.",
         )
-        self._searching = False
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         chosen = self._urls.get(str(event.row_key.value))

@@ -90,10 +90,18 @@ class SessionPanel(VerticalScroll):
 
         listing = self.query_one("#history-list", OptionList)
         listing.clear_options()
+        seen: set[str] = set()
         for entry in entries[:_HISTORY_SHOWN]:
             url = str(entry.get("url") or "")
             if not url:
                 continue
+            # Deduped because the id *is* the URL, and fetching the same
+            # album twice puts it in the history twice: the second
+            # add_option() raised DuplicateID, which aborted the loop and
+            # left the panel showing however many entries came before it.
+            if url in seen:
+                continue
+            seen.add(url)
             label = str(entry.get("label") or url)
             # The id is the URL itself: the list is short, and it saves
             # keeping a parallel index in step with a list that reloads.
@@ -108,8 +116,11 @@ class SessionPanel(VerticalScroll):
             from ..core.profiles import list_profiles_async
 
             self._profiles = await list_profiles_async()
-        except Exception:
+        except Exception as exc:
+            # Said out loud, like every other profile-store failure here: an
+            # unreadable store looked exactly like "no profiles saved yet".
             self._profiles = []
+            self._say(f"Could not read the saved profiles — {exc}")
 
         listing = self.query_one("#profile-list", OptionList)
         listing.clear_options()

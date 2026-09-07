@@ -8,23 +8,15 @@ they were found.
 
 from __future__ import annotations
 
-import asyncio
-import functools
 
 import pytest
+
+from tui_harness import drives_the_ui
 
 from SpotiFLAC.core.paths import default_download_dir
 from SpotiFLAC.tui.app import SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
 from SpotiFLAC.tui.config_view import quality_choices
-
-
-def drives_the_ui(test):
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(test(*args, **kwargs))
-
-    return wrapper
 
 
 def _ready_state() -> ConfigState:
@@ -137,33 +129,40 @@ def test_the_quality_menu_offers_three_tiers_at_most() -> None:
 
 
 @drives_the_ui
-async def test_the_menu_follows_the_providers() -> None:
+async def test_the_menu_follows_the_providers(monkeypatch) -> None:
     """Atmos appears when Tidal is picked and goes when it is dropped."""
-    from textual.widgets import Select, SelectionList
+    from textual.widgets import SelectionList
+
+    # Stubbed rather than skipped-around: the assertion below used to sit
+    # behind `if "tidal" in ...`, so on a machine without the tidal extension
+    # the test ran, passed, and checked nothing. Only this panel's view of
+    # what is installed is replaced — tidal does not become a prerequisite
+    # of the suite.
+    monkeypatch.setattr(
+        "SpotiFLAC.tui.config_view.installed_service_ids",
+        lambda: ["deezer", "tidal"],
+    )
 
     state = ConfigState(url="https://x/y", services=["deezer"])
     async with SpotiFLACTui(state).run_test(size=(104, 40)) as pilot:
         await _settled(pilot)
-        select = pilot.app.query_one("#cfg-quality", Select)
+        panel = pilot.app.query_one("#download")
 
         def offered() -> list[str]:
-            return [
-                str(value)
-                for _label, value in select._options
-                if value is not Select.BLANK
-            ]
+            # The panel's own record of what it put in the menu, rather than
+            # Select._options: quality labels are not their values, so the
+            # rendered rows cannot answer this, and the private attribute has
+            # already changed shape between Textual releases.
+            return list(panel._quality_values)
 
         assert "DOLBY_ATMOS" not in offered()
 
         providers = pilot.app.query_one("#cfg-services", SelectionList)
-        if "tidal" in [str(option.value) for option in providers.options]:
-            providers.select(
-                providers.get_option_at_index(
-                    [str(o.value) for o in providers.options].index("tidal"),
-                )
-            )
-            await _settled(pilot)
-            assert "DOLBY_ATMOS" in offered()
+        values = [str(option.value) for option in providers.options]
+        assert "tidal" in values
+        providers.select(providers.get_option_at_index(values.index("tidal")))
+        await _settled(pilot)
+        assert "DOLBY_ATMOS" in offered()
 
 
 @drives_the_ui

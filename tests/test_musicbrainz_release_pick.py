@@ -179,7 +179,9 @@ def _famoso_editions():
         media=[{"position": 1, "track-count": 13}],
     )
     original["date"] = "2020-11-20"
-    reissue = _release("Famoso", rel_id="reissue", media=[{"position": 1, "track-count": 17}])
+    reissue = _release(
+        "Famoso", rel_id="reissue", media=[{"position": 1, "track-count": 17}]
+    )
     reissue["date"] = "2021-10-14"
     return original, reissue
 

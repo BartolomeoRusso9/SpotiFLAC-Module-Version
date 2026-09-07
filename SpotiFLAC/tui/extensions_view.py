@@ -129,34 +129,43 @@ class ExtensionsPanel(VerticalScroll):
     async def _add(self, url: str) -> None:
         self._busy = True
         self._say(f"Adding {url}…")
+        # `finally`, not a reset per exit: clearing the flag by hand covered
+        # the two paths anyone thinks of and neither of the ones that
+        # actually break — a raise out of query_one(), reload() or _sync()
+        # left the view busy for the rest of the session, with the Add and
+        # Remove buttons dead and no way back but a restart.
         try:
-            from ..extensions import registry_config
+            try:
+                from ..extensions import registry_config
 
-            await asyncio.to_thread(registry_config.add_registry, url)
-        except Exception as exc:
-            self._say(f"Could not add it — {exc}")
+                await asyncio.to_thread(registry_config.add_registry, url)
+            except Exception as exc:
+                self._say(f"Could not add it — {exc}")
+                return
+
+            self.query_one("#registry-url", Input).value = ""
+            await self.reload()
+            await self._sync()
+        finally:
             self._busy = False
-            return
-
-        self.query_one("#registry-url", Input).value = ""
-        await self.reload()
-        await self._sync()
-        self._busy = False
 
     async def _remove(self, url: str) -> None:
         self._busy = True
         self._say(f"Removing {url}…")
         try:
-            from ..extensions import registry_config
+            try:
+                from ..extensions import registry_config
 
-            await asyncio.to_thread(registry_config.remove_registry, url)
-        except Exception as exc:
-            self._say(f"Could not remove it — {exc}")
+                await asyncio.to_thread(registry_config.remove_registry, url)
+            except Exception as exc:
+                self._say(f"Could not remove it — {exc}")
+                return
+
+            await self.reload()
+        finally:
+            # Same as _add: a reload() that raises must not cost the view
+            # every later add and remove.
             self._busy = False
-            return
-
-        await self.reload()
-        self._busy = False
 
     async def _sync(self) -> None:
         """Installs from the new list now, not at the next launch."""

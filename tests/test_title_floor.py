@@ -99,7 +99,7 @@ def test_a_featuring_credit_in_either_title_is_not_a_mismatch():
 
 
 def test_a_one_letter_difference_is_still_a_match():
-    """"Gelosi" against "Gelosa" — a typo or a localisation, not another song."""
+    """ "Gelosi" against "Gelosa" — a typo or a localisation, not another song."""
     candidate = _Candidate("Gelosa", "Sfera Ebbasta", "Famoso", 189000)
     assert _score(candidate, title="Gelosi") >= _APPLE_MATCH_MIN
 

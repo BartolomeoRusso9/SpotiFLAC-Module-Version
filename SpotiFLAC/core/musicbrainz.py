@@ -999,9 +999,7 @@ async def fetch_mb_metadata_async(
             _log_no_match(cache_key, title, artist)
         try:
             details = await _query_recording_details_async(res.get("mbid_track", ""))
-            res.update(
-                _parse_mb_details(details, album, total_tracks, release_date)
-            )
+            res.update(_parse_mb_details(details, album, total_tracks, release_date))
         except (RuntimeError, httpx.RequestError) as detail_err:
             logger.debug(
                 "[musicbrainz] async detail query failed, keeping search result: %s",

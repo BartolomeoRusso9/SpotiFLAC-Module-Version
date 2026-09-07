@@ -16,6 +16,7 @@ Nothing here downloads, and nothing prints.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -112,14 +113,45 @@ def track_url(track: Any, source_url: str = "") -> str:
     if not track_id:
         return ""
 
-    lowered = (source_url or "").lower()
-    if "tidal" in lowered:
+    source = (source_url or "").strip()
+    # Matched on the host, not on the whole string: an album slug is free to
+    # contain the word "tidal" or "apple", and a substring check on the URL
+    # let a Spotify playlist called "apple of my eye" mint Apple Music links
+    # for every track in it.
+    if url_host_matches(source, "tidal.com"):
         return f"https://tidal.com/browse/track/{track_id}"
-    if "apple" in lowered:
-        return f"https://music.apple.com/track/{track_id}"
-    if "spotify" in lowered or not lowered:
+    if url_host_matches(source, "music.apple.com"):
+        # Not `/track/{id}`: Apple Music has no such path, and
+        # parse_apple_music_url() rejects it outright — the storefront and
+        # the `song` segment are both required for a link to resolve. The
+        # slug between them is decorative, so the title stands in for it.
+        return (
+            f"https://music.apple.com/{_apple_storefront(source)}"
+            f"/song/{_slug(getattr(track, 'title', '')) or 'song'}/{track_id}"
+        )
+    # A bare `spotify:track:...` URI has no host to match, so it is named
+    # here rather than left to the fallback.
+    if url_host_matches(source, "open.spotify.com", "spotify.com") or source.startswith(
+        "spotify:"
+    ):
+        return f"https://open.spotify.com/track/{track_id}"
+    if not source:
         return f"https://open.spotify.com/track/{track_id}"
     return ""
+
+
+def _apple_storefront(source_url: str) -> str:
+    """The two-letter storefront out of an Apple Music URL, or Apple's own
+    default when the source does not name one.
+    """
+    match = re.search(r"music\.apple\.com/([a-z]{2})/", source_url, re.IGNORECASE)
+    return match.group(1).lower() if match else "us"
+
+
+def _slug(text: str) -> str:
+    """A URL path segment from a track title — decorative, not identifying."""
+    cleaned = re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-")
+    return cleaned[:60]
 
 
 def download_target(

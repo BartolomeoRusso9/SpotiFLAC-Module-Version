@@ -7,6 +7,10 @@ a module-level singleton rather than a provider, so `_close_providers()` did
 not reach it and the only thing that ever shut it down was the process
 exiting. The CLI exits after a run and got away with it; the TUI and the
 desktop window stay up, and Chrome sat there after the download finished.
+
+Closed once per batch, too: hanging it off DownloadWorker.run_async meant a
+command naming three albums restarted the browser twice mid-run, and each
+restart is a Turnstile solve.
 """
 
 from __future__ import annotations
@@ -16,14 +20,9 @@ import sys
 import time
 import types
 
-from SpotiFLAC.downloader import DownloadWorker
+from SpotiFLAC.downloader import _close_shared_browser_sessions
 
 _MONO = "SpotiFLAC.core.signed_session_mono"
-
-
-def _worker() -> DownloadWorker:
-    """A worker with no state — the hook touches none of it."""
-    return DownloadWorker.__new__(DownloadWorker)
 
 
 def _stub(on_close) -> types.ModuleType:
@@ -39,7 +38,7 @@ def test_the_mono_browser_is_closed_at_the_end_of_a_run(monkeypatch) -> None:
         closed.append("closed")
 
     monkeypatch.setitem(sys.modules, _MONO, _stub(close))
-    asyncio.run(_worker()._close_shared_browser_sessions())
+    asyncio.run(_close_shared_browser_sessions())
 
     assert closed == ["closed"]
 
@@ -55,7 +54,7 @@ def test_a_run_that_never_touched_amazon_does_not_import_pydoll(monkeypatch) -> 
     monkeypatch.delitem(sys.modules, _MONO, raising=False)
     before = set(sys.modules)
 
-    asyncio.run(_worker()._close_shared_browser_sessions())
+    asyncio.run(_close_shared_browser_sessions())
 
     new_modules = set(sys.modules) - before
     assert not any(name.startswith("pydoll") for name in new_modules)
@@ -84,7 +83,7 @@ def test_a_browser_that_will_not_close_does_not_hang_the_run(monkeypatch) -> Non
 
     async def timed() -> float:
         started = time.monotonic()
-        await _worker()._close_shared_browser_sessions()
+        await _close_shared_browser_sessions()
         return time.monotonic() - started
 
     elapsed = asyncio.run(timed())
@@ -97,4 +96,4 @@ def test_a_close_that_raises_is_swallowed(monkeypatch) -> None:
         raise RuntimeError(msg)
 
     monkeypatch.setitem(sys.modules, _MONO, _stub(boom))
-    asyncio.run(_worker()._close_shared_browser_sessions())  # must not raise
+    asyncio.run(_close_shared_browser_sessions())  # must not raise

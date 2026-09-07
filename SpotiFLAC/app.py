@@ -1014,16 +1014,22 @@ class SpotiFLAC_API(
             stripped = url.strip()
             is_url = stripped.startswith(("http", "spotify:"))
 
-            # Domain → client. Shared with the terminal UI's track picker
-            # via core/tracklist.py: a provider added to one mapping and not
-            # the other is a link that works in one window and not the other.
-            from .core.tracklist import metadata_client_for
-
-            client = metadata_client_for(url)
             if not is_url:
                 self.log("Text search: use search_provider_async.", "error")
                 self.set_progress("")
                 return
+
+            # Domain → client. Shared with the terminal UI's track picker
+            # via core/tracklist.py: a provider added to one mapping and not
+            # the other is a link that works in one window and not the other.
+            #
+            # After the guard, not before it: a text query resolved to a
+            # client it was never going to use, which for the Spotify default
+            # means constructing SpotifyMetadataClient — and its credential
+            # setup — for every search typed into the box.
+            from .core.tracklist import metadata_client_for
+
+            client = metadata_client_for(url)
 
             # ── Universal call ──────────────────────────────────────────────────
             # get_url() is sync on SpotifyMetadataClient but async on
@@ -1350,6 +1356,20 @@ class SpotiFLAC_API(
         # The picker in Settings is this GUI's --log-level, so it has to move
         # the console the process was started from too: the tracebacks and the
         # httpx chatter come from loggers we do not own.
+        #
+        # That reaches further than one batch, though: configure_console_logging
+        # goes through basicConfig(force=True), which removes *and closes*
+        # every handler the root logger already had. In --web mode that root
+        # belongs to the host process, so one download left the server logging
+        # through this batch's handler, at this batch's level, for the rest of
+        # its life. Detached by hand first — removeHandler does not close —
+        # so the saved handlers are still usable when the finally puts them
+        # back.
+        root_logger = logging.getLogger()
+        prior_root_handlers = root_logger.handlers[:]
+        prior_root_level = root_logger.level
+        for prior_handler in prior_root_handlers:
+            root_logger.removeHandler(prior_handler)
         configure_console_logging(current_log_level)
 
         try:
@@ -1438,17 +1458,15 @@ class SpotiFLAC_API(
             else:
                 urls_to_download = []
                 unresolved: list[str] = []
+                # core.tracklist.track_url, not a second copy of the same
+                # id-to-link rules: this one matched on substrings of the
+                # whole URL and minted `music.apple.com/track/{id}`, a path
+                # Apple Music does not have and the parser rejects.
+                from .core.tracklist import track_url
+
                 for i in selected_indices:
                     t = self.current_tracks[i]
-                    t_url = getattr(t, "external_url", None) or getattr(t, "url", None)
-                    t_id = getattr(t, "id", None)
-                    if not t_url and t_id:
-                        if "spotify" in self.current_url:
-                            t_url = f"https://open.spotify.com/track/{t_id}"
-                        elif "tidal" in self.current_url:
-                            t_url = f"https://tidal.com/browse/track/{t_id}"
-                        elif "apple" in self.current_url:
-                            t_url = f"https://music.apple.com/track/{t_id}"
+                    t_url = track_url(t, self.current_url)
                     if t_url:
                         urls_to_download.append(t_url)
                     else:
@@ -1583,6 +1601,15 @@ class SpotiFLAC_API(
             if "console_handler" in locals():
                 sf_logger.removeHandler(console_handler)
             sf_logger.propagate = sf_propagate
+            # Root put back the way this batch found it, so the next request
+            # starts from the host's configuration rather than from ours.
+            for batch_handler in root_logger.handlers[:]:
+                root_logger.removeHandler(batch_handler)
+                with contextlib.suppress(Exception):
+                    batch_handler.close()
+            for prior_handler in prior_root_handlers:
+                root_logger.addHandler(prior_handler)
+            root_logger.setLevel(prior_root_level)
             self._download_active.clear()
 
     # ── Health Check ──────────────────────────────────────────────────────────

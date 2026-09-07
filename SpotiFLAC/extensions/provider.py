@@ -168,6 +168,18 @@ class JSExtensionProvider(BaseProvider):
         """Synchronous backward compatibility."""
         self._stop_event = event
 
+    def _stop_requested(self) -> bool:
+        """Whether the run that owns this provider has been called off.
+
+        Read from the pool's worker threads as well as the event loop, which
+        is safe: `asyncio.Event.is_set()` only reads a flag. Setting it is
+        the download loop's job (see downloader.download_one_async), and what
+        this gates is starting *new* work — a node process already streaming
+        a file runs to its own end.
+        """
+        event = self._stop_event
+        return event is not None and event.is_set()
+
     # ─────────────────────── helpers ──────────────────────────
 
     def _load_extension(self, ext_id: str) -> InstalledExtension:
@@ -240,6 +252,14 @@ class JSExtensionProvider(BaseProvider):
             self._idle_runtimes.put(rt)
 
     def _call(self, method: str, *args, **kw) -> object:
+        if self._stop_requested():
+            # Refused rather than queued: this runs in a pool thread, and by
+            # the time one is free the run it belongs to may be long gone.
+            raise SpotiflacError(
+                kind=ErrorKind.UNAVAILABLE,
+                message="the run was cancelled",
+                provider=self.name,
+            )
         with self._active_calls_condition:
             self._active_calls += 1
         try:
@@ -501,7 +521,9 @@ class JSExtensionProvider(BaseProvider):
                 `bytesReceived`/`bytesTotal` all along and JSRuntime already
                 offers them here; nothing was accepting them.
                 """
-                if self._progress_cb is None:
+                if self._progress_cb is None or self._stop_requested():
+                    # Nothing is listening to a cancelled run, and the UI
+                    # that was has already given the terminal back.
                     return
                 # Whether the bridge counted the bytes is a separate question
                 # from whether it knows the total. A chunked response has no
@@ -557,6 +579,9 @@ class JSExtensionProvider(BaseProvider):
                 output_path.name,
             )
             download_started_at = time.monotonic()
+
+            if self._stop_requested():
+                return DownloadResult.fail(self.name, "the run was cancelled")
 
             # ── Progress fallback via disk polling ──────────────────────────
             # Covers the case where the extension bypasses global.file.download
@@ -632,9 +657,7 @@ class JSExtensionProvider(BaseProvider):
                 d_key = dl_result.get("decryption_key") or dl_result.get(
                     "decryptionKey",
                 )
-                if codec == "flac" and _m4a_is_the_final_container(
-                    transcode_to, d_key
-                ):
+                if codec == "flac" and _m4a_is_the_final_container(transcode_to, d_key):
                     # The download is already in the container the run is
                     # heading for, so extracting the FLAC would only be
                     # undone: m4a → flac → m4a, two full encodes to arrive

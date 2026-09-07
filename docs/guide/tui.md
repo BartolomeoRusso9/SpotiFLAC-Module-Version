@@ -68,7 +68,7 @@ that eats a quarter of a short screen is a logo in the way.
 
 Two things from MovieBox are deliberately not copied. It has **no sidebar** —
 its screens are a linear flow (search, then details, then play) navigated with
-`Tab`, where this has seven panels that are all live at once and a list of
+`Tab`, where this has eight panels that are all live at once and a list of
 them is the honest way to show that. And its posters are **images**, which a
 terminal cannot draw without sixel support that most do not have.
 

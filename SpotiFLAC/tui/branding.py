@@ -37,6 +37,13 @@ def plain_terminal() -> bool:
     Three signals, all of them things a user or an environment sets on
     purpose: ``NO_COLOR`` (the convention), ``TERM=dumb`` (no capabilities at
     all), and ``SPOTIFLAC_PLAIN_TUI`` for anyone who simply prefers it.
+
+    A *missing* ``TERM`` is the fourth, and it only means anything on POSIX,
+    where it says there is no terminal database to look this terminal up in.
+    Windows has never set the variable — not cmd.exe, not PowerShell, not
+    Windows Terminal — so reading its absence as "dumb" there degraded every
+    Windows session to ASCII, block letterform and all, on terminals that
+    draw the fancy form perfectly well.
     """
     if os.getenv("SPOTIFLAC_PLAIN_TUI", "").strip().lower() in {
         "1",
@@ -47,7 +54,12 @@ def plain_terminal() -> bool:
         return True
     if os.getenv("NO_COLOR") is not None:
         return True
-    return os.getenv("TERM", "").strip().lower() in {"dumb", ""}
+    term = os.getenv("TERM", "").strip().lower()
+    if term == "dumb":
+        return True
+    if not term:
+        return sys.platform != "win32"
+    return False
 
 
 # ---------------------------------------------------------------------------

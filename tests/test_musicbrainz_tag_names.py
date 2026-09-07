@@ -47,9 +47,20 @@ def _silent(tmp_path: Path, name: str, codec: str) -> Path:
     path = tmp_path / name
     subprocess.run(
         [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-            "-t", "1", "-c:a", codec, str(path),
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=stereo",
+            "-t",
+            "1",
+            "-c:a",
+            codec,
+            str(path),
         ],
         check=True,
     )
@@ -131,9 +142,7 @@ def test_every_id_survives_a_round_trip(fmt, request) -> None:
     writer(path, dict(_MB_TAGS), None, None, "")
 
     read_back = read_embedded_tags(path).tags
-    assert {k: read_back.get(k) for k in _MB_KEYS} == {
-        k: _MB_TAGS[k] for k in _MB_KEYS
-    }
+    assert {k: read_back.get(k) for k in _MB_KEYS} == {k: _MB_TAGS[k] for k in _MB_KEYS}
 
 
 # --- files written before the mapping existed -----------------------------

@@ -9,21 +9,13 @@ make them recognisable.
 
 from __future__ import annotations
 
-import asyncio
-import functools
+
+from tui_harness import drives_the_ui
 
 from SpotiFLAC.tui import branding
 from SpotiFLAC.tui.app import THEMES, SpotiFLACTui
 from SpotiFLAC.tui.banner import Banner, HintBar
 from SpotiFLAC.tui.config_state import ConfigState
-
-
-def drives_the_ui(test):
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(test(*args, **kwargs))
-
-    return wrapper
 
 
 def _ready_state() -> ConfigState:
@@ -40,12 +32,22 @@ def _ready_state() -> ConfigState:
 
 
 def test_the_wordmark_is_rectangular() -> None:
-    """Ragged rows would tear the letterform apart when centred."""
-    for art in (branding.WORDMARK_FULL, branding.WORDMARK_COMPACT):
+    """Ragged rows would tear the letterform apart when centred.
+
+    `text-align: center` centres each line of a Static on its own, so a row
+    five columns short of the others sits two columns right of them and the
+    wordmark visibly bows. WORDMARK_FULL is padded for exactly that reason
+    (see branding), and this is the check that it stayed padded — asserting
+    one width for every row, not each row against itself.
+    """
+    for art, expected_rows in (
+        (branding.WORDMARK_FULL, 6),
+        (branding.WORDMARK_COMPACT, 2),
+    ):
         rows = art.split("\n")
-        # Trailing blanks are trimmed, so rows may be short — never long.
-        assert max(len(row) for row in rows) == max(len(r) for r in rows)
-        assert all(len(row) <= max(len(r) for r in rows) for row in rows)
+        assert len(rows) == expected_rows, art
+        widths = {len(row) for row in rows}
+        assert len(widths) == 1, f"ragged rows: {sorted(widths)}"
 
 
 def test_the_wordmark_shrinks_to_fit() -> None:
@@ -77,6 +79,30 @@ def test_plain_terminal_follows_no_color(monkeypatch) -> None:
     assert branding.plain_terminal() is False
 
     monkeypatch.setenv("NO_COLOR", "1")
+    assert branding.plain_terminal() is True
+
+
+def test_a_windows_console_is_not_a_dumb_terminal(monkeypatch) -> None:
+    """No Windows shell sets TERM, and that used to mean ASCII everywhere.
+
+    An absent TERM is a POSIX signal — "no entry in the terminal database" —
+    so it keeps its meaning there. On Windows it is simply how every console
+    looks, and taking it literally cost the whole platform the block
+    letterform, the badges and the focus dots.
+    """
+    monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("SPOTIFLAC_PLAIN_TUI", raising=False)
+
+    monkeypatch.setattr(branding.sys, "platform", "win32")
+    assert branding.plain_terminal() is False
+
+    monkeypatch.setattr(branding.sys, "platform", "linux")
+    assert branding.plain_terminal() is True
+
+    # TERM=dumb is still dumb, wherever it is set.
+    monkeypatch.setenv("TERM", "dumb")
+    monkeypatch.setattr(branding.sys, "platform", "win32")
     assert branding.plain_terminal() is True
 
 

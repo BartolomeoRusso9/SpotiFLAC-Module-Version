@@ -1049,6 +1049,10 @@ let queueDurationInterval = null;
 //: Queue view filters. A hundred-track playlist makes the queue a list you
 //: have to search rather than read — most often to find the handful that
 //: failed. null status = show everything.
+// One Set of queue-item ids per dispatched batch, oldest first. The backend
+// runs batches one at a time (see _await_download_slot), so the batch that
+// reports finished is the one at the front.
+let dispatchedBatches = [];
 let queueFilterStatus = null;   // null | 'waiting' | 'done' | 'skipped' | 'error'
 let queueSearch = '';
 let previewAudio = null;
@@ -1249,11 +1253,20 @@ window.app_download_finished = (success = true, indices = null) => {
   // was wrong as soon as a second batch was queued behind the first (the
   // backend runs them one at a time now, see _await_download_slot): the
   // waiting batch's tracks were reported finished before they had started.
-  // `indices` is the same list the backend was given; older builds push
-  // nothing, so fall back to the previous all-active behaviour.
-  const batch = Array.isArray(indices) ? new Set(indices) : null;
+  // Matched on the ids startDownloadQueue dispatched, not on `indices`:
+  // those are tracklist positions, and two fetches put two different tracks
+  // at index 0, so a queue holding both closed out the wrong rows. `indices`
+  // is still accepted for older builds, and a build that pushes neither
+  // falls back to the previous all-active behaviour.
+  const dispatched = dispatchedBatches.shift() || null;
+  const byIndex = !dispatched && Array.isArray(indices) ? new Set(indices) : null;
+  const inBatch = (item) => {
+    if (dispatched) return dispatched.has(item.id);
+    if (byIndex) return byIndex.has(item.index);
+    return true;
+  };
   const activeItems = queue
-    .map((item, qi) => (item.status === 'active' && (!batch || batch.has(item.index)) ? qi : -1))
+    .map((item, qi) => (item.status === 'active' && inBatch(item) ? qi : -1))
     .filter(i => i >= 0);
   
   // Close out items from the completed batch
@@ -3801,11 +3814,19 @@ async function startDownloadQueue() {
 
   const config = buildConfig();
   const indices = waiting.map(w => w.index);
+  // The ids, not the indices, are what identifies these rows later: `index`
+  // is a position in the fetched tracklist, and a second fetch puts a
+  // different track at index 0 — the same trap the dedup above sidesteps.
+  const batchIds = new Set(waiting.map(w => w.id));
   console.log('[startDownloadQueue] Indices to download:', indices);
   console.log('[startDownloadQueue] Config:', config);
   console.log('[startDownloadQueue] pywebview available:', !!window.pywebview?.api);
 
   if (window.pywebview?.api) {
+    // Recorded only on the path that actually produces an
+    // app_download_finished callback, or the demo fallback below would leave
+    // a batch queued up for the next real one to consume.
+    dispatchedBatches.push(batchIds);
     try {
       console.log('[startDownloadQueue] Calling download_tracks with indices:', indices);
       // Send the tracks directly to the Python backend
@@ -3814,9 +3835,9 @@ async function startDownloadQueue() {
       if (op && typeof op.catch === 'function') {
         op.catch(e => {
           console.error('[startDownloadQueue] Download error:', e);
-          indices.forEach(idx => {
-            const qi = queue.findIndex(q => q.index === idx);
-            if (qi >= 0 && queue[qi].status === 'active') updateQueueItem(qi, 'error', 0);
+          dispatchedBatches = dispatchedBatches.filter(b => b !== batchIds);
+          queue.forEach((item, qi) => {
+            if (batchIds.has(item.id) && item.status === 'active') updateQueueItem(qi, 'error', 0);
           });
           logMessage('Download error: ' + e, 'error');
           setStatus('Error during download.');

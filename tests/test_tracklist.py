@@ -85,9 +85,21 @@ def test_an_id_is_rebuilt_against_the_service_it_came_from() -> None:
     assert track_url(track, "https://tidal.com/browse/album/a") == (
         "https://tidal.com/browse/track/t2"
     )
-    assert track_url(track, "https://music.apple.com/us/album/x/1") == (
-        "https://music.apple.com/track/t2"
+    # Storefront and `song` segment both required: `/track/{id}` is not a
+    # path Apple Music has, and parse_apple_music_url() refuses it.
+    assert track_url(track, "https://music.apple.com/gb/album/x/1") == (
+        "https://music.apple.com/gb/song/so-what/t2"
     )
+
+
+def test_the_service_is_read_off_the_host_not_the_whole_link() -> None:
+    """An album slug is free to contain another service's name."""
+    track = _Track("So What", track_id="t2")
+
+    assert track_url(track, "https://open.spotify.com/playlist/apple-of-my-eye") == (
+        "https://open.spotify.com/track/t2"
+    )
+    assert track_url(track, "spotify:album:a") == "https://open.spotify.com/track/t2"
 
 
 def test_a_track_with_neither_link_nor_id_has_no_url() -> None:
@@ -201,9 +213,11 @@ def test_resolving_unpacks_whatever_shape_the_provider_returns(monkeypatch) -> N
         assert result.name == "Album", name
         assert len(result) == 1, name
         assert result.source_url == "https://open.spotify.com/album/a"
-
-    assert result.cover == "cover.jpg"
-    assert result.meta == {"year": 1959}
+        # Asserted per shape, not once after the loop: outside it only the
+        # last shape — the one that carries both — was ever checked, so the
+        # defaults the shorter tuples fall back to went untested.
+        assert result.cover == ("cover.jpg" if name in {"three", "four"} else ""), name
+        assert result.meta == ({"year": 1959} if name == "four" else {}), name
 
 
 def test_a_provider_failure_reaches_the_caller(monkeypatch) -> None:

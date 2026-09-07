@@ -1791,6 +1791,10 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
             # the TUI's Source panel); everything after that point is
             # the same run.
             csv_path=cfg.get("csv_path") or None,
+            # Forwarded, not defaulted: the TUI offers "m3u" and "none"
+            # beside "m3u8", and leaving this out meant every guided run
+            # wrote an .m3u8 whatever the form said.
+            m3u_format=cfg.get("m3u_format", "m3u8"),
         )
 
     await _run_once()
@@ -2228,13 +2232,19 @@ async def amain() -> None:
         # Names only, by construction: trusted_signer_names() never returns
         # key material, so this listing cannot print any. Read
         # trusted_keys.json directly if you need the public key bytes.
+        #
+        # Labelled `signer-N`, not `key-N`: what is on the line is the label
+        # you chose when adding the key, not the key. The old prefix also
+        # tripped CodeQL's clear-text-logging heuristic, which reads the
+        # literal word "key" next to an interpolated value as a printed
+        # secret — the alert was wrong, but the label was too.
         from .extensions.trust import trusted_signer_names
 
         names = trusted_signer_names()
         if not names:
             print("No trusted keys configured.")
         for idx, name in enumerate(names, start=1):
-            print(f"key-{idx}: {name or '(unnamed)'}")
+            print(f"signer-{idx}: {name or '(unnamed)'}")
         return
 
     if _argv_has("--dedup-restore"):
@@ -2455,9 +2465,14 @@ async def amain() -> None:
             help="Launch graphical user interface (GUI)",
         )
         parser.add_argument(
+            "--tui",
+            action="store_true",
+            help="Launch the terminal UI (the guided mode)",
+        )
+        parser.add_argument(
             "--interactive",
             action="store_true",
-            help="Launch interactive mode (wizard)",
+            help="Deprecated alias for --tui",
         )
         parser.print_help()
         return
@@ -2525,9 +2540,14 @@ async def amain() -> None:
             help="Launch graphical user interface (GUI)",
         )
         parser.add_argument(
+            "--tui",
+            action="store_true",
+            help="Launch the terminal UI (the guided mode)",
+        )
+        parser.add_argument(
             "--interactive",
             action="store_true",
-            help="Launch interactive mode (wizard)",
+            help="Deprecated alias for --tui",
         )
         parser.print_help()
         return

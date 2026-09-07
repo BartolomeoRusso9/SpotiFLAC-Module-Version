@@ -7,23 +7,14 @@ not whether a lyrics server happens to be up while the suite runs.
 
 from __future__ import annotations
 
-import asyncio
-import functools
 
 import pytest
+
+from tui_harness import drives_the_ui
 
 from SpotiFLAC.core.health_check import HealthResult
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
-
-
-def drives_the_ui(test):
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(test(*args, **kwargs))
-
-    return wrapper
-
 
 _HEALTH_INDEX = [key for key, _ in MODES].index("health")
 

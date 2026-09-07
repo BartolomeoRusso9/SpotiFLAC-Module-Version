@@ -29,6 +29,7 @@ Typical use, from a UI that owns the screen::
 from __future__ import annotations
 
 import contextlib
+import inspect
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -52,6 +53,31 @@ class OutputSink(Protocol):
     def write_line(self, line: str, stream: str = STDOUT) -> None: ...
 
 
+def _takes_second_argument(callback: Callable[..., None]) -> bool:
+    """Whether *callback* can be handed the optional second argument.
+
+    Read off the signature once, rather than by calling with two arguments
+    and retrying on TypeError. A TypeError raised *inside* a two-argument
+    callback is indistinguishable at the call site from one raised by the
+    call itself, so the retry ran the callback a second time — side effects
+    and all, with the wrong number of arguments — and then reported whatever
+    the second attempt raised. Deciding up front means each callback is
+    invoked exactly once and its own TypeError travels unchanged.
+
+    Anything whose signature cannot be read (a builtin, a C extension) is
+    assumed to take both, which is what the protocol asks for.
+    """
+    try:
+        signature = inspect.signature(callback)
+    except (TypeError, ValueError):
+        return True
+    try:
+        signature.bind("", "")
+    except TypeError:
+        return False
+    return True
+
+
 class CallbackSink:
     """Adapts a plain callable into an :class:`OutputSink`.
 
@@ -61,11 +87,12 @@ class CallbackSink:
 
     def __init__(self, callback: Callable[..., None]) -> None:
         self._callback = callback
+        self._wants_stream = _takes_second_argument(callback)
 
     def write_line(self, line: str, stream: str = STDOUT) -> None:
-        try:
+        if self._wants_stream:
             self._callback(line, stream)
-        except TypeError:
+        else:
             self._callback(line)
 
 
@@ -167,6 +194,7 @@ class CallbackLogHandler(logging.Handler):
     def __init__(self, callback: Callable[..., None]) -> None:
         super().__init__()
         self._callback = callback
+        self._wants_severity = _takes_second_argument(callback)
 
     @staticmethod
     def severity_for(levelno: int) -> str:
@@ -180,9 +208,9 @@ class CallbackLogHandler(logging.Handler):
         try:
             message = self.format(record)
             severity = self.severity_for(record.levelno)
-            try:
+            if self._wants_severity:
                 self._callback(message, severity)
-            except TypeError:
+            else:
                 self._callback(message)
         except Exception:
             # A UI that blows up mid-render must not turn every subsequent

@@ -249,9 +249,7 @@ _M4A_MAP: dict[str, str] = {
     "MUSICBRAINZ_TRACKID": "----:com.apple.iTunes:MusicBrainz Track Id",
     "MUSICBRAINZ_ALBUMID": "----:com.apple.iTunes:MusicBrainz Album Id",
     "MUSICBRAINZ_ARTISTID": "----:com.apple.iTunes:MusicBrainz Artist Id",
-    "MUSICBRAINZ_ALBUMARTISTID": (
-        "----:com.apple.iTunes:MusicBrainz Album Artist Id"
-    ),
+    "MUSICBRAINZ_ALBUMARTISTID": ("----:com.apple.iTunes:MusicBrainz Album Artist Id"),
     "MUSICBRAINZ_RELEASEGROUPID": (
         "----:com.apple.iTunes:MusicBrainz Release Group Id"
     ),

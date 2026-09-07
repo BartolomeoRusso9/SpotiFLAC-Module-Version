@@ -9,25 +9,16 @@ the `cfg` the launcher is handed.
 
 from __future__ import annotations
 
-import asyncio
-import functools
 
 import pytest
 
 import SpotiFLAC.downloader as downloader
 import SpotiFLAC.launcher as launcher_module
+from tui_harness import drives_the_ui
+
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
 from SpotiFLAC.tui.tracklist_view import TracklistPanel
-
-
-def drives_the_ui(test):
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(test(*args, **kwargs))
-
-    return wrapper
-
 
 _TRACKS_INDEX = [key for key, _ in MODES].index("tracks")
 _ALBUM = "https://open.spotify.com/album/a1"

@@ -8,22 +8,14 @@ one fills the form field rather than only the state.
 
 from __future__ import annotations
 
-import asyncio
-import functools
 
 import pytest
+
+from tui_harness import drives_the_ui
 
 from SpotiFLAC.tui.app import SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
 from SpotiFLAC.tui.csv_picker_screen import CsvPickerScreen
-
-
-def drives_the_ui(test):
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(test(*args, **kwargs))
-
-    return wrapper
 
 
 def _ready_state() -> ConfigState:

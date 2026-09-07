@@ -34,9 +34,19 @@ def _encode(tmp_path: Path, name: str, *args: str) -> Path:
     path = tmp_path / name
     subprocess.run(
         [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "1",
-            *args, str(path),
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=stereo",
+            "-t",
+            "1",
+            *args,
+            str(path),
         ],
         check=True,
     )
@@ -65,12 +75,12 @@ def lossy_aac(tmp_path: Path) -> Path:
 @pytest.mark.parametrize(
     ("target", "expected"),
     [
-        ("alac", True),   # the reported case: .m4a in, .m4a out
-        ("m4a", True),    # the same target, spelled the other way
+        ("alac", True),  # the reported case: .m4a in, .m4a out
+        ("m4a", True),  # the same target, spelled the other way
         ("flac", False),  # extracting it is the whole point
         ("mp3", False),
         ("wav", False),
-        (None, False),    # no transcode at all: the .flac is the deliverable
+        (None, False),  # no transcode at all: the .flac is the deliverable
     ],
 )
 def test_only_an_m4a_target_makes_the_extraction_pointless(target, expected):

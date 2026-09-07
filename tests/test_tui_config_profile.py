@@ -11,11 +11,11 @@ of ConfigState, and this one replaces the state wholesale, so it announces
 
 from __future__ import annotations
 
-import asyncio
-import functools
 
 import pytest
 from textual.widgets import Input, Select, Static
+
+from tui_harness import drives_the_ui
 
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
@@ -30,14 +30,6 @@ _SAVED_PROFILE = {
     "use_artist_subfolders": True,
     "track_max_retries": 4,
 }
-
-
-def drives_the_ui(test):
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(test(*args, **kwargs))
-
-    return wrapper
 
 
 @pytest.fixture
@@ -88,6 +80,21 @@ def _picker(pilot) -> Select:
     return pilot.app.query_one("#profile-picker", Select)
 
 
+def _offered_profiles(pilot) -> list[str]:
+    """The names on the picker's menu, as the widget renders them.
+
+    For profiles the label *is* the value, so the rendered prompts answer the
+    question without reaching for the option values.
+    """
+    from textual.widgets import OptionList
+
+    picker = _picker(pilot)
+    menu = picker.query_one(OptionList)
+    rows = [str(menu.get_option_at_index(i).prompt) for i in range(menu.option_count)]
+    # The blank row at the top is the picker's own prompt, not a profile.
+    return [row for row in rows if row != str(picker.prompt)]
+
+
 # --- the menu -------------------------------------------------------------
 
 
@@ -95,13 +102,10 @@ def _picker(pilot) -> Select:
 async def test_the_saved_profiles_are_offered(stub_profiles) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
-        # _options carries the blank prompt row in front of the real ones.
-        offered = [
-            value
-            for _label, value in _picker(pilot)._options
-            if isinstance(value, str)
-        ]
-        assert offered == ["archive", "weekend"]
+        # Read off the menu the widget actually shows, rather than out of
+        # Select._options — a private attribute of somebody else's widget,
+        # and one that has already changed shape between Textual releases.
+        assert _offered_profiles(pilot) == ["archive", "weekend"]
 
 
 @drives_the_ui

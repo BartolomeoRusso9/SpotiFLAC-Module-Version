@@ -18,12 +18,13 @@ real run produces, in a tenth of a second and with no network.
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
 
 import pytest
 
 import SpotiFLAC.launcher as launcher_module
+from tui_harness import drives_the_ui
+
 from SpotiFLAC.core import output_sink
 from SpotiFLAC.core.console import print_run_header, print_track_done
 from SpotiFLAC.core.progress import DownloadManager, safe_tqdm_write
@@ -37,14 +38,6 @@ from SpotiFLAC.tui.runner import (
     DownloadRunner,
     make_status_line,
 )
-
-
-def drives_the_ui(test):
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(test(*args, **kwargs))
-
-    return wrapper
 
 
 @pytest.fixture(autouse=True)
@@ -328,6 +321,7 @@ async def test_the_queue_panel_fills_from_broadcaster_events(monkeypatch) -> Non
         assert pilot.app.query_one("#log-pane").display is True
         assert "downloaded" in str(pilot.app.query_one("#status").content)
 
+
 # ---------------------------------------------------------------------------
 # Where the log sits
 # ---------------------------------------------------------------------------
@@ -384,6 +378,7 @@ async def test_the_hidden_log_leaves_the_panel_the_whole_width() -> None:
         await pilot.pause()
 
         assert pilot.app.query_one("#panels").size.width < wide
+
 
 # ---------------------------------------------------------------------------
 # Which track the header is about

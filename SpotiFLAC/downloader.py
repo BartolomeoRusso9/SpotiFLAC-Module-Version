@@ -546,9 +546,7 @@ async def _transcode_result_async(
         return result
 
     source = Path(result.file_path)
-    if await asyncio.to_thread(
-        already_in_target_format, source, opts.transcode_to
-    ):
+    if await asyncio.to_thread(already_in_target_format, source, opts.transcode_to):
         return result
 
     try:
@@ -865,6 +863,16 @@ async def download_one_async(
                 else:
                     result = await download_task
 
+            except asyncio.CancelledError:
+                # The only thing that ever raises this event. It is handed to
+                # every provider above ("cooperative shutdown propagation"),
+                # is checked at the top of each retry — and was never set by
+                # anything, so a cancelled run (the TUI's stop key, a closed
+                # window) left the provider's own blocking work running,
+                # still downloading and still printing, over a UI that had
+                # already torn its output sink down.
+                stop_event.set()
+                raise
             except asyncio.TimeoutError:
                 wait_for_idle = getattr(provider, "wait_for_idle_async", None)
                 if callable(wait_for_idle):
@@ -1053,6 +1061,45 @@ def _quote_for_shell(value: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+async def _close_shared_browser_sessions() -> None:
+    """Tears down the persistent Monochrome browser once a batch is over.
+
+    The Amazon provider's mono path (amz.geeked.wtf) keeps a real Chrome
+    alive on purpose: the JWT it gets back is tied to that browser's TLS
+    session, so closing it between tracks would cost a Turnstile solve every
+    time. Between *batches* there is nothing left to keep.
+
+    It was never being closed at all, once. The session is a module-level
+    singleton in `core.signed_session_mono` rather than a provider object, so
+    `DownloadWorker._close_providers()` never saw it, and the only thing that
+    ever shut it down was the `atexit` hook — i.e. the process exiting. The
+    CLI exits after a run and got away with it; the TUI and the desktop
+    window do not, so Chrome stayed on screen after the download finished.
+
+    Called per batch, not per worker. It lived in `DownloadWorker.run_async`,
+    which runs once per *collection*: three albums in one command therefore
+    tore the browser down and stood it back up twice mid-run, paying a
+    Turnstile solve each time — the exact cost the shared session exists to
+    avoid. The batch entry points own it now.
+
+    Read out of `sys.modules` rather than imported: `signed_session_mono`
+    pulls in pydoll, and importing it here to ask whether a browser needs
+    closing would load it for every run that never went near Amazon. If the
+    module was never imported, no mono browser was ever started and there is
+    nothing to close.
+
+    Bounded and suppressed because a browser that will not close is not a
+    reason to fail a download that already succeeded — and
+    `close_mono_browser_session()` falls back to killing by profile directory
+    when the polite stop fails.
+    """
+    mono = sys.modules.get("SpotiFLAC.core.signed_session_mono")
+    if mono is None:
+        return
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(mono.close_mono_browser_session(), timeout=20.0)
+
+
 class DownloadWorker:
     def __init__(
         self,
@@ -1105,39 +1152,6 @@ class DownloadWorker:
                 with contextlib.suppress(Exception):
                     close()
 
-    async def _close_shared_browser_sessions(self) -> None:
-        """Tears down the persistent Monochrome browser once the run is over.
-
-        The Amazon provider's mono path (amz.geeked.wtf) keeps a real Chrome
-        alive on purpose: the JWT it gets back is tied to that browser's TLS
-        session, so closing it between tracks would cost a Turnstile solve
-        every time. Between *runs* there is nothing left to keep.
-
-        It was never being closed, though. The session is a module-level
-        singleton in `core.signed_session_mono` rather than a provider
-        object, so `_close_providers()` above never saw it, and the only
-        thing that ever shut it down was the `atexit` hook — i.e. the process
-        exiting. The CLI exits after a run and got away with it; the TUI and
-        the desktop window do not, so Chrome stayed on screen after the
-        download had finished.
-
-        Read out of `sys.modules` rather than imported: `signed_session_mono`
-        pulls in pydoll, and importing it here to ask whether a browser needs
-        closing would load it for every run that never went near Amazon. If
-        the module was never imported, no mono browser was ever started and
-        there is nothing to close.
-
-        Bounded and suppressed because a browser that will not close is not a
-        reason to fail a download that already succeeded — and
-        `close_mono_browser_session()` falls back to killing by profile
-        directory when the polite stop fails.
-        """
-        mono = sys.modules.get("SpotiFLAC.core.signed_session_mono")
-        if mono is None:
-            return
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(mono.close_mono_browser_session(), timeout=20.0)
-
     async def run_async(self) -> list[tuple[str, str, str]]:
         try:
             if self._opts.transcode_to:
@@ -1186,8 +1200,10 @@ class DownloadWorker:
                 # silently dropping them.
                 await _await_pending_hires_checks()
         finally:
+            # Providers only: the shared mono browser outlives one worker on
+            # purpose, and is closed by whichever batch entry point started
+            # this one (see _close_shared_browser_sessions).
             self._close_providers()
-            await self._close_shared_browser_sessions()
 
     async def _run_downloads_async(
         self,
@@ -1544,19 +1560,22 @@ class SpotiflacDownloader:
         """Starts downloading one or more URLs using the async worker pipeline."""
         urls = [input_url] if isinstance(input_url, str) else list(input_url)
 
-        for _idx, url in enumerate(urls):
-            if len(urls) > 1:
-                pass
+        try:
+            for _idx, url in enumerate(urls):
+                if len(urls) > 1:
+                    pass
 
-            failed_tracks = None
-            while True:
-                failed_tracks = await self._run_once_async(
-                    url,
-                    target_tracks=failed_tracks,
-                )
-                if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
-                    break
-                await asyncio.sleep(loop_minutes * 60)
+                failed_tracks = None
+                while True:
+                    failed_tracks = await self._run_once_async(
+                        url,
+                        target_tracks=failed_tracks,
+                    )
+                    if not loop_minutes or loop_minutes <= 0 or not failed_tracks:
+                        break
+                    await asyncio.sleep(loop_minutes * 60)
+        finally:
+            await _close_shared_browser_sessions()
 
     #: How many metadata lookups run at once in run_tracks_async(). These
     #: are small JSON requests, but twenty of them fired simultaneously at
@@ -1603,12 +1622,15 @@ class SpotiflacDownloader:
             return
 
         pending = await self._resolve_isrc_bulk_async(tracks)
-        while True:
-            failed = await self._run_worker_async(pending, "", {}, False, False)
-            if not loop_minutes or loop_minutes <= 0 or not failed:
-                break
-            await asyncio.sleep(loop_minutes * 60)
-            pending = failed
+        try:
+            while True:
+                failed = await self._run_worker_async(pending, "", {}, False, False)
+                if not loop_minutes or loop_minutes <= 0 or not failed:
+                    break
+                await asyncio.sleep(loop_minutes * 60)
+                pending = failed
+        finally:
+            await _close_shared_browser_sessions()
 
     async def _resolve_track_list_async(
         self,
@@ -1948,7 +1970,12 @@ class SpotiflacDownloader:
             is_playlist=False,
             positions=[p.position for p in pending],
         )
-        await worker.run_async()
+        try:
+            await worker.run_async()
+        finally:
+            # The single batch of the --playlist and --csv paths, both of
+            # which reach the worker only through here.
+            await _close_shared_browser_sessions()
 
         completed = worker.completed_paths
         return {

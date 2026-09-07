@@ -63,7 +63,11 @@ class CsvPickerScreen(ModalScreen[str | None]):
                 yield OptionList(id="csv-candidates")
                 yield Label("Or type a path", classes="help-heading")
                 yield Input(placeholder="~/Downloads/wishlist.csv", id="csv-path")
-                yield Static("", id="csv-preview")
+                # markup=False: everything this widget shows comes out of the
+                # file — column names, row labels, the path itself — and a
+                # column called `[bold]` would restyle the preview, while a
+                # stray `[/]` raises MarkupError and takes the screen down.
+                yield Static("", id="csv-preview", markup=False)
                 yield Horizontal(
                     Button("Use this file", id="csv-accept", variant="primary"),
                     Button("Cancel", id="csv-cancel"),

@@ -10,26 +10,11 @@ that fails to parse, a widget id the panel queries but never mounts, a
 
 from __future__ import annotations
 
-import asyncio
-import functools
+
+from tui_harness import drives_the_ui
 
 from SpotiFLAC.tui.app import MODES, THEMES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
-
-
-def drives_the_ui(test):
-    """Runs an async test body, the way the rest of this suite does.
-
-    The project has no pytest-asyncio; every other async test here spells it
-    `asyncio.run(...)`. One decorator keeps these readable without adding a
-    plugin for twelve tests.
-    """
-
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(test(*args, **kwargs))
-
-    return wrapper
 
 
 def _ready_state() -> ConfigState:

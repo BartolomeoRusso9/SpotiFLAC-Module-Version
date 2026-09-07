@@ -117,3 +117,23 @@ def _isolated_database(monkeypatch, tmp_path_factory):
     db.reset_for_tests()
     yield
     db.reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def _capable_terminal(monkeypatch):
+    """Pins the terminal capabilities the TUI reads, instead of inheriting.
+
+    `branding.plain_terminal()` answers from NO_COLOR / TERM /
+    SPOTIFLAC_PLAIN_TUI, so every test that asserts how the TUI *looks* was
+    really asserting something about the terminal that happened to run it:
+    green under a developer's xterm, red under `NO_COLOR=1` and red on the
+    Windows runner, which sets no TERM at all. Same class of leak as the
+    fixtures above — the suite's result depended on the machine.
+
+    Pinned to the fancy form because that is what those tests describe. The
+    handful that want the ASCII fallback set their own variable with
+    monkeypatch and still win: this only fills in a baseline.
+    """
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("SPOTIFLAC_PLAIN_TUI", raising=False)

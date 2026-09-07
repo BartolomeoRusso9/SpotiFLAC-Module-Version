@@ -19,6 +19,7 @@ drift from what a run actually needs.
 from __future__ import annotations
 
 import ast
+import os
 import pathlib
 
 import pytest
@@ -259,7 +260,10 @@ def test_downloads_land_in_music_spotiflac_unless_told_otherwise() -> None:
     from SpotiFLAC.core.paths import default_download_dir
 
     assert ConfigState().output_dir == default_download_dir()
-    assert ConfigState().to_cfg()["output_dir"].endswith("Music/SpotiFLAC")
+    # os.path.join, not a literal "Music/SpotiFLAC": the separator is the
+    # platform's, and on Windows this read the right path as the wrong one.
+    landing = ConfigState().to_cfg()["output_dir"]
+    assert landing.endswith(os.path.join("Music", "SpotiFLAC"))
 
 
 def test_a_blank_folder_is_still_reported_as_missing() -> None:
