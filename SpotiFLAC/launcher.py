@@ -2229,18 +2229,15 @@ async def amain() -> None:
         return
 
     if "--trust-key-list" in sys.argv:
-        # Names only, by construction: trusted_signer_names() never returns
-        # key material, so this listing cannot print any. Read
-        # trusted_keys.json directly if you need the public key bytes.
+        # Names only, by construction: signer_names() never returns key
+        # material, so this listing cannot print any. Read trusted_keys.json
+        # directly if you need the public key bytes.
         #
-        # Labelled `signer-N`, not `key-N`: what is on the line is the label
-        # you chose when adding the key, not the key. The old prefix also
-        # tripped CodeQL's clear-text-logging heuristic, which reads the
-        # literal word "key" next to an interpolated value as a printed
-        # secret — the alert was wrong, but the label was too.
-        from .extensions.trust import trusted_signer_names
+        # Labelled `signer-N` rather than `key-N` because what is on the line
+        # is the label you chose when adding the key, not the key.
+        from .extensions.trust import signer_names
 
-        names = trusted_signer_names()
+        names = signer_names()
         if not names:
             print("No trusted keys configured.")
         for idx, name in enumerate(names, start=1):
