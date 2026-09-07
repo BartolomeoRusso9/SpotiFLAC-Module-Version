@@ -2,9 +2,19 @@
 set -e
 
 # ==============================================================================
-# [WEB MODE]: if --web is among the arguments, skip Xvfb/Fluxbox/VNC entirely —
-# the FastAPI/uvicorn server needs no virtual display. Map the app's own port
-# instead (default 8000), not 6080/5900 (those are for the old VNC-based GUI).
+# [WEB MODE]: if --web is among the arguments, skip Xvfb/Fluxbox/VNC here and
+# map the app's own port instead (default 8000), not 6080/5900 (those are for
+# the old VNC-based GUI).
+#
+# "Skip", not "never needs": uvicorn itself wants no display, but a download it
+# serves can still have to solve a Turnstile challenge, and core/solver.py
+# launches a real (non-headless) Chromium to do it. That browser needs an X
+# server, so the solver brings one up on demand — which is cheaper than an
+# Xvfb in every container that never goes near a challenge.
+#
+# Note the image sets DISPLAY=:99 for every mode (see the Dockerfile), so the
+# solver has to check whether anything is actually listening there rather than
+# trust the variable. It does; if you change either side, keep that true.
 #
 # Example:
 # docker run --rm -it \
