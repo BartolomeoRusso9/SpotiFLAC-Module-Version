@@ -9,6 +9,7 @@ import platform
 import random
 import shutil
 import signal
+import socket
 import subprocess
 import tempfile
 import threading
@@ -581,11 +582,65 @@ def _get_profile_dir() -> str:
     return tempfile.mkdtemp(prefix="ts_profile_", dir=base)
 
 
+#: How long to wait for a freshly started Xvfb to accept connections.
+_XVFB_READY_TIMEOUT_SECONDS = 10.0
+
+#: Where a local X server puts its socket. A constant so the probe below can
+#: be pointed somewhere writable under test.
+_X11_SOCKET_DIR = "/tmp/.X11-unix"  # noqa: S108 — the path X11 itself defines
+
+
+def _display_is_live(display: str) -> bool:
+    """Whether an X server is actually answering on *display*.
+
+    A set ``DISPLAY`` is not a running X server, and the gap between the two
+    is exactly how a ``--web`` container ends up unable to solve a challenge:
+    the image sets ``DISPLAY=:99`` for every mode, while its entrypoint only
+    starts Xvfb on the GUI path. The variable was set, so the bootstrap below
+    concluded there was a display and returned — and Chromium then spent its
+    whole 45-second start timeout trying to reach one nobody had started,
+    failing with ``FailedToStartBrowser`` while reporting ``binary_exists=True``
+    and ``display=:99``, which is a genuinely confusing pair of facts.
+
+    Only *local* displays (``:99``, ``:0.0``, ``unix:0``) are probed, over the
+    socket the server listens on. A ``host:0`` or an SSH-forwarded
+    ``localhost:10.0`` belongs to somebody else's X server and is taken at its
+    word rather than second-guessed — or worse, stomped on by starting Xvfb
+    over the top of it.
+    """
+    display = (display or "").strip()
+    if not display:
+        return False
+    host, separator, screen = display.rpartition(":")
+    if not separator or host not in {"", "unix"}:
+        return True
+    number = screen.split(".", 1)[0]
+    if not number.isdigit():
+        return True
+    path = os.path.join(_X11_SOCKET_DIR, f"X{number}")
+    # Both the filesystem socket and — Linux only — the abstract one of the
+    # same name. A server that listens on just the abstract address would
+    # otherwise read as dead, and Xvfb would be started on top of a display
+    # that was working.
+    candidates = [path]
+    if platform.system() == "Linux":
+        candidates.append("\0" + path)
+    for candidate in candidates:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                probe.settimeout(0.5)
+                probe.connect(candidate)
+        except OSError:
+            continue
+        return True
+    return False
+
+
 def _start_xvfb_if_needed() -> subprocess.Popen | None:
     """On Linux headless servers, start a virtual display so Chrome can run."""
     if platform.system() != "Linux":
         return None
-    if os.environ.get("DISPLAY"):
+    if _display_is_live(os.environ.get("DISPLAY", "")):
         return None
     proc = subprocess.Popen(
         ["Xvfb", ":99", "-screen", "0", "1280x900x24"],
@@ -593,7 +648,29 @@ def _start_xvfb_if_needed() -> subprocess.Popen | None:
         stderr=subprocess.DEVNULL,
     )
     os.environ["DISPLAY"] = ":99"
-    time.sleep(0.5)
+    # Polled rather than slept: Xvfb comes up in whatever time the machine
+    # takes, and a flat 0.5s was both wasteful on an idle box and too short on
+    # a loaded one — where Chromium raced it and failed exactly as if no
+    # display had been started at all.
+    deadline = time.monotonic() + _XVFB_READY_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if _display_is_live(":99"):
+            logger.info("[solver] virtual display :99 is up")
+            return proc
+        if proc.poll() is not None:
+            logger.error(
+                "[solver] Xvfb exited immediately (code %s). A stale "
+                "/tmp/.X99-lock from a previous run will do this — remove it, "
+                "or start your own X server and point DISPLAY at it.",
+                proc.returncode,
+            )
+            return None
+        time.sleep(0.05)
+    logger.warning(
+        "[solver] Xvfb did not accept connections within %.0fs; launching the "
+        "browser anyway",
+        _XVFB_READY_TIMEOUT_SECONDS,
+    )
     return proc
 
 
@@ -606,13 +683,20 @@ def _ensure_xvfb() -> None:
     running. Idempotent and safe to call from multiple threads.
     """
     global _xvfb_started
-    if _xvfb_started or platform.system() != "Linux" or os.environ.get("DISPLAY"):
+    if _xvfb_started or platform.system() != "Linux":
+        return
+    if _display_is_live(os.environ.get("DISPLAY", "")):
         return
     with _xvfb_lock:
-        if _xvfb_started or os.environ.get("DISPLAY"):
+        if _xvfb_started or _display_is_live(os.environ.get("DISPLAY", "")):
             return
-        _start_xvfb_if_needed()
-        _xvfb_started = True
+        # Latched only on a display that actually came up. Xvfb dying on the
+        # spot — a stale /tmp/.X99-lock is the usual reason — is reported as
+        # None, and recording that as "started" would make every later call
+        # return early: the process would run on with no display and never
+        # try again. Left false, the next solve gets another attempt.
+        if _start_xvfb_if_needed() is not None:
+            _xvfb_started = True
 
 
 def build_chromium_options(*, hidden: bool = True) -> tuple[ChromiumOptions, str]:
