@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -880,31 +881,73 @@ class SignedSessionClient:
                 self._client = None
 
 
-# --- Phase 4: authentication synchronization (async-native) --------
+# --- Phase 4: authentication synchronization --------
 #
-# PREVIOUSLY: SpotiFLAC downloaded multiple tracks in parallel using a
-# ThreadPoolExecutor where each thread ran its own asyncio.run()
-# (so each thread had a DIFFERENT event loop). An asyncio.Lock keyed
-# by (loop, namespace) is not sufficient in that case: two parallel threads,
-# each with its own loop, would each get a separate fresh lock and would
-# not synchronize at all — hence the old _AsyncThreadLockCtx wrapper that
-# paired a threading.Lock with async polling.
+# What has to be serialized: authenticating one namespace. It is slow (a
+# Turnstile solve is seconds, sometimes tens of seconds) and wasteful to do
+# twice, so parallel tracks that all find themselves unauthenticated must
+# queue behind the first one rather than each open their own browser.
 #
-# NOW: with a single process/thread and a single shared event loop
-# (no download starts its own asyncio.run()), a dict of asyncio.Lock()
-# indexed by namespace is sufficient and correct: all coroutines competing
-# to authenticate the same namespace run on the same loop, so asyncio.Lock
-# serializes them natively without polling or thread-safe primitives.
-_AUTH_LOCKS: dict[str, asyncio.Lock] = {}
+# The primitive has to be loop-agnostic, and that is the whole difficulty.
+# These locks live in a module-level dict, so they outlive any single event
+# loop, while their waiters do not: `--web` serves requests on the server's
+# loop, and other entry points (a CLI download, a worker that calls
+# asyncio.run() of its own) bring loops of their own. An asyncio.Lock
+# created on one loop and awaited from another raises
+# "... is bound to a different event loop" and the caller dies on the spot —
+# which is exactly what happened to ext:qobuz-web under --web, on every
+# signed request it made.
+#
+# Keying the dict by (loop, namespace) would silence that error and
+# reintroduce the bug the lock exists to prevent: two loops would take two
+# different locks and authenticate the same namespace twice, concurrently.
+#
+# So the lock is a threading.Lock — which belongs to no loop — acquired
+# without blocking and awaited by polling (see _AsyncThreadLock). Polling is
+# affordable precisely because this guards a rare, slow operation: the cost
+# is one 50 ms sleep per waiter per poll, against an authentication measured
+# in seconds.
+_AUTH_LOCKS: dict[str, threading.Lock] = {}
+
+#: Guards creation of the per-namespace locks above. Without it two threads
+#: racing on a namespace that has no lock yet can each build one and take
+#: their own, which is the same double-authentication this is meant to stop.
+_AUTH_LOCKS_GUARD = threading.Lock()
 
 
-def _get_auth_lock(namespace: str) -> asyncio.Lock:
-    """Return the asyncio.Lock for the given namespace, creating it if absent."""
-    lock = _AUTH_LOCKS.get(namespace)
-    if lock is None:
-        lock = asyncio.Lock()
-        _AUTH_LOCKS[namespace] = lock
-    return lock
+def _get_auth_lock(namespace: str) -> threading.Lock:
+    """Return the lock for the given namespace, creating it if absent."""
+    with _AUTH_LOCKS_GUARD:
+        lock = _AUTH_LOCKS.get(namespace)
+        if lock is None:
+            lock = threading.Lock()
+            _AUTH_LOCKS[namespace] = lock
+        return lock
+
+
+class _AsyncThreadLock:
+    """`async with` over a threading.Lock, without blocking the event loop.
+
+    `threading.Lock.acquire()` would stall the whole loop — every other
+    coroutine on it, including the downloads this one is competing with — so
+    the lock is taken non-blockingly and the coroutine yields between
+    attempts.
+    """
+
+    #: Long enough that a queue of waiters costs nothing measurable, short
+    #: enough to be invisible next to the authentication being awaited.
+    _POLL_INTERVAL_S = 0.05
+
+    def __init__(self, lock: threading.Lock) -> None:
+        self._lock = lock
+
+    async def __aenter__(self) -> _AsyncThreadLock:
+        while not self._lock.acquire(blocking=False):
+            await asyncio.sleep(self._POLL_INTERVAL_S)
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        self._lock.release()
 
 
 async def perform_signed_fetch(
@@ -940,8 +983,7 @@ async def perform_signed_fetch(
     try:
         # If we're not authenticated, acquire the async Lock
         if not client.authenticated:
-            lock = _get_auth_lock(client.namespace)
-            async with lock:
+            async with _AsyncThreadLock(_get_auth_lock(client.namespace)):
                 # DOUBLE-CHECK: once inside the lock, reload the data from disk.
                 # If another track running in parallel just authenticated in our
                 # place, we'll see the refreshed session and skip authenticating!

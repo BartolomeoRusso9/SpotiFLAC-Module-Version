@@ -12,6 +12,7 @@ import threading as _threading
 import time
 import unicodedata
 import urllib.parse
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -58,15 +59,44 @@ _mb_inflight: dict[str, threading.Event] = {}
 _mb_inflight_mu = threading.Lock()
 
 # --- Async in-flight state (Phase 2) ---
-_mb_inflight_async: dict[str, asyncio.Event] = {}
-_mb_inflight_async_lock: asyncio.Lock | None = None  # lazy init
+# In-flight de-duplication, kept per event loop.
+#
+# An asyncio.Lock and an asyncio.Event both bind to the loop that created
+# them, while a module-level dict outlives every loop. Sharing one set across
+# loops is what makes `async with lock` and `await event.wait()` raise
+# "... is bound to a different event loop" — the same failure that took
+# ext:qobuz-web down through core/signed_session_mobile.py. Under --web there
+# is more than one loop in the process, so this has to be loop-local.
+#
+# Loop-local is the right scope here, unlike the authentication lock in
+# signed_session_mobile: this only avoids issuing the same MusicBrainz query
+# twice at once. The real sharing happens in _mb_cache, which is a plain dict
+# every loop already reads, so a duplicate request across two loops costs one
+# extra HTTP call — not a correctness problem worth a cross-loop primitive.
+#
+# Weak keys so a finished loop takes its own entries with it; a strong dict
+# keyed by id(loop) would leak one entry per loop that ever ran.
+_mb_inflight_async: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_mb_inflight_async_locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
-def _get_async_inflight_lock() -> asyncio.Lock:
-    global _mb_inflight_async_lock
-    if _mb_inflight_async_lock is None:
-        _mb_inflight_async_lock = asyncio.Lock()
-    return _mb_inflight_async_lock
+def _get_async_inflight() -> tuple[asyncio.Lock, dict[str, asyncio.Event]]:
+    """The lock and in-flight map belonging to the running loop.
+
+    No locking around the lazy creation: everything here runs synchronously
+    between awaits, so no other coroutine on this loop can interleave, and a
+    different loop gets a different entry by construction.
+    """
+    loop = asyncio.get_running_loop()
+    lock = _mb_inflight_async_locks.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _mb_inflight_async_locks[loop] = lock
+    inflight = _mb_inflight_async.get(loop)
+    if inflight is None:
+        inflight = {}
+        _mb_inflight_async[loop] = inflight
+    return lock, inflight
 
 
 _mb_throttle_mu = threading.Lock()
@@ -831,10 +861,19 @@ def fetch_mb_metadata(
     the same ISRC asked for as part of two different albums — or two
     editions of one album — has two different answers.
     """
-    if not isrc:
+    # Normalised before the guard rather than after it: a whitespace-only
+    # ISRC passes `if not isrc` but leaves nothing to look up, and would
+    # otherwise reach MusicBrainz as the query "isrc:" and be cached under
+    # an empty key.
+    isrc_norm = isrc.strip().upper() if isrc else ""
+    if not isrc_norm:
         return {}
 
-    cache_key = isrc.strip().upper()
+    # Kept apart from cache_key on purpose: the key below grows album,
+    # track count and date onto the ISRC, and logging that composite as
+    # though it were an ISRC makes the logs unsearchable for the one
+    # identifier anybody greps them for.
+    cache_key = isrc_norm
     if album:
         # Every input _release_score() weighs belongs in the key, or a
         # lookup made for one edition answers for another.
@@ -850,7 +889,7 @@ def fetch_mb_metadata(
         return persisted
 
     if should_skip_mb():
-        _log_paused(cache_key)
+        _log_paused(isrc_norm)
         return {}
 
     with _mb_inflight_mu:
@@ -869,7 +908,7 @@ def fetch_mb_metadata(
 
     res: dict | object = _LOOKUP_FAILED
     try:
-        data = _query_recordings(f"isrc:{isrc}")
+        data = _query_recordings(f"isrc:{isrc_norm}")
         set_mb_status(True)
         res = _parse_mb_response(data, album, total_tracks, release_date)
         if not any(res.values()) and title and artist:
@@ -884,9 +923,9 @@ def fetch_mb_metadata(
                 res = _parse_mb_response(
                     {"recordings": [match]}, album, total_tracks, release_date
                 )
-                _log_fallback_hit(cache_key, match)
+                _log_fallback_hit(isrc_norm, match)
         if not any(res.values()):
-            _log_no_match(cache_key, title, artist)
+            _log_no_match(isrc_norm, title, artist)
         try:
             res.update(
                 _parse_mb_details(
@@ -905,7 +944,7 @@ def fetch_mb_metadata(
             put_cached_response("musicbrainz", cache_key, res)
     except Exception as e:
         set_mb_status(False)
-        _log_failed(cache_key, e)
+        _log_failed(isrc_norm, e)
         res = _LOOKUP_FAILED
     finally:
         _mb_cache[cache_key] = res
@@ -944,10 +983,19 @@ async def fetch_mb_metadata_async(
     `album`/`total_tracks`/`release_date` release pick — as the sync
     version.
     """
-    if not isrc:
+    # Normalised before the guard rather than after it: a whitespace-only
+    # ISRC passes `if not isrc` but leaves nothing to look up, and would
+    # otherwise reach MusicBrainz as the query "isrc:" and be cached under
+    # an empty key.
+    isrc_norm = isrc.strip().upper() if isrc else ""
+    if not isrc_norm:
         return {}
 
-    cache_key = isrc.strip().upper()
+    # Kept apart from cache_key on purpose: the key below grows album,
+    # track count and date onto the ISRC, and logging that composite as
+    # though it were an ISRC makes the logs unsearchable for the one
+    # identifier anybody greps them for.
+    cache_key = isrc_norm
     if album:
         # Every input _release_score() weighs belongs in the key, or a
         # lookup made for one edition answers for another.
@@ -963,24 +1011,24 @@ async def fetch_mb_metadata_async(
         return persisted
 
     if should_skip_mb():
-        _log_paused(cache_key)
+        _log_paused(isrc_norm)
         return {}
 
-    inflight_lock = _get_async_inflight_lock()
+    inflight_lock, inflight = _get_async_inflight()
 
     async with inflight_lock:
-        if cache_key in _mb_inflight_async:
-            event = _mb_inflight_async[cache_key]
+        if cache_key in inflight:
+            event = inflight[cache_key]
             await event.wait()
             result = _mb_cache.get(cache_key)
             return {} if (result is None or result is _LOOKUP_FAILED) else result  # type: ignore
 
         event = asyncio.Event()
-        _mb_inflight_async[cache_key] = event
+        inflight[cache_key] = event
 
     res: dict | object = _LOOKUP_FAILED
     try:
-        data = await _query_recordings_async(f"isrc:{isrc}")
+        data = await _query_recordings_async(f"isrc:{isrc_norm}")
         res = _parse_mb_response(data, album, total_tracks, release_date)
         if not any(res.values()) and title and artist:
             candidates = await _query_recordings_async(_fallback_query(title, artist))
@@ -994,9 +1042,9 @@ async def fetch_mb_metadata_async(
                 res = _parse_mb_response(
                     {"recordings": [match]}, album, total_tracks, release_date
                 )
-                _log_fallback_hit(cache_key, match)
+                _log_fallback_hit(isrc_norm, match)
         if not any(res.values()):
-            _log_no_match(cache_key, title, artist)
+            _log_no_match(isrc_norm, title, artist)
         try:
             details = await _query_recording_details_async(res.get("mbid_track", ""))
             res.update(_parse_mb_details(details, album, total_tracks, release_date))
@@ -1010,7 +1058,7 @@ async def fetch_mb_metadata_async(
         set_mb_status(True)
     except Exception as e:
         set_mb_status(False)
-        _log_failed(cache_key, e)
+        _log_failed(isrc_norm, e)
         res = _LOOKUP_FAILED
     finally:
         _mb_cache[cache_key] = res
@@ -1023,7 +1071,7 @@ async def fetch_mb_metadata_async(
             pass
         event.set()
         async with inflight_lock:
-            _mb_inflight_async.pop(cache_key, None)
+            inflight.pop(cache_key, None)
 
     return {} if res is _LOOKUP_FAILED else res  # type: ignore
 
