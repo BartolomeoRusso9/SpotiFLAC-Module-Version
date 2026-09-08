@@ -20,7 +20,6 @@ import pytest
 
 from SpotiFLAC.core import solver
 
-
 # The probe reaches an X server over an AF_UNIX socket, which Windows has no
 # notion of — CPython does not even define socket.AF_UNIX there. The two tests
 # that stand a real socket up are POSIX-only; the rest of the file exercises
