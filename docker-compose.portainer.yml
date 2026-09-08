@@ -55,10 +55,14 @@ services:
       SPOTIFLAC_MIN_TRUST: "${SPOTIFLAC_MIN_TRUST:-}"
 
       # --- Web GUI authentication -----------------------------------------
-      # Shared secret required on every request. Leave empty ONLY if this port
-      # is unreachable from any network you do not fully trust. /healthz stays
-      # exempt, so setting this does not break the healthcheck below.
-      SPOTIFLAC_WEB_TOKEN: "${SPOTIFLAC_WEB_TOKEN:-}"
+      # Required, not optional: `:?` makes the deploy fail with this message
+      # rather than quietly starting an unauthenticated GUI on a port that is
+      # published to the whole LAN. Set it in the stack's environment
+      # variables to any long random string.
+      #
+      # /healthz stays exempt from the check inside the app (webapp.py), so
+      # enabling this does not make the container report itself unhealthy.
+      SPOTIFLAC_WEB_TOKEN: "${SPOTIFLAC_WEB_TOKEN:?set a long random shared secret — the web GUI has no other authentication}"
 
       # --- Storage ---------------------------------------------------------
       # Both default under /home/spotiflac/.spotiflac, which is the volume
