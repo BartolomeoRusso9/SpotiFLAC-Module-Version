@@ -38,6 +38,19 @@ _BADGE_CLASSES = (
 
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "skipped"})
 
+#: The row's own state classes for a status. One definition, because
+#: __init__ sets them and apply() has to be able to clear them again.
+_ROW_STATE_CLASSES = {
+    "failed": "failed",
+    "completed": "completed",
+    "downloading": "active",
+}
+
+
+def _row_state_classes(status: str) -> tuple[str, ...]:
+    css = _ROW_STATE_CLASSES.get(status)
+    return (css,) if css else ()
+
 
 class TrackRow(Horizontal):
     """One track: what it is, how far along, and how it ended.
@@ -49,7 +62,15 @@ class TrackRow(Horizontal):
     """
 
     def __init__(self, item: dict) -> None:
-        super().__init__(classes="track-row")
+        # State classes from the start, not from on_mount. mount() is
+        # asynchronous, so a row built without them paints at least one frame
+        # as though the track were still queued — and anything reading the
+        # row before on_mount has run sees the same wrong answer.
+        super().__init__(
+            classes=" ".join(
+                ("track-row", *_row_state_classes(str(item.get("status", ""))))
+            )
+        )
         self._item = item
         self._bar: ProgressBar | None = None
         self._label: Label | None = None
@@ -59,7 +80,10 @@ class TrackRow(Horizontal):
         # The badge is MovieBox's resolution chip, doing the same job: the
         # outcome, readable at a glance from colour and shape together, so
         # colour alone is never carrying it.
-        self._badge = Label("", classes="track-badge", markup=False)
+        # Rendered from the item for the same reason as the classes above:
+        # left as Label(""), the outcome is blank until on_mount fills it in.
+        text, css = status_badge(str(self._item.get("status", "")))
+        self._badge = Label(text, classes=f"track-badge {css}", markup=False)
         self._label = Label(self._title_for(self._item), classes="track-title")
         # `total` is not known until the first chunk arrives, and a bar with
         # no total renders as indeterminate — which is exactly the honest

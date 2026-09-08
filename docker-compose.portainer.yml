@@ -109,9 +109,28 @@ services:
       TZ: "${TZ:-Europe/Rome}"
 
     volumes:
-      # Finished audio. Swap for a bind mount to your NAS share if you prefer,
-      # e.g. "/mnt/media/music:/app/downloads".
+      # Finished audio, mounted at BOTH paths that matter — one named volume,
+      # two mount points, same content.
+      #
+      # /app/downloads is what the image declares as its downloads VOLUME and
+      # what the CLI examples pass explicitly; without a mount here Docker
+      # invents an anonymous volume for it.
+      #
+      # ~/Music/SpotiFLAC is where --web actually writes: app.py sets
+      # download_dir from core.paths.default_download_dir(), and nothing on
+      # the web path ever overrides it. Left unmounted, every download lands
+      # in the container's writable layer and dies with the next recreate —
+      # which is what Watchtower does on every update.
+      #
+      # Changing it from the GUI instead is not an option: webapp.py's
+      # _is_path_safe confines the folder picker to $HOME and the current
+      # download_dir, so /app/downloads cannot be selected from there.
+      #
+      # For a NAS share, point both at the same host path, e.g.
+      #   - /mnt/media/music:/app/downloads
+      #   - /mnt/media/music:/home/spotiflac/Music/SpotiFLAC
       - spotiflac-downloads:/app/downloads
+      - spotiflac-downloads:/home/spotiflac/Music/SpotiFLAC
       # Everything durable *and* the cache: the database, installed
       # extensions, signed sessions, web users, trusted keys, settings — and
       # ~/.spotiflac/.cache, which is where the cache lives now. One volume
