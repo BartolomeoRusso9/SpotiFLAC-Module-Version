@@ -56,10 +56,15 @@ RUN groupadd --gid "${APP_GID}" spotiflac \
     && mkdir -p /app/downloads \
                 "${HOME}/.spotiflac/extensions" \
                 "${HOME}/.spotiflac/signed_sessions" \
-                "${HOME}/.cache/spotiflac" \
     && chown -R spotiflac:spotiflac /app "${HOME}"
 
-VOLUME ["/app/downloads", "/home/spotiflac/.spotiflac", "/home/spotiflac/.cache/spotiflac"]
+# ~/.cache/spotiflac is deliberately absent from both the mkdir above and the
+# VOLUME below. The cache moved under ~/.spotiflac/.cache (see core/paths.py),
+# so nothing writes to the old path any more; core.paths.adopt_legacy_cache_file
+# still *reads* it, but that needs no directory to exist and no volume. Leaving
+# it declared here cost a stray anonymous volume on every container that did
+# not explicitly mount over it.
+VOLUME ["/app/downloads", "/home/spotiflac/.spotiflac"]
 
 # ==============================================================================
 # [VNC/WEB SCREEN] — desktop GUI over VNC (default `spotiflac --gui` path):

@@ -834,7 +834,12 @@ def fetch_mb_metadata(
     if not isrc:
         return {}
 
-    cache_key = isrc.strip().upper()
+    # Kept apart from cache_key on purpose: the key below grows album,
+    # track count and date onto the ISRC, and logging that composite as
+    # though it were an ISRC makes the logs unsearchable for the one
+    # identifier anybody greps them for.
+    isrc_norm = isrc.strip().upper()
+    cache_key = isrc_norm
     if album:
         # Every input _release_score() weighs belongs in the key, or a
         # lookup made for one edition answers for another.
@@ -850,7 +855,7 @@ def fetch_mb_metadata(
         return persisted
 
     if should_skip_mb():
-        _log_paused(cache_key)
+        _log_paused(isrc_norm)
         return {}
 
     with _mb_inflight_mu:
@@ -884,9 +889,9 @@ def fetch_mb_metadata(
                 res = _parse_mb_response(
                     {"recordings": [match]}, album, total_tracks, release_date
                 )
-                _log_fallback_hit(cache_key, match)
+                _log_fallback_hit(isrc_norm, match)
         if not any(res.values()):
-            _log_no_match(cache_key, title, artist)
+            _log_no_match(isrc_norm, title, artist)
         try:
             res.update(
                 _parse_mb_details(
@@ -905,7 +910,7 @@ def fetch_mb_metadata(
             put_cached_response("musicbrainz", cache_key, res)
     except Exception as e:
         set_mb_status(False)
-        _log_failed(cache_key, e)
+        _log_failed(isrc_norm, e)
         res = _LOOKUP_FAILED
     finally:
         _mb_cache[cache_key] = res
@@ -947,7 +952,12 @@ async def fetch_mb_metadata_async(
     if not isrc:
         return {}
 
-    cache_key = isrc.strip().upper()
+    # Kept apart from cache_key on purpose: the key below grows album,
+    # track count and date onto the ISRC, and logging that composite as
+    # though it were an ISRC makes the logs unsearchable for the one
+    # identifier anybody greps them for.
+    isrc_norm = isrc.strip().upper()
+    cache_key = isrc_norm
     if album:
         # Every input _release_score() weighs belongs in the key, or a
         # lookup made for one edition answers for another.
@@ -963,7 +973,7 @@ async def fetch_mb_metadata_async(
         return persisted
 
     if should_skip_mb():
-        _log_paused(cache_key)
+        _log_paused(isrc_norm)
         return {}
 
     inflight_lock = _get_async_inflight_lock()
@@ -994,9 +1004,9 @@ async def fetch_mb_metadata_async(
                 res = _parse_mb_response(
                     {"recordings": [match]}, album, total_tracks, release_date
                 )
-                _log_fallback_hit(cache_key, match)
+                _log_fallback_hit(isrc_norm, match)
         if not any(res.values()):
-            _log_no_match(cache_key, title, artist)
+            _log_no_match(isrc_norm, title, artist)
         try:
             details = await _query_recording_details_async(res.get("mbid_track", ""))
             res.update(_parse_mb_details(details, album, total_tracks, release_date))
@@ -1010,7 +1020,7 @@ async def fetch_mb_metadata_async(
         set_mb_status(True)
     except Exception as e:
         set_mb_status(False)
-        _log_failed(cache_key, e)
+        _log_failed(isrc_norm, e)
         res = _LOOKUP_FAILED
     finally:
         _mb_cache[cache_key] = res

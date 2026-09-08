@@ -1,0 +1,197 @@
+# ==============================================================================
+# SpotiFLAC — Portainer stack (web mode) + Watchtower auto-update
+# ==============================================================================
+# Deploy: Portainer > Stacks > Add stack > Web editor, paste this file, then
+# fill the values below under "Environment variables" (or leave them empty —
+# every one of them has a safe default except SPOTIFLAC_REGISTRIES).
+#
+# Unlike docker-compose.example.yml this file never builds from source:
+# a Portainer stack has no build context, so it pulls the published GHCR
+# image — which is also what makes Watchtower's auto-update meaningful.
+#
+# Only SPOTIFLAC_REGISTRIES is genuinely required: no extension registry is
+# bundled by design, and without one there are no providers to download with.
+# ==============================================================================
+
+services:
+  spotiflac:
+    image: ghcr.io/bartolomeorusso9/spotiflac:${SPOTIFLAC_TAG:-latest}
+    container_name: spotiflac
+    # --host 0.0.0.0 is mandatory in a container: the CLI default 127.0.0.1
+    # only accepts connections from inside the container itself.
+    command: ["--web", "--host", "0.0.0.0", "--port", "8000"]
+    # For per-user logins instead of one shared token, use:
+    # command: ["--web", "--host", "0.0.0.0", "--port", "8000", "--web-multiuser"]
+    # (create users first: docker exec spotiflac spotiflac --web-user-add NAME PASS)
+    ports:
+      # Host side is 8080, not 8000: on a Portainer host 8000 is taken by
+      # Portainer itself (the Edge agent tunnel server). Container side stays
+      # 8000 and must match --port in `command` and the healthcheck below.
+      - "${SPOTIFLAC_PORT:-8080}:8000"
+
+    # The web path skips Xvfb/VNC, but a download can still hit a Turnstile
+    # challenge, and the solver then launches a real Chromium on its own
+    # display. Chromium dies on the default 64 MB /dev/shm.
+    shm_size: "1gb"
+
+    # The container's resolver proved unreliable in practice: extensions hit
+    # "Temporary failure in name resolution" and "Name or service not known",
+    # and core/http.py's DNS-over-HTTPS fallback only covers the requests that
+    # go through it — a Node extension's own HTTP client does not.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+
+    environment:
+      # --- Extensions ------------------------------------------------------
+      # REQUIRED. Comma-separated registry JSON URLs. Nothing is bundled.
+      SPOTIFLAC_REGISTRIES: "${SPOTIFLAC_REGISTRIES:-}"
+      # Optional: directory JSONs that *list* registries for you to review and
+      # add yourself (GUI > Discover). Not a source of extensions on its own.
+      SPOTIFLAC_REGISTRY_DIRECTORIES: "${SPOTIFLAC_REGISTRY_DIRECTORIES:-}"
+      # Optional: path to a file of extension download URLs, one per line.
+      SPOTIFLAC_EXT_LINKS: "${SPOTIFLAC_EXT_LINKS:-}"
+      # Minimum trust tier accepted on install: unverified | checksum-only | signed
+      SPOTIFLAC_MIN_TRUST: "${SPOTIFLAC_MIN_TRUST:-}"
+
+      # --- Web GUI authentication -----------------------------------------
+      # Shared secret required on every request. Leave empty ONLY if this port
+      # is unreachable from any network you do not fully trust. /healthz stays
+      # exempt, so setting this does not break the healthcheck below.
+      SPOTIFLAC_WEB_TOKEN: "${SPOTIFLAC_WEB_TOKEN:-}"
+
+      # --- Storage ---------------------------------------------------------
+      # Both default under /home/spotiflac/.spotiflac, which is the volume
+      # mounted below — override only if you want them somewhere else.
+      SPOTIFLAC_DB_PATH: "${SPOTIFLAC_DB_PATH:-}"
+      SPOTIFLAC_CACHE_DIR: "${SPOTIFLAC_CACHE_DIR:-}"
+
+      # --- Automation / notifications --------------------------------------
+      SPOTIFLAC_NOTIFY_URL: "${SPOTIFLAC_NOTIFY_URL:-}"
+      SPOTIFLAC_NOTIFY_TOKEN: "${SPOTIFLAC_NOTIFY_TOKEN:-}"
+      SPOTIFLAC_LIBRARY_USER: "${SPOTIFLAC_LIBRARY_USER:-}"
+      SPOTIFLAC_LIBRARY_TOKEN: "${SPOTIFLAC_LIBRARY_TOKEN:-}"
+
+      # --- Apple Music metadata / lyrics (optional) ------------------------
+      SPOTIFLAC_APPLE_MEDIA_USER_TOKEN: "${SPOTIFLAC_APPLE_MEDIA_USER_TOKEN:-}"
+      SPOTIFLAC_APPLE_STOREFRONT: "${SPOTIFLAC_APPLE_STOREFRONT:-}"
+      SPOTIFLAC_APPLE_LYRICS_TRANSLATION: "${SPOTIFLAC_APPLE_LYRICS_TRANSLATION:-}"
+      SPOTIFLAC_APPLE_LYRICS_PRONUNCIATION: "${SPOTIFLAC_APPLE_LYRICS_PRONUNCIATION:-}"
+
+      # --- Logging ----------------------------------------------------------
+      # 0 = plain lines instead of animated bars. Correct for `docker logs`,
+      # which otherwise collapses every bar refresh into "[285B blob data]".
+      SPOTIFLAC_PROGRESS_BARS: "${SPOTIFLAC_PROGRESS_BARS:-0}"
+
+      # --- Escape hatches: every one of these weakens a security control. ---
+      # All are off unless set to 1/true/yes, so leave them empty.
+      # Names an extension may read from this environment (comma-separated);
+      # the sandbox strips everything else, tokens included.
+      SPOTIFLAC_EXT_ENV_PASSTHROUGH: "${SPOTIFLAC_EXT_ENV_PASSTHROUGH:-}"
+      # Lets extensions reach RFC1918 / localhost addresses.
+      SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK: "${SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK:-}"
+      # Lets extensions write outside their own directories.
+      SPOTIFLAC_EXT_ALLOW_ANY_WRITE: "${SPOTIFLAC_EXT_ALLOW_ANY_WRITE:-}"
+      SPOTIFLAC_EXT_WRITABLE_DIRS: "${SPOTIFLAC_EXT_WRITABLE_DIRS:-}"
+      # Disables the extension sandbox entirely. Debugging only.
+      SPOTIFLAC_EXT_NO_SANDBOX: "${SPOTIFLAC_EXT_NO_SANDBOX:-}"
+      # Installs an extension whose checksum does not match the registry.
+      SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH: "${SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH:-}"
+      # Lets the web/GUI bridge run a post-download shell command.
+      SPOTIFLAC_ALLOW_POST_COMMAND: "${SPOTIFLAC_ALLOW_POST_COMMAND:-}"
+      # Stops redacting provider tokens out of httpx logs.
+      SPOTIFLAC_NO_LOG_REDACTION: "${SPOTIFLAC_NO_LOG_REDACTION:-}"
+
+      TZ: "${TZ:-Europe/Rome}"
+
+    volumes:
+      # Finished audio. Swap for a bind mount to your NAS share if you prefer,
+      # e.g. "/mnt/media/music:/app/downloads".
+      - spotiflac-downloads:/app/downloads
+      # Everything durable *and* the cache: the database, installed
+      # extensions, signed sessions, web users, trusted keys, settings — and
+      # ~/.spotiflac/.cache, which is where the cache lives now. One volume
+      # is all this needs; older docs mounting /home/spotiflac/.cache/spotiflac
+      # separately are pointing at a path nothing writes to any more.
+      - spotiflac-data:/home/spotiflac/.spotiflac
+
+    restart: unless-stopped
+
+    healthcheck:
+      # No curl/wget in the base image, so this uses Python's stdlib.
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+    labels:
+      # The opt-in Watchtower below only touches containers carrying this.
+      com.centurylinklabs.watchtower.enable: "true"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # Watchtower — polls GHCR and redeploys spotiflac when a new image is pushed.
+  # ============================================================================
+  # It mounts the Docker socket, which is root-equivalent on the host. That is
+  # inherent to what it does; it is the reason it is scoped by label below
+  # rather than left to update every container on the machine.
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Only needed for a private registry — see REPO_USER/REPO_PASS below.
+      # - /root/.docker/config.json:/config.json:ro
+    environment:
+      # Update ONLY containers labelled watchtower.enable=true. Without this
+      # a Portainer host gets everything on it updated, Portainer included.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # Delete the superseded image after a successful update.
+      WATCHTOWER_CLEANUP: "true"
+      # Drop anonymous volumes on recreate; the named ones above survive.
+      WATCHTOWER_REMOVE_VOLUMES: "false"
+      # Check interval in seconds (3600 = hourly). Use WATCHTOWER_SCHEDULE
+      # instead for a cron expression — set one or the other, never both.
+      WATCHTOWER_POLL_INTERVAL: "${WATCHTOWER_POLL_INTERVAL:-3600}"
+      # e.g. "0 0 4 * * *" = every night at 04:00. Leave empty to use the
+      # interval above.
+      WATCHTOWER_SCHEDULE: "${WATCHTOWER_SCHEDULE:-}"
+      # Log what it decided, not just what it changed.
+      WATCHTOWER_INCLUDE_RESTARTING: "true"
+      WATCHTOWER_LOG_LEVEL: "${WATCHTOWER_LOG_LEVEL:-info}"
+      # Set to "true" for a dry run: it reports updates without applying them.
+      WATCHTOWER_MONITOR_ONLY: "${WATCHTOWER_MONITOR_ONLY:-false}"
+      # Optional push notification on update — shoutrrr URL, e.g.
+      # telegram://TOKEN@telegram?chats=CHAT_ID  or  discord://TOKEN@ID
+      WATCHTOWER_NOTIFICATION_URL: "${WATCHTOWER_NOTIFICATION_URL:-}"
+      WATCHTOWER_NOTIFICATIONS_LEVEL: "info"
+      # Private GHCR only: a PAT with read:packages.
+      REPO_USER: "${GHCR_USER:-}"
+      REPO_PASS: "${GHCR_TOKEN:-}"
+      TZ: "${TZ:-Europe/Rome}"
+    labels:
+      # Lets Watchtower update itself as well as SpotiFLAC — without this
+      # label, WATCHTOWER_LABEL_ENABLE above excludes it from its own sweep.
+      com.centurylinklabs.watchtower.enable: "true"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  spotiflac-downloads:
+  spotiflac-data:
