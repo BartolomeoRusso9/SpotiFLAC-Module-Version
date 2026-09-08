@@ -690,8 +690,13 @@ def _ensure_xvfb() -> None:
     with _xvfb_lock:
         if _xvfb_started or _display_is_live(os.environ.get("DISPLAY", "")):
             return
-        _start_xvfb_if_needed()
-        _xvfb_started = True
+        # Latched only on a display that actually came up. Xvfb dying on the
+        # spot — a stale /tmp/.X99-lock is the usual reason — is reported as
+        # None, and recording that as "started" would make every later call
+        # return early: the process would run on with no display and never
+        # try again. Left false, the next solve gets another attempt.
+        if _start_xvfb_if_needed() is not None:
+            _xvfb_started = True
 
 
 def build_chromium_options(*, hidden: bool = True) -> tuple[ChromiumOptions, str]:

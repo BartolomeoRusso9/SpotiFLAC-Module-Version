@@ -115,3 +115,53 @@ def test_a_live_display_is_left_alone(monkeypatch) -> None:
     solver._ensure_xvfb()
 
     assert started == []
+
+
+def test_a_failed_xvfb_start_leaves_room_for_a_retry(monkeypatch) -> None:
+    """A display that never came up must not be recorded as started.
+
+    Xvfb exits on the spot when a stale /tmp/.X99-lock is lying around, and
+    the helper reports that by returning None. Latching the flag anyway left
+    the process without a display for the rest of its life, since every later
+    call returned at the first `if _xvfb_started`.
+    """
+    monkeypatch.setattr(solver.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(solver, "_xvfb_started", False)
+    monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.setattr(solver, "_display_is_live", lambda display: False)
+
+    attempts: list[str] = []
+
+    def failed_start() -> None:
+        attempts.append("attempt")
+        return None
+
+    monkeypatch.setattr(solver, "_start_xvfb_if_needed", failed_start)
+
+    solver._ensure_xvfb()
+    assert solver._xvfb_started is False, "a display that never came up is not started"
+
+    solver._ensure_xvfb()
+    assert attempts == ["attempt", "attempt"], "the next call must try again"
+
+
+def test_a_successful_xvfb_start_is_only_done_once(monkeypatch) -> None:
+    """The other half: a display that did come up is not started twice."""
+    monkeypatch.setattr(solver.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(solver, "_xvfb_started", False)
+    monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.setattr(solver, "_display_is_live", lambda display: False)
+
+    attempts: list[str] = []
+
+    def successful_start() -> object:
+        attempts.append("attempt")
+        return object()  # stands in for the Popen the real helper returns
+
+    monkeypatch.setattr(solver, "_start_xvfb_if_needed", successful_start)
+
+    solver._ensure_xvfb()
+    assert solver._xvfb_started is True
+
+    solver._ensure_xvfb()
+    assert attempts == ["attempt"], "a live display must not be started again"
