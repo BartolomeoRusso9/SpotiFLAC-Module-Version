@@ -21,6 +21,16 @@ import pytest
 from SpotiFLAC.core import solver
 
 
+# The probe reaches an X server over an AF_UNIX socket, which Windows has no
+# notion of — CPython does not even define socket.AF_UNIX there. The two tests
+# that stand a real socket up are POSIX-only; the rest of the file exercises
+# the parsing, which is platform-agnostic, and runs everywhere.
+needs_unix_sockets = pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX"),
+    reason="no AF_UNIX on this platform, so no X11 socket to probe",
+)
+
+
 @pytest.fixture
 def x11_socket_dir(monkeypatch):
     """A stand-in for /tmp/.X11-unix the probe can be pointed at.
@@ -51,11 +61,13 @@ def test_an_unset_display_is_not_live() -> None:
     assert solver._display_is_live("   ") is False
 
 
+@needs_unix_sockets
 def test_a_local_display_with_nobody_listening_is_not_live(x11_socket_dir) -> None:
     """The Docker case: DISPLAY=:99, and no Xvfb behind it."""
     assert solver._display_is_live(":99") is False
 
 
+@needs_unix_sockets
 def test_a_display_someone_answers_on_is_live(x11_socket_dir) -> None:
     server = _listening(x11_socket_dir / "X7")
     try:
