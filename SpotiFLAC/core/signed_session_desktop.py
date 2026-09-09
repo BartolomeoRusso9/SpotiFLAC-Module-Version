@@ -40,6 +40,23 @@ COMMUNITY_VERIFY_TIMEOUT = 90  # seconds
 # its outer bound instead, giving up early only once the solver thread has
 # actually exited without producing a grant.
 COMMUNITY_VERIFY_ABSOLUTE_TIMEOUT = 240  # seconds
+# Above this, a failed verification round is not retried by
+# ``ensure_community_session()``: see the comment at the retry site.
+COMMUNITY_VERIFY_RETRY_MAX_ELAPSED = 60  # seconds
+
+
+class CommunityVerificationFailed(RuntimeError):
+    """One verification round ended without a grant — retryable.
+
+    Typed on purpose. This is raised *inside* the MODE 2 ``try`` in
+    ``run_community_verification()``, whose ``except Exception`` used to
+    swallow it and re-raise a differently worded RuntimeError ("Manual
+    verification disabled..."). ``ensure_community_session()`` recognised
+    the retryable case by matching "verification timed out" in the message,
+    which that rewritten text never contained — so the retry loop never
+    retried. Matching on the type instead of on prose keeps the two ends
+    from drifting apart again.
+    """
 
 
 def fetch_latest_version() -> str:
@@ -161,15 +178,33 @@ def ensure_community_session() -> CommunitySessionRecord:
 
         grant = None
         for attempt in range(1, 3):
+            started = time.monotonic()
             try:
                 grant = run_community_verification(record)
                 break
             except Exception as exc:
                 message = str(exc)
-                if (
-                    "Automated verification timed out" not in message
-                    and "verification timed out" not in message
-                ):
+                retryable = isinstance(exc, CommunityVerificationFailed) or (
+                    "verification timed out" in message
+                )
+                if not retryable:
+                    raise
+
+                # Retrying is worth it for a fast failure (solver crashed on
+                # startup, browser missing); it is not worth it when the round
+                # burned the full COMMUNITY_VERIFY_ABSOLUTE_TIMEOUT, since a
+                # second one doubles the wait *while holding
+                # community_session_mu* — every other caller then trips the 30s
+                # acquire timeout above.
+                elapsed = time.monotonic() - started
+                if attempt < 2 and elapsed >= COMMUNITY_VERIFY_RETRY_MAX_ELAPSED:
+                    logger.warning(
+                        "[desktop verification] attempt %d/2 failed after %.0fs (%s); "
+                        "not retrying, too slow to be worth a second round",
+                        attempt,
+                        elapsed,
+                        exc,
+                    )
                     raise
 
                 if attempt < 2:
@@ -304,10 +339,11 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 return grant_queue.get(timeout=COMMUNITY_VERIFY_TIMEOUT)
             except queue.Empty:
                 msg = "verification timed out (GUI browser)"
-                raise Exception(msg)
+                raise CommunityVerificationFailed(msg)
 
         # === MODE 2: Automation via solver.py (pydoll) ===
         logger.info("Attempting automated verification via solver.py...")
+        failure_reason = ""
         try:
             from SpotiFLAC.core.solver import (
                 _kill_by_profile_dir,
@@ -335,6 +371,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
             # =========================================================================
             solver_cancel = threading.Event()
             solver_browser_info: dict = {}
+            solver_error: dict = {}
 
             def _run_solver_thread():
                 try:
@@ -350,7 +387,22 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                         with contextlib.suppress(queue.Full):
                             grant_queue.put_nowait(grant_res)
                 except Exception as e:
-                    logger.debug(f"Solver thread terminated or interrupted: {e}")
+                    solver_error["exc"] = e
+                    if solver_cancel.is_set():
+                        # We already got the grant and told the solver to wind
+                        # down; whatever it raises on the way out is expected.
+                        logger.debug(f"Solver thread terminated or interrupted: {e}")
+                    else:
+                        # Nobody cancelled it, so this is the real reason the
+                        # verification is about to "time out". Logging it at
+                        # DEBUG left the caller with nothing but the misleading
+                        # timeout message.
+                        logger.warning(
+                            "[desktop verification] solver thread failed: %s: %s",
+                            type(e).__name__,
+                            e,
+                            exc_info=True,
+                        )
 
             solver_thread = threading.Thread(target=_run_solver_thread, daemon=True)
             solver_thread.start()
@@ -405,16 +457,36 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
                 # here — just let it finish on its own.
                 return grant
 
-            msg = "Automated verification timed out (no grant received in time)."
+            solver_exc = solver_error.get("exc")
+            if solver_exc is not None:
+                msg = (
+                    "Automated verification produced no grant: solver thread "
+                    f"failed with {type(solver_exc).__name__}: {solver_exc}"
+                )
+            elif not solver_thread.is_alive():
+                msg = (
+                    "Automated verification produced no grant "
+                    "(solver thread exited without one)."
+                )
+            else:
+                msg = "Automated verification timed out (no grant received in time)."
             logger.warning(msg)
-            raise RuntimeError(msg)
+            raise CommunityVerificationFailed(msg)
 
         except ImportError:
-            logger.info("solver.py not found or Playwright dependencies missing.")
+            failure_reason = "solver.py not found or Playwright dependencies missing"
+            logger.info(failure_reason)
+        except CommunityVerificationFailed:
+            raise
         except Exception as e:
-            logger.warning(f"Automated verification failed: {e}")
+            failure_reason = f"{type(e).__name__}: {e}"
+            logger.warning(f"Automated verification failed: {failure_reason}")
+        # Carry the cause into the message: this string is what the caller and
+        # the user actually see, and on its own it explains nothing.
         raise RuntimeError(
-            f"Manual verification disabled to avoid blocking the server (challenge: {final_challenge_url})"
+            "Manual verification disabled to avoid blocking the server"
+            + (f" ({failure_reason})" if failure_reason else "")
+            + f" (challenge: {final_challenge_url})"
         )
 
     finally:
