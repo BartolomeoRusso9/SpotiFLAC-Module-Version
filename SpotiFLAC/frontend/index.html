@@ -620,6 +620,20 @@
                 <span class="toggle-sl"></span>
               </label>
             </div>
+            <div class="s-row">
+              <span class="s-label">Verify Hi-Res authenticity<small>Spectral check on every Hi-Res download: flags files that declare 96 kHz but whose content stops at CD range (upsampled). Needs <code>pip install SpotiFLAC[hires]</code>; adds a few seconds per track</small></span>
+              <label class="toggle">
+                <input type="checkbox" id="config-verify-hires" onchange="onVerifyHiresChange()">
+                <span class="toggle-sl"></span>
+              </label>
+            </div>
+            <div class="s-row verify-hires-opt" style="display:none;padding-left:16px;border-left:2px solid var(--border2);margin-left:4px;">
+              <span class="s-label">Replace fake Hi-Res<small>Off = a finding is only reported. On = the flagged file is set aside, the track is re-downloaded as LOSSLESS, and the flagged file is deleted only once the replacement is on disk</small></span>
+              <label class="toggle">
+                <input type="checkbox" id="config-redownload-fake-hires">
+                <span class="toggle-sl"></span>
+              </label>
+            </div>
           </div>
           <div class="s-section">
             <div class="s-title">Appearance</div>

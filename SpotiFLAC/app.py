@@ -1326,6 +1326,48 @@ class SpotiFLAC_API(
         finally:
             self._download_lock.release()
 
+    def _log_hires_verification(self, quality: str, redownload: bool) -> None:
+        """Says what Hi-Res verification will actually do for this run.
+
+        Three things can quietly make the setting a no-op, and all of them
+        are invisible from the settings panel: the optional analysis
+        packages are missing, the requested quality never claimed Hi-Res in
+        the first place, or the check is on but set only to report. Saying
+        so here costs one line and saves the user waiting for a warning
+        that was never going to come.
+        """
+        from .core.hires_check import is_available
+        from .core.quality import normalize_quality
+
+        if not is_available():
+            self.log(
+                "Hi-Res verification is on but the analysis packages are "
+                "missing — install them with: pip install SpotiFLAC[hires]. "
+                "Downloads are unaffected; they simply will not be checked.",
+                "warn",
+            )
+            return
+
+        if normalize_quality(quality) not in ("HI_RES_LOSSLESS", "HI_RES"):
+            self.log(
+                f"Hi-Res verification is on but the requested quality is "
+                f"{normalize_quality(quality)} — standard-definition content "
+                "is what was asked for, so nothing will be flagged.",
+                "debug",
+            )
+            return
+
+        self.log(
+            "Hi-Res verification enabled — each track is spectrally checked "
+            "for upsampling"
+            + (
+                "; a flagged file is replaced by a LOSSLESS re-download"
+                if redownload
+                else " (findings are reported, files are left alone)"
+            ),
+            "debug",
+        )
+
     def _run_download_batch(self, selected_indices, config) -> None:
         self._download_active.set()
         from .client import _CleanConsoleFormatter
@@ -1412,6 +1454,13 @@ class SpotiFLAC_API(
             transcode_to = normalize_transcode_format(config.get("transcode_to"))
             transcode_bitrate = config.get("transcode_bitrate") or "320k"
             transcode_keep_original = config.get("transcode_keep_original", False)
+            # Asking for the replacement is asking for the check, so the
+            # GUI cannot send one without the other (DownloadOptions
+            # enforces the same thing for every other entry point).
+            redownload_fake_hires = bool(config.get("redownload_fake_hires", False))
+            verify_hires = (
+                bool(config.get("verify_hires", False)) or redownload_fake_hires
+            )
             track_max_retries = int(config.get("track_max_retries", 0))
             # The GUI had no equivalent of --max-concurrent, so every
             # download ran at client.SpotiFLAC's default of 2 no matter what
@@ -1501,6 +1550,9 @@ class SpotiFLAC_API(
                     "debug",
                 )
 
+            if verify_hires:
+                self._log_hires_verification(quality, redownload_fake_hires)
+
             self.set_progress(f"Downloading ({quality})…")
             monitor_stop = threading.Event()
             monitor_thread = threading.Thread(
@@ -1568,6 +1620,8 @@ class SpotiFLAC_API(
                 loop=loop_minutes,
                 post_download_hooks=[log_hook],
                 max_concurrent_downloads=max_concurrent,
+                verify_hires=verify_hires,
+                redownload_fake_hires=redownload_fake_hires,
             )
 
             self._push_download_stats()

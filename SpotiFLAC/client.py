@@ -121,6 +121,7 @@ class AsyncSpotiFLAC:
         sync_extensions: bool = True,
         registries: list[str] | None = None,
         verify_hires: bool = False,
+        redownload_fake_hires: bool = False,
     ) -> None:
         self._logger = _setup_logger(log_level)
         self._sync_extensions_on_enter = sync_extensions
@@ -164,6 +165,7 @@ class AsyncSpotiFLAC:
             timeout_s=timeout_s,
             max_concurrent_downloads=max_concurrent_downloads,
             verify_hires=verify_hires,
+            redownload_fake_hires=redownload_fake_hires,
         )
 
         self._downloader = SpotiflacDownloader(self._opts)
@@ -361,6 +363,7 @@ def SpotiFLAC(
     sync_extensions: bool = True,
     registries: list[str] | None = None,
     verify_hires: bool = False,
+    redownload_fake_hires: bool = False,
     batch_tracks: bool = False,
 ) -> None:
     """Backwards-compatible SYNCHRONOUS wrapper.
@@ -417,6 +420,7 @@ def SpotiFLAC(
             sync_extensions=sync_extensions,
             registries=registries,
             verify_hires=verify_hires,
+            redownload_fake_hires=redownload_fake_hires,
         ) as client:
             urls = [url] if isinstance(url, str) else list(url)
             if batch_tracks:

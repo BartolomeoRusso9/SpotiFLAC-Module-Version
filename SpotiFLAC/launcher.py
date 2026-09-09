@@ -919,6 +919,18 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         "(pip install SpotiFLAC[hires]) and adds a few seconds of analysis "
         "per track. Skipped automatically for lossy formats (e.g. --mp3).",
     )
+    verify_grp.add_argument(
+        "--redownload-fake-hires",
+        action="store_true",
+        dest="redownload_fake_hires",
+        default=pd.get("redownload_fake_hires", False),
+        help="Act on a --verify-hires finding instead of only logging it: a "
+        "flagged file is set aside and the track is downloaded again at "
+        "LOSSLESS (the resolution it really had), and the flagged file is "
+        "deleted only once the replacement is on disk — if every provider "
+        "fails, the original is put back. Implies --verify-hires, and only "
+        "applies when a Hi-Res quality was requested.",
+    )
 
     # ── Retry ────────────────────────────────────────────────────────────────
     library_grp = parser.add_argument_group("Music library")
@@ -1336,6 +1348,7 @@ def _subscription_downloader(profile_defaults: dict, output_dir_override: str | 
             transcode_keep_original=pd.get("transcode_keep_original", False),
             max_concurrent_downloads=pd.get("max_concurrent_downloads", 2),
             verify_hires=pd.get("verify_hires", False),
+            redownload_fake_hires=pd.get("redownload_fake_hires", False),
         )
 
     return _download
@@ -1526,6 +1539,7 @@ async def _run_download_async(
     m3u_format: str = "m3u8",
     max_concurrent_downloads: int = 2,
     verify_hires: bool = False,
+    redownload_fake_hires: bool = False,
     save_lrc: bool = False,
     lrc_library_dir: str | None = None,
     resume: bool = True,
@@ -1633,6 +1647,7 @@ async def _run_download_async(
         transcode_keep_original=transcode_keep_original,
         max_concurrent_downloads=max(1, max_concurrent_downloads),
         verify_hires=verify_hires,
+        redownload_fake_hires=redownload_fake_hires,
         save_lrc=save_lrc,
         lrc_library_dir=lrc_library_dir,
         resume=resume,
@@ -1787,6 +1802,7 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
             transcode_keep_original=cfg.get("transcode_keep_original", False),
             max_concurrent_downloads=cfg.get("max_concurrent_downloads", 2),
             verify_hires=cfg.get("verify_hires", False),
+            redownload_fake_hires=cfg.get("redownload_fake_hires", False),
             # The wizard takes a .csv where it takes a link (see
             # the TUI's Source panel); everything after that point is
             # the same run.
@@ -2630,6 +2646,7 @@ async def amain() -> None:
             m3u_format=args.m3u_format,
             max_concurrent_downloads=args.max_concurrent,
             verify_hires=args.verify_hires,
+            redownload_fake_hires=args.redownload_fake_hires,
             notify=args.notify,
             notify_url=args.notify_url,
             notify_token=args.notify_token,
@@ -2679,6 +2696,7 @@ async def amain() -> None:
                 "watch": args.watch,
                 "max_concurrent_downloads": args.max_concurrent,
                 "verify_hires": args.verify_hires,
+                "redownload_fake_hires": args.redownload_fake_hires,
                 "save_lrc": args.save_lrc,
                 "lrc_library_dir": args.lrc_library_dir,
             }

@@ -293,7 +293,7 @@ The conversion is a no-op for extensions that already deliver the requested form
 
 ### Hi-Res Verification
 
-Enable `verify_hires=True` (Python) or `--verify-hires` (CLI) to run a spectral-analysis QA check on every successful lossless download, flagging files that declare a high sample rate (e.g. 96 kHz) but whose actual audio content stops well short of it — a common fingerprint of **upsampling**: taking a CD-quality or lossy source and re-encoding it at a higher sample rate without adding any real high-frequency content, so it *looks* like Hi-Res without being one.
+Enable `verify_hires=True` (Python), `--verify-hires` (CLI) or **Settings → General → Quality → Verify Hi-Res authenticity** (GUI) to run a spectral-analysis QA check on every successful lossless download, flagging files that declare a high sample rate (e.g. 96 kHz) but whose actual audio content stops well short of it — a common fingerprint of **upsampling**: taking a CD-quality or lossy source and re-encoding it at a higher sample rate without adding any real high-frequency content, so it *looks* like Hi-Res without being one.
 
 ```bash
 spotiflac https://open.spotify.com/album/... ./out --service ext:tidal-web -q HI_RES_LOSSLESS --verify-hires
@@ -316,13 +316,45 @@ SpotiFLAC(
 
 - **Off by default and fully opt-in.** It requires the optional `librosa` and `numpy` packages, which are *not* installed by default — install them with `pip install librosa numpy` or `pip install SpotiFLAC[hires]`. If they're missing, the check is silently skipped (a debug-level log line, nothing more) rather than breaking your run.
 - **Never blocks or fails a download.** The check runs as a background task *after* the file has already been saved successfully — a track download is never delayed, retried, or marked as failed because of it, and analysis errors (corrupt segment, unreadable file, etc.) are swallowed and logged at debug level, not surfaced as errors.
-- **A finding is a hint, not a certification.** Some genuine Hi-Res masters are deliberately low-pass filtered during mastering (common in pop/rock) and will still read as "no anomaly". Treat a "possibly upsampled" warning as something worth a closer listen, not definitive proof.
+- **A finding is a hint, not a certification.** The measurement cannot tell an upsampled CD from a genuine Hi-Res master that was deliberately low-pass filtered during mastering (not rare in pop/rock) — in the signal the two are the same. Treat a "possibly upsampled" warning as something worth a closer listen, not definitive proof.
 - **Skipped automatically for lossy output.** If `transcode_to="mp3"` (or `--mp3`) is set, the already-lossy result is never analyzed — checking an MP3 for ultrasonic content would be meaningless. The lossless targets keep the check, since they preserve the spectrum of the source exactly.
 - **Standalone tool.** The underlying checker also ships as a CLI you can point at any file(s) you already have, independent of a download run:
 
   ```bash
   python -m SpotiFLAC.tools.hires_check_cli "My Track.flac" --seconds 45
   ```
+
+#### Replacing a fake Hi-Res file automatically
+
+By default a finding is only a warning: the file stays where it is. Add `redownload_fake_hires=True` (Python), `--redownload-fake-hires` (CLI), or switch on **Replace fake Hi-Res** under the GUI toggle above, to act on it — a flagged file is set aside, the track is downloaded again at `LOSSLESS`, and the flagged file is deleted only once the replacement is on disk.
+
+```bash
+spotiflac https://open.spotify.com/album/... ./out --service ext:tidal-web \
+    -q HI_RES_LOSSLESS --redownload-fake-hires
+```
+
+```python
+from SpotiFLAC import SpotiFLAC
+SpotiFLAC(
+    url="https://open.spotify.com/album/...",
+    output_dir="./downloads",
+    services=["ext:tidal-web"],
+    quality="HI_RES_LOSSLESS",
+    redownload_fake_hires=True,   # implies verify_hires=True
+)
+```
+
+**Why LOSSLESS is the replacement, not a downgrade.** An upsampled 24/96 file carries no more information than the CD-rate master it was made from — the extra bandwidth is empty. The `LOSSLESS` copy is the same audio, honestly labelled, and a good deal smaller.
+
+**What to know:**
+
+- **It implies `--verify-hires`.** Replacing a file means first knowing it should be replaced, so enabling one enables the other.
+- **Only when Hi-Res was requested.** With `-q LOSSLESS`, standard-definition content is exactly what was asked for, not a finding — the check does not engage at all.
+- **The check runs inline here, not in the background.** The verdict decides what happens to the file, so the track is only reported as finished once it has been settled. Expect a few CPU-bound seconds per Hi-Res track.
+- **It can never leave you with nothing.** The flagged file is *renamed* (`<name>.fake-hires.bak`), not deleted, while the replacement is fetched. If every extension fails at `LOSSLESS`, the original name is restored and the run reports that the flagged file was kept.
+- **One replacement, never a chain.** The `LOSSLESS` pass is not itself eligible for replacement, so an extension that ignores the quality request cannot put the track in a loop.
+- **A false positive costs bit depth.** Since the check cannot distinguish an upsample from a deliberately low-passed genuine master, switching this on will occasionally replace a real 24-bit Hi-Res file with a 16-bit `LOSSLESS` one. Nothing audible is lost in that case, but it is a real trade — leave the option off and read the warnings if you would rather decide track by track.
+- **`transcode_keep_original` is not undone.** With that option on, the untranscoded source of a replaced track is left behind under its own extension; only the file the run reported is swapped.
 
 ### Multiple Playlists in One Folder
 

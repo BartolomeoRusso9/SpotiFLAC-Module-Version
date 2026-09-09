@@ -7,11 +7,15 @@ of sharp cutoff is a common fingerprint of upsampling — taking a CD-quality
 or lossy source and re-encoding it at a higher sample rate without adding
 any real high-frequency content, to make it *look* like Hi-Res.
 
-This is a best-effort heuristic, not a certification. Some genuinely hi-res
-masters are deliberately low-pass filtered during mastering (common in pop/
-rock) and will still read as "no anomaly" here, while an unusual but
-legitimate mix could occasionally look suspicious. Treat a "fake_hires"
-verdict as a hint worth a closer listen, not definitive proof.
+This is a best-effort heuristic, not a certification, and the thing it
+measures cannot distinguish between the two ways a spectrum ends at 22 kHz:
+an upsampled CD, and a genuine hi-res master that was deliberately low-pass
+filtered during mastering (not rare in pop/rock). Both read as "fake_hires"
+here, because in the signal they are the same. Treat the verdict as a hint
+worth a closer listen, not proof — and note that acting on it automatically
+(SpotiFLAC's --redownload-fake-hires) will replace such a master with a
+LOSSLESS copy, which costs its bit depth even though no audible content is
+lost.
 
 Public API:
     - is_available() -> bool
@@ -117,7 +121,7 @@ def check_file(
     sample_seconds: int = 30,
     noise_floor_db: float = -80.0,
     hires_sample_rate_threshold: int = 48000,
-    hires_cutoff_threshold_hz: float = 24000.0,
+    hires_cutoff_threshold_hz: float = 28000.0,
     n_fft: int = 4096,
 ) -> HiResCheckResult:
     """Analyzes ``file_path`` and returns a :class:`HiResCheckResult`.
@@ -136,7 +140,12 @@ def check_file(
         hires_sample_rate_threshold: Sample rate (Hz) above which a file
             is considered to *claim* Hi-Res.
         hires_cutoff_threshold_hz: Minimum active-content cutoff frequency
-            (Hz) a genuine Hi-Res file is expected to reach.
+            (Hz) a genuine Hi-Res file is expected to reach. Sits well
+            above 22.05 kHz on purpose: a resampler upsampling from CD
+            leaves a transition-band tail a couple of kHz wide, which a
+            threshold hugging the CD Nyquist reads as real content. A
+            measured 44.1 -> 176.4 kHz upsample of a commercial track
+            reached ~24.7 kHz — the old 24 kHz default passed it.
         n_fft: FFT window size for the STFT. Automatically shrunk for very
             short segments to avoid librosa warnings/errors.
 
@@ -245,7 +254,14 @@ def check_file(
                 noise_floor_db=noise_floor_db,
                 verdict="inconclusive",
             )
-        spectrum_db = librosa.amplitude_to_db(avg_spectrum, ref=np.max)
+        # top_db=None matters more than it looks. librosa's default clamps
+        # everything to `peak - 80 dB`, which is exactly where
+        # noise_floor_db also sits by default — so every clamped bin
+        # compared as "active" against any floor below -80, and the check
+        # reported the full Nyquist frequency as the cutoff for every file
+        # it was given. Documented as tunable, the parameter silently
+        # disabled the check at any value under its own default.
+        spectrum_db = librosa.amplitude_to_db(avg_spectrum, ref=np.max, top_db=None)
         frequencies = librosa.fft_frequencies(sr=sr, n_fft=effective_n_fft)
     except HiResCheckError:
         raise
@@ -278,7 +294,7 @@ async def check_file_async(
     sample_seconds: int = 30,
     noise_floor_db: float = -80.0,
     hires_sample_rate_threshold: int = 48000,
-    hires_cutoff_threshold_hz: float = 24000.0,
+    hires_cutoff_threshold_hz: float = 28000.0,
     n_fft: int = 4096,
 ) -> HiResCheckResult:
     """Async wrapper around :func:`check_file`.

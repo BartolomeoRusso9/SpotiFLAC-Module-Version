@@ -363,6 +363,9 @@ function applySettings(settings = {}) {
   if ($('config-transcode')) { $('config-transcode').value = cfg.transcode_to || 'none'; onTranscodeChange(); }
   if ($('config-transcode-bitrate')) $('config-transcode-bitrate').value = cfg.transcode_bitrate || '320k';
   if ($('config-transcode-keep')) $('config-transcode-keep').checked = cfg.transcode_keep_original;
+  if ($('config-verify-hires')) $('config-verify-hires').checked = !!cfg.verify_hires || !!cfg.redownload_fake_hires;
+  if ($('config-redownload-fake-hires')) $('config-redownload-fake-hires').checked = !!cfg.redownload_fake_hires;
+  onVerifyHiresChange();
   if ($('config-retries')) $('config-retries').value = cfg.track_max_retries;
   if ($('config-post-action')) { $('config-post-action').value = cfg.post_download_action; onPostChange(); }
   if ($('config-post-cmd')) $('config-post-cmd').value = cfg.post_download_command;
@@ -515,6 +518,23 @@ function onTranscodeChange() {
   });
 }
 
+// Replacing a fake Hi-Res file means first knowing it is one, so the
+// replace toggle only exists while the check is on. Hidden rather than
+// disabled: an off check makes the setting inapplicable, not unavailable.
+function onVerifyHiresChange() {
+  const on = $('config-verify-hires') ? $('config-verify-hires').checked : false;
+  document.querySelectorAll('.verify-hires-opt').forEach(row => {
+    row.style.display = on ? 'flex' : 'none';
+  });
+  // Clearing the nested toggle is the whole point of doing this here. The
+  // backend reads "replace" as implying "verify" (one cannot act on a
+  // finding it never made), so a checkbox left on behind a hidden row
+  // would switch the check the user just turned off straight back on.
+  if (!on && $('config-redownload-fake-hires')) {
+    $('config-redownload-fake-hires').checked = false;
+  }
+}
+
 // ── Sortable lists ───────────────────────────────────────────────────────────
 function makeSortable(el) {
   let drag = null;
@@ -608,6 +628,8 @@ const DEFAULT_SETTINGS = {
   transcode_to: 'none',
   transcode_bitrate: '320k',
   transcode_keep_original: false,
+  verify_hires: false,
+  redownload_fake_hires: false,
   qobuz_local_api_url: '',
   tidal_custom_api: '',
   acoustid_api_key: '',
@@ -4045,6 +4067,8 @@ function buildConfig() {
     transcode_to:           $('config-transcode')?.value || 'none',
     transcode_bitrate:      $('config-transcode-bitrate')?.value || '320k',
     transcode_keep_original: $('config-transcode-keep')?.checked || false,
+    verify_hires:           $('config-verify-hires')?.checked || false,
+    redownload_fake_hires:  $('config-redownload-fake-hires')?.checked || false,
     track_max_retries:      parseInt($('config-retries').value) || 0,
     post_download_action:   $('config-post-action').value,
     post_download_command:  $('config-post-cmd')?.value?.trim() || '',
