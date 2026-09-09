@@ -1455,13 +1455,13 @@ class SpotiFLAC_API(
             transcode_to = normalize_transcode_format(config.get("transcode_to"))
             transcode_bitrate = config.get("transcode_bitrate") or "320k"
             transcode_keep_original = config.get("transcode_keep_original", False)
-            # Asking for the replacement is asking for the check, so the
-            # GUI cannot send one without the other (DownloadOptions
-            # enforces the same thing for every other entry point).
-            redownload_fake_hires = bool(config.get("redownload_fake_hires", False))
-            verify_hires = (
-                bool(config.get("verify_hires", False)) or redownload_fake_hires
-            )
+            # `is True`, not bool(): in --web mode this dict is an HTTP
+            # request body, so a setting can arrive as the *string* "false"
+            # — which bool() reads as on, and which would switch on a
+            # feature that deletes files. Only a real boolean counts;
+            # anything else, missing included, leaves it off.
+            redownload_fake_hires = config.get("redownload_fake_hires") is True
+            verify_hires = config.get("verify_hires") is True or redownload_fake_hires
             track_max_retries = int(config.get("track_max_retries", 0))
             # The GUI had no equivalent of --max-concurrent, so every
             # download ran at client.SpotiFLAC's default of 2 no matter what

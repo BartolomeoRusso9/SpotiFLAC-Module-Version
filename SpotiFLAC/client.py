@@ -363,8 +363,12 @@ def SpotiFLAC(
     sync_extensions: bool = True,
     registries: list[str] | None = None,
     verify_hires: bool = False,
-    redownload_fake_hires: bool = False,
+    # After batch_tracks, not before it: this signature is the compatibility
+    # surface for synchronous callers, and inserting a parameter ahead of an
+    # existing one silently rebinds anything passing batch_tracks by
+    # position. New options go on the end.
     batch_tracks: bool = False,
+    redownload_fake_hires: bool = False,
 ) -> None:
     """Backwards-compatible SYNCHRONOUS wrapper.
 

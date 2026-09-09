@@ -44,6 +44,11 @@ def _verdict(verdict: str, sample_rate: int) -> HiResCheckResult:
         cutoff_frequency_hz=21800.0 if verdict == "fake_hires" else 45000.0,
         noise_floor_db=-80.0,
         verdict=verdict,
+        reason=(
+            f"declares {sample_rate} Hz but content stops at ~21800 Hz"
+            if verdict == "fake_hires"
+            else ""
+        ),
     )
 
 
@@ -188,6 +193,70 @@ def test_verify_alone_never_touches_the_file(_offline, monkeypatch, tmp_path) ->
     assert seen == []
     assert provider.qualities == ["HI_RES_LOSSLESS"]
     assert (tmp_path / TRACK_FILE).read_bytes() == b"audio-HI_RES_LOSSLESS"
+
+
+def test_the_kept_transcode_source_is_set_aside_as_well(
+    _offline, monkeypatch, tmp_path
+) -> None:
+    """With transcode_keep_original the provider's own file survives the
+    conversion under the same stem. Left in place while the replacement is
+    fetched, BaseProvider._file_exists() finds it and reports the track as
+    already downloaded — so the replacement never happens and the flagged
+    file comes back.
+    """
+    _stub_analysis(monkeypatch, _verdict("fake_hires", 96000))
+    provider = _Provider(tmp_path)
+    kept_source = tmp_path / (Path(TRACK_FILE).stem + ".m4a")
+    kept_source.write_bytes(b"provider-source")
+
+    opts = dl.DownloadOptions(
+        output_dir=str(tmp_path),
+        embed_lyrics=False,
+        enrich_metadata=False,
+        quality="HI_RES_LOSSLESS",
+        redownload_fake_hires=True,
+        transcode_keep_original=True,
+        transcode_to="flac",
+    )
+    result = asyncio.run(
+        dl.download_one_async(_track(), str(tmp_path), [provider], opts),
+    )
+
+    assert result.success
+    assert provider.qualities == ["HI_RES_LOSSLESS", "LOSSLESS"]
+    # Both the flagged file and the source it was made from are gone.
+    assert not kept_source.exists()
+    assert not (tmp_path / (QUARANTINED)).exists()
+    assert not (
+        tmp_path / (kept_source.name + dl._FAKE_HIRES_QUARANTINE_SUFFIX)
+    ).exists()
+
+
+def test_a_kept_source_is_put_back_when_the_replacement_fails(
+    _offline, monkeypatch, tmp_path
+) -> None:
+    """Both files move, so both must come back."""
+    _stub_analysis(monkeypatch, _verdict("fake_hires", 96000))
+    provider = _Provider(tmp_path, fail_after_first=True)
+    kept_source = tmp_path / (Path(TRACK_FILE).stem + ".m4a")
+    kept_source.write_bytes(b"provider-source")
+
+    opts = dl.DownloadOptions(
+        output_dir=str(tmp_path),
+        embed_lyrics=False,
+        enrich_metadata=False,
+        quality="HI_RES_LOSSLESS",
+        redownload_fake_hires=True,
+        transcode_keep_original=True,
+        transcode_to="flac",
+    )
+    result = asyncio.run(
+        dl.download_one_async(_track(), str(tmp_path), [provider], opts),
+    )
+
+    assert result.success
+    assert (tmp_path / TRACK_FILE).read_bytes() == b"audio-HI_RES_LOSSLESS"
+    assert kept_source.read_bytes() == b"provider-source"
 
 
 def test_asking_for_the_replacement_turns_the_check_on(tmp_path) -> None:

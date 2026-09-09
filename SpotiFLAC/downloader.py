@@ -440,16 +440,13 @@ async def _analyze_hires_async(file_path: str):
 def _report_hires_result(file_path: str, result) -> None:
     """Prints/logs one verdict. Warns on the console only for a finding."""
     if result.is_suspicious:
+        reason = result.reason or "does not measure as Hi-Res"
         safe_tqdm_write(
             f"  \u26a0\ufe0f  Hi-Res check: '{Path(file_path).name}' "
-            f"{result.reason} — possibly upsampled / fake Hi-Res.",
+            f"{reason} — possibly upsampled / fake Hi-Res.",
             file=sys.stderr,
         )
-        logger.warning(
-            "[hires-check] possible fake Hi-Res: %s (%s)",
-            file_path,
-            result.reason,
-        )
+        logger.warning("[hires-check] possible fake Hi-Res: %s (%s)", file_path, reason)
     else:
         logger.debug(
             "[hires-check] %s -> verdict=%s (declared %d Hz / %s-bit, "
@@ -544,6 +541,51 @@ async def _await_pending_hires_checks(timeout_s: float = 30.0) -> None:
         return
     with contextlib.suppress(Exception):
         await asyncio.wait(pending, timeout=timeout_s)
+
+
+#: Containers a provider can deliver. Used to find the untranscoded source
+#: that `transcode_keep_original` leaves beside the converted file — the
+#: DownloadResult only ever names the converted one.
+_PROVIDER_AUDIO_SUFFIXES = (
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".ogg",
+    ".opus",
+    ".wav",
+    ".aiff",
+    ".wv",
+    ".tta",
+)
+
+
+def _retained_transcode_sources(result_path: str, opts: DownloadOptions) -> list[str]:
+    """The provider's own file(s) kept beside `result_path`, or [].
+
+    With `transcode_keep_original` the source survives the conversion under
+    the same stem and its own extension. It has to be set aside along with
+    the converted file: the replacement pass asks the providers again, and
+    BaseProvider._file_exists() would find that leftover and report the
+    track as already downloaded — so the flagged file would be restored and
+    nothing would ever be replaced.
+
+    Probed by extension rather than by listing the folder: an album
+    directory can be large, and a stem is free to contain glob characters.
+    """
+    if not (opts.transcode_to and opts.transcode_keep_original):
+        return []
+
+    target = Path(result_path)
+    current = target.suffix.lower()
+    retained = []
+    for suffix in _PROVIDER_AUDIO_SUFFIXES:
+        if suffix == current:
+            continue
+        candidate = target.with_suffix(suffix)
+        with contextlib.suppress(OSError):
+            if candidate.is_file():
+                retained.append(str(candidate))
+    return retained
 
 
 async def _quarantine_file_async(path: str) -> str | None:
@@ -1183,12 +1225,23 @@ async def _replace_fake_hires_async(
     if not check.is_suspicious:
         return result
 
-    quarantined = await _quarantine_file_async(original_path)
-    if quarantined is None:
-        # Could not free the name, so the replacement would either be
-        # refused as "already downloaded" or overwrite the evidence
-        # half-way. Leave everything alone; the warning already went out.
-        return result
+    # The flagged file, plus whatever transcode kept beside it: every one
+    # of them has to stop existing under its own name, or the replacement
+    # pass finds a leftover and reports the track as already downloaded.
+    to_set_aside = [original_path, *_retained_transcode_sources(original_path, opts)]
+
+    quarantined: list[tuple[str, str]] = []
+    for source in to_set_aside:
+        moved = await _quarantine_file_async(source)
+        if moved is None:
+            # Could not free a name, so the replacement would either be
+            # refused as "already downloaded" or overwrite the evidence
+            # half-way. Undo what has already moved and leave everything as
+            # it was; the warning has already gone out.
+            for previous, origin in quarantined:
+                await _restore_quarantined_file_async(previous, origin)
+            return result
+        quarantined.append((moved, source))
 
     safe_tqdm_write(
         f"  ↺  Re-downloading '{metadata.title}' at "
@@ -1222,7 +1275,8 @@ async def _replace_fake_hires_async(
     )
 
     if not retry.success or retry.skipped or not retry.file_path:
-        await _restore_quarantined_file_async(quarantined, original_path)
+        for moved, origin in quarantined:
+            await _restore_quarantined_file_async(moved, origin)
         safe_tqdm_write(
             f"  ⚠️  {_FAKE_HIRES_FALLBACK_QUALITY} re-download of "
             f"'{metadata.title}' failed ({retry.error or 'no file'}) — "
@@ -1237,7 +1291,8 @@ async def _replace_fake_hires_async(
         )
         return result
 
-    await _discard_quarantined_file_async(quarantined)
+    for moved, _origin in quarantined:
+        await _discard_quarantined_file_async(moved)
     logger.info(
         "[hires-check] replaced fake Hi-Res '%s' with %s from %s",
         original_path,

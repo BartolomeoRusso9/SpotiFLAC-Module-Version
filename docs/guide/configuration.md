@@ -361,7 +361,7 @@ SpotiFLAC(
 - **It can never leave you with nothing.** The flagged file is *renamed* (`<name>.fake-hires.bak`), not deleted, while the replacement is fetched. If every extension fails at `LOSSLESS`, the original name is restored and the run reports that the flagged file was kept.
 - **One replacement, never a chain.** The `LOSSLESS` pass is not itself eligible for replacement, so an extension that ignores the quality request cannot put the track in a loop.
 - **A false positive costs bit depth.** Since the *spectral* half cannot distinguish an upsample from a deliberately low-passed genuine master, switching this on will occasionally replace a real 24-bit Hi-Res file with a 16-bit `LOSSLESS` one. A finding that names the bit depth instead ("declares 24-bit but only 16 bits carry data") is not a judgement call, and replacing that file loses nothing at all. Nothing audible is lost in that case, but it is a real trade — leave the option off and read the warnings if you would rather decide track by track.
-- **`transcode_keep_original` is not undone.** With that option on, the untranscoded source of a replaced track is left behind under its own extension; only the file the run reported is swapped.
+- **`transcode_keep_original` is handled too.** With that option on, the converted file *and* the provider source kept beside it are both set aside, and both are replaced or both put back. Setting aside only the converted one would leave the source where the next provider's "already downloaded" check finds it, and the track would never actually be replaced.
 
 ### Multiple Playlists in One Folder
 

@@ -144,7 +144,7 @@ cannot be matched are listed rather than silently dropped.
 | --- | --- |
 | `--upgrade-library PATH` | Folder to scan. |
 | `--upgrade-target` | `LOSSLESS` (default), `HI_RES`, … — anything `normalize_quality()` accepts. |
-| `--upgrade-verify-hires` | Also flag fake Hi-Res. Slow; needs the `hires` extra. |
+| `--upgrade-verify-hires` | Also flag fake Hi-Res (upsampled, or a padded bit depth). Slow; nothing extra to install. |
 | `--upgrade-download` | Re-fetch what was found. Without it the command only reports. |
 | `--upgrade-limit N` | Stop after N files — useful for a first trial run. |
 | `--no-recursive` | Do not descend into subfolders. |
