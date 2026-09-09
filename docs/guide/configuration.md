@@ -310,13 +310,20 @@ SpotiFLAC(
 )
 ```
 
-**How it works:** for each finished track, a short segment (default 30s) is decoded from the middle of the file — never the whole track, to keep memory usage bounded — and its average frequency spectrum is compared against the noise floor. If the file's sample rate implies Hi-Res but no real content is found above ~24 kHz, a warning is printed and logged; nothing else happens.
+**How it works:** a file can claim Hi-Res along two independent axes, and each is answered by the test that can actually judge it. A short segment (default 30s) is read from the middle of the file — never the whole track, to keep memory usage bounded.
+
+| Claim | Test | Nature |
+|---|---|---|
+| **Sample rate** — declares 96 kHz | Average frequency spectrum vs. the noise floor. Content stopping just above 22.05 kHz is the fingerprint of upsampling from a CD source. | Heuristic |
+| **Bit depth** — declares 24-bit | How many bits the samples actually use. A 16-bit master padded into a 24-bit container leaves its low 8 bits zero in *every* sample. | Exact |
+
+The bit-depth test is the only one that says anything about a **24-bit / 44.1 kHz** file, which claims Hi-Res by depth alone: its sample rate claims nothing, so a CD-range spectrum is the correct answer for it rather than a finding. That case used to pass unexamined. A file is flagged if either test fails, and the warning names which one.
 
 **Design notes worth knowing before you turn it on:**
 
 - **Off by default and fully opt-in.** It requires the optional `librosa` and `numpy` packages, which are *not* installed by default — install them with `pip install librosa numpy` or `pip install SpotiFLAC[hires]`. If they're missing, the check is silently skipped (a debug-level log line, nothing more) rather than breaking your run.
 - **Never blocks or fails a download.** The check runs as a background task *after* the file has already been saved successfully — a track download is never delayed, retried, or marked as failed because of it, and analysis errors (corrupt segment, unreadable file, etc.) are swallowed and logged at debug level, not surfaced as errors.
-- **A finding is a hint, not a certification.** The measurement cannot tell an upsampled CD from a genuine Hi-Res master that was deliberately low-pass filtered during mastering (not rare in pop/rock) — in the signal the two are the same. Treat a "possibly upsampled" warning as something worth a closer listen, not definitive proof.
+- **The spectral half is a hint, not a certification.** It cannot tell an upsampled CD from a genuine Hi-Res master that was deliberately low-pass filtered during mastering (not rare in pop/rock) — in the signal the two are the same. Treat a "content stops at…" warning as something worth a closer listen, not definitive proof. The bit-depth half carries no such caveat: bits are either used or they are not.
 - **Skipped automatically for lossy output.** If `transcode_to="mp3"` (or `--mp3`) is set, the already-lossy result is never analyzed — checking an MP3 for ultrasonic content would be meaningless. The lossless targets keep the check, since they preserve the spectrum of the source exactly.
 - **Standalone tool.** The underlying checker also ships as a CLI you can point at any file(s) you already have, independent of a download run:
 
@@ -353,7 +360,7 @@ SpotiFLAC(
 - **The check runs inline here, not in the background.** The verdict decides what happens to the file, so the track is only reported as finished once it has been settled. Expect a few CPU-bound seconds per Hi-Res track.
 - **It can never leave you with nothing.** The flagged file is *renamed* (`<name>.fake-hires.bak`), not deleted, while the replacement is fetched. If every extension fails at `LOSSLESS`, the original name is restored and the run reports that the flagged file was kept.
 - **One replacement, never a chain.** The `LOSSLESS` pass is not itself eligible for replacement, so an extension that ignores the quality request cannot put the track in a loop.
-- **A false positive costs bit depth.** Since the check cannot distinguish an upsample from a deliberately low-passed genuine master, switching this on will occasionally replace a real 24-bit Hi-Res file with a 16-bit `LOSSLESS` one. Nothing audible is lost in that case, but it is a real trade — leave the option off and read the warnings if you would rather decide track by track.
+- **A false positive costs bit depth.** Since the *spectral* half cannot distinguish an upsample from a deliberately low-passed genuine master, switching this on will occasionally replace a real 24-bit Hi-Res file with a 16-bit `LOSSLESS` one. A finding that names the bit depth instead ("declares 24-bit but only 16 bits carry data") is not a judgement call, and replacing that file loses nothing at all. Nothing audible is lost in that case, but it is a real trade — leave the option off and read the warnings if you would rather decide track by track.
 - **`transcode_keep_original` is not undone.** With that option on, the untranscoded source of a replaced track is left behind under its own extension; only the file the run reported is swapped.
 
 ### Multiple Playlists in One Folder

@@ -440,25 +440,25 @@ def _report_hires_result(file_path: str, result) -> None:
     """Prints/logs one verdict. Warns on the console only for a finding."""
     if result.is_suspicious:
         safe_tqdm_write(
-            f"  \u26a0\ufe0f  Hi-Res check: '{Path(file_path).name}' declares "
-            f"{result.declared_sample_rate} Hz but active spectral content "
-            f"stops at ~{result.cutoff_frequency_hz:.0f} Hz — possibly "
-            "upsampled / fake Hi-Res.",
+            f"  \u26a0\ufe0f  Hi-Res check: '{Path(file_path).name}' "
+            f"{result.reason} — possibly upsampled / fake Hi-Res.",
             file=sys.stderr,
         )
         logger.warning(
-            "[hires-check] possible fake Hi-Res: %s (declared %d Hz, cutoff ~%.0f Hz)",
+            "[hires-check] possible fake Hi-Res: %s (%s)",
             file_path,
-            result.declared_sample_rate,
-            result.cutoff_frequency_hz,
+            result.reason,
         )
     else:
         logger.debug(
-            "[hires-check] %s -> verdict=%s (declared %d Hz, cutoff ~%.0f Hz)",
+            "[hires-check] %s -> verdict=%s (declared %d Hz / %s-bit, "
+            "cutoff ~%.0f Hz, %s bits in use)",
             file_path,
             result.verdict,
             result.declared_sample_rate,
+            result.declared_bit_depth or "?",
             result.cutoff_frequency_hz,
+            result.effective_bit_depth or "?",
         )
 
 
@@ -1191,7 +1191,8 @@ async def _replace_fake_hires_async(
 
     safe_tqdm_write(
         f"  ↺  Re-downloading '{metadata.title}' at "
-        f"{_FAKE_HIRES_FALLBACK_QUALITY} — the Hi-Res copy looks upsampled."
+        f"{_FAKE_HIRES_FALLBACK_QUALITY} — the Hi-Res copy "
+        f"{check.reason or 'does not measure as Hi-Res'}."
     )
 
     # The providers of the first pass wrote their findings onto the shared

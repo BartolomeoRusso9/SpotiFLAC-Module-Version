@@ -54,6 +54,11 @@ def _analyze_one(file_path: str, sample_seconds: int) -> tuple[bool, bool]:
         f"(of {result.total_duration_s:.1f}s total)"
     )
     print(f"  Active cutoff freq.  : ~{result.cutoff_frequency_hz:.0f} Hz")
+    if result.declared_bit_depth:
+        print(
+            f"  Bit depth            : {result.declared_bit_depth} declared, "
+            f"{result.effective_bit_depth or '?'} in use"
+        )
 
     icons = {
         "fake_hires": "\u26a0\ufe0f",

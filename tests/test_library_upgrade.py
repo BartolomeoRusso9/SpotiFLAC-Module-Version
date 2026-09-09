@@ -223,12 +223,18 @@ def test_fake_hires_is_reclassified_down_when_verifying(tmp_path, monkeypatch):
     _make_audio(
         tmp_path / "fake.flac", codec="flac", rate=96000, extra=["-sample_fmt", "s32"]
     )
-    monkeypatch.setattr(lu, "_verify_hires", lambda _path: "fake_hires")
+    monkeypatch.setattr(
+        lu,
+        "_verify_hires",
+        lambda _path: ("fake_hires", "declares 24-bit but only 16 bits carry data"),
+    )
 
     report = scan_library(tmp_path, "HI_RES", verify_hires=True)
 
     assert len(report.candidates) == 1
-    assert "declares Hi-Res" in report.candidates[0].reason
+    # The check's own words, not a fixed string: it can flag a padded bit
+    # depth as well as a CD-range spectrum, and the report has to say which.
+    assert report.candidates[0].reason == "declares 24-bit but only 16 bits carry data"
     # Without verification the same file passes.
     assert scan_library(tmp_path, "HI_RES").candidates == []
 
