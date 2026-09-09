@@ -261,7 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--verify",
         action="store_true",
         help="Confirm each group against the audio itself with Chromaprint "
-        "before offering it. Needs the 'dedup' extra; slower, and the only "
+        "before offering it. Needs the fpcalc binary; slower, and the only "
         "mode that catches two files that share tags but not audio.",
     )
     parser.add_argument(
@@ -338,8 +338,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.folder and not args.from_db:
         print(
-            "Error: a FOLDER is required (or --from-db FILE.db, or "
-            "--restore MANIFEST)",
+            "Error: a FOLDER is required (or --from-db FILE.db, or --restore MANIFEST)",
             file=sys.stderr,
         )
         return EXIT_NO_FILES

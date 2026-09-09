@@ -224,12 +224,24 @@ class DownloadOptions:
 
     # Optional post-download QA check: flags files that declare a high
     # sample rate but whose actual spectral content stops at, or just
-    # above, standard-definition limits (a common fingerprint of
-    # upsampling — see core/hires_check.py). Off by default: it requires
-    # the optional 'librosa'/'numpy' dependencies and adds a few seconds
+    # above, standard-definition limits, and files whose declared bit depth
+    # is padding (see core/hires_check.py). Off by default: it adds a few
+    # seconds
     # of analysis per track. Never blocks or fails a download — a finding
     # is only logged/printed as a warning.
     verify_hires: bool = False
+
+    # What to do with a file `verify_hires` flags as fake Hi-Res. Off: the
+    # finding is only a warning and the file stays. On: the flagged file is
+    # set aside and the track is downloaded again at LOSSLESS, which is what
+    # it actually was before somebody upsampled it — the CD-rate original is
+    # both smaller and honest about what it contains. The flagged file is
+    # only deleted once the replacement has actually arrived; if every
+    # provider fails at LOSSLESS it is put back, so this can never leave the
+    # track missing. Requires verify_hires=True and a Hi-Res request
+    # (-q HI_RES / HI_RES_LOSSLESS): asking for LOSSLESS and getting
+    # standard-definition audio is not a fake, it is the request.
+    redownload_fake_hires: bool = False
 
     def __post_init__(self) -> None:
         # Normalize immediately so the rest of the code can do `if opts.transcode_to`
@@ -237,6 +249,12 @@ class DownloadOptions:
         # through a download batch.
         self.transcode_to = normalize_transcode_format(self.transcode_to)
         self.transcode_bitrate = normalize_bitrate(self.transcode_bitrate)
+        # Replacing a fake Hi-Res file means first knowing it is one, so
+        # asking for the replacement is asking for the check. Resolved here
+        # rather than at each entry point (CLI, profile, TUI, API) so no
+        # caller can enable one without the other by omission.
+        if self.redownload_fake_hires:
+            self.verify_hires = True
 
 
 def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProvider]:
@@ -365,80 +383,134 @@ def _no_providers_error_message(services: list[str]) -> str:
 # format conversion itself rather than the source. Skip them outright.
 _HIRES_CHECK_SKIP_FORMATS = {"mp3", "aac", "ogg", "opus", "m4a-lossy"}
 
+#: The canonical qualities that actually *claim* Hi-Res. A LOSSLESS request
+#: answered with CD-range audio is not a fake — it is exactly what was asked
+#: for — so the redownload path below only ever engages for these.
+_HIRES_QUALITY_TIERS = {"HI_RES_LOSSLESS", "HI_RES"}
+
+#: What a flagged file is replaced with. An upsampled 24/96 file has no more
+#: information in it than the CD-rate master it was made from, so LOSSLESS is
+#: not a downgrade here — it is the same audio, honestly labelled and smaller.
+_FAKE_HIRES_FALLBACK_QUALITY = "LOSSLESS"
+
+#: The flagged file is renamed with this suffix, not deleted, while the
+#: replacement is fetched: if every provider fails at LOSSLESS it is put back.
+#: Losing the only copy of a track to a *heuristic* would be a far worse
+#: outcome than keeping a file whose top octave is empty.
+_FAKE_HIRES_QUARANTINE_SUFFIX = ".fake-hires.bak"
+
 # Keeps strong references to fire-and-forget background tasks so they are
 # not garbage-collected mid-flight (a well-known asyncio footgun), while
 # `add_done_callback` cleans each one up as soon as it finishes.
 _hires_check_tasks: set[asyncio.Task] = set()
 
 
-async def _run_hires_check_background(file_path: str) -> None:
-    """Runs the optional Hi-Res spectral check for one finished download.
+async def _analyze_hires_async(file_path: str):
+    """The spectral verdict for one finished file, or None if it can't be had.
 
-    Best-effort and completely non-fatal by design: any failure (missing
-    optional dependency, unreadable file, analysis error) is logged at
-    debug level and swallowed — this must never affect, delay, or fail a
-    download that already succeeded.
+    Best-effort and completely non-fatal by design: a missing optional
+    dependency, an unreadable file or an analysis error is logged at debug
+    level and reported as None. A QA check must never turn a download that
+    already succeeded into a failure — every caller here treats None as
+    "not verified" and leaves the file exactly as it found it.
     """
     from .core.hires_check import HiResCheckError, check_file_async, is_available
 
     if not is_available():
         logger.debug(
-            "[hires-check] skipped for '%s': optional 'librosa'/'numpy' "
-            "dependencies are not installed (pip install SpotiFLAC[hires])",
+            "[hires-check] skipped for '%s': numpy/soundfile could not be "
+            "imported (they are install dependencies, so this means a "
+            "broken environment rather than a missing extra)",
             file_path,
         )
-        return
+        return None
 
     try:
-        result = await check_file_async(file_path)
+        return await check_file_async(file_path)
     except HiResCheckError as exc:
         logger.debug("[hires-check] skipped for '%s': %s", file_path, exc)
-        return
+        return None
     except Exception as exc:  # noqa: BLE001 - a QA check must never crash the pipeline
         logger.debug(
             "[hires-check] unexpected error analyzing '%s': %s", file_path, exc
         )
-        return
+        return None
 
+
+def _report_hires_result(file_path: str, result) -> None:
+    """Prints/logs one verdict. Warns on the console only for a finding."""
     if result.is_suspicious:
+        reason = result.reason or "does not measure as Hi-Res"
         safe_tqdm_write(
-            f"  \u26a0\ufe0f  Hi-Res check: '{Path(file_path).name}' declares "
-            f"{result.declared_sample_rate} Hz but active spectral content "
-            f"stops at ~{result.cutoff_frequency_hz:.0f} Hz — possibly "
-            "upsampled / fake Hi-Res.",
+            f"  \u26a0\ufe0f  Hi-Res check: '{Path(file_path).name}' "
+            f"{reason} — possibly upsampled / fake Hi-Res.",
             file=sys.stderr,
         )
-        logger.warning(
-            "[hires-check] possible fake Hi-Res: %s (declared %d Hz, "
-            "cutoff ~%.0f Hz)",
-            file_path,
-            result.declared_sample_rate,
-            result.cutoff_frequency_hz,
-        )
+        logger.warning("[hires-check] possible fake Hi-Res: %s (%s)", file_path, reason)
     else:
         logger.debug(
-            "[hires-check] %s -> verdict=%s (declared %d Hz, cutoff ~%.0f Hz)",
+            "[hires-check] %s -> verdict=%s (declared %d Hz / %s-bit, "
+            "cutoff ~%.0f Hz, %s bits in use)",
             file_path,
             result.verdict,
             result.declared_sample_rate,
+            result.declared_bit_depth or "?",
             result.cutoff_frequency_hz,
+            result.effective_bit_depth or "?",
         )
 
 
-def _schedule_hires_check(opts: DownloadOptions, result: DownloadResult) -> None:
-    """Fires the Hi-Res check for a successful, non-skipped download.
+async def _run_hires_check_background(file_path: str) -> None:
+    """Runs the optional Hi-Res spectral check for one finished download.
 
-    Scheduled as a background task rather than awaited inline: librosa's
+    The report-only half of the feature: it looks, it warns, it changes
+    nothing on disk. `--redownload-fake-hires` takes the other path (see
+    _replace_fake_hires_async), which has to run inline because it acts on
+    the verdict.
+    """
+    result = await _analyze_hires_async(file_path)
+    if result is None:
+        return
+    _report_hires_result(file_path, result)
+
+
+def _hires_check_candidate(opts: DownloadOptions, result: DownloadResult) -> bool:
+    """Whether this finished download is worth analyzing at all."""
+    if not opts.verify_hires or not result.file_path:
+        return False
+    if not result.success or result.skipped:
+        return False
+    return (result.format or "").lower() not in _HIRES_CHECK_SKIP_FORMATS
+
+
+def _fake_hires_redownload_applies(
+    opts: DownloadOptions,
+    result: DownloadResult,
+) -> bool:
+    """Whether the inline redownload path owns this result.
+
+    When it does, `_schedule_hires_check` stands down: the file would
+    otherwise be decoded and analyzed twice, once by each path, and the
+    background copy could still be reading a file the inline one has
+    already replaced.
+    """
+    if not opts.redownload_fake_hires or not _hires_check_candidate(opts, result):
+        return False
+    return normalize_quality(opts.quality) in _HIRES_QUALITY_TIERS
+
+
+def _schedule_hires_check(opts: DownloadOptions, result: DownloadResult) -> None:
+    """Fires the report-only Hi-Res check for a successful download.
+
+    Scheduled as a background task rather than awaited inline: the
     analysis takes a few CPU-bound seconds, and blocking here would stall
     this track's slot (and any progress output) for every download, opt-in
     feature or not. Requires a running event loop — always true here, since
     this is only ever called from within the async download pipeline.
     """
-    if not opts.verify_hires or not result.file_path:
+    if not _hires_check_candidate(opts, result):
         return
-
-    fmt = (result.format or "").lower()
-    if fmt in _HIRES_CHECK_SKIP_FORMATS:
+    if _fake_hires_redownload_applies(opts, result):
         return
 
     try:
@@ -469,6 +541,112 @@ async def _await_pending_hires_checks(timeout_s: float = 30.0) -> None:
         return
     with contextlib.suppress(Exception):
         await asyncio.wait(pending, timeout=timeout_s)
+
+
+#: Containers a provider can deliver. Used to find the untranscoded source
+#: that `transcode_keep_original` leaves beside the converted file — the
+#: DownloadResult only ever names the converted one.
+_PROVIDER_AUDIO_SUFFIXES = (
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".ogg",
+    ".opus",
+    ".wav",
+    ".aiff",
+    ".wv",
+    ".tta",
+)
+
+
+def _retained_transcode_sources(result_path: str, opts: DownloadOptions) -> list[str]:
+    """The provider's own file(s) kept beside `result_path`, or [].
+
+    With `transcode_keep_original` the source survives the conversion under
+    the same stem and its own extension. It has to be set aside along with
+    the converted file: the replacement pass asks the providers again, and
+    BaseProvider._file_exists() would find that leftover and report the
+    track as already downloaded — so the flagged file would be restored and
+    nothing would ever be replaced.
+
+    Probed by extension rather than by listing the folder: an album
+    directory can be large, and a stem is free to contain glob characters.
+    """
+    if not (opts.transcode_to and opts.transcode_keep_original):
+        return []
+
+    target = Path(result_path)
+    current = target.suffix.lower()
+    retained = []
+    for suffix in _PROVIDER_AUDIO_SUFFIXES:
+        if suffix == current:
+            continue
+        candidate = target.with_suffix(suffix)
+        with contextlib.suppress(OSError):
+            if candidate.is_file():
+                retained.append(str(candidate))
+    return retained
+
+
+async def _quarantine_file_async(path: str) -> str | None:
+    """Moves `path` aside and returns where it went, or None if it couldn't.
+
+    A rename inside the same folder: atomic, instant whatever the file's
+    size, and it frees the name so the replacement download lands exactly
+    where the flagged file was (and so no provider's "already downloaded"
+    check sees the old file and skips).
+    """
+    quarantined = path + _FAKE_HIRES_QUARANTINE_SUFFIX
+
+    def _do_move() -> str:
+        # A leftover from an interrupted earlier run would make os.replace
+        # silently drop it; it is a stale copy of this same track, so
+        # letting the new one take its place is the right resolution.
+        os.replace(path, quarantined)
+        return quarantined
+
+    try:
+        return await asyncio.to_thread(_do_move)
+    except OSError as exc:
+        logger.warning(
+            "[hires-check] could not set '%s' aside for replacement: %s", path, exc
+        )
+        return None
+
+
+async def _restore_quarantined_file_async(quarantined: str, original: str) -> None:
+    """Puts a quarantined file back under its own name. Never raises."""
+
+    def _do_restore() -> None:
+        os.replace(quarantined, original)
+
+    try:
+        await asyncio.to_thread(_do_restore)
+    except OSError as exc:
+        logger.warning(
+            "[hires-check] could not restore '%s' to '%s': %s",
+            quarantined,
+            original,
+            exc,
+        )
+
+
+async def _discard_quarantined_file_async(quarantined: str) -> None:
+    """Deletes a quarantined file once its replacement is on disk."""
+
+    def _do_unlink() -> None:
+        os.unlink(quarantined)
+
+    try:
+        await asyncio.to_thread(_do_unlink)
+    except OSError as exc:
+        # The replacement is already in place, so this is untidy, not
+        # broken: say where the leftover is and carry on.
+        logger.warning(
+            "[hires-check] replacement downloaded but could not delete '%s': %s",
+            quarantined,
+            exc,
+        )
 
 
 async def _move_file_async(src: str, dst: str) -> None:
@@ -712,7 +890,7 @@ async def _record_provider_outcome(
         )
 
 
-async def download_one_async(
+async def _download_one_pass_async(
     metadata: TrackMetadata,
     output_dir: str,
     providers: list[BaseProvider],
@@ -720,8 +898,12 @@ async def download_one_async(
     position: int = 1,
     is_album: bool = False,
 ) -> DownloadResult:
-    """Attempts to download a single track across all providers in order,
-    with per-track retry if track_max_retries > 0.
+    """One full pass over the providers for a single track.
+
+    Attempts the download across all providers in order, with per-track
+    retry if track_max_retries > 0. Called twice for the same track only by
+    download_one_async(), when a Hi-Res file turns out to be upsampled and
+    is fetched again at LOSSLESS.
     """
     stop_event = asyncio.Event()
     DownloadManager()
@@ -1002,6 +1184,166 @@ async def download_one_async(
     return DownloadResult.fail(
         "none",
         f"All providers failed after {attempts_str} — {summary}",
+    )
+
+
+async def _replace_fake_hires_async(
+    metadata: TrackMetadata,
+    output_dir: str,
+    providers: list[BaseProvider],
+    opts: DownloadOptions,
+    position: int,
+    is_album: bool,
+    snapshot: TrackMetadata,
+    result: DownloadResult,
+) -> DownloadResult:
+    """Verifies a finished Hi-Res download and replaces it if it is fake.
+
+    Runs the spectral check inline rather than in the background, unlike
+    the report-only path: the verdict decides what happens to the file, so
+    there is nothing useful to do with it after the track has been reported
+    as done.
+
+    A file that passes (or that cannot be analyzed at all) is returned
+    untouched. A flagged one is set aside, the track is downloaded again at
+    LOSSLESS, and only then is the flagged file deleted. If the replacement
+    fails on every provider the original is put back and returned as it
+    was: a heuristic is not a good enough reason to leave the user with no
+    file at all.
+    """
+    # Guaranteed non-empty by _fake_hires_redownload_applies(), which is
+    # the only caller; spelled out so the path is a plain `str` from here on.
+    original_path = result.file_path or ""
+    if not original_path:
+        return result
+
+    check = await _analyze_hires_async(original_path)
+    if check is None:
+        return result
+
+    _report_hires_result(original_path, check)
+    if not check.is_suspicious:
+        return result
+
+    # The flagged file, plus whatever transcode kept beside it: every one
+    # of them has to stop existing under its own name, or the replacement
+    # pass finds a leftover and reports the track as already downloaded.
+    to_set_aside = [original_path, *_retained_transcode_sources(original_path, opts)]
+
+    quarantined: list[tuple[str, str]] = []
+    for source in to_set_aside:
+        moved = await _quarantine_file_async(source)
+        if moved is None:
+            # Could not free a name, so the replacement would either be
+            # refused as "already downloaded" or overwrite the evidence
+            # half-way. Undo what has already moved and leave everything as
+            # it was; the warning has already gone out.
+            for previous, origin in quarantined:
+                await _restore_quarantined_file_async(previous, origin)
+            return result
+        quarantined.append((moved, source))
+
+    safe_tqdm_write(
+        f"  ↺  Re-downloading '{metadata.title}' at "
+        f"{_FAKE_HIRES_FALLBACK_QUALITY} — the Hi-Res copy "
+        f"{check.reason or 'does not measure as Hi-Res'}."
+    )
+
+    # The providers of the first pass wrote their findings onto the shared
+    # TrackMetadata, including whatever led to the file being rejected.
+    # The second pass gets the same brief the first one did, not the
+    # first one's conclusions.
+    _restore_metadata(metadata, snapshot)
+
+    fallback_opts = replace(
+        opts,
+        quality=_FAKE_HIRES_FALLBACK_QUALITY,
+        # One replacement attempt, never a chain: the LOSSLESS file is
+        # expected to read as standard-definition, and a provider that
+        # ignores the quality request would otherwise be asked again and
+        # again for the same track.
+        redownload_fake_hires=False,
+    )
+
+    retry = await _download_one_pass_async(
+        metadata,
+        output_dir,
+        providers,
+        fallback_opts,
+        position,
+        is_album,
+    )
+
+    if not retry.success or retry.skipped or not retry.file_path:
+        for moved, origin in quarantined:
+            await _restore_quarantined_file_async(moved, origin)
+        safe_tqdm_write(
+            f"  ⚠️  {_FAKE_HIRES_FALLBACK_QUALITY} re-download of "
+            f"'{metadata.title}' failed ({retry.error or 'no file'}) — "
+            "keeping the flagged Hi-Res file.",
+            file=sys.stderr,
+        )
+        logger.warning(
+            "[hires-check] kept flagged file '%s': %s re-download failed (%s)",
+            original_path,
+            _FAKE_HIRES_FALLBACK_QUALITY,
+            retry.error or "no file",
+        )
+        return result
+
+    for moved, _origin in quarantined:
+        await _discard_quarantined_file_async(moved)
+    logger.info(
+        "[hires-check] replaced fake Hi-Res '%s' with %s from %s",
+        original_path,
+        retry.file_path,
+        retry.provider,
+    )
+    return retry
+
+
+async def download_one_async(
+    metadata: TrackMetadata,
+    output_dir: str,
+    providers: list[BaseProvider],
+    opts: DownloadOptions,
+    position: int = 1,
+    is_album: bool = False,
+) -> DownloadResult:
+    """Downloads a single track, honouring `--redownload-fake-hires`.
+
+    Thin wrapper over _download_one_pass_async(): without that option it is
+    the pass, unchanged. With it, a Hi-Res download that the spectral check
+    flags as upsampled is swapped for a LOSSLESS one before the track is
+    reported as finished — so what the caller receives (and what the post
+    -download hooks, the playlist writer and the run summary all see) is
+    the file the user actually ends up with.
+    """
+    # Taken before any provider runs, so the replacement pass can be given
+    # the request rather than the rejected download's version of it.
+    snapshot = metadata.model_copy(deep=True)
+
+    result = await _download_one_pass_async(
+        metadata,
+        output_dir,
+        providers,
+        opts,
+        position,
+        is_album,
+    )
+
+    if not _fake_hires_redownload_applies(opts, result):
+        return result
+
+    return await _replace_fake_hires_async(
+        metadata,
+        output_dir,
+        providers,
+        opts,
+        position,
+        is_album,
+        snapshot,
+        result,
     )
 
 
@@ -2084,19 +2426,23 @@ class SpotiflacDownloader:
                 from .core.tidal_metadata import TidalMetadataClient
 
                 client = TidalMetadataClient()
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(
-                        client, url, include_featuring=self._opts.include_featuring
-                    )
+                (
+                    collection_name,
+                    tracks,
+                    *collection_cover,
+                ) = await _call_metadata_get_url(
+                    client, url, include_featuring=self._opts.include_featuring
                 )
             elif is_apple:
                 from .core.apple_music_metadata import AppleMusicMetadataClient
 
                 client = AppleMusicMetadataClient()
-                collection_name, tracks, *collection_cover = (
-                    await _call_metadata_get_url(
-                        client, url, include_featuring=self._opts.include_featuring
-                    )
+                (
+                    collection_name,
+                    tracks,
+                    *collection_cover,
+                ) = await _call_metadata_get_url(
+                    client, url, include_featuring=self._opts.include_featuring
                 )
             elif is_soundcloud:
                 sc_providers = _build_providers_for_name("soundcloud", self._opts)
@@ -2129,12 +2475,14 @@ class SpotiflacDownloader:
                     _adapt_js_metadata_response(response)
                 )
             else:
-                collection_name, tracks, *_collection_cover = (
-                    await _call_metadata_get_url(
-                        self._metadata_client(),
-                        url,
-                        include_featuring=self._opts.include_featuring,
-                    )
+                (
+                    collection_name,
+                    tracks,
+                    *_collection_cover,
+                ) = await _call_metadata_get_url(
+                    self._metadata_client(),
+                    url,
+                    include_featuring=self._opts.include_featuring,
                 )
         except SpotiflacError:
             raise

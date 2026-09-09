@@ -913,11 +913,23 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         help="After each successful lossless download, run a spectral "
         "analysis to flag files that declare a high sample rate but whose "
         "actual content stops at standard-definition frequencies (a common "
-        "sign of upsampling / fake Hi-Res). A finding is only logged as a "
+        "sign of upsampling), and files whose declared bit depth is padding "
+        "(24-bit containing a 16-bit master). A finding is only logged as a "
         "warning — it never fails or removes the download. Off by default: "
-        "requires the optional 'librosa'/'numpy' dependencies "
-        "(pip install SpotiFLAC[hires]) and adds a few seconds of analysis "
-        "per track. Skipped automatically for lossy formats (e.g. --mp3).",
+        "it adds a few seconds of analysis per track. Skipped automatically "
+        "for lossy formats (e.g. --mp3).",
+    )
+    verify_grp.add_argument(
+        "--redownload-fake-hires",
+        action="store_true",
+        dest="redownload_fake_hires",
+        default=pd.get("redownload_fake_hires", False),
+        help="Act on a --verify-hires finding instead of only logging it: a "
+        "flagged file is set aside and the track is downloaded again at "
+        "LOSSLESS (the resolution it really had), and the flagged file is "
+        "deleted only once the replacement is on disk — if every provider "
+        "fails, the original is put back. Implies --verify-hires, and only "
+        "applies when a Hi-Res quality was requested.",
     )
 
     # ── Retry ────────────────────────────────────────────────────────────────
@@ -1336,6 +1348,7 @@ def _subscription_downloader(profile_defaults: dict, output_dir_override: str | 
             transcode_keep_original=pd.get("transcode_keep_original", False),
             max_concurrent_downloads=pd.get("max_concurrent_downloads", 2),
             verify_hires=pd.get("verify_hires", False),
+            redownload_fake_hires=pd.get("redownload_fake_hires", False),
         )
 
     return _download
@@ -1526,6 +1539,7 @@ async def _run_download_async(
     m3u_format: str = "m3u8",
     max_concurrent_downloads: int = 2,
     verify_hires: bool = False,
+    redownload_fake_hires: bool = False,
     save_lrc: bool = False,
     lrc_library_dir: str | None = None,
     resume: bool = True,
@@ -1633,6 +1647,7 @@ async def _run_download_async(
         transcode_keep_original=transcode_keep_original,
         max_concurrent_downloads=max(1, max_concurrent_downloads),
         verify_hires=verify_hires,
+        redownload_fake_hires=redownload_fake_hires,
         save_lrc=save_lrc,
         lrc_library_dir=lrc_library_dir,
         resume=resume,
@@ -1787,6 +1802,7 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
             transcode_keep_original=cfg.get("transcode_keep_original", False),
             max_concurrent_downloads=cfg.get("max_concurrent_downloads", 2),
             verify_hires=cfg.get("verify_hires", False),
+            redownload_fake_hires=cfg.get("redownload_fake_hires", False),
             # The wizard takes a .csv where it takes a link (see
             # the TUI's Source panel); everything after that point is
             # the same run.
@@ -1893,15 +1909,17 @@ async def amain() -> None:
             from .webapp import resolve_web_token
             from .webapp import run_async as run_web
         except ImportError as exc:
-            # webapp.py imports FastAPI at module level, and FastAPI/uvicorn
-            # ship in the optional `web` extra rather than the base install —
-            # web mode is one of several, and most users of the module never
-            # start a server. Say which command fixes it instead of handing
-            # over a bare traceback.
+            # webapp.py imports FastAPI at module level. FastAPI and uvicorn
+            # are base dependencies now — they used to sit in a `web` extra,
+            # which meant `pip install SpotiFLAC && spotiflac --web` died on
+            # an ImportError — so reaching here means a broken environment
+            # rather than a missing extra. Say so instead of handing over a
+            # bare traceback.
             print(
-                f"--web needs the web extra, which isn't installed ({exc}).\n"
-                "Install it with:\n"
-                "    pip install 'SpotiFLAC[web]'",
+                f"--web could not import its server dependencies ({exc}).\n"
+                "FastAPI and uvicorn ship with SpotiFLAC, so this environment "
+                "looks incomplete. Try:\n"
+                "    pip install --force-reinstall fastapi 'uvicorn[standard]'",
                 file=sys.stderr,
             )
             raise SystemExit(1) from exc
@@ -2292,7 +2310,7 @@ async def amain() -> None:
             dest="verify",
             action="store_true",
             help="Confirm each group against the audio with Chromaprint "
-            "before offering it. Needs the 'dedup' extra.",
+            "before offering it. Needs the fpcalc binary (Chromaprint).",
         )
         dd_parser.add_argument(
             "--dedup-threshold", dest="threshold", type=float, default=0.95
@@ -2630,6 +2648,7 @@ async def amain() -> None:
             m3u_format=args.m3u_format,
             max_concurrent_downloads=args.max_concurrent,
             verify_hires=args.verify_hires,
+            redownload_fake_hires=args.redownload_fake_hires,
             notify=args.notify,
             notify_url=args.notify_url,
             notify_token=args.notify_token,
@@ -2679,6 +2698,7 @@ async def amain() -> None:
                 "watch": args.watch,
                 "max_concurrent_downloads": args.max_concurrent,
                 "verify_hires": args.verify_hires,
+                "redownload_fake_hires": args.redownload_fake_hires,
                 "save_lrc": args.save_lrc,
                 "lrc_library_dir": args.lrc_library_dir,
             }

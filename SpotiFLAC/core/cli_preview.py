@@ -129,7 +129,11 @@ def build_command_parts(cfg: dict) -> list[str]:
         parts.append("--include-featuring")
     if cfg.get("m3u_format", "m3u8") != "m3u8":
         parts.extend(["--m3u", cfg["m3u_format"]])
-    if cfg.get("verify_hires"):
+    if cfg.get("redownload_fake_hires"):
+        # Implies --verify-hires (see DownloadOptions.__post_init__), so
+        # printing both would just be noise on the command line.
+        parts.append("--redownload-fake-hires")
+    elif cfg.get("verify_hires"):
         parts.append("--verify-hires")
     # Resuming is the default, so only its absence is worth spelling out.
     if cfg.get("resume", True) is False:

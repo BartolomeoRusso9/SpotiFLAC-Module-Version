@@ -785,13 +785,13 @@ def verify_groups(
 
     notes: list[str] = []
     if not can_compare():
-        # Same posture as library_upgrade._verify_hires(): an optional
-        # dependency that is missing degrades to "did not verify", never to
-        # a failed scan — and never to a silent pass, which here would mean
-        # deleting files on an unverified guess.
+        # Same posture as library_upgrade._verify_hires(): a missing
+        # dependency degrades to "did not verify", never to a failed scan —
+        # and never to a silent pass, which here would mean deleting files
+        # on an unverified guess.
         notes.append(
-            "acoustic verification skipped: needs pyacoustid, the fpcalc "
-            "binary and libchromaprint (pip install 'SpotiFLAC[dedup]')"
+            "acoustic verification skipped: needs the fpcalc binary and "
+            "libchromaprint on this machine — see https://acoustid.org/chromaprint"
         )
         return groups, notes
 
@@ -1011,7 +1011,7 @@ class ResolutionResult:
             lines.append(f"  manifest: {self.manifest_path}")
             if self.action == ACTION_TRASH:
                 lines.append(
-                    "  undo with: spotiflac --dedup-restore " f"{self.manifest_path}"
+                    f"  undo with: spotiflac --dedup-restore {self.manifest_path}"
                 )
         return "\n".join(lines)
 

@@ -306,11 +306,14 @@ def scan_library(
         reason = ""
 
         if verify_hires and current == TIER_HIRES:
-            verdict = _verify_hires(path)
+            verdict, why = _verify_hires(path)
             if verdict == "fake_hires":
                 # It claims hi-res and isn't. Its honest tier is CD at best.
                 current = TIER_LOSSLESS
-                reason = "declares Hi-Res but has a CD-range spectral cutoff"
+                # Taken from the check rather than written here: it can flag
+                # a padded bit depth as well as a CD-range spectrum now, and
+                # a fixed string would name the wrong one half the time.
+                reason = why or "declares Hi-Res but does not measure as it"
 
         if current >= target:
             report.already_ok += 1
@@ -340,26 +343,28 @@ def scan_library(
     return report
 
 
-def _verify_hires(path: Path) -> str:
-    """hires_check's verdict for one file, or "" when it can't run.
+def _verify_hires(path: Path) -> tuple[str, str]:
+    """hires_check's (verdict, reason) for one file, or ("", "") if it can't run.
 
-    Wrapped because the check is an optional dependency (`SpotiFLAC[hires]`)
-    and a missing librosa must degrade to "don't reclassify" rather than
-    failing the scan.
+    Wrapped because a broken audio-analysis import must degrade to "don't
+    reclassify" rather than failing the whole scan. That used to be the
+    normal case (the check lived behind an optional extra); it is now the
+    unusual one, and the handling is the same either way.
     """
     try:
         from .hires_check import check_file, is_available
 
         if not is_available():
             logger.warning(
-                "[upgrade] --verify-hires needs the optional 'hires' extra "
-                "(pip install 'SpotiFLAC[hires]'); scanning without it."
+                "[upgrade] --verify-hires could not import numpy/soundfile; "
+                "scanning without it."
             )
-            return ""
-        return check_file(path).verdict
+            return "", ""
+        result = check_file(path)
+        return result.verdict, result.reason
     except Exception as exc:
         logger.debug("[upgrade] hires check failed for %s: %s", path, exc)
-        return ""
+        return "", ""
 
 
 # ─────────────────────────────────────────────────────────────

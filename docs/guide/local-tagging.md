@@ -128,11 +128,10 @@ result = await retag_local_file_async(
 
 Local Tagging's own dedup (above) matches by ISRC or by normalized title+artist text — cheap and usually right, but blind to a re-rip with wrong or missing tags, or the same recording pulled from two different providers with slightly different metadata. This is a second, independent signal that looks at the *audio itself* instead: [Chromaprint](https://acoustid.org/chromaprint) acoustic fingerprints, compared locally — no network call, no AcoustID lookup, no API key.
 
-Off by default and fully opt-in (same posture as [Hi-Res Verification](configuration.md#hi-res-verification)): needs the optional `pyacoustid` package and the `fpcalc` binary it wraps.
+Off by default, and the one thing it needs is not a Python package: `pyacoustid` ships with SpotiFLAC, but it is a wrapper around `fpcalc`, a system binary pip cannot install for you.
 
 ```bash
-pip install SpotiFLAC[dedup]
-# then install fpcalc — most package managers ship it as "chromaprint" or
+# install fpcalc — most package managers ship it as "chromaprint" or
 # "libchromaprint-tools" (see https://acoustid.org/chromaprint)
 
 python -m SpotiFLAC.tools.dedup_check_cli ~/Music/MyLibrary
@@ -229,9 +228,9 @@ own recording.
 `--dedup-verify` fingerprints each group and splits it where the audio
 disagrees, so a group only survives if the sound agrees with the tags. This
 is the expensive check applied cheaply: fingerprints are computed per group,
-never library-wide. It needs the same `SpotiFLAC[dedup]` extra as the section
-above; without it the scan says so in a note and reports unverified groups
-rather than silently passing them.
+never library-wide. It needs the same `fpcalc` binary as the section above;
+without it the scan says so in a note and reports unverified groups rather
+than silently passing them.
 
 A file that cannot be fingerprinted leaves its group rather than staying in
 it. Everything downstream of a group is a decision to remove files, so

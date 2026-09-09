@@ -80,13 +80,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if not is_available():
         print(
-            "Error: duplicate detection requires the optional 'pyacoustid' "
-            "package and the 'fpcalc' binary (from Chromaprint), neither of "
-            "which is installed.\n"
-            "Install with: pip install SpotiFLAC[dedup]\n"
-            "then install fpcalc — see https://acoustid.org/chromaprint "
-            "(most package managers ship it as 'chromaprint' or "
-            "'libchromaprint-tools').",
+            "Error: duplicate detection needs the 'fpcalc' binary (from "
+            "Chromaprint), which is not on PATH. pyacoustid itself ships "
+            "with SpotiFLAC, so there is nothing to pip install.\n"
+            "See https://acoustid.org/chromaprint — most package managers "
+            "ship it as 'chromaprint' or 'libchromaprint-tools'.",
             file=sys.stderr,
         )
         return EXIT_DEPENDENCY_MISSING

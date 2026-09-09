@@ -54,6 +54,11 @@ def _analyze_one(file_path: str, sample_seconds: int) -> tuple[bool, bool]:
         f"(of {result.total_duration_s:.1f}s total)"
     )
     print(f"  Active cutoff freq.  : ~{result.cutoff_frequency_hz:.0f} Hz")
+    if result.declared_bit_depth:
+        print(
+            f"  Bit depth            : {result.declared_bit_depth} declared, "
+            f"{result.effective_bit_depth or '?'} in use"
+        )
 
     icons = {
         "fake_hires": "\u26a0\ufe0f",
@@ -91,10 +96,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if not is_available():
         print(
-            "Error: Hi-Res verification requires the optional 'librosa' and "
-            "'numpy' packages, which are not installed.\n"
-            "Install them with: pip install librosa numpy\n"
-            "(or: pip install SpotiFLAC[hires])",
+            "Error: could not import numpy/soundfile. They are install "
+            "dependencies of SpotiFLAC, so this is a broken environment "
+            "rather than a missing extra.\n"
+            "Try: pip install --force-reinstall numpy soundfile",
             file=sys.stderr,
         )
         return EXIT_DEPENDENCY_MISSING

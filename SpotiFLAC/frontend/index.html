@@ -446,7 +446,7 @@
               Duration slack
               <input type="number" id="libdedup-tolerance" value="4" min="0" max="60" step="0.5" style="width:64px;">s
             </label>
-            <label class="s-label" style="display:flex;align-items:center;gap:6px;font-size:11.5px;" title="Fingerprint each group and split it where the audio disagrees. Slower; needs the 'dedup' extra.">
+            <label class="s-label" style="display:flex;align-items:center;gap:6px;font-size:11.5px;" title="Fingerprint each group and split it where the audio disagrees. Slower; needs the fpcalc binary (Chromaprint) on this machine.">
               <input type="checkbox" id="libdedup-verify"> Confirm with audio
             </label>
             <label class="s-label" style="display:flex;align-items:center;gap:6px;font-size:11.5px;" title="Also write a SQLite index of the whole library next to the quarantine folder">
@@ -617,6 +617,20 @@
               <span class="s-label">Auto quality fallback</span>
               <label class="toggle">
                 <input type="checkbox" id="config-fallback">
+                <span class="toggle-sl"></span>
+              </label>
+            </div>
+            <div class="s-row">
+              <span class="s-label">Verify Hi-Res authenticity<small>Flags files that declare 96 kHz but whose content stops at CD range (upsampled), and 24-bit files that are really a padded 16-bit master. Adds a few seconds of analysis per track</small></span>
+              <label class="toggle">
+                <input type="checkbox" id="config-verify-hires" onchange="onVerifyHiresChange()">
+                <span class="toggle-sl"></span>
+              </label>
+            </div>
+            <div class="s-row verify-hires-opt" style="display:none;padding-left:16px;border-left:2px solid var(--border2);margin-left:4px;">
+              <span class="s-label">Replace fake Hi-Res<small>Off = a finding is only reported. On = the flagged file is set aside, the track is re-downloaded as LOSSLESS, and the flagged file is deleted only once the replacement is on disk</small></span>
+              <label class="toggle">
+                <input type="checkbox" id="config-redownload-fake-hires">
                 <span class="toggle-sl"></span>
               </label>
             </div>

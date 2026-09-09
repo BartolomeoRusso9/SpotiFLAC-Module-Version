@@ -21,10 +21,11 @@ Public API:
     - fingerprint_similarity(a, b) -> float               (0.0-1.0)
     - find_duplicate_groups(fingerprints, ...) -> list[list[Path]]
 
-Off by default and fully opt-in, same posture as core/hires_check.py:
-requires `pip install SpotiFLAC[dedup]` (pyacoustid + the system `fpcalc`
-binary); if either is missing, is_available() is False and callers are
-expected to skip the feature rather than fail.
+pyacoustid ships with SpotiFLAC, but the fingerprinting itself is done by
+`fpcalc` (Chromaprint) — a system binary pip cannot install. So this stays
+opt-in in the same way core/hires_check.py is: if fpcalc is not on PATH,
+is_available() is False and callers are expected to skip the feature rather
+than fail.
 """
 
 from __future__ import annotations
@@ -125,7 +126,11 @@ def compute_fingerprint(path: str | Path) -> AudioFingerprint:
     not abort a whole library scan.
     """
     if acoustid is None:
-        msg = f"pyacoustid not installed ({_ACOUSTID_IMPORT_ERROR}); pip install SpotiFLAC[dedup]"
+        msg = (
+            f"could not import pyacoustid ({_ACOUSTID_IMPORT_ERROR}). It is "
+            "an install dependency of SpotiFLAC, so this points at a broken "
+            "environment; try: pip install --force-reinstall pyacoustid"
+        )
         raise AudioFingerprintError(msg)
 
     p = Path(path)

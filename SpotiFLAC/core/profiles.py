@@ -74,6 +74,7 @@ class ProfileConfig(BaseModel):
     # here, so `--verify-hires --save-profile x` came back without it.
     create_playlist_subfolders: bool = True
     verify_hires: bool = False
+    redownload_fake_hires: bool = False
 
     model_config = {"extra": "ignore"}
 

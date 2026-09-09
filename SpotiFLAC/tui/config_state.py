@@ -148,6 +148,7 @@ class ConfigState:
     # makes `to_cfg()` a complete answer rather than a partial one.
     json_report: bool = False
     verify_hires: bool = False
+    redownload_fake_hires: bool = False
     write_m3u: str | None = None
     m3u_format: str = "m3u8"
     library_type: str | None = None
@@ -393,6 +394,7 @@ class ConfigState:
             "tidal_custom_api": state.tidal_custom_api,
             "json_report": state.json_report,
             "verify_hires": state.verify_hires,
+            "redownload_fake_hires": state.redownload_fake_hires,
             "write_m3u": state.write_m3u,
             "m3u_format": state.m3u_format,
             "library_type": state.library_type,
