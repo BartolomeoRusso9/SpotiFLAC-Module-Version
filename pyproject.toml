@@ -58,7 +58,27 @@ dependencies = [
     "tenacity>=8.3.0",
     "python-dotenv>=1.2.2",
     "requests>=2.33.0",
-    "pydoll-python>=2.9.0"
+    "pydoll-python>=2.9.0",
+    # Base, not an extra: --verify-hires used to be a flag that silently did
+    # nothing unless you had also installed SpotiFLAC[hires]. That extra
+    # pulled librosa, and with it numba, llvmlite, scipy and scikit-learn —
+    # some 346 MB to use six functions. core/hires_check.py now does the
+    # analysis on numpy and soundfile directly (verified verdict-for-verdict
+    # against the librosa version), which is ~36 MB and no native toolchain,
+    # so the check can simply always be available.
+    "numpy>=1.24.0",
+    "soundfile>=0.12.1",
+    # Base, not an extra: webapp.py and webapi/routes.py import FastAPI at
+    # module level, so `spotiflac --web` was not a degraded experience
+    # without it — it was an ImportError. An entry point that cannot start
+    # is not an optional feature.
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    # Base too. It is a thin wrapper, and the weight of acoustic
+    # fingerprinting is in `fpcalc` (Chromaprint), a system binary pip could
+    # never have installed anyway — so gating the Python half behind an
+    # extra only added a second way for the feature to be missing.
+    "pyacoustid>=1.3.0"
 ]
 
 [project.urls]
@@ -101,21 +121,10 @@ dev = [
     "mypy>=1.10",
     "pre-commit>=3.0",
 ]
-web = [
-    # Needed by `spotiflac --web` (webapp.py imports FastAPI at module level).
-    # These used to live only in requirements.txt, so Docker — which installs
-    # from both files — worked while `pip install SpotiFLAC && spotiflac --web`
-    # died on ImportError. Keep this extra and requirements.txt in agreement.
-    "fastapi>=0.110.0",
-    "uvicorn[standard]>=0.29.0",
-]
-hires = [
-    "librosa>=0.10.0",
-    "numpy>=1.24.0",
-]
-dedup = [
-    "pyacoustid>=1.3.0",
-]
+# `web`, `hires` and `dedup` used to live here. Everything they installed is
+# part of the base install now, and pip treats a request for an extra that no
+# longer exists as a warning rather than an error, so an old
+# `pip install 'SpotiFLAC[web]'` still gets a working install.
 
 [tool.black]
 line-length = 88
@@ -159,13 +168,12 @@ warn_redundant_casts = true
 exclude = ["build/", "dist/"]
 
 [[tool.mypy.overrides]]
-# Optional heavy deps (the `hires` extra) pulled in only by core/hires_check.py.
-# Not installed in CI's default dev environment. When present locally, skip
-# reading their source entirely (treated as untyped `Any`) instead of just
-# suppressing errors: librosa's own source uses PEP 695 syntax mypy's parser
-# can't even read under python_version=3.10, which aborts the whole run
-# rather than reporting a normal per-module error.
-module = ["librosa.*", "numpy.*"]
+# The audio-analysis deps, used only by core/hires_check.py. They are part of
+# the base install now (librosa, which needed this override to avoid aborting
+# the run on PEP 695 syntax, is gone), but their source is still skipped
+# rather than followed: numpy's stubs pull a large graph into an advisory-only
+# run, and every finding here would be in numpy rather than in this codebase.
+module = ["numpy.*", "soundfile.*"]
 follow_imports = "skip"
 
 [tool.coverage.run]

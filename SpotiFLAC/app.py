@@ -1341,9 +1341,10 @@ class SpotiFLAC_API(
 
         if not is_available():
             self.log(
-                "Hi-Res verification is on but the analysis packages are "
-                "missing — install them with: pip install SpotiFLAC[hires]. "
-                "Downloads are unaffected; they simply will not be checked.",
+                "Hi-Res verification is on but numpy/soundfile could not be "
+                "imported. They ship with SpotiFLAC, so this points at a "
+                "broken install rather than a missing extra. Downloads are "
+                "unaffected; they simply will not be checked.",
                 "warn",
             )
             return

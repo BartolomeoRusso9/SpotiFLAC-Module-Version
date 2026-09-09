@@ -224,9 +224,9 @@ class DownloadOptions:
 
     # Optional post-download QA check: flags files that declare a high
     # sample rate but whose actual spectral content stops at, or just
-    # above, standard-definition limits (a common fingerprint of
-    # upsampling — see core/hires_check.py). Off by default: it requires
-    # the optional 'librosa'/'numpy' dependencies and adds a few seconds
+    # above, standard-definition limits, and files whose declared bit depth
+    # is padding (see core/hires_check.py). Off by default: it adds a few
+    # seconds
     # of analysis per track. Never blocks or fails a download — a finding
     # is only logged/printed as a warning.
     verify_hires: bool = False
@@ -418,8 +418,9 @@ async def _analyze_hires_async(file_path: str):
 
     if not is_available():
         logger.debug(
-            "[hires-check] skipped for '%s': optional 'librosa'/'numpy' "
-            "dependencies are not installed (pip install SpotiFLAC[hires])",
+            "[hires-check] skipped for '%s': numpy/soundfile could not be "
+            "imported (they are install dependencies, so this means a "
+            "broken environment rather than a missing extra)",
             file_path,
         )
         return None
@@ -504,7 +505,7 @@ def _fake_hires_redownload_applies(
 def _schedule_hires_check(opts: DownloadOptions, result: DownloadResult) -> None:
     """Fires the report-only Hi-Res check for a successful download.
 
-    Scheduled as a background task rather than awaited inline: librosa's
+    Scheduled as a background task rather than awaited inline: the
     analysis takes a few CPU-bound seconds, and blocking here would stall
     this track's slot (and any progress output) for every download, opt-in
     feature or not. Requires a running event loop — always true here, since

@@ -39,19 +39,19 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger("SpotiFLAC.hires_check")
 
 try:
-    import librosa
     import numpy as np
     import soundfile as sf
 
-    _LIBROSA_IMPORT_ERROR: Exception | None = None
-except Exception as exc:  # pragma: no cover - depends on optional install
-    librosa = None  # type: ignore[assignment]
+    _AUDIO_IMPORT_ERROR: Exception | None = None
+except Exception as exc:  # pragma: no cover - both are install dependencies
     np = None  # type: ignore[assignment]
-    _LIBROSA_IMPORT_ERROR = exc
+    sf = None  # type: ignore[assignment]
+    _AUDIO_IMPORT_ERROR = exc
 
 
 class HiResCheckError(Exception):
@@ -195,19 +195,69 @@ def _measure_bit_depth(
 
 
 def is_available() -> bool:
-    """Whether the optional `librosa`/`numpy` dependencies are installed."""
-    return _LIBROSA_IMPORT_ERROR is None
+    """Whether the analysis can run at all.
+
+    Both numpy and soundfile are install dependencies now, so this is True
+    on any working install. Kept — and still checked by every caller —
+    because a broken environment is a thing that happens, and degrading to
+    "verification skipped" is the right answer when it does. It must never
+    be the reason a finished download is treated as failed.
+    """
+    return _AUDIO_IMPORT_ERROR is None
 
 
-def _require_librosa() -> None:
-    if _LIBROSA_IMPORT_ERROR is not None:
+def _require_audio_libs() -> None:
+    if _AUDIO_IMPORT_ERROR is not None:
         raise HiResCheckError(
-            "Hi-Res verification requires the optional 'librosa' and 'numpy' "
-            "packages, which are not installed. Install them with: "
-            "pip install librosa numpy  "
-            "(or: pip install SpotiFLAC[hires]). "
-            f"Original import error: {_LIBROSA_IMPORT_ERROR}"
+            "Hi-Res verification needs 'numpy' and 'soundfile', which are "
+            "install dependencies of SpotiFLAC — this environment has a "
+            "broken or partial install. Try: pip install --force-reinstall "
+            f"numpy soundfile. Original import error: {_AUDIO_IMPORT_ERROR}"
         )
+
+
+def _read_mono_window(
+    path: Path,
+    start_frame: int,
+    frames: int,
+) -> tuple["np.ndarray", int]:
+    """The requested window of `path`, downmixed to mono, as float32.
+
+    soundfile is what librosa itself decoded through, so this reads exactly
+    the same formats it did — libsndfile's list, which is FLAC, WAV, AIFF,
+    OGG, MP3 and friends, but *not* ALAC in an MP4 container.
+    """
+    with sf.SoundFile(path) as handle:
+        handle.seek(start_frame)
+        block = handle.read(frames, dtype="float32", always_2d=True)
+        return block.mean(axis=1), int(handle.samplerate)
+
+
+def _average_magnitude_spectrum(y: "np.ndarray", n_fft: int) -> "np.ndarray":
+    """Mean magnitude across a Hann-windowed STFT of `y`.
+
+    A hand-rolled equivalent of `np.abs(librosa.stft(y, n_fft)).mean(axis=1)`,
+    matching its defaults exactly: a periodic Hann window, a hop of n_fft/4,
+    and centred frames (the signal zero-padded by n_fft/2 at both ends).
+    Checked against librosa on real and synthetic audio before librosa was
+    dropped: the spectra agree to 1.1e-07 relative — float32 rounding, i.e.
+    the same computation — and every cutoff came out identical.
+    """
+    hop = n_fft // 4
+    # Annotated because numpy is `follow_imports = "skip"` for mypy (see
+    # pyproject.toml), so everything it returns arrives as untyped Any.
+    window: Any = np.hanning(n_fft + 1)[:-1].astype(np.float32)
+    padded: Any = np.pad(y, n_fft // 2, mode="constant")
+    frame_count = 1 + (len(padded) - n_fft) // hop
+    if frame_count < 1:
+        return np.zeros(n_fft // 2 + 1, dtype=np.float32)
+
+    # One strided view rather than a Python loop over frames: a 30s window
+    # at 176.4 kHz is ~5000 frames, and the copy this makes is bounded by
+    # the window length the caller already agreed to hold in memory.
+    starts: Any = hop * np.arange(frame_count)[:, None]
+    frames = padded[starts + np.arange(n_fft)[None, :]] * window
+    return np.abs(np.fft.rfft(frames, n=n_fft, axis=1)).mean(axis=0)
 
 
 def check_file(
@@ -224,8 +274,13 @@ def check_file(
     whole file) to keep memory usage bounded regardless of track length.
 
     Args:
-        file_path: Path to an audio file readable by librosa/soundfile
-            (FLAC, WAV, ALAC/M4A, AIFF, MP3, ...).
+        file_path: Path to an audio file libsndfile can open — FLAC, WAV,
+            AIFF, OGG, MP3 and the rest of its list. Notably *not* ALAC in
+            an MP4 container, which raises HiResCheckError here and is
+            reported by callers as "verification skipped". That was already
+            true when this ran on librosa: recent versions dropped audioread
+            and decode through soundfile, so both fail on an .m4a with the
+            same libsndfile error.
         sample_seconds: Length, in seconds, of the segment to analyze.
             Clamped to the file's actual duration if shorter.
         noise_floor_db: dB threshold (relative to the segment's peak)
@@ -241,7 +296,8 @@ def check_file(
             measured 44.1 -> 176.4 kHz upsample of a commercial track
             reached ~24.7 kHz — the old 24 kHz default passed it.
         n_fft: FFT window size for the STFT. Automatically shrunk for very
-            short segments to avoid librosa warnings/errors.
+            short segments, so a window longer than the audio cannot end up
+            measuring its own zero padding.
 
     Returns:
         A populated HiResCheckResult. Never returns partial/garbage data —
@@ -253,7 +309,7 @@ def check_file(
             unreadable audio, invalid parameters, fully silent segment
             after decoding that also fails the safety net below).
     """
-    _require_librosa()
+    _require_audio_libs()
 
     if sample_seconds <= 0:
         raise HiResCheckError("sample_seconds must be a positive number")
@@ -275,19 +331,21 @@ def check_file(
     if size == 0:
         raise HiResCheckError(f"File is empty: {path}")
 
+    # One header read for both figures, and no decoding to get them: the
+    # frame count is in the header, so duration is arithmetic rather than a
+    # full pass over the file.
     try:
-        declared_sr = int(librosa.get_samplerate(path))
+        info = sf.info(path)
+        declared_sr = int(info.samplerate)
+        total_frames = int(info.frames)
     except Exception as exc:
         raise HiResCheckError(
-            f"Could not read sample rate (unsupported or corrupt file?): {exc}"
+            f"Could not read the audio header (unsupported or corrupt file?): {exc}"
         ) from exc
     if declared_sr <= 0:
         raise HiResCheckError(f"Invalid declared sample rate: {declared_sr}")
 
-    try:
-        total_duration = float(librosa.get_duration(path=path))
-    except Exception as exc:
-        raise HiResCheckError(f"Could not read duration: {exc}") from exc
+    total_duration = total_frames / declared_sr
     if total_duration <= 0:
         raise HiResCheckError(
             "File reports zero or negative duration — likely corrupt/unreadable"
@@ -296,14 +354,10 @@ def check_file(
     analyzed_duration = min(float(sample_seconds), total_duration)
     offset = max(0.0, (total_duration - analyzed_duration) / 2)
 
+    start_frame = int(offset * declared_sr)
+    window_frames = int(analyzed_duration * declared_sr)
     try:
-        y, sr = librosa.load(
-            path,
-            sr=None,  # keep the file's native sample rate
-            mono=True,
-            offset=offset,
-            duration=analyzed_duration,
-        )
+        y, sr = _read_mono_window(path, start_frame, window_frames)
     except Exception as exc:
         raise HiResCheckError(f"Could not decode audio: {exc}") from exc
 
@@ -326,17 +380,17 @@ def check_file(
             verdict="inconclusive",
         )
 
-    # Shrink n_fft for very short segments so librosa doesn't pad a huge
-    # window over a tiny signal (also avoids its "n_fft too large" warning).
+    # Shrink n_fft for very short segments so a huge window is not padded
+    # over a tiny signal, which would measure the padding as much as the
+    # audio.
     effective_n_fft = n_fft
     while effective_n_fft > 256 and effective_n_fft > len(y) * 2:
         effective_n_fft //= 2
 
     try:
-        spectrogram = np.abs(librosa.stft(y, n_fft=effective_n_fft))
-        if spectrogram.size == 0:
-            raise HiResCheckError("STFT produced an empty spectrogram")
-        avg_spectrum = np.mean(spectrogram, axis=1)
+        avg_spectrum = _average_magnitude_spectrum(y, effective_n_fft)
+        if avg_spectrum.size == 0:
+            raise HiResCheckError("Spectral analysis produced no bins")
         peak = float(np.max(avg_spectrum))
         if peak <= 0.0:
             return HiResCheckResult(
@@ -348,15 +402,15 @@ def check_file(
                 noise_floor_db=noise_floor_db,
                 verdict="inconclusive",
             )
-        # top_db=None matters more than it looks. librosa's default clamps
-        # everything to `peak - 80 dB`, which is exactly where
-        # noise_floor_db also sits by default — so every clamped bin
-        # compared as "active" against any floor below -80, and the check
+        # Deliberately unclamped. librosa's amplitude_to_db, which this
+        # replaces, floors everything at `peak - 80 dB` by default —
+        # exactly where noise_floor_db also sits — so every floored bin
+        # compared as "active" against any lower threshold, and the check
         # reported the full Nyquist frequency as the cutoff for every file
         # it was given. Documented as tunable, the parameter silently
         # disabled the check at any value under its own default.
-        spectrum_db = librosa.amplitude_to_db(avg_spectrum, ref=np.max, top_db=None)
-        frequencies = librosa.fft_frequencies(sr=sr, n_fft=effective_n_fft)
+        spectrum_db = 20.0 * np.log10(np.maximum(avg_spectrum, 1e-30) / peak)
+        frequencies = np.fft.rfftfreq(effective_n_fft, 1.0 / sr)
     except HiResCheckError:
         raise
     except Exception as exc:
@@ -367,8 +421,8 @@ def check_file(
 
     declared_bits, effective_bits = _measure_bit_depth(
         path,
-        start_frame=int(offset * sr),
-        frames=int(analyzed_duration * sr),
+        start_frame=start_frame,
+        frames=window_frames,
     )
 
     # A file can claim Hi-Res by rate, by depth, or by both, and each claim
@@ -422,7 +476,7 @@ async def check_file_async(
 ) -> HiResCheckResult:
     """Async wrapper around :func:`check_file`.
 
-    librosa/numpy are CPU-bound and blocking, so this runs the analysis in
+    The decode and the FFT are CPU-bound and blocking, so this runs in
     a worker thread via `asyncio.to_thread` to avoid stalling the event
     loop (and, in turn, every other in-flight download).
     """

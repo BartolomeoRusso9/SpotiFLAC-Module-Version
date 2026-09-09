@@ -96,10 +96,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if not is_available():
         print(
-            "Error: Hi-Res verification requires the optional 'librosa' and "
-            "'numpy' packages, which are not installed.\n"
-            "Install them with: pip install librosa numpy\n"
-            "(or: pip install SpotiFLAC[hires])",
+            "Error: could not import numpy/soundfile. They are install "
+            "dependencies of SpotiFLAC, so this is a broken environment "
+            "rather than a missing extra.\n"
+            "Try: pip install --force-reinstall numpy soundfile",
             file=sys.stderr,
         )
         return EXIT_DEPENDENCY_MISSING

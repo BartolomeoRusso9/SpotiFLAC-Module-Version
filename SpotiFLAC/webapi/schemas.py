@@ -513,8 +513,8 @@ class LibraryDuplicatesRequest(BaseModel):
     verify: bool = Field(
         default=False,
         description="Confirm each group against the audio with Chromaprint "
-        "before reporting it. Needs the optional 'dedup' extra; if it is "
-        "missing the scan says so in `notes` rather than failing.",
+        "before reporting it. Needs the fpcalc binary on the server; if it "
+        "is missing the scan says so in `notes` rather than failing.",
     )
     similarity_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
     export_db: bool = Field(

@@ -4684,9 +4684,10 @@ async function removeTrustedKeyLink(encodedName) {
 }
 
 // ── Duplicate Detection (acoustic fingerprint) ───────────────────────────────
-// See core/audio_fingerprint.py. Off by default on the backend (needs the
-// optional pyacoustid + fpcalc) — get_dedup_status() lets us say so
-// up front instead of just failing after the user waits for a scan.
+// See core/audio_fingerprint.py. pyacoustid ships with SpotiFLAC, but the
+// fingerprinting is done by fpcalc — a system binary pip cannot install —
+// so this can still be unavailable. get_dedup_status() lets us say so up
+// front instead of just failing after the user waits for a scan.
 async function startDedupScan() {
   const path = $('local-path-input').value.trim();
   if (!path) {

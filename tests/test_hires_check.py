@@ -9,30 +9,50 @@ describe as clearly.
 from __future__ import annotations
 
 import numpy as np
-import pytest
+import soundfile as sf
 
-librosa = pytest.importorskip("librosa")
-sf = pytest.importorskip("soundfile")
-
-from SpotiFLAC.core.hires_check import check_file  # noqa: E402
+from SpotiFLAC.core.hires_check import check_file
 
 HIRES_SR = 176400
 CD_SR = 44100
 SECONDS = 4
 
 
-def _noise(sample_rate: int) -> np.ndarray:
+def _noise(sample_rate: int):
     """Full-bandwidth noise: content right up to the file's own Nyquist."""
     rng = np.random.default_rng(0)
     return rng.standard_normal(sample_rate * SECONDS).astype(np.float32) * 0.2
 
 
-def _write(path, data: np.ndarray, sample_rate: int, subtype="PCM_24") -> str:
+def _write(path, data, sample_rate: int, subtype="PCM_24") -> str:
     sf.write(str(path), data, sample_rate, format="FLAC", subtype=subtype)
     return str(path)
 
 
-def _pcm(bits: int, frames: int) -> np.ndarray:
+def _upsampled_from_cd():
+    """CD-bandwidth noise carried in a 176.4 kHz container: a fake Hi-Res.
+
+    Built in the frequency domain rather than by resampling, so the test
+    owns the thing it is asserting about. Everything above 22.05 kHz is
+    zeroed, then a short raised-cosine taper is left running up to ~24.5
+    kHz — the transition-band tail a real resampler leaves behind, and the
+    reason the cutoff threshold sits at 28 kHz rather than hugging 22.05.
+    """
+    y = _noise(HIRES_SR)
+    spectrum = np.fft.rfft(y)
+    freqs = np.fft.rfftfreq(len(y), 1.0 / HIRES_SR)
+
+    taper_end = 24_500.0
+    cd_nyquist = CD_SR / 2
+    in_taper = (freqs >= cd_nyquist) & (freqs < taper_end)
+    ramp = (freqs[in_taper] - cd_nyquist) / (taper_end - cd_nyquist)
+    spectrum[in_taper] *= 0.5 * (1 + np.cos(np.pi * ramp)) * 1e-3
+    spectrum[freqs >= taper_end] = 0
+
+    return np.fft.irfft(spectrum, n=len(y)).astype(np.float32)
+
+
+def _pcm(bits: int, frames: int):
     """Noise occupying exactly `bits` bits, left-justified in an int32.
 
     That justification is soundfile's own convention for every PCM subtype,
@@ -58,9 +78,7 @@ def test_an_upsampled_cd_signal_is_flagged(tmp_path) -> None:
     a couple of kHz above 22.05 kHz and is what the old 24 kHz threshold
     mistook for real Hi-Res content.
     """
-    cd = _noise(CD_SR)
-    upsampled = librosa.resample(cd, orig_sr=CD_SR, target_sr=HIRES_SR)
-    path = _write(tmp_path / "fake.flac", upsampled, HIRES_SR)
+    path = _write(tmp_path / "fake.flac", _upsampled_from_cd(), HIRES_SR)
 
     result = check_file(path)
     assert result.verdict == "fake_hires"
@@ -137,11 +155,9 @@ def test_a_lower_noise_floor_still_measures_the_spectrum(tmp_path) -> None:
     floor of the file itself is real broadband content, so a cutoff at
     Nyquist there is the right answer rather than the bug.
     """
-    cd = _noise(CD_SR)
-    upsampled = librosa.resample(cd, orig_sr=CD_SR, target_sr=HIRES_SR)
-    path = _write(tmp_path / "fake.flac", upsampled, HIRES_SR)
+    path = _write(tmp_path / "fake.flac", _upsampled_from_cd(), HIRES_SR)
 
     result = check_file(path, noise_floor_db=-90.0)
-    assert (
-        result.cutoff_frequency_hz < HIRES_SR / 2
-    ), "a floor below -80 dB reported the full Nyquist as content"
+    assert result.cutoff_frequency_hz < HIRES_SR / 2, (
+        "a floor below -80 dB reported the full Nyquist as content"
+    )

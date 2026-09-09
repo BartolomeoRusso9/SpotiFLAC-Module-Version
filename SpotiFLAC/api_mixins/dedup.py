@@ -74,9 +74,10 @@ class DedupMixin:
             "install_hint": (
                 None
                 if available
-                else "pip install SpotiFLAC[dedup], plus Chromaprint itself: "
-                "the 'fpcalc' binary on PATH and the libchromaprint shared "
-                "library (Homebrew's chromaprint formula installs fpcalc only)"
+                else "Install Chromaprint: the 'fpcalc' binary on PATH and "
+                "the libchromaprint shared library (Homebrew's chromaprint "
+                "formula installs fpcalc only). The Python side ships with "
+                "SpotiFLAC — there is nothing to pip install."
             ),
         }
 

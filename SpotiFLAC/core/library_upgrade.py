@@ -346,17 +346,18 @@ def scan_library(
 def _verify_hires(path: Path) -> tuple[str, str]:
     """hires_check's (verdict, reason) for one file, or ("", "") if it can't run.
 
-    Wrapped because the check is an optional dependency (`SpotiFLAC[hires]`)
-    and a missing librosa must degrade to "don't reclassify" rather than
-    failing the scan.
+    Wrapped because a broken audio-analysis import must degrade to "don't
+    reclassify" rather than failing the whole scan. That used to be the
+    normal case (the check lived behind an optional extra); it is now the
+    unusual one, and the handling is the same either way.
     """
     try:
         from .hires_check import check_file, is_available
 
         if not is_available():
             logger.warning(
-                "[upgrade] --verify-hires needs the optional 'hires' extra "
-                "(pip install 'SpotiFLAC[hires]'); scanning without it."
+                "[upgrade] --verify-hires could not import numpy/soundfile; "
+                "scanning without it."
             )
             return "", ""
         result = check_file(path)

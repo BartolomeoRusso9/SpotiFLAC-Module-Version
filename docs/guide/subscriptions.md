@@ -120,19 +120,16 @@ The container alone does not decide: `.m4a` holds both AAC (lossy) and ALAC
 ### Fake Hi-Res
 
 A file can *declare* 24/96 and contain nothing above 22 kHz — the fingerprint
-of something upsampled from a CD. `--upgrade-verify-hires` runs the spectral
-check from [`core/hires_check.py`](../../SpotiFLAC/core/hires_check.py) and
-reclassifies such a file down to the tier its content justifies, which is the
-only way "upgrade my library to Hi-Res" gives an honest answer.
+of something upsampled from a CD — or declare 24-bit while only 16 of those
+bits ever carry data. `--upgrade-verify-hires` runs the checks from
+[`core/hires_check.py`](../../SpotiFLAC/core/hires_check.py) and reclassifies
+such a file down to the tier its content justifies, naming which of the two
+it found. That is the only way "upgrade my library to Hi-Res" gives an honest
+answer.
 
-It is off by default because it decodes ~30 seconds per file, and needs the
-optional extra:
-
-```bash
-pip install 'SpotiFLAC[hires]'
-```
-
-Without it the scan says so once and carries on without reclassifying.
+It is off by default because it decodes ~30 seconds per file. Nothing extra
+to install: the analysis runs on numpy and soundfile, which ship with
+SpotiFLAC.
 
 ### How a candidate is matched back to Spotify
 

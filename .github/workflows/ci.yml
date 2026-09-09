@@ -32,11 +32,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # .[web] rather than plain `.` — the webapp/launcher tests start
-          # with pytest.importorskip("fastapi"), so without the extra they
-          # were being silently skipped here (5 files' worth) while passing
-          # locally, which is the worst of both worlds.
-          pip install -e '.[web]'
+          # Plain `.` now installs FastAPI too: the webapp/launcher tests
+          # start with pytest.importorskip("fastapi"), and they were once
+          # silently skipped here (5 files' worth) while passing locally.
+          # The `[web]` extra that fixed that no longer exists — everything
+          # it held is a base dependency.
+          pip install -e .
           pip install -r requirements-dev.txt
 
       - name: Ruff (lint)
@@ -92,11 +93,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # .[web] rather than plain `.` — the webapp/launcher tests start
-          # with pytest.importorskip("fastapi"), so without the extra they
-          # were being silently skipped here (5 files' worth) while passing
-          # locally, which is the worst of both worlds.
-          pip install -e '.[web]'
+          # Plain `.` now installs FastAPI too: the webapp/launcher tests
+          # start with pytest.importorskip("fastapi"), and they were once
+          # silently skipped here (5 files' worth) while passing locally.
+          # The `[web]` extra that fixed that no longer exists — everything
+          # it held is a base dependency.
+          pip install -e .
           pip install -r requirements-dev.txt
 
       - name: Pytest

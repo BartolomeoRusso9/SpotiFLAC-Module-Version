@@ -913,11 +913,11 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         help="After each successful lossless download, run a spectral "
         "analysis to flag files that declare a high sample rate but whose "
         "actual content stops at standard-definition frequencies (a common "
-        "sign of upsampling / fake Hi-Res). A finding is only logged as a "
+        "sign of upsampling), and files whose declared bit depth is padding "
+        "(24-bit containing a 16-bit master). A finding is only logged as a "
         "warning — it never fails or removes the download. Off by default: "
-        "requires the optional 'librosa'/'numpy' dependencies "
-        "(pip install SpotiFLAC[hires]) and adds a few seconds of analysis "
-        "per track. Skipped automatically for lossy formats (e.g. --mp3).",
+        "it adds a few seconds of analysis per track. Skipped automatically "
+        "for lossy formats (e.g. --mp3).",
     )
     verify_grp.add_argument(
         "--redownload-fake-hires",
@@ -1909,15 +1909,17 @@ async def amain() -> None:
             from .webapp import resolve_web_token
             from .webapp import run_async as run_web
         except ImportError as exc:
-            # webapp.py imports FastAPI at module level, and FastAPI/uvicorn
-            # ship in the optional `web` extra rather than the base install —
-            # web mode is one of several, and most users of the module never
-            # start a server. Say which command fixes it instead of handing
-            # over a bare traceback.
+            # webapp.py imports FastAPI at module level. FastAPI and uvicorn
+            # are base dependencies now — they used to sit in a `web` extra,
+            # which meant `pip install SpotiFLAC && spotiflac --web` died on
+            # an ImportError — so reaching here means a broken environment
+            # rather than a missing extra. Say so instead of handing over a
+            # bare traceback.
             print(
-                f"--web needs the web extra, which isn't installed ({exc}).\n"
-                "Install it with:\n"
-                "    pip install 'SpotiFLAC[web]'",
+                f"--web could not import its server dependencies ({exc}).\n"
+                "FastAPI and uvicorn ship with SpotiFLAC, so this environment "
+                "looks incomplete. Try:\n"
+                "    pip install --force-reinstall fastapi 'uvicorn[standard]'",
                 file=sys.stderr,
             )
             raise SystemExit(1) from exc
@@ -2308,7 +2310,7 @@ async def amain() -> None:
             dest="verify",
             action="store_true",
             help="Confirm each group against the audio with Chromaprint "
-            "before offering it. Needs the 'dedup' extra.",
+            "before offering it. Needs the fpcalc binary (Chromaprint).",
         )
         dd_parser.add_argument(
             "--dedup-threshold", dest="threshold", type=float, default=0.95
