@@ -402,7 +402,15 @@ class SpotiFLACTui(App[None]):
         real command; it is just one with a placeholder where the answer goes,
         so the gaps are named above it rather than shown instead of it.
         """
-        panel = self.query_one("#command", Static)
+        try:
+            panel = self.query_one("#command", Static)
+        except Exception:
+            # Not mounted (yet, or any more). The form's first Changed can be
+            # handled before the command panel — composed after it, in the
+            # same switcher — exists; a slow machine is enough for that
+            # order. Nothing is lost: on_mount renders it from the state
+            # _config_changed has already stored.
+            return
         problems = self.state.missing_requirements()
         lines: list[str] = []
         if problems:

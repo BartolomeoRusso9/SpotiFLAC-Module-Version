@@ -1500,9 +1500,20 @@ class SpotiFLAC_API(
             # A track list loaded from a CSV has no collection URL to stand
             # for it (see api_mixins/csv_import.py), so the whole-collection
             # shortcut only applies when there really is one.
-            if collection_url.startswith(("http", "spotify:")) and len(
-                selected_indices
-            ) == len(self.current_tracks):
+            from_a_link = collection_url.startswith(("http", "spotify:"))
+            # Link -> the metadata this GUI already fetched for that track,
+            # handed to the downloader so it does not fetch every selected
+            # track over again (a full lookup each). Only for a list read from
+            # a link: a CSV row carries little more than a title, and the
+            # lookup is what fills the rest in.
+            prefetched: dict[str, TrackMetadata] = {}
+            # Every track exactly once, not merely as many indices as tracks:
+            # [0, 0, 1] out of three is not the whole collection, and in --web
+            # mode this list is an HTTP body.
+            whole_list = sorted(selected_indices) == list(
+                range(len(self.current_tracks))
+            )
+            if from_a_link and whole_list:
                 urls_to_download = [collection_url]
                 self.log("Downloading entire album/playlist…", "debug")
             else:
@@ -1512,6 +1523,7 @@ class SpotiFLAC_API(
                 # id-to-link rules: this one matched on substrings of the
                 # whole URL and minted `music.apple.com/track/{id}`, a path
                 # Apple Music does not have and the parser rejects.
+                from .core.models import TrackMetadata
                 from .core.tracklist import track_url
 
                 for i in selected_indices:
@@ -1519,6 +1531,8 @@ class SpotiFLAC_API(
                     t_url = track_url(t, self.current_url)
                     if t_url:
                         urls_to_download.append(t_url)
+                        if from_a_link and isinstance(t, TrackMetadata):
+                            prefetched[t_url] = t
                     else:
                         # Quiet: a tracklist that carries no links at all —
                         # a CSV of bare titles, say — hits this for every
@@ -1586,7 +1600,10 @@ class SpotiFLAC_API(
             # batch_tracks sends the whole selection through one worker pool
             # instead; the files land exactly where they did before (see
             # SpotiflacDownloader.run_tracks_async).
-            batch_tracks = len(urls_to_download) > 1
+            # A single pick goes this way too when the GUI has its metadata:
+            # the batch path is the one that uses it, sparing the track a full
+            # lookup and the recent links an entry for it.
+            batch_tracks = len(urls_to_download) > 1 or bool(prefetched)
             SpotiFLAC(
                 url=urls_to_download if batch_tracks else urls_to_download[0],
                 batch_tracks=batch_tracks,
@@ -1623,6 +1640,7 @@ class SpotiFLAC_API(
                 max_concurrent_downloads=max_concurrent,
                 verify_hires=verify_hires,
                 redownload_fake_hires=redownload_fake_hires,
+                prefetched_tracks=prefetched or None,
             )
 
             self._push_download_stats()

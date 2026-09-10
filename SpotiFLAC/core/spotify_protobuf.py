@@ -268,12 +268,21 @@ def parse_album(raw: bytes) -> dict[str, Any]:
 
     total_discs = 0
     total_tracks = 0
+    track_discs: dict[str, int] = {}
     discs = field_values(fields, 11, _WIRE_LEN)
     for disc in discs:
         disc_fields = read_fields(disc)
         number = decode_sint(first_value(disc_fields, 1, _WIRE_VARINT))
         total_discs = max(total_discs, number)
-        total_tracks += len(field_values(disc_fields, 3, _WIRE_LEN))
+        disc_tracks = field_values(disc_fields, 3, _WIRE_LEN)
+        total_tracks += len(disc_tracks)
+        # Each entry is a track naming its gid in field 1 — the one place a
+        # track read off a playlist (which says disc 1 for everything) can
+        # learn its real disc without a request of its own.
+        for entry in disc_tracks:
+            track_id = gid_to_id(first_value(read_fields(entry), 1, _WIRE_LEN))
+            if track_id and number > 0:
+                track_discs[track_id] = number
     if not total_discs and discs:
         total_discs = len(discs)
 
@@ -308,6 +317,7 @@ def parse_album(raw: bytes) -> dict[str, Any]:
         "upc": upc,
         "total_tracks": total_tracks,
         "total_discs": total_discs,
+        "track_discs": track_discs,
         "genre": "; ".join(_unique(genres)),
         "copyright": "; ".join(_unique(copyrights)),
     }
