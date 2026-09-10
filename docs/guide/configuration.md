@@ -319,6 +319,8 @@ SpotiFLAC(
 
 The bit-depth test is the only one that says anything about a **24-bit / 44.1 kHz** file, which claims Hi-Res by depth alone: its sample rate claims nothing, so a CD-range spectrum is the correct answer for it rather than a finding. That case used to pass unexamined. A file is flagged if either test fails, and the warning names which one.
 
+**Formats.** FLAC, WAV, AIFF, OGG and MP3 are read directly. **ALAC (`.m4a`), WavPack (`.wv`) and TTA (`.tta`) go through ffmpeg**, because libsndfile cannot open those containers at all — and they are three of `--transcode`'s seven targets, so without that path `--transcode alac --verify-hires` looked enabled while checking nothing. If you converted your files with SpotiFLAC you already have ffmpeg; if it is missing, those three formats report an error naming ffmpeg rather than claiming the file is corrupt.
+
 **Design notes worth knowing before you turn it on:**
 
 - **Off by default, but nothing to install.** The analysis runs on `numpy` and `soundfile`, which ship with SpotiFLAC — it used to sit behind a `SpotiFLAC[hires]` extra that pulled `librosa` and, with it, numba, llvmlite, scipy and scikit-learn (~346 MB, for six functions). That extra is gone; pip treats a request for an extra that no longer exists as a warning, so an old `pip install 'SpotiFLAC[hires]'` still produces a working install.
