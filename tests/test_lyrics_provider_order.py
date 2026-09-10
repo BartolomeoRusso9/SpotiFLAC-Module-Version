@@ -196,7 +196,13 @@ def test_apple_word_by_word_setting_reaches_the_fetcher(monkeypatch, cache) -> N
     )
     assert seen["wbw"] is False
     # cached under the line-synced key, not the default word-by-word one
-    assert cache[("lyrics-provider", "apple|Like Him|Tyler, The Creator||278|||line")]
+    assert cache[
+        (
+            "lyrics-provider",
+            "apple|Like Him|Tyler, The Creator||278|||line"
+            f"|{L._APPLE_CACHE_GENERATION}",
+        )
+    ]
 
 
 # --- what the cache is allowed to remember ----------------------------------
@@ -210,8 +216,9 @@ def test_apple_word_by_word_setting_reaches_the_fetcher(monkeypatch, cache) -> N
 
 def _key(provider: str) -> tuple[str, str]:
     # Apple's key carries the word-by-word / line-synced mode ("wbw" by
-    # default) — its two renderings can't share a cache entry.
-    suffix = "|wbw" if provider == "apple" else ""
+    # default) — its two renderings can't share a cache entry — and the
+    # generation of the rule that chose the Apple song.
+    suffix = f"|wbw|{L._APPLE_CACHE_GENERATION}" if provider == "apple" else ""
     return (
         "lyrics-provider",
         f"{provider}|Like Him|Tyler, The Creator||278||{suffix}",

@@ -421,11 +421,11 @@ async def _fetch_apple_async(
         scored = [
             (res, _score_itunes_result(res, track_name, artist_name, duration_s))
             for res in results
+            if _itunes_result_matches(res, track_name, artist_name, duration_s)
         ]
-        best_result, best_score = max(scored, key=lambda x: x[1])
-
-        if best_score < 50:
+        if not scored:
             return ""
+        best_result, _best_score = max(scored, key=lambda x: x[1])
 
         song_id = best_result.get("trackId")
         if not song_id:
@@ -478,6 +478,84 @@ def _score_itunes_result(
     ):
         score += 20
     return score
+
+
+#: How far apart two recordings' lengths may be and still count as the same
+#: recording. An exact title gets the wider margin — a remaster or another
+#: master moves the length by a few seconds. A title that only *contains* the
+#: other needs the lengths to agree closely: "San Valentino" contains
+#: "Valentino" and is a different song.
+_ITUNES_DURATION_TOLERANCE_EXACT_S = 10
+_ITUNES_DURATION_TOLERANCE_PARTIAL_S = 5
+
+#: Part of Apple's lyrics cache key. Answers cached before a result had to
+#: match on both title and artist (_itunes_result_matches) include other
+#: songs' lyrics; a new generation retires them instead of serving them for
+#: another week. Bump it whenever the way the Apple song is chosen changes.
+_APPLE_CACHE_GENERATION = "m2"
+
+
+def _words(text: str) -> str:
+    """Just the words, punctuation dropped: iTunes credits a track to
+    "21 Savage, Offset & Metro Boomin", and the comma must not stop "21
+    Savage" from being found in it."""
+    return " ".join(re.findall(r"\w+", text))
+
+
+def _contains_words(haystack: str, needle: str) -> bool:
+    """Whole-word containment, so "nas" is not found inside "jonas"."""
+    needle = _words(needle)
+    return bool(needle) and f" {needle} " in f" {_words(haystack)} "
+
+
+def _itunes_result_matches(
+    res: dict,
+    track_name: str,
+    artist_name: str,
+    duration_s: int,
+) -> bool:
+    """Whether an iTunes search result is the track being tagged.
+
+    _score_itunes_result() only ranks. It used to decide as well, through a
+    threshold of 50 that a result reached on the title alone (50) or on the
+    artist alone (60), and the lyrics of whatever won were embedded: Guns N'
+    Roses' "November Rain" for Kris Wu's, another song off VillaBanks' album
+    "Quanto Manca 2" for "Quanto Manca", Gigi D'Alessio's "San Valentino" for
+    Vale Lambo's "Valentino". A result now has to match on both title and
+    artist, and on length whenever both lengths are known.
+    """
+    wanted_track = normalize_loose_string(simplify_track_name(track_name))
+    result_track = normalize_loose_string(
+        simplify_track_name(res.get("trackName", "") or "")
+    )
+    wanted_artist = normalize_loose_string(artist_name)
+    result_artist = normalize_loose_string(res.get("artistName", "") or "")
+    if not (wanted_track and result_track and wanted_artist and result_artist):
+        return False
+
+    if not (
+        _contains_words(result_artist, wanted_artist)
+        or _contains_words(wanted_artist, result_artist)
+    ):
+        return False
+
+    title_exact = _words(result_track) == _words(wanted_track)
+    if not title_exact and not (
+        _contains_words(result_track, wanted_track)
+        or _contains_words(wanted_track, result_track)
+    ):
+        return False
+
+    result_s = (res.get("trackTimeMillis") or 0) / 1000.0
+    if duration_s > 0 and result_s > 0:
+        tolerance = (
+            _ITUNES_DURATION_TOLERANCE_EXACT_S
+            if title_exact
+            else _ITUNES_DURATION_TOLERANCE_PARTIAL_S
+        )
+        return abs(result_s - duration_s) <= tolerance
+    # Nothing to check the length against: only an exact title is trusted.
+    return title_exact
 
 
 async def _fetch_musixmatch_async(
@@ -891,7 +969,8 @@ async def fetch_lyrics_async(
     # key needs splitting; every other provider ignores the setting.
     def _provider_track_key(provider_name: str) -> str:
         if provider_name == "apple":
-            return f"{track_key}|{'wbw' if apple_word_by_word else 'line'}"
+            mode = "wbw" if apple_word_by_word else "line"
+            return f"{track_key}|{mode}|{_APPLE_CACHE_GENERATION}"
         return track_key
 
     def _cached_for(provider_name: str) -> str | None:
