@@ -167,9 +167,9 @@ def test_a_lower_noise_floor_still_measures_the_spectrum(tmp_path) -> None:
     path = _write(tmp_path / "fake.flac", _upsampled_from_cd(), HIRES_SR)
 
     result = check_file(path, noise_floor_db=-90.0)
-    assert result.cutoff_frequency_hz < HIRES_SR / 2, (
-        "a floor below -80 dB reported the full Nyquist as content"
-    )
+    assert (
+        result.cutoff_frequency_hz < HIRES_SR / 2
+    ), "a floor below -80 dB reported the full Nyquist as content"
 
 
 # ── Formats libsndfile cannot open ────────────────────────────────────────
