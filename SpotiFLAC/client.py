@@ -243,6 +243,7 @@ class AsyncSpotiFLAC:
         urls: list[str],
         *,
         loop_minutes: int | None = None,
+        prefetched: dict[str, TrackMetadata] | None = None,
     ) -> None:
         """Downloads a set of *individual track* links as one single run.
 
@@ -252,9 +253,15 @@ class AsyncSpotiFLAC:
         list of tracks means downloading them strictly one at a time no
         matter what max_concurrent_downloads says. See
         SpotiflacDownloader.run_tracks_async().
+
+        `prefetched` maps a link to metadata the caller already holds for it
+        (the GUI, which fetched the whole list to show it); those links are
+        not looked up again.
         """
         self._ensure_entered()
-        await self._downloader.run_tracks_async(urls, loop_minutes=loop_minutes)
+        await self._downloader.run_tracks_async(
+            urls, loop_minutes=loop_minutes, prefetched=prefetched
+        )
 
     async def get_playlist(self, url: str) -> tuple[dict, list[TrackMetadata]]:
         self._ensure_entered()
@@ -369,6 +376,7 @@ def SpotiFLAC(
     # position. New options go on the end.
     batch_tracks: bool = False,
     redownload_fake_hires: bool = False,
+    prefetched_tracks: dict[str, TrackMetadata] | None = None,
 ) -> None:
     """Backwards-compatible SYNCHRONOUS wrapper.
 
@@ -382,6 +390,9 @@ def SpotiFLAC(
     as one collection per URL — see AsyncSpotiFLAC.download_tracks(). This is
     what makes `max_concurrent_downloads` mean something for a hand-picked
     selection; without it a list of 20 tracks is 20 sequential runs.
+
+    `prefetched_tracks` (with `batch_tracks`): link -> metadata already in
+    hand, so those tracks are not looked up again one request each.
     """
 
     async def _run() -> None:
@@ -428,7 +439,8 @@ def SpotiFLAC(
         ) as client:
             urls = [url] if isinstance(url, str) else list(url)
             if batch_tracks:
-                await client.download_tracks(urls, loop_minutes=loop)
+                extra = {"prefetched": prefetched_tracks} if prefetched_tracks else {}
+                await client.download_tracks(urls, loop_minutes=loop, **extra)
             else:
                 await client.download_batch(urls, loop_minutes=loop)
 

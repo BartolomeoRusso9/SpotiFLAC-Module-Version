@@ -83,6 +83,17 @@ def _native_cache_put(
     return value
 
 
+def peek_native_track_metadata(track_id: str) -> dict[str, Any] | None:
+    """The track's native metadata if it is already cached — never a request.
+
+    For callers that want what an earlier lookup happened to bring back (the
+    composer and disc number the ISRC lookup fetched along with the ISRC) but
+    would not spend a request of their own on it. None when nothing is
+    cached; an empty dict when the last lookup found nothing.
+    """
+    return _native_cache_get(_native_track_cache, track_id)
+
+
 def _isrc_from_raw_body(body: bytes) -> str:
     """Last-resort ISRC scrape, for a message the parser could not walk.
 

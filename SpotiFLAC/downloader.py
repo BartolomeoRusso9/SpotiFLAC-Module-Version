@@ -1929,6 +1929,7 @@ class SpotiflacDownloader:
         self,
         urls: list[str],
         loop_minutes: int | None = None,
+        prefetched: dict[str, TrackMetadata] | None = None,
     ) -> None:
         """Downloads a set of *individual track* links as ONE run.
 
@@ -1955,7 +1956,7 @@ class SpotiflacDownloader:
         numbered as one batch they count 1..N in the order selected, which is
         what downloading the same tracks as a collection already did.
         """
-        tracks = await self._resolve_track_list_async(urls)
+        tracks = await self._resolve_track_list_async(urls, prefetched)
         if not tracks:
             logger.warning(
                 "[downloader] No track could be resolved from %d link(s)",
@@ -1977,6 +1978,7 @@ class SpotiflacDownloader:
     async def _resolve_track_list_async(
         self,
         urls: list[str],
+        prefetched: dict[str, TrackMetadata] | None = None,
     ) -> list[TrackMetadata]:
         """Metadata for every link in `urls`, in the order they were given.
 
@@ -1984,24 +1986,33 @@ class SpotiflacDownloader:
         failing the batch: with one run per track a bad link cost that track
         only, and moving to a single run must not turn it into something that
         costs the other nineteen.
+
+        A link in `prefetched` is taken as already resolved. The GUI fetched
+        the whole list to show it, and looking each selected track up again
+        cost a full metadata request apiece — the ISRC and release date it
+        lacks are filled in by _resolve_isrc_bulk_async() either way.
         """
         semaphore = asyncio.Semaphore(self.TRACK_RESOLVE_CONCURRENCY)
+        known = prefetched or {}
 
+        # No recent-links entry for any of these tracks. They are a selection
+        # out of a list whose own link the GUI recorded when it opened it,
+        # and an entry per track (kept once so the list would look as it did
+        # when every track had a run of its own) buried that link under one
+        # line for every song downloaded from it.
         async def _resolve(url: str) -> list[TrackMetadata]:
+            track = known.get(url)
+            if track is not None:
+                return [await self._with_composer_async(track, semaphore)]
             async with semaphore:
                 try:
-                    collection_name, tracks, info = await self._resolve_metadata_async(
-                        url,
-                    )
+                    _name, tracks, _info = await self._resolve_metadata_async(url)
                 except SpotiflacError as exc:
                     logger.error("[downloader] %s: %s", url, exc)
                     return []
                 if not tracks:
                     logger.warning("[downloader] No track found at %s", url)
                     return []
-                # Same history entry the per-URL path wrote, so the recent
-                # links list looks the same after this change as before it.
-                await self._record_history_async(url, collection_name, tracks, info)
                 return tracks
 
         resolved = await asyncio.gather(*(_resolve(url) for url in urls))
@@ -2577,10 +2588,14 @@ class SpotiflacDownloader:
         except Exception as exc:
             logger.warning("[isrc] bulk resolution async failed: %s", exc)
 
-        # Some Spotify playlists may lose album/release dates during bulk
-        # ISRC resolution. For tracks that still miss a `release_date` but
-        # have an `open.spotify.com/track/` external URL, fetch detailed
-        # track metadata and hydrate the release date when available.
+        # A playlist's tracks arrive with no release date — the playlist query
+        # does not carry one. It used to be filled in with a full
+        # get_track_async() per track: a GraphQL query, a composer lookup and
+        # the ISRC all over again, several requests a song for one date that
+        # every track of an album shares. It is read from the album's native
+        # metadata instead: one request per distinct album, and usually none
+        # at all, because the ISRC lookup above goes through
+        # get_native_track_metadata(), which fetches and caches the album.
         try:
             missing_dates = [
                 (idx, t)
@@ -2589,36 +2604,119 @@ class SpotiflacDownloader:
                 and "open.spotify.com/track/" in (t.external_url or "")
             ]
             if missing_dates:
-                semaphore = asyncio.Semaphore(10)
-
-                async def _hydrate(idx: int, track: TrackMetadata):
-                    async with semaphore:
-                        try:
-                            detailed = await self._metadata_client().get_track_async(
-                                track.id
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Could not fetch release date for %s: %s",
-                                track.title,
-                                exc,
-                            )
-                            return idx, track
-                    if not detailed.release_date:
-                        return idx, track
-                    return idx, track.model_copy(
-                        update={"release_date": detailed.release_date}
-                    )
-
-                for i, updated in await asyncio.gather(
-                    *(_hydrate(i, t) for i, t in missing_dates)
-                ):
-                    tracks[i] = updated
+                for i, date in await self._release_dates_async(missing_dates):
+                    tracks[i] = tracks[i].model_copy(update={"release_date": date})
         except Exception:
             # Non-fatal — keep original tracks if hydration fails
             pass
 
+        # The disc number is missing from a playlist's track data too (it
+        # reads 1 for every track). The ISRC lookup above has just fetched
+        # each track's native metadata, which carries it, so it is read from
+        # that cache — never a request of its own. The composer is read from
+        # there as well when present, but Spotify rarely puts credits in that
+        # response; hand-picked tracks get theirs from _with_composer_async().
+        try:
+            tracks = self._fill_from_native_cache(tracks)
+        except Exception:
+            pass
+
         return tracks
+
+    @staticmethod
+    def _fill_from_native_cache(tracks: list[TrackMetadata]) -> list[TrackMetadata]:
+        """Disc number (and composer, if any) from cached native metadata."""
+        from .core.spotfetch import peek_native_track_metadata
+
+        filled = []
+        for track in tracks:
+            update: dict[str, Any] = {}
+            if "open.spotify.com/track/" in (track.external_url or "") and (
+                not track.composer or track.disc_number <= 1
+            ):
+                native = peek_native_track_metadata(track.id) or {}
+                if not track.composer and native.get("composer"):
+                    update["composer"] = native["composer"]
+                disc = int(native.get("disc_number") or 0)
+                if disc > 1 and track.disc_number <= 1:
+                    update["disc_number"] = disc
+            filled.append(track.model_copy(update=update) if update else track)
+        return filled
+
+    async def _with_composer_async(
+        self,
+        track: TrackMetadata,
+        semaphore: asyncio.Semaphore,
+    ) -> TrackMetadata:
+        """A hand-picked track with its composer filled in.
+
+        The one field a track's own lookup brought that nothing cached has:
+        Spotify's native metadata carries no credits, only the credits query
+        does. One request, instead of the several a full lookup made.
+        """
+        if track.composer or "open.spotify.com/track/" not in (
+            track.external_url or ""
+        ):
+            return track
+        async with semaphore:
+            try:
+                web_client = self._metadata_client().web_client
+                composer = await asyncio.to_thread(
+                    web_client.get_track_composer, track.id
+                )
+            except Exception as exc:
+                logger.debug("[metadata] no composer for %s: %s", track.id, exc)
+                return track
+        return track.model_copy(update={"composer": composer}) if composer else track
+
+    async def _release_dates_async(
+        self,
+        missing: list[tuple[int, TrackMetadata]],
+    ) -> list[tuple[int, str]]:
+        """(index, release date) for the tracks in `missing` that have one.
+
+        Per album where the track says which album it is on, per track (from
+        the same native metadata, cached by the ISRC lookup) where it does
+        not.
+        """
+        web_client = self._metadata_client().web_client
+        semaphore = asyncio.Semaphore(10)
+
+        async def _date(fetch, key: str) -> str:
+            async with semaphore:
+                try:
+                    metadata = await asyncio.to_thread(fetch, key)
+                except Exception as exc:
+                    logger.debug("[metadata] no release date for %s: %s", key, exc)
+                    return ""
+            return (metadata or {}).get("release_date", "") or ""
+
+        album_ids = sorted({t.album_id for _, t in missing if t.album_id})
+        album_dates = dict(
+            zip(
+                album_ids,
+                await asyncio.gather(
+                    *(_date(web_client.get_native_album_metadata, a) for a in album_ids)
+                ),
+            )
+        )
+
+        without_album = [(i, t) for i, t in missing if not t.album_id]
+        track_dates = await asyncio.gather(
+            *(
+                _date(web_client.get_native_track_metadata, t.id)
+                for _, t in without_album
+            )
+        )
+        by_track = {i: d for (i, _), d in zip(without_album, track_dates)}
+
+        found = []
+        for i, track in missing:
+            date = album_dates.get(track.album_id, "") if track.album_id else ""
+            date = date or by_track.get(i, "")
+            if date:
+                found.append((i, date))
+        return found
 
     async def _register_queue_async(
         self,
