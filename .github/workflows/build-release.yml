@@ -52,17 +52,59 @@ jobs:
         shell: bash
         run: |
           # 1. Commit delle modifiche di formattazione (se esistono)
-          if [[ -n "$(git status --porcelain)" ]]; then
-            echo "Format changes detected. Committing..."
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            
+          #
+          # The checkout above is a snapshot. Anything pushed to the branch
+          # while this job was installing its dependencies leaves it behind,
+          # and `git push` is then rejected as non-fast-forward — which used
+          # to fail the whole release over a cosmetic commit.
+          #
+          # The formatters are re-run on top of the newer tree rather than
+          # the commit being rebased onto it: a formatting commit rebased
+          # over content changes conflicts on exactly the lines it rewrote,
+          # and re-running is both conflict-free and idempotent. The result
+          # is identical either way — the branch tip, formatted.
+          #
+          # Syncing also keeps the tag honest: it is created below on local
+          # HEAD, so a HEAD that is behind the branch would tag a tree
+          # nobody has.
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          sync_and_format() {
+            git fetch origin "$BRANCH"
+            git reset --hard FETCH_HEAD
+            ruff check --fix . || true
+            black . || true
+          }
+
+          git fetch origin "$BRANCH"
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]]; then
+            echo "::warning::$BRANCH moved since checkout; re-formatting on top of its tip."
+            sync_and_format
+          fi
+
+          for attempt in 1 2 3; do
+            if [[ -z "$(git status --porcelain)" ]]; then
+              echo "No formatting changes to commit."
+              break
+            fi
+
+            echo "Format changes detected. Committing (attempt $attempt)..."
             git add .
             git commit -m "style: auto-fix ruff e black [skip ci]"
-            git push origin HEAD:${{ github.ref }}
-          else
-            echo "No formatting changes detected. Moving straight to versioning."
-          fi
+
+            if git push origin "HEAD:$BRANCH"; then
+              break
+            fi
+
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::Could not push the formatting commit: $BRANCH keeps moving under this job. Re-run the workflow when pushes have settled."
+              exit 1
+            fi
+            echo "::warning::Push rejected — $BRANCH moved again. Re-syncing and retrying."
+            sync_and_format
+          done
           
           # 2. Calcolo del nuovo Tag (Manuale o Automatico)
           USER_INPUT="${{ github.event.inputs.version_tag }}"
