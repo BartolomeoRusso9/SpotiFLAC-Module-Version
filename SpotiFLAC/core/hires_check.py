@@ -36,12 +36,19 @@ Public API:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("SpotiFLAC.hires_check")
+
+#: Ceiling for one ffprobe/ffmpeg call. The decode is bounded work on a
+#: window of at most `sample_seconds`, so anything near this is a hang.
+_FFMPEG_TIMEOUT_S = 120
 
 try:
     import numpy as np
@@ -164,18 +171,32 @@ def _measure_bit_depth(
     any read failure: an unmeasurable depth must leave the spectral verdict
     exactly as it was, never turn into a finding of its own.
     """
+    via_ffmpeg = False
     try:
         declared = _PCM_SUBTYPE_BITS.get(sf.info(path).subtype, 0)
     except Exception as exc:
-        logger.debug("[hires-check] could not read subtype of '%s': %s", path, exc)
-        return 0, 0
+        if not _ffmpeg_available():
+            logger.debug("[hires-check] could not read subtype of '%s': %s", path, exc)
+            return 0, 0
+        try:
+            _sr, _frames, declared = _ffprobe_info(path)
+        except Exception as probe_exc:
+            logger.debug(
+                "[hires-check] ffprobe could not read '%s': %s", path, probe_exc
+            )
+            return 0, 0
+        via_ffmpeg = True
     if not declared:
         return 0, 0
 
     try:
-        with sf.SoundFile(path) as handle:
-            handle.seek(start_frame)
-            window = handle.read(frames, dtype="int32", always_2d=True)
+        if via_ffmpeg:
+            sample_rate, _f, _b = _ffprobe_info(path)
+            window = _ffmpeg_read_window(path, start_frame, frames, sample_rate)
+        else:
+            with sf.SoundFile(path) as handle:
+                handle.seek(start_frame)
+                window = handle.read(frames, dtype="int32", always_2d=True)
     except Exception as exc:
         logger.debug("[hires-check] could not read samples of '%s': %s", path, exc)
         return declared, 0
@@ -216,6 +237,144 @@ def _require_audio_libs() -> None:
         )
 
 
+# ── ffmpeg fallback ────────────────────────────────────────────────────────
+#
+# libsndfile, which soundfile wraps, cannot open an MP4 container (so no
+# ALAC), WavPack or TTA. Three of `--transcode`'s seven targets land in
+# exactly those, and only the *lossy* ones are deliberately skipped by the
+# download path — so `--transcode alac --verify-hires` used to look enabled
+# while checking nothing at all, one debug line at a time.
+#
+# ffmpeg reads all of them, and anyone holding files in those formats
+# because SpotiFLAC converted them has it installed by definition:
+# ensure_ffmpeg_available() runs before the first download. When it is
+# missing the callers still degrade to "verification skipped" — but they say
+# so out loud now.
+
+
+def _ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
+def _ffprobe_info(path: Path) -> tuple[int, int, int]:
+    """(sample_rate, frames, declared_bits) via ffprobe.
+
+    `bits_per_raw_sample` is what the codec actually stores; ffprobe leaves
+    it empty for formats that have no fixed depth, which is the same "0
+    means no claim to check" convention _measure_bit_depth() already uses.
+    """
+    out = subprocess.run(  # noqa: S603 - fixed argv, path passed as one arg
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=sample_rate,channels,bits_per_raw_sample,duration_ts,duration",
+            "-of",
+            "json",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=_FFMPEG_TIMEOUT_S,
+        check=True,
+    )
+    streams = json.loads(out.stdout or "{}").get("streams") or []
+    if not streams:
+        raise HiResCheckError(f"ffprobe found no audio stream in '{path}'")
+    stream = streams[0]
+
+    sample_rate = int(stream.get("sample_rate") or 0)
+    if sample_rate <= 0:
+        raise HiResCheckError(f"ffprobe reported no sample rate for '{path}'")
+
+    # duration_ts is in stream time base, which for audio is the sample
+    # rate, so it is the frame count directly. Falling back to seconds
+    # keeps containers that only carry a duration usable.
+    frames = int(stream.get("duration_ts") or 0)
+    if frames <= 0:
+        frames = int(float(stream.get("duration") or 0.0) * sample_rate)
+
+    try:
+        declared_bits = int(stream.get("bits_per_raw_sample") or 0)
+    except (TypeError, ValueError):
+        declared_bits = 0
+
+    return sample_rate, frames, declared_bits
+
+
+def _ffmpeg_read_window(
+    path: Path,
+    start_frame: int,
+    frames: int,
+    sample_rate: int,
+) -> "np.ndarray":
+    """The requested window decoded to interleaved 32-bit PCM, 2D (n, ch).
+
+    s32le on purpose, and left-justified the way soundfile hands back every
+    PCM subtype: ffmpeg widens a 16-bit source by shifting it up, so the low
+    bits stay zero and the padded-depth test reads a converted file exactly
+    as it reads a native one.
+    """
+    proc = subprocess.run(  # noqa: S603 - fixed argv, path passed as one arg
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            f"{start_frame / sample_rate:.6f}",
+            "-t",
+            f"{frames / sample_rate:.6f}",
+            "-i",
+            str(path),
+            "-map",
+            "a:0",
+            "-f",
+            "s32le",
+            "-acodec",
+            "pcm_s32le",
+            "-",
+        ],
+        capture_output=True,
+        timeout=_FFMPEG_TIMEOUT_S,
+        check=True,
+    )
+    raw = np.frombuffer(proc.stdout, dtype="<i4")
+    if raw.size == 0:
+        raise HiResCheckError(f"ffmpeg decoded an empty window from '{path}'")
+
+    channels = max(1, _ffprobe_channels(path))
+    usable = (raw.size // channels) * channels
+    return raw[:usable].reshape(-1, channels)
+
+
+def _ffprobe_channels(path: Path) -> int:
+    out = subprocess.run(  # noqa: S603 - fixed argv, path passed as one arg
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=channels",
+            "-of",
+            "csv=p=0",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=_FFMPEG_TIMEOUT_S,
+        check=True,
+    )
+    try:
+        return int((out.stdout or "").strip() or 0)
+    except ValueError:
+        return 0
+
+
 def _read_mono_window(
     path: Path,
     start_frame: int,
@@ -223,14 +382,32 @@ def _read_mono_window(
 ) -> tuple["np.ndarray", int]:
     """The requested window of `path`, downmixed to mono, as float32.
 
-    soundfile is what librosa itself decoded through, so this reads exactly
-    the same formats it did — libsndfile's list, which is FLAC, WAV, AIFF,
-    OGG, MP3 and friends, but *not* ALAC in an MP4 container.
+    soundfile first — it is what librosa itself decoded through — and
+    ffmpeg for what libsndfile cannot open (ALAC/MP4, WavPack, TTA). The
+    spectrum is normalised against its own peak downstream, so the integer
+    scale ffmpeg returns needs no conversion to mean the same thing.
     """
-    with sf.SoundFile(path) as handle:
-        handle.seek(start_frame)
-        block = handle.read(frames, dtype="float32", always_2d=True)
-        return block.mean(axis=1), int(handle.samplerate)
+    try:
+        with sf.SoundFile(path) as handle:
+            handle.seek(start_frame)
+            block = handle.read(frames, dtype="float32", always_2d=True)
+            return block.mean(axis=1), int(handle.samplerate)
+    except Exception as exc:
+        if not _ffmpeg_available():
+            raise HiResCheckError(
+                f"{path.suffix or 'this format'} cannot be opened by "
+                f"libsndfile ({exc}), and ffmpeg — which reads it — is not "
+                "installed"
+            ) from exc
+        logger.debug(
+            "[hires-check] soundfile could not open '%s' (%s); using ffmpeg",
+            path,
+            exc,
+        )
+
+    sample_rate, _frames, _bits = _ffprobe_info(path)
+    window = _ffmpeg_read_window(path, start_frame, frames, sample_rate)
+    return window.mean(axis=1).astype(np.float32), sample_rate
 
 
 def _average_magnitude_spectrum(y: "np.ndarray", n_fft: int) -> "np.ndarray":
@@ -274,13 +451,12 @@ def check_file(
     whole file) to keep memory usage bounded regardless of track length.
 
     Args:
-        file_path: Path to an audio file libsndfile can open — FLAC, WAV,
-            AIFF, OGG, MP3 and the rest of its list. Notably *not* ALAC in
-            an MP4 container, which raises HiResCheckError here and is
-            reported by callers as "verification skipped". That was already
-            true when this ran on librosa: recent versions dropped audioread
-            and decode through soundfile, so both fail on an .m4a with the
-            same libsndfile error.
+        file_path: Path to any audio file. libsndfile handles FLAC, WAV,
+            AIFF, OGG, MP3 and the rest of its list directly; ALAC/MP4,
+            WavPack and TTA go through ffmpeg instead, which is why three
+            of `--transcode`'s targets are checkable at all. Without ffmpeg
+            those three raise HiResCheckError, and the message says which
+            half is missing rather than reporting a corrupt file.
         sample_seconds: Length, in seconds, of the segment to analyze.
             Clamped to the file's actual duration if shorter.
         noise_floor_db: dB threshold (relative to the segment's peak)
@@ -339,9 +515,19 @@ def check_file(
         declared_sr = int(info.samplerate)
         total_frames = int(info.frames)
     except Exception as exc:
-        raise HiResCheckError(
-            f"Could not read the audio header (unsupported or corrupt file?): {exc}"
-        ) from exc
+        if not _ffmpeg_available():
+            raise HiResCheckError(
+                f"Could not read the audio header of '{path.name}': {exc}. "
+                "libsndfile cannot open MP4/ALAC, WavPack or TTA; ffmpeg "
+                "reads all three but is not installed."
+            ) from exc
+        try:
+            declared_sr, total_frames, _bits = _ffprobe_info(path)
+        except Exception as probe_exc:
+            raise HiResCheckError(
+                f"Neither libsndfile nor ffmpeg could read '{path.name}': "
+                f"{exc} / {probe_exc}"
+            ) from probe_exc
     if declared_sr <= 0:
         raise HiResCheckError(f"Invalid declared sample rate: {declared_sr}")
 

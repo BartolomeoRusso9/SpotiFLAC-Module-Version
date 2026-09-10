@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 import SpotiFLAC.downloader as downloader
+import SpotiFLAC.core.tracklist as tracklist_module
 import SpotiFLAC.launcher as launcher_module
 from tui_harness import drives_the_ui
 
@@ -31,6 +32,23 @@ class _Track:
         self.album = "Kind of Blue"
         if track_id is not None:
             self.id = track_id
+
+
+@pytest.fixture(autouse=True)
+def _no_live_spotify_session(monkeypatch):
+    """Nothing here wants a real Spotify client, and one was being built.
+
+    resolve_tracklist() calls metadata_client_for() *before* the resolver
+    these tests stub, and SpotifyMetadataClient.__init__ runs
+    SpotifyWebClient.initialize() — three live HTTP calls for a session, an
+    access token and a client token. So every test below reached a stubbed
+    resolver by way of the real network, and a hiccup there surfaced as the
+    panel reporting a connection error where the test expected the
+    resolver's own message. That is the intermittent failure this fixture
+    removes; it also takes the network out of a unit test that never meant
+    to be in it.
+    """
+    monkeypatch.setattr(tracklist_module, "metadata_client_for", lambda url: object())
 
 
 @pytest.fixture
@@ -77,11 +95,37 @@ async def _settled(pilot) -> None:
         await pilot.pause()
 
 
+async def _until(pilot, predicate, what: str, tries: int = 300) -> None:
+    """Pumps the UI until `predicate` holds, then returns.
+
+    A fixed pause count is a bet on how fast the machine is. panel.load()
+    hands the fetch to a worker, so on a loaded box the table could still be
+    empty when the test moved on — and an empty table makes
+    action_toggle_row() a no-op, which surfaced as a command panel missing
+    its "1 of 5 tracks are picked" note rather than as a timeout.
+    """
+    for _ in range(tries):
+        if predicate():
+            return
+        await pilot.pause()
+    raise AssertionError(f"timed out waiting for {what}")
+
+
 async def _loaded(pilot) -> TracklistPanel:
     pilot.app.query_one("#sidebar").index = _TRACKS_INDEX
     await _settled(pilot)
     panel = pilot.app.query_one("#tracks", TracklistPanel)
     panel.load()
+    # `_loading` covers every outcome: _load() clears it on the failure
+    # path too, and on the success path it sets self.tracklist before
+    # clearing it — so a settled worker means the rows are there whenever
+    # there were rows to have. Two tests here load a bad link or no URL at
+    # all on purpose, and they settle exactly the same way.
+    await _until(
+        pilot,
+        lambda: not panel._loading,
+        "the tracklist panel's load worker to settle",
+    )
     await _settled(pilot)
     return panel
 
@@ -299,7 +343,21 @@ async def test_the_command_panel_admits_the_cli_cannot_do_this(stub_album) -> No
 
         pilot.app.query_one("#tracks-table", DataTable).move_cursor(row=0)
         panel.action_toggle_row()
-        await _settled(pilot)
+
+        # The toggle reaches the command panel as a SelectionChanged
+        # message, so the redraw is a round trip through the message pump
+        # rather than something that has already happened when the call
+        # returns. Waiting on the result instead of on a pause count keeps
+        # this honest on a machine that is busy: the timeout still fails the
+        # test, and says what it was waiting for.
+        await _until(
+            pilot,
+            lambda: (
+                "1 of 5 tracks are picked"
+                in str(pilot.app.query_one("#command").content)
+            ),
+            "the command panel to report the narrowed selection",
+        )
 
         rendered = str(pilot.app.query_one("#command").content)
         assert "1 of 5 tracks are picked" in rendered

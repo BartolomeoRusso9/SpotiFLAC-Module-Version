@@ -13,6 +13,7 @@ import asyncio
 
 import pytest
 
+import SpotiFLAC.core.tracklist as tracklist_module
 from SpotiFLAC.core.tracklist import (
     Tracklist,
     download_target,
@@ -22,6 +23,25 @@ from SpotiFLAC.core.tracklist import (
     track_url,
     unresolved_titles,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_live_spotify_session(monkeypatch):
+    """Nothing here wants a real Spotify client, and one was being built.
+
+    resolve_tracklist() calls metadata_client_for() *before* the resolver
+    these tests stub, and SpotifyMetadataClient.__init__ runs
+    SpotifyWebClient.initialize() — three live HTTP calls for a session, an
+    access token and a client token. So every test that resolves a link
+    reached its stubbed resolver by way of the real network, and a hiccup
+    there surfaced as the caller seeing a connection error where the test
+    expected the resolver's own message.
+
+    Patched on the module, which leaves the direct `metadata_client_for`
+    imported above untouched — test_the_client_is_chosen_by_host asserts on
+    the real thing and must keep seeing it.
+    """
+    monkeypatch.setattr(tracklist_module, "metadata_client_for", lambda url: object())
 
 
 class _Track:
@@ -54,7 +74,19 @@ def _collection(*tracks, source="https://open.spotify.com/album/a1") -> Tracklis
         ("something unrecognised", "SpotifyMetadataClient"),
     ],
 )
-def test_the_client_matches_the_domain(url, expected) -> None:
+def test_the_client_matches_the_domain(url, expected, monkeypatch) -> None:
+    """Which class the host picks — not whether that class can reach the net.
+
+    Constructing the real SpotifyMetadataClient opens a live session (see
+    _no_live_spotify_session above), so three HTTP calls were being made
+    here to read a class name. Neutering initialize() keeps the assertion
+    exactly as it was and takes the network out of it.
+    """
+    from SpotiFLAC.core import spotfetch
+
+    monkeypatch.setattr(
+        spotfetch.SpotifyWebClient, "initialize", lambda self, force=False: None
+    )
     assert type(metadata_client_for(url)).__name__ == expected
 
 

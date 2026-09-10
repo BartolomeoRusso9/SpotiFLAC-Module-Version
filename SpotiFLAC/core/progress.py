@@ -8,6 +8,7 @@ import io
 import logging
 import os
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -250,11 +251,55 @@ class DownloadItem:
     cover_url: str = ""
 
 
+class _CrossLoopLock:
+    """A mutex that survives more than one event loop.
+
+    asyncio.Lock binds itself to the loop that first awaits it and raises
+    "is bound to a different event loop" for every other one. The singletons
+    below outlive any single loop, and this process genuinely runs more than
+    one: core/loop_runner.py owns a long-lived loop for the GUI and web sync
+    bridges, while client.SpotiFLAC() deliberately keeps its own
+    asyncio.run() for a one-shot batch — see that module's docstring, which
+    calls the separation correct.
+
+    Both were switched to a plain asyncio.Lock on the premise that "no
+    thread runs its own asyncio.run()". That premise was wrong, and the
+    result was a hard crash the moment a download batch started after
+    anything had already touched the queue from the shared loop:
+
+        RuntimeError: <asyncio.locks.Lock ...> is bound to a different
+        event loop
+
+    A threading.Lock has no loop affinity. It is acquired without blocking
+    and the caller yields while it is busy, so the loop is never held up —
+    and every critical section it guards is a short synchronous mutation
+    with no await in it, so contention is brief by construction.
+    """
+
+    def __init__(self, poll_interval: float = 0.01) -> None:
+        self._lock = threading.Lock()
+        self._poll_interval = poll_interval
+
+    async def __aenter__(self) -> _CrossLoopLock:
+        # A plain yield first: an uncontended lock is the overwhelmingly
+        # common case, and a contended one is usually free again within a
+        # single tick, so the poll interval should be the exception.
+        if not self._lock.acquire(blocking=False):
+            await asyncio.sleep(0)
+            while not self._lock.acquire(blocking=False):
+                await asyncio.sleep(self._poll_interval)
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        self._lock.release()
+        return False
+
+
 class DownloadBroadcaster:
     """Singleton for streaming progress events to external listeners
-    (e.g. a GUI webview). Previously it used _CrossLoopLock to protect
-    access to self._listeners from multiple parallel threads/loops.
-    With a single event loop, asyncio.Lock() is sufficient and correct.
+    (e.g. a GUI webview). self._listeners is guarded by _CrossLoopLock:
+    this singleton outlives any one event loop, and the process runs more
+    than one. See that class for what happens when it does not.
     """
 
     _instance: DownloadBroadcaster | None = None
@@ -263,7 +308,7 @@ class DownloadBroadcaster:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._listeners = set()
-            cls._instance._lock = asyncio.Lock()
+            cls._instance._lock = _CrossLoopLock()
             cls._instance._last_broadcast_time = 0.0
         return cls._instance
 
@@ -294,8 +339,12 @@ class DownloadBroadcaster:
 
 class DownloadManager:
     """Singleton that holds the download queue state.
-    _CrossLoopLock -> asyncio.Lock(): valid because there are no longer
-    multiple concurrent event loops (no thread runs its own asyncio.run()).
+
+    Guarded by _CrossLoopLock, not asyncio.Lock. The queue is process-wide
+    and outlives any single loop — loop_runner's shared loop fills it from
+    the GUI and web bridges, client.SpotiFLAC()'s own asyncio.run() fills it
+    from a batch run — and an asyncio.Lock crashes the second loop to reach
+    it.
     """
 
     _instance: DownloadManager | None = None
@@ -308,7 +357,7 @@ class DownloadManager:
         return cls._instance
 
     def _init_state(self) -> None:
-        self._lock = asyncio.Lock()
+        self._lock = _CrossLoopLock()
         self._queue: list[DownloadItem] = []
         self.total_downloaded = 0.0
         self.current_item_id = ""
