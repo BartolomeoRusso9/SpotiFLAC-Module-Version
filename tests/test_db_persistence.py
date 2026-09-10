@@ -178,6 +178,90 @@ def test_failed_downloads_do_not_count_towards_usage():
     assert download_log.count_since("alice", 0) == 0
 
 
+def _track(isrc: str) -> TrackMetadata:
+    return TrackMetadata(
+        id="sp-" + isrc,
+        title="Song",
+        artists="Artist",
+        album="Album",
+        album_artist="Artist",
+        isrc=isrc,
+    )
+
+
+def test_rerunning_a_playlist_does_not_count_a_file_twice(tmp_path):
+    from SpotiFLAC.core.models import DownloadResult
+
+    target = tmp_path / "song.m4a"
+    target.write_bytes(b"z" * 100)
+    hook = download_log.record_hook(owner="carol")
+
+    hook(DownloadResult.ok("ext:tidal-web", str(target)), _track("ITAAA0000009"))
+    # Two later runs find the file already on disk and skip it.
+    for _ in range(2):
+        hook(
+            DownloadResult.skipped_result("tidal", str(target)), _track("ITAAA0000009")
+        )
+
+    assert download_log.count_since("carol", 0) == 1
+    assert download_log.totals("carol") == {"tracks": 1, "bytes": 100}
+
+
+def test_first_skip_of_an_unrecorded_file_is_still_learned(tmp_path):
+    from SpotiFLAC.core.models import DownloadResult
+
+    # A file that was on disk before the log existed: its first skip is the
+    # only chance to learn it, and has_isrc() depends on that.
+    target = tmp_path / "old.m4a"
+    target.write_bytes(b"o" * 50)
+    hook = download_log.record_hook(owner="dave")
+
+    for _ in range(3):
+        hook(
+            DownloadResult.skipped_result("tidal", str(target)), _track("ITAAA0000010")
+        )
+
+    assert download_log.has_isrc("ITAAA0000010", owner="dave") is True
+    assert download_log.count_since("dave", 0) == 1
+
+
+def test_dedup_migration_keeps_one_row_per_file():
+    for _ in range(3):
+        download_log.record(owner="erin", file_path="/music/a.m4a", size_bytes=10)
+    download_log.record(owner="erin", file_path="/music/b.m4a", size_bytes=20)
+    # Another account's copy of the same path is its own file.
+    download_log.record(owner="frank", file_path="/music/a.m4a", size_bytes=10)
+    # Failed attempts have no file and must survive: they are attempts.
+    download_log.record(owner="erin", success=False)
+    download_log.record(owner="erin", success=False)
+
+    conn = db.connection()
+    first = conn.execute(
+        "SELECT MIN(id) FROM downloads WHERE owner = 'erin' AND file_path = '/music/a.m4a'"
+    ).fetchone()[0]
+
+    # Replay the migration the way an instance upgrading from v2 runs it.
+    dedup = next(
+        stmts
+        for stmts in db._MIGRATIONS
+        if any("DELETE FROM downloads" in s for s in stmts)
+    )
+    with conn:
+        for statement in dedup:
+            conn.execute(statement)
+
+    assert download_log.totals("erin") == {"tracks": 2, "bytes": 30}
+    assert download_log.totals("frank") == {"tracks": 1, "bytes": 10}
+    kept = conn.execute(
+        "SELECT id FROM downloads WHERE owner = 'erin' AND file_path = '/music/a.m4a'"
+    ).fetchall()
+    assert [r[0] for r in kept] == [first]
+    failed = conn.execute(
+        "SELECT COUNT(*) FROM downloads WHERE owner = 'erin' AND success = 0"
+    ).fetchone()[0]
+    assert failed == 2
+
+
 # ── History ───────────────────────────────────────────────────────────────
 
 

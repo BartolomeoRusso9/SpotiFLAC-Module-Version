@@ -182,6 +182,49 @@ _MIGRATIONS: tuple[tuple[str, ...], ...] = (
         # for everyone or for one account.
         "CREATE INDEX IF NOT EXISTS idx_downloads_time ON downloads(downloaded_at)",
     ),
+    # v3 — one row per file, not one per run.
+    #
+    # The post-download hook used to record skipped tracks as well, so every
+    # re-run of a playlist appended a fresh successful row for each file that
+    # was already on disk, and the dashboard, quotas and totals counted the
+    # same file once per run. The hook no longer does that (see
+    # download_log.record_hook); this removes the duplicates it left behind.
+    # Each file keeps its earliest row — the one that says when it actually
+    # arrived. Failed attempts have no file and are left alone: they are
+    # attempts, and the dashboard reports them as such.
+    (
+        """
+        DELETE FROM downloads
+        WHERE success = 1 AND file_path != ''
+          AND id NOT IN (
+              SELECT MIN(id) FROM downloads
+              WHERE success = 1 AND file_path != ''
+              GROUP BY owner, file_path
+          )
+        """,
+    ),
+    # v4 — the tracks that still have to be downloaded.
+    #
+    # A run's failures lived only in the downloader's memory and in the
+    # frontend's queue, so a restart or a page reload lost the one list of
+    # what was still missing. core/failed_tracks.py keeps it here: one row
+    # per track per account, with the full metadata a retry needs after the
+    # tracklist it came from is gone, removed as soon as the track downloads.
+    (
+        """
+        CREATE TABLE IF NOT EXISTS failed_tracks (
+            owner           TEXT NOT NULL DEFAULT '',
+            track_key       TEXT NOT NULL,
+            track           TEXT NOT NULL,
+            source_url      TEXT NOT NULL DEFAULT '',
+            error           TEXT NOT NULL DEFAULT '',
+            attempts        INTEGER NOT NULL DEFAULT 1,
+            first_failed_at REAL NOT NULL,
+            last_failed_at  REAL NOT NULL,
+            PRIMARY KEY (owner, track_key)
+        )
+        """,
+    ),
 )
 
 

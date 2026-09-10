@@ -1988,6 +1988,38 @@
       font-size: var(--fs-200); color: var(--text2);
     }
     .queue-stats-bar strong { color: var(--text); font-family: var(--font-mono); }
+    /* Tracks still missing (see the #failed-panel comment in index.html).
+       Same surface and radius as the counters above it, so it reads as part
+       of the queue rather than as a warning banner dropped on top. */
+    .failed-panel {
+      margin: 0 24px var(--sp-4);
+      padding: 12px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      font-size: var(--fs-200); color: var(--text2);
+    }
+    .failed-panel .fp-head { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+    .failed-panel .fp-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 160px; }
+    .failed-panel .fp-text strong { color: var(--status-failed-fg); font-weight: 700; }
+    .failed-panel .fp-sub { font-size: var(--fs-75); color: var(--muted); }
+    .failed-panel .fp-actions { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
+    .failed-panel .act-btn { padding: 7px 12px; font-size: var(--fs-75); }
+    .fp-list {
+      list-style: none; margin: 10px 0 0; padding: 0;
+      max-height: 220px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .fp-item {
+      display: flex; align-items: center; gap: var(--sp-3);
+      padding: 6px 8px; border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+    }
+    .fp-item .fp-main { flex: 1; min-width: 0; }
+    .fp-item .fp-name, .fp-item .fp-error { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fp-item .fp-name { color: var(--text); }
+    .fp-item .fp-error { font-size: var(--fs-75); color: var(--muted); }
+    .fp-item .fp-attempts { font-size: var(--fs-75); color: var(--muted); font-family: var(--font-mono); white-space: nowrap; }
     .queue-summary .qs-icon {
       width: 34px; height: 34px; border-radius: var(--radius-md);
       display: grid; place-items: center; background: var(--status-active-bg);

@@ -182,6 +182,26 @@ def _file_size(path: str) -> int:
         return 0
 
 
+def _already_recorded(owner: str, file_path: str) -> bool:
+    """Whether `owner` already has a successful row for this exact file."""
+    if not file_path:
+        return False
+    try:
+        row = (
+            db.connection()
+            .execute(
+                "SELECT 1 FROM downloads "
+                "WHERE owner = ? AND file_path = ? AND success = 1 LIMIT 1",
+                (owner, file_path),
+            )
+            .fetchone()
+        )
+        return row is not None
+    except Exception:
+        logger.debug("[download_log] _already_recorded failed", exc_info=True)
+        return False
+
+
 def record_hook(owner: str = "") -> Any:
     """A post-download hook that writes each finished track to the log.
 
@@ -191,6 +211,17 @@ def record_hook(owner: str = "") -> Any:
     """
 
     def _on_track(result: Any, metadata: Any) -> None:
+        # A skip is not a download. Re-running a playlist reports every track
+        # already on disk as a skipped success, and recording each of those
+        # counted the same file once more per run: three runs of a playlist
+        # turned a 1,100-track library into 3,177 in the dashboard. The first
+        # skip of a file the log has never seen is still recorded, so a
+        # library that predates the log is learned once — has_isrc() and
+        # subscriptions rely on that.
+        if getattr(result, "skipped", False) and _already_recorded(
+            owner, getattr(result, "file_path", "") or ""
+        ):
+            return
         record(
             owner=owner,
             spotify_id=getattr(metadata, "id", "") or "",
