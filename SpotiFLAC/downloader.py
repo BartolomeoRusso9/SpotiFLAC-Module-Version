@@ -2598,6 +2598,9 @@ class SpotiflacDownloader:
         # metadata instead: one request per distinct album, and usually none
         # at all, because the ISRC lookup above goes through
         # get_native_track_metadata(), which fetches and caches the album.
+        # Album native metadata fetched in this call, shared by the release-date
+        # and disc-number steps so no album is asked for twice.
+        albums: dict[str, dict] = {}
         try:
             missing_dates = [
                 (idx, t)
@@ -2606,20 +2609,23 @@ class SpotiflacDownloader:
                 and "open.spotify.com/track/" in (t.external_url or "")
             ]
             if missing_dates:
-                for i, date in await self._release_dates_async(missing_dates):
+                for i, date in await self._release_dates_async(missing_dates, albums):
                     tracks[i] = tracks[i].model_copy(update={"release_date": date})
         except Exception:
             # Non-fatal — keep original tracks if hydration fails
             pass
 
         # The disc number is missing from a playlist's track data too (it
-        # reads 1 for every track). The ISRC lookup above has just fetched
-        # each track's native metadata, which carries it, so it is read from
-        # that cache — never a request of its own. The composer is read from
-        # there as well when present, but Spotify rarely puts credits in that
-        # response; hand-picked tracks get theirs from _with_composer_async().
+        # reads 1 for every track). When the ISRC lookup above went to the
+        # network it left each track's native metadata in memory, which
+        # carries it; otherwise — an ISRC from the on-disk cache, or one the
+        # track already had — the album's native metadata answers for every
+        # track on it. The composer is read from the track cache as well when
+        # present, but Spotify rarely puts credits in that response;
+        # hand-picked tracks get theirs from _with_composer_async().
         try:
             tracks = self._fill_from_native_cache(tracks)
+            tracks = await self._discs_from_album_async(tracks, albums)
         except Exception:
             pass
 
@@ -2674,13 +2680,16 @@ class SpotiflacDownloader:
     async def _release_dates_async(
         self,
         missing: list[tuple[int, TrackMetadata]],
+        albums: dict[str, dict] | None = None,
     ) -> list[tuple[int, str]]:
         """(index, release date) for the tracks in `missing` that have one.
 
         Per album where the track says which album it is on, per track (from
         the same native metadata, cached by the ISRC lookup) where it does
-        not.
+        not. `albums` receives the album metadata fetched, for the
+        disc-number step to reuse.
         """
+        albums = {} if albums is None else albums
         web_client = self._metadata_client().web_client
         semaphore = asyncio.Semaphore(10)
 
@@ -2693,15 +2702,13 @@ class SpotiflacDownloader:
                     return ""
             return (metadata or {}).get("release_date", "") or ""
 
-        album_ids = sorted({t.album_id for _, t in missing if t.album_id})
-        album_dates = dict(
-            zip(
-                album_ids,
-                await asyncio.gather(
-                    *(_date(web_client.get_native_album_metadata, a) for a in album_ids)
-                ),
-            )
+        await self._album_metadata_async(
+            {t.album_id for _, t in missing if t.album_id}, albums
         )
+        album_dates = {
+            album_id: (metadata or {}).get("release_date", "") or ""
+            for album_id, metadata in albums.items()
+        }
 
         without_album = [(i, t) for i, t in missing if not t.album_id]
         track_dates = await asyncio.gather(
@@ -2719,6 +2726,71 @@ class SpotiflacDownloader:
             if date:
                 found.append((i, date))
         return found
+
+    async def _album_metadata_async(
+        self,
+        album_ids: set[str],
+        albums: dict[str, dict],
+    ) -> None:
+        """Fetches into `albums` the native metadata of each album not in it.
+
+        A failed fetch is stored as {} so it is not asked for again in the
+        same call. Across calls spotfetch's own cache does the same job.
+        """
+        wanted = sorted(a for a in album_ids if a and a not in albums)
+        if not wanted:
+            return
+        web_client = self._metadata_client().web_client
+        semaphore = asyncio.Semaphore(10)
+
+        async def _one(album_id: str) -> dict:
+            async with semaphore:
+                try:
+                    metadata = await asyncio.to_thread(
+                        web_client.get_native_album_metadata, album_id
+                    )
+                except Exception as exc:
+                    logger.debug("[metadata] no album metadata %s: %s", album_id, exc)
+                    return {}
+            return metadata if isinstance(metadata, dict) else {}
+
+        for album_id, metadata in zip(
+            wanted, await asyncio.gather(*(_one(a) for a in wanted))
+        ):
+            albums[album_id] = metadata
+
+    async def _discs_from_album_async(
+        self,
+        tracks: list[TrackMetadata],
+        albums: dict[str, dict],
+    ) -> list[TrackMetadata]:
+        """Disc numbers the track cache could not give, from album metadata.
+
+        Only for Spotify tracks still at disc 1 with nothing cached for them:
+        one album request each at most, and none for an album the date step
+        has already fetched.
+        """
+        from .core.spotfetch import peek_native_track_metadata
+
+        need = [
+            (i, track)
+            for i, track in enumerate(tracks)
+            if track.disc_number <= 1
+            and track.album_id
+            and "open.spotify.com/track/" in (track.external_url or "")
+            and not (peek_native_track_metadata(track.id) or {}).get("disc_number")
+        ]
+        if not need:
+            return tracks
+        await self._album_metadata_async({t.album_id for _, t in need}, albums)
+
+        filled = list(tracks)
+        for i, track in need:
+            discs = (albums.get(track.album_id) or {}).get("track_discs") or {}
+            disc = int(discs.get(track.id) or 0)
+            if disc > 1:
+                filled[i] = track.model_copy(update={"disc_number": disc})
+        return filled
 
     async def _register_queue_async(
         self,

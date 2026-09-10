@@ -106,10 +106,12 @@ def test_a_track_with_no_album_id_uses_its_own_metadata(hydrate) -> None:
     assert result[0].release_date == "2001-05-05"
 
 
-def test_tracks_that_already_have_a_date_cost_nothing(hydrate) -> None:
+def test_a_date_already_there_is_not_looked_up_again(hydrate) -> None:
+    """The album is still read once — for the disc number, which a playlist
+    track lacks and nothing cached supplies — but the date is left alone."""
     result, web = hydrate([_track(1, "A1", release_date="1999")])
 
-    assert web.albums == [] and web.tracks == []
+    assert web.albums == ["A1"] and web.tracks == []
     assert result[0].release_date == "1999"
 
 

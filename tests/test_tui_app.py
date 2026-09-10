@@ -90,6 +90,21 @@ async def test_editing_a_field_updates_the_state_and_the_command() -> None:
 
 
 @drives_the_ui
+async def test_a_change_before_the_command_panel_exists_is_not_fatal() -> None:
+    """Regression (seen on Windows CI): the form's Changed can reach the app
+    before the command panel, composed after it, is mounted — and
+    `query_one("#command")` then raised NoMatches, killing the app."""
+    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+        from textual.widgets import Input
+
+        await pilot.app.query_one("#command").remove()
+        pilot.app.query_one("#cfg-output_dir", Input).value = "/tmp/elsewhere"
+        await pilot.pause()
+
+        assert pilot.app.state.output_dir == "/tmp/elsewhere"
+
+
+@drives_the_ui
 async def test_a_dependent_setting_is_disabled_rather_than_ignored() -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Switch
