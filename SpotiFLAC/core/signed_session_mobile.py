@@ -23,9 +23,20 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
-from .signed_session_errors import should_clear_session
+from .signed_session_errors import parse_session_error, should_clear_session
 
 logger = logging.getLogger(__name__)
+
+#: After a refresh the gateway refused (or never answered), how long before
+#: the next request tries again. Without it, every signed request made after
+#: `refresh_after` repeats the same refused refresh — one extra round trip per
+#: track for the up-to-two hours until the session expires.
+_REFRESH_RETRY_S = 300.0
+
+#: Session file path -> monotonic time before which no refresh is attempted.
+#: Module-level because runtime_features.signed_fetch() builds a new client
+#: for every request, so nothing kept on an instance survives to the next one.
+_REFRESH_RETRY_AT: dict[str, float] = {}
 
 
 _DEFAULT_ENDPOINTS = {
@@ -556,26 +567,74 @@ class SignedSessionClient:
         self._save()
 
     async def _refresh(self) -> None:
+        """Extends the current session. Never raises.
+
+        A refresh that fails leaves the session exactly as valid as it was
+        until `expires_at`, so it must not take the request that triggered it
+        down with it — before, a network error here propagated out of
+        ensure_session() and failed a download that had a working session.
+        """
         refresh_path = self.endpoints.get("refresh")
         if not refresh_path:
             return  # no refresh endpoint declared: behavior identical to Go
-        body = {"install_id": self.install_id}
-        headers = self._sign_headers("POST", refresh_path, json.dumps(body).encode())
+        retry_key = str(self._path)
+        if time.monotonic() < _REFRESH_RETRY_AT.get(retry_key, 0.0):
+            return
+        # Serialised once, and these exact bytes are both hashed and sent. It
+        # used to hash json.dumps(body) — '{"install_id": "…"}', with a space —
+        # while sending json=body, which httpx 0.28 writes without one: the
+        # Body-Sha256 in the signature never matched the body on the wire,
+        # and whatever the gateway answered was dropped without a word. A
+        # session that is never refreshed dies at its first expiry and costs
+        # a new Turnstile challenge.
+        payload = json.dumps(
+            {"install_id": self.install_id}, separators=(",", ":")
+        ).encode()
+        headers = self._sign_headers("POST", refresh_path, payload)
+        headers["Content-Type"] = "application/json"
         self._ensure_client()
-        resp = await self._client.post(
-            f"{self.base_url}{refresh_path}",
-            json=body,
-            headers=headers,
-            timeout=15,
-        )
-        if resp.is_success:
+        try:
+            resp = await self._client.post(
+                f"{self.base_url}{refresh_path}",
+                content=payload,
+                headers=headers,
+                timeout=15,
+            )
+        except httpx.HTTPError as exc:
+            _REFRESH_RETRY_AT[retry_key] = time.monotonic() + _REFRESH_RETRY_S
+            logger.warning(
+                "[signed_session:%s] Session refresh failed: %s",
+                self.namespace,
+                str(exc) or type(exc).__name__,
+            )
+            return
+        if not resp.is_success:
+            _REFRESH_RETRY_AT[retry_key] = time.monotonic() + _REFRESH_RETRY_S
+            logger.warning(
+                "[signed_session:%s] Session refresh refused — HTTP %d: %s",
+                self.namespace,
+                resp.status_code,
+                resp.text[:200],
+            )
+            return
+        _REFRESH_RETRY_AT.pop(retry_key, None)
+        try:
             data = resp.json()
-            self.session_id = data.get("session_id", self.session_id)
-            self.session_secret = data.get("session_secret", self.session_secret)
-            self.expires_at = data.get("expires_at", self.expires_at)
-            self.refresh_after = data.get("refresh_after", self.refresh_after)
-            self.capabilities = data.get("capabilities", self.capabilities)
-            self._save()
+        except ValueError:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        self.session_id = data.get("session_id", self.session_id)
+        self.session_secret = data.get("session_secret", self.session_secret)
+        self.expires_at = data.get("expires_at", self.expires_at)
+        self.refresh_after = data.get("refresh_after", self.refresh_after)
+        self.capabilities = data.get("capabilities", self.capabilities)
+        self._save()
+        logger.info(
+            "[signed_session:%s] Session refreshed, valid until %s",
+            self.namespace,
+            self.expires_at,
+        )
 
     async def ensure_session(self) -> None:
         if not self.session_id or not self.session_secret:
@@ -950,6 +1009,116 @@ class _AsyncThreadLock:
         self._lock.release()
 
 
+# --- Backing off after a failed authentication -----------------------------
+#
+# A failed verification used to cost nothing to repeat, and it was repeated
+# for every signed request that followed: runtime_features.signed_fetch()
+# builds a fresh client per request, so nothing remembered that the attempt
+# before had just failed, and every track of an album — times every fallback
+# provider, times each extension's own retries — went back to /bootstrap and
+# opened another Chromium on another challenge. Against a gateway that counts
+# challenges per address, that is how one failed solve becomes a block
+# measured in hours.
+#
+# So a failure now pauses authentication for the whole namespace — every
+# extension sharing it talks to the same gateway from the same address — for
+# longer after each consecutive failure, and never for less than the gateway
+# itself asked. It is kept on disk beside the sessions, because what it
+# guards against (going back to a gateway that has already said no) should
+# not start over just because the container restarted.
+
+_AUTH_BACKOFF_BASE_S = 300
+_AUTH_BACKOFF_FACTOR = 3
+_AUTH_BACKOFF_MAX_S = 4 * 3600
+
+#: A failure this long after the previous pause ended is a new problem, not
+#: the next step of the old one, and starts the schedule from the bottom.
+_AUTH_BACKOFF_FORGET_S = 24 * 3600
+
+
+def _auth_backoff_path(client: SignedSessionClient) -> Path:
+    # Leading dot: session files are "<namespace>-<hash>.json", and this must
+    # never be mistaken for one.
+    return client.data_dir / f".{client.namespace}.auth-backoff.json"
+
+
+def _read_auth_backoff(client: SignedSessionClient) -> dict:
+    try:
+        data = json.loads(_auth_backoff_path(client).read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def auth_backoff_remaining(client: SignedSessionClient) -> float:
+    """Seconds before this namespace may try to authenticate again, or 0."""
+    try:
+        not_before = float(_read_auth_backoff(client).get("not_before") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, not_before - time.time())
+
+
+def _record_auth_failure(client: SignedSessionClient, retry_after: int = 0) -> float:
+    """Starts (or extends) the pause after a failed authentication.
+
+    Returns its length in seconds.
+    """
+    now = time.time()
+    record = _read_auth_backoff(client)
+    try:
+        failures = int(record.get("failures") or 0)
+        previous_end = float(record.get("not_before") or 0)
+    except (TypeError, ValueError):
+        failures, previous_end = 0, 0.0
+    if now - previous_end > _AUTH_BACKOFF_FORGET_S:
+        failures = 0
+    failures += 1
+    delay = min(
+        _AUTH_BACKOFF_BASE_S * _AUTH_BACKOFF_FACTOR ** (failures - 1),
+        _AUTH_BACKOFF_MAX_S,
+    )
+    # Deliberately not capped: a gateway that says "come back in 17 hours"
+    # means it, and every request before then only pushes the date back.
+    delay = max(delay, retry_after)
+    with contextlib.suppress(OSError):
+        _auth_backoff_path(client).write_text(
+            json.dumps({"failures": failures, "not_before": now + delay})
+        )
+    return delay
+
+
+def _clear_auth_backoff(client: SignedSessionClient) -> None:
+    with contextlib.suppress(OSError):
+        _auth_backoff_path(client).unlink()
+
+
+def _retry_after_from(exc: BaseException) -> int:
+    """The wait a refusal asked for, in seconds, or 0.
+
+    Read from the Retry-After header, else from the gateway's error envelope
+    (see signed_session_errors). Only httpx.HTTPStatusError carries a
+    response; anything else — a timeout, a solver that never got a token —
+    has nothing to say about it.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return 0
+    raw = (response.headers.get("Retry-After") or "").strip()
+    if raw.isdigit():
+        return int(raw)
+    with contextlib.suppress(Exception):
+        return parse_session_error(response.content).retry_after_seconds
+    return 0
+
+
+def _format_pause(seconds: float) -> str:
+    minutes = max(1, int(seconds + 59) // 60)
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60:02d} min"
+
+
 async def perform_signed_fetch(
     client: SignedSessionClient,
     method: str,
@@ -990,14 +1159,30 @@ async def perform_signed_fetch(
                 client._load()
 
                 if not client.authenticated:
-                    try:
-                        if use_turnstile_browser:
-                            await client.authenticate_with_turnstile(
-                                timeout=min(timeout, 90),
+                    if not use_turnstile_browser:
+                        return {"error": "RuntimeError: turnstile automation disabled"}
+                    # Checked here, under the lock and after _load(), so a
+                    # session another process obtained in the meantime is
+                    # used rather than refused. Debug, not warning: during a
+                    # pause every track lands here, and the failure that
+                    # started it has already been logged once, with the time.
+                    remaining = auth_backoff_remaining(client)
+                    if remaining > 0:
+                        logger.debug(
+                            "[signed_session:%s] verification paused, %s left",
+                            client.namespace,
+                            _format_pause(remaining),
+                        )
+                        return {
+                            "error": (
+                                "verification paused after a failed attempt — "
+                                f"next try in {_format_pause(remaining)}"
                             )
-                        else:
-                            msg = "turnstile automation disabled"
-                            raise RuntimeError(msg)
+                        }
+                    try:
+                        await client.authenticate_with_turnstile(
+                            timeout=min(timeout, 90),
+                        )
                     except Exception as exc:
                         # `str(exc)` is empty for httpx's timeout classes —
                         # `str(ReadTimeout(TimeoutError()))` is "" — which is
@@ -1005,14 +1190,17 @@ async def perform_signed_fetch(
                         # "Turnstile automatico fallito ()". The type name is
                         # always there, so lead with it and fall back to it.
                         detail = str(exc) or type(exc).__name__
-                        logger.info(
+                        pause = _record_auth_failure(client, _retry_after_from(exc))
+                        logger.warning(
                             "[signed_session:%s] Turnstile automatico fallito "
-                            "(%s: %s)",
+                            "(%s: %s) — no new verification for %s",
                             client.namespace,
                             type(exc).__name__,
                             detail,
+                            _format_pause(pause),
                         )
                         return {"error": f"{type(exc).__name__}: {detail}"}
+                    _clear_auth_backoff(client)
 
         # At this point the session is guaranteed for all parallel tracks
         #
