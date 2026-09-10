@@ -38,6 +38,21 @@ _REFRESH_RETRY_S = 300.0
 #: for every request, so nothing kept on an instance survives to the next one.
 _REFRESH_RETRY_AT: dict[str, float] = {}
 
+#: Session file path -> monotonic time of its last successful refresh, so a
+#: request that queued behind one can tell the session was just refreshed.
+_REFRESH_DONE_AT: dict[str, float] = {}
+
+#: One refresh at a time per session file. A threading.Lock for the reason
+#: the authentication locks further down give: signed requests run on event
+#: loops of their own, and an asyncio.Lock cannot be shared between them.
+_REFRESH_LOCKS: dict[str, threading.Lock] = {}
+_REFRESH_LOCKS_GUARD = threading.Lock()
+
+
+def _get_refresh_lock(key: str) -> threading.Lock:
+    with _REFRESH_LOCKS_GUARD:
+        return _REFRESH_LOCKS.setdefault(key, threading.Lock())
+
 
 _DEFAULT_ENDPOINTS = {
     "bootstrap": "/bootstrap",
@@ -573,6 +588,10 @@ class SignedSessionClient:
         until `expires_at`, so it must not take the request that triggered it
         down with it — before, a network error here propagated out of
         ensure_session() and failed a download that had a working session.
+
+        One refresh at a time per session: every signed request builds its
+        own client, so parallel downloads past `refresh_after` each found the
+        session due and each posted a refresh of their own.
         """
         refresh_path = self.endpoints.get("refresh")
         if not refresh_path:
@@ -580,6 +599,18 @@ class SignedSessionClient:
         retry_key = str(self._path)
         if time.monotonic() < _REFRESH_RETRY_AT.get(retry_key, 0.0):
             return
+        waiting_since = time.monotonic()
+        async with _AsyncThreadLock(_get_refresh_lock(retry_key)):
+            # Rechecked under the lock: whoever held it has just been either
+            # refused (the retry window says so) or answered (the done mark
+            # says so), and a second POST would repeat the one or the other.
+            if time.monotonic() < _REFRESH_RETRY_AT.get(retry_key, 0.0):
+                return
+            if _REFRESH_DONE_AT.get(retry_key, 0.0) >= waiting_since:
+                return
+            await self._post_refresh(refresh_path, retry_key)
+
+    async def _post_refresh(self, refresh_path: str, retry_key: str) -> None:
         # Serialised once, and these exact bytes are both hashed and sent. It
         # used to hash json.dumps(body) — '{"install_id": "…"}', with a space —
         # while sending json=body, which httpx 0.28 writes without one: the
@@ -617,19 +648,31 @@ class SignedSessionClient:
                 resp.text[:200],
             )
             return
-        _REFRESH_RETRY_AT.pop(retry_key, None)
         try:
             data = resp.json()
         except ValueError:
-            data = {}
+            data = None
         if not isinstance(data, dict):
-            data = {}
+            # A 200 that carries no session is not a refresh. Taken as one,
+            # it left the session exactly as due as before, so every request
+            # that followed posted it again.
+            _REFRESH_RETRY_AT[retry_key] = time.monotonic() + _REFRESH_RETRY_S
+            logger.warning(
+                "[signed_session:%s] Session refresh answered HTTP %d without "
+                "a session: %s",
+                self.namespace,
+                resp.status_code,
+                resp.text[:200],
+            )
+            return
+        _REFRESH_RETRY_AT.pop(retry_key, None)
         self.session_id = data.get("session_id", self.session_id)
         self.session_secret = data.get("session_secret", self.session_secret)
         self.expires_at = data.get("expires_at", self.expires_at)
         self.refresh_after = data.get("refresh_after", self.refresh_after)
         self.capabilities = data.get("capabilities", self.capabilities)
         self._save()
+        _REFRESH_DONE_AT[retry_key] = time.monotonic()
         logger.info(
             "[signed_session:%s] Session refreshed, valid until %s",
             self.namespace,
@@ -1037,9 +1080,16 @@ _AUTH_BACKOFF_FORGET_S = 24 * 3600
 
 
 def _auth_backoff_path(client: SignedSessionClient) -> Path:
+    # Per namespace *and gateway*: a namespace on another base_url is another
+    # gateway, whose refusals say nothing about this one. Deliberately not per
+    # app_version or platform — those are what tell apart the extensions that
+    # share this gateway and this address, and a pause each of them could
+    # skip by being a different extension would be no pause at all.
+    #
     # Leading dot: session files are "<namespace>-<hash>.json", and this must
     # never be mistaken for one.
-    return client.data_dir / f".{client.namespace}.auth-backoff.json"
+    gateway = hashlib.sha256(client.base_url.lower().encode()).hexdigest()[:12]
+    return client.data_dir / f".{client.namespace}-{gateway}.auth-backoff.json"
 
 
 def _read_auth_backoff(client: SignedSessionClient) -> dict:

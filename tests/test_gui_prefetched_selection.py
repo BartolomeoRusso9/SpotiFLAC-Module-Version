@@ -77,6 +77,19 @@ def test_the_whole_collection_still_goes_as_its_url(download) -> None:
     assert call["prefetched_tracks"] is None
 
 
+def test_a_selection_with_a_repeat_is_not_the_whole_collection(download) -> None:
+    """Four indices for four tracks, but t3 is not among them."""
+    call = download([0, 0, 1, 2])
+    assert call["url"] != PLAYLIST
+    assert call["batch_tracks"] is True
+
+
+def test_a_single_pick_uses_the_metadata_too(download) -> None:
+    call = download([2])
+    assert call["batch_tracks"] is True
+    assert [t.id for t in call["prefetched_tracks"].values()] == ["t2"]
+
+
 def test_the_sync_wrapper_forwards_what_it_is_given(monkeypatch) -> None:
     from SpotiFLAC import client as client_mod
 

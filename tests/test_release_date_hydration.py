@@ -118,6 +118,18 @@ def test_an_album_with_no_date_leaves_its_tracks_undated(hydrate) -> None:
     assert result[0].release_date == ""
 
 
+def test_a_track_with_an_isrc_already_still_gets_its_date(hydrate) -> None:
+    """Regression: with nothing missing an ISRC the whole step returned
+    early, dates and disc numbers included."""
+    track = _track(1, "A1").model_copy(update={"isrc": "KEEP"})
+
+    result, web = hydrate([track])
+
+    assert result[0].isrc == "KEEP"
+    assert result[0].release_date == "2020-01-02"
+    assert web.albums == ["A1"]
+
+
 def test_a_failing_album_lookup_is_not_fatal(hydrate) -> None:
     result, web = hydrate([_track(1, "A1"), _track(2, "A2")], fail=True)
 

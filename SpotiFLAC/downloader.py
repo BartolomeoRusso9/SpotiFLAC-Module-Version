@@ -2554,8 +2554,6 @@ class SpotiflacDownloader:
         tracks: list[TrackMetadata],
     ) -> list[TrackMetadata]:
         missing = [t for t in tracks if not t.isrc]
-        if not missing:
-            return tracks
 
         only_youtube = (
             len(self._opts.services) == 1 and self._opts.services[0] == "youtube"
@@ -2564,29 +2562,33 @@ class SpotiflacDownloader:
         if only_youtube:
             return tracks
 
-        try:
-            resolver = IsrcHelper(AsyncHttpClient("isrc"))
+        # Only the ISRC lookup waits on something being missing. The release
+        # date and disc number below are owed to every track, including one
+        # that arrived with its ISRC already.
+        if missing:
+            try:
+                resolver = IsrcHelper(AsyncHttpClient("isrc"))
 
-            async def _resolve_one(i: int, track: TrackMetadata):
-                if track.isrc:
+                async def _resolve_one(i: int, track: TrackMetadata):
+                    if track.isrc:
+                        return i, track
+                    if hasattr(resolver, "get_isrc_async"):
+                        resolved = await resolver.get_isrc_async(track.id)
+                    else:
+                        resolved = await asyncio.to_thread(resolver.get_isrc, track.id)
+
+                    if resolved:
+                        return i, track.model_copy(update={"isrc": resolved})
                     return i, track
-                if hasattr(resolver, "get_isrc_async"):
-                    resolved = await resolver.get_isrc_async(track.id)
-                else:
-                    resolved = await asyncio.to_thread(resolver.get_isrc, track.id)
 
-                if resolved:
-                    return i, track.model_copy(update={"isrc": resolved})
-                return i, track
+                tasks = [_resolve_one(i, t) for i, t in enumerate(tracks) if not t.isrc]
+                results = await asyncio.gather(*tasks)
 
-            tasks = [_resolve_one(i, t) for i, t in enumerate(tracks) if not t.isrc]
-            results = await asyncio.gather(*tasks)
+                for i, updated in results:
+                    tracks[i] = updated
 
-            for i, updated in results:
-                tracks[i] = updated
-
-        except Exception as exc:
-            logger.warning("[isrc] bulk resolution async failed: %s", exc)
+            except Exception as exc:
+                logger.warning("[isrc] bulk resolution async failed: %s", exc)
 
         # A playlist's tracks arrive with no release date — the playlist query
         # does not carry one. It used to be filled in with a full

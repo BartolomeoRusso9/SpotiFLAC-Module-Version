@@ -185,8 +185,10 @@ def _session_client(tmp_path) -> ssm.SignedSessionClient:
 @pytest.fixture(autouse=True)
 def _no_refresh_throttle_between_tests():
     ssm._REFRESH_RETRY_AT.clear()
+    ssm._REFRESH_DONE_AT.clear()
     yield
     ssm._REFRESH_RETRY_AT.clear()
+    ssm._REFRESH_DONE_AT.clear()
 
 
 def test_refresh_signs_the_bytes_it_actually_sends(tmp_path) -> None:
@@ -228,3 +230,72 @@ def test_a_refresh_that_cannot_connect_does_not_fail_the_request(tmp_path) -> No
     asyncio.run(client._refresh())  # must not raise
 
     assert client.authenticated
+
+
+@pytest.mark.parametrize("body", ["<html>maintenance</html>", "[]"])
+def test_a_200_without_a_session_is_a_failed_refresh(tmp_path, body) -> None:
+    client = _session_client(tmp_path)
+    request = httpx.Request("POST", "https://gateway.invalid/v2/session/refresh")
+    http = _RecordingHttp(httpx.Response(200, text=body, request=request))
+    client._client = http
+    expires = client.expires_at
+
+    asyncio.run(client._refresh())
+    asyncio.run(client._refresh())
+
+    assert len(http.calls) == 1, "taken as a refresh, it was re-posted every time"
+    assert client.expires_at == expires
+
+
+def test_concurrent_refreshes_post_once(tmp_path) -> None:
+    """Two requests past refresh_after, each with its own client, as the
+    runtime builds them: only the first may post."""
+    new_expiry = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
+    posts: list[str] = []
+
+    class _SlowHttp:
+        async def post(self, url, **kwargs):
+            posts.append(url)
+            await asyncio.sleep(0.2)
+            return httpx.Response(
+                200,
+                json={"expires_at": new_expiry, "refresh_after": new_expiry},
+                request=httpx.Request("POST", url),
+            )
+
+        async def aclose(self):
+            pass
+
+    first, second = _session_client(tmp_path), _session_client(tmp_path)
+    assert first._path == second._path
+    first._client, second._client = _SlowHttp(), _SlowHttp()
+
+    async def _both():
+        await asyncio.gather(first._refresh(), second._refresh())
+
+    asyncio.run(_both())
+
+    assert len(posts) == 1
+
+
+def test_a_pause_is_per_gateway_and_shared_by_its_extensions(tmp_path) -> None:
+    tidal = _client(tmp_path)
+    qobuz = ssm.SignedSessionClient(
+        base_url="https://gateway.invalid/v2",
+        namespace="zarz-v2",
+        app_version="qobuz-web@1.2.15",
+        platform="extension",
+        data_dir=str(tmp_path),
+    )
+    elsewhere = ssm.SignedSessionClient(
+        base_url="https://other-gateway.invalid/v2",
+        namespace="zarz-v2",
+        app_version="tidal-web@1.2.5",
+        platform="extension",
+        data_dir=str(tmp_path),
+    )
+
+    ssm._record_auth_failure(tidal)
+
+    assert ssm.auth_backoff_remaining(qobuz) > 0, "same gateway, same address"
+    assert ssm.auth_backoff_remaining(elsewhere) == 0

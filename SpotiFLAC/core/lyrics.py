@@ -492,7 +492,7 @@ _ITUNES_DURATION_TOLERANCE_PARTIAL_S = 5
 #: match on both title and artist (_itunes_result_matches) include other
 #: songs' lyrics; a new generation retires them instead of serving them for
 #: another week. Bump it whenever the way the Apple song is chosen changes.
-_APPLE_CACHE_GENERATION = "m2"
+_APPLE_CACHE_GENERATION = "m3"
 
 
 def _words(text: str) -> str:
@@ -506,6 +506,21 @@ def _contains_words(haystack: str, needle: str) -> bool:
     """Whole-word containment, so "nas" is not found inside "jonas"."""
     needle = _words(needle)
     return bool(needle) and f" {needle} " in f" {_words(haystack)} "
+
+
+#: What separates the artists within one credit ("A, B & C feat. D").
+_CREDIT_SEPARATORS = re.compile(
+    r"\s*(?:,|&|;|\bfeat\.?(?=\s)|\bft\.?(?=\s)|\bfeaturing\b)\s*",
+    re.IGNORECASE,
+)
+
+
+def _credits(artist_name: str) -> set[str]:
+    """The artists one credit string names, each reduced to its words."""
+    return {
+        _words(normalize_loose_string(part))
+        for part in _CREDIT_SEPARATORS.split(artist_name or "")
+    } - {""}
 
 
 def _itunes_result_matches(
@@ -528,15 +543,15 @@ def _itunes_result_matches(
     result_track = normalize_loose_string(
         simplify_track_name(res.get("trackName", "") or "")
     )
-    wanted_artist = normalize_loose_string(artist_name)
-    result_artist = normalize_loose_string(res.get("artistName", "") or "")
-    if not (wanted_track and result_track and wanted_artist and result_artist):
+    wanted_artists = _credits(artist_name)
+    result_artists = _credits(res.get("artistName", "") or "")
+    if not (wanted_track and result_track and wanted_artists and result_artists):
         return False
 
-    if not (
-        _contains_words(result_artist, wanted_artist)
-        or _contains_words(wanted_artist, result_artist)
-    ):
+    # Whole credits, not words: "Nas" is a word of "Lil Nas X" and a different
+    # artist, while "21 Savage" is one of the credits of "21 Savage, Offset &
+    # Metro Boomin".
+    if not wanted_artists & result_artists:
         return False
 
     title_exact = _words(result_track) == _words(wanted_track)

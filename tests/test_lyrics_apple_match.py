@@ -87,6 +87,17 @@ def test_artist_containment_is_by_whole_words() -> None:
     assert not _itunes_result_matches(res, "Sucker", "Nas", 181)
 
 
+def test_a_name_inside_another_artist_s_name_is_not_that_artist() -> None:
+    """Regression: "Nas" is a word of "Lil Nas X", not one of its credits."""
+    res = _res("Old Town Road", "Lil Nas X", 157)
+    assert not _itunes_result_matches(res, "Old Town Road", "Nas", 157)
+
+
+def test_a_featured_credit_is_still_a_credit() -> None:
+    res = _res("Song", "Somebody feat. Nas", 200)
+    assert _itunes_result_matches(res, "Song", "Nas", 200)
+
+
 # --- the fetch itself ------------------------------------------------------
 
 
