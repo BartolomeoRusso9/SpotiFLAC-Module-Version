@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "4.1.2"
+version = "4.1.3"
 description = "Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends."
 readme = "README.md"
 # 3.10, not 3.9: core/models.py declares PEP 604 unions (`str | None`) on
@@ -58,7 +58,7 @@ dependencies = [
     "tenacity>=8.3.0",
     "python-dotenv>=1.2.2",
     "requests>=2.33.0",
-    "pydoll-python>=2.9.0",
+    "pydoll-python>=2.19.0",
     # Base, not an extra: --verify-hires used to be a flag that silently did
     # nothing unless you had also installed SpotiFLAC[hires]. That extra
     # pulled librosa, and with it numba, llvmlite, scipy and scikit-learn —
