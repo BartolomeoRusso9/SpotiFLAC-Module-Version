@@ -151,6 +151,9 @@ class _MonochromeBrowserSession:
         self._record = load_monochrome_session()
         self._ever_solved = False
         self._page_url = MONOCHROME_PAGE_URLS[0]
+        # Whether the tab has loaded self._page_url: _do_fetch() runs in the
+        # page's context, so a cached token still needs a page to send from.
+        self._on_page = False
         self._profile_dir: str | None = None
         # Holds the process-wide browser-slot semaphore (see solver.py) for
         # as long as this persistent browser is alive. Entered/exited
@@ -182,10 +185,10 @@ class _MonochromeBrowserSession:
                 self._browser.start(),
                 timeout=MONOCHROME_BROWSER_START_TIMEOUT,
             )
-            await asyncio.wait_for(
-                self._tab.go_to(self._page_url),
-                timeout=MONOCHROME_BROWSER_START_TIMEOUT,
-            )
+            # No navigation here: which Monochrome page to load is decided
+            # (with fallback) by _open_page()'s callers, so one page being
+            # down can't take the whole browser start with it.
+            self._on_page = False
             await _try_minimize_window(self._browser)
         except Exception:
             if self._browser is not None:
@@ -274,31 +277,54 @@ class _MonochromeBrowserSession:
         self._ever_solved = True
         return result["access_token"]
 
+    def _candidate_pages(self) -> tuple[str, ...]:
+        """Every Monochrome page, the last one that worked first."""
+        start = MONOCHROME_PAGE_URLS.index(self._page_url)
+        return MONOCHROME_PAGE_URLS[start:] + MONOCHROME_PAGE_URLS[:start]
+
+    async def _open_page(self, page_url: str) -> None:
+        if page_url != self._page_url:
+            logger.info("[mono] falling back to %s", page_url)
+        await asyncio.wait_for(
+            self._tab.go_to(page_url),
+            timeout=MONOCHROME_BROWSER_START_TIMEOUT,
+        )
+        self._page_url = page_url
+        self._on_page = True
+        # A fresh page load already runs the widget; the refresh at the top of
+        # _solve_turnstile_on_page() is for re-solving in place.
+        self._ever_solved = False
+
+    async def _open_any_page(self) -> None:
+        """Load the first Monochrome page that navigates, for a cached token."""
+        errors: list[str] = []
+        for page_url in self._candidate_pages():
+            try:
+                await self._open_page(page_url)
+                return
+            except Exception as exc:
+                errors.append(f"{page_url}: navigation failed ({exc})")
+        msg = "no Monochrome page could be loaded — " + "; ".join(errors)
+        raise Exception(msg)
+
     async def _solve_on_any_page(self, timeout: float) -> str:
         """Solve on the current page, then on each fallback in turn.
 
-        The page that yields the token becomes `self._page_url`, and the tab
+        A page that fails to load or yields no token moves on to the next.
+        The one that yields the token becomes `self._page_url`, and the tab
         stays on it: `_do_fetch()` runs in that page's context, so the API
         request goes out from the same origin that was handed the JWT.
         """
-        start = MONOCHROME_PAGE_URLS.index(self._page_url)
-        pages = MONOCHROME_PAGE_URLS[start:] + MONOCHROME_PAGE_URLS[:start]
         errors: list[str] = []
-        for page_url in pages:
-            if page_url != self._page_url:
-                logger.info("[mono] falling back to %s", page_url)
+        for page_url in self._candidate_pages():
+            # Already on it (a re-solve after a 401): solve in place, which
+            # refreshes the page rather than navigating to it again.
+            if not (self._on_page and page_url == self._page_url):
                 try:
-                    await asyncio.wait_for(
-                        self._tab.go_to(page_url),
-                        timeout=MONOCHROME_BROWSER_START_TIMEOUT,
-                    )
+                    await self._open_page(page_url)
                 except Exception as exc:
                     errors.append(f"{page_url}: navigation failed ({exc})")
                     continue
-                self._page_url = page_url
-                # A fresh page load already runs the widget; the refresh at the
-                # top of _solve_turnstile_on_page() is for re-solving in place.
-                self._ever_solved = False
             try:
                 return await self._solve_turnstile_on_page(timeout)
             except Exception as exc:
@@ -308,6 +334,8 @@ class _MonochromeBrowserSession:
 
     async def _ensure_token(self) -> str:
         if monochrome_session_valid(self._record):
+            if not self._on_page:
+                await self._open_any_page()
             return self._record.jwt
 
         await self._ensure_browser()
@@ -429,6 +457,7 @@ class _MonochromeBrowserSession:
                 _kill_by_profile_dir(self._profile_dir)
         self._browser = None
         self._tab = None
+        self._on_page = False
         self._profile_dir = None
         if self._slot_cm is not None:
             with contextlib.suppress(Exception):
