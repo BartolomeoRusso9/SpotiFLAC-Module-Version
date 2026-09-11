@@ -224,13 +224,18 @@ def test_single_user_web_resumes_a_job_the_last_process_left(monkeypatch):
     monkeypatch.setattr(
         SpotiFLAC_API, "run_download_job", lambda self, payload: ran.append(payload)
     )
-    # What the previous process left behind: a job that was running when it
-    # died.
+    # What the previous process left behind: its own job, running when it
+    # died, next to one a multi-user run left in the same table.
+    single = db.dumps({"indices": [], "session": "old"})
+    multi = db.dumps({"owner": "alice", "selected_indices": [0]})
     with db.transaction() as conn:
-        conn.execute(
-            "INSERT INTO jobs (id, owner, payload, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            ("j1", "", db.dumps({"indices": [], "session": "old"}), "running", 1.0),
+        conn.executemany(
+            "INSERT INTO jobs (id, owner, payload, status, created_at, kind) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("j1", "", single, "running", 1.0, "single-user"),
+                ("m1", "alice", multi, "queued", 2.0, "multiuser"),
+            ],
         )
 
     app = webapp.create_app(token=None)
@@ -240,4 +245,24 @@ def test_single_user_web_resumes_a_job_the_last_process_left(monkeypatch):
     deadline = time.time() + 3
     while not ran and time.time() < deadline:
         time.sleep(0.01)
-    assert ran and ran[0]["session"] == "old"
+    assert [payload.get("session") for payload in ran] == ["old"]
+    assert app.state.download_queue.get("m1") is None, "not this queue's job"
+
+
+def test_multi_user_web_leaves_single_user_jobs_alone():
+    pytest.importorskip("fastapi")
+    from SpotiFLAC import webapp
+
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, owner, payload, status, created_at, kind) "
+            "VALUES ('j1', '', ?, 'running', 1.0, 'single-user')",
+            (db.dumps({"indices": [0], "tracks": [{}], "session": "old"}),),
+        )
+
+    app = webapp.create_app(token=None, multiuser=True)
+
+    assert app.state.download_queue is None
+    assert app.state.job_queue.get("j1") is None
+    row = db.connection().execute("SELECT status FROM jobs WHERE id = 'j1'").fetchone()
+    assert row["status"] == "running", "left for single-user mode to resume"

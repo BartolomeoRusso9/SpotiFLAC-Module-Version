@@ -225,6 +225,19 @@ _MIGRATIONS: tuple[tuple[str, ...], ...] = (
         )
         """,
     ),
+    # v5 — which queue a persisted job belongs to.
+    #
+    # Two JobQueues now share the jobs table: multi-user's, whose payloads are
+    # positions in an account's tracklist, and single-user --web's, whose
+    # payloads carry the tracks themselves (see webapp.py). A process
+    # restarted in the other mode restored the other queue's rows and handed
+    # them to a handler that cannot read them. Each queue now sees only its
+    # own kind. Every row written before this came from multi-user's queue,
+    # the only one that persisted.
+    (
+        "ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT ''",
+        "UPDATE jobs SET kind = 'multiuser'",
+    ),
 )
 
 

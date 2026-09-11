@@ -88,6 +88,60 @@ def test_unfinished_jobs_are_restored_and_rerun():
     assert q.get("j-running").started_at is not None
 
 
+@pytest.mark.parametrize(
+    ("kind", "expected", "untouched"),
+    [("single-user", "s", "m1"), ("multiuser", "m", "s1")],
+)
+def test_a_queue_restores_only_its_own_kind_of_job(kind, expected, untouched):
+    """A process restarted in the other mode must not run the other queue's jobs.
+
+    Single-user --web and multi-user persist into the same table with payloads
+    of different shapes, and each handler can only read its own.
+    """
+    with db.transaction() as conn:
+        conn.executemany(
+            "INSERT INTO jobs (id, owner, payload, status, created_at, kind) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("m1", "alice", db.dumps({"n": "m"}), "running", 1.0, "multiuser"),
+                ("s1", "", db.dumps({"n": "s"}), "queued", 2.0, "single-user"),
+            ],
+        )
+
+    seen: list[str] = []
+    q = JobQueue(handler=lambda p: seen.append(p["n"]), persist=True, kind=kind)
+
+    _wait_until(lambda: seen == [expected])
+    assert q.get(untouched) is None
+    row = (
+        db.connection()
+        .execute("SELECT status FROM jobs WHERE id = ?", (untouched,))
+        .fetchone()
+    )
+    assert row["status"] in ("running", "queued"), "left for its own queue"
+
+
+def test_jobs_from_before_queue_kinds_stay_multi_users():
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, owner, payload, status, created_at, kind) "
+            "VALUES ('old', 'alice', ?, 'queued', 1.0, '')",
+            (db.dumps({"n": 1}),),
+        )
+        # The backfill an upgrade runs once, on a database that predates kinds.
+        backfill = next(
+            statement
+            for statements in db._MIGRATIONS
+            for statement in statements
+            if statement.startswith("UPDATE jobs SET kind")
+        )
+        conn.execute(backfill)
+
+    seen: list[int] = []
+    JobQueue(handler=lambda p: seen.append(p["n"]), persist=True, kind="multiuser")
+    _wait_until(lambda: seen == [1])
+
+
 def test_persistence_is_off_by_default():
     q = JobQueue(handler=lambda _payload: None)
     job = q.submit("alice", {})

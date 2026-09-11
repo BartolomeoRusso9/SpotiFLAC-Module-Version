@@ -501,6 +501,9 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             # the one where a lost backlog is least likely to be noticed.
             persist=True,
             quota_check=_quota_check,
+            # Its own rows only: single-user --web persists into the same
+            # table (see below), with payloads this handler cannot read.
+            kind="multiuser",
         )
 
     # Single-user --web runs its downloads through a persisted queue as well,
@@ -516,7 +519,12 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     if not multiuser:
         from .core.job_queue import JobQueue
 
-        download_queue = JobQueue(handler=api.run_download_job, workers=1, persist=True)
+        download_queue = JobQueue(
+            handler=api.run_download_job,
+            workers=1,
+            persist=True,
+            kind="single-user",
+        )
         api._download_queue = download_queue
 
     @asynccontextmanager
