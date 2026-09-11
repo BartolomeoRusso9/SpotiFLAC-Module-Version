@@ -39,7 +39,15 @@ logger = logging.getLogger(__name__)
 
 MONOCHROME_SESSION_SKEW = timedelta(minutes=2)
 MONOCHROME_VERIFY_TIMEOUT = 60.0
-MONOCHROME_PAGE_URL = "https://monochrome.tf/"
+# Monochrome frontends that hand out the Turnstile JWT, tried in order: the
+# first one that yields a token is the page later requests are routed from.
+# monochrome.samidy.com is a fallback for when the main instance is down —
+# monochrome.tf has shipped a "down for maintenance" page with no Turnstile
+# on it at all, which left nothing to solve and every mono download failing.
+MONOCHROME_PAGE_URLS = (
+    "https://monochrome.tf/",
+    "https://monochrome.samidy.com/",
+)
 # Bound on browser.start() + initial navigation when spinning up the
 # persistent mono browser, so a hang there can't hold the global browser
 # slot (see acquire_browser_slot() below) forever.
@@ -142,6 +150,7 @@ class _MonochromeBrowserSession:
         self._lock = asyncio.Lock()
         self._record = load_monochrome_session()
         self._ever_solved = False
+        self._page_url = MONOCHROME_PAGE_URLS[0]
         self._profile_dir: str | None = None
         # Holds the process-wide browser-slot semaphore (see solver.py) for
         # as long as this persistent browser is alive. Entered/exited
@@ -174,7 +183,7 @@ class _MonochromeBrowserSession:
                 timeout=MONOCHROME_BROWSER_START_TIMEOUT,
             )
             await asyncio.wait_for(
-                self._tab.go_to(MONOCHROME_PAGE_URL),
+                self._tab.go_to(self._page_url),
                 timeout=MONOCHROME_BROWSER_START_TIMEOUT,
             )
             await _try_minimize_window(self._browser)
@@ -265,12 +274,44 @@ class _MonochromeBrowserSession:
         self._ever_solved = True
         return result["access_token"]
 
+    async def _solve_on_any_page(self, timeout: float) -> str:
+        """Solve on the current page, then on each fallback in turn.
+
+        The page that yields the token becomes `self._page_url`, and the tab
+        stays on it: `_do_fetch()` runs in that page's context, so the API
+        request goes out from the same origin that was handed the JWT.
+        """
+        start = MONOCHROME_PAGE_URLS.index(self._page_url)
+        pages = MONOCHROME_PAGE_URLS[start:] + MONOCHROME_PAGE_URLS[:start]
+        errors: list[str] = []
+        for page_url in pages:
+            if page_url != self._page_url:
+                logger.info("[mono] falling back to %s", page_url)
+                try:
+                    await asyncio.wait_for(
+                        self._tab.go_to(page_url),
+                        timeout=MONOCHROME_BROWSER_START_TIMEOUT,
+                    )
+                except Exception as exc:
+                    errors.append(f"{page_url}: navigation failed ({exc})")
+                    continue
+                self._page_url = page_url
+                # A fresh page load already runs the widget; the refresh at the
+                # top of _solve_turnstile_on_page() is for re-solving in place.
+                self._ever_solved = False
+            try:
+                return await self._solve_turnstile_on_page(timeout)
+            except Exception as exc:
+                errors.append(f"{page_url}: {exc}")
+        msg = "no Monochrome page produced a token — " + "; ".join(errors)
+        raise Exception(msg)
+
     async def _ensure_token(self) -> str:
         if monochrome_session_valid(self._record):
             return self._record.jwt
 
         await self._ensure_browser()
-        token = await self._solve_turnstile_on_page(MONOCHROME_VERIFY_TIMEOUT)
+        token = await self._solve_on_any_page(MONOCHROME_VERIFY_TIMEOUT)
 
         exp_dt = _decode_jwt_exp(token) or (
             datetime.now(timezone.utc) + timedelta(minutes=55)
