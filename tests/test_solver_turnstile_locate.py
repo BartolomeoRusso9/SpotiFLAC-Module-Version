@@ -12,7 +12,10 @@ enumeration instead; these fakes stand in for pydoll's nodes along that path.
 from __future__ import annotations
 
 import asyncio
+import inspect
 
+from pydoll.browser.tab import Tab
+from pydoll.elements.web_element import WebElement
 from pydoll.exceptions import ElementNotFound
 
 from SpotiFLAC.core import solver
@@ -107,3 +110,13 @@ def test_collapsed_widget_has_no_rect() -> None:
 def test_turnstile_root_without_iframe_is_skipped() -> None:
     husk = FakeNode(html=WIDGET_HTML)
     assert _locate([husk]) == (None, None)
+
+
+def test_installed_pydoll_has_the_apis_the_solver_uses() -> None:
+    # What pyproject's pydoll-python>=2.19.0 floor is for: find_shadow_roots
+    # and get_shadow_root arrived in 2.17.0, Tab.mouse (humanized moves) in
+    # 2.19.0. On an older pydoll, locate_widget() would quietly lose the
+    # checkbox and do_click() would raise AttributeError mid-solve.
+    assert "deep" in inspect.signature(Tab.find_shadow_roots).parameters
+    assert "timeout" in inspect.signature(WebElement.get_shadow_root).parameters
+    assert isinstance(inspect.getattr_static(Tab, "mouse"), property)

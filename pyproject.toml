@@ -58,7 +58,7 @@ dependencies = [
     "tenacity>=8.3.0",
     "python-dotenv>=1.2.2",
     "requests>=2.33.0",
-    "pydoll-python>=2.9.0",
+    "pydoll-python>=2.19.0",
     # Base, not an extra: --verify-hires used to be a flag that silently did
     # nothing unless you had also installed SpotiFLAC[hires]. That extra
     # pulled librosa, and with it numba, llvmlite, scipy and scikit-learn —
