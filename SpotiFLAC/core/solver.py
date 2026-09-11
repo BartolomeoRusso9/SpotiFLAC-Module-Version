@@ -29,9 +29,10 @@ _MAX_RELOAD_ATTEMPTS = 3
 # Fixed per-attempt overhead the hard watchdog budget must also cover, on
 # top of _watchdog_per_attempt (the token-polling window itself): the
 # navigation-poll loop in _navigate_with_turnstile_bypass() (100 * 0.1s)
-# and the iframe-rectangle discovery loop in _try_solve_within() (20 *
-# 0.5s) each run once per attempt and can legitimately take their full
-# duration before the token-polling window even starts.
+# and the checkbox discovery loop in _try_solve_within() (bounded by
+# _MAX_IFRAME_RECT_POLL_SECONDS) each run once per attempt and can
+# legitimately take their full duration before the token-polling window
+# even starts.
 _MAX_NAV_POLL_SECONDS = 100 * 0.1
 _MAX_IFRAME_RECT_POLL_SECONDS = 20 * 0.5
 
@@ -837,6 +838,53 @@ def _extract_grant_from_callback_url(callback_url: str) -> str | None:
     return None
 
 
+_CF_CHALLENGE_DOMAIN = "challenges.cloudflare.com"
+_CF_IFRAME_SELECTOR = f'iframe[src*="{_CF_CHALLENGE_DOMAIN}"]'
+_CF_CHECKBOX_SELECTOR = 'input[type="checkbox"]'
+
+
+async def _locate_turnstile(tab) -> tuple[object | None, dict | None]:
+    """Find the Turnstile checkbox and the widget iframe's rectangle.
+
+    Turnstile renders its iframe inside a *closed* shadow root, so
+    ``document.querySelectorAll('iframe')`` on the page never sees it: a
+    solver that looks there finds no widget and ends up clicking blind. This
+    goes through CDP's shadow-root enumeration instead — the same traversal
+    pydoll's own bypass does — shadow root -> iframe -> body -> inner shadow
+    root -> checkbox.
+
+    Returns ``(checkbox, rect)``, either of which may be None: the widget can
+    be on the page before the checkbox inside it is rendered (a challenge page
+    with a countdown, or Cloudflare still running its own checks), and a
+    re-render mid-traversal makes any step fail. ``rect`` is in the top-level
+    page's viewport coordinates, ``{"x", "y", "w", "h"}``.
+    """
+    for shadow_root in await tab.find_shadow_roots(deep=False):
+        try:
+            if _CF_CHALLENGE_DOMAIN not in await shadow_root.inner_html:
+                continue
+            iframe = await shadow_root.query(_CF_IFRAME_SELECTOR, timeout=0)
+        except Exception:
+            continue
+        rect = None
+        with contextlib.suppress(Exception):
+            bounds = await iframe.get_bounds_using_js()
+            if bounds["width"] > 50 and bounds["height"] > 20:
+                rect = {
+                    "x": bounds["x"],
+                    "y": bounds["y"],
+                    "w": bounds["width"],
+                    "h": bounds["height"],
+                }
+        checkbox = None
+        with contextlib.suppress(Exception):
+            body = await iframe.find(tag_name="body", timeout=0)
+            inner_shadow = await body.get_shadow_root(timeout=0)
+            checkbox = await inner_shadow.query(_CF_CHECKBOX_SELECTOR, timeout=0)
+        return checkbox, rect
+    return None, None
+
+
 async def _try_minimize_window(browser: Chrome) -> None:
     """Best-effort: minimize the browser window to taskbar/dock.
 
@@ -1215,14 +1263,22 @@ async def _solve_impl(
             callback_grant = extracted
         return callback_grant
 
-    async def get_cf_iframe_rect() -> dict | None:
+    async def get_cf_widget_rect() -> dict | None:
+        """Light-DOM fallback for the widget's rectangle, for when the
+        shadow-root traversal in `_locate_turnstile()` can't produce one: a
+        challenge iframe embedded directly in the page, or the
+        ``.cf-turnstile`` container Turnstile renders into — whose box is the
+        widget's even though the iframe itself sits in a closed shadow root.
+        """
         response = await tab.execute_script(
             """
             return JSON.stringify((function () {
-                for (const f of document.querySelectorAll('iframe')) {
-                    const src = f.src || f.getAttribute('src') || '';
-                    if (!src.includes('challenges.cloudflare.com')) continue;
-                    const r = f.getBoundingClientRect();
+                const candidates = [
+                    ...document.querySelectorAll('iframe[src*="challenges.cloudflare.com"]'),
+                    ...document.querySelectorAll('.cf-turnstile, [data-sitekey]'),
+                ];
+                for (const el of candidates) {
+                    const r = el.getBoundingClientRect();
                     if (r.width > 50 && r.height > 20) return {x:r.x, y:r.y, w:r.width, h:r.height};
                 }
                 return null;
@@ -1235,30 +1291,63 @@ async def _solve_impl(
             return json.loads(raw)
         return None
 
-    async def do_click(rect: dict | None) -> None:
-        """Manual click fallback, kept for pydoll versions without native
-        Turnstile support, or in case the native helper's single click
-        wasn't enough (e.g. a second challenge appeared after reload).
+    async def locate_widget() -> tuple[object | None, dict | None]:
+        try:
+            checkbox, rect = await _locate_turnstile(tab)
+        except Exception as exc:
+            if _looks_like_dead_browser(exc):
+                raise
+            checkbox, rect = None, None
+        if rect is None:
+            rect = await get_cf_widget_rect()
+        return checkbox, rect
+
+    async def do_click(checkbox, rect: dict | None) -> bool:
+        """Clicks the Turnstile checkbox; False if there was nothing to click.
+
+        Prefers pydoll's element click, which lands on the checkbox inside
+        the cross-origin iframe exactly, and falls back to a viewport click
+        where the checkbox sits in the widget (left edge, vertically centred)
+        when that raises — ElementNotVisible mid re-render, for instance.
+        Never clicks without a located widget: there is nothing to aim at,
+        and a stray click can hit a link and navigate the challenge away.
         """
+        if checkbox is None and rect is None:
+            return False
         if rect:
             cx = rect["x"] + 28 + random.uniform(-3, 3)
             cy = rect["y"] + rect["h"] / 2 + random.uniform(-3, 3)
-        else:
-            cx = 20 + 28 + random.uniform(-3, 3)
-            cy = 20 + 32 + random.uniform(-3, 3)
-        await tab.mouse.move(cx - 80, cy - 20, humanize=True)
-        await asyncio.sleep(random.uniform(0.15, 0.25))
-        await tab.mouse.move(cx, cy, humanize=True)
-        await asyncio.sleep(random.uniform(0.08, 0.15))
+            await tab.mouse.move(cx - 80, cy - 20, humanize=True)
+            await asyncio.sleep(random.uniform(0.15, 0.25))
+            await tab.mouse.move(cx, cy, humanize=True)
+            await asyncio.sleep(random.uniform(0.08, 0.15))
+        if checkbox is not None:
+            try:
+                await checkbox.click()
+                return True
+            except Exception as exc:
+                if _looks_like_dead_browser(exc):
+                    raise
+                logger.debug(
+                    "[solver] checkbox click failed, falling back to coordinates: %s",
+                    exc,
+                )
+        if not rect:
+            return False
         await tab.mouse.click(cx, cy)
+        return True
 
     async def _try_solve_within(window_seconds: float) -> str | None:
         """Attempts to obtain the token within `window_seconds`.
 
-        The native Turnstile click already happened (if available) during
-        `_navigate_with_turnstile_bypass()`/`_open_fresh_page()`, so this
-        mostly polls for the resulting token/grant, and only falls back to
-        manual clicking if nothing showed up yet.
+        The native Turnstile click may already have happened during
+        `_navigate_with_turnstile_bypass()`/`_open_fresh_page()`, but pydoll
+        only looks for the checkbox for a few seconds after the load event,
+        and a challenge page that renders the widget after a countdown
+        outlasts that. So this first waits (up to
+        _MAX_IFRAME_RECT_POLL_SECONDS) for the checkbox to be rendered, then
+        polls for the token/grant and clicks the checkbox itself while none
+        shows up.
         """
         token = await get_token()
         if token:
@@ -1268,18 +1357,29 @@ async def _solve_impl(
             if callback_grant:
                 return None  # grant already obtained, verified by the caller
 
-        rect = None
-        for _ in range(20):
-            rect = await get_cf_iframe_rect()
-            if rect:
+        loop = asyncio.get_event_loop()
+        discovery_deadline = loop.time() + _MAX_IFRAME_RECT_POLL_SECONDS
+        while loop.time() < discovery_deadline:
+            if _cancelled():
+                _shutdown_now()
+            token = await get_token()
+            if token:
+                return token
+            if capture_callback:
+                with contextlib.suppress(Exception):
+                    await capture_callback_grant()
+                if callback_grant:
+                    return None
+            checkbox, _rect = await locate_widget()
+            if checkbox is not None:
                 break
             await asyncio.sleep(0.5)
 
-        deadline = asyncio.get_event_loop().time() + window_seconds
+        deadline = loop.time() + window_seconds
         click_count = 0
         last_click = 0.0
 
-        while asyncio.get_event_loop().time() < deadline:
+        while loop.time() < deadline:
             if _cancelled():
                 _shutdown_now()
                 return token
@@ -1294,17 +1394,23 @@ async def _solve_impl(
             if token:
                 break
 
-            now = asyncio.get_event_loop().time()
-            if click_count == 0 or (not token and now - last_click > 8):
-                if click_count >= 3:
-                    await asyncio.sleep(0.3)
+            now = loop.time()
+            if click_count < 3 and (click_count == 0 or now - last_click > 8):
+                # Located afresh for every click: Turnstile re-renders its
+                # iframe while it works, which leaves older nodes stale.
+                checkbox, rect = await locate_widget()
+                if checkbox is None and click_count > 0:
+                    # Already clicked and no checkbox back: the widget is
+                    # verifying or done, and its box is no target any more.
+                    rect = None
+                if await do_click(checkbox, rect):
+                    click_count += 1
+                    last_click = loop.time()
+                    logger.info(
+                        "[solver] clicked the Turnstile checkbox (%d/3)", click_count
+                    )
+                    await asyncio.sleep(1.0)
                     continue
-                await do_click(rect)
-                last_click = asyncio.get_event_loop().time()
-                click_count += 1
-                await asyncio.sleep(1.0)
-                rect = await get_cf_iframe_rect() or rect
-                continue
 
             await asyncio.sleep(0.3)
 
