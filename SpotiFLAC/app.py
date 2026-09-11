@@ -293,6 +293,12 @@ class SpotiFLAC_API(
             ).start()
         except Exception as e:
             self.log(f"Error starting extensions: {e}", "warn")
+        try:
+            # Scheduled subscriptions (Following view). Once per process, however
+            # many times the page loads; see api_mixins/subscriptions.py.
+            self._start_subscription_scheduler()
+        except Exception as e:
+            self.log(f"Could not start the subscription scheduler: {e}", "warn")
         app_version = self.app_version
         try:
             self._push("loadHistoryAndProfiles")

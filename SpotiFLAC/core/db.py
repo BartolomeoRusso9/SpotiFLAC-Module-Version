@@ -238,6 +238,18 @@ _MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT ''",
         "UPDATE jobs SET kind = 'multiuser'",
     ),
+    # v6 — subscriptions that check themselves.
+    #
+    # `interval_minutes` > 0 puts a subscription on the scheduler (see
+    # core/subscription_scheduler.py); 0 keeps it manual, which is what every
+    # existing row was. `download_config` is the download settings the page
+    # last sent for it: a scheduled check has no page open to ask.
+    (
+        "ALTER TABLE subscriptions ADD COLUMN interval_minutes INTEGER NOT NULL "
+        "DEFAULT 0",
+        "ALTER TABLE subscriptions ADD COLUMN download_config TEXT NOT NULL "
+        "DEFAULT '{}'",
+    ),
 )
 
 

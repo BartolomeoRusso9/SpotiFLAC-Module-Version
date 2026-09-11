@@ -196,6 +196,7 @@ ALLOWED_METHODS: set[str] = {
     "add_subscription",
     "remove_subscription",
     "set_subscription_enabled",
+    "set_subscription_interval",
     "reset_subscription",
     "check_subscriptions",
     # Extension health (read-only, plus a counter reset).
@@ -575,10 +576,17 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                     "short by the last restart; tracks already on disk are skipped.",
                     "info",
                 )
+        # Scheduled subscriptions (Following view). In multi-user mode each
+        # subscription is checked, and downloaded, by its own account's Api
+        # instance — into that account's folder.
+        scheduler = api._start_subscription_scheduler(
+            (lambda owner: registry.get(owner or None)) if multiuser else None
+        )
         yield
-        # No shutdown-side work (yet) — everything here is process-lifetime
-        # state (threads, in-memory sessions/queue) that dies with the
-        # process anyway.
+        # Everything else here is process-lifetime state (threads, in-memory
+        # sessions/queue) that dies with the process anyway; the scheduler is
+        # stopped so an app torn down in-process stops checking.
+        await run_in_threadpool(scheduler.stop)
 
     app = FastAPI(title="SpotiFLAC Web", lifespan=_lifespan)
     app.state.shared_api = app_state_api

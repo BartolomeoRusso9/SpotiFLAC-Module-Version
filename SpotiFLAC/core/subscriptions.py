@@ -24,12 +24,28 @@ one command and being handed four hundred tracks — is a bad surprise to
 inflict by default. `backfill=True` (CLI: `--subscribe-backfill`) opts into
 the other reading.
 
+Playlists
+---------
+A playlist URL makes a `kind="playlist"` subscription: the seen-set holds
+track ids instead of release ids, and a check hands back the tracks added
+since the last one — with their metadata, so they can be queued for download
+without a second lookup each. The same first-check rule applies: the tracks
+already in the playlist are the baseline.
+
+Checking on a timer
+-------------------
+`interval_minutes` > 0 puts a subscription on the scheduler
+(core/subscription_scheduler.py), which checks it whenever that much time has
+passed since its last check and downloads what is new with the settings saved
+in `download_config`. 0 leaves it to the manual "check" buttons.
+
 Storage is `core/db.py`: the seen-set is append-mostly and unbounded, which
 is the shape a rewrite-the-whole-file JSON store handles worst.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -47,6 +63,14 @@ RELEASE_GROUPS = ("album", "single", "compilation", "appears_on")
 
 DEFAULT_GROUPS = "album,single"
 
+#: What a subscription can follow, keyed by parse_spotify_url()'s type.
+KINDS = {"artist": "artist", "artist_discography": "artist", "playlist": "playlist"}
+
+#: The shortest schedule accepted. Each check is several Spotify calls (a
+#: whole playlist listing, for a playlist), and a dozen subscriptions checked
+#: every minute is how an instance gets rate-limited.
+MIN_INTERVAL_MINUTES = 15
+
 
 class SubscriptionError(ValueError):
     """A subscription could not be created or resolved."""
@@ -54,7 +78,8 @@ class SubscriptionError(ValueError):
 
 @dataclass
 class Release:
-    """One release in an artist's discography, before anything is downloaded."""
+    """One item a subscription can find new: an artist's release, or — with
+    `type="track"` — a track added to a followed playlist."""
 
     id: str
     title: str = ""
@@ -63,7 +88,8 @@ class Release:
 
     @property
     def url(self) -> str:
-        return f"https://open.spotify.com/album/{self.id}"
+        path = "track" if self.type == "track" else "album"
+        return f"https://open.spotify.com/{path}/{self.id}"
 
     def to_dict(self) -> dict:
         return {
@@ -88,12 +114,25 @@ class Subscription:
     created_at: float = field(default_factory=time.time)
     last_checked_at: float | None = None
     last_error: str | None = None
+    interval_minutes: int = 0
+    download_config: dict = field(default_factory=dict)
 
     @property
     def groups(self) -> list[str]:
         return [g.strip() for g in self.include_groups.split(",") if g.strip()]
 
+    @property
+    def next_check_at(self) -> float | None:
+        """When the scheduler will next check this, or None if it won't."""
+        if not self.enabled or self.interval_minutes <= 0:
+            return None
+        if self.last_checked_at is None:
+            return time.time()
+        return float(self.last_checked_at) + self.interval_minutes * 60
+
     def to_dict(self) -> dict:
+        # download_config stays out: it is the page's own settings echoed
+        # back, and nothing that lists subscriptions needs it.
         return {
             "id": self.id,
             "url": self.url,
@@ -106,8 +145,18 @@ class Subscription:
             "created_at": self.created_at,
             "last_checked_at": self.last_checked_at,
             "last_error": self.last_error,
+            "interval_minutes": self.interval_minutes,
+            "next_check_at": self.next_check_at,
             "seen_count": count_seen(self.id),
         }
+
+
+def _load_config(raw) -> dict:
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _row_to_subscription(row) -> Subscription:
@@ -123,6 +172,8 @@ def _row_to_subscription(row) -> Subscription:
         created_at=float(row["created_at"] or 0.0),
         last_checked_at=row["last_checked_at"],
         last_error=row["last_error"],
+        interval_minutes=int(row["interval_minutes"] or 0),
+        download_config=_load_config(row["download_config"]),
     )
 
 
@@ -147,6 +198,40 @@ def _normalise_groups(groups: str | None) -> str:
     return ",".join(wanted) or DEFAULT_GROUPS
 
 
+def _normalise_interval(minutes) -> int:
+    try:
+        value = int(minutes or 0)
+    except (TypeError, ValueError):
+        msg = f"Check interval must be a number of minutes, not {minutes!r}"
+        raise SubscriptionError(msg) from None
+    if value <= 0:
+        return 0
+    if value < MIN_INTERVAL_MINUTES:
+        msg = (
+            f"Check interval must be at least {MIN_INTERVAL_MINUTES} minutes "
+            "(or 0 to check only on demand)"
+        )
+        raise SubscriptionError(msg)
+    return value
+
+
+def kind_for_url(url: str) -> str:
+    """ "artist" or "playlist" for a URL a subscription can follow."""
+    from .spotify_metadata import parse_spotify_url
+
+    try:
+        url_type = parse_spotify_url(url)["type"]
+    except Exception:
+        url_type = ""
+    kind = KINDS.get(url_type)
+    if kind is None:
+        msg = "Follow a Spotify artist or playlist link" + (
+            f"; {url} is a {url_type}." if url_type else f"; {url} is neither."
+        )
+        raise SubscriptionError(msg)
+    return kind
+
+
 def add(
     url: str,
     *,
@@ -154,7 +239,9 @@ def add(
     output_dir: str = "",
     owner: str = "",
     include_groups: str | None = None,
-    kind: str = "artist",
+    kind: str | None = None,
+    interval_minutes: int | None = None,
+    download_config: dict | None = None,
 ) -> Subscription:
     """Registers a subscription. Re-adding the same URL updates it in place.
 
@@ -162,24 +249,39 @@ def add(
     twice is idempotent — which is what someone re-running a setup script
     expects, and the alternative is a silent duplicate that then downloads
     everything twice.
+
+    `kind` is read off the URL when not given. `interval_minutes` and
+    `download_config` left as None keep what an existing subscription has
+    (a new one starts manual, with no saved settings).
     """
     url = (url or "").strip()
     if not url:
-        msg = "A subscription needs a URL (an artist page, for example)"
+        msg = "A subscription needs a URL (an artist or playlist link)"
         raise SubscriptionError(msg)
 
+    kind = kind or kind_for_url(url)
     groups = _normalise_groups(include_groups)
+    interval = (
+        None if interval_minutes is None else _normalise_interval(interval_minutes)
+    )
 
     existing = get_by_url(url, owner=owner)
     if existing is not None:
         with db.transaction() as conn:
             conn.execute(
                 "UPDATE subscriptions SET name = ?, output_dir = ?, "
-                "include_groups = ?, enabled = 1 WHERE id = ?",
+                "include_groups = ?, enabled = 1, interval_minutes = ?, "
+                "download_config = ? WHERE id = ?",
                 (
                     name or existing.name,
                     output_dir or existing.output_dir,
                     groups,
+                    existing.interval_minutes if interval is None else interval,
+                    json.dumps(
+                        existing.download_config
+                        if download_config is None
+                        else download_config
+                    ),
                     existing.id,
                 ),
             )
@@ -195,11 +297,14 @@ def add(
         output_dir=output_dir,
         owner=owner,
         include_groups=groups,
+        interval_minutes=interval or 0,
+        download_config=dict(download_config or {}),
     )
     with db.transaction() as conn:
         conn.execute(
             "INSERT INTO subscriptions (id, kind, url, name, output_dir, owner, "
-            "include_groups, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
+            "include_groups, enabled, created_at, interval_minutes, "
+            "download_config) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
             (
                 sub.id,
                 sub.kind,
@@ -209,6 +314,8 @@ def add(
                 sub.owner,
                 sub.include_groups,
                 sub.created_at,
+                sub.interval_minutes,
+                json.dumps(sub.download_config),
             ),
         )
     return sub
@@ -276,6 +383,67 @@ def set_enabled(subscription_id: str, enabled: bool) -> bool:
             (1 if enabled else 0, subscription_id),
         )
         return cursor.rowcount > 0
+
+
+def set_schedule(
+    subscription_id: str,
+    interval_minutes: int,
+    download_config: dict | None = None,
+) -> bool:
+    """Puts a subscription on the scheduler (or takes it off, with 0).
+
+    `download_config` replaces the saved download settings when given; the
+    page sends its current ones, so a scheduled download is done the way the
+    person who scheduled it had things set up.
+    """
+    interval = _normalise_interval(interval_minutes)
+    with db.transaction() as conn:
+        if download_config is None:
+            cursor = conn.execute(
+                "UPDATE subscriptions SET interval_minutes = ? WHERE id = ?",
+                (interval, subscription_id),
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE subscriptions SET interval_minutes = ?, download_config = ? "
+                "WHERE id = ?",
+                (interval, json.dumps(download_config), subscription_id),
+            )
+        return cursor.rowcount > 0
+
+
+def update_download_config(owner: str, download_config: dict) -> int:
+    """Saves `download_config` on every subscription `owner` has.
+
+    Called whenever the page hands over its settings (a manual check, a
+    schedule change), so scheduled downloads follow settings changed since.
+    """
+    with db.transaction() as conn:
+        cursor = conn.execute(
+            "UPDATE subscriptions SET download_config = ? WHERE owner = ?",
+            (json.dumps(download_config), owner),
+        )
+        return cursor.rowcount
+
+
+def due(now: float | None = None) -> list[Subscription]:
+    """Enabled, scheduled subscriptions whose interval has run out.
+
+    Never checked counts as due: a schedule set a minute ago should not wait
+    a whole interval before its first look.
+    """
+    now = time.time() if now is None else now
+    rows = (
+        db.connection()
+        .execute(
+            "SELECT * FROM subscriptions WHERE enabled = 1 AND interval_minutes > 0 "
+            "AND (last_checked_at IS NULL OR last_checked_at + interval_minutes * 60 <= ?) "
+            "ORDER BY created_at",
+            (now,),
+        )
+        .fetchall()
+    )
+    return [_row_to_subscription(r) for r in rows]
 
 
 def record_check(subscription_id: str, error: str | None = None) -> None:
@@ -370,8 +538,8 @@ async def list_releases_async(
     info = parse_spotify_url(url)
     if info["type"] not in ("artist", "artist_discography"):
         msg = (
-            f"Subscriptions follow an artist; {url} is a {info['type']}. "
-            "Use --watch for a playlist or album you want re-synced."
+            f"Only an artist has a discography to list; {url} is a "
+            f"{info['type']}. Use --watch for an album you want re-synced."
         )
         raise SubscriptionError(msg)
 
@@ -412,6 +580,52 @@ async def list_releases_async(
     return artist_name, releases
 
 
+async def list_playlist_tracks_async(
+    url: str,
+    *,
+    client: Any = None,
+) -> tuple[str, list]:
+    """(playlist name, tracks) for a playlist subscription's URL.
+
+    The whole listing on every check — a playlist has no "newest first" order
+    to stop reading at, and tracks can be added anywhere in it. The tracks
+    come back as the TrackMetadata the GUI's own fetch produces, so the new
+    ones can be queued for download without looking each one up again.
+
+    `client` is injectable so tests can drive this without Spotify.
+    """
+    import asyncio
+    import inspect
+
+    from .spotify_metadata import SpotifyMetadataClient, parse_spotify_url
+
+    try:
+        url_type = parse_spotify_url(url)["type"]
+    except Exception as exc:
+        raise SubscriptionError(f"{url} is not a Spotify playlist link") from exc
+    if url_type != "playlist":
+        msg = f"{url} is a {url_type}, not a playlist"
+        raise SubscriptionError(msg)
+
+    metadata_client = client or SpotifyMetadataClient()
+    fetch = getattr(metadata_client, "get_url_async", None) or metadata_client.get_url
+    if inspect.iscoroutinefunction(fetch):
+        result = await fetch(url)
+    else:
+        result = await asyncio.to_thread(fetch, url)
+    return str(result[0] or ""), list(result[1] or [])
+
+
+def _track_release(track) -> Release:
+    title = getattr(track, "title", "") or ""
+    artists = getattr(track, "artists", "") or ""
+    return Release(
+        id=str(track.id),
+        title=f"{title} — {artists}" if artists else title,
+        type="track",
+    )
+
+
 def _release_year(release: dict) -> str:
     date = release.get("date")
     if isinstance(date, dict):
@@ -427,7 +641,11 @@ def _release_year(release: dict) -> str:
 
 @dataclass
 class CheckResult:
-    """What one check found. `new` is empty on a first (watermarking) check."""
+    """What one check found. `new` is empty on a first (watermarking) check.
+
+    For a playlist, `artist_name` is the playlist's name, `new` lists the
+    added tracks and `new_tracks` carries their full TrackMetadata.
+    """
 
     subscription: Subscription
     artist_name: str = ""
@@ -435,11 +653,13 @@ class CheckResult:
     new: list[Release] = field(default_factory=list)
     watermarked: bool = False
     error: str = ""
+    new_tracks: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "subscription_id": self.subscription.id,
             "url": self.subscription.url,
+            "kind": self.subscription.kind,
             "artist": self.artist_name or self.subscription.name,
             "total_releases": self.total,
             "new_releases": [r.to_dict() for r in self.new],
@@ -461,10 +681,18 @@ async def check_async(
     check forever. The failure is reported by the download path (and by
     `--json`), and `--subscribe-reset` is how you ask for another attempt.
     """
+    tracks: list = []
     try:
-        artist_name, releases = await list_releases_async(
-            sub.url, sub.include_groups, client=client
-        )
+        if sub.kind == "playlist":
+            artist_name, tracks = await list_playlist_tracks_async(
+                sub.url, client=client
+            )
+            tracks = [t for t in tracks if getattr(t, "id", "")]
+            releases = list({str(t.id): _track_release(t) for t in tracks}.values())
+        else:
+            artist_name, releases = await list_releases_async(
+                sub.url, sub.include_groups, client=client
+            )
     except Exception as exc:
         record_check(sub.id, str(exc))
         return CheckResult(subscription=sub, error=str(exc))
@@ -493,11 +721,19 @@ async def check_async(
             watermarked=True,
         )
 
+    fresh_ids = {r.id for r in fresh}
+    new_tracks: list = []
+    for track in tracks:
+        if str(track.id) in fresh_ids:
+            new_tracks.append(track)
+            fresh_ids.discard(str(track.id))  # a track listed twice, once
+
     return CheckResult(
         subscription=sub,
         artist_name=artist_name,
         total=len(releases),
         new=fresh,
+        new_tracks=new_tracks,
     )
 
 

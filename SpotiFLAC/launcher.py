@@ -1169,9 +1169,17 @@ def subscription_groups() -> tuple[str, ...]:
     return RELEASE_GROUPS
 
 
+def _sub_unit(kind: str) -> str:
+    """What a subscription's seen-set counts: a playlist's tracks, an artist's releases."""
+    return "track" if kind == "playlist" else "release"
+
+
 def _print_subscriptions(rows: list[dict]) -> None:
     if not rows:
-        print("No subscriptions. Add one with: spotiflac --subscribe <artist URL>")
+        print(
+            "No subscriptions. Add one with: "
+            "spotiflac --subscribe <artist or playlist URL>"
+        )
         return
     for row in rows:
         state = "" if row["enabled"] else "  (disabled)"
@@ -1180,11 +1188,16 @@ def _print_subscriptions(rows: list[dict]) -> None:
             if row["last_checked_at"]
             else "never"
         )
+        groups = (
+            "playlist"
+            if row["kind"] == "playlist"
+            else f"groups: {row['include_groups']}"
+        )
         print(f"{row['name'] or '(unnamed)'}{state}")
         print(f"    {row['url']}")
         print(
-            f"    groups: {row['include_groups']}  ·  seen: {row['seen_count']} "
-            f"release(s)  ·  last checked: {checked}"
+            f"    {groups}  ·  seen: {row['seen_count']} "
+            f"{_sub_unit(row['kind'])}(s)  ·  last checked: {checked}"
         )
         if row["last_error"]:
             print(f"    last error: {row['last_error']}")
@@ -1216,13 +1229,22 @@ async def _handle_subscriptions() -> None:
         except subscriptions.SubscriptionError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
-        print(f"Following {sub.name or sub.url} ({sub.include_groups}).")
+        is_playlist = sub.kind == "playlist"
+        print(
+            f"Following {sub.name or sub.url} "
+            f"({'playlist' if is_playlist else sub.include_groups})."
+        )
         if not args.backfill:
             print(
-                "The current catalogue will be recorded as already-seen on the "
-                "first check; only later releases are fetched. Use "
-                "--subscribe-backfill on the next --check-subscriptions to "
-                "fetch what is already out."
+                (
+                    "The tracks already in it will be recorded as already-seen on "
+                    "the first check; only tracks added later are fetched. "
+                    if is_playlist
+                    else "The current catalogue will be recorded as already-seen "
+                    "on the first check; only later releases are fetched. "
+                )
+                + "Use --subscribe-backfill on the next --check-subscriptions to "
+                "fetch what is already there."
             )
         return
 
@@ -1276,19 +1298,20 @@ async def _handle_subscriptions() -> None:
         label = (
             result.artist_name or result.subscription.name or result.subscription.url
         )
+        unit = _sub_unit(result.subscription.kind)
         if result.error:
             print(f"{label}: error — {result.error}")
         elif result.watermarked:
-            print(f"{label}: first check, {result.total} release(s) recorded as seen.")
+            print(f"{label}: first check, {result.total} {unit}(s) recorded as seen.")
         elif result.new:
-            print(f"{label}: {len(result.new)} new release(s)")
+            print(f"{label}: {len(result.new)} new {unit}(s)")
             for release in result.new:
                 year = f" ({release.year})" if release.year else ""
                 print(f"    · {release.title}{year} [{release.type}]")
         else:
             print(f"{label}: nothing new.")
     if total_new and not args.download:
-        print(f"\n{total_new} new release(s). Re-run with --download to fetch them.")
+        print(f"\n{total_new} new item(s). Re-run with --download to fetch them.")
 
 
 def _subscription_downloader(profile_defaults: dict, output_dir_override: str | None):
