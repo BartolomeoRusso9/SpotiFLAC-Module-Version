@@ -176,6 +176,7 @@
     'set_subscription_enabled', 'reset_subscription', 'check_subscriptions',
     'get_extension_health', 'reset_extension_health',
     'get_stats',
+    'get_failed_tracks', 'retry_failed_tracks', 'clear_failed_tracks',
     // CSV import sends the file's text, read in the browser — never a path.
     'preview_csv', 'fetch_csv',
   ];
@@ -304,6 +305,7 @@
   // checks the two agree; three names had already drifted out before it did.
   const ALLOWED_PUSH_FNS = new Set([
     '__set_version_label',
+    'app_background_download_finished',
     'app_cover_download_finished',
     'app_csv_error',
     'app_csv_loaded',

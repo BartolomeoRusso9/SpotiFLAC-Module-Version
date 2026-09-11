@@ -126,6 +126,7 @@ class JobQueue:
         max_pending_per_owner: int = DEFAULT_MAX_PENDING_PER_OWNER,
         persist: bool = False,
         quota_check: Callable[[str], None] | None = None,
+        kind: str = "",
     ) -> None:
         self._handler = handler
         self._queue: queue.Queue[str] = queue.Queue()
@@ -133,6 +134,11 @@ class JobQueue:
         self._max_history = max_history
         self._max_pending_per_owner = max_pending_per_owner
         self._persist = persist
+        # Which of the queues sharing the `jobs` table this one is. Restore,
+        # write and delete only ever touch rows of this kind: two queues'
+        # payloads are different shapes, and a process restarted in the other
+        # mode must not hand one queue's jobs to the other's handler.
+        self._kind = kind
         # Called with the owner just before a job is accepted; it raises to
         # refuse. Injected rather than imported so this module keeps knowing
         # nothing about accounts — see webapp.py, which passes the
@@ -174,7 +180,10 @@ class JobQueue:
         try:
             rows = (
                 db.connection()
-                .execute("SELECT * FROM jobs ORDER BY created_at")
+                .execute(
+                    "SELECT * FROM jobs WHERE kind = ? ORDER BY created_at",
+                    (self._kind,),
+                )
                 .fetchall()
             )
         except Exception:
@@ -223,8 +232,8 @@ class JobQueue:
                     """
                     INSERT INTO jobs (
                         id, owner, payload, status,
-                        created_at, started_at, finished_at, error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        created_at, started_at, finished_at, error, kind
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         status      = excluded.status,
                         started_at  = excluded.started_at,
@@ -240,6 +249,7 @@ class JobQueue:
                         job.started_at,
                         job.finished_at,
                         job.error,
+                        self._kind,
                     ),
                 )
         except Exception:
@@ -259,7 +269,8 @@ class JobQueue:
         try:
             with db.transaction() as conn:
                 conn.executemany(
-                    "DELETE FROM jobs WHERE id = ?", [(i,) for i in job_ids]
+                    "DELETE FROM jobs WHERE id = ? AND kind = ?",
+                    [(i, self._kind) for i in job_ids],
                 )
         except Exception:
             logger.debug("[JobQueue] Could not evict persisted jobs", exc_info=True)

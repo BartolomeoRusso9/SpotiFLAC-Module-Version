@@ -10,7 +10,7 @@
        tells itself apart from --web. Harmless to load in the desktop
        pywebview window too: manifest/theme-color are simply unused there,
        and the registration script below no-ops without that flag. -->
-  <link rel="manifest" href="manifest.json?v=20260921">
+  <link rel="manifest" href="manifest.json?v=20260922">
   <meta name="theme-color" content="#0a0a0c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="SpotiFLAC">
@@ -21,7 +21,7 @@
   <link rel="icon" type="image/svg+xml" href="assets/icons/logo.svg">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/logo-192.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260921">
+  <link rel="stylesheet" href="styles.css?v=20260922">
   <script>
     // Theme, applied before the first paint. app.js used to do this only from
     // its 'pywebviewready' handler, which meant the window painted light and
@@ -1131,6 +1131,25 @@
             <button type="button" class="qs-item failed" onclick="filterQueue('error')" aria-pressed="false"><span class="qs-icon">✕</span><strong id="q-failed">0</strong>Failed</button>
           </div>
 
+          <!-- The backend's list of tracks that failed and have not downloaded
+               since (core/failed_tracks.py), kept across runs and restarts.
+               The counters above only know this page's own queue, which a
+               reload empties. Hidden while the list is empty. -->
+          <section id="failed-panel" class="failed-panel hidden" aria-labelledby="fp-title">
+            <div class="fp-head">
+              <div class="fp-text">
+                <strong id="fp-title"><span id="fp-count">0</span> tracks still missing</strong>
+                <span class="fp-sub">Kept until they download, even across restarts.</span>
+              </div>
+              <div class="fp-actions">
+                <button type="button" class="act-btn secondary" id="fp-toggle" onclick="toggleFailedList()" aria-expanded="false" aria-controls="fp-list">Show</button>
+                <button type="button" class="act-btn secondary" onclick="clearFailedTracks()">Clear list</button>
+                <button type="button" class="act-btn primary" id="fp-retry" onclick="retryFailedTracks()">Retry all</button>
+              </div>
+            </div>
+            <ul id="fp-list" class="fp-list hidden"></ul>
+          </section>
+
           <div class="queue-toolbar">
             <span class="ts-icon">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -1157,8 +1176,8 @@
           <div id="queue-counter"><span id="q-count">0 tracks</span><span id="q-done"></span></div>
         </div>
       </div>
-  <script src="toast-system.js?v=20260921"></script>
-  <script src="app.js?v=20260921"></script>
+  <script src="toast-system.js?v=20260922"></script>
+  <script src="app.js?v=20260922"></script>
   <script>
     // --web mode only (see sw.js's own comment for what the service worker
     // actually does — installability, not offline caching of live data).

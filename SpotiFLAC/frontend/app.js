@@ -1315,9 +1315,24 @@ window.app_download_finished = (success = true, indices = null) => {
   if (waiting.length > 0) {
     startDownloadQueue();
   }
+  loadFailedTracks();
+};
+// A download this page did not dispatch — a batch the backend resumed after a
+// restart, or a retry from the missing-tracks list — ends here instead of in
+// app_download_finished, which closes the oldest batch *this page* sent and
+// would close the wrong rows.
+window.app_background_download_finished = (success = true, count = 0) => {
+  loadFailedTracks();
+  logMessage(
+    success
+      ? `Background download finished (${count} track(s)).`
+      : 'Background download failed.',
+    success ? 'ok' : 'error',
+  );
 };
 window.loadHistoryAndProfiles = async () => {
   if (!window.pywebview?.api) return;
+  loadFailedTracks();
   try {
     const hist     = await window.pywebview.api.get_history();
     renderRecent(hist);
@@ -3698,6 +3713,88 @@ function toggleQueueDrawer() {
   const drawer = $('queue-drawer');
   if (!drawer) return;
   drawer.classList.toggle('open');
+  if (drawer.classList.contains('open')) loadFailedTracks();
+}
+
+// ── Tracks still missing ─────────────────────────────────────────────────
+// The backend's list (core/failed_tracks.py): every track that failed and has
+// not downloaded since, across runs and restarts. Unlike `queue`, it is not
+// this page's memory, so it is re-read rather than kept in step by hand.
+let failedTracks = [];
+
+async function loadFailedTracks() {
+  if (!window.pywebview?.api?.get_failed_tracks) return;
+  try {
+    const doc = await window.pywebview.api.get_failed_tracks();
+    failedTracks = Array.isArray(doc?.tracks) ? doc.tracks : [];
+  } catch (e) {
+    console.warn('[failed-tracks] could not load the list:', e);
+    return;
+  }
+  renderFailedTracks();
+}
+
+function renderFailedTracks() {
+  const panel = $('failed-panel');
+  if (!panel) return;
+  panel.classList.toggle('hidden', failedTracks.length === 0);
+  const count = $('fp-count');
+  if (count) count.textContent = String(failedTracks.length);
+  const title = $('fp-title');
+  if (title && title.lastChild) {
+    title.lastChild.textContent = failedTracks.length === 1
+      ? ' track still missing'
+      : ' tracks still missing';
+  }
+  const list = $('fp-list');
+  if (!list) return;
+  list.innerHTML = failedTracks.map((t) => {
+    const name = [t.title, t.artists].filter(Boolean).join(' — ') || t.key;
+    const tries = t.attempts > 1 ? `${t.attempts} tries` : '1 try';
+    const error = t.error || 'No error message';
+    return `
+      <li class="fp-item">
+        <div class="fp-main">
+          <div class="fp-name" title="${regEscapeHtml(name)}">${regEscapeHtml(name)}</div>
+          <div class="fp-error" title="${regEscapeHtml(error)}">${regEscapeHtml(error)}</div>
+        </div>
+        <span class="fp-attempts">${tries}</span>
+        <button type="button" class="act-btn secondary" data-key="${regEscapeHtml(t.key)}"
+          onclick="retryFailedTracks([this.dataset.key])">Retry</button>
+      </li>`;
+  }).join('');
+}
+
+function toggleFailedList() {
+  const list = $('fp-list');
+  if (!list) return;
+  const open = !list.classList.toggle('hidden');
+  const btn = $('fp-toggle');
+  if (btn) {
+    btn.textContent = open ? 'Hide' : 'Show';
+    btn.setAttribute('aria-expanded', String(open));
+  }
+}
+
+async function retryFailedTracks(keys = null) {
+  if (!window.pywebview?.api?.retry_failed_tracks) return;
+  try {
+    const res = await window.pywebview.api.retry_failed_tracks(buildConfig(), keys);
+    if (!res?.queued) showToast('Nothing left to retry.', 'info');
+  } catch (e) {
+    logMessage('Could not retry the missing tracks: ' + e, 'error');
+  }
+}
+
+async function clearFailedTracks() {
+  if (!window.pywebview?.api?.clear_failed_tracks) return;
+  try {
+    await window.pywebview.api.clear_failed_tracks(null);
+  } catch (e) {
+    logMessage('Could not clear the missing-tracks list: ' + e, 'error');
+    return;
+  }
+  loadFailedTracks();
 }
 
 // The four counters double as filters: the number and the way to see what it

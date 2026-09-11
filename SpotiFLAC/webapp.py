@@ -205,6 +205,11 @@ ALLOWED_METHODS: set[str] = {
     # the calling account's own history: each account gets its own Api
     # instance, and `owner` is set on it above.
     "get_stats",
+    # The tracks still missing after a download (see core/failed_tracks.py).
+    # Retrying is a download like any other; clearing only edits the list.
+    "get_failed_tracks",
+    "retry_failed_tracks",
+    "clear_failed_tracks",
     # CSV input (core/csv_source.py). Both take the file's *contents*, never
     # a path — the browser reads the file locally, so nothing here can be
     # pointed at a path on the host.
@@ -496,7 +501,31 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             # the one where a lost backlog is least likely to be noticed.
             persist=True,
             quota_check=_quota_check,
+            # Its own rows only: single-user --web persists into the same
+            # table (see below), with payloads this handler cannot read.
+            kind="multiuser",
         )
+
+    # Single-user --web runs its downloads through a persisted queue as well,
+    # and for the reason multi-user's exists: this is the headless deployment,
+    # restarted by container updates and reboots nobody is watching. Each
+    # batch is written down before it starts — the tracks themselves, not
+    # positions in a tracklist that lives only in memory — and whatever a
+    # restart cut short is put back and runs again, skipping what is already
+    # on disk (see SpotiFLAC_API.download_tracks). Kept apart from
+    # `job_queue`: that is multi-user's account-aware queue, and /api/metrics
+    # and the v1 API read its presence as "multi-user".
+    download_queue = None
+    if not multiuser:
+        from .core.job_queue import JobQueue
+
+        download_queue = JobQueue(
+            handler=api.run_download_job,
+            workers=1,
+            persist=True,
+            kind="single-user",
+        )
+        api._download_queue = download_queue
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
@@ -530,6 +559,22 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             await run_in_threadpool(api.log, f"Extension init error: {e}", "warn")
         api._push("loadHistoryAndProfiles")
         api._push("__set_version_label", api.app_version)
+        if download_queue is not None:
+            # Nothing has been submitted yet at this point, so anything queued
+            # or running is what the queue restored from the last process.
+            waiting = [
+                job
+                for job in download_queue.list_all()
+                if job.status.value in ("queued", "running")
+            ]
+            if waiting:
+                tracks = sum(len(job.payload.get("tracks") or []) for job in waiting)
+                await run_in_threadpool(
+                    api.log,
+                    f"Resuming {len(waiting)} download(s) ({tracks} track(s)) cut "
+                    "short by the last restart; tracks already on disk are skipped.",
+                    "info",
+                )
         yield
         # No shutdown-side work (yet) — everything here is process-lifetime
         # state (threads, in-memory sessions/queue) that dies with the
@@ -539,6 +584,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     app.state.shared_api = app_state_api
     app.state.api_registry = registry
     app.state.job_queue = job_queue
+    app.state.download_queue = download_queue
 
     @app.middleware("http")
     async def _no_cache_frontend(request, call_next):
@@ -1064,11 +1110,11 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
             "<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n"
-            '<script src="/web-shim.js?v=20260921"></script>\n'
+            '<script src="/web-shim.js?v=20260922"></script>\n'
         )
         html = html.replace(
-            '<script src="toast-system.js?v=20260921"></script>',
-            inject + '<script src="toast-system.js?v=20260921"></script>',
+            '<script src="toast-system.js?v=20260922"></script>',
+            inject + '<script src="toast-system.js?v=20260922"></script>',
         )
         # Marks the document as browser-served before the first paint, so CSS
         # can drop the chrome that only makes sense in the pywebview window

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from .api_mixins.csv_import import CsvImportMixin
 from .api_mixins.dedup import DedupMixin
 from .api_mixins.discovery import DiscoveryMixin
 from .api_mixins.extension_health import ExtensionHealthMixin
+from .api_mixins.failed_tracks import FailedTracksMixin
 from .api_mixins.local_tagging import LocalTaggingMixin
 from .api_mixins.search import SearchMixin
 from .api_mixins.stats import StatsMixin
@@ -173,6 +175,7 @@ class SpotiFLAC_API(
     ExtensionHealthMixin,
     CsvImportMixin,
     StatsMixin,
+    FailedTracksMixin,
 ):
     """pywebview/`--web` bridge — every method here (plus the two mixins
     above) becomes a callable the frontend invokes as `pywebview.api.<name>`
@@ -198,6 +201,15 @@ class SpotiFLAC_API(
         # Held for the whole of a download batch, so two of them never share
         # a process — see _await_download_slot().
         self._download_lock = threading.Lock()
+        # Set by webapp.py in --web mode: a persisted JobQueue that
+        # download_tracks() writes each batch into instead of starting a bare
+        # thread, so a restart resumes it (see run_download_job). None
+        # everywhere else, the desktop window included — nothing should start
+        # downloading by itself because the app was opened.
+        self._download_queue = None
+        # Tells this process's own download jobs from ones a queue restored
+        # from an earlier process — see run_download_job().
+        self._session_id = uuid.uuid4().hex
         # Optional callable set by webapp.py in web mode: fn(event_name, args_list).
         # Desktop (pywebview) mode never sets this and is completely unaffected.
         self._ws_broadcast = None
@@ -1279,11 +1291,95 @@ class SpotiFLAC_API(
     # ── Phase 2: Download ─────────────────────────────────────────────────────
 
     def download_tracks(self, selected_indices, config) -> None:
+        if self._download_queue is not None:
+            payload = self._download_job_payload(selected_indices, config)
+            if payload is not None:
+                self._submit_download_job(payload)
+                return
         threading.Thread(
             target=self._download_task,
             args=(selected_indices, config),
             daemon=True,
         ).start()
+
+    def _download_job_payload(self, selected_indices, config) -> dict | None:
+        """One download request, in a form that outlives the process.
+
+        The tracks themselves rather than their positions: `current_tracks`
+        is replaced by the next fetch and empty after a restart, so indices
+        alone would resume into nothing — or into another playlist. The
+        indices ride along only so the page that asked can close the right
+        rows when the batch ends. None when a selected track cannot be written
+        down; the batch then runs the old, unpersisted way rather than not at
+        all.
+        """
+        try:
+            indices = [int(i) for i in selected_indices]
+            tracks = [self.current_tracks[i].model_dump(mode="json") for i in indices]
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+        return {
+            "indices": indices,
+            "tracks": tracks,
+            "source_url": self.current_url or "",
+            # Decided now, against the tracklist the user was looking at:
+            # after a restart there is no tracklist left to compare with.
+            "whole": sorted(indices) == list(range(len(self.current_tracks))),
+            "config": dict(config or {}),
+            "session": self._session_id,
+        }
+
+    def _start_download_job(self, payload: dict) -> None:
+        """Runs a self-contained download job: queued in --web mode, else now."""
+        if self._download_queue is not None:
+            self._submit_download_job(payload)
+            return
+        threading.Thread(
+            target=self.run_download_job, args=(payload,), daemon=True
+        ).start()
+
+    def _submit_download_job(self, payload: dict) -> None:
+        from .core.job_queue import QueueFullError
+
+        try:
+            self._download_queue.submit(self.owner, payload)
+        except QueueFullError as exc:
+            self.log(
+                f"{exc.pending} downloads are already waiting (limit {exc.limit}); "
+                "try again once some have finished.",
+                "error",
+            )
+
+    def run_download_job(self, payload: dict) -> dict:
+        """Runs one download job to the end, in the calling thread.
+
+        The persisted queue's handler (see webapp.py), which is why it
+        blocks: the job has to stay RUNNING until the batch is really over,
+        or a restart halfway through would find it DONE and drop the rest.
+        A job left over from an earlier process carries that process's
+        session id and finishes as a background download, since no open page
+        dispatched it (see app_background_download_finished in app.js).
+        """
+        from .core.models import TrackMetadata
+
+        indices = [int(i) for i in payload.get("indices") or []]
+        raw_tracks = payload.get("tracks") or []
+        if len(raw_tracks) != len(indices):
+            msg = "Malformed download job: tracks and indices do not match"
+            raise ValueError(msg)
+        tracks = {
+            i: TrackMetadata.model_validate(t)
+            for i, t in zip(indices, raw_tracks, strict=True)
+        }
+        self._download_task(
+            indices,
+            dict(payload.get("config") or {}),
+            tracks_by_index=tracks,
+            source_url=str(payload.get("source_url") or ""),
+            whole=bool(payload.get("whole")),
+            announce=payload.get("session") == self._session_id,
+        )
+        return {"tracks": len(indices)}
 
     def _await_download_slot(self, selected_indices) -> None:
         """Blocks until no other download batch is running.
@@ -1311,7 +1407,7 @@ class SpotiFLAC_API(
         )
         self._download_lock.acquire()
 
-    def _download_task(self, selected_indices, config) -> None:
+    def _download_task(self, selected_indices, config, **batch) -> None:
         """Runs one batch start to finish, never overlapping another one.
 
         The lock is taken and released here rather than around the body
@@ -1322,7 +1418,7 @@ class SpotiFLAC_API(
         """
         self._await_download_slot(selected_indices)
         try:
-            self._run_download_batch(selected_indices, config)
+            self._run_download_batch(selected_indices, config, **batch)
         finally:
             self._download_lock.release()
 
@@ -1369,7 +1465,24 @@ class SpotiFLAC_API(
             "debug",
         )
 
-    def _run_download_batch(self, selected_indices, config) -> None:
+    def _run_download_batch(
+        self,
+        selected_indices,
+        config,
+        *,
+        tracks_by_index: dict | None = None,
+        source_url: str | None = None,
+        whole: bool | None = None,
+        announce: bool = True,
+    ) -> None:
+        """One batch, start to finish.
+
+        The keyword arguments come from a persisted job (see
+        run_download_job), which carries its own tracks, source and
+        whole-collection decision; without them the batch reads the tracklist
+        on screen, as it always has. `announce=False` ends the batch with
+        app_background_download_finished instead of app_download_finished.
+        """
         self._download_active.set()
         from .client import _CleanConsoleFormatter
 
@@ -1496,7 +1609,8 @@ class SpotiFLAC_API(
                 self.log("Error: select at least one service.", "error")
                 return
 
-            collection_url = (self.current_url or "").strip()
+            source = self.current_url if source_url is None else source_url
+            collection_url = (source or "").strip()
             # A track list loaded from a CSV has no collection URL to stand
             # for it (see api_mixins/csv_import.py), so the whole-collection
             # shortcut only applies when there really is one.
@@ -1510,8 +1624,10 @@ class SpotiFLAC_API(
             # Every track exactly once, not merely as many indices as tracks:
             # [0, 0, 1] out of three is not the whole collection, and in --web
             # mode this list is an HTTP body.
-            whole_list = sorted(selected_indices) == list(
-                range(len(self.current_tracks))
+            whole_list = (
+                whole
+                if whole is not None
+                else sorted(selected_indices) == list(range(len(self.current_tracks)))
             )
             if from_a_link and whole_list:
                 urls_to_download = [collection_url]
@@ -1527,8 +1643,12 @@ class SpotiFLAC_API(
                 from .core.tracklist import track_url
 
                 for i in selected_indices:
-                    t = self.current_tracks[i]
-                    t_url = track_url(t, self.current_url)
+                    t = (
+                        tracks_by_index[i]
+                        if tracks_by_index is not None
+                        else self.current_tracks[i]
+                    )
+                    t_url = track_url(t, source)
                     if t_url:
                         urls_to_download.append(t_url)
                         if from_a_link and isinstance(t, TrackMetadata):
@@ -1586,6 +1706,12 @@ class SpotiFLAC_API(
             # dashboard would have shown an empty history to precisely the
             # people who never touch the CLI.
             log_hook = record_hook(self.owner)
+            # A track that fails stays listed, with what a retry needs, until
+            # it downloads (core/failed_tracks.py): the downloader's own list
+            # of failures ends with this call.
+            from .core import failed_tracks
+
+            failed_hook = failed_tracks.hook(self.owner, collection_url)
 
             # ONE call, not one per URL. client.SpotiFLAC() is a one-shot
             # entry point: it opens an event loop, an httpx pool, an
@@ -1636,7 +1762,7 @@ class SpotiFLAC_API(
                 post_download_command=post_download_command,
                 log_level=current_log_level,
                 loop=loop_minutes,
-                post_download_hooks=[log_hook],
+                post_download_hooks=[log_hook, failed_hook],
                 max_concurrent_downloads=max_concurrent,
                 verify_hires=verify_hires,
                 redownload_fake_hires=redownload_fake_hires,
@@ -1652,7 +1778,12 @@ class SpotiFLAC_API(
                 # every 'active' row done, which with a second batch queued
                 # behind this one meant marking tracks finished before they
                 # had started.
-                self._push("app_download_finished", True, list(selected_indices))
+                if announce:
+                    self._push("app_download_finished", True, list(selected_indices))
+                else:
+                    self._push(
+                        "app_background_download_finished", True, len(selected_indices)
+                    )
             except Exception:
                 pass
 
@@ -1661,7 +1792,12 @@ class SpotiFLAC_API(
             self.set_progress("Error.")
             self._push_download_stats()
             try:
-                self._push("app_download_finished", False, list(selected_indices))
+                if announce:
+                    self._push("app_download_finished", False, list(selected_indices))
+                else:
+                    self._push(
+                        "app_background_download_finished", False, len(selected_indices)
+                    )
             except Exception:
                 pass
         finally:
