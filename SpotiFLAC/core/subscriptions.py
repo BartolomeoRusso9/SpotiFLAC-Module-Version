@@ -460,9 +460,7 @@ def is_baselined(subscription_id: str) -> bool:
     """
     row = (
         db.connection()
-        .execute(
-            "SELECT baselined FROM subscriptions WHERE id = ?", (subscription_id,)
-        )
+        .execute("SELECT baselined FROM subscriptions WHERE id = ?", (subscription_id,))
         .fetchone()
     )
     return bool(row["baselined"]) if row is not None else False
