@@ -277,3 +277,115 @@ def test_set_output_sink_returns_the_previous_one() -> None:
     assert set_output_sink(second) is first
     assert set_output_sink(None) is second
     assert not sink_active()
+
+
+def test_a_host_app_with_rich_logging_sees_each_line_once(capfd) -> None:
+    """Library mode does not render over the host application's own logging.
+
+    An app that embeds AsyncSpotiFLAC and configures `rich.logging.
+    RichHandler` on the root logger used to get every warning twice for the
+    length of a download: once rendered by Rich, once as
+    "[WARNING] SpotiFLAC.core.signed_session_mobile: ...". A RichHandler is
+    a bare `logging.Handler`, not a StreamHandler, so the suspension pass
+    walked straight past it and then added a tqdm handler on the same root
+    it was still attached to.
+    """
+    from rich.logging import RichHandler
+
+    root = logging.getLogger()
+    package = logging.getLogger("SpotiFLAC")
+    host = RichHandler(show_path=False, show_time=False, markup=False)
+    host.setLevel(logging.INFO)
+
+    previous_level, previous_propagate = root.level, package.propagate
+    root.addHandler(host)
+    root.setLevel(logging.INFO)
+    try:
+        progress.install_console_interception()
+        try:
+            logging.getLogger("SpotiFLAC.core.signed_session_mobile").warning(
+                "ticket not returned",
+            )
+        finally:
+            progress.uninstall_console_interception()
+    finally:
+        root.removeHandler(host)
+        root.setLevel(previous_level)
+        package.propagate = previous_propagate
+
+    captured = capfd.readouterr()
+    printed = captured.out + captured.err
+    assert printed.count("ticket not returned") == 1
+    # The one that survived is the host's, not ours.
+    assert "[WARNING] SpotiFLAC" not in printed
+
+
+def test_a_host_log_file_keeps_receiving_records_during_a_download(tmp_path) -> None:
+    """A FileHandler is not a renderer and must not be suspended as one.
+
+    `logging.FileHandler` is a StreamHandler subclass, so the suspension
+    pass used to take the host's log file out for the length of every
+    download — the one stretch of a run worth having in a log — and could
+    then adopt its formatter for the terminal as well.
+    """
+    log_path = tmp_path / "host.log"
+    root = logging.getLogger()
+    host = logging.FileHandler(log_path)
+    host.setFormatter(logging.Formatter("%(message)s"))
+    host.setLevel(logging.INFO)
+
+    previous_level = root.level
+    root.addHandler(host)
+    root.setLevel(logging.INFO)
+    try:
+        progress.install_console_interception()
+        try:
+            assert host in root.handlers
+            logging.getLogger("SpotiFLAC.downloader").info("one track")
+        finally:
+            progress.uninstall_console_interception()
+    finally:
+        root.removeHandler(host)
+        host.close()
+        root.setLevel(previous_level)
+
+    assert log_path.read_text().strip() == "one track"
+
+
+def test_the_stand_in_handler_does_not_filter_more_than_the_one_it_replaced(
+    capfd,
+) -> None:
+    """`log_level=INFO` has to mean INFO during the download too.
+
+    The tqdm handler used to copy `root.level` onto itself. A library caller
+    raises the "SpotiFLAC" logger, not the root one, so the stand-in came up
+    at WARNING and swallowed every INFO record for exactly as long as the
+    download lasted — while the console handler it had just suspended
+    carried no level at all.
+    """
+    package = logging.getLogger("SpotiFLAC")
+    root = logging.getLogger()
+    host = logging.StreamHandler()
+
+    saved_handlers = list(package.handlers)
+    saved_propagate, saved_level = package.propagate, package.level
+    saved_root_handlers, saved_root_level = list(root.handlers), root.level
+    root.handlers.clear()
+    root.setLevel(logging.WARNING)
+    package.handlers[:] = [host]
+    package.propagate = False
+    package.setLevel(logging.INFO)
+    try:
+        progress.install_console_interception()
+        try:
+            logging.getLogger("SpotiFLAC.downloader").info("one track")
+        finally:
+            progress.uninstall_console_interception()
+    finally:
+        root.handlers[:] = saved_root_handlers
+        root.setLevel(saved_root_level)
+        package.handlers[:] = saved_handlers
+        package.propagate, package.level = saved_propagate, saved_level
+
+    captured = capfd.readouterr()
+    assert "one track" in captured.out + captured.err

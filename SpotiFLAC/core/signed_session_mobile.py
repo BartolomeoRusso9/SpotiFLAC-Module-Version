@@ -1199,6 +1199,9 @@ async def perform_signed_fetch(
         dict: Response details, a verification URL when reauthentication is required, or an error message.
 
     """
+    # Bound before the try so the failure log can time a call that died
+    # during authentication, long before the request itself was timed.
+    call_started = time.monotonic()
     try:
         # If we're not authenticated, acquire the async Lock
         if not client.authenticated:
@@ -1358,14 +1361,27 @@ async def perform_signed_fetch(
         # side decides how loudly to fail. At debug the reason was invisible
         # at the default level, so a download that stopped here reported
         # only "download failed".
+        #
+        # The type name leads, because `str(exc)` is empty for every one of
+        # httpx's timeout classes — `str(ReadTimeout(TimeoutError()))` is ""
+        # — and a timeout is the single most common way a signed request
+        # ends here. That emptiness was doing real damage on both sides of
+        # the bridge: the log line read "... failed:" and stopped, and the
+        # falsy `error` sent an extension straight past its
+        # `if (response.error)` branch to throw "HTTP undefined" instead,
+        # losing the reason and the Retry-After with it. Same treatment as
+        # the authentication path above.
+        detail = str(exc) or type(exc).__name__
         logger.warning(
-            "[signed_session:%s] signedFetch %s %s failed: %s",
+            "[signed_session:%s] signedFetch %s %s failed after %.1fs (%s: %s)",
             client.namespace,
             method,
             path,
-            exc,
+            time.monotonic() - call_started,
+            type(exc).__name__,
+            detail,
         )
-        return {"error": str(exc)}
+        return {"error": f"{type(exc).__name__}: {detail}"}
 
 
 def client_from_manifest(

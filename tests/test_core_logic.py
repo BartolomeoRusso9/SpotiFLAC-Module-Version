@@ -702,3 +702,48 @@ def test_async_client_tracks_loop_minutes_and_default_playlist_subfolders():
         ("https://open.spotify.com/track/abc", [{"id": "retry-track"}]),
     ]
     assert sleep_calls == [420]
+
+
+def test_setup_logger_leaves_a_host_application_s_logging_alone():
+    """A library does not get to decide how the program embedding it logs.
+
+    With the host's own handler on the root logger, adding one of ours put
+    a second, differently formatted copy of every record on the terminal,
+    and `propagate = False` hid the records from the host's handler
+    entirely whenever nothing had un-set it yet.
+    """
+    import logging
+
+    from SpotiFLAC.client import _setup_logger
+
+    package = logging.getLogger("SpotiFLAC")
+    root = logging.getLogger()
+    host = logging.NullHandler()
+
+    saved_handlers = list(package.handlers)
+    saved_propagate, saved_level = package.propagate, package.level
+    # pytest keeps handlers of its own on the root logger, and they would
+    # read as a configured host: this test is about what SpotiFLAC does with
+    # a root it was handed, so it hands it a known one.
+    saved_root_handlers = list(root.handlers)
+    root.handlers.clear()
+    package.handlers.clear()
+    package.propagate = True
+    root.addHandler(host)
+    try:
+        _setup_logger(logging.INFO)
+        assert package.handlers == []
+        assert package.propagate is True
+        # The level is an explicit argument of the public API, so it still
+        # applies — it is the *rendering* we keep our hands off.
+        assert package.level == logging.INFO
+
+        # Nothing configured: the handler is a convenience, not a hijack.
+        root.removeHandler(host)
+        _setup_logger(logging.INFO)
+        assert len(package.handlers) == 1
+        assert package.propagate is False
+    finally:
+        root.handlers[:] = saved_root_handlers
+        package.handlers[:] = saved_handlers
+        package.propagate, package.level = saved_propagate, saved_level

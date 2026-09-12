@@ -299,3 +299,34 @@ def test_a_pause_is_per_gateway_and_shared_by_its_extensions(tmp_path) -> None:
 
     assert ssm.auth_backoff_remaining(qobuz) > 0, "same gateway, same address"
     assert ssm.auth_backoff_remaining(elsewhere) == 0
+
+
+def test_a_timed_out_request_says_so_instead_of_returning_an_empty_error(
+    tmp_path, caplog
+) -> None:
+    """`str(exc)` is "" for every httpx timeout class.
+
+    That emptiness reached both sides of the bridge: the log line read
+    "... failed:" and stopped, and `{"error": ""}` is falsy, so an
+    extension's `if (response.error)` branch was skipped and it threw
+    "HTTP undefined for /dl/tid" — losing the reason, and the Retry-After
+    with it. A /dl that stalls for its full 30 seconds is the most common
+    way a signed request ends here, so it is the one that has to be legible.
+    """
+    client = _client(tmp_path)
+    client.session_id = "sid"
+    client.session_secret = "secret"
+    client.expires_at = (datetime.now(timezone.utc) + timedelta(days=1)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+    async def _timeout(*args, **kwargs):
+        raise httpx.ReadTimeout("")
+
+    client.request = _timeout
+
+    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+        result = _fetch(client)
+
+    assert "ReadTimeout" in result["error"]
+    assert "ReadTimeout" in caplog.text
