@@ -5975,10 +5975,35 @@ if ($('config-first-artist')) {
 /* ──────────────────────────────────────────────────────────────────────────
    Following (subscriptions) — see core/subscriptions.py
 
-   A subscription is a followed artist plus the set of releases already seen.
-   The backend never downloads on its own: "Check for new" reports, and
-   "Check & download" is the explicit second step.
+   A subscription is a followed artist or playlist plus the set of releases
+   (or tracks) already seen. "Check for new" reports, "Check & download" is
+   the explicit second step — or a "Check every…" schedule, which checks on
+   its own (core/subscription_scheduler.py) and downloads what is new with
+   the download settings sent along with it.
    ────────────────────────────────────────────────────────────────────────── */
+
+/* Minutes; 0 = manual. The backend refuses anything under 15 (see
+   core/subscriptions.MIN_INTERVAL_MINUTES). */
+const SUB_INTERVALS = [
+  [0, 'Manual only'],
+  [15, 'Every 15 min'],
+  [30, 'Every 30 min'],
+  [60, 'Every hour'],
+  [180, 'Every 3 hours'],
+  [360, 'Every 6 hours'],
+  [720, 'Every 12 hours'],
+  [1440, 'Every day'],
+];
+
+function subIntervalOptions(selected) {
+  const minutes = Number(selected) || 0;
+  const options = SUB_INTERVALS.some(([m]) => m === minutes)
+    ? SUB_INTERVALS
+    : [...SUB_INTERVALS, [minutes, `Every ${minutes} min`]];
+  return options.map(([m, label]) =>
+    `<option value="${m}"${m === minutes ? ' selected' : ''}>${label}</option>`
+  ).join('');
+}
 
 function subFormatDate(ts) {
   if (!ts) return 'never';
@@ -5992,6 +6017,10 @@ function subFormatDate(ts) {
 async function loadSubscriptions() {
   const list = $('subscription-list');
   if (!list) return;
+  const intervalSelect = $('subscription-interval');
+  if (intervalSelect && !intervalSelect.options.length) {
+    intervalSelect.innerHTML = subIntervalOptions(0);
+  }
   if (!window.pywebview?.api?.get_subscriptions) {
     list.innerHTML = '<div class="s-label" style="font-size:11.5px;">Following is unavailable in this build.</div>';
     return;
@@ -6014,29 +6043,42 @@ function renderSubscriptions(subs) {
   if (!subs || !subs.length) {
     list.innerHTML = emptyState(
       'user',
-      'Not following anyone yet',
-      'Paste an artist link above to be told when they release something new.',
+      'Not following anything yet',
+      'Paste an artist or playlist link above to be told — or have it downloaded — when something new appears.',
     );
     return;
   }
 
   list.innerHTML = subs.map((s) => {
     const name = regEscapeHtml(s.name || s.url);
+    const isPlaylist = s.kind === 'playlist';
     const err = s.last_error
       ? `<div class="s-label" style="font-size:11px;color:var(--red);">Last check failed: ${regEscapeHtml(s.last_error)}</div>`
       : '';
+    const what = isPlaylist
+      ? `Playlist · ${s.seen_count} track(s) seen`
+      : `Artist · ${regEscapeHtml(s.include_groups)} · ${s.seen_count} release(s) seen`;
+    const next = s.next_check_at && s.enabled
+      ? ` · next check ${regEscapeHtml(subFormatDate(s.next_check_at))}`
+      : '';
+    const target = isPlaylist ? 'playlist' : 'artist';
     return `
       <div class="sort-item reg-item${s.enabled ? '' : ' reg-item-disabled'}">
         <div class="reg-item-main">
           <span class="reg-url" title="${regEscapeHtml(s.url)}">${name}</span>
           <div class="s-label" style="font-size:11px;">
-            ${regEscapeHtml(s.include_groups)} · ${s.seen_count} release(s) seen · checked ${regEscapeHtml(subFormatDate(s.last_checked_at))}
+            ${what} · checked ${regEscapeHtml(subFormatDate(s.last_checked_at))}${next}
           </div>
           ${err}
         </div>
+        <select style="max-width:140px;padding:5px 8px;font-size:var(--fs-75);flex-shrink:0;"
+                title="Check this ${target} automatically and download what is new"
+                onchange="setSubscriptionInterval('${regEscapeHtml(s.id)}', this.value)">
+          ${subIntervalOptions(s.interval_minutes)}
+        </select>
         <button class="act-btn secondary reg-remove-btn" type="button"
                 onclick="toggleSubscription('${regEscapeHtml(s.id)}', ${s.enabled ? 'false' : 'true'})"
-                title="${s.enabled ? 'Stop checking this artist without forgetting what has been seen' : 'Resume checking this artist'}">
+                title="${s.enabled ? `Stop checking this ${target} without forgetting what has been seen` : `Resume checking this ${target}`}">
           ${s.enabled ? 'Pause' : 'Resume'}
         </button>
         <button class="act-btn secondary reg-remove-btn" type="button"
@@ -6056,16 +6098,20 @@ async function addSubscription() {
   const input = $('subscription-url-input');
   const url = (input?.value || '').trim();
   if (!url) {
-    showToast('Paste an artist link first.', 'error');
+    showToast('Paste an artist or playlist link first.', 'error');
     return;
   }
+  const interval = Number($('subscription-interval')?.value || 0);
   try {
     const res = await window.pywebview.api.add_subscription(
-      url, '', $('subscription-groups')?.value || 'album,single', ''
+      url, '', $('subscription-groups')?.value || 'album,single', '',
+      interval, buildConfig()
     );
     if (res?.ok) {
       input.value = '';
-      showToast('Now following ' + (res.subscription?.name || 'that artist') + '.');
+      const what = res.subscription?.kind === 'playlist' ? 'that playlist' : 'that artist';
+      showToast('Now following ' + (res.subscription?.name || what) +
+        (interval ? ' — checked automatically.' : '.'));
       loadSubscriptions();
     } else {
       showToast(res?.error || 'Could not follow that link.', 'error');
@@ -6073,6 +6119,24 @@ async function addSubscription() {
   } catch (e) {
     showToast('Could not follow that link.', 'error');
   }
+}
+
+async function setSubscriptionInterval(id, minutes) {
+  try {
+    const res = await window.pywebview.api.set_subscription_interval(
+      id, Number(minutes) || 0, buildConfig()
+    );
+    if (res?.ok) {
+      showToast(Number(minutes)
+        ? 'Scheduled — new items will be downloaded with your current settings.'
+        : 'Back to manual checks.');
+    } else {
+      showToast(res?.error || 'Could not change the schedule.', 'error');
+    }
+  } catch (e) {
+    showToast('Could not change the schedule.', 'error');
+  }
+  loadSubscriptions();
 }
 
 async function removeSubscription(id) {
@@ -6111,7 +6175,11 @@ async function checkSubscriptions(download) {
     $('subscription-results-section').style.display = '';
   }
   try {
-    await window.pywebview.api.check_subscriptions(!!download);
+    // The settings go along only when downloading: they are what the
+    // downloads use, and they are saved for scheduled checks too.
+    await window.pywebview.api.check_subscriptions(
+      !!download, download ? buildConfig() : null
+    );
   } catch (e) {
     showToast('Could not start the check.', 'error');
   }
@@ -6137,6 +6205,8 @@ function subscriptionsChecked(payload) {
 
   results.innerHTML = rows.map((r) => {
     const artist = regEscapeHtml(r.artist || r.url);
+    const isPlaylist = r.kind === 'playlist';
+    const unit = isPlaylist ? 'track' : 'release';
     if (r.error) {
       return `<div class="sort-item reg-item"><div class="reg-item-main">
         <span class="reg-url">${artist}</span>
@@ -6146,15 +6216,17 @@ function subscriptionsChecked(payload) {
     if (r.watermarked) {
       return `<div class="sort-item reg-item"><div class="reg-item-main">
         <span class="reg-url">${artist}</span>
-        <div class="s-label" style="font-size:11px;">First check — ${r.total_releases} release(s) recorded as seen. Only later releases will be fetched.</div>
+        <div class="s-label" style="font-size:11px;">First check — ${r.total_releases} ${unit}(s) recorded as seen. Only ${isPlaylist ? 'tracks added later' : 'later releases'} will be fetched.</div>
       </div></div>`;
     }
     const releases = (r.new_releases || []).map((rel) =>
-      `<div class="s-label" style="font-size:11px;">· ${regEscapeHtml(rel.title)}${rel.year ? ' (' + regEscapeHtml(rel.year) + ')' : ''} [${regEscapeHtml(rel.type)}]</div>`
+      isPlaylist
+        ? `<div class="s-label" style="font-size:11px;">· ${regEscapeHtml(rel.title)}</div>`
+        : `<div class="s-label" style="font-size:11px;">· ${regEscapeHtml(rel.title)}${rel.year ? ' (' + regEscapeHtml(rel.year) + ')' : ''} [${regEscapeHtml(rel.type)}]</div>`
     ).join('');
     return `<div class="sort-item reg-item"><div class="reg-item-main">
       <span class="reg-url">${artist}</span>
-      <div class="s-label" style="font-size:11px;">${(r.new_releases || []).length} new release(s)</div>
+      <div class="s-label" style="font-size:11px;">${(r.new_releases || []).length} new ${unit}(s)${payload?.scheduled ? ' · scheduled check' : ''}</div>
       ${releases}
     </div></div>`;
   }).join('');

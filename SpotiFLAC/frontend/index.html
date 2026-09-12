@@ -495,27 +495,33 @@
       </div>
       <div class="s-body">
         <div class="s-section">
-          <div class="s-title">Follow an artist</div>
+          <div class="s-title">Follow an artist or a playlist</div>
           <p style="font-size:12px;color:var(--muted);margin:-4px 0 12px;line-height:1.6;">
-            Paste an artist link. The catalogue that already exists is recorded as
-            seen, so the first thing downloaded is the first thing released
-            <em>after</em> you follow — not four hundred back-catalogue tracks.
-            Use <strong>Reset</strong> on a row if you do want the back catalogue.
+            Paste a Spotify artist or playlist link. What already exists is recorded
+            as seen, so the first thing downloaded is the first release — or the first
+            track added to the playlist — <em>after</em> you follow, not the whole back
+            catalogue. Use <strong>Reset</strong> on a row if you do want everything.
           </p>
-          <div class="s-row" style="align-items:stretch;gap:8px;">
-            <input type="text" id="subscription-url-input" class="full" placeholder="https://open.spotify.com/artist/…" style="flex:1;">
-            <select id="subscription-groups" style="max-width:170px;">
+          <p style="font-size:12px;color:var(--muted);margin:-4px 0 12px;line-height:1.6;">
+            Pick <strong>Check every…</strong> to have it checked on its own and new
+            items downloaded automatically, with the download settings you have when
+            you set it (or last press <strong>Check &amp; download</strong>).
+          </p>
+          <div class="s-row" style="align-items:stretch;gap:8px;flex-wrap:wrap;">
+            <input type="text" id="subscription-url-input" class="full" placeholder="https://open.spotify.com/artist/… or /playlist/…" style="flex:1;min-width:220px;">
+            <select id="subscription-groups" style="max-width:170px;" title="Which releases count, for an artist (ignored for a playlist)">
               <option value="album,single">Albums &amp; singles</option>
               <option value="album">Albums only</option>
               <option value="single">Singles only</option>
               <option value="all">Everything</option>
             </select>
+            <select id="subscription-interval" style="max-width:170px;" title="Check automatically and download what is new"></select>
             <button class="act-btn primary" type="button" onclick="addSubscription()" style="padding:8px 16px;font-size:12px;white-space:nowrap;">Follow</button>
           </div>
         </div>
 
         <div class="s-section">
-          <div class="s-title">Followed artists</div>
+          <div class="s-title">Followed artists &amp; playlists</div>
           <div id="subscription-list" class="sort-list" style="margin-top:4px;">
             <div class="s-label" style="font-size:11.5px;">Loading…</div>
           </div>

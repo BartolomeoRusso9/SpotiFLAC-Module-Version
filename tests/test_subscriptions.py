@@ -169,11 +169,12 @@ def test_reset_makes_the_back_catalogue_new_again():
 
 
 def test_check_records_the_error_and_does_not_raise():
-    sub = subs.add("https://open.spotify.com/playlist/123")
+    # An artist subscription pointing at an album: there is no discography.
+    sub = subs.add("https://open.spotify.com/album/123", kind="artist")
     result = asyncio.run(subs.check_async(sub, client=FakeMetadataClient([])))
 
     assert result.error
-    assert "playlist" in result.error
+    assert "album" in result.error
     assert subs.get(sub.id).last_error
 
 
@@ -204,3 +205,171 @@ def test_discography_listing_is_not_fetched_per_album():
     asyncio.run(subs.check_async(sub, client=client))
 
     assert client.web_client.calls == 1
+
+
+# ── Playlists ─────────────────────────────────────────────────────────────
+
+PLAYLIST_URL = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
+
+
+def _track(track_id: str, title: str = "Song"):
+    from SpotiFLAC.core.models import TrackMetadata
+
+    return TrackMetadata(
+        id=track_id,
+        title=title,
+        artists="Artist",
+        album="Album",
+        album_artist="Artist",
+    )
+
+
+class FakePlaylistClient:
+    """Stands in for SpotifyMetadataClient.get_url on a playlist link."""
+
+    def __init__(self, tracks: list, name: str = "My Playlist") -> None:
+        self.tracks = tracks
+        self.name = name
+
+    def get_url(self, url: str):
+        return self.name, list(self.tracks), "", {}
+
+
+def test_the_kind_is_read_off_the_link():
+    assert subs.add(PLAYLIST_URL).kind == "playlist"
+    assert subs.add(ARTIST_URL).kind == "artist"
+
+
+def test_a_link_that_is_neither_is_refused():
+    with pytest.raises(SubscriptionError, match="album"):
+        subs.add("https://open.spotify.com/album/1")
+
+
+def test_playlist_first_check_watermarks():
+    sub = subs.add(PLAYLIST_URL)
+    client = FakePlaylistClient([_track("t1"), _track("t2")])
+
+    result = asyncio.run(subs.check_async(sub, client=client))
+
+    assert result.watermarked
+    assert result.new == [] and result.new_tracks == []
+    assert result.total == 2
+    assert subs.get(sub.id).name == "My Playlist"
+
+
+def test_playlist_check_returns_only_the_added_tracks_with_metadata():
+    sub = subs.add(PLAYLIST_URL)
+    client = FakePlaylistClient([_track("t1")])
+    asyncio.run(subs.check_async(sub, client=client))
+
+    # Added once, listed twice: still one new track.
+    client.tracks = [_track("t1"), _track("t2", "New one"), _track("t2", "New one")]
+    result = asyncio.run(subs.check_async(sub, client=client))
+
+    assert [r.id for r in result.new] == ["t2"]
+    assert [t.id for t in result.new_tracks] == ["t2"]
+    assert result.new[0].url == "https://open.spotify.com/track/t2"
+    assert result.new[0].title == "New one — Artist"
+    assert result.to_dict()["kind"] == "playlist"
+
+
+# ── Schedules ─────────────────────────────────────────────────────────────
+
+
+def test_an_interval_under_the_minimum_is_refused():
+    with pytest.raises(SubscriptionError, match=str(subs.MIN_INTERVAL_MINUTES)):
+        subs.add(PLAYLIST_URL, interval_minutes=5)
+
+
+def test_re_adding_keeps_the_schedule_and_settings_unless_given():
+    subs.add(PLAYLIST_URL, interval_minutes=60, download_config={"quality": "LOSSLESS"})
+
+    again = subs.add(PLAYLIST_URL)
+
+    assert again.interval_minutes == 60
+    assert again.download_config == {"quality": "LOSSLESS"}
+
+
+def test_due_lists_scheduled_subscriptions_whose_interval_ran_out():
+    import time
+
+    scheduled = subs.add(PLAYLIST_URL, interval_minutes=30)
+    subs.add(ARTIST_URL)  # manual: never due
+
+    assert [s.id for s in subs.due()] == [scheduled.id]  # never checked
+
+    subs.record_check(scheduled.id)
+    now = time.time()
+    assert subs.due(now) == []
+    assert [s.id for s in subs.due(now + 30 * 60 + 1)] == [scheduled.id]
+
+    subs.set_enabled(scheduled.id, False)
+    assert subs.due(now + 3600) == []
+
+
+def test_set_schedule_saves_the_settings_and_zero_keeps_them():
+    sub = subs.add(PLAYLIST_URL)
+
+    assert subs.set_schedule(sub.id, 60, {"quality": "HI_RES_LOSSLESS"})
+    stored = subs.get(sub.id)
+    assert stored.interval_minutes == 60
+    assert stored.download_config == {"quality": "HI_RES_LOSSLESS"}
+    assert stored.to_dict()["next_check_at"] is not None
+
+    subs.set_schedule(sub.id, 0)
+    stored = subs.get(sub.id)
+    assert stored.interval_minutes == 0
+    assert stored.next_check_at is None
+    assert stored.download_config == {"quality": "HI_RES_LOSSLESS"}
+
+
+def test_saved_settings_are_updated_per_owner():
+    mine = subs.add(PLAYLIST_URL, owner="me")
+    theirs = subs.add(PLAYLIST_URL, owner="them")
+
+    subs.update_download_config("me", {"quality": "HI_RES"})
+
+    assert subs.get(mine.id).download_config == {"quality": "HI_RES"}
+    assert subs.get(theirs.id).download_config == {}
+
+
+def test_an_empty_first_check_still_counts_as_the_baseline():
+    """A playlist with nothing in it yet is checked, not "never checked".
+
+    The baseline used to be inferred from the seen-set, which an empty
+    listing leaves empty — so the next check looked like a first one and
+    watermarked away the first track added.
+    """
+    sub = subs.add(PLAYLIST_URL)
+    client = FakePlaylistClient([])
+
+    first = asyncio.run(subs.check_async(sub, client=client))
+    assert first.watermarked and first.total == 0
+    assert subs.is_baselined(sub.id) is True
+
+    client.tracks = [_track("t1", "The first one")]
+    second = asyncio.run(subs.check_async(subs.get(sub.id), client=client))
+
+    assert second.watermarked is False
+    assert [r.id for r in second.new] == ["t1"]
+    assert [t.id for t in second.new_tracks] == ["t1"]
+
+
+def test_a_failed_check_is_not_a_baseline():
+    sub = subs.add(PLAYLIST_URL)
+
+    class Failing:
+        def get_url(self, url):
+            raise RuntimeError("Spotify unreachable")
+
+    failed = asyncio.run(subs.check_async(sub, client=Failing()))
+    assert failed.error
+    assert subs.get(sub.id).last_checked_at  # stamped even so
+    assert subs.is_baselined(sub.id) is False
+
+    # The first listing that does come back is the baseline.
+    result = asyncio.run(
+        subs.check_async(subs.get(sub.id), client=FakePlaylistClient([_track("t1")]))
+    )
+    assert result.watermarked is True
+    assert subs.is_baselined(sub.id) is True

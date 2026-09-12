@@ -113,7 +113,7 @@ renders it usefully. Every page below is the same text that used to be here.
 | [API Reference](docs/guide/api-reference.md) | `SpotiFLAC` and `AsyncSpotiFLAC`, and the objects they return |
 | [Local Tagging](docs/guide/local-tagging.md) | Retagging an existing library, MusicBrainz enrichment, download validation |
 | [Automation & Operations](docs/guide/automation.md) | JSON output, post-download hooks, notifications, M3U, library rescan, cache maintenance, running the web server |
-| [Following Artists](docs/guide/subscriptions.md) | Subscriptions, new-release checks, and the library-upgrade pass |
+| [Following Artists](docs/guide/subscriptions.md) | Subscriptions, new-release checks, scheduled playlist monitoring, and the library-upgrade pass |
 | [REST API](docs/guide/rest-api.md) | The versioned `/api/v1` surface, quotas and the admin endpoints |
 | [Docker](docs/guide/docker.md) | Headless and NAS setups |
 | [CLI](docs/guide/cli.md) | The standalone executables |

@@ -56,9 +56,25 @@ spotiflac --check-subscriptions --subscribe-backfill --download
 | `--output-dir` | Where new releases land. Falls back to the subscription's own folder, then the profile's. |
 | `--json` | Machine-readable output, for cron. |
 
-A subscription owns no download settings of its own: a fetched release lands
-with exactly the naming, quality, lyrics and tagging a manual download would
-have used, read from `--profile` or `config.json`.
+From the CLI a subscription owns no download settings of its own: a fetched
+release lands with exactly the naming, quality, lyrics and tagging a manual
+download would have used, read from `--profile` or `config.json`. (A schedule
+set in the GUI is the exception — see below.)
+
+### Following a playlist
+
+A Spotify **playlist** link makes a playlist subscription. Its seen-set holds
+tracks instead of releases, and a check reports the tracks added since the last
+one — the same first-check rule applies, so the tracks already in the playlist
+are the baseline and only later additions are fetched.
+
+```bash
+spotiflac --subscribe "https://open.spotify.com/playlist/<id>"
+spotiflac --check-subscriptions --download
+```
+
+Unlike `--watch`, which re-syncs the whole playlist every pass, this fetches
+only what was added, and a track you deleted from disk is not fetched again.
 
 ### Running it on a schedule
 
@@ -77,9 +93,19 @@ hourly cron is reasonable.
 
 ### In the GUI / web UI
 
-The **Following** panel in the sidebar does the same things: follow, pause,
-reset, unfollow, and "Check for new" / "Check & download" as two separate
-buttons.
+The **Following** panel in the sidebar does the same things for artists and
+playlists: follow, pause, reset, unfollow, and "Check for new" / "Check &
+download" as two separate buttons.
+
+It can also check on its own. Pick **Check every…** (15 minutes to a day) when
+following, or on a row later, and the app checks that subscription whenever
+the interval has passed and downloads what is new — no button, no cron. Those
+downloads use the download settings the page had when you set the schedule, or
+when you last pressed **Check & download**; they are saved with the
+subscription, since a scheduled check runs with no page open. The desktop app
+checks while it is open; `--web` checks for as long as the server runs, and in
+multi-user mode each account's subscriptions download into that account's
+folder.
 
 ---
 
