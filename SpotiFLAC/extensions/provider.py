@@ -215,6 +215,7 @@ class JSExtensionProvider(BaseProvider):
                 if self._signed_session is not None
                 else None
             ),
+            cancelled_probe=self._stop_requested,
         )
         rt.start()
         return rt

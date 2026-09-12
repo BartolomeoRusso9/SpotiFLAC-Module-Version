@@ -122,8 +122,14 @@ def apply_jellyfin_word_gap(lrc_text: str, gap: str = JELLYFIN_WORD_GAP) -> str:
     left alone, since a trim never reaches it, and so is the last word of a
     line, which has no separator to protect. Line-synced LRC carries no
     inline tags and comes back untouched.
+
+    Re-running this is a no-op, but the test for that is per word rather than
+    per text: a word already carrying the gap has nothing to rstrip, so it is
+    left as it is. Bailing out on the first gap anywhere would instead strand
+    every ungapped word in a text that is only partly converted — which is
+    what lyrics stitched together from two sources look like.
     """
-    if not lrc_text or gap in lrc_text:
+    if not lrc_text:
         return lrc_text
 
     lines = []
@@ -137,7 +143,7 @@ def apply_jellyfin_word_gap(lrc_text: str, gap: str = JELLYFIN_WORD_GAP) -> str:
         for index in range(0, len(pieces), 2):
             word = pieces[index]
             trimmed = word.rstrip()
-            if trimmed and trimmed != word:
+            if trimmed and trimmed != word and not trimmed.endswith(gap):
                 pieces[index] = trimmed + gap
         lines.append("".join(pieces))
     return "\n".join(lines)

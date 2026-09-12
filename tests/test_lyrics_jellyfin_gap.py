@@ -59,3 +59,23 @@ def test_line_synced_lrc_is_untouched() -> None:
 def test_applying_twice_changes_nothing() -> None:
     once = apply_jellyfin_word_gap(APPLE_LRC)
     assert apply_jellyfin_word_gap(once) == once
+
+
+def test_a_half_converted_text_is_finished_rather_than_skipped() -> None:
+    # Lyrics stitched from two sources — one line already converted, one not.
+    # Stopping at the first gap anywhere would leave the second line broken.
+    mixed = (
+        f"[00:08.61]<00:08.61>Nuij{JELLYFIN_WORD_GAP}<00:08.91>simm\n"
+        "[00:12.47]<00:12.47>T' <00:12.76>stai"
+    )
+    out = apply_jellyfin_word_gap(mixed)
+
+    assert _as_jellyfin_renders(out.split("\n")[0]) == f"Nuij{JELLYFIN_WORD_GAP}simm"
+    assert _as_jellyfin_renders(out.split("\n")[1]) == f"T'{JELLYFIN_WORD_GAP}stai"
+    # The line that was already converted keeps exactly one gap per word.
+    assert JELLYFIN_WORD_GAP * 2 not in out
+
+
+def test_a_word_ending_in_gap_and_space_gains_no_second_gap() -> None:
+    already = f"[00:08.61]<00:08.61>Nuij{JELLYFIN_WORD_GAP} <00:08.91>simm"
+    assert JELLYFIN_WORD_GAP * 2 not in apply_jellyfin_word_gap(already)

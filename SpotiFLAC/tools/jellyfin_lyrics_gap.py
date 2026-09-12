@@ -57,11 +57,18 @@ def _read_lyrics(audio) -> tuple[str, str] | None:
 
 def _write_lyrics(audio, key: str, text: str) -> None:
     if key.startswith("USLT"):
-        existing = audio.tags[key]
-        audio.tags.setall(
-            "USLT",
-            [USLT(encoding=3, lang=existing.lang, desc=existing.desc, text=text)],
-        )
+        # setall() replaces the whole USLT collection, so the rewritten frame
+        # has to be handed back alongside its siblings: a file can carry one
+        # per language, and passing only ours would delete the rest.
+        rebuilt = [
+            (
+                USLT(encoding=3, lang=frame.lang, desc=frame.desc, text=text)
+                if frame.HashKey == key
+                else frame
+            )
+            for frame in audio.tags.getall("USLT")
+        ]
+        audio.tags.setall("USLT", rebuilt)
     elif key == "\xa9lyr":
         audio.tags["\xa9lyr"] = [text]
     else:

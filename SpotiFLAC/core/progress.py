@@ -151,6 +151,14 @@ _DEFAULT_LOG_FORMAT = "[%(levelname)s] %(name)s: %(message)s"
 # at all once ours is in place.
 _console_streams: tuple[object, ...] = ()
 
+#: Whatever sys.stdout/sys.stderr were when the proxies went in. They are not
+#: always the interpreter's own streams: pytest's capture, a --web log sink or
+#: an embedding host may already have replaced them, and writing to
+#: sys.__stdout__ instead would step straight past that wrapper to the real
+#: terminal. Restoring them is what hands the outer wrapper back on uninstall.
+_saved_stdout: object | None = None
+_saved_stderr: object | None = None
+
 
 def _snapshot_console_streams() -> None:
     global _console_streams
@@ -202,14 +210,18 @@ def install_console_interception() -> None:
     Idempotent: calling it while already installed does nothing, instead of
     adding a second handler that would double every line.
     """
-    global _tqdm_handler, _intercepting
+    global _tqdm_handler, _intercepting, _saved_stdout, _saved_stderr
 
     if not _intercepting:
         _snapshot_console_streams()
+    # The isinstance guards keep a second call from recording a proxy as the
+    # stream to restore, which would leave the wrapper installed for good.
     if not isinstance(sys.stdout, _TqdmTextIOProxy):
-        sys.stdout = _TqdmTextIOProxy(sys.__stdout__, STDOUT)
+        _saved_stdout = sys.stdout
+        sys.stdout = _TqdmTextIOProxy(_saved_stdout, STDOUT)
     if not isinstance(sys.stderr, _TqdmTextIOProxy):
-        sys.stderr = _TqdmTextIOProxy(sys.__stderr__, STDERR)
+        _saved_stderr = sys.stderr
+        sys.stderr = _TqdmTextIOProxy(_saved_stderr, STDERR)
 
     if _intercepting:
         return
@@ -296,14 +308,16 @@ def _host_renders_to_terminal(targets: list[logging.Logger]) -> bool:
 
 
 def uninstall_console_interception() -> None:
-    global _tqdm_handler, _intercepting
+    global _tqdm_handler, _intercepting, _saved_stdout, _saved_stderr
 
     _intercepting = False
 
     if isinstance(sys.stdout, _TqdmTextIOProxy):
-        sys.stdout = sys.__stdout__
+        sys.stdout = _saved_stdout if _saved_stdout is not None else sys.__stdout__
+        _saved_stdout = None
     if isinstance(sys.stderr, _TqdmTextIOProxy):
-        sys.stderr = sys.__stderr__
+        sys.stderr = _saved_stderr if _saved_stderr is not None else sys.__stderr__
+        _saved_stderr = None
 
     if _tqdm_handler is not None:
         logging.getLogger().removeHandler(_tqdm_handler)
