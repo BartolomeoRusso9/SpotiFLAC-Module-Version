@@ -308,14 +308,17 @@ class JSRuntime:
         # this call is abandoned — instead of the extension guessing, or (as
         # it did while the bridge offered no such function at all) retrying
         # with no idea how much time it had left.
-        msg = json.dumps(
-            {
-                "id": seq,
-                "call": method,
-                "args": final_args,
-                "budgetMs": max(0, int(timeout * 1000)),
-            }
-        ) + "\n"
+        msg = (
+            json.dumps(
+                {
+                    "id": seq,
+                    "call": method,
+                    "args": final_args,
+                    "budgetMs": max(0, int(timeout * 1000)),
+                }
+            )
+            + "\n"
+        )
         try:
             self._proc.stdin.write(msg.encode())
             self._proc.stdin.flush()
