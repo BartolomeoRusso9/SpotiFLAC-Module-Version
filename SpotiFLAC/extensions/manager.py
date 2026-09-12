@@ -683,7 +683,7 @@ class ExtensionManager:
         manifest = dict(manifest)
         manifest.pop("_registry_sha256", None)
         if sha256:
-            manifest["_registry_sha256"] = sha256.lower()
+            manifest["_registry_sha256"] = actual
 
         if runtime_hint == "python" and python_modules:
             manifest = dict(manifest)
@@ -754,10 +754,10 @@ class ExtensionManager:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(zf.read(member))
 
-            if is_legacy_python:
-                (staging / "manifest.json").write_text(
-                    json.dumps(manifest, indent=2), encoding="utf-8"
-                )
+            # Persist checksum metadata and runtime hints for every package.
+            (staging / "manifest.json").write_text(
+                json.dumps(manifest, indent=2), encoding="utf-8"
+            )
             if saved_settings and not settings:
                 (staging / "settings.json").write_bytes(saved_settings)
             if settings:
