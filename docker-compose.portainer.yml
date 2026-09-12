@@ -82,6 +82,15 @@ services:
       SPOTIFLAC_APPLE_LYRICS_TRANSLATION: "${SPOTIFLAC_APPLE_LYRICS_TRANSLATION:-}"
       SPOTIFLAC_APPLE_LYRICS_PRONUNCIATION: "${SPOTIFLAC_APPLE_LYRICS_PRONUNCIATION:-}"
 
+      # Jellyfin cuts word-by-word lyrics into one cue per word and trims each
+      # one, which deletes the space before the next word: "Nuij simm doije"
+      # reaches Jellify and Finamp as "Nuijsimmdoije". Set to 1 to separate the
+      # words with U+2800 BRAILLE PATTERN BLANK instead, which draws the same
+      # but is not whitespace, so the trim leaves it alone. Only affects new
+      # downloads; for tracks already on disk run
+      # `python -m SpotiFLAC.tools.jellyfin_lyrics_gap <folder> --apply`.
+      SPOTIFLAC_LYRICS_JELLYFIN_COMPAT: "${SPOTIFLAC_LYRICS_JELLYFIN_COMPAT:-}"
+
       # --- Logging ----------------------------------------------------------
       # 0 = plain lines instead of animated bars. Correct for `docker logs`,
       # which otherwise collapses every bar refresh into "[285B blob data]".
