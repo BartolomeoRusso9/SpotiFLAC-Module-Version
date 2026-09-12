@@ -87,12 +87,17 @@ class JSRuntime:
         node_executable: str = "node",
         startup_timeout: float = 20.0,
         session_handler: Callable[[str, str, Any, dict], Awaitable[dict]] | None = None,
+        cancelled_probe: Callable[[], bool] | None = None,
     ) -> None:
         self.ext_path = Path(ext_path)
         self.settings = settings or {}
         self.node_executable = node_executable
         self.startup_timeout = startup_timeout
         self.session_handler = session_handler
+        # Answers utils.isDownloadCancelled() from the JS side. Read live,
+        # never cached here: the point of the probe is that the answer
+        # changes underneath a call that is already running.
+        self.cancelled_probe = cancelled_probe
 
         self._proc: subprocess.Popen | None = None
         self._seq = 0
@@ -298,7 +303,22 @@ class JSRuntime:
             final_args[-1] = "__progress__"
             self._progress_cbs[seq] = progress_cb
 
-        msg = json.dumps({"id": seq, "call": method, "args": final_args}) + "\n"
+        # The budget travels with the call so utils.getResolutionRemainingMs()
+        # can answer from the host's real deadline — `timeout` below is when
+        # this call is abandoned — instead of the extension guessing, or (as
+        # it did while the bridge offered no such function at all) retrying
+        # with no idea how much time it had left.
+        msg = (
+            json.dumps(
+                {
+                    "id": seq,
+                    "call": method,
+                    "args": final_args,
+                    "budgetMs": max(0, int(timeout * 1000)),
+                }
+            )
+            + "\n"
+        )
         try:
             self._proc.stdin.write(msg.encode())
             self._proc.stdin.flush()
@@ -395,6 +415,9 @@ class JSRuntime:
         if msg.get("type") == "session_signed_fetch":
             self._handle_session_signed_fetch(msg)
             return
+        if msg.get("type") == "host_is_cancelled":
+            self._handle_host_is_cancelled(msg)
+            return
         seq = msg.get("id")
         if seq is None:
             return
@@ -458,6 +481,41 @@ class JSRuntime:
         except Exception as e:
             result = {"error": str(e)}
         _respond(result)
+
+    def _handle_host_is_cancelled(self, msg: dict) -> None:
+        """Answers `utils.isDownloadCancelled()` from the JS side.
+
+        Called from _read_loop, like the signed-fetch handler, but it runs
+        nothing: a probe that blocked this thread would stall the very
+        download it is being asked about.
+
+        No probe configured means "not cancelled" — the same answer the
+        extension assumed for as long as this function did not exist.
+        """
+        cancelled = False
+        if self.cancelled_probe is not None:
+            try:
+                cancelled = bool(self.cancelled_probe())
+            except Exception:
+                logger.debug("[JSRuntime] cancellation probe raised, read as running")
+        try:
+            line = (
+                json.dumps(
+                    {
+                        "type": "host_is_cancelled_response",
+                        "requestId": msg.get("requestId"),
+                        "result": cancelled,
+                    },
+                )
+                + "\n"
+            )
+            self._proc.stdin.write(line.encode())
+            self._proc.stdin.flush()
+        except Exception as e:
+            logger.debug(
+                "[JSRuntime] unable to respond to utils.isDownloadCancelled: %s",
+                e,
+            )
 
     def _drain_stderr(self) -> None:
         try:

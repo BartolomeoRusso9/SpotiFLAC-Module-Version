@@ -134,7 +134,74 @@ class _TqdmTextIOProxy(io.TextIOBase):
 _suspended_handlers: list[tuple[logging.Logger, logging.Handler, bool]] = []
 _tqdm_handler: TqdmLoggingHandler | None = None
 
+# `_tqdm_handler is not None` is no longer the same question as "already
+# installed": when the host renders these records itself we install nothing
+# and still have handlers suspended, and a second call that redid the
+# suspension pass would take out whatever the host attached in between and
+# never give it back.
+_intercepting = False
+
 _DEFAULT_LOG_FORMAT = "[%(levelname)s] %(name)s: %(message)s"
+
+# Whatever counted as "the screen" when interception went in. Snapshotted
+# there rather than read live, because the swap below is what makes the live
+# answer wrong: a handler attached before it still points at the stream
+# sys.stdout used to be, which in a host that had already replaced it
+# (a notebook kernel, a capture layer) is reachable through no sys attribute
+# at all once ours is in place.
+_console_streams: tuple[object, ...] = ()
+
+#: Whatever sys.stdout/sys.stderr were when the proxies went in. They are not
+#: always the interpreter's own streams: pytest's capture, a --web log sink or
+#: an embedding host may already have replaced them, and writing to
+#: sys.__stdout__ instead would step straight past that wrapper to the real
+#: terminal. Restoring them is what hands the outer wrapper back on uninstall.
+_saved_stdout: object | None = None
+_saved_stderr: object | None = None
+
+
+def _snapshot_console_streams() -> None:
+    global _console_streams
+    _console_streams = tuple(
+        stream
+        for stream in (sys.stdout, sys.stderr, sys.__stdout__, sys.__stderr__)
+        if stream is not None
+    )
+
+
+def _handler_stream(handler: logging.Handler) -> object | None:
+    """The file object *handler* writes to, when it writes to one at all.
+
+    `logging.StreamHandler` keeps it on `.stream`. Handlers that wrap a
+    renderer — `rich.logging.RichHandler` is the one library users actually
+    hit — keep theirs one level down, on a `console` object that resolves
+    `sys.stdout` lazily at write time.
+    """
+    stream = getattr(handler, "stream", None)
+    if stream is None:
+        console = getattr(handler, "console", None)
+        if console is not None:
+            with contextlib.suppress(Exception):
+                stream = console.file
+    return stream
+
+
+def _writes_to_terminal(handler: logging.Handler) -> bool:
+    """Whether *handler* puts its records on the screen this run shares.
+
+    A log file is not the screen: a bar cannot tear on it, so a FileHandler
+    is neither suspended nor counted as a renderer — taking one out used to
+    mean a host's log file simply missed everything logged during a
+    download.
+    """
+    if isinstance(handler, logging.FileHandler):
+        return False
+    stream = _handler_stream(handler)
+    if stream is None:
+        return False
+    if isinstance(stream, _TqdmTextIOProxy):
+        return True
+    return any(stream is console for console in _console_streams)
 
 
 def install_console_interception() -> None:
@@ -143,15 +210,22 @@ def install_console_interception() -> None:
     Idempotent: calling it while already installed does nothing, instead of
     adding a second handler that would double every line.
     """
-    global _tqdm_handler
+    global _tqdm_handler, _intercepting, _saved_stdout, _saved_stderr
 
+    if not _intercepting:
+        _snapshot_console_streams()
+    # The isinstance guards keep a second call from recording a proxy as the
+    # stream to restore, which would leave the wrapper installed for good.
     if not isinstance(sys.stdout, _TqdmTextIOProxy):
-        sys.stdout = _TqdmTextIOProxy(sys.__stdout__, STDOUT)
+        _saved_stdout = sys.stdout
+        sys.stdout = _TqdmTextIOProxy(_saved_stdout, STDOUT)
     if not isinstance(sys.stderr, _TqdmTextIOProxy):
-        sys.stderr = _TqdmTextIOProxy(sys.__stderr__, STDERR)
+        _saved_stderr = sys.stderr
+        sys.stderr = _TqdmTextIOProxy(_saved_stderr, STDERR)
 
-    if _tqdm_handler is not None:
+    if _intercepting:
         return
+    _intercepting = True
 
     root = logging.getLogger()
     targets: list[logging.Logger] = [root]
@@ -165,19 +239,34 @@ def install_console_interception() -> None:
     for logger_obj in targets:
         propagate = logger_obj.propagate
         for handler in list(logger_obj.handlers):
-            if isinstance(handler, logging.StreamHandler):
+            if isinstance(handler, logging.StreamHandler) and _writes_to_terminal(
+                handler
+            ):
                 logger_obj.removeHandler(handler)
                 _suspended_handlers.append((logger_obj, handler, propagate))
         if logger_obj is not root:
             logger_obj.propagate = True
 
-    # A UI that owns the screen and already mirrors log records itself (the
-    # TUI attaches a CallbackLogHandler before starting the run) needs no
-    # handler from us: both would end up in the same pane, once formatted by
-    # the UI and once as "[INFO] name: ...", and every line would appear
-    # twice. The bars a tqdm handler exists to protect are switched off under
-    # a sink anyway, so there is nothing left for it to do here.
-    if sink_active() and _sink_log_handler_installed(targets):
+    # Something else already puts these records on the screen, so a handler
+    # from us would only print each one a second time. Two shapes of that,
+    # and the suspension pass above has just ruled out the third (a plain
+    # console StreamHandler, which we take over and replace):
+    #
+    #   * a UI that owns the screen and mirrors records into it — the TUI
+    #     attaches a CallbackLogHandler before starting the run — where both
+    #     would land in the same pane, once as the UI formatted it and once
+    #     as "[INFO] name: ...". The bars a tqdm handler exists to protect
+    #     are switched off under a sink anyway, so it has nothing left to do;
+    #   * a host application's own console handler that is not a
+    #     StreamHandler and so survived suspension. rich.logging.RichHandler
+    #     is the one that shows up in practice: a library user with Rich
+    #     logging configured saw every warning twice, once rendered by Rich
+    #     and once as "[WARNING] SpotiFLAC.core...: ...".
+    #
+    # The handlers we did suspend stay suspended either way, and the
+    # SpotiFLAC loggers were just set to propagate: the records reach the
+    # host's handler, which is the whole point of standing aside.
+    if _host_renders_to_terminal(targets):
         return
 
     # Keep the host's own formatter — its timestamps are usually the only way
@@ -188,28 +277,47 @@ def install_console_interception() -> None:
     )
     _tqdm_handler = TqdmLoggingHandler()
     _tqdm_handler.setFormatter(formatter or logging.Formatter(_DEFAULT_LOG_FORMAT))
-    _tqdm_handler.setLevel(root.level or logging.WARNING)
+    # No level of its own, like the console handler it stands in for: a
+    # handler filters on top of the decision its logger already made, and
+    # `root.level` is not that decision for a record logged on
+    # "SpotiFLAC.…". It used to be copied here anyway, which capped the
+    # stand-in at WARNING for the length of every download in any program
+    # that had not also raised the *root* level — so a library caller who
+    # asked for log_level=INFO got INFO everywhere except during the
+    # download, the one part worth watching.
+    _tqdm_handler.setLevel(logging.NOTSET)
     root.addHandler(_tqdm_handler)
 
 
-def _sink_log_handler_installed(targets: list[logging.Logger]) -> bool:
-    """Whether one of *targets* already routes records to the output sink."""
+def _host_renders_to_terminal(targets: list[logging.Logger]) -> bool:
+    """Whether *targets* still carry a handler that shows records on screen.
+
+    Called after the suspension pass, so anything left here belongs to the
+    host and stays: a sink-backed UI handler, or a console handler we cannot
+    swap out (RichHandler and the like).
+    """
     from .output_sink import CallbackLogHandler
 
+    sink = sink_active()
     return any(
-        isinstance(handler, CallbackLogHandler)
+        (sink and isinstance(handler, CallbackLogHandler))
+        or _writes_to_terminal(handler)
         for logger_obj in targets
         for handler in logger_obj.handlers
     )
 
 
 def uninstall_console_interception() -> None:
-    global _tqdm_handler
+    global _tqdm_handler, _intercepting, _saved_stdout, _saved_stderr
+
+    _intercepting = False
 
     if isinstance(sys.stdout, _TqdmTextIOProxy):
-        sys.stdout = sys.__stdout__
+        sys.stdout = _saved_stdout if _saved_stdout is not None else sys.__stdout__
+        _saved_stdout = None
     if isinstance(sys.stderr, _TqdmTextIOProxy):
-        sys.stderr = sys.__stderr__
+        sys.stderr = _saved_stderr if _saved_stderr is not None else sys.__stderr__
+        _saved_stderr = None
 
     if _tqdm_handler is not None:
         logging.getLogger().removeHandler(_tqdm_handler)

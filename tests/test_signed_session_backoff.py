@@ -299,3 +299,182 @@ def test_a_pause_is_per_gateway_and_shared_by_its_extensions(tmp_path) -> None:
 
     assert ssm.auth_backoff_remaining(qobuz) > 0, "same gateway, same address"
     assert ssm.auth_backoff_remaining(elsewhere) == 0
+
+
+def test_a_timed_out_request_says_so_instead_of_returning_an_empty_error(
+    tmp_path, caplog
+) -> None:
+    """`str(exc)` is "" for every httpx timeout class.
+
+    That emptiness reached both sides of the bridge: the log line read
+    "... failed:" and stopped, and `{"error": ""}` is falsy, so an
+    extension's `if (response.error)` branch was skipped and it threw
+    "HTTP undefined for /dl/tid" — losing the reason, and the Retry-After
+    with it. A /dl that stalls for its full 30 seconds is the most common
+    way a signed request ends here, so it is the one that has to be legible.
+    """
+    client = _client(tmp_path)
+    client.session_id = "sid"
+    client.session_secret = "secret"
+    client.expires_at = (datetime.now(timezone.utc) + timedelta(days=1)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+    async def _timeout(*args, **kwargs):
+        raise httpx.ReadTimeout("")
+
+    client.request = _timeout
+
+    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+        result = _fetch(client)
+
+    assert "ReadTimeout" in result["error"]
+    assert "ReadTimeout" in caplog.text
+
+
+def _live(client) -> None:
+    """Gives *client* a session that ensure_session() will accept."""
+    client.session_id = "sid"
+    client.session_secret = "secret"
+    client.expires_at = (datetime.now(timezone.utc) + timedelta(days=1)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+class _Envelope:
+    """A gateway refusal carrying the error envelope of signed_session_errors."""
+
+    url = "https://gateway.invalid/v2/dl/tid"
+
+    def __init__(self, status: int, body: str, headers: dict | None = None) -> None:
+        self.status_code = status
+        self._body = body.encode()
+        self.headers = headers or {}
+
+    @property
+    def text(self) -> str:
+        return self._body.decode()
+
+    @property
+    def content(self) -> bytes:
+        return self._body
+
+    def json(self):
+        import json
+
+        return json.loads(self._body)
+
+
+def _answered(client, response) -> dict:
+    async def _respond(*args, **kwargs):
+        return response
+
+    client.request = _respond
+    return _fetch(client)
+
+
+BUSY = (
+    '{"error":"operation running","code":"TICKET_BUSY","origin":"gateway",'
+    '"retryable":true,"retry_mode":"poll_existing","retry_after_seconds":4}'
+)
+
+
+def test_the_gateway_s_retry_mode_reaches_the_extension(tmp_path) -> None:
+    """The contract was parsed, acted on, and never carried across.
+
+    `signed_session_errors.parse_session_error` reads `retry_mode`, and
+    tidal-web branches on it — `poll_existing` is the case where the ticket
+    owns an operation already running and must be kept rather than thrown
+    away (index.js). This function returned a dict without the field, so
+    every refusal read as "no instruction given" and every retry started a
+    fresh operation with a fresh ticket.
+    """
+    client = _client(tmp_path)
+    _live(client)
+
+    result = _answered(client, _Envelope(409, BUSY))
+
+    assert result["retryMode"] == "poll_existing"
+    assert result["retryAfterSeconds"] == 4
+
+
+def test_code_and_retryable_are_deliberately_withheld(tmp_path) -> None:
+    """They come out of the same envelope and are left where they are.
+
+    The extensions read `code && !retryable` as "stop retrying", so
+    forwarding those two would hand the gateway a switch that ends a
+    download early. Whether it sets them that precisely on a transient
+    failure is not something this side can verify, so the narrow field is
+    the one that travels.
+    """
+    client = _client(tmp_path)
+    _live(client)
+
+    result = _answered(client, _Envelope(409, BUSY))
+
+    assert "code" not in result
+    assert "retryable" not in result
+
+
+def test_a_retry_after_header_still_wins_over_the_envelope(tmp_path) -> None:
+    client = _client(tmp_path)
+    _live(client)
+
+    result = _answered(client, _Envelope(429, BUSY, {"Retry-After": "9"}))
+
+    assert result["retryAfterSeconds"] == 9
+
+
+def test_a_success_body_is_never_parsed_as_an_envelope(tmp_path) -> None:
+    """A 200 carries the provider's payload — sometimes a large manifest."""
+    client = _client(tmp_path)
+    _live(client)
+
+    result = _answered(client, _Envelope(200, '{"data":{"manifest":"<MPD/>"}}'))
+
+    assert result["ok"] is True
+    assert "retryMode" not in result
+
+
+def test_a_refusal_without_an_envelope_adds_nothing(tmp_path) -> None:
+    client = _client(tmp_path)
+    _live(client)
+
+    result = _answered(client, _Envelope(500, "upstream exploded"))
+
+    assert result["ok"] is False
+    assert "retryMode" not in result
+
+
+def test_the_request_timeout_is_per_phase_and_configurable(tmp_path) -> None:
+    """A flat `timeout=30` gave connect, read, write and pool 30s each.
+
+    Only the read is worth that: the gateway proxies to a provider. A
+    connect still unfinished after 10s is not going to finish, and a 30s
+    pool wait means the limits are wrong rather than the network slow.
+    """
+    client = _client(tmp_path)
+    assert client.request_timeout == ssm._DEFAULT_REQUEST_TIMEOUT_S
+
+    timeout = client._timeout()
+    assert timeout.connect == ssm._CONNECT_TIMEOUT_S
+    assert timeout.pool == ssm._POOL_TIMEOUT_S
+    assert timeout.read == ssm._DEFAULT_REQUEST_TIMEOUT_S
+
+    # A refresh is a gateway-local call and keeps its own shorter wait.
+    assert client._timeout(read=15).read == 15
+
+
+def test_a_manifest_may_declare_its_own_request_timeout(tmp_path) -> None:
+    block = {
+        "baseUrl": "https://gateway.invalid/v2",
+        "namespace": "zarz-v2",
+        "requestTimeoutSeconds": 75,
+    }
+    client = ssm.client_from_manifest(block, data_dir=str(tmp_path))
+    assert client.request_timeout == 75.0
+    assert client._timeout().read == 75.0
+
+    block["requestTimeoutSeconds"] = "not a number"
+    fallback = ssm.client_from_manifest(block, data_dir=str(tmp_path))
+    assert fallback.request_timeout == ssm._DEFAULT_REQUEST_TIMEOUT_S

@@ -54,6 +54,23 @@ def _get_refresh_lock(key: str) -> threading.Lock:
         return _REFRESH_LOCKS.setdefault(key, threading.Lock())
 
 
+#: Per-phase timeouts for a signed request, in seconds.
+#:
+#: It used to be a flat `timeout=30`, which httpx applies to each phase
+#: separately — connect, read, write and pool all got the same 30 seconds.
+#: Only one of those is worth 30: the gateway proxies to a provider, so a
+#: read is the phase that legitimately takes time, while a connect that has
+#: not completed in 10s is not going to, and a pool wait that long means the
+#: limits are wrong rather than the network slow.
+#:
+#: The read stays at 30 deliberately. A `/dl` that goes quiet is recovered
+#: by the extension's own retry, which has been observed answering in about
+#: a second — so waiting longer here buys a slower failure, not a success.
+#: `request_timeout` is the knob for anyone whose gateway needs otherwise.
+_CONNECT_TIMEOUT_S = 10.0
+_POOL_TIMEOUT_S = 10.0
+_DEFAULT_REQUEST_TIMEOUT_S = 30.0
+
 _DEFAULT_ENDPOINTS = {
     "bootstrap": "/bootstrap",
     "challenge": "/challenge",
@@ -124,6 +141,7 @@ class SignedSessionClient:
         endpoints: dict[str, str] | None = None,
         data_dir: str = "~/.spotiflac/signed_sessions",
         refresh_skew_seconds: int = 3600,
+        request_timeout: float = _DEFAULT_REQUEST_TIMEOUT_S,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.namespace = namespace
@@ -134,6 +152,7 @@ class SignedSessionClient:
         self.window_seconds = window_seconds
         self.endpoints = {**_DEFAULT_ENDPOINTS, **(endpoints or {})}
         self.refresh_skew_seconds = refresh_skew_seconds
+        self.request_timeout = max(1.0, float(request_timeout))
         self.data_dir = Path(os.path.expanduser(data_dir))
         self.data_dir.mkdir(parents=True, exist_ok=True)
         # Unlike the previous suppress(OSError), a failure to lock this
@@ -222,6 +241,20 @@ class SignedSessionClient:
         self.refresh_after = record.get("refresh_after")
         self.capabilities = record.get("capabilities", [])
         self._save()
+
+    def _timeout(self, read: float | None = None) -> httpx.Timeout:
+        """Per-phase timeout for one signed request.
+
+        `read` overrides the configured read timeout for the phases where a
+        different wait is right — a session refresh is a gateway-local call
+        and has never needed the same patience as a proxied download.
+        """
+        return httpx.Timeout(
+            connect=_CONNECT_TIMEOUT_S,
+            read=self.request_timeout if read is None else read,
+            write=self.request_timeout if read is None else read,
+            pool=_POOL_TIMEOUT_S,
+        )
 
     def _ensure_client(self) -> None:
         """Creates the httpx client lazily and removes the "Connection" header.
@@ -629,7 +662,7 @@ class SignedSessionClient:
                 f"{self.base_url}{refresh_path}",
                 content=payload,
                 headers=headers,
-                timeout=15,
+                timeout=self._timeout(read=15),
             )
         except httpx.HTTPError as exc:
             _REFRESH_RETRY_AT[retry_key] = time.monotonic() + _REFRESH_RETRY_S
@@ -809,7 +842,7 @@ class SignedSessionClient:
             f"{self.base_url}{path}",
             content=body,
             headers=headers,
-            timeout=30,
+            timeout=self._timeout(),
         )
         with contextlib.suppress(Exception):
             logger.info(
@@ -1199,6 +1232,9 @@ async def perform_signed_fetch(
         dict: Response details, a verification URL when reauthentication is required, or an error message.
 
     """
+    # Bound before the try so the failure log can time a call that died
+    # during authentication, long before the request itself was timed.
+    call_started = time.monotonic()
     try:
         # If we're not authenticated, acquire the async Lock
         if not client.authenticated:
@@ -1243,8 +1279,9 @@ async def perform_signed_fetch(
                         pause = _record_auth_failure(client, _retry_after_from(exc))
                         logger.warning(
                             "[signed_session:%s] Turnstile automatico fallito "
-                            "(%s: %s) — no new verification for %s",
+                            "dopo %.1fs (%s: %s) — no new verification for %s",
                             client.namespace,
+                            time.monotonic() - call_started,
                             type(exc).__name__,
                             detail,
                             _format_pause(pause),
@@ -1313,8 +1350,7 @@ async def perform_signed_fetch(
                 )
             else:
                 logger.warning(
-                    "[signed_session:%s] Ticket NOT returned — HTTP %d after "
-                    "%.1fs: %s",
+                    "[signed_session:%s] Ticket NOT returned — HTTP %d after %.1fs: %s",
                     client.namespace,
                     resp.status_code,
                     elapsed,
@@ -1343,29 +1379,66 @@ async def perform_signed_fetch(
         if raw_retry_after.isdigit():
             retry_after = max(0, int(raw_retry_after))
 
-        return {
+        ok = 200 <= resp.status_code < 300
+        result = {
             "statusCode": resp.status_code,
             "status": resp.status_code,
-            "ok": 200 <= resp.status_code < 300,
+            "ok": ok,
             "url": str(resp.url),
             "body": resp.text,
             "headers": dict(resp.headers),
             "retryAfterSeconds": retry_after,
         }
+
+        # The gateway says how a refusal should be retried, and the
+        # extensions already branch on it — tidal-web keeps its ticket for
+        # "poll_existing" and throws it away otherwise (index.js) — but this
+        # function never put the field in the dict it hands them, so every
+        # refusal read as "no instruction" and every retry started a fresh
+        # operation. Parsed only for a refusal: a success body is the
+        # provider's payload, sometimes a large manifest, and never an
+        # envelope.
+        #
+        # `retry_mode` only. `code` and `retryable` come out of the same
+        # envelope and are deliberately left out: the extensions read
+        # `code && !retryable` as "stop retrying", so forwarding them would
+        # hand the gateway a switch to end a download early, and whether it
+        # sets them that precisely on transient failures is not something
+        # this side can verify.
+        if not ok:
+            err = parse_session_error(getattr(resp, "content", b""))
+            if err.retry_mode:
+                result["retryMode"] = err.retry_mode
+            if not retry_after and err.retry_after_seconds:
+                result["retryAfterSeconds"] = err.retry_after_seconds
+        return result
     except Exception as exc:
         # "warning", not "debug": this is the end of the road for whatever
         # the extension was doing, and returning {"error": …} means the JS
         # side decides how loudly to fail. At debug the reason was invisible
         # at the default level, so a download that stopped here reported
         # only "download failed".
+        #
+        # The type name leads, because `str(exc)` is empty for every one of
+        # httpx's timeout classes — `str(ReadTimeout(TimeoutError()))` is ""
+        # — and a timeout is the single most common way a signed request
+        # ends here. That emptiness was doing real damage on both sides of
+        # the bridge: the log line read "... failed:" and stopped, and the
+        # falsy `error` sent an extension straight past its
+        # `if (response.error)` branch to throw "HTTP undefined" instead,
+        # losing the reason and the Retry-After with it. Same treatment as
+        # the authentication path above.
+        detail = str(exc) or type(exc).__name__
         logger.warning(
-            "[signed_session:%s] signedFetch %s %s failed: %s",
+            "[signed_session:%s] signedFetch %s %s failed after %.1fs (%s: %s)",
             client.namespace,
             method,
             path,
-            exc,
+            time.monotonic() - call_started,
+            type(exc).__name__,
+            detail,
         )
-        return {"error": str(exc)}
+        return {"error": f"{type(exc).__name__}: {detail}"}
 
 
 def client_from_manifest(
@@ -1373,6 +1446,12 @@ def client_from_manifest(
     data_dir: str = "~/.spotiflac/signed_sessions",
 ) -> SignedSessionClient:
     """Builds a SignedSessionClient from an extension manifest's `signedSession` block."""
+    try:
+        request_timeout = float(
+            manifest_block.get("requestTimeoutSeconds") or _DEFAULT_REQUEST_TIMEOUT_S,
+        )
+    except (TypeError, ValueError):
+        request_timeout = _DEFAULT_REQUEST_TIMEOUT_S
     return SignedSessionClient(
         base_url=manifest_block["baseUrl"],
         namespace=manifest_block["namespace"],
@@ -1383,4 +1462,7 @@ def client_from_manifest(
         window_seconds=int(manifest_block.get("timeWindowSeconds", 300)),
         endpoints=manifest_block.get("endpoints"),
         data_dir=data_dir,
+        # A gateway whose /dl needs longer than the default can say so in the
+        # manifest rather than requiring a patched host.
+        request_timeout=request_timeout,
     )

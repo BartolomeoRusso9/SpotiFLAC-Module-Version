@@ -49,6 +49,25 @@ if (!isMainThread) {
   // correct _progress_cbs[seq].
   let _currentCallId = null;
 
+  // When the host will give up on the call now running, as a Date.now()
+  // stamp, and the last answer to "has this run been called off?".
+  //
+  // Both exist for utils.getResolutionRemainingMs() and
+  // utils.isDownloadCancelled(), which extensions guard on with `typeof
+  // === "function"` and which this bridge did not provide. Silent
+  // absence is the worst shape for that: tidal-web's retry loop checks
+  // both on every attempt, so with neither available a /dl that times out
+  // was retried maxDownloadAttempts times per quality tier with nothing
+  // able to stop it early.
+  let _callDeadlineAt = 0;
+  let _cancelledAt = 0;
+  let _cancelled = false;
+
+  //: How long a cancellation answer is reused before asking again. The
+  //: probe is a round trip to Python, and an extension polling it in a
+  //: tight loop should not turn into a round trip per iteration.
+  const CANCEL_CACHE_MS = 200;
+
   const BRIDGE_TIMEOUT_MS   = 60_000;
   const TRANSFER_TIMEOUT_MS  = 30 * 60_000;
   const TRANSFER_METHODS = new Set(['file.download', 'file.downloadSegments']);
@@ -191,7 +210,51 @@ if (!isMainThread) {
     randomUserAgent: () =>
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     appUserAgent: () => 'SpotiFLAC-Python/1.2',
-    
+
+    // Blocks this thread, and only this thread: the main thread keeps
+    // serving bridge requests throughout. Atomics.wait on a private buffer
+    // is the one way to wait synchronously, and synchronous is what the
+    // extension API is — an extension calls utils.sleep() in the middle of
+    // a retry loop and expects to be there when it returns.
+    //
+    // Its absence was not harmless. tidal-web's waitBeforeRetry() ends in
+    // `if (utils && typeof utils.sleep === "function") return utils.sleep(delay);
+    //  return true;` — so every retry fired immediately, the exponential
+    // backoff was computed and discarded, and a Retry-After the gateway
+    // asked for was honoured by waiting zero seconds.
+    sleep: (ms) => {
+      const duration = Math.max(0, Math.floor(Number(ms) || 0));
+      if (duration > 0) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, duration);
+      }
+      return true;
+    },
+
+    //: Milliseconds before the host abandons the call now running, so an
+    //: extension can decline to start an attempt it has no time to finish
+    //: instead of being cut off mid-request. The deadline is the host's own
+    //: `timeout_s` for this call (see JSRuntime.call) — not a second budget
+    //: invented here.
+    getResolutionRemainingMs: () => {
+      if (!_callDeadlineAt) return Number.MAX_SAFE_INTEGER;
+      return Math.max(0, _callDeadlineAt - Date.now());
+    },
+
+    isDownloadCancelled: () => {
+      const now = Date.now();
+      if (now - _cancelledAt < CANCEL_CACHE_MS) return _cancelled;
+      try {
+        _cancelled = bridgeCall('host.isCancelled', {}) === true;
+      } catch (e) {
+        // A probe that cannot be answered is not a cancellation: saying
+        // "yes" here would abort a perfectly good download.
+        _cancelled = false;
+      }
+      _cancelledAt = now;
+      return _cancelled;
+    },
+
+
     sha256: (input) =>
       require('crypto').createHash('sha256').update(String(input), 'utf8').digest('hex'),
       
@@ -296,8 +359,15 @@ if (!isMainThread) {
   };
 
   // Receives commands from the main thread and executes them *synchronously*
-  parentPort.on('message', ({ id, call, args }) => {
+  parentPort.on('message', ({ id, call, args, budgetMs }) => {
     _currentCallId = id; // NEW: rende id disponibile a bridgeCall() durante fn(...)
+    // Turned into a stamp on arrival rather than carried as one: the host's
+    // clock and this one are not the same clock, and the difference between
+    // them would be read as budget already spent.
+    const budget = Number(budgetMs) || 0;
+    _callDeadlineAt = budget > 0 ? Date.now() + budget : 0;
+    _cancelledAt = 0;
+    _cancelled = false;
     try {
       const fn = _ext[call];
       if (typeof fn !== 'function') {
@@ -337,6 +407,7 @@ if (!isMainThread) {
       parentPort.postMessage({ id, error: (e && e.message) || String(e) });
     } finally {
       _currentCallId = null; // NEW
+      _callDeadlineAt = 0;
       progressScale.delete(id);
     }
   });
@@ -408,6 +479,12 @@ async function handleBridgeRequest() {
       result = await forwardToPython('session_signed_fetch', {
         method: args.method, path: args.path, body: args.body, headers: args.headers,
       });
+    } else if (method === 'host.isCancelled') {
+      // The stop event belongs to the run, which is Python's: a provider is
+      // handed one per batch (see JSExtensionProvider.set_stop_event_async),
+      // and only it knows whether the run this call belongs to is still
+      // wanted.
+      result = await forwardToPython('host_is_cancelled', {}) === true;
     } else {
       error = `Unknown bridge method: ${method}`;
     }
@@ -826,11 +903,11 @@ worker.on('message', async (msg) => {
 });
 
 /** Sends a command to the Worker and waits for the response. */
-function callWorker(call, args) {
+function callWorker(call, args, budgetMs) {
   return new Promise((resolve, reject) => {
     const id = ++_cmdSeq;
     _pendingPy.set(id, { resolve, reject });
-    worker.postMessage({ id, call, args });
+    worker.postMessage({ id, call, args, budgetMs });
   });
 }
 
@@ -845,7 +922,8 @@ stdinRL.on('line', async (line) => {
   // Response from Python to a forwardToPython('session_signed_fetch', ...):
   // resolves the Promise waiting in the Worker; it is not a command to
   // execute.
-  if (req.type === 'session_signed_fetch_response') {
+  if (req.type === 'session_signed_fetch_response'
+      || req.type === 'host_is_cancelled_response') {
     const resolve = _pySessionPending.get(req.requestId);
     if (resolve) {
       _pySessionPending.delete(req.requestId);
@@ -854,9 +932,9 @@ stdinRL.on('line', async (line) => {
     return;
   }
 
-  const { id, call, args } = req;
+  const { id, call, args, budgetMs } = req;
   try {
-    const result = await callWorker(call, args);
+    const result = await callWorker(call, args, budgetMs);
     process.stdout.write(JSON.stringify({ id, result }) + '\n');
   } catch (e) {
     process.stdout.write(JSON.stringify({ id, error: (e && e.message) || String(e) }) + '\n');

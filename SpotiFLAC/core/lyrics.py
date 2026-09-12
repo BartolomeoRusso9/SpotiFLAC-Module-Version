@@ -102,6 +102,53 @@ def add_lrc_metadata(lrc_text: str, track_name: str, artist_name: str) -> str:
     return headers + lrc_text
 
 
+#: Jellyfin parses word-by-word lyrics into one cue per word and runs .NET's
+#: string.Trim() over each one, which eats the space that separated the word
+#: from the next; re-serialised, "Nuij simm doije" comes back out of its
+#: metadata cache as "Nuijsimmdoije". U+2800 BRAILLE PATTERN BLANK draws as a
+#: blank but sits in category So rather than Zs, so char.IsWhiteSpace is false
+#: for it and the trim leaves it where it is.
+JELLYFIN_WORD_GAP = "\u2800"
+
+#: The `<mm:ss.xx>` that opens each word of an enhanced-LRC line. Kept as a
+#: capturing group so re.split() hands back the tags along with the words.
+_INLINE_WORD_TAG = re.compile(r"(<\d{2}:\d{2}\.\d{2}>)")
+
+
+def apply_jellyfin_word_gap(lrc_text: str, gap: str = JELLYFIN_WORD_GAP) -> str:
+    """Swap the space that ends each timed word for a trim-proof blank.
+
+    Only the *separating* space goes: a space inside a word ("t'he 'a") is
+    left alone, since a trim never reaches it, and so is the last word of a
+    line, which has no separator to protect. Line-synced LRC carries no
+    inline tags and comes back untouched.
+
+    Re-running this is a no-op, but the test for that is per word rather than
+    per text: a word already carrying the gap has nothing to rstrip, so it is
+    left as it is. Bailing out on the first gap anywhere would instead strand
+    every ungapped word in a text that is only partly converted — which is
+    what lyrics stitched together from two sources look like.
+    """
+    if not lrc_text:
+        return lrc_text
+
+    lines = []
+    for line in lrc_text.split("\n"):
+        if "<" not in line:
+            lines.append(line)
+            continue
+        # One capturing group means re.split() alternates text, tag, text,
+        # tag, ... starting with text, so the odd indices are the tags.
+        pieces = _INLINE_WORD_TAG.split(line)
+        for index in range(0, len(pieces), 2):
+            word = pieces[index]
+            trimmed = word.rstrip()
+            if trimmed and trimmed != word and not trimmed.endswith(gap):
+                pieces[index] = trimmed + gap
+        lines.append("".join(pieces))
+    return "\n".join(lines)
+
+
 def _format_lrc_timestamp(milliseconds: int, opening: str = "[") -> str:
     minutes, remainder = divmod(max(0, milliseconds), 60_000)
     seconds, remainder = divmod(remainder, 1_000)
@@ -1070,9 +1117,13 @@ async def fetch_lyrics_async(
             if not lyrics:
                 continue
 
+            lyrics_text = lyrics.strip()
+            if _env_flag("SPOTIFLAC_LYRICS_JELLYFIN_COMPAT"):
+                lyrics_text = apply_jellyfin_word_gap(lyrics_text)
+
             result = (
                 add_lrc_metadata(
-                    lyrics.strip(),
+                    lyrics_text,
                     track_name,
                     artist_name,
                 ),

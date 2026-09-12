@@ -49,8 +49,25 @@ class _CleanConsoleFormatter(logging.Formatter):
         return logger.getEffectiveLevel() <= logging.DEBUG
 
 
+def _host_configured_logging() -> bool:
+    """Whether the application embedding us already handles log records.
+
+    A library that is imported into someone else's program does not get to
+    decide how that program logs. When the host has configured logging —
+    `logging.basicConfig()`, a `RichHandler` on the root logger, a handler
+    of its own on "SpotiFLAC" — the handler below is not a convenience but a
+    second renderer, and `propagate = False` on top of it hides our records
+    from the host's own entirely.
+
+    `logging.lastResort` is not a configured handler: it is the stderr
+    fallback Python uses precisely *because* nothing was configured, which
+    is the case this exists to detect.
+    """
+    return bool(logger.handlers or logging.getLogger().handlers)
+
+
 def _setup_logger(level: int) -> logging.Logger:
-    if not logger.handlers:
+    if not _host_configured_logging():
         handler = logging.StreamHandler()
         handler.setFormatter(
             _CleanConsoleFormatter("[%(levelname)s] %(name)s: %(message)s")
