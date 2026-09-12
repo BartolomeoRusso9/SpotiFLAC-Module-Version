@@ -81,7 +81,16 @@ class SubscriptionScheduler:
         self._thread.start()
 
     def stop(self, timeout: float | None = 5.0) -> None:
+        """Asks the worker to stop and waits `timeout` for it to.
+
+        The thread reference is dropped only once the thread is really gone:
+        a check still running when the timeout expires keeps it, so a later
+        start() sees a live worker instead of starting a second one beside
+        the first — two threads checking the same subscriptions at once.
+        """
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout)
-            self._thread = None
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout)
+            if not thread.is_alive():
+                self._thread = None

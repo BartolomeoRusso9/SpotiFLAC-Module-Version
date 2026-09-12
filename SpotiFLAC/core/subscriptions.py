@@ -116,6 +116,9 @@ class Subscription:
     last_error: str | None = None
     interval_minutes: int = 0
     download_config: dict = field(default_factory=dict)
+    #: Whether a check has ever succeeded for this subscription. The first
+    #: one records what exists as the baseline; see check_async().
+    baselined: bool = False
 
     @property
     def groups(self) -> list[str]:
@@ -174,6 +177,7 @@ def _row_to_subscription(row) -> Subscription:
         last_error=row["last_error"],
         interval_minutes=int(row["interval_minutes"] or 0),
         download_config=_load_config(row["download_config"]),
+        baselined=bool(row["baselined"]),
     )
 
 
@@ -446,6 +450,37 @@ def due(now: float | None = None) -> list[Subscription]:
     return [_row_to_subscription(r) for r in rows]
 
 
+def is_baselined(subscription_id: str) -> bool:
+    """Whether a check has already succeeded for this subscription.
+
+    Its own column rather than "the seen-set is non-empty": a listing can
+    succeed and be empty (a playlist with nothing in it yet, an artist with
+    no release in the chosen groups), and reading that as "never checked"
+    made the next check watermark away the first thing added.
+    """
+    row = (
+        db.connection()
+        .execute(
+            "SELECT baselined FROM subscriptions WHERE id = ?", (subscription_id,)
+        )
+        .fetchone()
+    )
+    return bool(row["baselined"]) if row is not None else False
+
+
+def mark_baselined(subscription_id: str) -> None:
+    """Records that a check succeeded, so later ones report what is new.
+
+    Only successful checks call this: a failed one still stamps
+    `last_checked_at` (see record_check), and must not be mistaken for the
+    baseline.
+    """
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE subscriptions SET baselined = 1 WHERE id = ?", (subscription_id,)
+        )
+
+
 def record_check(subscription_id: str, error: str | None = None) -> None:
     with db.transaction() as conn:
         conn.execute(
@@ -698,11 +733,12 @@ async def check_async(
         return CheckResult(subscription=sub, error=str(exc))
 
     already = seen_ids(sub.id)
-    first_check = not already
+    first_check = not is_baselined(sub.id) and not already
 
     fresh = [r for r in releases if r.id not in already]
     mark_seen(sub.id, releases)
     record_check(sub.id, None)
+    mark_baselined(sub.id)
 
     if artist_name and not sub.name:
         with db.transaction() as conn:

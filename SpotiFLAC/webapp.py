@@ -376,6 +376,10 @@ class ApiRegistry:
         self._base = base_download_dir
         self._apis: dict[str, SpotiFLAC_API] = {}
         self._lock = threading.Lock()
+        #: Set once the multi-user queue exists (create_app builds it after
+        #: this registry). Scheduled subscription downloads go through it so
+        #: they are quota-checked and persisted like any other download.
+        self.download_queue = None
 
     def get(self, username: str | None) -> SpotiFLAC_API:
         key = username or ""
@@ -403,6 +407,7 @@ class ApiRegistry:
             api.download_dir = os.path.join(self._base, _safe_username(username))
             with contextlib.suppress(OSError):
                 os.makedirs(api.download_dir, exist_ok=True)
+        api._subscription_download_queue = self.download_queue
         return api
 
     def known(self) -> list[str]:
@@ -486,6 +491,11 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             # because a REST client has no notion of a fetch that happened
             # earlier in someone's browser session. Resolving a URL is the
             # same fetch_metadata() the GUI runs, so both end up on one path.
+            # A third shape comes from the scheduler: a subscription's new
+            # tracks, carried whole (see api_mixins/subscriptions.py), which
+            # run_download_job() can execute without a tracklist in memory.
+            if "tracks" in payload:
+                return owner_api.run_download_job(payload)
             if "selected_indices" in payload:
                 owner_api.download_tracks(
                     payload["selected_indices"], payload.get("config", {})
@@ -506,6 +516,9 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             # table (see below), with payloads this handler cannot read.
             kind="multiuser",
         )
+        # Every account Api built from here on gets it (see _build); none has
+        # been built yet — the first is created by the first request.
+        registry.download_queue = job_queue
 
     # Single-user --web runs its downloads through a persisted queue as well,
     # and for the reason multi-user's exists: this is the headless deployment,

@@ -250,6 +250,19 @@ _MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "ALTER TABLE subscriptions ADD COLUMN download_config TEXT NOT NULL "
         "DEFAULT '{}'",
     ),
+    # v7 — "this subscription has had a successful check" as its own fact.
+    #
+    # It used to be inferred from subscription_seen being non-empty, which is
+    # wrong for a listing that legitimately comes back empty (a new playlist,
+    # an artist with nothing in the chosen groups): nothing was recorded, so
+    # the next check still looked like a first one and watermarked away the
+    # first thing added. Existing rows with a seen-set have plainly been
+    # checked, so they start out baselined.
+    (
+        "ALTER TABLE subscriptions ADD COLUMN baselined INTEGER NOT NULL DEFAULT 0",
+        "UPDATE subscriptions SET baselined = 1 WHERE id IN "
+        "(SELECT DISTINCT subscription_id FROM subscription_seen)",
+    ),
 )
 
 

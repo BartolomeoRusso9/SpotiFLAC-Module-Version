@@ -162,3 +162,62 @@ def test_the_scheduler_dispatches_to_the_owners_instance(playlist):
 
     assert host.jobs == []
     assert [t["id"] for t in bob.jobs[0]["tracks"]] == ["t2"]
+
+
+def test_only_the_owner_can_reset_remove_or_pause(playlist):
+    alice, bob = FakeApi("alice"), FakeApi("bob")
+    sub = alice.add_subscription(PLAYLIST_URL)["subscription"]
+    subs.mark_seen(sub["id"], [subs.Release(id="t1", type="track")])
+
+    assert bob.reset_subscription(sub["id"]) == {
+        "ok": False,
+        "error": "No such subscription.",
+    }
+    assert bob.remove_subscription(sub["id"])["ok"] is False
+    assert bob.set_subscription_enabled(sub["id"], False)["ok"] is False
+
+    # Untouched, and still the owner's to change.
+    assert subs.count_seen(sub["id"]) == 1
+    assert subs.get(sub["id"]).enabled is True
+    assert alice.reset_subscription(sub["id"])["ok"] is True
+    assert subs.count_seen(sub["id"]) == 0
+
+
+class FakeQueue:
+    def __init__(self) -> None:
+        self.submitted: list[tuple[str, dict]] = []
+
+    def submit(self, owner: str, payload: dict) -> None:
+        self.submitted.append((owner, payload))
+
+
+def test_multiuser_scheduled_downloads_go_through_the_shared_queue(playlist):
+    api = FakeApi("bob")
+    api._subscription_download_queue = queue = FakeQueue()
+    sub = subs.add(PLAYLIST_URL, owner="bob", interval_minutes=15)
+    api._run_scheduled_check(sub)  # baseline
+    playlist.append(_track("t2"))
+
+    api._run_scheduled_check(subs.get(sub.id))
+
+    assert api.jobs == []  # not the direct path
+    [(owner, payload)] = queue.submitted
+    assert owner == "bob" and payload["owner"] == "bob"
+    assert [t["id"] for t in payload["tracks"]] == ["t2"]
+
+
+def test_a_queue_refusal_is_reported_not_raised(playlist):
+    api = FakeApi("bob")
+
+    class FullQueue:
+        def submit(self, owner, payload):
+            raise RuntimeError("quota exceeded")
+
+    api._subscription_download_queue = FullQueue()
+    sub = subs.add(PLAYLIST_URL, owner="bob", interval_minutes=15)
+    api._run_scheduled_check(sub)
+    playlist.append(_track("t2"))
+
+    api._run_scheduled_check(subs.get(sub.id))
+
+    assert any("quota exceeded" in message for _level, message in api.logs)

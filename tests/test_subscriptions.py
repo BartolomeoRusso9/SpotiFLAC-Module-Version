@@ -331,3 +331,45 @@ def test_saved_settings_are_updated_per_owner():
 
     assert subs.get(mine.id).download_config == {"quality": "HI_RES"}
     assert subs.get(theirs.id).download_config == {}
+
+
+def test_an_empty_first_check_still_counts_as_the_baseline():
+    """A playlist with nothing in it yet is checked, not "never checked".
+
+    The baseline used to be inferred from the seen-set, which an empty
+    listing leaves empty — so the next check looked like a first one and
+    watermarked away the first track added.
+    """
+    sub = subs.add(PLAYLIST_URL)
+    client = FakePlaylistClient([])
+
+    first = asyncio.run(subs.check_async(sub, client=client))
+    assert first.watermarked and first.total == 0
+    assert subs.is_baselined(sub.id) is True
+
+    client.tracks = [_track("t1", "The first one")]
+    second = asyncio.run(subs.check_async(subs.get(sub.id), client=client))
+
+    assert second.watermarked is False
+    assert [r.id for r in second.new] == ["t1"]
+    assert [t.id for t in second.new_tracks] == ["t1"]
+
+
+def test_a_failed_check_is_not_a_baseline():
+    sub = subs.add(PLAYLIST_URL)
+
+    class Failing:
+        def get_url(self, url):
+            raise RuntimeError("Spotify unreachable")
+
+    failed = asyncio.run(subs.check_async(sub, client=Failing()))
+    assert failed.error
+    assert subs.get(sub.id).last_checked_at  # stamped even so
+    assert subs.is_baselined(sub.id) is False
+
+    # The first listing that does come back is the baseline.
+    result = asyncio.run(
+        subs.check_async(subs.get(sub.id), client=FakePlaylistClient([_track("t1")]))
+    )
+    assert result.watermarked is True
+    assert subs.is_baselined(sub.id) is True

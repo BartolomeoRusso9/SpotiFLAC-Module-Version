@@ -29,6 +29,20 @@ class SubscriptionsMixin:
     def _subscription_owner(self) -> str:
         return getattr(self, "owner", "") or ""
 
+    def _owned_subscription(self, subscription_id: str):
+        """The caller's own subscription with this id, or None.
+
+        Every method here takes an id, and in multi-user mode ids from one
+        account must not act on another's rows — get_subscriptions() only
+        ever shows an account its own.
+        """
+        from ..core.subscriptions import get
+
+        sub = get(subscription_id)
+        if sub is None or sub.owner != self._subscription_owner():
+            return None
+        return sub
+
     def _start_subscription_scheduler(self, api_for_owner=None):
         """Starts the scheduler for scheduled subscriptions, once per instance.
 
@@ -94,6 +108,8 @@ class SubscriptionsMixin:
         try:
             from ..core.subscriptions import remove
 
+            if self._owned_subscription(subscription_id) is None:
+                return {"ok": False, "error": "No such subscription."}
             return {"ok": True, "removed": remove(subscription_id)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -102,6 +118,8 @@ class SubscriptionsMixin:
         try:
             from ..core.subscriptions import set_enabled
 
+            if self._owned_subscription(subscription_id) is None:
+                return {"ok": False, "error": "No such subscription."}
             return {"ok": True, "updated": set_enabled(subscription_id, bool(enabled))}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -119,8 +137,7 @@ class SubscriptionsMixin:
         try:
             from ..core.subscriptions import get, set_schedule
 
-            sub = get(subscription_id)
-            if sub is None or sub.owner != self._subscription_owner():
+            if self._owned_subscription(subscription_id) is None:
                 return {"ok": False, "error": "No such subscription."}
             set_schedule(subscription_id, interval_minutes, config)
             return {"ok": True, "subscription": get(subscription_id).to_dict()}
@@ -134,6 +151,8 @@ class SubscriptionsMixin:
         try:
             from ..core.subscriptions import forget_seen
 
+            if self._owned_subscription(subscription_id) is None:
+                return {"ok": False, "error": "No such subscription."}
             forget_seen(subscription_id)
             return {"ok": True}
         except Exception as e:
@@ -257,12 +276,31 @@ class SubscriptionsMixin:
         # --web mode, where it survives a restart, and run right away
         # otherwise. No "session", so it finishes as a background download —
         # no page asked for it.
-        self._start_download_job(
-            {
-                "indices": list(range(len(tracks))),
-                "tracks": [t.model_dump(mode="json") for t in tracks],
-                "source_url": source_url,
-                "whole": whole,
-                "config": dict(config),
-            }
-        )
+        payload = {
+            "indices": list(range(len(tracks))),
+            "tracks": [t.model_dump(mode="json") for t in tracks],
+            "source_url": source_url,
+            "whole": whole,
+            "config": dict(config),
+        }
+        queue = getattr(self, "_subscription_download_queue", None)
+        if queue is None:
+            self._start_download_job(payload)
+            return
+
+        # Multi-user --web: through the account-aware queue, so a scheduled
+        # download is quota-checked and survives a restart like every other
+        # one. `owner` rides in the payload because the queue thread has no
+        # request to read it from (see webapp._run_queued_download).
+        #
+        # Deliberately not self._download_queue: download_tracks() submits to
+        # that one and the multi-user handler calls download_tracks(), so a
+        # job set on these instances would re-queue itself forever.
+        owner = self._subscription_owner()
+        try:
+            queue.submit(owner, {**payload, "owner": owner})
+        except Exception as exc:
+            self.log(
+                f"Could not queue {len(tracks)} new track(s) for download: {exc}",
+                "error",
+            )
