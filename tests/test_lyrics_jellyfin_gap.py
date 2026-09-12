@@ -18,9 +18,7 @@ import unicodedata
 
 from SpotiFLAC.core.lyrics import JELLYFIN_WORD_GAP, apply_jellyfin_word_gap
 
-APPLE_LRC = (
-    "[00:08.61]<00:08.61>Nuij <00:08.91>simm <00:09.44>doije <00:10.41>stann'"
-)
+APPLE_LRC = "[00:08.61]<00:08.61>Nuij <00:08.91>simm <00:09.44>doije <00:10.41>stann'"
 
 _CUE = re.compile(r"<(\d{2}:\d{2}\.\d{2})>([^<]*)")
 
