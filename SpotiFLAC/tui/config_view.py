@@ -42,6 +42,7 @@ from ..extensions.catalog import installed_service_ids
 from .config_state import (
     ATMOS_PROVIDER,
     ENRICH_PROVIDERS,
+    CANVAS_PROVIDERS,
     LYRICS_PROVIDERS,
     POST_DOWNLOAD_ACTIONS,
     TRANSCODE_BITRATES,
@@ -441,6 +442,28 @@ class ConfigPanel(VerticalScroll):
                 ),
             )
 
+        with Collapsible(title="Canvas", collapsed=True):
+            yield Row(
+                "Save the canvas alongside",
+                Switch(value=state.save_canvas, id=_field_id("save_canvas")),
+            )
+            yield Row(
+                "Canvas library folder",
+                Input(
+                    value=state.canvas_library_dir or "",
+                    placeholder="collect every canvas in one place",
+                    id=_field_id("canvas_library_dir"),
+                ),
+            )
+            yield Label("Canvas providers, in order", classes="setting-label")
+            yield SelectionList[str](
+                *[
+                    (provider, provider, provider in state.canvas_providers)
+                    for provider in CANVAS_PROVIDERS
+                ],
+                id=_field_id("canvas_providers"),
+            )
+
         with Collapsible(title="Metadata enrichment", collapsed=True):
             yield Row(
                 "Enrich metadata",
@@ -762,6 +785,12 @@ class ConfigPanel(VerticalScroll):
         self._set_enabled(
             "apple_lyrics_word_by_word",
             state.embed_lyrics and "apple" in state.lyrics_providers,
+        )
+        # Nothing is looked up unless one of the two destinations is on,
+        # so the provider order is a question with no answer until then.
+        self._set_enabled(
+            "canvas_providers",
+            bool(state.save_canvas or state.canvas_library_dir),
         )
         self._set_enabled("enrich_providers", state.enrich_metadata)
         self._set_enabled(

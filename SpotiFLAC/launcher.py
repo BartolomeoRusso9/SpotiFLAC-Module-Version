@@ -833,6 +833,37 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         ),
     )
 
+    # ── Canvas ──────────────────────────────────────────────────────────────
+    canvas_grp = parser.add_argument_group("Canvas")
+    canvas_grp.add_argument(
+        "--save-canvas",
+        action="store_true",
+        default=pd.get("save_canvas", False),
+        dest="save_canvas",
+        help=(
+            "also save the track's Spotify Canvas (the short looping visual) "
+            "as a video file next to it, under the audio file's own name"
+        ),
+    )
+    canvas_grp.add_argument(
+        "--canvas-dir",
+        default=pd.get("canvas_library_dir") or None,
+        dest="canvas_library_dir",
+        metavar="DIR",
+        help="also collect every canvas into DIR as 'Artist - Title.mp4'",
+    )
+    canvas_grp.add_argument(
+        "--canvas-providers",
+        nargs="+",
+        default=pd.get("canvas_providers") or ["spotify", "paxsenix"],
+        dest="canvas_providers",
+        choices=["spotify", "paxsenix"],
+        help=(
+            "where to look one up, in order: 'spotify' asks spclient "
+            "directly, 'paxsenix' goes through the public JSON wrapper"
+        ),
+    )
+
     # ── Metadata enrichment ─────────────────────────────────────────────────
     enrich_grp = parser.add_argument_group("Metadata Enrichment")
     enrich_grp.add_argument(
@@ -1355,6 +1386,9 @@ def _subscription_downloader(profile_defaults: dict, output_dir_override: str | 
             apple_lyrics_word_by_word=pd.get("apple_lyrics_word_by_word", True),
             save_lrc=pd.get("save_lrc", False),
             lrc_library_dir=pd.get("lrc_library_dir") or None,
+            save_canvas=pd.get("save_canvas", False),
+            canvas_library_dir=pd.get("canvas_library_dir") or None,
+            canvas_providers=pd.get("canvas_providers") or ["spotify", "paxsenix"],
             enrich_metadata=pd.get("enrich_metadata", True),
             enrich_providers=pd.get("enrich_providers")
             or ["deezer", "apple", "qobuz", "tidal"],
@@ -1565,6 +1599,9 @@ async def _run_download_async(
     redownload_fake_hires: bool = False,
     save_lrc: bool = False,
     lrc_library_dir: str | None = None,
+    save_canvas: bool = False,
+    canvas_library_dir: str | None = None,
+    canvas_providers: list[str] | None = None,
     resume: bool = True,
     post_download_hooks: list[str] | None = None,
     json_report: bool = False,
@@ -1673,6 +1710,9 @@ async def _run_download_async(
         redownload_fake_hires=redownload_fake_hires,
         save_lrc=save_lrc,
         lrc_library_dir=lrc_library_dir,
+        save_canvas=save_canvas,
+        canvas_library_dir=canvas_library_dir,
+        canvas_providers=canvas_providers or ["spotify", "paxsenix"],
         resume=resume,
         post_download_hooks=hooks,
     )
@@ -1797,6 +1837,9 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
             apple_lyrics_word_by_word=cfg.get("apple_lyrics_word_by_word", True),
             save_lrc=cfg.get("save_lrc", False),
             lrc_library_dir=cfg.get("lrc_library_dir") or None,
+            save_canvas=cfg.get("save_canvas", False),
+            canvas_library_dir=cfg.get("canvas_library_dir") or None,
+            canvas_providers=cfg.get("canvas_providers") or ["spotify", "paxsenix"],
             enrich_metadata=cfg["enrich_metadata"],
             enrich_providers=cfg["enrich_providers"],
             qobuz_local_api_url=cfg.get("qobuz_local_api_url"),
@@ -2641,6 +2684,9 @@ async def amain() -> None:
             apple_lyrics_word_by_word=args.apple_lyrics_word_by_word,
             save_lrc=args.save_lrc,
             lrc_library_dir=args.lrc_library_dir,
+            save_canvas=args.save_canvas,
+            canvas_library_dir=args.canvas_library_dir,
+            canvas_providers=args.canvas_providers,
             enrich_metadata=args.enrich,
             enrich_providers=args.enrich_providers,
             qobuz_local_api_url=qobuz_local_api_url,
@@ -2724,6 +2770,9 @@ async def amain() -> None:
                 "redownload_fake_hires": args.redownload_fake_hires,
                 "save_lrc": args.save_lrc,
                 "lrc_library_dir": args.lrc_library_dir,
+                "save_canvas": args.save_canvas,
+                "canvas_library_dir": args.canvas_library_dir,
+                "canvas_providers": args.canvas_providers,
             }
             await save_profile_async(args.save_profile, profile_cfg)
         except Exception:

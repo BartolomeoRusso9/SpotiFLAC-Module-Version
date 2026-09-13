@@ -46,6 +46,11 @@ class ProfileConfig(BaseModel):
     apple_lyrics_word_by_word: bool = True
     save_lrc: bool = False
     lrc_library_dir: str | None = None
+    save_canvas: bool = False
+    canvas_library_dir: str | None = None
+    canvas_providers: list[str] = Field(
+        default_factory=lambda: ["spotify", "paxsenix"],
+    )
     enrich_metadata: bool = True
     enrich_providers: list[str] = Field(
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"],

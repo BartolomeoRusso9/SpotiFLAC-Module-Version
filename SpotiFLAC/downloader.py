@@ -176,6 +176,24 @@ class DownloadOptions:
     save_lrc: bool = False
     lrc_library_dir: str | None = None
 
+    # Spotify Canvas — the 3-8 second silent loop the mobile app plays
+    # instead of the cover. Saved as a sidecar video next to the track,
+    # never embedded: FLAC has no video stream to hold one, and muxing it
+    # into an .m4a produces files players refuse to open.
+    #
+    # Off by default, and not only because it is a nicety: no media server
+    # reads these on its own (Jellyfin's music scanner walks audio
+    # extensions and steps over the file), so this is for archiving the
+    # track complete rather than for something downstream to display.
+    # `save_canvas` and `canvas_library_dir` split the same way save_lrc
+    # and lrc_library_dir do — beside the audio under its own name, and/or
+    # collected in one folder as "Artist - Title".
+    save_canvas: bool = False
+    canvas_library_dir: str | None = None
+    canvas_providers: list[str] = field(
+        default_factory=lambda: ["spotify", "paxsenix"],
+    )
+
     enrich_metadata: bool = True
     # SoundCloud isn't checked by default — still selectable (GUI checklist,
     # --enrich-providers, the terminal UI), just opt-in now.
@@ -808,6 +826,88 @@ async def _write_lrc_sidecars_async(
         logger.warning("[lrc] could not write sidecar for %s: %s", metadata.title, exc)
 
 
+async def _write_canvas_sidecars_async(
+    result: DownloadResult,
+    metadata: TrackMetadata,
+    opts: DownloadOptions,
+) -> None:
+    """Save the track's Spotify Canvas beside it, if asked for.
+
+    Runs in the same place as the .lrc sidecars — after transcoding and
+    after any move — so the clip lands next to the file the user ends up
+    with. An existing sidecar is left alone rather than re-fetched, which
+    is what makes a re-run of a half-finished album cheap.
+
+    Never raises. A track with no canvas is the normal case, not an error,
+    and neither it nor an unwritable folder may turn a finished download
+    into a failed one.
+    """
+    if not (opts.save_canvas or opts.canvas_library_dir) or not result.file_path:
+        return
+
+    from .core.canvas import download_canvas_async, fetch_canvas_async
+
+    audio = Path(result.file_path)
+    artist = metadata.first_artist if opts.first_artist_only else metadata.artists
+    stem = f"{sanitize(artist)} - {sanitize(metadata.title)}"
+
+    def _destinations(suffix: str) -> list[Path]:
+        out: list[Path] = []
+        if opts.save_canvas:
+            out.append(audio.with_suffix(suffix))
+        if opts.canvas_library_dir:
+            out.append(Path(opts.canvas_library_dir).expanduser() / f"{stem}{suffix}")
+        # Belt and braces: no canvas extension collides with an audio one
+        # today, but a sidecar must never be able to land on the track.
+        return [dest for dest in out if dest != audio]
+
+    try:
+        # Cheap pre-check against the extension a canvas almost always
+        # has, so an album that was already fetched costs no requests at
+        # all. The real check, against the suffix the URL turns out to
+        # carry, happens once the canvas is known.
+        if all(dest.exists() for dest in _destinations(".mp4")):
+            return
+
+        canvas = await fetch_canvas_async(
+            metadata.id,
+            providers=opts.canvas_providers or None,
+        )
+        if not canvas:
+            logger.debug("[canvas] none for %s", metadata.title)
+            return
+
+        destinations = [
+            dest for dest in _destinations(canvas.suffix) if not dest.exists()
+        ]
+        if not destinations:
+            return
+
+        payload = await download_canvas_async(canvas)
+        if not payload:
+            return
+
+        def _write() -> list[str]:
+            written: list[str] = []
+            for dest in destinations:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                # Written under a temporary name in the destination's own
+                # folder and renamed into place: a canvas interrupted
+                # halfway would otherwise leave a truncated video that the
+                # "already there" check above would then trust forever.
+                partial = dest.with_name(dest.name + ".part")
+                partial.write_bytes(payload)
+                partial.replace(dest)
+                written.append(str(dest))
+            return written
+
+        for written in await asyncio.to_thread(_write):
+            logger.info("[canvas] wrote %s (via %s)", written, canvas.provider)
+
+    except Exception as exc:
+        logger.warning("[canvas] could not save one for %s: %s", metadata.title, exc)
+
+
 def _restore_identity(metadata: TrackMetadata, requested: TrackMetadata) -> None:
     """Undo any change a provider made to what names the recording.
 
@@ -1146,6 +1246,7 @@ async def _download_one_pass_async(
                     )
 
                 await _write_lrc_sidecars_async(result, metadata, opts)
+                await _write_canvas_sidecars_async(result, metadata, opts)
 
                 print_track_done(
                     result.provider or provider.name,

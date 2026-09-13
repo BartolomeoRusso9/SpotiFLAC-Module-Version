@@ -116,6 +116,17 @@ def build_command_parts(cfg: dict) -> list[str]:
         parts.append("--save-lrc")
     if cfg.get("lrc_library_dir"):
         parts.extend(["--lrc-dir", cfg["lrc_library_dir"]])
+    if cfg.get("save_canvas"):
+        parts.append("--save-canvas")
+    if cfg.get("canvas_library_dir"):
+        parts.extend(["--canvas-dir", cfg["canvas_library_dir"]])
+    # Only worth printing when it is not the default order: the flag exists
+    # for the fallback case, and a preview should read like something a
+    # person would have typed.
+    if (cfg.get("save_canvas") or cfg.get("canvas_library_dir")) and list(
+        cfg.get("canvas_providers") or ["spotify", "paxsenix"]
+    ) != ["spotify", "paxsenix"]:
+        parts.extend(["--canvas-providers", *cfg["canvas_providers"]])
     if cfg.get("log_level") is not None:
         # Profiles store the numeric constant; print the name a user would
         # actually type, which --log-level accepts either way.
