@@ -565,9 +565,11 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             # True — so it did bootstrap, and had done all along. Behaviour
             # unchanged; only the claim about it was wrong. In practice this
             # is a no-op under `spotiflac --web`: launcher.amain() has already
-            # run the bootstrap, and ExtensionManager dedupes it per-process
-            # (_startup_registry_checks). It matters when webapp is started
-            # directly, e.g. `python -m SpotiFLAC.webapp`.
+            # run the bootstrap, and ExtensionManager skips a repeat within
+            # $SPOTIFLAC_EXT_UPDATE_INTERVAL (_startup_registry_checks). It
+            # matters when webapp is started directly, e.g.
+            # `python -m SpotiFLAC.webapp`. Later updates need no hook here:
+            # every download re-runs the same check once the interval is up.
             await run_in_threadpool(ExtensionManager, auto_install_downloads=True)
         except Exception as e:
             await run_in_threadpool(api.log, f"Extension init error: {e}", "warn")

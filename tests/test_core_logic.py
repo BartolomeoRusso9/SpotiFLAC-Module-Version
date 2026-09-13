@@ -596,6 +596,94 @@ def test_extension_manager_deduplicates_registry_checks_in_one_process(
         ExtensionManager._startup_registry_checks.update(original_checks)
 
 
+@pytest.fixture
+def _fake_registry(monkeypatch, tmp_path):
+    """One unsigned download provider behind a fake registry URL, with the
+    fetch and install calls recorded. Restores the per-process check state."""
+    monkeypatch.setattr(registry_config, "ENV_FILES_TO_CHECK", ())
+    monkeypatch.setattr(
+        registry_config, "CONFIG_FILE", tmp_path / "registry_settings.json"
+    )
+    monkeypatch.setenv("SPOTIFLAC_REGISTRIES", "https://example.com/registry.json")
+    monkeypatch.delenv("SPOTIFLAC_MIN_TRUST", raising=False)
+
+    calls = {"fetch": 0, "install": 0}
+
+    def fake_fetch_registry(self, url=None):
+        calls["fetch"] += 1
+        return [
+            RegistryEntry(
+                id="demo-provider",
+                display_name="Demo provider",
+                version="1.0.0",
+                description="",
+                download_url="https://example.com/demo.zip",
+                category="download_provider",
+                tags=["download_provider"],
+            )
+        ]
+
+    def fake_install(*args, **kwargs):
+        calls["install"] += 1
+
+    monkeypatch.setattr(ExtensionManager, "fetch_registry", fake_fetch_registry)
+    monkeypatch.setattr(ExtensionManager, "get_installed", lambda self, ext_id: None)
+    monkeypatch.setattr(ExtensionManager, "install_from_url", fake_install)
+
+    original_checks = ExtensionManager._startup_registry_checks.copy()
+    ExtensionManager._startup_registry_checks.clear()
+    try:
+        yield calls
+    finally:
+        ExtensionManager._startup_registry_checks.clear()
+        ExtensionManager._startup_registry_checks.update(original_checks)
+
+
+def _age_registry_checks(seconds: float) -> None:
+    checks = ExtensionManager._startup_registry_checks
+    for key, (checked_at, floor) in list(checks.items()):
+        checks[key] = (checked_at - seconds, floor)
+
+
+@pytest.mark.uses_registry
+def test_extension_manager_rechecks_registry_after_interval(
+    _fake_registry, monkeypatch, tmp_path
+):
+    """An always-on --web process must pick up new extension versions."""
+    ext_dir = tmp_path / "exts"
+    monkeypatch.setenv("SPOTIFLAC_EXT_UPDATE_INTERVAL", "600")
+
+    ExtensionManager(ext_dir=ext_dir, auto_install_downloads=True)
+    ExtensionManager(ext_dir=ext_dir, auto_install_downloads=True)
+    assert _fake_registry == {"fetch": 1, "install": 1}
+
+    _age_registry_checks(601)
+    ExtensionManager(ext_dir=ext_dir, auto_install_downloads=True)
+    assert _fake_registry == {"fetch": 2, "install": 2}
+
+    # Zero restores the old once-per-process behaviour.
+    monkeypatch.setenv("SPOTIFLAC_EXT_UPDATE_INTERVAL", "0")
+    _age_registry_checks(10**6)
+    ExtensionManager(ext_dir=ext_dir, auto_install_downloads=True)
+    assert _fake_registry["fetch"] == 2
+
+
+@pytest.mark.uses_registry
+def test_extension_manager_recheck_keeps_startup_trust_floor(_fake_registry, tmp_path):
+    """The launcher passes --min-trust-tier only to the startup bootstrap; a
+    later re-check from the download path must not run under a weaker one."""
+    ext_dir = tmp_path / "exts"
+
+    ExtensionManager(
+        ext_dir=ext_dir, auto_install_downloads=True, min_trust_tier="signed"
+    )
+    assert _fake_registry == {"fetch": 1, "install": 0}
+
+    _age_registry_checks(10**6)
+    ExtensionManager(ext_dir=ext_dir, auto_install_downloads=True)
+    assert _fake_registry == {"fetch": 2, "install": 0}
+
+
 def test_extension_manager_skips_matching_registry_checksum(tmp_path):
     manager = ExtensionManager(ext_dir=tmp_path, auto_install_downloads=False)
     installed = InstalledExtension(

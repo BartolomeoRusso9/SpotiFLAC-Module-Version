@@ -69,6 +69,15 @@ em = ExtensionManager()
 em.install("some-extension-id", registry_url="https://example.com/my-registry.json")
 ```
 
+**Updates.** Extensions from a configured registry are installed at startup and
+then re-checked while SpotiFLAC keeps running: the next download after
+`SPOTIFLAC_EXT_UPDATE_INTERVAL` seconds (default `3600`) fetches the registry
+again and installs any newer version before it starts. An always-on `--web`
+instance — a Docker container, typically — therefore keeps its extensions
+current without a restart. Set it to `0` to check only once per process, as
+older versions did. A re-check never runs under a weaker trust floor than the
+startup check did (see [`--min-trust-tier`](#enforcing-trust---min-trust-tier)).
+
 Extensions use the `ext:` prefix and are referenced like any other provider:
 
 ```bash

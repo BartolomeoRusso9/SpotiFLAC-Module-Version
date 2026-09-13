@@ -53,6 +53,11 @@ services:
       SPOTIFLAC_EXT_LINKS: "${SPOTIFLAC_EXT_LINKS:-}"
       # Minimum trust tier accepted on install: unverified | checksum-only | signed
       SPOTIFLAC_MIN_TRUST: "${SPOTIFLAC_MIN_TRUST:-}"
+      # Seconds between checks for newer extension versions while the
+      # container keeps running (default 3600; 0 = only at container start).
+      # Watchtower only recreates the container for a new image, so this is
+      # what brings extension updates in between.
+      SPOTIFLAC_EXT_UPDATE_INTERVAL: "${SPOTIFLAC_EXT_UPDATE_INTERVAL:-}"
 
       # --- Web GUI authentication -----------------------------------------
       # Required, not optional: `:?` makes the deploy fail with this message

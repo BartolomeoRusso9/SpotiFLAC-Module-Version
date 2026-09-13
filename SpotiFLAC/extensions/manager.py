@@ -59,6 +59,31 @@ ENV_FILES_TO_CHECK = (Path.cwd() / ".env", Path.home() / ".spotiflac_env")
 
 DEFAULT_EXT_DIR = Path.home() / ".spotiflac" / "extensions"
 
+# How often a long-running process re-checks the registry for new extension
+# versions. Checking only once per process meant a --web container, which
+# never restarts on its own, kept whatever it installed at boot until the next
+# image update — Watchtower recreates it for a new image, never for a new
+# extension. See ensure_download_providers().
+REGISTRY_RECHECK_ENV_KEY = "SPOTIFLAC_EXT_UPDATE_INTERVAL"
+DEFAULT_REGISTRY_RECHECK_SECONDS = 3600
+
+
+def registry_recheck_interval() -> float:
+    """Seconds between registry checks in one process; 0 or less means once."""
+    raw = os.environ.get(REGISTRY_RECHECK_ENV_KEY, "").strip()
+    if not raw:
+        return float(DEFAULT_REGISTRY_RECHECK_SECONDS)
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(
+            "[ExtMgr] Ignoring %s=%r: not a number of seconds; using %d",
+            REGISTRY_RECHECK_ENV_KEY,
+            raw,
+            DEFAULT_REGISTRY_RECHECK_SECONDS,
+        )
+        return float(DEFAULT_REGISTRY_RECHECK_SECONDS)
+
 
 # ─────────────────────────────────────────────────────────────
 #  Models
@@ -198,7 +223,9 @@ class ExtensionManager:
         # Automatically downloads or updates download providers on startup
     """
 
-    _startup_registry_checks: set[tuple[str, ...]] = set()
+    #: registry key -> (time.monotonic() of the last successful check, the
+    #: trust floor that check ran under).
+    _startup_registry_checks: dict[tuple[str, ...], tuple[float, str]] = {}
     _startup_registry_checks_lock = threading.RLock()
 
     def __init__(
@@ -223,8 +250,9 @@ class ExtensionManager:
 
     # ── Trust enforcement ────────────────────────────────────
 
-    def enforce_trust(self, entry: RegistryEntry) -> None:
-        """Raises TrustRejectedError if `entry` sits below `min_trust_tier`.
+    def enforce_trust(self, entry: RegistryEntry, min_tier: str | None = None) -> None:
+        """Raises TrustRejectedError if `entry` sits below `min_trust_tier`
+        (or `min_tier`, when the caller has a stricter floor to apply).
 
         Called on every registry-driven install. Deliberately *not* called by
         install_from_file(): a local file has no registry entry to be signed
@@ -232,14 +260,15 @@ class ExtensionManager:
         make the floor mean "you may no longer install your own extension
         from disk", which is not what anyone asks for by raising it.
         """
+        floor = min_tier or self.min_trust_tier
         tier = entry.trust_tier
-        if meets_min_trust(tier, self.min_trust_tier):
-            if tier != "signed" and self.min_trust_tier != DEFAULT_MIN_TRUST:
+        if meets_min_trust(tier, floor):
+            if tier != "signed" and floor != DEFAULT_MIN_TRUST:
                 logger.info(
                     "[ExtMgr] '%s' accepted at tier '%s' (floor '%s')",
                     entry.id,
                     tier,
-                    self.min_trust_tier,
+                    floor,
                 )
             return
 
@@ -254,7 +283,7 @@ class ExtensionManager:
             )
         msg = (
             f"Extension '{entry.id}' is '{tier}' but this instance requires "
-            f"'{self.min_trust_tier}' or better.{detail}"
+            f"'{floor}' or better.{detail}"
         )
         raise TrustRejectedError(msg)
 
@@ -266,9 +295,18 @@ class ExtensionManager:
         """Checks the remote registry and automatically installs (or updates)
         all extensions classified as download providers AND utilities.
 
-        The auto-setup is deduplicated per-process for the same registry
-        configuration to avoid repeated startup fetches when multiple manager
-        instances are created while the app is booting.
+        Every download builds a fresh manager with auto-install on, so this
+        runs far more often than it does any work: for the same registry
+        configuration it fetches at most once per `registry_recheck_interval()`
+        ($SPOTIFLAC_EXT_UPDATE_INTERVAL, an hour by default; 0 restores the
+        old once-per-process behaviour). That is what lets an always-on --web
+        instance pick up new extension versions without a restart. Providers
+        are built per download, so the next one after an update runs the new
+        code — JS in a fresh node process, Python re-executed by
+        preload_python_modules().
+
+        The whole check holds the class lock, so two downloads starting at
+        once neither fetch twice nor start from a half-replaced extension.
         """
         urls = self._registry_urls_from_env(registry_url)
         if not urls:
@@ -278,25 +316,46 @@ class ExtensionManager:
             return
 
         registry_key = tuple(sorted(urls)) + (str(self.ext_dir),)
+        interval = registry_recheck_interval()
 
         with self.__class__._startup_registry_checks_lock:
-            if registry_key in self.__class__._startup_registry_checks:
-                logger.debug(
-                    "[ExtMgr] Skipping duplicate registry bootstrap for %s",
-                    registry_key,
+            floor = self.min_trust_tier
+            previous = self.__class__._startup_registry_checks.get(registry_key)
+            if previous is not None:
+                checked_at, previous_floor = previous
+                if interval <= 0 or time.monotonic() - checked_at < interval:
+                    logger.debug(
+                        "[ExtMgr] Skipping duplicate registry bootstrap for %s",
+                        registry_key,
+                    )
+                    return
+                # The launcher's bootstrap gets --min-trust-tier from argv;
+                # the download path that triggers a re-check only sees
+                # $SPOTIFLAC_MIN_TRUST. Keep the stricter of the two, or an
+                # hourly update would install what the boot refused.
+                if meets_min_trust(previous_floor, floor):
+                    floor = previous_floor
+                logger.info("[ExtMgr] Periodic check for extension updates...")
+            else:
+                logger.info(
+                    "[ExtMgr] Automatic check for download extensions on startup..."
                 )
-                return
+            self._bootstrap_from_registry(urls, registry_key, floor)
 
-        logger.info("[ExtMgr] Automatic check for download extensions on startup...")
+    def _bootstrap_from_registry(
+        self, urls: list[str], registry_key: tuple[str, ...], floor: str
+    ) -> None:
         try:
-            entries = self.fetch_registry(urls if urls else registry_url)
+            entries = self.fetch_registry(urls)
         except Exception as e:
             logger.warning("[ExtMgr] Unable to retrieve registry for auto-setup: %s", e)
             return
 
         # Only record the key after successful fetch so transient failures can be retried
-        with self.__class__._startup_registry_checks_lock:
-            self.__class__._startup_registry_checks.add(registry_key)
+        self.__class__._startup_registry_checks[registry_key] = (
+            time.monotonic(),
+            floor,
+        )
 
         # CRITICAL ORDER: put utilities first, so they're downloaded before the providers
         entries.sort(
@@ -336,7 +395,7 @@ class ExtensionManager:
                 entry.version,
             )
             try:
-                self.enforce_trust(entry)
+                self.enforce_trust(entry, floor)
                 self.install_from_url(entry.download_url, sha256=entry.sha256)
             except TrustRejectedError as e:
                 # Not an error: the operator asked for this. Skip it and carry
