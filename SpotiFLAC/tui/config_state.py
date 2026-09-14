@@ -51,6 +51,10 @@ LYRICS_PROVIDERS: tuple[str, ...] = (
 ENRICH_PROVIDERS: tuple[str, ...] = ("deezer", "apple", "qobuz", "tidal", "soundcloud")
 
 DEFAULT_LYRICS_PROVIDERS: tuple[str, ...] = ("apple", "lrclib")
+
+#: Where a Spotify Canvas can be looked up, in the order they are tried.
+CANVAS_PROVIDERS: tuple[str, ...] = ("spotify", "paxsenix")
+DEFAULT_CANVAS_PROVIDERS: tuple[str, ...] = ("spotify", "paxsenix")
 DEFAULT_ENRICH_PROVIDERS: tuple[str, ...] = ("deezer", "apple", "qobuz", "tidal")
 
 POST_DOWNLOAD_ACTIONS: tuple[str, ...] = ("none", "open_folder", "notify", "command")
@@ -120,6 +124,13 @@ class ConfigState:
     apple_lyrics_word_by_word: bool = True
     save_lrc: bool = False
     lrc_library_dir: str | None = None
+
+    # ── Canvas ──────────────────────────────────────────────────────────
+    save_canvas: bool = False
+    canvas_library_dir: str | None = None
+    canvas_providers: list[str] = field(
+        default_factory=lambda: list(DEFAULT_CANVAS_PROVIDERS),
+    )
 
     # ── Metadata enrichment ─────────────────────────────────────────────
     enrich_metadata: bool = True
@@ -321,6 +332,11 @@ class ConfigState:
         if not state.lrc_library_dir:
             state.lrc_library_dir = None
 
+        if not state.canvas_library_dir:
+            state.canvas_library_dir = None
+        if not state.canvas_providers:
+            state.canvas_providers = list(DEFAULT_CANVAS_PROVIDERS)
+
         if not state.lyrics_providers:
             state.lyrics_providers = list(DEFAULT_LYRICS_PROVIDERS)
         if not state.enrich_providers:
@@ -381,6 +397,9 @@ class ConfigState:
             "apple_lyrics_word_by_word": state.apple_lyrics_word_by_word,
             "save_lrc": state.save_lrc,
             "lrc_library_dir": state.lrc_library_dir,
+            "save_canvas": state.save_canvas,
+            "canvas_library_dir": state.canvas_library_dir,
+            "canvas_providers": list(state.canvas_providers),
             "enrich_metadata": state.enrich_metadata,
             "enrich_providers": list(state.enrich_providers),
             "track_max_retries": state.track_max_retries,

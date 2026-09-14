@@ -129,6 +129,45 @@ SpotiFLAC(
 
 Both are off by default. The lyrics are read back out of the finished file rather than fetched again, so there is no extra network request, it works with every provider, and the `.lrc` is by construction identical to what the track carries — including after transcoding, where the sidecar follows the converted file. A track with no lyrics produces no empty file, and a destination that cannot be written is logged as a warning rather than failing the download.
 
+### Spotify Canvas
+
+A Canvas is the 3-to-8 second silent loop Spotify's mobile app plays behind the player instead of the cover art. It belongs to the track, not the album, and most of the catalogue has none.
+
+It is saved **beside** the audio, never inside it: FLAC has no video stream to embed one in, and muxing it into an `.m4a` produces files several players refuse to open. The two switches split the same way the `.lrc` ones do:
+
+| Option | Writes |
+| --- | --- |
+| `save_canvas` / `--save-canvas` | `<audio file's name>.<ext>`, next to the track |
+| `canvas_library_dir` / `--canvas-dir DIR` | `DIR/Artist - Title.<ext>`, one folder for everything |
+
+`<ext>` is whatever Spotify serves for that track, read off the media URL: `.mp4` for the looping video most canvases are, `.jpg` for the ones that are a still image.
+
+```bash
+spotiflac https://open.spotify.com/album/... ./out --save-canvas
+```
+
+```python
+from SpotiFLAC import SpotiFLAC
+
+SpotiFLAC(
+    url="https://open.spotify.com/album/...",
+    output_dir="./out",
+    save_canvas=True,
+    canvas_library_dir="~/Music/Canvas",
+)
+```
+
+Both are off by default, and it is worth being clear about what the file is for: **no media server picks these up on its own.** Jellyfin's music scanner only walks audio extensions, so the sidecar sits there ignored rather than turning up as a stray video item — this is for archiving the track complete and for players that know to look, not a way to get canvases to show up in a library app.
+
+`canvas_providers` / `--canvas-providers` chooses where one is looked up, in order:
+
+| Provider | Where it goes |
+| --- | --- |
+| `spotify` (default first) | Spotify's own `canvaz-cache` endpoint, behind the same anonymous token the lyrics already use. No third party involved. |
+| `paxsenix` | [Spotify-Canvas-API](https://github.com/Paxsenix0/Spotify-Canvas-API), a public JSON wrapper around that same endpoint, as a fallback for when the direct call is blocked. |
+
+Neither endpoint is documented by Spotify. A track with no canvas is remembered for a week so that re-running a discography does not cost a request per track, a failed lookup is a debug line rather than a failed download, and an existing sidecar is left alone rather than fetched again.
+
 ### Configuration Profiles
 
 Save and reuse complete download configurations without re-typing them every time.

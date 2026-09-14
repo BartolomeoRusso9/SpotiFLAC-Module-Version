@@ -2,7 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- viewport-fit=cover lets the layout paint into the notch/home-indicator
+       areas instead of being letterboxed by them; every edge-anchored element
+       (the phone nav bar, the queue dock, toasts, bottom sheets) pads itself
+       back out with env(safe-area-inset-*) in styles.css. No maximum-scale or
+       user-scalable=no: pinch-zoom stays available, and the iOS focus-zoom it
+       is usually abused to suppress is handled properly instead, by giving
+       form controls a 16px font below the phone breakpoint. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>SpotiFLAC</title>
   <!-- Installability (Add to Home Screen / standalone window) for --web
        mode only — see sw.js's own comment for why it's network-first, and
@@ -12,7 +19,16 @@
        and the registration script below no-ops without that flag. -->
   <link rel="manifest" href="manifest.json?v=20260922">
   <meta name="theme-color" content="#0a0a0c">
+  <!-- apple-mobile-web-app-capable is the legacy spelling Safari still reads;
+       mobile-web-app-capable is the standard one everything else reads. Both,
+       because dropping either loses standalone mode on one of the two. -->
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <!-- black-translucent puts the iOS status bar over the page rather than
+       above it, which is the only way the app's own background reaches the
+       top of the screen in standalone mode. It is what makes the top inset
+       real, hence the safe-area padding on #app-body. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="SpotiFLAC">
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
   <!-- Without these the browser asks for /favicon.ico on every load and
@@ -46,6 +62,15 @@
       var dark = mode === 'dark' ||
         (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.classList.add(dark ? 'dark-theme' : 'light-theme');
+      // theme-color is what paints the browser UI around the page on a phone —
+      // Chrome's address bar, and the status/gesture bars of an installed PWA.
+      // Hard-coded dark, it framed the light theme in a black bar. It follows
+      // the chosen theme instead, here for the first paint and in app.js's
+      // setThemeClass() for every change after it.
+      try {
+        var tc = document.querySelector('meta[name="theme-color"]');
+        if (tc) tc.setAttribute('content', dark ? '#0a0a0c' : '#ffffff');
+      } catch (e) {}
       // Accent, for the same reason and in the same breath: without it the
       // first frames paint the default green before applyAccent() runs.
       // 'green' is the default and has no data-accent value of its own.

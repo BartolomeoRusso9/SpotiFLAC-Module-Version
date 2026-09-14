@@ -1561,6 +1561,12 @@ class SpotiFLAC_API(
             apple_lyrics_word_by_word = config.get("apple_lyrics_word_by_word", True)
             save_lrc = config.get("save_lrc", False)
             lrc_library_dir = config.get("lrc_library_dir") or None
+            save_canvas = config.get("save_canvas", False)
+            canvas_library_dir = config.get("canvas_library_dir") or None
+            canvas_providers = config.get("canvas_providers") or [
+                "spotify",
+                "paxsenix",
+            ]
             enrich_providers = config.get("enrich_providers") or [
                 "deezer",
                 "apple",
@@ -1756,6 +1762,9 @@ class SpotiFLAC_API(
                 apple_lyrics_word_by_word=apple_lyrics_word_by_word,
                 save_lrc=save_lrc,
                 lrc_library_dir=lrc_library_dir,
+                save_canvas=save_canvas,
+                canvas_library_dir=canvas_library_dir,
+                canvas_providers=canvas_providers,
                 enrich_metadata=enrich_metadata,
                 enrich_providers=enrich_providers,
                 qobuz_local_api_url=qobuz_local_api_url,
