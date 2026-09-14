@@ -173,6 +173,15 @@ function setThemeClass(dark) {
     el.classList.toggle('dark-theme', dark);
     el.classList.toggle('light-theme', !dark);
   }
+  // The browser chrome around the page follows the theme too — on a phone
+  // that is Chrome's address bar, and the status/gesture bars of an
+  // installed PWA. index.html's pre-paint script sets the same tag for the
+  // first frame; this keeps it honest when the theme is switched later, or
+  // when the OS flips under an 'auto' choice.
+  try {
+    const tc = document.querySelector('meta[name="theme-color"]');
+    if (tc) tc.setAttribute('content', dark ? '#0a0a0c' : '#ffffff');
+  } catch (e) { /* no <head> access is not worth failing the theme over */ }
 }
 
 function applyTheme(mode) {

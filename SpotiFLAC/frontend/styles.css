@@ -3314,3 +3314,461 @@
     @media (max-width: 640px) {
       .stat-bar-label { flex-basis: 44%; max-width: 44%; }
     }
+
+/* ── Scrolling panels whose cards must not be squeezed ────────────────────
+   #view-local's .s-body is `display:flex; flex-direction:column` (inline,
+   in index.html), which makes its .s-section cards flex items — and a flex
+   item's default flex-shrink is 1. In a container tall enough for all of
+   them that changes nothing, which is why this looks fine on a desktop.
+   When the content is taller than the panel, though, the cards are shrunk
+   to fit it instead of overflowing it, and .s-section is overflow:hidden,
+   so the surplus is simply cut off: the panel reports nothing to scroll and
+   the bottom of each card is unreachable. Measured at 360x740 that is 130px
+   of the Target Directory card — its path field's help line, and the start
+   of the row below it — gone with no way to reach it.
+
+   A card keeps its content height and the panel scrolls, which is what
+   .s-body's own overflow-y:auto was always there to do. Not inside a media
+   query: the trigger is content taller than the panel, which a short
+   desktop window reaches the same way a phone does. */
+#view-local > .s-body > * { flex-shrink: 0; }
+
+/* =========================================
+   PHONE LAYOUT
+   =========================================
+   The window this app was drawn for is a desktop one: a 58px vertical nav
+   rail on the left, hover to reveal a row's secondary actions, controls
+   sized for a mouse. Served over --web (webapp.py, which marks <body> with
+   .web-mode) that same document is what a phone gets, and several of those
+   choices stop working there rather than merely looking tight:
+
+     - the rail costs 16% of a 360px viewport and puts navigation in the
+       thumb's worst corner;
+     - a 14px <input> makes iOS Safari zoom the page in on focus, and it
+       does not zoom back out;
+     - the track row's action column is 130px wide but holds five 30px
+       buttons — 162px of content — because @media (hover:none) correctly
+       stops hiding four of them on a device that cannot hover;
+     - 30px and 36px hit targets are below the 44px both platforms' guidance
+       asks for;
+     - every viewport-anchored element (queue dock, toasts, modals) is
+       positioned in raw px from an edge that, on a notched phone, is under
+       the status bar or the home indicator.
+
+   What follows fixes those, in two deliberately different scopes:
+
+     - `@media (max-width: 700px)` alone — sizing, wrapping and overflow
+       fixes that are simply correct at that width whoever is looking. A
+       narrow desktop window gets them too, and wants them.
+     - `body.web-mode` as well — the structural change (the rail becomes a
+       bottom bar) and the safe-area insets. The desktop build is a frameless
+       pywebview window with real chrome and no notch, and never carries that
+       class, so nothing in those blocks can reach it.
+
+   700px rather than the 600px used elsewhere in this file: the rail-to-
+   bottom-bar switch is about thumb reach, which a 7" tablet in portrait
+   shares with a phone, while the 600px rules above are about a layout that
+   has genuinely run out of horizontal room. */
+
+/* ── Touch ergonomics, at any width ───────────────────────────────────────
+   Pointer-type questions, not width questions: an iPad in landscape is
+   1024px wide and still has no hover. */
+@media (hover: none) and (pointer: coarse) {
+  /* Chromium and Safari wait ~300ms after a tap on an element that might be
+     the first half of a double-tap-to-zoom before they fire click.
+     Declaring that these never zoom removes the wait, which is most of what
+     makes the UI feel slower under a finger than the same buttons feel
+     under a mouse. */
+  button, .nav-btn, .mode-btn, .act-btn, .ta-btn, .stab, .page-btn,
+  .track-row, .toggle, .recent-card, .explore-card, .artist-album-card,
+  select, summary, [onclick] {
+    touch-action: manipulation;
+  }
+  /* The grey flash Android paints on tap lands on top of our own :active
+     styling and outlasts it. */
+  button, a, label, .track-row, [onclick] {
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Rubber-banding the page behind a scrolled panel is how a modal ends up
+     scrolling the list underneath it. */
+  #content, .s-body, #track-table-wrap, .queue-list, .api-modal-card, #fb-entries {
+    overscroll-behavior: contain;
+  }
+}
+
+@media (max-width: 700px) {
+  /* 100% of the initial containing block on a mobile browser is measured
+     with the URL bar collapsed, so a bottom-anchored bar sits under it
+     until you scroll. dvh is the viewport as it is right now. Guarded by
+     @supports so a browser without it keeps the height:100% it had. */
+  @supports (height: 100dvh) {
+    html, body { height: 100dvh; }
+  }
+
+  /* iOS zooms the page when a control smaller than 16px takes focus — the
+     single most disorienting thing the app does on a phone, because nothing
+     zooms it back out. 16px is the threshold, not a preference. */
+  input[type="text"], input[type="password"], input[type="number"],
+  input[type="search"], input[type="email"], input[type="url"],
+  select, textarea, #urlInput {
+    font-size: 16px;
+  }
+  #urlInput::placeholder { font-size: 15px; }
+
+  /* ── Hero ──
+     32px of padding above a 72px logo pushed the search bar — the reason
+     the page exists — below the fold on a 667px-tall screen. */
+  #home-hero { padding: var(--sp-5) var(--sp-4) var(--sp-4); }
+  .hero-text { padding: var(--sp-4) 0; }
+  .hero-icon { width: 52px; height: 52px; }
+  .hero-headline { gap: var(--sp-4); }
+
+  /* ── Search bar ──
+     Touch sizing only; the two-row arrangement itself is in the 900px block
+     further down, which is where the stacking it replaces already lived. */
+  .search-container { padding: 10px; }
+  .mode-btn, #fetchBtn { height: 44px; min-width: 44px; }
+  #urlInput { height: 44px; }
+  .status-bar { padding: 0 var(--sp-4); }
+
+  /* ── Album card ──
+     The 900px rule already drops the tech column below the text. Below
+     700px the cover has to go above the text as well: clamp(200px, 22vw,
+     240px) resolves to its 200px floor on a phone, which left ~110px for a
+     title, an artist list and four metadata lines. */
+  #album-card {
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--sp-5);
+    gap: var(--sp-5);
+  }
+  #album-cover {
+    width: min(200px, 52vw); height: min(200px, 52vw);
+    align-self: center;
+  }
+
+  /* ── Card grids ──
+     minmax(180px, 1fr) inside a ~330px content box resolves to exactly one
+     column, so each card drew at double its design size and the view became
+     a very long single file. 140px gives two. */
+  .explore-grid, .artist-gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: var(--sp-3);
+  }
+  .artist-albums-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: var(--sp-3);
+  }
+
+  /* ── Settings ──
+     s-header is title-left / buttons-right; at this width its three action
+     buttons wrapped into a ragged block. They take the full row instead. */
+  .s-header { padding: var(--sp-5) var(--sp-4) var(--sp-3); gap: var(--sp-4); }
+  .s-header h1 { font-size: var(--fs-400); }
+  .s-actions { width: 100%; }
+  .s-actions .act-btn { flex: 1 1 auto; min-height: 44px; }
+  .s-body { padding: var(--sp-4) var(--sp-4) var(--sp-5); }
+  .s-section { padding: var(--sp-5) var(--sp-4); }
+  .tab-bar { padding: 0 var(--sp-4); -webkit-overflow-scrolling: touch; }
+  .stab { min-height: 44px; padding: var(--sp-3) var(--sp-4); }
+
+  /* A settings row is `label` then `control`. A <select> or a text field
+     next to a label that wraps to three lines has nowhere to go, so it
+     takes a line of its own — flex-basis 100% forces the wrap — at full
+     width, which is also the only way its now-16px text fits. Toggles and
+     buttons are narrow and stay on the label's line, where they still read
+     as that label's control. */
+  .s-row { flex-wrap: wrap; }
+  /* A basis, so the label shrinks to share its line instead of measuring
+     its full text and pushing whatever follows onto the next one. Without
+     it every toggle row with a sentence of help text under its label sent
+     the toggle to a second line — and, being the only thing on that line,
+     space-between parked it on the left, where it no longer read as
+     belonging to the label above it. */
+  .s-row > .s-label { flex: 1 1 55%; }
+  .s-row > select,
+  .s-row > input[type="text"],
+  .s-row > input[type="password"],
+  .s-row > input[type="number"],
+  .s-row > .accent-picker,
+  .s-row > .volume-control {
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: none;
+    min-height: 44px;
+  }
+  .s-row > .accent-picker select { flex: 1; min-width: 0; }
+  .s-row > .volume-control input[type="range"] { flex: 1; width: auto; }
+  /* Anything that does still wrap to its own line keeps the right edge the
+     unwrapped version put it at. */
+  .s-row > .toggle { margin-left: auto; }
+
+  /* ── Modals as bottom sheets ──
+     A centred 520px card on a 360px screen is a full-screen dialog with a
+     20px margin pretending not to be. Anchored to the bottom edge it is
+     both within thumb reach and the shape a phone user expects. dvh again,
+     so a sheet is never taller than the visible viewport while the URL bar
+     is showing. */
+  .api-modal { padding: 0; align-items: flex-end; }
+  .api-modal-card {
+    width: 100%;
+    max-height: 92dvh;
+    overflow-y: auto;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: none;
+    padding: var(--sp-6) var(--sp-5) calc(var(--sp-6) + env(safe-area-inset-bottom));
+  }
+  .api-modal-header .close-btn { min-width: 44px; min-height: 44px; }
+  /* The action row is a space-between pair: a link (or, in the login sheet,
+     an empty <div> holding the left slot open) and a cluster of buttons. At
+     this width the cluster gets the whole row and its buttons split it, so
+     the primary action is a full-width target at the bottom of the sheet
+     rather than a content-width one tucked into the corner. The empty
+     spacer would otherwise contribute a blank row of its own. */
+  .api-modal-actions { flex-wrap: wrap; gap: var(--sp-3); }
+  .api-modal-actions > div { flex: 1 1 100%; }
+  .api-modal-actions > div:empty { display: none; }
+  .api-modal-actions .act-btn { flex: 1 1 auto; min-height: 44px; }
+
+  #queue-drawer { padding: 0; align-items: flex-end; }
+  .queue-panel {
+    width: 100%;
+    max-height: 88dvh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: none;
+  }
+  .queue-toolbar { flex-wrap: wrap; }
+  .queue-toolbar .act-btn { min-height: 40px; }
+
+  #folder-browser-modal { align-items: flex-end; }
+  .fb-card {
+    width: 100%;
+    max-height: 88dvh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* A folder list is a column of things to tap, one per row, and picking
+     the wrong directory here is the sort of mistake that is only obvious
+     three screens later. */
+  .fb-entry { min-height: 44px; }
+  .fb-toolbar { flex-wrap: wrap; }
+  #fb-back, .fb-select, .fb-close { min-height: 44px; min-width: 44px; }
+
+  /* ── Toasts ──
+     Every corner variant becomes the same full-width strip: a 24px inset
+     from a corner is a third of the screen on a phone, and the four
+     positions stop meaning anything once the card is as wide as the
+     viewport. The bottom ones clear the nav bar — see the web-mode block. */
+  .toast-container.bottom-right, .toast-container.bottom-left,
+  .toast-container.bottom-center, .toast-container.top-right,
+  .toast-container.top-left, .toast-container.top-center {
+    left: var(--sp-3);
+    right: var(--sp-3);
+    transform: none;
+    max-width: none;
+  }
+  .toast-container.top-right, .toast-container.top-left,
+  .toast-container.top-center {
+    top: calc(var(--sp-3) + env(safe-area-inset-top));
+  }
+  .toast { width: auto; max-width: none; }
+
+  /* The Local view's path field carries an inline `flex:1`, so it shares a
+     line with the Browse button and gets ~250px of it — an absolute path is
+     longer than that at the best of times. !important is the only thing
+     that outranks an inline style, and this is what it is for. */
+  #local-path-input { flex: 1 1 100% !important; }
+
+  #pagetion-controls { flex-wrap: wrap; gap: var(--sp-2); }
+  .page-btn { min-height: 40px; }
+  #page-info { min-width: 0; }
+}
+
+/* ── Search bar, narrow windows ───────────────────────────────────────────
+   The responsivity section above turns the bar into a column below 900px,
+   which gives each of its three children a row: the two 36px mode buttons
+   centred on one, the 36px fetch button centred and alone on another, and
+   the input — the one control anyone came here to use — on a third. Three
+   rows of mostly air.
+
+   Two rows instead, by re-wrapping rather than re-stacking. The input
+   claims a whole line with flex-basis:100%, the three buttons fall onto the
+   next, and fetch takes whatever the two fixed-width mode buttons leave, so
+   the primary action is also the widest target on the row. `order` rather
+   than moving anything in index.html: the DOM order is mode / input /
+   fetch, which is the tab order and the order a screen reader reads, and
+   both are right as they stand. */
+@media (max-width: 900px) {
+  .search-container {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    height: auto;
+  }
+  .url-wrap { order: 1; flex: 1 1 100%; width: 100%; }
+  .mode-wrap { order: 2; flex: 0 0 auto; }
+  #fetchBtn { order: 3; flex: 1 1 auto; }
+}
+
+/* ── Track row action column ──────────────────────────────────────────────
+   A container query, not a media query, because that is what the two column
+   collapses above already use — #track-table-wrap's own box, not the
+   viewport (see their comment for the 102px offset).
+
+   At 498px the grid gives the actions column 130px. A row renders five
+   .ta-btn at 30px with a 3px gap: 162px. On a desktop that overflow is
+   invisible because four of the five are opacity:0 — but they still occupy
+   their width, and @media (hover:none) makes them opaque again on exactly
+   the devices where the column is narrowest.
+
+   The fix is to stop asking one line to hold both. Checkbox and title keep
+   the first line, the action cluster drops to a second, right-aligned,
+   where there is room to give each button a 38px target instead of shaving
+   pixels off five of them. The header's "Actions" label has nothing left to
+   sit over and goes. */
+@container tracktable (max-width: 498px) {
+  .track-table-header, .track-row {
+    grid-template-columns: 24px 1fr !important;
+    row-gap: var(--sp-3);
+  }
+  .track-table-header > div:nth-child(6) { display: none; }
+  .tr-actions {
+    grid-column: 1 / -1;
+    margin-left: 0;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+  }
+  .ta-btn { width: 38px; height: 38px; }
+}
+
+/* =========================================
+   PHONE NAV BAR — --web mode only
+   =========================================
+   The rail becomes a bottom bar. #app-body is already `display:flex` with
+   #sidebar first and #content second, so column-reverse alone moves the nav
+   to the bottom edge without touching index.html's DOM order — which
+   matters, because that order is also the tab order, and navigation should
+   stay reachable first by keyboard.
+
+   Scoped to .web-mode: webapp.py adds that class, and only on the
+   browser-served route, so the desktop build keeps its rail at every window
+   size. */
+@media (max-width: 700px) {
+  body.web-mode {
+    /* #queue-dock positions itself at `calc(var(--rail-w) + 20px)` to clear
+       the rail. There is no rail here, so the variable it reads says so —
+       cheaper and less brittle than restating the dock's left edge. */
+    --rail-w: 0px;
+    /* Bar height, for everything that has to sit above it. */
+    --nav-h: 56px;
+    --nav-total-h: calc(var(--nav-h) + env(safe-area-inset-bottom));
+  }
+
+  body.web-mode #app-body {
+    flex-direction: column-reverse;
+    /* The titlebar is display:none in web mode, so nothing else holds the
+       content out from under a notch or a translucent status bar. Left and
+       right matter in landscape, where the notch is on one side. */
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  body.web-mode #sidebar {
+    width: 100%;
+    height: var(--nav-total-h);
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-2);
+    /* The inset is padding, not margin, so the bar's own background reaches
+       the bottom of the screen and the home indicator sits on it rather
+       than on whatever is behind the page. */
+    padding: 0 var(--sp-3) env(safe-area-inset-bottom);
+    border-right: none;
+    border-top: 1px solid var(--border);
+    /* The rail needed overflow:visible to let its tooltips escape; those
+       are suppressed below, and hiding overflow keeps the active marker or
+       a stray badge from drawing over the content above the bar. */
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  /* flex:1 with min-width:0 rather than a fixed 40px: the eight buttons
+     divide whatever the screen gives them (45px each at 360px, more on a
+     larger handset) instead of overflowing a narrow one. */
+  body.web-mode .nav-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+    height: 44px;
+    border-radius: var(--radius-sm);
+  }
+  /* A flex:1 button has no gap beside it to sit a marker in, and the accent
+     fill already says which view is open. The rail's edge tab would draw as
+     a 3px bar 9px to the button's left — i.e. on top of its neighbour. */
+  body.web-mode .nav-btn.active::before { display: none; }
+  /* `left: calc(100% + 10px)` puts this off the right edge of the screen
+     for the last button, and no touch device can trigger it anyway. */
+  body.web-mode .nav-btn[data-label]::after { display: none; }
+  body.web-mode .nav-spacer { display: none; }
+  /* A rail hover lifts the button by scaling it; in a row of touching
+     buttons that reads as the neighbours being shoved aside. */
+  body.web-mode .nav-btn:hover { transform: none; }
+
+  /* The dock is fixed to the viewport, so it knows nothing about the bar
+     now occupying the bottom of it. Full width as well: a 240px pill
+     carrying a title, a speed and a progress bar is legible at 360px only
+     if it gets the whole row. */
+  body.web-mode #queue-dock {
+    left: var(--sp-3);
+    right: var(--sp-3);
+    bottom: calc(var(--nav-total-h) + var(--sp-3));
+    min-width: 0;
+    padding: 10px var(--sp-4);
+    gap: 10px;
+  }
+  body.web-mode #queue-dock:hover { transform: none; }
+
+  /* Same for anything else anchored to the bottom edge. The bottom sheets
+     above are deliberately not in this list: a sheet covering the nav bar
+     is the point of a sheet. */
+  body.web-mode .toast-container.bottom-right,
+  body.web-mode .toast-container.bottom-left,
+  body.web-mode .toast-container.bottom-center {
+    bottom: calc(var(--nav-total-h) + var(--sp-3));
+  }
+  body.web-mode .save-toast {
+    left: var(--sp-3);
+    right: var(--sp-3);
+    bottom: calc(var(--nav-total-h) + var(--sp-3));
+    min-width: 0;
+  }
+}
+
+/* ── Short viewports ──────────────────────────────────────────────────────
+   Eight 40px rail buttons plus their gaps need ~330px of height. #sidebar
+   is overflow:visible (for the tooltips), so on anything shorter they did
+   not scroll — they drew past the bottom of the window, the last one or two
+   unreachable. That is a landscape handset mostly, but a short desktop
+   window reaches it too, so this one is not scoped to web-mode or to touch.
+   Shrinking rather than scrolling: 8x34 + gaps fits in ~310px, and a
+   scrollable rail would have to give up overflow:visible and its tooltips
+   with it. */
+@media (max-height: 560px) {
+  #sidebar { gap: var(--sp-2); padding: var(--sp-3) 0; }
+  .nav-btn { height: 34px; flex-shrink: 0; }
+}
+
+/* A 360x780 handset turned sideways is not a narrow viewport but a short
+   one, so most of the phone block above does not fire while the space it
+   was written for is scarcer still. Trimmed by hand: the bar loses 10px,
+   the hero gives its padding back, and the sheets may use nearly the whole
+   screen. pointer:coarse keeps a short laptop window out of it. */
+@media (max-height: 480px) and (orientation: landscape) and (pointer: coarse) {
+  body.web-mode { --nav-h: 46px; }
+  body.web-mode .nav-btn { height: 38px; }
+  #home-hero { padding: var(--sp-3) var(--sp-4); }
+  .hero-icon { width: 40px; height: 40px; }
+  .api-modal-card, .queue-panel, .fb-card { max-height: 96dvh; }
+}
