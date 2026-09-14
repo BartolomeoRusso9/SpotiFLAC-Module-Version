@@ -233,3 +233,191 @@ def test_an_id_that_is_not_a_spotify_id_is_never_looked_up() -> None:
         assert asyncio.run(cv.fetch_canvas_async("")) is None
 
     assert calls == []
+
+
+# ── A failure is not an absence ───────────────────────────────────────────
+
+
+def test_a_provider_that_could_not_answer_is_not_remembered_as_no_canvas() -> None:
+    """The miss cache lasts a week. A timeout, a 429 or a 503 says nothing
+    about whether the track has a canvas, so caching one of those would
+    switch the feature off for seven days over one bad minute.
+    """
+    calls: list[str] = []
+    providers = {
+        "spotify": _stub(cv.CanvasUnavailable("HTTP 503"), calls, "spotify"),
+    }
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cv, "_PROVIDERS", providers)
+        assert (
+            asyncio.run(cv.fetch_canvas_async(TRACK_ID, providers=["spotify"])) is None
+        )
+        assert (
+            asyncio.run(cv.fetch_canvas_async(TRACK_ID, providers=["spotify"])) is None
+        )
+
+    assert calls == ["spotify", "spotify"]
+
+
+def test_one_provider_failing_does_not_cache_the_others_absence() -> None:
+    """Both have to have been asked and answered for "no canvas" to mean
+    anything about the track.
+    """
+    calls: list[str] = []
+    providers = {
+        "spotify": _stub(cv.CanvasUnavailable("timed out"), calls, "spotify"),
+        "paxsenix": _stub(None, calls, "paxsenix"),
+    }
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cv, "_PROVIDERS", providers)
+        assert asyncio.run(cv.fetch_canvas_async(TRACK_ID)) is None
+        assert asyncio.run(cv.fetch_canvas_async(TRACK_ID)) is None
+
+    assert calls == ["spotify", "paxsenix", "spotify", "paxsenix"]
+
+
+# ── Which URLs are fetched at all ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("url", "allowed"),
+    [
+        (CANVAS_URL, True),
+        ("https://canvaz-cdn.spotifycdn.com/upload/x/video/y.cnvs.mp4", True),
+        (AVATAR_URL, True),
+        # Plain http, even to the right host: the URL is attacker-chosen.
+        ("http://canvaz.scdn.co/upload/x/video/y.mp4", False),
+        # The address an SSRF is usually pointed at.
+        ("https://169.254.169.254/latest/meta-data/iam/", False),
+        ("http://127.0.0.1:8080/admin", False),
+        # userinfo before the @ — the real host is evil.test.
+        ("https://canvaz.scdn.co@evil.test/y.mp4", False),
+        # A lookalike registrable domain, not a subdomain of one.
+        ("https://evil-scdn.co/y.mp4", False),
+        ("https://scdn.co.evil.test/y.mp4", False),
+        ("file:///etc/passwd", False),
+        ("", False),
+    ],
+)
+def test_only_the_canvas_cdn_is_ever_requested(url: str, allowed: bool) -> None:
+    """Both providers hand back a URL found by *scanning* their response —
+    any http string in the protobuf, any canvas-ish key in the JSON — so
+    whoever answers either endpoint would otherwise choose what this
+    process connects to.
+    """
+    assert cv.is_canvas_url(url) is allowed
+
+
+def test_a_rejected_url_is_never_even_requested() -> None:
+    """Rejected, not requested-then-discarded: for a link-local address or
+    an intranet host, making the request is itself the damage.
+    """
+    requested: list[str] = []
+
+    class _Client:
+        def stream(self, method, url, **kwargs):  # pragma: no cover - must not run
+            requested.append(url)
+            raise AssertionError("a rejected URL must not reach the network")
+
+    async def _client():
+        return _Client()
+
+    hostile = cv.Canvas(
+        url="https://169.254.169.254/latest/meta-data/",
+        kind="video",
+        provider="paxsenix",
+    )
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cv.NetworkManager, "get_async_client_safe", _client)
+        assert asyncio.run(cv.download_canvas_async(hostile)) is None
+
+    assert requested == []
+
+
+# ── What a 200 is allowed to contain ──────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("payload", "is_media"),
+    [
+        (b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 8, True),  # mp4/m4v/mov
+        (b"\x1aE\xdf\xa3" + b"\x00" * 10, True),  # webm
+        (b"\xff\xd8\xff\xe0" + b"\x00" * 10, True),  # jpeg
+        (b"\x89PNG\r\n\x1a\n" + b"\x00" * 8, True),
+        (b"GIF89a" + b"\x00" * 8, True),
+        (b"RIFF\x00\x00\x00\x00WEBPVP8 ", True),
+        (b'{"error": "not found", "status": 404}', False),
+        (b"<!DOCTYPE html><html><head><title>502 Bad Gateway", False),
+        (b"", False),
+        (b"short", False),
+    ],
+)
+def test_only_real_media_counts_as_a_canvas(payload: bytes, is_media: bool) -> None:
+    """A 200 is not proof of media, and whatever comes back is written to
+    disk as a sidecar that the "already there" check then trusts forever.
+    """
+    assert cv.looks_like_canvas_media(payload) is is_media
+
+
+def test_a_200_that_is_not_media_is_discarded_rather_than_returned() -> None:
+    """An error page, a JSON body or an HTML interstitial all arrive as a
+    200. The caller writes what comes back to disk under a media
+    extension, so this is the only place it can be stopped.
+    """
+
+    class _Response:
+        status_code = 200
+
+        async def aiter_bytes(self):
+            yield b'{"ok": false, "message": "no canvas found"}'
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _Client:
+        def stream(self, method, url, **kwargs):
+            assert kwargs["follow_redirects"] is False
+            return _Response()
+
+    async def _client():
+        return _Client()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cv.NetworkManager, "get_async_client_safe", _client)
+        canvas = cv.Canvas(url=CANVAS_URL, kind="video", provider="spotify")
+        assert asyncio.run(cv.download_canvas_async(canvas)) is None
+
+
+def test_real_media_on_the_canvas_cdn_comes_back() -> None:
+    """The other side of the check above: the happy path still works."""
+    payload = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
+
+    class _Response:
+        status_code = 200
+
+        async def aiter_bytes(self):
+            yield payload
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _Client:
+        def stream(self, method, url, **kwargs):
+            return _Response()
+
+    async def _client():
+        return _Client()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cv.NetworkManager, "get_async_client_safe", _client)
+        canvas = cv.Canvas(url=CANVAS_URL, kind="video", provider="spotify")
+        assert asyncio.run(cv.download_canvas_async(canvas)) == payload

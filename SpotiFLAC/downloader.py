@@ -177,9 +177,10 @@ class DownloadOptions:
     lrc_library_dir: str | None = None
 
     # Spotify Canvas — the 3-8 second silent loop the mobile app plays
-    # instead of the cover. Saved as a sidecar video next to the track,
-    # never embedded: FLAC has no video stream to hold one, and muxing it
-    # into an .m4a produces files players refuse to open.
+    # instead of the cover. Saved as a sidecar next to the track — .mp4,
+    # or .jpg for the canvases that are a still image — never embedded:
+    # FLAC has no video stream to hold one, and muxing it into an .m4a
+    # produces files players refuse to open.
     #
     # Off by default, and not only because it is a nicety: no media server
     # reads these on its own (Jellyfin's music scanner walks audio
@@ -833,10 +834,18 @@ async def _write_canvas_sidecars_async(
 ) -> None:
     """Save the track's Spotify Canvas beside it, if asked for.
 
-    Runs in the same place as the .lrc sidecars — after transcoding and
-    after any move — so the clip lands next to the file the user ends up
-    with. An existing sidecar is left alone rather than re-fetched, which
-    is what makes a re-run of a half-finished album cheap.
+    Runs after transcoding and after any move, so the clip lands next to
+    the file the user ends up with. An existing sidecar is left alone
+    rather than re-fetched, which is what makes a re-run cheap.
+
+    Also runs for a track that was *skipped* — one already in the output
+    folder, or already present in the transcode target format. That is
+    deliberate, and unlike the .lrc sidecars: lyrics are read back out of
+    the finished file, so a skipped track's .lrc can be written at any
+    time, while a canvas has to be fetched and so is only ever written
+    here. Without this, switching --save-canvas on over a library that is
+    already downloaded did nothing at all — every track skips, and the
+    canvases were never collected.
 
     Never raises. A track with no canvas is the normal case, not an error,
     and neither it nor an unwritable folder may turn a finished download
@@ -845,7 +854,11 @@ async def _write_canvas_sidecars_async(
     if not (opts.save_canvas or opts.canvas_library_dir) or not result.file_path:
         return
 
-    from .core.canvas import download_canvas_async, fetch_canvas_async
+    from .core.canvas import (
+        CANVAS_SUFFIXES,
+        download_canvas_async,
+        fetch_canvas_async,
+    )
 
     audio = Path(result.file_path)
     artist = metadata.first_artist if opts.first_artist_only else metadata.artists
@@ -862,11 +875,19 @@ async def _write_canvas_sidecars_async(
         return [dest for dest in out if dest != audio]
 
     try:
-        # Cheap pre-check against the extension a canvas almost always
-        # has, so an album that was already fetched costs no requests at
-        # all. The real check, against the suffix the URL turns out to
-        # carry, happens once the canvas is known.
-        if all(dest.exists() for dest in _destinations(".mp4")):
+        # Cheap pre-check, so an album that was already fetched costs no
+        # requests at all — which is what makes this affordable on the
+        # skip paths, where it runs for every track of a re-run.
+        #
+        # Every extension, not just .mp4: an image canvas lands as .jpg,
+        # and a pre-check that only knew about video would miss it and go
+        # back to the network for that track on every single run. The real
+        # check, against the suffix the URL turns out to carry, still
+        # happens once the canvas is known.
+        if any(
+            all(dest.exists() for dest in _destinations(suffix))
+            for suffix in CANVAS_SUFFIXES
+        ):
             return
 
         canvas = await fetch_canvas_async(
@@ -1034,11 +1055,13 @@ async def _download_one_pass_async(
             metadata.artists,
             metadata.title,
         )
-        return DownloadResult.skipped_result(
+        skipped = DownloadResult.skipped_result(
             providers[0].name if providers else "none",
             str(transcode_target),
             fmt=result_format_for(opts.transcode_to),
         )
+        await _write_canvas_sidecars_async(skipped, metadata, opts)
+        return skipped
 
     for attempt in range(opts.track_max_retries + 1):
         if stop_event.is_set():
@@ -1232,6 +1255,7 @@ async def _download_one_pass_async(
                     # would make a re-run of an already-complete album look
                     # like the provider had got dramatically faster.
                     await _record_provider_outcome(provider.name, True, 0.0)
+                    await _write_canvas_sidecars_async(result, metadata, opts)
                     return result
                 if opts.output_path and result.file_path:
                     _, ext = os.path.splitext(result.file_path)
@@ -1706,6 +1730,7 @@ class DownloadWorker:
                         str(existing_path),
                         fmt=existing_path.suffix.lstrip("."),
                     )
+                    await _write_canvas_sidecars_async(result, track, self._opts)
                 else:
                     out_dir = await self._track_output_dir_async(base_out, track)
                     try:

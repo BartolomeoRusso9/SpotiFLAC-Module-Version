@@ -137,8 +137,10 @@ It is saved **beside** the audio, never inside it: FLAC has no video stream to e
 
 | Option | Writes |
 | --- | --- |
-| `save_canvas` / `--save-canvas` | `<audio file's name>.mp4`, next to the track |
-| `canvas_library_dir` / `--canvas-dir DIR` | `DIR/Artist - Title.mp4`, one folder for everything |
+| `save_canvas` / `--save-canvas` | `<audio file's name>.<ext>`, next to the track |
+| `canvas_library_dir` / `--canvas-dir DIR` | `DIR/Artist - Title.<ext>`, one folder for everything |
+
+`<ext>` is whatever Spotify serves for that track, read off the media URL: `.mp4` for the looping video most canvases are, `.jpg` for the ones that are a still image.
 
 ```bash
 spotiflac https://open.spotify.com/album/... ./out --save-canvas

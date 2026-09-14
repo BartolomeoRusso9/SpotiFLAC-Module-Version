@@ -188,3 +188,35 @@ def test_a_download_that_returns_nothing_writes_nothing(audio, spotify, monkeypa
     _run(audio, save_canvas=True)
 
     assert not audio.with_suffix(".mp4").exists()
+
+
+def test_an_existing_image_sidecar_is_not_re_fetched(audio, spotify) -> None:
+    """The cheap pre-check runs before the canvas is known, so it has to
+    recognise a sidecar in any of the extensions one can take. Knowing
+    only about .mp4, it missed an image canvas and went back to the
+    network for that track on every single run — which matters now that
+    the pre-check also guards every skipped track of a re-run.
+    """
+    audio.with_suffix(".jpg").write_bytes(PAYLOAD)
+
+    _run(audio, save_canvas=True)
+
+    assert spotify["fetches"] == 0
+    assert spotify["downloads"] == 0
+
+
+def test_a_skipped_track_still_gets_its_canvas(audio, spotify) -> None:
+    """Switching --save-canvas on over an already-downloaded library has
+    to collect the canvases: every track skips, and a skip is the only
+    state those tracks will ever be in again.
+    """
+    opts = dl.DownloadOptions(output_dir=str(audio.parent), save_canvas=True)
+    asyncio.run(
+        dl._write_canvas_sidecars_async(
+            DownloadResult.skipped_result("tidal", str(audio), fmt="flac"),
+            _track(),
+            opts,
+        ),
+    )
+
+    assert audio.with_suffix(".mp4").read_bytes() == PAYLOAD

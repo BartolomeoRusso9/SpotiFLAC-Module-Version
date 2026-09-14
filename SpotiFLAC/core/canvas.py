@@ -9,9 +9,12 @@ usually a few hundred kilobytes of H.264.
 
 Where it ends up
 ----------------
-Beside the audio file, as its own ``.mp4``. It is deliberately **not**
-embedded: FLAC has no video stream to put it in, and muxing it into an
-``.m4a`` produces files that several players refuse to open. A sidecar is
+Beside the audio file, as its own sidecar — ``.mp4`` for the looping video
+most canvases are, ``.jpg`` for the ones that are a still image; the
+extension is read off the media URL (see :attr:`Canvas.suffix`). It is
+deliberately **not** embedded: FLAC has no video stream to put it in, and
+muxing it into an ``.m4a`` produces files that several players refuse to
+open. A sidecar is
 also the only shape anything else can consume — see the caveat below about
 who actually reads one.
 
@@ -55,6 +58,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from .http import NetworkManager
 from .response_cache import get as get_cached_response
@@ -87,6 +91,45 @@ _TRACK_ID = re.compile(r"^[0-9A-Za-z]{22}$")
 _VIDEO_SUFFIXES = (".mp4", ".m4v", ".webm", ".mov")
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 
+#: Every extension a sidecar can end up with, for callers that need to ask
+#: "is one of these already on disk?" before knowing which it would be.
+CANVAS_SUFFIXES = (*_VIDEO_SUFFIXES, *_IMAGE_SUFFIXES)
+
+#: Hosts a canvas may be fetched from. Neither provider's response is a
+#: trusted source of URLs: the protobuf walker above takes *any* string
+#: that starts with http, and the paxsenix walker takes any string under a
+#: key that looks canvas-ish, out of JSON served by a third party. Without
+#: this, whoever answers either endpoint chooses what this process
+#: connects to — a link-local metadata address, an intranet host — and the
+#: body comes back as a file on disk. Suffix-matched on the registrable
+#: part so Spotify can move between CDN hostnames without a release here.
+CANVAS_URL_HOSTS = (".scdn.co", ".spotifycdn.com")
+
+#: The first bytes of the formats a canvas actually comes in. A 200 is not
+#: proof of media: an error page, a JSON body, or an HTML interstitial all
+#: arrive as one, and anything not rejected here is written to disk as a
+#: sidecar and then trusted forever by the "already there" check in
+#: downloader.py.
+_MEDIA_SIGNATURES = (
+    b"\x1aE\xdf\xa3",  # webm / matroska
+    b"\xff\xd8\xff",  # jpeg
+    b"\x89PNG\r\n\x1a\n",  # png
+    b"GIF87a",
+    b"GIF89a",
+)
+
+
+class CanvasUnavailable(Exception):
+    """A provider could not answer — as opposed to answering "none".
+
+    The difference matters because the answer is cached for a week. A
+    provider that timed out, was rate-limited, or handed back something
+    unreadable has said nothing about whether the track has a canvas, and
+    remembering it as "no canvas" would suppress the whole feature for
+    seven days over one bad minute. Only a provider that was actually
+    asked and actually had nothing returns None.
+    """
+
 
 @dataclass(slots=True)
 class Canvas:
@@ -110,6 +153,45 @@ class Canvas:
             if path.endswith(suffix):
                 return suffix
         return ".mp4" if self.kind == "video" else ".jpg"
+
+
+def is_canvas_url(url: str) -> bool:
+    """Whether `url` is one this process is willing to fetch.
+
+    https only, and the host has to sit under one of CANVAS_URL_HOSTS —
+    see that constant for why a URL read out of a provider response is not
+    something to hand straight to an HTTP client.
+    """
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    if parsed.scheme != "https":
+        return False
+    # .hostname is already lower-cased and has any userinfo and port
+    # stripped — `https://canvaz.scdn.co@evil.test/x` has hostname
+    # "evil.test", which is the point of not splitting this by hand.
+    host = parsed.hostname or ""
+    return any(
+        host == allowed.lstrip(".") or host.endswith(allowed)
+        for allowed in CANVAS_URL_HOSTS
+    )
+
+
+def looks_like_canvas_media(payload: bytes) -> bool:
+    """Whether a downloaded body is actually one of the canvas formats.
+
+    mp4/m4v/mov carry their `ftyp` box at offset 4 rather than a fixed
+    prefix, so it is checked separately from the signatures that do start
+    at byte 0.
+    """
+    if len(payload) < 12:
+        return False
+    if payload[4:8] == b"ftyp":
+        return True
+    if payload[:4] == b"RIFF" and payload[8:12] == b"WEBP":
+        return True
+    return payload.startswith(_MEDIA_SIGNATURES)
 
 
 def _kind_for(url: str) -> str:
@@ -218,7 +300,7 @@ async def _fetch_spotify(track_id: str, timeout: int) -> Canvas | None:
 
     token = await _get_spotify_anon_token(timeout)
     if not token:
-        return None
+        raise CanvasUnavailable("no anonymous token")
 
     client = await NetworkManager.get_async_client_safe()
     body = encode_canvaz_request(track_id)
@@ -245,8 +327,10 @@ async def _fetch_spotify(track_id: str, timeout: int) -> Canvas | None:
         )
 
     if response.status_code != 200:
-        logger.debug("[canvas/spotify] %s for %s", response.status_code, track_id)
-        return None
+        # Not "this track has no canvas" — spclient says that with a 200
+        # and an empty body. A 429 or a 503 is the endpoint having a
+        # moment, and must not be cached as an absence.
+        raise CanvasUnavailable(f"HTTP {response.status_code} for {track_id}")
 
     # An empty 200 is the honest answer for "this track has no canvas",
     # and it is by far the most common one.
@@ -292,9 +376,10 @@ async def _fetch_paxsenix(track_id: str, timeout: int) -> Canvas | None:
         timeout=timeout,
     )
     if response.status_code != 200:
-        logger.debug("[canvas/paxsenix] %s for %s", response.status_code, track_id)
-        return None
+        raise CanvasUnavailable(f"HTTP {response.status_code} for {track_id}")
 
+    # A body that is not JSON is the wrapper being down or captive-portalled,
+    # not an answer: let the raise reach fetch_canvas_async as a failure.
     url = _url_in_json(response.json())
     if not url:
         return None
@@ -334,16 +419,27 @@ async def fetch_canvas_async(
     if get_cached_response("canvas-miss", cache_key, _CANVAS_MISS_CACHE_TTL):
         return None
 
+    # Only a run in which every provider was reachable and none had a
+    # canvas is worth remembering — see CanvasUnavailable.
+    absent = True
     for name in order:
         try:
             canvas = await _PROVIDERS[name](track_id, timeout)
+        except CanvasUnavailable as exc:
+            logger.debug("[canvas/%s] unavailable: %s", name, exc)
+            absent = False
+            continue
         except Exception as exc:
+            # A provider that raised something it did not mean to is a
+            # failure too: it did not get as far as an answer either.
             logger.debug("[canvas/%s] %s", name, exc)
+            absent = False
             continue
         if canvas and canvas.url:
             return canvas
 
-    put_cached_response("canvas-miss", cache_key, True)
+    if absent:
+        put_cached_response("canvas-miss", cache_key, True)
     return None
 
 
@@ -355,10 +451,25 @@ async def download_canvas_async(canvas: Canvas, *, timeout: int = 20) -> bytes |
     fetching a signed CDN URL twice is both slower and a second chance to
     fail.
     """
+    if not is_canvas_url(canvas.url):
+        # Rejected rather than requested: the URL came out of a provider
+        # response, and a request is itself the damage for an address this
+        # process should not be reaching. See CANVAS_URL_HOSTS.
+        logger.debug("[canvas] refusing to fetch %s", canvas.url)
+        return None
+
     try:
         client = await NetworkManager.get_async_client_safe()
         async with client.stream(
-            "GET", canvas.url, headers={"User-Agent": _UA}, timeout=timeout
+            "GET",
+            canvas.url,
+            headers={"User-Agent": _UA},
+            timeout=timeout,
+            # A redirect is a second URL, and this one would not have gone
+            # through is_canvas_url. httpx already defaults to not
+            # following them; stated here so a change to the shared client
+            # cannot quietly reopen the hole the check above closes.
+            follow_redirects=False,
         ) as response:
             if response.status_code != 200:
                 logger.debug(
@@ -373,7 +484,18 @@ async def download_canvas_async(canvas: Canvas, *, timeout: int = 20) -> bytes |
                         "[canvas] %s is larger than a canvas should be", canvas.url
                     )
                     return None
-        return bytes(chunks) or None
+
+        payload = bytes(chunks)
+        if not payload:
+            return None
+        # A 200 is not proof of media. An error page, a JSON `{"error":…}`
+        # or an HTML interstitial all arrive as one, and the caller writes
+        # whatever comes back to disk as a sidecar that the "already
+        # there" check then trusts on every future run.
+        if not looks_like_canvas_media(payload):
+            logger.debug("[canvas] %s did not return canvas media", canvas.url)
+            return None
+        return payload
     except Exception as exc:
         logger.debug("[canvas] download failed: %s", exc)
         return None
