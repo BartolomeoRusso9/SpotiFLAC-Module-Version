@@ -12,9 +12,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # - nodejs: for SpotiFLAC extensions
 # - xvfb: to create the virtual display (MANDATORY for Chromium even without VNC)
 # - chromium and fonts-liberation: browser for Pydoll and web fonts
+# - tini: PID 1 that reaps orphaned processes (see ENTRYPOINT below)
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        tini \
         ca-certificates \
         ffmpeg \
         flac \
@@ -91,5 +93,12 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # privileges any earlier makes that RUN fail and the image fail to build.
 USER spotiflac
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# tini as PID 1. The entrypoint execs python, which would otherwise be PID 1 —
+# and PID 1 is who inherits every orphan. core/solver.py ends a Turnstile
+# browser with `pkill -KILL` when stop() fails; Chromium's crashpad/zygote
+# children then outlive their parent, get reparented to python, and python
+# never wait()s for processes it did not start, so each solve left a handful of
+# <defunct> chromium processes behind for the life of the container. tini
+# reaps them, and forwards SIGTERM so `docker stop` still shuts down cleanly.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
 CMD ["--help"]
