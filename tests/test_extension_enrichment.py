@@ -109,16 +109,26 @@ def test_an_extension_echoing_its_input_adds_nothing() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _installed(name, types, runtime="javascript"):
+def _installed(name, types, runtime="javascript", root=None, enrich=True):
+    """An installed extension; with `root`, its entry point exists on disk,
+    defining enrichTrack or not."""
     manifest = {"name": name, "type": list(types)}
+    ext_dir = Path("/nonexistent") / name
     if runtime != "javascript":
         manifest["runtime"] = runtime
+    if root is not None:
+        ext_dir = Path(root) / name
+        ext_dir.mkdir(parents=True, exist_ok=True)
+        body = "function enrichTrack(track) { return track; }\n" if enrich else ""
+        (ext_dir / "index.js").write_text(
+            body + "registerExtension({ initialize: function () {} });\n"
+        )
     return InstalledExtension(
         name=name,
         display_name=name,
         version="1",
         description="",
-        ext_dir=Path("/nonexistent") / name,
+        ext_dir=ext_dir,
         manifest=manifest,
     )
 
@@ -131,19 +141,58 @@ class _Manager:
         return list(self.exts)
 
 
-def test_each_service_gets_its_javascript_metadata_extensions() -> None:
+def test_each_service_gets_its_javascript_metadata_extensions(tmp_path) -> None:
     manager = _Manager(
-        _installed("tidal-web", ["metadata_provider", "download_provider"]),
-        _installed("tidal-py", ["download_provider"], runtime="python"),
-        _installed("apple-music", ["metadata_provider", "lyrics_provider"]),
-        _installed("qobuz-web", ["metadata_provider", "download_provider"]),
-        _installed("helper", ["runtime_utility"]),
-        _installed("melon-music", ["metadata_provider"]),
+        _installed(
+            "tidal-web", ["metadata_provider", "download_provider"], root=tmp_path
+        ),
+        _installed("tidal-py", ["download_provider"], runtime="python", root=tmp_path),
+        _installed(
+            "apple-music", ["metadata_provider", "lyrics_provider"], root=tmp_path
+        ),
+        _installed(
+            "qobuz-web", ["metadata_provider", "download_provider"], root=tmp_path
+        ),
+        _installed("helper", ["runtime_utility"], root=tmp_path),
+        _installed("melon-music", ["metadata_provider"], root=tmp_path),
     )
     assert extensions_for_service("tidal", manager) == ["tidal-web"]
     assert extensions_for_service("apple", manager) == ["apple-music"]
     assert extensions_for_service("qobuz", manager) == ["qobuz-web"]
     assert extensions_for_service("deezer", manager) == []
+
+
+def test_every_installed_extension_that_implements_enrich_track_takes_part(
+    tmp_path,
+) -> None:
+    """Not only the services in the enrichment list: a Korean catalogue, a
+    metadata-only extension — any JavaScript metadata extension whose code
+    defines enrichTrack. One without the function, a Python extension or a
+    utility is not asked."""
+    manager = _Manager(
+        _installed(
+            "tidal-web", ["metadata_provider", "download_provider"], root=tmp_path
+        ),
+        _installed("melon-music", ["metadata_provider"], root=tmp_path),
+        _installed("no-enrich", ["metadata_provider"], root=tmp_path, enrich=False),
+        _installed("tidal-py", ["metadata_provider"], runtime="python", root=tmp_path),
+        _installed("helper", ["runtime_utility"], root=tmp_path),
+        _installed("gone", ["metadata_provider"]),  # entry point missing
+    )
+    assert ext_enrich.enrichment_extensions(manager) == ["melon-music", "tidal-web"]
+
+
+def test_an_updated_extension_is_read_again(tmp_path) -> None:
+    import os
+
+    ext = _installed("later", ["metadata_provider"], root=tmp_path, enrich=False)
+    assert ext_enrich.implements_enrich_track(ext) is False
+
+    entry = ext.ext_dir / "index.js"
+    entry.write_text("function enrichTrack(t) { return t; }\n")
+    stat = entry.stat()
+    os.utime(entry, (stat.st_atime, stat.st_mtime + 10))
+    assert ext_enrich.implements_enrich_track(ext) is True
 
 
 # ---------------------------------------------------------------------------
@@ -223,14 +272,20 @@ def both_halves(monkeypatch):
         "extensions_for_service",
         lambda service, manager=None: ["tidal-web"] if service == "tidal" else [],
     )
-    state = {"delay": 0.0, "asked": []}
+    state = {"delay": 0.0, "asked": [], "installed": ["tidal-web"]}
+    monkeypatch.setattr(
+        ext_enrich, "enrichment_extensions", lambda manager=None: state["installed"]
+    )
+    #: What an extension outside the list answers: fields no listed source has.
+    other_track = {"name": "Blinding Lights", "bpm": 171, "label": "Someone Else"}
 
     async def fake_ext(
         ext, track_name, artist_name, isrc="", album_name="", duration_ms=0
     ):
         state["asked"].append(ext)
         await asyncio.sleep(state["delay"])
-        return enriched_from_track(TIDAL_WEB_TRACK, title=track_name, album=album_name)
+        track = TIDAL_WEB_TRACK if ext == "tidal-web" else other_track
+        return enriched_from_track(track, title=track_name, album=album_name)
 
     monkeypatch.setattr(ext_enrich, "fetch_extension_enrichment", fake_ext)
     return state
@@ -270,6 +325,34 @@ def test_a_slow_extension_does_not_cost_the_built_in_answers(
     merged = _enrich(timeout_s=0.05)
     assert merged.label == "Republic Records"
     assert merged.copyright == ""
+
+
+@pytest.mark.uses_extension_enrichment
+def test_extensions_outside_the_list_are_asked_too_and_merge_last(both_halves) -> None:
+    both_halves["installed"] = ["melon-music", "tidal-web"]
+    merged = _enrich()
+    assert sorted(both_halves["asked"]) == ["melon-music", "tidal-web"]
+    # A field nothing listed supplied comes from the extension outside it…
+    assert merged.bpm == 171
+    assert merged._sources["bpm"] == "ext:melon-music"
+    # …and one the listed sources answered stays theirs.
+    assert merged.label == "Republic Records"
+
+
+@pytest.mark.uses_extension_enrichment
+def test_an_empty_list_still_asks_the_extensions(both_halves) -> None:
+    both_halves["installed"] = ["melon-music", "tidal-web"]
+    merged = asyncio.run(
+        me.enrich_metadata_async(
+            "Blinding Lights",
+            "The Weeknd",
+            "USUG11904206",
+            [],
+            album_name="After Hours",
+        )
+    )
+    assert sorted(both_halves["asked"]) == ["melon-music", "tidal-web"]
+    assert merged.copyright == "℗ 2019 The Weeknd XO, Inc."
 
 
 @pytest.mark.uses_extension_enrichment

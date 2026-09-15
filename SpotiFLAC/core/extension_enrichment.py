@@ -8,10 +8,12 @@ its credits. The app never asked. Enrichment went only to the built-in
 Python lookups, which for Tidal returned nothing at all and for Apple only
 what the public iTunes search carries.
 
-So enrichment now asks both, per service: the built-in lookup (which uses
-the Python extensions where it needs a service's API) first, then each
-installed JavaScript extension for that service, filling only the fields
-still blank.
+So enrichment now asks both. Each service in the enrichment list gets its
+built-in lookup (which uses the Python extensions where it needs a
+service's API) and then its own JavaScript extensions; after those, every
+other installed JavaScript extension that implements enrichTrack is asked
+too — always, whether or not its service is in the list. Each fills only
+the fields still blank.
 
 Two things keep that from costing more than it gives:
 
@@ -32,8 +34,10 @@ import asyncio
 import atexit
 import logging
 import os
+import re
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from .extension_metadata import _int, _text
@@ -90,20 +94,67 @@ def _installed_extensions(manager: Any = None) -> list:
         return installed
 
 
+_ENRICH_TRACK_RE = re.compile(r"\benrichTrack\b")
+
+#: entry point → (mtime, whether it defines enrichTrack). Read once per file
+#: version: enrichment runs per track and the answer only changes when the
+#: extension is updated.
+_implements_cache: dict[str, tuple[float, bool]] = {}
+
+
+def implements_enrich_track(ext: Any) -> bool:
+    """Whether an installed extension's code defines `enrichTrack`.
+
+    Read from the source rather than by calling it: finding out by calling
+    would start a Node runtime for every extension that has none, and an
+    extension without the function answers the call with an error anyway.
+    """
+    try:
+        path = Path(ext.entry_point)
+        mtime = path.stat().st_mtime
+    except (OSError, AttributeError):
+        return False
+    key = str(path)
+    cached = _implements_cache.get(key)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        found = bool(
+            _ENRICH_TRACK_RE.search(path.read_text(encoding="utf-8", errors="replace"))
+        )
+    except OSError:
+        return False
+    _implements_cache[key] = (mtime, found)
+    return found
+
+
+def can_enrich(ext: Any) -> bool:
+    """A JavaScript metadata extension that implements enrichTrack — the
+    only kind enrichment asks, and every one of them is asked."""
+    return (
+        ext.runtime == "javascript"
+        and "metadata_provider" in (ext.types or [])
+        and implements_enrich_track(ext)
+    )
+
+
+def enrichment_extensions(manager: Any = None) -> list[str]:
+    """Every installed extension that can enrich, whatever service it is
+    for — not only those of the services in the enrichment list."""
+    return sorted(ext.name for ext in _installed_extensions(manager) if can_enrich(ext))
+
+
 def extensions_for_service(service: str, manager: Any = None) -> list[str]:
-    """Installed JavaScript metadata extensions for an enrichment service
-    ("tidal" → tidal-web, "apple" → apple-music, …)."""
+    """The enriching extensions of one enrichment service ("tidal" →
+    tidal-web, "apple" → apple-music, …), so they can be merged right after
+    that service's built-in lookup."""
     from ..extensions.catalog import canonical_service_name
 
-    found = []
-    for ext in _installed_extensions(manager):
-        if ext.runtime != "javascript":
-            continue
-        if "metadata_provider" not in (ext.types or []):
-            continue
-        if canonical_service_name(ext.name) == service:
-            found.append(ext.name)
-    return found
+    return [
+        ext.name
+        for ext in _installed_extensions(manager)
+        if can_enrich(ext) and canonical_service_name(ext.name) == service
+    ]
 
 
 # ---------------------------------------------------------------------------

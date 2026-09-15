@@ -1106,19 +1106,28 @@ async def enrich_metadata_async(
             logger.debug("[meta/enrich] %s failed: %s", name, exc)
             return name, EnrichedMetadata()
 
-    # Each service is asked twice where it can be: the built-in lookup above,
-    # and every installed JavaScript extension for that service (tidal-web,
-    # qobuz-web, deezer, apple-music) through its enrichTrack — see
-    # core/extension_enrichment.py.
+    # Each service in the list is asked twice where it can be: the built-in
+    # lookup above, then its own JavaScript extensions (tidal-web, qobuz-web,
+    # deezer, apple-music). Every other installed JavaScript extension that
+    # implements enrichTrack is asked as well, whatever its service — the
+    # list chooses the built-in lookups and their order, not whether the
+    # extensions take part. See core/extension_enrichment.py.
     from . import extension_enrichment
 
     ext_sources: dict[str, list[str]] = {}
+    other_exts: list[str] = []
     if extension_enrichment.extension_enrichment_enabled():
-        for name in providers:
-            try:
+        try:
+            for name in providers:
                 ext_sources[name] = extension_enrichment.extensions_for_service(name)
-            except Exception as exc:
-                logger.debug("[meta/enrich] no extensions for %s: %s", name, exc)
+            claimed = {ext for exts in ext_sources.values() for ext in exts}
+            other_exts = [
+                ext
+                for ext in extension_enrichment.enrichment_extensions()
+                if ext not in claimed
+            ]
+        except Exception as exc:
+            logger.debug("[meta/enrich] could not list enriching extensions: %s", exc)
 
     async def bounded(coro, limit: float, label: str):
         # A timeout per source, not one for the lot: a slow extension used
@@ -1131,6 +1140,7 @@ async def enrich_metadata_async(
             return None
 
     ext_keys = [(name, ext) for name in providers for ext in ext_sources.get(name, [])]
+    ext_keys += [("", ext) for ext in other_exts]
     outcomes = await asyncio.gather(
         *[bounded(run_provider(p), timeout_s, p) for p in providers],
         *[
@@ -1167,6 +1177,12 @@ async def enrich_metadata_async(
             data = ext_results.get((name, ext))
             if isinstance(data, EnrichedMetadata):
                 merged.merge(data, f"ext:{ext}")
+    # The extensions of services not in the list come last, so the list's
+    # order still decides every field those services answer.
+    for ext in other_exts:
+        data = ext_results.get(("", ext))
+        if isinstance(data, EnrichedMetadata):
+            merged.merge(data, f"ext:{ext}")
 
     if merged._sources:
         logger.debug("[meta/enrich] async enriched: %s", merged._sources)

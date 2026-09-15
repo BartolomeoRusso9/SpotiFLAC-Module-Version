@@ -101,6 +101,11 @@ def _no_extension_enrichment(request, monkeypatch):
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
+        "uses_system_clipboard: test exercises tui/clipboard.py's command lookup "
+        "(faking every command); the autouse switch-off is skipped",
+    )
+    config.addinivalue_line(
+        "markers",
         "uses_extension_enrichment: test exercises enrichment through extensions "
         "(with its own fakes); the autouse switch-off is skipped",
     )
@@ -119,6 +124,23 @@ def pytest_configure(config):
         "uses_real_download_dir: test needs the configured download directory "
         "rather than a temporary one",
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_system_clipboard(request, monkeypatch):
+    """Keeps the TUI's copy keys off the developer's real clipboard.
+
+    Ctrl+Y and Ctrl+O run pbcopy / xclip / wl-copy / clip when one is found
+    (tui/clipboard.py). A test pressing them would otherwise replace whatever
+    the person running the suite had copied. Tests of that route fake
+    `native_copy` themselves; one that tests the command lookup itself opts
+    out with `@pytest.mark.uses_system_clipboard`.
+    """
+    if request.node.get_closest_marker("uses_system_clipboard"):
+        return
+    from SpotiFLAC.tui import clipboard
+
+    monkeypatch.setattr(clipboard, "_native_command", lambda: None)
 
 
 @pytest.fixture(autouse=True)

@@ -25,6 +25,7 @@ those lines would land on the terminal underneath and tear the layout.
 from __future__ import annotations
 
 import logging
+from collections import deque
 from typing import Any
 
 from textual import on
@@ -44,6 +45,7 @@ from textual.widgets import (
 from .banner import Banner, HintBar
 from ..core.paths import default_download_dir
 from .branding import mode_glyph, notice, panel_tag, panel_title
+from .clipboard import TERMINAL_ONLY_NOTE, copy_text
 
 from .config_state import ConfigState
 from .config_view import ConfigPanel
@@ -100,6 +102,9 @@ PANEL_TITLES: dict[str, tuple[str, str]] = {
 #: agree. Two frontends with two defaults is two libraries on one machine.
 DEFAULT_OUTPUT_DIR = default_download_dir()
 
+#: Lines the log pane keeps, and the most Ctrl+O copies.
+_LOG_MAX_LINES = 2000
+
 
 class SpotiFLACTui(App[None]):
     """The whole terminal UI."""
@@ -118,6 +123,10 @@ class SpotiFLACTui(App[None]):
         Binding("slash", "search", "Search"),
         Binding("question_mark", "help", "Help"),
         Binding("ctrl+y", "copy_command", "Copy CLI", priority=True),
+        # Ctrl+O, not a letter: priority bindings win over focused widgets,
+        # and every free Ctrl+letter nearer to hand (E, K, U, W…) is already
+        # a cursor or delete key inside Textual's Input.
+        Binding("ctrl+o", "copy_log", "Copy log", priority=True),
         Binding("t", "cycle_theme", "Theme", show=False),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
@@ -143,6 +152,10 @@ class SpotiFLACTui(App[None]):
         self._download_running = False
         #: Severity words waiting for their toast widget to mount.
         self._pending_toast_labels: list[str] = []
+        #: The log as plain text, for Ctrl+O. `RichLog` keeps only rendered
+        #: strips — wrapped at the pane's width — so the lines are kept here
+        #: as they were written, capped like the widget's own `max_lines`.
+        self._log_lines: deque[str] = deque(maxlen=_LOG_MAX_LINES)
 
     # ------------------------------------------------------------------
     # Layout
@@ -187,7 +200,7 @@ class SpotiFLACTui(App[None]):
                         id="log",
                         wrap=True,
                         markup=False,
-                        max_lines=2000,
+                        max_lines=_LOG_MAX_LINES,
                         min_width=20,
                     ),
                     id="log-pane",
@@ -523,6 +536,7 @@ class SpotiFLACTui(App[None]):
         self._toast(text, kind)
 
     def _write_log(self, line: str, severity: str = "") -> None:
+        self._log_lines.append(line)
         self.query_one("#log", RichLog).write(line)
 
     # ------------------------------------------------------------------
@@ -574,17 +588,40 @@ class SpotiFLACTui(App[None]):
 
         The panel has always been able to *show* the command; a preview you
         cannot get out of the terminal is a thing to retype, so this is the
-        half that was missing. `copy_to_clipboard` speaks OSC 52, which is
-        what carries over ssh as well as locally — and when the terminal
-        refuses it, the command is still on screen in the Command panel.
+        half that was missing. See tui/clipboard.py for the two routes it
+        takes — and when neither reaches the clipboard, the command is still
+        on screen in the Command panel.
         """
         command = self.state.for_preview().cli_command()
-        self.copy_to_clipboard(command)
         flags = command.count(" \\\n")
-        self._set_status(
-            f"Command copied — {flags + 1} line(s). Command panel shows it in full.",
-            "success",
-        )
+        if copy_text(self, command):
+            self._set_status(
+                f"Command copied — {flags + 1} line(s). Command panel shows it in full.",
+                "success",
+            )
+        else:
+            self._set_status(
+                f"Command {TERMINAL_ONLY_NOTE}. The Command panel shows it in full.",
+                "warning",
+            )
+
+    def action_copy_log(self) -> None:
+        """Puts the whole log on the clipboard, from any panel.
+
+        Selecting text in the pane with the mouse copies only what is on
+        screen, broken at the pane's wrap points — useless for pasting a
+        failed run into a bug report. This copies every kept line as it was
+        written. Works with the pane closed, too: the lines are kept either
+        way. Same two routes as Ctrl+Y (tui/clipboard.py).
+        """
+        if not self._log_lines:
+            self._set_status("The log is empty — nothing to copy yet.", "info")
+            return
+        count = len(self._log_lines)
+        if copy_text(self, "\n".join(self._log_lines)):
+            self._set_status(f"Log copied — {count} line(s).", "success")
+        else:
+            self._set_status(f"Log ({count} line(s)) {TERMINAL_ONLY_NOTE}.", "warning")
 
     def action_cycle_theme(self) -> None:
         current = THEMES.index(self.theme) if self.theme in THEMES else 0

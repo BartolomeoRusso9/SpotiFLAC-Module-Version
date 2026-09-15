@@ -162,6 +162,28 @@ def emit(line: str, *, stream: str = STDOUT, file: IO[str] | None = None) -> Non
     _write_through_tqdm(line, stream=stream, file=file)
 
 
+def use_thread_only_tqdm_lock() -> None:
+    """Keeps tqdm from ever building its multiprocessing lock.
+
+    tqdm's write lock is a thread lock plus, created on first use, a
+    multiprocessing one — and creating any multiprocessing lock starts
+    Python's resource tracker, which inherits `sys.stderr.fileno()`. Under
+    the TUI that stderr is Textual's print capture, whose `fileno()` is -1,
+    and the spawn raised "bad value(s) in fds_to_keep" on the first progress
+    bar of every run. Nothing in this app draws bars from more than one
+    process, so the multiprocessing half has nothing to protect: it is
+    declared absent, which tqdm itself supports (it is what it falls back to
+    where multiprocessing is unavailable). Idempotent, and a no-op once tqdm
+    has already built a lock.
+    """
+    try:
+        from tqdm.std import TqdmDefaultWriteLock
+    except ImportError:
+        return
+    if not hasattr(TqdmDefaultWriteLock, "mp_lock"):
+        TqdmDefaultWriteLock.mp_lock = None
+
+
 def _write_through_tqdm(
     line: str,
     *,
@@ -171,6 +193,8 @@ def _write_through_tqdm(
     import sys
 
     from tqdm import tqdm
+
+    use_thread_only_tqdm_lock()
 
     target = file
     if target is None:

@@ -18,10 +18,13 @@ from tqdm import tqdm
 from typing_extensions import Self
 
 from .console import print_track_progress
-from .output_sink import STDERR, STDOUT, emit, sink_active
+from .output_sink import STDERR, STDOUT, emit, sink_active, use_thread_only_tqdm_lock
 
 # tqdm.get_lock() remains the native tqdm lock (this is not our own hack;
-# it is the library's internal synchronization for writing to stderr).
+# it is the library's internal synchronization for writing to stderr) — its
+# thread half only: see use_thread_only_tqdm_lock() for why the
+# multiprocessing half crashed every TUI download.
+use_thread_only_tqdm_lock()
 
 
 # A tqdm bar is a stream of carriage returns: on a terminal that draws a
