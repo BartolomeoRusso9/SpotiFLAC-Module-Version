@@ -20,7 +20,7 @@ from .isrc_utils import normalize_isrc
 from .loop_runner import run_sync
 from .response_cache import get as get_cached_response
 from .response_cache import put as put_cached_response
-from .text_match import fold, ratio, score_track_match
+from .text_match import fold, is_latin_script, ratio, score_track_match, titles_match
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,11 @@ _ENRICHMENT_CACHE_TTL = 3600.0
 #: full four-provider fan-out again on every single pass over a library.
 _NEGATIVE_CACHE_TTL = 300.0
 _ENRICHMENT_CACHE_MAX = 2000
+#: The on-disk cache's name. "-v2" since enrichment began reading credits,
+#: composer and ℗ from Qobuz and the extensions: a day-old entry written
+#: before that has none of those fields, and would have kept them out of
+#: every track it matched until it expired.
+_CACHE_NAMESPACE = "metadata-enrichment-v2"
 
 #: Below this, a search result is not the track we asked for. iTunes
 #: always answers *something* — searching an ISRC it does not know
@@ -79,6 +84,10 @@ _MERGE_ATTRS = (
     "album_type",
     "total_tracks",
     "total_discs",
+    "lyricist",
+    "producer",
+    "mixer",
+    "engineer",
 )
 
 
@@ -100,6 +109,12 @@ class EnrichedMetadata:
     #: tagged DISCTOTAL=1 — the model's default — on every track of it.
     total_tracks: int = 0
     total_discs: int = 0
+    #: Credits, from services that publish them (Qobuz's performer list,
+    #: Tidal's credits). Several names are joined with "; ".
+    lyricist: str = ""
+    producer: str = ""
+    mixer: str = ""
+    engineer: str = ""
     _sources: dict[str, str] = field(default_factory=dict, repr=False)
 
     def as_tags(self) -> dict[str, str]:
@@ -130,6 +145,14 @@ class EnrichedMetadata:
             tags["DISCTOTAL"] = str(self.total_discs)
         if self.explicit:
             tags["ITUNESADVISORY"] = "1"
+        for attr, tag in (
+            ("lyricist", "LYRICIST"),
+            ("producer", "PRODUCER"),
+            ("mixer", "MIXER"),
+            ("engineer", "ENGINEER"),
+        ):
+            if getattr(self, attr):
+                tags[tag] = getattr(self, attr)
         return tags
 
     def merge(self, other: EnrichedMetadata, source: str) -> None:
@@ -164,7 +187,7 @@ def _get_cached(isrc: str) -> EnrichedMetadata | None:
         entry = _enrichment_cache.get(isrc.upper())
         if entry and (time.time() - entry[1]) < entry[2]:
             return entry[0]
-    persisted = get_cached_response("metadata-enrichment", isrc.upper(), 24 * 60 * 60)
+    persisted = get_cached_response(_CACHE_NAMESPACE, isrc.upper(), 24 * 60 * 60)
     if isinstance(persisted, dict):
         valid_fields = {f.name for f in dataclasses.fields(EnrichedMetadata)}
         filtered = {k: v for k, v in persisted.items() if k in valid_fields}
@@ -193,7 +216,14 @@ def _put_cached_memory(
 def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
     if not isrc:
         return
-    if not (data.genre or data.label or data.cover_url_hd or data.upc):
+    if not (
+        data.genre
+        or data.label
+        or data.cover_url_hd
+        or data.upc
+        or data.composer
+        or data.copyright
+    ):
         # Nothing usable came back. Remember that, in memory only and on the
         # short TTL — persisting a miss to disk would keep a track starved of
         # metadata across restarts long after the provider learned about it.
@@ -201,7 +231,7 @@ def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
         return
     _put_cached_memory(isrc, data)
     put_cached_response(
-        "metadata-enrichment",
+        _CACHE_NAMESPACE,
         isrc.upper(),
         {
             "genre": data.genre,
@@ -217,6 +247,10 @@ def _put_cached(isrc: str, data: EnrichedMetadata) -> None:
             "album_type": data.album_type,
             "total_tracks": data.total_tracks,
             "total_discs": data.total_discs,
+            "lyricist": data.lyricist,
+            "producer": data.producer,
+            "mixer": data.mixer,
+            "engineer": data.engineer,
         },
     )
 
@@ -280,6 +314,85 @@ def _same_release(expected: str, found: str) -> bool:
     return ratio(expected, found) >= 0.85
 
 
+#: Deezer names genres in the language the request asks for, and without
+#: asking, in the one its servers guess from the address: "Musica Asiatica"
+#: from Italy for what is "Asian Music" everywhere else.
+_DEEZER_HEADERS = {"User-Agent": _UA, "Accept-Language": "en-US,en;q=0.9"}
+
+#: A credited role, reduced to letters, and the credit field(s) it fills.
+#: Covers Qobuz's performer roles ("MixingEngineer", "ComposerLyricist")
+#: and Tidal's credit types ("Mixing Engineer").
+_CREDIT_ROLES: dict[str, tuple[str, ...]] = {
+    "composer": ("composer",),
+    "composerlyricist": ("composer", "lyricist"),
+    "songwriter": ("composer", "lyricist"),
+    "writer": ("lyricist",),
+    "lyricist": ("lyricist",),
+    "producer": ("producer",),
+    "coproducer": ("producer",),
+    "mixer": ("mixer",),
+    "mixingengineer": ("mixer",),
+    "mixengineer": ("mixer",),
+    "engineer": ("engineer",),
+    "masteringengineer": ("engineer",),
+    "recordingengineer": ("engineer",),
+}
+
+
+def _apply_credits(out: EnrichedMetadata, pairs) -> None:
+    """Fills the credit fields of `out` from (name, role) pairs, leaving any
+    field already set alone."""
+    buckets: dict[str, list[str]] = {}
+    for name, role in pairs:
+        name = str(name or "").strip()
+        fields = _CREDIT_ROLES.get(re.sub(r"[^a-z]", "", str(role or "").lower()))
+        if not name or not fields:
+            continue
+        for field_name in fields:
+            buckets.setdefault(field_name, []).append(name)
+    for field_name, names in buckets.items():
+        if not getattr(out, field_name):
+            setattr(out, field_name, "; ".join(dict.fromkeys(names)))
+
+
+def _qobuz_performer_pairs(text: Any) -> list[tuple[str, str]]:
+    """Qobuz's `performers` string — "Max Martin, Producer, Composer - Serban
+    Ghenea, MixingEngineer" — as (name, role) pairs."""
+    pairs: list[tuple[str, str]] = []
+    for chunk in str(text or "").split(" - "):
+        parts = [p.strip() for p in chunk.split(",") if p.strip()]
+        if len(parts) < 2:
+            continue
+        pairs.extend((parts[0], role) for role in parts[1:])
+    return pairs
+
+
+def _other_recording(expected: str, found: str) -> bool:
+    """Whether a lookup's title shows it answered about another song.
+
+    An ISRC lookup is an identity lookup, but only as good as the ISRC: a
+    wrong one — a typo, a reissue's code reused — returns a stranger's
+    track, and its credits and ℗ line would be written into the file. So a
+    title that is plainly a different song discards the answer.
+
+    Plainly: both titles in Latin script and nowhere near each other. A
+    Hangul title against its romanisation shares no letters at all, and
+    that is the same song.
+    """
+    if not expected or not found:
+        return False
+    if not (is_latin_script(expected) and is_latin_script(found)):
+        return False
+    return not titles_match(expected, found) and ratio(expected, found) < 0.5
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 class _DeezerMeta:
     BASE = "https://api.deezer.com/2.0"
 
@@ -289,7 +402,9 @@ class _DeezerMeta:
     def fetch(self, isrc: str, album_name: str = "") -> EnrichedMetadata:
         return _run_async_sync(self.fetch_async(isrc, album_name))
 
-    async def fetch_async(self, isrc: str, album_name: str = "") -> EnrichedMetadata:
+    async def fetch_async(
+        self, isrc: str, album_name: str = "", track_name: str = ""
+    ) -> EnrichedMetadata:
         """Deezer's view of one recording, looked up by ISRC.
 
         `album_name` guards the release-scoped fields. An ISRC identifies a
@@ -309,12 +424,20 @@ class _DeezerMeta:
             r = await client.get(
                 f"{self.BASE}/track/isrc:{isrc}",
                 timeout=_HTTP_TIMEOUT,
-                headers={"User-Agent": _UA},
+                headers=_DEEZER_HEADERS,
             )
             if r.status_code != 200:
                 return out
             d = r.json()
             if "error" in d:
+                return out
+            if _other_recording(track_name, str(d.get("title") or "")):
+                logger.debug(
+                    "[meta/deezer] ISRC %s is %r, not %r — ignored",
+                    isrc,
+                    d.get("title"),
+                    track_name,
+                )
                 return out
 
             composers = []
@@ -330,7 +453,7 @@ class _DeezerMeta:
                 ar = await client.get(
                     f"{self.BASE}/album/{album_id}",
                     timeout=_HTTP_TIMEOUT,
-                    headers={"User-Agent": _UA},
+                    headers=_DEEZER_HEADERS,
                 )
                 if ar.is_success:
                     ad = ar.json()
@@ -604,11 +727,17 @@ class _TidalMeta:
     def _refresh_bg(self) -> None:
         try:
             mod = _get_dynamic_python_module("tidal")
+            apis = None
             if mod and hasattr(mod, "refresh_tidal_api_list"):
                 apis = mod.refresh_tidal_api_list(force=False)
-                if apis:
-                    with self._apis_lock:
-                        self._apis = apis
+            elif mod and hasattr(mod, "refresh_tidal_api_list_async"):
+                # tidal-py only has the async one now. Looking for the sync
+                # name alone meant the list was never filled, and Tidal
+                # enrichment answered nothing for every track.
+                apis = run_sync(mod.refresh_tidal_api_list_async(force=False))
+            if apis:
+                with self._apis_lock:
+                    self._apis = apis
         except Exception as exc:
             logger.debug("[meta/tidal] refresh background failed: %s", exc)
 
@@ -707,10 +836,21 @@ class _QobuzMeta:
                 logger.debug("[meta/qobuz] cannot init provider: %s", exc)
         return self._provider
 
-    def fetch(self, isrc: str) -> EnrichedMetadata:
-        return _run_async_sync(self.fetch_async(isrc))
+    def fetch(self, isrc: str, album_name: str = "") -> EnrichedMetadata:
+        return _run_async_sync(self.fetch_async(isrc, album_name))
 
-    async def fetch_async(self, isrc: str) -> EnrichedMetadata:
+    async def fetch_async(
+        self, isrc: str, album_name: str = "", track_name: str = ""
+    ) -> EnrichedMetadata:
+        """Qobuz's view of one recording, looked up by ISRC.
+
+        The track Qobuz returns carries far more than was read from it:
+        composer, the ℗ line, the original release date, the album's track
+        and disc counts, and the full performer list with roles. All of it
+        is taken now. As with Deezer, an ISRC can land on a different
+        release, so the release-scoped fields are taken only when the album
+        agrees with `album_name`.
+        """
         out = EnrichedMetadata()
         if not isrc:
             return out
@@ -724,17 +864,47 @@ class _QobuzMeta:
                 track = None
             if not track:
                 return out
-            album = track.get("album", {})
+            if _other_recording(track_name, str(track.get("title") or "")):
+                logger.debug(
+                    "[meta/qobuz] ISRC %s is %r, not %r — ignored",
+                    isrc,
+                    track.get("title"),
+                    track_name,
+                )
+                return out
+            album = track.get("album", {}) or {}
             out.genre = (album.get("genre", {}) or {}).get("name", "")
-            out.label = (
-                album.get("label", {}).get("name", "")
-                if isinstance(album.get("label"), dict)
-                else ""
-            )
-            out.cover_url_hd = album.get("image", {}).get("large", "")
             out.explicit = bool(track.get("parental_warning"))
             out.isrc = track.get("isrc", "")
-            out.upc = album.get("upc", "")
+            composer = track.get("composer")
+            if isinstance(composer, dict):
+                out.composer = str(composer.get("name") or "")
+            _apply_credits(out, _qobuz_performer_pairs(track.get("performers")))
+
+            found_title = str(album.get("title") or "")
+            if not album_name or _same_release(album_name, found_title):
+                out.label = (
+                    album.get("label", {}).get("name", "")
+                    if isinstance(album.get("label"), dict)
+                    else ""
+                )
+                out.cover_url_hd = (album.get("image", {}) or {}).get("large", "")
+                out.upc = album.get("upc", "")
+                out.copyright = str(track.get("copyright") or "")
+                out.release_date = str(
+                    album.get("release_date_original")
+                    or track.get("release_date_original")
+                    or ""
+                )
+                out.total_tracks = _as_int(album.get("tracks_count"))
+                out.total_discs = _as_int(album.get("media_count"))
+            else:
+                logger.debug(
+                    "[meta/qobuz] release mismatch: wanted %r, got %r "
+                    "— keeping recording fields only",
+                    album_name,
+                    found_title,
+                )
         except Exception as exc:
             logger.debug("[meta/qobuz] async %s", exc)
         return out
@@ -837,8 +1007,10 @@ def _get_sc() -> _SoundCloudMeta:
 # ---------------------------------------------------------------------------
 
 
-async def _deezer_fetch_async(isrc: str, album_name: str = "") -> EnrichedMetadata:
-    return await _get_deezer().fetch_async(isrc, album_name)
+async def _deezer_fetch_async(
+    isrc: str, album_name: str = "", track_name: str = ""
+) -> EnrichedMetadata:
+    return await _get_deezer().fetch_async(isrc, album_name, track_name)
 
 
 async def _apple_fetch_async(
@@ -861,8 +1033,10 @@ async def _tidal_fetch_async(track_name: str, artist_name: str) -> EnrichedMetad
     return await _get_tidal().fetch_async(track_name, artist_name)
 
 
-async def _qobuz_fetch_async(isrc: str, qobuz_token: str | None) -> EnrichedMetadata:
-    return await _get_qobuz_meta(qobuz_token).fetch_async(isrc)
+async def _qobuz_fetch_async(
+    isrc: str, qobuz_token: str | None, album_name: str = "", track_name: str = ""
+) -> EnrichedMetadata:
+    return await _get_qobuz_meta(qobuz_token).fetch_async(isrc, album_name, track_name)
 
 
 async def _soundcloud_fetch_async(
@@ -907,7 +1081,9 @@ async def enrich_metadata_async(
     async def run_provider(name: str) -> tuple[str, EnrichedMetadata]:
         try:
             if name == "deezer":
-                return name, await _deezer_fetch_async(isrc, album_name)
+                return name, await _deezer_fetch_async(
+                    isrc, album_name, track_name=track_name
+                )
             if name == "apple":
                 return name, await _apple_fetch_async(
                     track_name,
@@ -919,7 +1095,9 @@ async def enrich_metadata_async(
             if name == "tidal":
                 return name, await _tidal_fetch_async(track_name, artist_name)
             if name == "qobuz":
-                return name, await _qobuz_fetch_async(isrc, qobuz_token)
+                return name, await _qobuz_fetch_async(
+                    isrc, qobuz_token, album_name, track_name=track_name
+                )
             if name == "soundcloud":
                 return name, await _soundcloud_fetch_async(track_name, artist_name)
             logger.warning("[meta/enrich] provider sconosciuto: %s", name)
@@ -928,15 +1106,50 @@ async def enrich_metadata_async(
             logger.debug("[meta/enrich] %s failed: %s", name, exc)
             return name, EnrichedMetadata()
 
-    try:
-        results_raw = await asyncio.wait_for(
-            asyncio.gather(*[run_provider(p) for p in providers]),
-            timeout=timeout_s,
-        )
-        results = dict(results_raw)
-    except asyncio.TimeoutError:
-        logger.warning("[meta/enrich] async timeout %.1fs", timeout_s)
-        results = {}
+    # Each service is asked twice where it can be: the built-in lookup above,
+    # and every installed JavaScript extension for that service (tidal-web,
+    # qobuz-web, deezer, apple-music) through its enrichTrack — see
+    # core/extension_enrichment.py.
+    from . import extension_enrichment
+
+    ext_sources: dict[str, list[str]] = {}
+    if extension_enrichment.extension_enrichment_enabled():
+        for name in providers:
+            try:
+                ext_sources[name] = extension_enrichment.extensions_for_service(name)
+            except Exception as exc:
+                logger.debug("[meta/enrich] no extensions for %s: %s", name, exc)
+
+    async def bounded(coro, limit: float, label: str):
+        # A timeout per source, not one for the lot: a slow extension used
+        # to be able to cost every provider's answer, and the extensions'
+        # first call also starts their runtime.
+        try:
+            return await asyncio.wait_for(coro, timeout=limit)
+        except asyncio.TimeoutError:
+            logger.warning("[meta/enrich] %s timed out after %.1fs", label, limit)
+            return None
+
+    ext_keys = [(name, ext) for name in providers for ext in ext_sources.get(name, [])]
+    outcomes = await asyncio.gather(
+        *[bounded(run_provider(p), timeout_s, p) for p in providers],
+        *[
+            bounded(
+                extension_enrichment.fetch_extension_enrichment(
+                    ext, track_name, artist_name, isrc, album_name, duration_ms
+                ),
+                max(timeout_s, extension_enrichment.EXTENSION_TIMEOUT_S),
+                f"ext:{ext}",
+            )
+            for _name, ext in ext_keys
+        ],
+    )
+    results = {
+        outcome[0]: outcome[1]
+        for outcome in outcomes[: len(providers)]
+        if isinstance(outcome, tuple)
+    }
+    ext_results = dict(zip(ext_keys, outcomes[len(providers) :]))
 
     # Every provider has already answered — gather() above waits for all of
     # them — so this loop spends nothing but the merge. It used to stop at
@@ -950,6 +1163,10 @@ async def enrich_metadata_async(
         data = results.get(name)
         if isinstance(data, EnrichedMetadata):
             merged.merge(data, name)
+        for ext in ext_sources.get(name, []):
+            data = ext_results.get((name, ext))
+            if isinstance(data, EnrichedMetadata):
+                merged.merge(data, f"ext:{ext}")
 
     if merged._sources:
         logger.debug("[meta/enrich] async enriched: %s", merged._sources)

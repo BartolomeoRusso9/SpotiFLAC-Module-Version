@@ -84,7 +84,26 @@ def _isolated_extension_dir(request, monkeypatch, tmp_path_factory):
     monkeypatch.setenv("SPOTIFLAC_EXT_DIR", str(tmp_path_factory.mktemp("extensions")))
 
 
+@pytest.fixture(autouse=True)
+def _no_extension_enrichment(request, monkeypatch):
+    """Keeps tagging from starting Node runtimes and reaching the services.
+
+    Enrichment asks every installed JavaScript extension for its metadata
+    (core/extension_enrichment.py). The extension directory is already a
+    temporary one, but a test that installs something, or points at a real
+    directory, would otherwise enrich over the network from inside the suite.
+    """
+    if request.node.get_closest_marker("uses_extension_enrichment"):
+        return
+    monkeypatch.setenv("SPOTIFLAC_ENRICH_EXTENSIONS", "0")
+
+
 def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "uses_extension_enrichment: test exercises enrichment through extensions "
+        "(with its own fakes); the autouse switch-off is skipped",
+    )
     config.addinivalue_line(
         "markers",
         "uses_registry: test drives ExtensionManager.ensure_download_providers "
