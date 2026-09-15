@@ -500,7 +500,8 @@ def test_a_wrong_isrc_does_not_bring_a_stranger_s_credits(monkeypatch) -> None:
 
 
 def test_a_title_in_another_script_is_still_the_same_song(monkeypatch) -> None:
-    korean = {**QOBUZ_TRACK, "title": "밤편지"}
+    # Its own ISRC, the one asked for: only the script of the title differs.
+    korean = {**QOBUZ_TRACK, "title": "밤편지", "isrc": "KRA381700512"}
     out = asyncio.run(
         _qobuz(monkeypatch, korean).fetch_async(
             "KRA381700512", "After Hours", "Through the Night"
