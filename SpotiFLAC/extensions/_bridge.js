@@ -112,10 +112,110 @@ if (!isMainThread) {
   // ── Globals esposti all'estensione ───────────────────────────
   const _mem = {};
 
+  // Headers are passed flat, as the app's own runtime takes them
+  // (`http.get(url, {"User-Agent": ...})`). Some extensions written for the
+  // mobile app pass `http.request`'s options object instead —
+  // `http.get(url, {headers: {...}})` — and the flat reading sent that as a
+  // single header literally named "headers", leaving the request with no
+  // User-Agent at all: Bugs Music answers that with a 500. A lone `headers`
+  // object is unwrapped rather than sent.
+  function requestHeaders(arg) {
+    if (!arg || typeof arg !== 'object') return {};
+    const keys = Object.keys(arg);
+    if (keys.length === 1 && keys[0] === 'headers' && arg.headers && typeof arg.headers === 'object') {
+      return arg.headers;
+    }
+    return arg;
+  }
+
+  // The rest of the mobile runtime's http object (extension_runtime_http.go):
+  // `request(url, {method, body, headers})` and the PUT/PATCH/DELETE
+  // shortcuts. spotify-web probes `typeof http.request === "function"` before
+  // a HEAD request, and quietly does without it otherwise.
+  function methodCall(method, url, body, headers) {
+    return bridgeCall('http.request', {
+      url,
+      method,
+      body: body === undefined ? null : body,
+      headers: requestHeaders(headers),
+    });
+  }
+
   global.http = {
-    get:  (url, headers)       => bridgeCall('http.get',  { url, headers: headers || {} }),
-    post: (url, body, headers) => bridgeCall('http.post', { url, body,   headers: headers || {} }),
+    get:  (url, headers)       => bridgeCall('http.get',  { url, headers: requestHeaders(headers) }),
+    post: (url, body, headers) => bridgeCall('http.post', { url, body,   headers: requestHeaders(headers) }),
+    request: (url, opts) => {
+      const o = opts && typeof opts === 'object' ? opts : {};
+      return methodCall(String(o.method || 'GET').toUpperCase(), url, o.body,
+        o.headers && typeof o.headers === 'object' ? o.headers : {});
+    },
+    put:    (url, body, headers) => methodCall('PUT', url, body, headers),
+    patch:  (url, body, headers) => methodCall('PATCH', url, body, headers),
+    delete: (url, headers)       => methodCall('DELETE', url, null, headers),
   };
+
+  // `matching`, as the mobile runtime defines it (extension_runtime_matching.go).
+  // Reproduced rather than improved on: apple-music turns these numbers into
+  // accept/reject thresholds tuned against the Go versions — a Levenshtein
+  // ratio over UTF-8 *bytes*, and a duration check that answers a boolean.
+  function levenshteinBytes(a, b) {
+    if (a.length === 0) return b.length;
+    if (b.length === 0) return a.length;
+    let prev = new Array(b.length + 1);
+    for (let j = 0; j <= b.length; j++) prev[j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      }
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+
+  const MATCH_SUFFIXES = [
+    ' (remastered)', ' (remaster)', ' - remastered', ' - remaster',
+    ' (deluxe)', ' (deluxe edition)', ' - deluxe', ' - deluxe edition',
+    ' (explicit)', ' (clean)', ' [explicit]', ' [clean]',
+    ' (album version)', ' (single version)', ' (radio edit)',
+    ' (feat.', ' (ft.', ' feat.', ' ft.',
+  ];
+
+  global.matching = {
+    compareStrings: function (a, b) {
+      if (arguments.length < 2) return 0;
+      const s1 = String(a).trim().toLowerCase();
+      const s2 = String(b).trim().toLowerCase();
+      if (s1 === s2) return 1;
+      const b1 = Buffer.from(s1, 'utf8');
+      const b2 = Buffer.from(s2, 'utf8');
+      if (b1.length === 0 || b2.length === 0) return 0;
+      return 1 - levenshteinBytes(b1, b2) / Math.max(b1.length, b2.length);
+    },
+    compareDuration: function (d1, d2, tolerance) {
+      if (arguments.length < 2) return false;
+      const tol = tolerance === undefined ? 3000 : (Math.trunc(Number(tolerance)) || 0);
+      return Math.abs((Math.trunc(Number(d1)) || 0) - (Math.trunc(Number(d2)) || 0)) <= tol;
+    },
+    normalizeString: function (value) {
+      if (arguments.length < 1) return '';
+      let s = String(value).toLowerCase();
+      for (const suffix of MATCH_SUFFIXES) {
+        const idx = s.indexOf(suffix);
+        if (idx !== -1) s = s.slice(0, idx);
+      }
+      return s.replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean).join(' ').trim();
+    },
+  };
+
+  // Bytes for hmacSHA1: a string is its UTF-8, an array is its numbers.
+  // Anything else is not an input the mobile runtime accepts either.
+  function hmacInput(value) {
+    if (typeof value === 'string') return Buffer.from(value, 'utf8');
+    if (Array.isArray(value)) return Buffer.from(value.map((n) => Number(n) & 0xff));
+    return null;
+  }
 
   global.storage = {
     get:    (k)    => (_mem[k] !== undefined ? _mem[k] : null),
@@ -254,6 +354,38 @@ if (!isMainThread) {
       return _cancelled;
     },
 
+
+    // The mobile runtime's name for the same probe, asked about the request
+    // rather than the download; here both are the host's one stop event.
+    isRequestCancelled: () => global.utils.isDownloadCancelled(),
+
+    // HMAC-SHA1 as an array of byte values — spotify-web builds its TOTP
+    // from it (`hmac[hmac.length - 1] & 0x0f`).
+    hmacSHA1: (key, message) => {
+      const k = hmacInput(key);
+      const m = hmacInput(message);
+      if (!k || !m) return [];
+      return Array.from(require('crypto').createHmac('sha1', k).update(m).digest());
+    },
+
+    // Mobile exposes this as gobackend.getLocalTime; gobackend is utils here.
+    getLocalTime: () => {
+      const now = new Date();
+      let timezone = 'Local';
+      try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local'; } catch (e) {}
+      return {
+        year: now.getFullYear(),
+        month: now.getMonth() + 1,
+        day: now.getDate(),
+        hour: now.getHours(),
+        minute: now.getMinutes(),
+        second: now.getSeconds(),
+        weekday: now.getDay(),
+        offsetMinutes: now.getTimezoneOffset(),
+        timezone,
+        timestamp: Math.floor(now.getTime() / 1000),
+      };
+    },
 
     sha256: (input) =>
       require('crypto').createHash('sha256').update(String(input), 'utf8').digest('hex'),
@@ -464,6 +596,8 @@ async function handleBridgeRequest() {
       result = await nodeHttpRequest('GET', args.url, null, args.headers);
     } else if (method === 'http.post') {
       result = await nodeHttpRequest('POST', args.url, args.body, args.headers);
+    } else if (method === 'http.request') {
+      result = await nodeHttpRequest(args.method || 'GET', args.url, args.body, args.headers);
     } else if (method === 'file.download') {
       result = await nodeFileDownload(args.url, args.outputPath, args.opts, callId); // NEW: passa callId
     } else if (method === 'file.downloadSegments') {
@@ -500,9 +634,26 @@ async function handleBridgeRequest() {
   Atomics.notify(STATE, 0, 1);
 }
 
+/** The User-Agent a request gets when the extension names none. The mobile
+ *  app's Go client always sends one of its own; Node sends nothing, and
+ *  some sites refuse a request without it outright. */
+const DEFAULT_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
 /** HTTP request asincrona con redirect e cookie base. */
 function nodeHttpRequest(method, rawUrl, body, headers, _depth = 0) {
-  return new Promise((resolve) => {
+  return new Promise((settle) => {
+    // `status` and `ok` next to `statusCode`: the mobile app's runtime answers
+    // with all three, and extensions written for it test `response.ok` —
+    // which, missing here, read every successful request as a failure.
+    const resolve = (value) => {
+      if (value && typeof value.then === 'function') { settle(value); return; }
+      const statusCode = value.statusCode || 0;
+      settle(Object.assign(value, {
+        status: statusCode,
+        ok: statusCode >= 200 && statusCode < 300,
+      }));
+    };
     if (_depth > 5) { resolve({ statusCode: 0, body: '', error: 'Too many redirects' }); return; }
     let u;
     try { u = new URL(rawUrl); } catch (e) {
@@ -521,7 +672,16 @@ function nodeHttpRequest(method, rawUrl, body, headers, _depth = 0) {
       method,
       headers:  Object.assign({}, headers),
     };
-    if (bodyBuf) opts.headers['Content-Length'] = bodyBuf.length;
+    if (!Object.keys(opts.headers).some((k) => k.toLowerCase() === 'user-agent')) {
+      opts.headers['User-Agent'] = DEFAULT_USER_AGENT;
+    }
+    if (bodyBuf) {
+      opts.headers['Content-Length'] = bodyBuf.length;
+      // As the mobile runtime does for any request with a body.
+      if (!Object.keys(opts.headers).some((k) => k.toLowerCase() === 'content-type')) {
+        opts.headers['Content-Type'] = 'application/json';
+      }
+    }
 
     let data = '';
     const req = lib.request(opts, (res) => {
@@ -529,7 +689,12 @@ function nodeHttpRequest(method, rawUrl, body, headers, _depth = 0) {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && loc) {
         const next = loc.startsWith('http') ? loc : `${u.protocol}//${u.host}${loc}`;
         res.resume();
-        resolve(nodeHttpRequest('GET', next, null, headers, _depth + 1));
+        // 307 and 308 exist to say "repeat this exact request there": same
+        // method, same body. 301/302/303 become a GET, as browsers do — a
+        // HEAD stays a HEAD, since it never had a body to lose.
+        const repeat = res.statusCode === 307 || res.statusCode === 308;
+        const nextMethod = repeat || method === 'HEAD' ? method : 'GET';
+        resolve(nodeHttpRequest(nextMethod, next, repeat ? body : null, headers, _depth + 1));
         return;
       }
       res.setEncoding('utf8');

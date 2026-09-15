@@ -203,6 +203,37 @@ def test_a_window_that_has_gone_away_does_not_crash_the_search(monkeypatch) -> N
     _Closed()._search_provider_thread("miles", 50)  # must not raise
 
 
+def test_a_search_id_comes_back_with_its_answer(monkeypatch) -> None:
+    """So the window can drop an answer that a newer search has replaced."""
+    import SpotiFLAC.core.spotify_metadata as metadata_module
+
+    class _Client:
+        def search(self, query, limit=50):
+            return _results()
+
+    monkeypatch.setattr(metadata_module, "SpotifyMetadataClient", _Client)
+    api = _Api()
+    api._search_provider_thread("miles", 50, None, 7)
+    event, payload = api.pushed[-1]
+    assert event == "app_handle_provider_search_results"
+    assert payload["request_id"] == 7
+
+    class _Broken:
+        def search(self, query, limit=50):
+            raise RuntimeError("down")
+
+    monkeypatch.setattr(metadata_module, "SpotifyMetadataClient", _Broken)
+    api._search_provider_thread("miles", 50, None, 8)
+    assert api.pushed[-1] == (
+        "app_handle_provider_search_error",
+        {"message": "down", "request_id": 8},
+    )
+
+    # Without an id, the error stays the bare string older callers read.
+    api._search_provider_thread("miles", 50)
+    assert api.pushed[-1] == ("app_handle_provider_search_error", "down")
+
+
 def test_the_gui_api_still_offers_both_entry_points() -> None:
     """The mixin has to be mixed in, not merely written."""
     pytest.importorskip("webview")

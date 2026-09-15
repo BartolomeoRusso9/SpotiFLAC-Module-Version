@@ -84,7 +84,31 @@ def _isolated_extension_dir(request, monkeypatch, tmp_path_factory):
     monkeypatch.setenv("SPOTIFLAC_EXT_DIR", str(tmp_path_factory.mktemp("extensions")))
 
 
+@pytest.fixture(autouse=True)
+def _no_extension_enrichment(request, monkeypatch):
+    """Keeps tagging from starting Node runtimes and reaching the services.
+
+    Enrichment asks every installed JavaScript extension for its metadata
+    (core/extension_enrichment.py). The extension directory is already a
+    temporary one, but a test that installs something, or points at a real
+    directory, would otherwise enrich over the network from inside the suite.
+    """
+    if request.node.get_closest_marker("uses_extension_enrichment"):
+        return
+    monkeypatch.setenv("SPOTIFLAC_ENRICH_EXTENSIONS", "0")
+
+
 def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "uses_system_clipboard: test exercises tui/clipboard.py's command lookup "
+        "(faking every command); the autouse switch-off is skipped",
+    )
+    config.addinivalue_line(
+        "markers",
+        "uses_extension_enrichment: test exercises enrichment through extensions "
+        "(with its own fakes); the autouse switch-off is skipped",
+    )
     config.addinivalue_line(
         "markers",
         "uses_registry: test drives ExtensionManager.ensure_download_providers "
@@ -100,6 +124,23 @@ def pytest_configure(config):
         "uses_real_download_dir: test needs the configured download directory "
         "rather than a temporary one",
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_system_clipboard(request, monkeypatch):
+    """Keeps the TUI's copy keys off the developer's real clipboard.
+
+    Ctrl+Y and Ctrl+O run pbcopy / xclip / wl-copy / clip when one is found
+    (tui/clipboard.py). A test pressing them would otherwise replace whatever
+    the person running the suite had copied. Tests of that route fake
+    `native_copy` themselves; one that tests the command lookup itself opts
+    out with `@pytest.mark.uses_system_clipboard`.
+    """
+    if request.node.get_closest_marker("uses_system_clipboard"):
+        return
+    from SpotiFLAC.tui import clipboard
+
+    monkeypatch.setattr(clipboard, "_native_command", lambda: None)
 
 
 @pytest.fixture(autouse=True)

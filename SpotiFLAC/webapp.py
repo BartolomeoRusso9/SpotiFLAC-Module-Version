@@ -157,6 +157,7 @@ ALLOWED_METHODS: set[str] = {
     "get_spotify_home_feed",
     "search_provider",
     "search_provider_async",
+    "get_metadata_sources",
     "remove_history_item",
     "get_network_status",
     "save_profile_data",
@@ -1133,11 +1134,11 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
             "<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n"
-            '<script src="/web-shim.js?v=20260922"></script>\n'
+            '<script src="/web-shim.js?v=20260924"></script>\n'
         )
         html = html.replace(
-            '<script src="toast-system.js?v=20260922"></script>',
-            inject + '<script src="toast-system.js?v=20260922"></script>',
+            '<script src="toast-system.js?v=20260924"></script>',
+            inject + '<script src="toast-system.js?v=20260924"></script>',
         )
         # Marks the document as browser-served before the first paint, so CSS
         # can drop the chrome that only makes sense in the pywebview window

@@ -1454,6 +1454,13 @@ class EmbedOptions:
     enrich_qobuz_token: str | None = None
     is_album: bool = False
     extra_tags: dict[str, str] = field(default_factory=dict)
+    #: What the service the file was downloaded from says about the track it
+    #: served (label, ℗ line, UPC, composers…), as tags. It describes the
+    #: release actually in the file, so it wins over enrichment — which
+    #: looks the track up elsewhere and can land on another edition — except
+    #: for the genre, where enrichment's English names are preferred.
+    #: Applied only when `enrich` is on.
+    source_tags: dict[str, str] = field(default_factory=dict)
     # When set, ARTIST/ALBUMARTIST are written as a single string joined
     # with this separator (e.g. ", " or " / ") instead of as a multi-value
     # Vorbis Comment field. Multi-value ARTIST fields are the "correct"
@@ -1527,6 +1534,11 @@ async def embed_metadata_async(
             logger.debug("[tagger] enriched: %s", list(enriched_tags.keys()))
         except Exception as exc:
             logger.warning("[tagger] enrichment failed: %s", exc)
+
+        for key, value in (opts.source_tags or {}).items():
+            if not value or (key == "GENRE" and enriched_tags.get("GENRE")):
+                continue
+            enriched_tags[key] = value
 
     # ── 1b. ReplayGain ─────────────────────────────────────────────────────
     # Measured from the file that is about to be tagged, not from the source:

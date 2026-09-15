@@ -26,6 +26,7 @@ KEYS: tuple[tuple[str, str], ...] = (
     ("Ctrl+C", "Stop the download, or quit when nothing is running"),
     ("Ctrl+L", "Show or hide the log pane"),
     ("Ctrl+Y", "Copy the equivalent CLI command to the clipboard"),
+    ("Ctrl+O", "Copy the whole log to the clipboard"),
     ("/", "Jump to the search box"),
     ("Tab / Shift+Tab", "Move between controls"),
     ("j / k", "Same, without leaving the home row"),

@@ -781,6 +781,22 @@ class JSExtensionProvider(BaseProvider):
                         Path(actual_path).unlink()
                     return DownloadResult.fail(self.name, f"Wrong track: {mismatch}")
 
+                # The same result also says what the service knows about the
+                # track it served — label, ℗ line, composers, UPC — which used
+                # to be read for the identity check above and then dropped.
+                source_tags: dict[str, str] = {}
+                if enrich_metadata:
+                    from SpotiFLAC.core.extension_enrichment import (
+                        enriched_from_track,
+                    )
+
+                    source_tags = enriched_from_track(
+                        dl_result,
+                        title=metadata.title,
+                        isrc=metadata.isrc,
+                        source=self.name,
+                    ).as_tags()
+
                 await embed_metadata_async(
                     Path(actual_path),
                     metadata,
@@ -796,6 +812,7 @@ class JSExtensionProvider(BaseProvider):
                         enrich_qobuz_token=qobuz_token or "",
                         is_album=is_album,
                         extra_tags=mb_tags,
+                        source_tags=source_tags,
                     ),
                 )
             except Exception as e:

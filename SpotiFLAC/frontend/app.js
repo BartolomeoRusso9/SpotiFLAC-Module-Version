@@ -2895,7 +2895,8 @@ function toggleSearchMode() {
         toggle.classList.add('active');
         label.textContent = 'Search';
         toggle.title = 'Switch to Fetch Mode';
-        
+        syncSearchSourceVisibility();
+
         fetchBtn.style.display = 'none';
         renderRecentSearches();
         
@@ -2908,7 +2909,8 @@ function toggleSearchMode() {
         toggle.classList.remove('active');
         label.textContent = 'Fetch';
         toggle.title = 'Switch to Search Mode';
-        
+        syncSearchSourceVisibility();
+
         fetchBtn.style.display = 'inline-flex';
         
         const rl = $('recent-wrap').querySelector('.recent-label');
@@ -2920,16 +2922,67 @@ function toggleSearchMode() {
     runTypewriter();
 }
 
+// ── Search source (Spotify or a catalogue extension) ─────────────────────────
+function currentSearchSource() {
+  return $('searchSource')?.value || 'spotify';
+}
+
+function currentSearchSourceLabel() {
+  const sel = $('searchSource');
+  return sel?.selectedOptions?.[0]?.textContent || 'Spotify';
+}
+
+function syncSearchSourceVisibility() {
+  const sel = $('searchSource');
+  if (!sel) return;
+  const show = $('searchMode')?.value === 'search' && sel.options.length > 1;
+  sel.classList.toggle('hidden', !show);
+}
+
+async function loadSearchSources() {
+  const sel = $('searchSource');
+  if (!sel || !window.pywebview?.api?.get_metadata_sources) return;
+  let sources = [];
+  try {
+    sources = await window.pywebview.api.get_metadata_sources();
+  } catch (e) {
+    return;
+  }
+  if (!Array.isArray(sources) || !sources.length) return;
+  let saved = 'spotify';
+  try { saved = localStorage.getItem('searchSource') || 'spotify'; } catch (e) {}
+  sel.innerHTML = '';
+  sources.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.label;
+    sel.appendChild(opt);
+  });
+  sel.value = sources.some(s => s.id === saved) ? saved : 'spotify';
+  syncSearchSourceVisibility();
+  if ($('searchMode')?.value === 'search') updateSearchMode();
+}
+
+function onSearchSourceChange() {
+  try { localStorage.setItem('searchSource', currentSearchSource()); } catch (e) {}
+  if ($('searchMode')?.value !== 'search') return;
+  $('urlInput').placeholder = `Search ${currentSearchSourceLabel()} with keywords, artist or track name…`;
+  // Re-run the query already typed, against the new source.
+  _lastSearchQuery = '';
+  $('urlInput').dispatchEvent(new Event('input'));
+}
+
 function updateSearchMode() {
   const mode = $('searchMode').value;
   const input = $('urlInput');
   const toggle = $('searchModeToggle');
   const label = $('searchModeText');
-  
+  syncSearchSourceVisibility();
+
   if (mode === 'search') {
     // Text mode: stop the animation and set the fixed text
     clearTimeout(phTimeout);
-    input.placeholder = 'Search Spotify with keywords, artist or track name…';
+    input.placeholder = `Search ${currentSearchSourceLabel()} with keywords, artist or track name…`;
     toggle.classList.add('active');
     label.textContent = 'Search';
     toggle.title = 'Switch to Fetch Mode';
@@ -2978,6 +3031,9 @@ function renderCodeResults(results) {
 }
 
 window.app_handle_provider_search_results = function(results) {
+  // An answer to a search that has since been replaced — typed over, its
+  // source switched, its box cleared — must not paint over the newer one.
+  if (!isCurrentSearchRequest(results)) return;
   const isSearchMode = $('searchMode')?.value === 'search';
   if (!isSearchMode) { 
     return; 
@@ -3150,6 +3206,10 @@ function onSearchResultClick(url) {
 }
 
 window.app_handle_provider_search_error = function(message) {
+  if (message && typeof message === 'object') {
+    if (!isCurrentSearchRequest(message)) return;
+    message = message.message;
+  }
   clearSearchUI();
   setFetchingState('error');
   $('track-rows').innerHTML = `<div class="queue-empty">Provider search failed.</div>`;
@@ -4102,7 +4162,7 @@ async function onFetch() {
     currentUrl = url;
 
     if (window.pywebview?.api) {
-      window.pywebview.api.search_provider_async(url, 50)
+      window.pywebview.api.search_provider_async(url, 50, currentSearchSource(), nextSearchRequest())
         .then(() => {
           setStatus(`Searching "${url}"...`, true);
         })
@@ -5335,6 +5395,7 @@ window.addEventListener('pywebviewready', async () => {
   initSettingsTracking();
   updateSearchMode();
   initPasteButton();
+  loadSearchSources();
 });
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncSystemTheme);
@@ -5350,6 +5411,26 @@ window.addEventListener('beforeunload', function (e) {
 let _searchDebounceTimer = null;
 let _lastSearchQuery = '';
 
+// Every provider search gets a number, and only the newest one's answer is
+// shown. Searches overlap all the time — a debounced keystroke, a source
+// switch re-running the query — and whichever backend call finished last used
+// to win, so a slow Spotify answer could replace the Melon results asked for
+// after it.
+let _searchRequestSeq = 0;
+let _activeSearchRequest = 0;
+
+function nextSearchRequest() {
+  _searchRequestSeq += 1;
+  _activeSearchRequest = _searchRequestSeq;
+  return _activeSearchRequest;
+}
+
+function isCurrentSearchRequest(payload) {
+  const id = payload && typeof payload === 'object' ? payload.request_id : undefined;
+  // No id: a backend that does not send one — nothing to compare, keep it.
+  return id === undefined || id === null || id === _activeSearchRequest;
+}
+
 $('urlInput').addEventListener('input', function() {
   const mode = $('searchMode').value;
   if (mode !== 'search') return;
@@ -5360,6 +5441,7 @@ $('urlInput').addEventListener('input', function() {
   if (!query) {
     clearSearchUI();
     _lastSearchQuery = '';
+    nextSearchRequest(); // whatever is still out answers a box that is now empty
     clearTimeout(_searchDebounceTimer);
     const container = $('text-search-results');
     if (container) container.innerHTML = '';
@@ -5394,7 +5476,7 @@ $('urlInput').addEventListener('input', function() {
     // END CHANGE
 
     if (window.pywebview?.api) {
-      window.pywebview.api.search_provider_async(query, 50).catch(e => {
+      window.pywebview.api.search_provider_async(query, 50, currentSearchSource(), nextSearchRequest()).catch(e => {
         logMessage('Real-time search error: ' + e, 'error');
       });
     }

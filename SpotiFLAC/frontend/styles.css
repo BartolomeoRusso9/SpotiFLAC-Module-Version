@@ -667,6 +667,18 @@
       .mode-btn.is-busy .mode-btn-icon { animation: none; opacity: .7; }
     }
     .mode-btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; font-size: 14px; }
+    .search-source {
+      height: 36px;
+      max-width: 120px;
+      padding: 0 var(--sp-2);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--button-border);
+      background: var(--button-bg);
+      color: var(--button-text);
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .search-source:hover { background: var(--surface3); }
     /* Fetch mode shows the chain, Search mode the magnifier. The button
        already gets .active in search mode, so the swap needs no JS — and
        because these are `stroke: currentColor` SVGs they invert with the

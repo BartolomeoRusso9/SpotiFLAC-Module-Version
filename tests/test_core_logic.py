@@ -684,6 +684,63 @@ def test_extension_manager_recheck_keeps_startup_trust_floor(_fake_registry, tmp
     assert _fake_registry == {"fetch": 2, "install": 0}
 
 
+@pytest.mark.uses_registry
+def test_extension_manager_bootstrap_installs_every_category(monkeypatch, tmp_path):
+    """Metadata and lyrics extensions are installed too, not only download
+    providers: the metadata fallback and catalogue links can only use what
+    is installed. Utilities still go first."""
+    monkeypatch.setattr(registry_config, "ENV_FILES_TO_CHECK", ())
+    monkeypatch.setattr(
+        registry_config, "CONFIG_FILE", tmp_path / "registry_settings.json"
+    )
+    monkeypatch.setenv("SPOTIFLAC_REGISTRIES", "https://example.com/registry.json")
+    monkeypatch.delenv("SPOTIFLAC_MIN_TRUST", raising=False)
+
+    def entry(ext_id, category, tags):
+        return RegistryEntry(
+            id=ext_id,
+            display_name=ext_id,
+            version="1.0.0",
+            description="",
+            download_url=f"https://example.com/{ext_id}.zip",
+            category=category,
+            tags=tags,
+        )
+
+    entries = [
+        entry("tidal-web", "download", ["download"]),
+        entry("spotify-web", "integration", ["spotify", "homefeed"]),
+        entry("apple-music", "integration", ["apple", "lyrics"]),
+        entry("helper", "utility", ["utility"]),
+    ]
+    installed = []
+    monkeypatch.setattr(
+        ExtensionManager, "fetch_registry", lambda self, url=None: entries
+    )
+    monkeypatch.setattr(ExtensionManager, "get_installed", lambda self, ext_id: None)
+    monkeypatch.setattr(
+        ExtensionManager,
+        "install_from_url",
+        lambda self, url, **kwargs: installed.append(url.rsplit("/", 1)[-1]),
+    )
+
+    original_checks = ExtensionManager._startup_registry_checks.copy()
+    ExtensionManager._startup_registry_checks.clear()
+    try:
+        ExtensionManager(ext_dir=tmp_path / "exts", auto_install_downloads=True)
+    finally:
+        ExtensionManager._startup_registry_checks.clear()
+        ExtensionManager._startup_registry_checks.update(original_checks)
+
+    assert installed[0] == "helper.zip"
+    assert sorted(installed) == [
+        "apple-music.zip",
+        "helper.zip",
+        "spotify-web.zip",
+        "tidal-web.zip",
+    ]
+
+
 def test_extension_manager_skips_matching_registry_checksum(tmp_path):
     manager = ExtensionManager(ext_dir=tmp_path, auto_install_downloads=False)
     installed = InstalledExtension(
