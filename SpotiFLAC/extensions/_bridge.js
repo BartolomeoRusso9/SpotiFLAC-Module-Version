@@ -634,6 +634,32 @@ async function handleBridgeRequest() {
   Atomics.notify(STATE, 0, 1);
 }
 
+/** Seconds a Retry-After header asks for — a number of seconds or an HTTP
+ *  date — or 0 when there is none. */
+function retryAfterSeconds(headers) {
+  const raw = String((headers && headers['retry-after']) || '').trim();
+  if (/^\d+$/.test(raw)) return Number(raw);
+  const when = Date.parse(raw);
+  return Number.isNaN(when) ? 0 : Math.max(0, Math.ceil((when - Date.now()) / 1000));
+}
+
+/** Logs a rate limit at warning level, with the wait it asked for.
+ *  The extensions retry a 429 on their own and seldom say so, which left the
+ *  host with no record of how long an address had been limited. Sent to
+ *  Python as a log message on stdout rather than written to stderr, which
+ *  Python only reads at debug level. */
+function logRateLimited(what, rawUrl, headers) {
+  let host = String(rawUrl);
+  try { host = new URL(rawUrl).host; } catch (_) { /* keep the raw string */ }
+  const seconds = retryAfterSeconds(headers);
+  const wait = seconds > 0 ? `retry after ${seconds}s` : 'no Retry-After';
+  process.stdout.write(JSON.stringify({
+    type: 'log',
+    level: 'warning',
+    msg: `[http] HTTP 429 from ${host} (${what}) — ${wait}`,
+  }) + '\n');
+}
+
 /** The User-Agent a request gets when the extension names none. The mobile
  *  app's Go client always sends one of its own; Node sends nothing, and
  *  some sites refuse a request without it outright. */
@@ -699,13 +725,16 @@ function nodeHttpRequest(method, rawUrl, body, headers, _depth = 0) {
       }
       res.setEncoding('utf8');
       res.on('data', (d) => { data += d; });
-      res.on('end', () => resolve({
-        statusCode: res.statusCode,
-        body:       data,
-        headers:    res.headers,
-        url:        rawUrl,
-        error:      null,
-      }));
+      res.on('end', () => {
+        if (res.statusCode === 429) logRateLimited(method, rawUrl, res.headers);
+        resolve({
+          statusCode: res.statusCode,
+          body:       data,
+          headers:    res.headers,
+          url:        rawUrl,
+          error:      null,
+        });
+      });
     });
     req.on('error', (e) => resolve({ statusCode: 0, body: '', error: e.message, url: rawUrl }));
     req.setTimeout(30_000, () => { req.destroy(); resolve({ statusCode: 0, body: '', error: 'timeout' }); });
@@ -785,6 +814,7 @@ function nodeFileDownload(rawUrl, outputPath, opts, callId) {
     const stream = fs.createWriteStream(outputPath);
     const req = lib.request(reqOpts, (res) => {
       if (res.statusCode >= 400) {
+        if (res.statusCode === 429) logRateLimited('file download', rawUrl, res.headers);
         res.resume();
         stream.close();
         fs.unlink(outputPath, () => {});
@@ -929,6 +959,7 @@ function nodeFileDownloadSegments(urls, outputPath, opts, callId) {
           return;
         }
         if (status >= 400) {
+          if (status === 429) logRateLimited('segment', rawUrl, res.headers);
           res.resume();
           // 403/410 is how every signed CDN says "this URL has aged out".
           const expired = status === 403 || status === 410;
@@ -936,7 +967,7 @@ function nodeFileDownloadSegments(urls, outputPath, opts, callId) {
             ok: false,
             error: `HTTP ${status}`,
             error_type: expired ? 'expired_stream' : 'download_error',
-            retry_after_seconds: Number(res.headers['retry-after'] || 0) || 0,
+            retry_after_seconds: retryAfterSeconds(res.headers),
           });
           return;
         }

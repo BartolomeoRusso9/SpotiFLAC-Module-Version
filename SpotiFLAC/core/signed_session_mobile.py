@@ -1329,6 +1329,21 @@ async def perform_signed_fetch(
         resp = await client.request(method, path, json_body=body, extra_headers=headers)
         elapsed = time.monotonic() - started
 
+        # How long a refusal says to wait: the Retry-After header first, else
+        # the gateway's error envelope. Worked out before the log lines below,
+        # because a 429 is logged with it: the extensions retry a rate limit
+        # on their own and say nothing, so the log held no record of how long
+        # an address had been limited for.
+        ok = 200 <= resp.status_code < 300
+        retry_after = 0
+        raw_retry_after = resp.headers.get("Retry-After", "").strip()
+        if raw_retry_after.isdigit():
+            retry_after = max(0, int(raw_retry_after))
+        # Parsed only for a refusal: a success body is the provider's payload,
+        # sometimes a large manifest, and never an envelope.
+        err = None if ok else parse_session_error(getattr(resp, "content", b""))
+        wait = retry_after or (err.retry_after_seconds if err else 0)
+
         if is_ticket:
             granted = False
             if 200 <= resp.status_code < 300:
@@ -1364,6 +1379,15 @@ async def perform_signed_fetch(
                 elapsed,
             )
 
+        if resp.status_code == 429:
+            logger.warning(
+                "[signed_session:%s] HTTP 429 for %s %s — %s",
+                client.namespace,
+                method,
+                path,
+                f"retry after {wait}s" if wait else "no Retry-After",
+            )
+
         # Same distinction as in request(): re-bootstrapping and demanding
         # verification are session decisions, and a provider's refusal is
         # not grounds for either.
@@ -1374,12 +1398,6 @@ async def perform_signed_fetch(
             if isinstance(retry_auth_url, str) and retry_auth_url:
                 return {"needsVerification": True, "auth_url": retry_auth_url}
 
-        retry_after = 0
-        raw_retry_after = resp.headers.get("Retry-After", "").strip()
-        if raw_retry_after.isdigit():
-            retry_after = max(0, int(raw_retry_after))
-
-        ok = 200 <= resp.status_code < 300
         result = {
             "statusCode": resp.status_code,
             "status": resp.status_code,
@@ -1405,8 +1423,7 @@ async def perform_signed_fetch(
         # hand the gateway a switch to end a download early, and whether it
         # sets them that precisely on transient failures is not something
         # this side can verify.
-        if not ok:
-            err = parse_session_error(getattr(resp, "content", b""))
+        if err is not None:
             if err.retry_mode:
                 result["retryMode"] = err.retry_mode
             if not retry_after and err.retry_after_seconds:
