@@ -6468,7 +6468,7 @@ function renderSignedSessions(data) {
     if (r.capabilities?.length) details.push(r.capabilities.join(', '));
     if (r.auth_paused_s) details.push('verification paused ' + signedDuration(r.auth_paused_s));
     const clearBtn = r.state === 'unverified' ? '' :
-      `<button class="act-btn secondary" type="button" style="padding:4px 10px;font-size:11px;" onclick="clearSignedSession('${regEscapeHtml(r.key)}')" title="Drop this session so the next request verifies again.">Clear</button>`;
+      `<button class="act-btn secondary" type="button" style="padding:4px 10px;font-size:11px;" data-signed-clear="${regEscapeHtml(r.key)}" title="Drop this session so the next request verifies again.">Clear</button>`;
     return `
       <div class="sort-item reg-item">
         <div class="reg-item-main">
@@ -6482,6 +6482,9 @@ function renderSignedSessions(data) {
         </span>
       </div>`;
   }).join('');
+  list.querySelectorAll('[data-signed-clear]').forEach(btn => {
+    btn.addEventListener('click', () => clearSignedSession(btn.dataset.signedClear));
+  });
 
   const tick = () => {
     const elapsed = (Date.now() - loadedAt) / 1000;
@@ -6498,6 +6501,7 @@ function renderSignedSessions(data) {
       let text = left > 0 ? 'Expires in ' + signedDuration(left) : 'Expired ' + signedDuration(left) + ' ago';
       if (r.state === 'active' && r.refresh_in_s !== null && r.refresh_in_s !== undefined) {
         const refresh = r.refresh_in_s - elapsed;
+        if (r.refresh_in_s > 0 && refresh <= 0) lapsed = true;
         text += refresh > 0 ? ' · refresh in ' + signedDuration(refresh) : ' · refresh due';
       }
       el.textContent = text;

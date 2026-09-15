@@ -2260,14 +2260,17 @@ async def amain() -> None:
     ):
         # allow_abbrev=False: otherwise a bare --signed-sessions is an
         # "ambiguous option" between the other two.
+        # --signed-sessions is declared too, so a malformed "--signed-sessions=x"
+        # errors out instead of silently listing.
         ss_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        ss_parser.add_argument("--signed-sessions", action="store_true")
         ss_parser.add_argument("--signed-sessions-clear", default=None)
         ss_parser.add_argument("--signed-sessions-prune", action="store_true")
         ss_args, _ = ss_parser.parse_known_args(sys.argv[1:])
 
         from .core import signed_session_status as sss
 
-        if ss_args.signed_sessions_clear:
+        if ss_args.signed_sessions_clear is not None:
             if not sss.clear_signed_session(ss_args.signed_sessions_clear):
                 print(f"No signed session with key '{ss_args.signed_sessions_clear}'.")
                 sys.exit(1)
@@ -2278,7 +2281,7 @@ async def amain() -> None:
                 f"Removed {len(removed)} orphaned session file(s)"
                 + (": " + ", ".join(removed) if removed else ".")
             )
-        if ss_args.signed_sessions_clear or ss_args.signed_sessions_prune:
+        if ss_args.signed_sessions_clear is not None or ss_args.signed_sessions_prune:
             print()
         sss.print_signed_sessions_report(sss.list_signed_sessions())
         return

@@ -8,6 +8,7 @@ the clock or on what happens to be installed on the machine running the suite.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -228,7 +229,9 @@ def test_clear_keeps_install_id(dirs):
         "session_secret": "",
         "expires_at": "",
     }
-    assert (sessions / sss.COMMUNITY_FILE).stat().st_mode & 0o077 == 0
+    # Windows has no POSIX mode bits: chmod is a no-op there and files are 0o666.
+    if os.name != "nt":
+        assert (sessions / sss.COMMUNITY_FILE).stat().st_mode & 0o077 == 0
 
 
 @pytest.mark.parametrize("key", ["", "../x", "missing", ".hidden", "a/b"])
@@ -250,6 +253,26 @@ def test_prune_removes_only_orphans(dirs):
     assert sorted(p.name for p in sessions.iterdir()) == sorted(
         [current + ".json", sss.COMMUNITY_FILE]
     )
+
+
+def test_unreadable_extensions_dir_orphans_nothing(dirs, monkeypatch):
+    sessions, extensions = dirs
+    old = sss.gateway_file_stem(_block("q@1"))
+    _write(sessions, old + ".json", {"install_id": "i"})
+
+    real_iterdir = Path.iterdir
+
+    def _iterdir(self):
+        if self == extensions:
+            raise PermissionError("denied")
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", _iterdir)
+
+    rows = sss.list_signed_sessions(sessions, extensions, NOW)
+    assert [r["state"] for r in rows] == [sss.UNVERIFIED]
+    assert sss.prune_orphaned_sessions(sessions, extensions) == []
+    assert (sessions / (old + ".json")).exists()
 
 
 def test_missing_directory_is_empty(tmp_path):

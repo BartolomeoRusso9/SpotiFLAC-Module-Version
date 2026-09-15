@@ -112,14 +112,23 @@ def gateway_file_stem(block: dict) -> str | None:
     return f"{namespace}-{hashlib.sha256(scope.encode()).hexdigest()[:16]}"
 
 
-def _scan_extensions(ext_dir: Path) -> tuple[dict[str, dict], dict[str, list[str]]]:
-    """({file stem: {extension, version, base_url, namespace}}, {kind: [ext]})."""
+def _scan_extensions(
+    ext_dir: Path,
+) -> tuple[dict[str, dict], dict[str, list[str]], bool]:
+    """({file stem: {extension, version, base_url, namespace}}, {kind: [ext]}, complete).
+
+    ``complete`` is False when the extensions directory exists but could not
+    be listed: an empty index then means "unknown", not "nothing installed",
+    and no session may be called orphaned on its strength.
+    """
     gateway: dict[str, dict] = {}
     shared: dict[str, list[str]] = {kind: [] for kind in _SHARED_MARKERS}
     try:
         entries = sorted(ext_dir.iterdir())
+    except FileNotFoundError:
+        return gateway, shared, True
     except OSError:
-        return gateway, shared
+        return gateway, shared, False
 
     for entry in entries:
         if entry.name.startswith(".") or entry.name.endswith(".previous"):
@@ -147,7 +156,7 @@ def _scan_extensions(ext_dir: Path) -> tuple[dict[str, dict], dict[str, list[str
             for kind, marker in _SHARED_MARKERS.items():
                 if marker in text and name not in shared[kind]:
                     shared[kind].append(name)
-    return gateway, shared
+    return gateway, shared, True
 
 
 def _auth_paused_s(directory: Path, info: dict, now_ts: float) -> float:
@@ -205,7 +214,7 @@ def list_signed_sessions(
     if not directory.is_dir():
         return []
 
-    gateway_index, shared = _scan_extensions(ext_dir)
+    gateway_index, shared, scan_complete = _scan_extensions(ext_dir)
     rows: list[dict] = []
 
     for path in sorted(directory.glob("*.json")):
@@ -255,7 +264,7 @@ def list_signed_sessions(
             record.get("session_id") and record.get("session_secret")
         )
         state = _state(has_credentials, expires, refresh, now)
-        if info is None:
+        if info is None and scan_complete:
             state = ORPHANED
         capabilities = record.get("capabilities")
         rows.append(
@@ -330,9 +339,14 @@ def clear_signed_session(key: str, directory: Path | None = None) -> bool:
 def prune_orphaned_sessions(
     directory: Path | None = None, ext_dir: Path | None = None
 ) -> list[str]:
-    """Deletes gateway session files no installed extension uses. Returns keys."""
+    """Deletes gateway session files no installed extension uses. Returns keys.
+
+    Deletes nothing when the extensions directory could not be read.
+    """
     directory = directory or sessions_dir()
     removed: list[str] = []
+    if not _scan_extensions(ext_dir or extensions_dir())[2]:
+        return removed
     for row in list_signed_sessions(directory, ext_dir):
         if row["state"] != ORPHANED:
             continue
