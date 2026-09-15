@@ -18,7 +18,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
 
 from SpotiFLAC.core import get_community_url
-from SpotiFLAC.core.signed_session_errors import parse_session_error
+from SpotiFLAC.core.signed_session_errors import (
+    parse_session_error,
+    retry_after_header_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +35,7 @@ def _refusal_message(what: str, resp) -> str:
     the gateway's error envelope (see signed_session_errors).
     """
     msg = f"{what} returned HTTP {resp.status_code}"
-    raw = str(resp.headers.get("Retry-After") or "").strip()
-    wait = int(raw) if raw.isdigit() else 0
+    wait = retry_after_header_seconds(resp.headers.get("Retry-After"))
     if not wait:
         with contextlib.suppress(Exception):
             wait = parse_session_error(resp.content).retry_after_seconds

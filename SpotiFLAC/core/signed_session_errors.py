@@ -23,7 +23,10 @@ whose contract is what the gateway actually emits.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 #: The session is gone and can be re-established without the user.
@@ -57,6 +60,32 @@ class SessionError:
     @property
     def from_provider(self) -> bool:
         return self.origin == "provider"
+
+
+def retry_after_header_seconds(raw: Any) -> int:
+    """Seconds a Retry-After header asks for, or 0. Never raises.
+
+    RFC 9110 allows two forms, a count of seconds and an HTTP date, and the
+    bridge's retryAfterSeconds() (extensions/_bridge.js) has always read
+    both. The Python readers accepted only digits, so a gateway answering
+    with the date form read here as "no Retry-After" and the wait fell
+    through to the error envelope — or to nothing. A date already in the
+    past is 0: the wait is over.
+    """
+    text = str(raw or "").strip()
+    if text.isdigit():
+        return int(text)
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return 0
+    if when is None:
+        return 0
+    # An HTTP date is UTC by definition, but parsedate_to_datetime returns a
+    # naive datetime for the obsolete formats that carry no offset.
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0, math.ceil((when - datetime.now(timezone.utc)).total_seconds()))
 
 
 def parse_session_error(body: Any) -> SessionError:

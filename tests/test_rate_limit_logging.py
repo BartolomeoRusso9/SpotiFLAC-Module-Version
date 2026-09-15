@@ -99,6 +99,26 @@ def test_the_wait_comes_from_the_envelope_when_there_is_no_header(
     assert result["retryAfterSeconds"] == 900
 
 
+def test_an_http_date_header_is_turned_into_seconds(tmp_path, caplog) -> None:
+    """The date form of Retry-After, which the Node bridge has always read."""
+    header = formatdate(time() + 600, usegmt=True)
+    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+        result = _fetch(tmp_path, _Response(429, "", {"Retry-After": header}))
+
+    assert 590 <= result["retryAfterSeconds"] <= 600
+    assert f"retry after {result['retryAfterSeconds']}s" in caplog.text
+
+
+def test_a_past_http_date_falls_back_to_the_envelope(tmp_path, caplog) -> None:
+    """A wait already over is no wait — the envelope still has one."""
+    header = formatdate(time() - 600, usegmt=True)
+    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+        result = _fetch(tmp_path, _Response(429, LIMITED, {"Retry-After": header}))
+
+    assert "HTTP 429 for POST /dl/tid — retry after 900s" in caplog.text
+    assert result["retryAfterSeconds"] == 900
+
+
 def test_a_429_without_any_wait_says_so(tmp_path, caplog) -> None:
     with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
         _fetch(tmp_path, _Response(429, "slow down"))
@@ -134,6 +154,27 @@ def test_a_desktop_refusal_carries_the_retry_after_header() -> None:
     assert (
         ssd._refusal_message("session exchange", resp)
         == "session exchange returned HTTP 429, retry after 120s"
+    )
+
+
+def test_a_desktop_refusal_reads_an_http_date_header() -> None:
+    resp = _RequestsResponse(
+        429, b"", {"Retry-After": formatdate(time() + 600, usegmt=True)}
+    )
+    seconds = int(
+        ssd._refusal_message("session exchange", resp)
+        .rsplit("retry after ", 1)[1]
+        .rstrip("s")
+    )
+    assert 590 <= seconds <= 600
+
+
+def test_a_desktop_refusal_ignores_an_unparsable_header() -> None:
+    """Garbage in the header is not a wait; the envelope is still read."""
+    resp = _RequestsResponse(429, LIMITED.encode(), {"Retry-After": "soon"})
+    assert (
+        ssd._refusal_message("session exchange", resp)
+        == "session exchange returned HTTP 429, retry after 900s"
     )
 
 

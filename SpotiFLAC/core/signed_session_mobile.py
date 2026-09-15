@@ -23,7 +23,11 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
-from .signed_session_errors import parse_session_error, should_clear_session
+from .signed_session_errors import (
+    parse_session_error,
+    retry_after_header_seconds,
+    should_clear_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1187,9 +1191,9 @@ def _retry_after_from(exc: BaseException) -> int:
     response = getattr(exc, "response", None)
     if response is None:
         return 0
-    raw = (response.headers.get("Retry-After") or "").strip()
-    if raw.isdigit():
-        return int(raw)
+    wait = retry_after_header_seconds(response.headers.get("Retry-After"))
+    if wait:
+        return wait
     with contextlib.suppress(Exception):
         return parse_session_error(response.content).retry_after_seconds
     return 0
@@ -1335,10 +1339,7 @@ async def perform_signed_fetch(
         # on their own and say nothing, so the log held no record of how long
         # an address had been limited for.
         ok = 200 <= resp.status_code < 300
-        retry_after = 0
-        raw_retry_after = resp.headers.get("Retry-After", "").strip()
-        if raw_retry_after.isdigit():
-            retry_after = max(0, int(raw_retry_after))
+        retry_after = retry_after_header_seconds(resp.headers.get("Retry-After"))
         # Parsed only for a refusal: a success body is the provider's payload,
         # sometimes a large manifest, and never an envelope.
         err = None if ok else parse_session_error(getattr(resp, "content", b""))
