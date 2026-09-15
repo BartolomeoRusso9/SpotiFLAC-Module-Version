@@ -16,7 +16,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    { name=" BartolomeoRusso9, ShuKurenais" }
+    { name=" BartolomeoRusso9" }
 ]
 
 keywords = [
