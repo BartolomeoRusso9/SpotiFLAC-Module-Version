@@ -386,6 +386,15 @@ def _other_recording(expected: str, found: str) -> bool:
     return not titles_match(expected, found) and ratio(expected, found) < 0.5
 
 
+def _other_isrc(wanted: Any, found: Any) -> bool:
+    """Whether a lookup by ISRC answered with a different one. Qobuz's is a
+    search whose term is the ISRC, and a search returns its nearest hit when
+    there is no exact one. Absent on either side proves nothing."""
+    wanted_n = normalize_isrc(str(wanted or ""))
+    found_n = normalize_isrc(str(found or ""))
+    return bool(wanted_n and found_n and wanted_n != found_n)
+
+
 def _as_int(value: Any) -> int:
     try:
         return int(value or 0)
@@ -437,6 +446,13 @@ class _DeezerMeta:
                     isrc,
                     d.get("title"),
                     track_name,
+                )
+                return out
+            if _other_isrc(isrc, d.get("isrc")):
+                logger.debug(
+                    "[meta/deezer] asked for ISRC %s, answered with %s — ignored",
+                    isrc,
+                    d.get("isrc"),
                 )
                 return out
 
@@ -870,6 +886,13 @@ class _QobuzMeta:
                     isrc,
                     track.get("title"),
                     track_name,
+                )
+                return out
+            if _other_isrc(isrc, track.get("isrc")):
+                logger.debug(
+                    "[meta/qobuz] asked for ISRC %s, answered with %s — ignored",
+                    isrc,
+                    track.get("isrc"),
                 )
                 return out
             album = track.get("album", {}) or {}

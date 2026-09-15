@@ -482,8 +482,14 @@ async def attach_isrcs(
     if spotify is None:
         from .spotify_metadata import SpotifyMetadataClient
 
-        # Its constructor opens a session over the network.
-        spotify = await asyncio.to_thread(SpotifyMetadataClient)
+        # Its constructor opens a session over the network, and can fail
+        # there. The ISRC is a bonus, not a requirement: the link still
+        # resolves, with the catalogue's own tracks.
+        try:
+            spotify = await asyncio.to_thread(SpotifyMetadataClient)
+        except Exception as exc:
+            logger.debug("[catalogue] no Spotify client for ISRC matching: %s", exc)
+            return tracks
     if isrc_helper is None:
         from .http import AsyncHttpClient
         from .isrc_helper import IsrcHelper
@@ -586,22 +592,31 @@ class ExtensionMetadataClient:
 
         return JSExtensionProvider(self.ext_name, timeout_s=EXTENSION_TIMEOUT_S)
 
-    def _call_sync(self, method: str, *args: Any) -> Any:
-        # One provider per operation, closed afterwards: each holds Node
-        # processes, and a client lives as long as whoever asked for it.
-        provider = self._make_provider()
-        try:
-            return provider._call(method, *args)
-        finally:
-            close = getattr(provider, "close", None)
-            if close is not None:
-                try:
-                    close()
-                except Exception:
-                    pass
+    @staticmethod
+    def _close(provider: Any) -> None:
+        close = getattr(provider, "close", None)
+        if close is not None:
+            try:
+                close()
+            except Exception:
+                pass
 
-    async def _call(self, method: str, *args: Any) -> Any:
-        return await asyncio.to_thread(self._call_sync, method, *args)
+    def _call_sync(self, method: str, *args: Any, provider: Any = None) -> Any:
+        # With `provider`, a call inside an operation that owns it. Without,
+        # a one-off: its own provider, closed afterwards — each holds Node
+        # processes, and a client lives as long as whoever asked for it.
+        if provider is not None:
+            return provider._call(method, *args)
+        own = self._make_provider()
+        try:
+            return own._call(method, *args)
+        finally:
+            self._close(own)
+
+    async def _call(self, method: str, *args: Any, provider: Any = None) -> Any:
+        return await asyncio.to_thread(
+            lambda: self._call_sync(method, *args, provider=provider)
+        )
 
     # -- links ------------------------------------------------------------------
 
@@ -618,35 +633,44 @@ class ExtensionMetadataClient:
         method = {"track": "getTrack", "album": "getAlbum", "playlist": "getPlaylist"}[
             link.kind
         ]
-        response = await self._call(method, link.item_id)
+        # One provider for the whole link: a track link can take a getTrack
+        # and a getAlbum, an album one a getTrack per untitled track, and a
+        # provider per call started a Node runtime for each.
+        provider = await asyncio.to_thread(self._make_provider)
+        try:
+            response = await self._call(method, link.item_id, provider=provider)
 
-        if not isinstance(response, dict) or response.get("success") is False:
-            reason = response.get("error") if isinstance(response, dict) else ""
-            raise SpotiflacError(
-                ErrorKind.TRACK_NOT_FOUND,
-                f"{self.site.label} returned nothing for this {link.kind}"
-                + (f": {reason}" if reason else "."),
-                provider=f"ext:{self.ext_name}",
-            )
+            if not isinstance(response, dict) or response.get("success") is False:
+                reason = response.get("error") if isinstance(response, dict) else ""
+                raise SpotiflacError(
+                    ErrorKind.TRACK_NOT_FOUND,
+                    f"{self.site.label} returned nothing for this {link.kind}"
+                    + (f": {reason}" if reason else "."),
+                    provider=f"ext:{self.ext_name}",
+                )
 
-        if link.kind == "track":
-            item = (
-                response.get("track")
-                if isinstance(response.get("track"), dict)
-                else response
-            )
-            track = await self._track_from_its_album(item) or to_track(item, self.site)
-            tracks = [track] if track else []
-            name = track.title if track else ""
-            cover = track.cover_url if track else ""
-        else:
-            items = await self._with_titles(response.get("tracks") or [])
-            tracks = self._collection_tracks(response, link.kind, items)
-            name = clean_album(
-                _text(response.get("name") or response.get("title")),
-                _text(response.get("artists")),
-            )
-            cover = _first_image(response)
+            if link.kind == "track":
+                item = (
+                    response.get("track")
+                    if isinstance(response.get("track"), dict)
+                    else response
+                )
+                track = await self._track_from_its_album(item, provider) or to_track(
+                    item, self.site
+                )
+                tracks = [track] if track else []
+                name = track.title if track else ""
+                cover = track.cover_url if track else ""
+            else:
+                items = await self._with_titles(response.get("tracks") or [], provider)
+                tracks = self._collection_tracks(response, link.kind, items)
+                name = clean_album(
+                    _text(response.get("name") or response.get("title")),
+                    _text(response.get("artists")),
+                )
+                cover = _first_image(response)
+        finally:
+            await asyncio.to_thread(self._close, provider)
 
         if tracks and self.match_isrcs:
             tracks = await attach_isrcs(tracks)
@@ -655,7 +679,7 @@ class ExtensionMetadataClient:
             name = tracks[0].album
         return name, tracks, cover
 
-    async def _with_titles(self, items: list) -> list:
+    async def _with_titles(self, items: list, provider: Any = None) -> list:
         """`items`, with a title read from the track's own page for each one
         whose listing had none to give (Melon's title track reads "Title").
 
@@ -670,7 +694,9 @@ class ExtensionMetadataClient:
                 and not clean_title(_text(item.get("name") or item.get("title")))
             ):
                 try:
-                    page = await self._call("getTrack", str(item["id"]))
+                    page = await self._call(
+                        "getTrack", str(item["id"]), provider=provider
+                    )
                     found = page.get("track") if isinstance(page, dict) else None
                     name = clean_title(_text((found or {}).get("name")))
                     if name:
@@ -700,7 +726,9 @@ class ExtensionMetadataClient:
             )
         ]
 
-    async def _track_from_its_album(self, item: dict) -> TrackMetadata | None:
+    async def _track_from_its_album(
+        self, item: dict, provider: Any = None
+    ) -> TrackMetadata | None:
         """The track as its album lists it, when the album does.
 
         A track page is where these extensions scrape worst — Bugs' yields
@@ -716,7 +744,7 @@ class ExtensionMetadataClient:
         if not raw_id or not album_id or album_id == raw_id:
             return None
         try:
-            album = await self._call("getAlbum", album_id)
+            album = await self._call("getAlbum", album_id, provider=provider)
         except Exception as exc:
             logger.debug("[catalogue] album %s for track %s: %s", album_id, raw_id, exc)
             return None

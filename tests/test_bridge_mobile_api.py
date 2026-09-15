@@ -43,6 +43,12 @@ class _Echo(BaseHTTPRequestHandler):
     def _answer(self):
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length).decode() if length else ""
+        if self.path in ("/r302", "/r307", "/r308"):
+            self.send_response(int(self.path[2:]))
+            self.send_header("Location", "/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         payload = json.dumps(
             {
                 "method": self.command,
@@ -243,3 +249,20 @@ def test_put_patch_and_delete_shortcuts(net_js, server) -> None:
     assert json.loads(net_js(f"http.patch({url}, 'x')")["body"])["method"] == "PATCH"
     gone = json.loads(net_js(f"http.delete({url}, {{'X-Test': 'd'}})")["body"])
     assert (gone["method"], gone["x"], gone["body"]) == ("DELETE", "d", "")
+
+
+def test_307_and_308_repeat_the_request_302_turns_it_into_a_get(net_js, server) -> None:
+    for code in ("307", "308"):
+        moved = json.loads(
+            net_js(f"http.post({json.dumps(server + '/r' + code)}, 'a=1')")["body"]
+        )
+        assert (moved["method"], moved["body"]) == ("POST", "a=1"), code
+        put = json.loads(
+            net_js(f"http.put({json.dumps(server + '/r' + code)}, 'p')")["body"]
+        )
+        assert (put["method"], put["body"]) == ("PUT", "p"), code
+
+    found = json.loads(
+        net_js(f"http.post({json.dumps(server + '/r302')}, 'a=1')")["body"]
+    )
+    assert (found["method"], found["body"]) == ("GET", "")

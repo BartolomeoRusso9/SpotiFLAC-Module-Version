@@ -689,7 +689,12 @@ function nodeHttpRequest(method, rawUrl, body, headers, _depth = 0) {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && loc) {
         const next = loc.startsWith('http') ? loc : `${u.protocol}//${u.host}${loc}`;
         res.resume();
-        resolve(nodeHttpRequest('GET', next, null, headers, _depth + 1));
+        // 307 and 308 exist to say "repeat this exact request there": same
+        // method, same body. 301/302/303 become a GET, as browsers do — a
+        // HEAD stays a HEAD, since it never had a body to lose.
+        const repeat = res.statusCode === 307 || res.statusCode === 308;
+        const nextMethod = repeat || method === 'HEAD' ? method : 'GET';
+        resolve(nodeHttpRequest(nextMethod, next, repeat ? body : null, headers, _depth + 1));
         return;
       }
       res.setEncoding('utf8');

@@ -1134,11 +1134,11 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
             "<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n"
-            '<script src="/web-shim.js?v=20260923"></script>\n'
+            '<script src="/web-shim.js?v=20260924"></script>\n'
         )
         html = html.replace(
-            '<script src="toast-system.js?v=20260923"></script>',
-            inject + '<script src="toast-system.js?v=20260923"></script>',
+            '<script src="toast-system.js?v=20260924"></script>',
+            inject + '<script src="toast-system.js?v=20260924"></script>',
         )
         # Marks the document as browser-served before the first paint, so CSS
         # can drop the chrome that only makes sense in the pywebview window

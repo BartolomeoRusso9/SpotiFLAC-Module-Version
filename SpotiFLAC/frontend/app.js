@@ -3031,6 +3031,9 @@ function renderCodeResults(results) {
 }
 
 window.app_handle_provider_search_results = function(results) {
+  // An answer to a search that has since been replaced — typed over, its
+  // source switched, its box cleared — must not paint over the newer one.
+  if (!isCurrentSearchRequest(results)) return;
   const isSearchMode = $('searchMode')?.value === 'search';
   if (!isSearchMode) { 
     return; 
@@ -3203,6 +3206,10 @@ function onSearchResultClick(url) {
 }
 
 window.app_handle_provider_search_error = function(message) {
+  if (message && typeof message === 'object') {
+    if (!isCurrentSearchRequest(message)) return;
+    message = message.message;
+  }
   clearSearchUI();
   setFetchingState('error');
   $('track-rows').innerHTML = `<div class="queue-empty">Provider search failed.</div>`;
@@ -4155,7 +4162,7 @@ async function onFetch() {
     currentUrl = url;
 
     if (window.pywebview?.api) {
-      window.pywebview.api.search_provider_async(url, 50, currentSearchSource())
+      window.pywebview.api.search_provider_async(url, 50, currentSearchSource(), nextSearchRequest())
         .then(() => {
           setStatus(`Searching "${url}"...`, true);
         })
@@ -5404,6 +5411,26 @@ window.addEventListener('beforeunload', function (e) {
 let _searchDebounceTimer = null;
 let _lastSearchQuery = '';
 
+// Every provider search gets a number, and only the newest one's answer is
+// shown. Searches overlap all the time — a debounced keystroke, a source
+// switch re-running the query — and whichever backend call finished last used
+// to win, so a slow Spotify answer could replace the Melon results asked for
+// after it.
+let _searchRequestSeq = 0;
+let _activeSearchRequest = 0;
+
+function nextSearchRequest() {
+  _searchRequestSeq += 1;
+  _activeSearchRequest = _searchRequestSeq;
+  return _activeSearchRequest;
+}
+
+function isCurrentSearchRequest(payload) {
+  const id = payload && typeof payload === 'object' ? payload.request_id : undefined;
+  // No id: a backend that does not send one — nothing to compare, keep it.
+  return id === undefined || id === null || id === _activeSearchRequest;
+}
+
 $('urlInput').addEventListener('input', function() {
   const mode = $('searchMode').value;
   if (mode !== 'search') return;
@@ -5414,6 +5441,7 @@ $('urlInput').addEventListener('input', function() {
   if (!query) {
     clearSearchUI();
     _lastSearchQuery = '';
+    nextSearchRequest(); // whatever is still out answers a box that is now empty
     clearTimeout(_searchDebounceTimer);
     const container = $('text-search-results');
     if (container) container.innerHTML = '';
@@ -5448,7 +5476,7 @@ $('urlInput').addEventListener('input', function() {
     // END CHANGE
 
     if (window.pywebview?.api) {
-      window.pywebview.api.search_provider_async(query, 50, currentSearchSource()).catch(e => {
+      window.pywebview.api.search_provider_async(query, 50, currentSearchSource(), nextSearchRequest()).catch(e => {
         logMessage('Real-time search error: ' + e, 'error');
       });
     }

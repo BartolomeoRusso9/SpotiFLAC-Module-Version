@@ -182,6 +182,23 @@ def test_every_installed_extension_that_implements_enrich_track_takes_part(
     assert ext_enrich.enrichment_extensions(manager) == ["melon-music", "tidal-web"]
 
 
+def test_an_extension_shipping_both_runtimes_enriches_through_its_javascript(
+    tmp_path,
+) -> None:
+    """`runtime` answers "python" for it, and its entry point is the Python
+    file — but enrichTrack runs in the JavaScript runtime, from index.js."""
+    ext = _installed("merged", ["metadata_provider"], root=tmp_path)
+    ext.manifest["runtimes"] = ["python", "javascript"]
+    ext.manifest["entryPoints"] = {"python": "merged.py", "javascript": "index.js"}
+    (ext.ext_dir / "merged.py").write_text("# no enrichTrack here\n")
+    assert ext.runtime == "python"
+    assert ext_enrich.can_enrich(ext) is True
+
+    python_only = _installed("py-only", ["metadata_provider"], root=tmp_path)
+    python_only.manifest["runtimes"] = ["python"]
+    assert ext_enrich.can_enrich(python_only) is False
+
+
 def test_an_updated_extension_is_read_again(tmp_path) -> None:
     import os
 
@@ -427,6 +444,48 @@ def test_qobuz_on_another_release_keeps_recording_fields_only(monkeypatch) -> No
         "The Weeknd; Max Martin",
     )
     assert (out.label, out.upc, out.copyright, out.total_tracks) == ("", "", "", 0)
+
+
+def test_a_lookup_answering_with_another_isrc_is_ignored(monkeypatch) -> None:
+    """Qobuz's ISRC lookup is a search, and returns its nearest hit."""
+    nearest = {**QOBUZ_TRACK, "isrc": "USUG11904999"}
+    out = asyncio.run(
+        _qobuz(monkeypatch, nearest).fetch_async(
+            "USUG11904206", "After Hours", "Blinding Lights"
+        )
+    )
+    assert out.as_tags() == {}
+    # Written differently, the same code is still the same code.
+    same = {**QOBUZ_TRACK, "isrc": "usug11904206"}
+    out = asyncio.run(
+        _qobuz(monkeypatch, same).fetch_async(
+            "USUG11904206", "After Hours", "Blinding Lights"
+        )
+    )
+    assert out.composer == "Max Martin"
+
+    class _Response:
+        status_code = 200
+        is_success = True
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    class _Client:
+        async def get(self, url, timeout=None, headers=None):
+            return _Response({"title": "Blinding Lights", "isrc": "USUG11904999"})
+
+    async def client_safe():
+        return _Client()
+
+    monkeypatch.setattr(me.NetworkManager, "get_async_client_safe", client_safe)
+    deezer = asyncio.run(
+        me._DeezerMeta().fetch_async("USUG11904206", "After Hours", "Blinding Lights")
+    )
+    assert deezer.as_tags() == {}
 
 
 def test_a_wrong_isrc_does_not_bring_a_stranger_s_credits(monkeypatch) -> None:

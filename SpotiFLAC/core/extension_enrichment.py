@@ -110,7 +110,10 @@ def implements_enrich_track(ext: Any) -> bool:
     extension without the function answers the call with an error anyway.
     """
     try:
-        path = Path(ext.entry_point)
+        # index.js, not entry_point: an extension shipping both runtimes
+        # reports its Python file as entry_point, while the JavaScript
+        # runtime that enrichTrack runs in always loads index.js.
+        path = Path(ext.index_js)
         mtime = path.stat().st_mtime
     except (OSError, AttributeError):
         return False
@@ -128,11 +131,22 @@ def implements_enrich_track(ext: Any) -> bool:
     return found
 
 
+def _has_javascript(ext: Any) -> bool:
+    """Whether the extension ships a JavaScript runtime at all. `runtime`
+    answers "python" for one that ships both, so the manifest's list is
+    asked first."""
+    runtimes = (getattr(ext, "manifest", None) or {}).get("runtimes")
+    if isinstance(runtimes, list) and runtimes:
+        return "javascript" in runtimes
+    return ext.runtime == "javascript"
+
+
 def can_enrich(ext: Any) -> bool:
-    """A JavaScript metadata extension that implements enrichTrack — the
-    only kind enrichment asks, and every one of them is asked."""
+    """A metadata extension with a JavaScript runtime that implements
+    enrichTrack — the only kind enrichment asks, and every one of them is
+    asked."""
     return (
-        ext.runtime == "javascript"
+        _has_javascript(ext)
         and "metadata_provider" in (ext.types or [])
         and implements_enrich_track(ext)
     )

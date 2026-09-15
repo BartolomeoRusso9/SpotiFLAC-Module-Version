@@ -194,26 +194,39 @@ class SearchMixin:
             self.log(f"search_provider error: {exc}", "error")
             return empty_results()
 
-    def search_provider_async(self, query, limit=50, source=None):
-        """Starts the search in a thread and pushes the result to the window."""
+    def search_provider_async(self, query, limit=50, source=None, request_id=None):
+        """Starts the search in a thread and pushes the result to the window.
+
+        `request_id` comes back with the result or the error, so the window
+        can drop an answer that arrives after a newer search — typing on, or
+        switching the source, starts another while this one is still out.
+        """
         if not query:
             return {"status": "empty"}
         threading.Thread(
             target=self._search_provider_thread,
-            args=(query, limit, source),
+            args=(query, limit, source, request_id),
             daemon=True,
         ).start()
         return {"status": "started"}
 
-    def _search_provider_thread(self, query, limit, source=None) -> None:
+    def _search_provider_thread(
+        self, query, limit, source=None, request_id=None
+    ) -> None:
         try:
             client = _search_client(source)
             out = shape_search_results(
                 client.search(query, limit=limit), limit, source or "spotify"
             )
         except Exception as exc:
-            self._push_quietly("app_handle_provider_search_error", str(exc))
+            # A bare string without an id, as before, for callers that send none.
+            error: Any = str(exc)
+            if request_id is not None:
+                error = {"message": str(exc), "request_id": request_id}
+            self._push_quietly("app_handle_provider_search_error", error)
             return
+        if request_id is not None:
+            out["request_id"] = request_id
         self._push_quietly("app_handle_provider_search_results", out)
 
     def _push_quietly(self, event: str, payload: Any) -> None:

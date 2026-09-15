@@ -687,3 +687,53 @@ def test_a_title_track_listed_as_its_badge_is_named_from_its_page() -> None:
     # Only the track that needed it cost a page.
     assert calls.count(("getTrack", ("37928381",))) == 1
     assert len(calls) == 2
+
+
+def test_one_link_is_one_provider_however_many_calls_it_takes() -> None:
+    """A track link takes a getTrack and a getAlbum; each used to start its
+    own Node runtime."""
+    bugs = next(s for s in SITES if s.key == "bugs")
+    built, closed = [], []
+
+    class _Provider:
+        def _call(self, method, *args):
+            if method == "getTrack":
+                return {
+                    "success": True,
+                    "track": {"id": "2", "name": "", "album_id": "9"},
+                }
+            return {
+                "id": "9",
+                "name": "Album",
+                "artists": "A",
+                "tracks": [{"id": "2", "name": "Song", "artists": "A"}],
+            }
+
+        def close(self):
+            closed.append(self)
+
+    def factory(name):
+        built.append(name)
+        return _Provider()
+
+    client = ExtensionMetadataClient(
+        "bugs-music", bugs, provider_factory=factory, match_isrcs=False
+    )
+    _name, [track], _cover = asyncio.run(
+        client.get_url_async("https://music.bugs.co.kr/track/2")
+    )
+    assert track.title == "Song"
+    assert len(built) == 1
+    assert len(closed) == 1
+
+
+def test_no_spotify_client_leaves_the_tracks_as_they_are(monkeypatch) -> None:
+    import SpotiFLAC.core.spotify_metadata as spotify_module
+
+    class _Unreachable:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("no session")
+
+    monkeypatch.setattr(spotify_module, "SpotifyMetadataClient", _Unreachable)
+    tracks = [_track("밤편지")]
+    assert asyncio.run(attach_isrcs(tracks, isrc_helper=_Isrc())) is tracks
