@@ -78,7 +78,9 @@ def test_excludes_threads_too() -> None:
                 await asyncio.sleep(0)
                 inside -= 1
 
-    threads = [threading.Thread(target=asyncio.run, args=(_worker(),)) for _ in range(4)]
+    threads = [
+        threading.Thread(target=asyncio.run, args=(_worker(),)) for _ in range(4)
+    ]
     for t in threads:
         t.start()
     for t in threads:
@@ -95,7 +97,10 @@ def test_isrc_cache_across_batches(tmp_path, monkeypatch) -> None:
 
     async def _batch(tag: str) -> list[str]:
         await asyncio.gather(
-            *(isrc_cache.put_cached_isrc_async(f"{tag}{i}", f"us{i:010d}") for i in range(20))
+            *(
+                isrc_cache.put_cached_isrc_async(f"{tag}{i}", f"us{i:010d}")
+                for i in range(20)
+            )
         )
         return await asyncio.gather(
             *(isrc_cache.get_cached_isrc_async(f"{tag}{i}") for i in range(20))

@@ -20,10 +20,18 @@ _SIGNED_INDEX = [key for key, _ in MODES].index("signed")
 
 def _row(key, label, state, expires_in_s=3600.0):
     return {
-        "key": key, "kind": "gateway", "label": label, "extensions": [label],
-        "version": "1.0", "state": state, "expires_at": None,
-        "expires_in_s": expires_in_s, "refresh_after": None, "refresh_in_s": None,
-        "capabilities": [], "auth_paused_s": 0.0,
+        "key": key,
+        "kind": "gateway",
+        "label": label,
+        "extensions": [label],
+        "version": "1.0",
+        "state": state,
+        "expires_at": None,
+        "expires_in_s": expires_in_s,
+        "refresh_after": None,
+        "refresh_in_s": None,
+        "capabilities": [],
+        "auth_paused_s": 0.0,
     }
 
 

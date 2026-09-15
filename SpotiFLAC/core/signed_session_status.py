@@ -106,7 +106,9 @@ def gateway_file_stem(block: dict) -> str | None:
         return None
     app_version = str(block.get("appVersion", "1.0"))
     platform = str(block.get("platform", "extension"))
-    scope = f"{namespace}\n{base_url.lower()}\n{app_version.lower()}\n{platform.lower()}"
+    scope = (
+        f"{namespace}\n{base_url.lower()}\n{app_version.lower()}\n{platform.lower()}"
+    )
     return f"{namespace}-{hashlib.sha256(scope.encode()).hexdigest()[:16]}"
 
 
@@ -164,8 +166,12 @@ def _auth_paused_s(directory: Path, info: dict, now_ts: float) -> float:
         return 0.0
 
 
-def _state(has_credentials: bool, expires: datetime | None, refresh: datetime | None,
-           now: datetime) -> str:
+def _state(
+    has_credentials: bool,
+    expires: datetime | None,
+    refresh: datetime | None,
+    now: datetime,
+) -> str:
     if not has_credentials:
         return UNVERIFIED
     if expires is not None and now >= expires:
@@ -220,16 +226,18 @@ def list_signed_sessions(
                 {
                     "key": stem,
                     "kind": kind,
-                    "label": "Community (signed-desktop)"
-                    if kind == "community"
-                    else "Monochrome",
+                    "label": (
+                        "Community (signed-desktop)"
+                        if kind == "community"
+                        else "Monochrome"
+                    ),
                     "extensions": list(shared[kind]),
                     "version": "",
                     "state": _state(has_credentials, expires, None, now),
                     "expires_at": record.get("expires_at") or None,
-                    "expires_in_s": _seconds_until(expires, now)
-                    if has_credentials
-                    else None,
+                    "expires_in_s": (
+                        _seconds_until(expires, now) if has_credentials else None
+                    ),
                     "refresh_after": None,
                     "refresh_in_s": None,
                     "capabilities": [],
@@ -243,7 +251,9 @@ def list_signed_sessions(
 
         info = gateway_index.get(stem)
         refresh = _parse_time(record.get("refresh_after"))
-        has_credentials = bool(record.get("session_id") and record.get("session_secret"))
+        has_credentials = bool(
+            record.get("session_id") and record.get("session_secret")
+        )
         state = _state(has_credentials, expires, refresh, now)
         if info is None:
             state = ORPHANED
@@ -257,13 +267,21 @@ def list_signed_sessions(
                 "version": info["version"] if info else "",
                 "state": state,
                 "expires_at": record.get("expires_at") or None,
-                "expires_in_s": _seconds_until(expires, now) if has_credentials else None,
+                "expires_in_s": (
+                    _seconds_until(expires, now) if has_credentials else None
+                ),
                 "refresh_after": record.get("refresh_after") or None,
-                "refresh_in_s": _seconds_until(refresh, now) if has_credentials else None,
-                "capabilities": [str(c) for c in capabilities]
-                if isinstance(capabilities, list)
-                else [],
-                "auth_paused_s": _auth_paused_s(directory, info, now_ts) if info else 0.0,
+                "refresh_in_s": (
+                    _seconds_until(refresh, now) if has_credentials else None
+                ),
+                "capabilities": (
+                    [str(c) for c in capabilities]
+                    if isinstance(capabilities, list)
+                    else []
+                ),
+                "auth_paused_s": (
+                    _auth_paused_s(directory, info, now_ts) if info else 0.0
+                ),
             }
         )
 
@@ -358,7 +376,11 @@ def describe_expiry(row: dict) -> str:
     seconds = row.get("expires_in_s")
     if seconds is None:
         return "—"
-    return f"in {format_duration(seconds)}" if seconds > 0 else f"{format_duration(seconds)} ago"
+    return (
+        f"in {format_duration(seconds)}"
+        if seconds > 0
+        else f"{format_duration(seconds)} ago"
+    )
 
 
 def describe_row_detail(row: dict) -> str:

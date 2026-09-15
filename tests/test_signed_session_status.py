@@ -68,8 +68,12 @@ def test_file_stem_matches_what_the_client_writes(tmp_path):
 
 def test_states_and_extension_join(dirs):
     sessions, extensions = dirs
-    _install(extensions, "qobuz-web", {"version": "1.2.15", "signedSession": _block("q@1")})
-    _install(extensions, "tidal-web", {"version": "1.2.6", "signedSession": _block("t@1")})
+    _install(
+        extensions, "qobuz-web", {"version": "1.2.15", "signedSession": _block("q@1")}
+    )
+    _install(
+        extensions, "tidal-web", {"version": "1.2.6", "signedSession": _block("t@1")}
+    )
     _install(extensions, "deezer", {"version": "1.3.5", "signedSession": _block("d@1")})
     _install(extensions, "amazon", {"version": "2.3.8", "signedSession": _block("a@1")})
     _install(
@@ -80,19 +84,45 @@ def test_states_and_extension_join(dirs):
     )
 
     live = {"install_id": "i", "session_id": "s", "session_secret": "secret"}
-    _write(sessions, sss.gateway_file_stem(_block("q@1")) + ".json",
-           {**live, "expires_at": _iso(timedelta(hours=2)),
-            "refresh_after": _iso(timedelta(hours=1)), "capabilities": ["resolve"]})
-    _write(sessions, sss.gateway_file_stem(_block("t@1")) + ".json",
-           {**live, "expires_at": _iso(timedelta(minutes=30)),
-            "refresh_after": _iso(-timedelta(minutes=5))})
-    _write(sessions, sss.gateway_file_stem(_block("a@1")) + ".json",
-           {**live, "expires_at": _iso(-timedelta(hours=1))})
-    _write(sessions, sss.gateway_file_stem(_block("d@1")) + ".json",
-           {"install_id": "i", "session_id": None, "session_secret": None})
-    _write(sessions, sss.gateway_file_stem(_block("q@0")) + ".json",
-           {**live, "expires_at": _iso(timedelta(hours=2))})
-    _write(sessions, sss.COMMUNITY_FILE, {**live, "expires_at": _iso(timedelta(minutes=10))})
+    _write(
+        sessions,
+        sss.gateway_file_stem(_block("q@1")) + ".json",
+        {
+            **live,
+            "expires_at": _iso(timedelta(hours=2)),
+            "refresh_after": _iso(timedelta(hours=1)),
+            "capabilities": ["resolve"],
+        },
+    )
+    _write(
+        sessions,
+        sss.gateway_file_stem(_block("t@1")) + ".json",
+        {
+            **live,
+            "expires_at": _iso(timedelta(minutes=30)),
+            "refresh_after": _iso(-timedelta(minutes=5)),
+        },
+    )
+    _write(
+        sessions,
+        sss.gateway_file_stem(_block("a@1")) + ".json",
+        {**live, "expires_at": _iso(-timedelta(hours=1))},
+    )
+    _write(
+        sessions,
+        sss.gateway_file_stem(_block("d@1")) + ".json",
+        {"install_id": "i", "session_id": None, "session_secret": None},
+    )
+    _write(
+        sessions,
+        sss.gateway_file_stem(_block("q@0")) + ".json",
+        {**live, "expires_at": _iso(timedelta(hours=2))},
+    )
+    _write(
+        sessions,
+        sss.COMMUNITY_FILE,
+        {**live, "expires_at": _iso(timedelta(minutes=10))},
+    )
 
     rows = {r["label"]: r for r in sss.list_signed_sessions(sessions, extensions, NOW)}
 
@@ -115,10 +145,21 @@ def test_states_and_extension_join(dirs):
 
 def test_no_row_carries_a_secret(dirs):
     sessions, extensions = dirs
-    _write(sessions, "zarz-v2-0000000000000000.json",
-           {"install_id": "INSTALL", "session_id": "SID", "session_secret": "SECRET",
-            "expires_at": _iso(timedelta(hours=1))})
-    _write(sessions, sss.MONOCHROME_FILE, {"jwt": "JWT", "expires_at": _iso(timedelta(hours=1))})
+    _write(
+        sessions,
+        "zarz-v2-0000000000000000.json",
+        {
+            "install_id": "INSTALL",
+            "session_id": "SID",
+            "session_secret": "SECRET",
+            "expires_at": _iso(timedelta(hours=1)),
+        },
+    )
+    _write(
+        sessions,
+        sss.MONOCHROME_FILE,
+        {"jwt": "JWT", "expires_at": _iso(timedelta(hours=1))},
+    )
 
     dumped = json.dumps(sss.list_signed_sessions(sessions, extensions, NOW))
     for secret in ("INSTALL", "SID", "SECRET", "JWT"):
@@ -132,8 +173,10 @@ def test_backoff_files_are_not_sessions_but_are_reported(dirs):
     stem = sss.gateway_file_stem(block)
     _write(sessions, stem + ".json", {"install_id": "i"})
     client = SignedSessionClient(
-        base_url=block["baseUrl"], namespace=block["namespace"],
-        app_version=block["appVersion"], platform=block["platform"],
+        base_url=block["baseUrl"],
+        namespace=block["namespace"],
+        app_version=block["appVersion"],
+        platform=block["platform"],
         data_dir=str(sessions),
     )
     from SpotiFLAC.core.signed_session_mobile import _auth_backoff_path
@@ -149,12 +192,27 @@ def test_backoff_files_are_not_sessions_but_are_reported(dirs):
 
 def test_clear_keeps_install_id(dirs):
     sessions, _ = dirs
-    _write(sessions, "zarz-v2-aaaaaaaaaaaaaaaa.json",
-           {"install_id": "keep", "session_id": "s", "session_secret": "x",
-            "expires_at": _iso(timedelta(hours=1)), "capabilities": ["resolve"]})
-    _write(sessions, sss.COMMUNITY_FILE,
-           {"install_id": "keep2", "session_id": "s", "session_secret": "x",
-            "expires_at": _iso(timedelta(hours=1))})
+    _write(
+        sessions,
+        "zarz-v2-aaaaaaaaaaaaaaaa.json",
+        {
+            "install_id": "keep",
+            "session_id": "s",
+            "session_secret": "x",
+            "expires_at": _iso(timedelta(hours=1)),
+            "capabilities": ["resolve"],
+        },
+    )
+    _write(
+        sessions,
+        sss.COMMUNITY_FILE,
+        {
+            "install_id": "keep2",
+            "session_id": "s",
+            "session_secret": "x",
+            "expires_at": _iso(timedelta(hours=1)),
+        },
+    )
 
     assert sss.clear_signed_session("zarz-v2-aaaaaaaaaaaaaaaa", sessions)
     assert sss.clear_signed_session("community_sessions", sessions)
@@ -164,8 +222,12 @@ def test_clear_keeps_install_id(dirs):
     assert gateway["session_secret"] is None
     assert gateway["capabilities"] == []
     community = json.loads((sessions / sss.COMMUNITY_FILE).read_text())
-    assert community == {"install_id": "keep2", "session_id": "",
-                         "session_secret": "", "expires_at": ""}
+    assert community == {
+        "install_id": "keep2",
+        "session_id": "",
+        "session_secret": "",
+        "expires_at": "",
+    }
     assert (sessions / sss.COMMUNITY_FILE).stat().st_mode & 0o077 == 0
 
 
@@ -196,8 +258,14 @@ def test_missing_directory_is_empty(tmp_path):
 
 @pytest.mark.parametrize(
     ("seconds", "text"),
-    [(None, "—"), (40, "40s"), (720, "12m"), (7500, "2h 05m"), (-7500, "2h 05m"),
-     (90000, "1d 01h")],
+    [
+        (None, "—"),
+        (40, "40s"),
+        (720, "12m"),
+        (7500, "2h 05m"),
+        (-7500, "2h 05m"),
+        (90000, "1d 01h"),
+    ],
 )
 def test_format_duration(seconds, text):
     assert sss.format_duration(seconds) == text

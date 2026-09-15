@@ -2269,9 +2269,7 @@ async def amain() -> None:
 
         if ss_args.signed_sessions_clear:
             if not sss.clear_signed_session(ss_args.signed_sessions_clear):
-                print(
-                    f"No signed session with key '{ss_args.signed_sessions_clear}'."
-                )
+                print(f"No signed session with key '{ss_args.signed_sessions_clear}'.")
                 sys.exit(1)
             print(f"Cleared {ss_args.signed_sessions_clear}.")
         if ss_args.signed_sessions_prune:
