@@ -203,6 +203,13 @@ ALLOWED_METHODS: set[str] = {
     # Extension health (read-only, plus a counter reset).
     "get_extension_health",
     "reset_extension_health",
+    # Signed sessions (core/signed_session_status.py). The listing never
+    # carries a secret; clearing and pruning only drop credentials the next
+    # request re-verifies, and in multi-user mode are refused to non-admins
+    # (see api_mixins/signed_sessions.py).
+    "get_signed_sessions",
+    "clear_signed_session",
+    "prune_signed_sessions",
     # The dashboard (core/stats.py). Read-only, and in multi-user mode it is
     # the calling account's own history: each account gets its own Api
     # instance, and `owner` is set on it above.
@@ -1134,11 +1141,11 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
             "<script>window.__SPOTIFLAC_WEB_MODE__ = true;</script>\n"
-            '<script src="/web-shim.js?v=20260924"></script>\n'
+            '<script src="/web-shim.js?v=20260926"></script>\n'
         )
         html = html.replace(
-            '<script src="toast-system.js?v=20260924"></script>',
-            inject + '<script src="toast-system.js?v=20260924"></script>',
+            '<script src="toast-system.js?v=20260926"></script>',
+            inject + '<script src="toast-system.js?v=20260926"></script>',
         )
         # Marks the document as browser-served before the first paint, so CSS
         # can drop the chrome that only makes sense in the pywebview window

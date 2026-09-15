@@ -11,6 +11,7 @@ import json
 import logging
 import time
 
+from .cross_loop_lock import CrossLoopLock
 from .paths import cache_path
 
 try:
@@ -21,15 +22,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 _CACHE_FILE = cache_path("isrc-cache.json")
-_cache_lock: asyncio.Lock | None = None
+#: Not an asyncio.Lock: this cache is shared by every download, and under
+#: --web each one runs its own event loop. See core/cross_loop_lock.py.
+_cache_lock = CrossLoopLock()
 _cache: dict[str, dict] | None = None
 
 
-async def _get_lock() -> asyncio.Lock:
-    """Get or create the asyncio.Lock for cache access."""
-    global _cache_lock
-    if _cache_lock is None:
-        _cache_lock = asyncio.Lock()
+async def _get_lock() -> CrossLoopLock:
     return _cache_lock
 
 

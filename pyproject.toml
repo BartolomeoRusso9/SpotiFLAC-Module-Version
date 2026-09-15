@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "4.2.1"
+version = "4.2.2"
 description = "Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends."
 readme = "README.md"
 # 3.10, not 3.9: core/models.py declares PEP 604 unions (`str | None`) on
@@ -16,7 +16,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    { name=" BartolomeoRusso9, ShuKurenais" }
+    { name=" BartolomeoRusso9" }
 ]
 
 keywords = [

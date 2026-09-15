@@ -8,7 +8,6 @@ import io
 import logging
 import os
 import sys
-import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -18,6 +17,7 @@ from tqdm import tqdm
 from typing_extensions import Self
 
 from .console import print_track_progress
+from .cross_loop_lock import CrossLoopLock
 from .output_sink import STDERR, STDOUT, emit, sink_active, use_thread_only_tqdm_lock
 
 # tqdm.get_lock() remains the native tqdm lock (this is not our own hack;
@@ -362,7 +362,7 @@ class DownloadItem:
     cover_url: str = ""
 
 
-class _CrossLoopLock:
+class _CrossLoopLock(CrossLoopLock):
     """A mutex that survives more than one event loop.
 
     asyncio.Lock binds itself to the loop that first awaits it and raises
@@ -381,29 +381,9 @@ class _CrossLoopLock:
         RuntimeError: <asyncio.locks.Lock ...> is bound to a different
         event loop
 
-    A threading.Lock has no loop affinity. It is acquired without blocking
-    and the caller yields while it is busy, so the loop is never held up —
-    and every critical section it guards is a short synchronous mutation
-    with no await in it, so contention is brief by construction.
+    The implementation now lives in core/cross_loop_lock.py, shared with
+    every other process-wide lock that had the same bug.
     """
-
-    def __init__(self, poll_interval: float = 0.01) -> None:
-        self._lock = threading.Lock()
-        self._poll_interval = poll_interval
-
-    async def __aenter__(self) -> _CrossLoopLock:
-        # A plain yield first: an uncontended lock is the overwhelmingly
-        # common case, and a contended one is usually free again within a
-        # single tick, so the poll interval should be the exception.
-        if not self._lock.acquire(blocking=False):
-            await asyncio.sleep(0)
-            while not self._lock.acquire(blocking=False):
-                await asyncio.sleep(self._poll_interval)
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> bool:
-        self._lock.release()
-        return False
 
 
 class DownloadBroadcaster:

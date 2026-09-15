@@ -156,6 +156,7 @@ function switchTab(name, btn) {
     loadDirectories();
     loadTrustedKeys();
     loadExtensionHealth();
+    loadSignedSessions();
   }
 }
 
@@ -6397,6 +6398,154 @@ async function resetExtensionHealth() {
   } catch (e) {
     showToast('Could not clear the statistics.', 'error');
   }
+}
+
+// ── Signed sessions (core/signed_session_status.py) ───────────────────────
+//
+// Read from disk, no network. The expiry is sent as seconds-from-now and
+// counted down here, re-anchored on every load, so an open tab stays honest
+// without polling the backend.
+
+let signedSessionsTimer = null;
+
+const SIGNED_STATE = {
+  active: ['active', 'var(--green, #1ed760)'],
+  refresh_due: ['refresh due', 'var(--yellow, #f0c674)'],
+  expired: ['expired', 'var(--red)'],
+  unverified: ['not verified', 'var(--muted)'],
+  orphaned: ['orphaned', 'var(--muted)'],
+};
+
+function signedDuration(seconds) {
+  // Rounded, not truncated: the first tick runs a few ms after the load, and
+  // truncating 7499.99 turned a fresh "2h 05m" into "2h 04m" on sight.
+  let s = Math.abs(Math.round(seconds));
+  const d = Math.floor(s / 86400); s %= 86400;
+  const h = Math.floor(s / 3600); s %= 3600;
+  const m = Math.floor(s / 60);
+  if (d) return `${d}d ${String(h).padStart(2, '0')}h`;
+  if (h) return `${h}h ${String(m).padStart(2, '0')}m`;
+  if (m) return `${m}m`;
+  return `${s % 60}s`;
+}
+
+async function loadSignedSessions() {
+  const list = $('signed-sessions-list');
+  if (!list) return;
+  if (!window.pywebview?.api?.get_signed_sessions) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;">Signed sessions are unavailable in this build.</div>';
+    return;
+  }
+  try {
+    renderSignedSessions(await window.pywebview.api.get_signed_sessions());
+  } catch (e) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">Unable to load signed sessions.</div>';
+  }
+}
+
+function renderSignedSessions(data) {
+  const list = $('signed-sessions-list');
+  if (!list) return;
+  if (signedSessionsTimer) { clearInterval(signedSessionsTimer); signedSessionsTimer = null; }
+
+  if (data?.error) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;color:var(--red);">' + regEscapeHtml(data.error) + '</div>';
+    return;
+  }
+  const rows = data?.sessions || [];
+  if (!rows.length) {
+    list.innerHTML = '<div class="s-label" style="font-size:11.5px;">No signed sessions stored yet — one is created the first time an extension needs it.</div>';
+    return;
+  }
+
+  const loadedAt = Date.now();
+  list.innerHTML = rows.map((r, i) => {
+    const [stateLabel, colour] = SIGNED_STATE[r.state] || [r.state, 'var(--muted)'];
+    const version = r.version ? ' · v' + regEscapeHtml(r.version) : '';
+    const details = [];
+    if (r.kind !== 'gateway' && r.extensions?.length) details.push('used by ' + r.extensions.join(', '));
+    if (r.state === 'orphaned') details.push('no installed extension uses it');
+    if (r.capabilities?.length) details.push(r.capabilities.join(', '));
+    if (r.auth_paused_s) details.push('verification paused ' + signedDuration(r.auth_paused_s));
+    const clearBtn = r.state === 'unverified' ? '' :
+      `<button class="act-btn secondary" type="button" style="padding:4px 10px;font-size:11px;" data-signed-clear="${regEscapeHtml(r.key)}" title="Drop this session so the next request verifies again.">Clear</button>`;
+    return `
+      <div class="sort-item reg-item">
+        <div class="reg-item-main">
+          <span class="reg-url">${regEscapeHtml(r.label)}${version}</span>
+          <div class="s-label" style="font-size:11px;" data-signed-expiry="${i}"></div>
+          ${details.length ? `<div class="s-label" style="font-size:11px;">${regEscapeHtml(details.join(' · '))}</div>` : ''}
+        </div>
+        <span style="display:flex;align-items:center;gap:8px;">
+          <span style="font-weight:600;font-size:12px;color:${colour};">${regEscapeHtml(stateLabel)}</span>
+          ${clearBtn}
+        </span>
+      </div>`;
+  }).join('');
+  list.querySelectorAll('[data-signed-clear]').forEach(btn => {
+    btn.addEventListener('click', () => clearSignedSession(btn.dataset.signedClear));
+  });
+
+  const tick = () => {
+    const elapsed = (Date.now() - loadedAt) / 1000;
+    let lapsed = false;
+    rows.forEach((r, i) => {
+      const el = list.querySelector(`[data-signed-expiry="${i}"]`);
+      if (!el) return;
+      if (r.expires_in_s === null || r.expires_in_s === undefined) {
+        el.textContent = r.state === 'unverified' ? 'Verifies on first use' : 'No expiry recorded';
+        return;
+      }
+      const left = r.expires_in_s - elapsed;
+      if (r.expires_in_s > 0 && left <= 0) lapsed = true;
+      let text = left > 0 ? 'Expires in ' + signedDuration(left) : 'Expired ' + signedDuration(left) + ' ago';
+      if (r.state === 'active' && r.refresh_in_s !== null && r.refresh_in_s !== undefined) {
+        const refresh = r.refresh_in_s - elapsed;
+        if (r.refresh_in_s > 0 && refresh <= 0) lapsed = true;
+        text += refresh > 0 ? ' · refresh in ' + signedDuration(refresh) : ' · refresh due';
+      }
+      el.textContent = text;
+    });
+    // A session crossed its expiry while the tab was open: the state badge is
+    // now wrong, so re-read rather than recolour on the client's guess.
+    if (lapsed) loadSignedSessions();
+  };
+  tick();
+  signedSessionsTimer = setInterval(() => {
+    if (!document.body.contains(list) || !$('tc-extensions')?.classList.contains('active')) {
+      clearInterval(signedSessionsTimer); signedSessionsTimer = null;
+      return;
+    }
+    tick();
+  }, 1000);
+}
+
+async function clearSignedSession(key) {
+  if (!confirm('Clear this signed session? The next request that needs it will verify again.')) return;
+  try {
+    const res = await window.pywebview.api.clear_signed_session(key);
+    if (res?.ok) showToast('Signed session cleared.');
+    else showToast(res?.error || 'Could not clear the session.', 'error');
+  } catch (e) {
+    showToast('Could not clear the session.', 'error');
+  }
+  loadSignedSessions();
+}
+
+async function pruneSignedSessions() {
+  if (!confirm('Delete the session files no installed extension uses?')) return;
+  try {
+    const res = await window.pywebview.api.prune_signed_sessions();
+    if (res?.ok) {
+      const n = res.removed?.length || 0;
+      showToast(n ? `Removed ${n} orphaned session${n === 1 ? '' : 's'}.` : 'No orphaned sessions to remove.');
+    } else {
+      showToast(res?.error || 'Could not remove orphaned sessions.', 'error');
+    }
+  } catch (e) {
+    showToast('Could not remove orphaned sessions.', 'error');
+  }
+  loadSignedSessions();
 }
 
 // ── Your library, in numbers (core/stats.py) ──────────────────────────────

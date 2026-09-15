@@ -26,10 +26,11 @@ its DNS server would be useless in exactly the situation it exists for.
 
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import logging
 import time
+
+from .cross_loop_lock import CrossLoopLock
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,8 @@ DOH_ENDPOINTS = (
 _TTL_S = 300.0
 
 _cache: dict[str, tuple[float, list[str]]] = {}
-_cache_lock = asyncio.Lock()
+#: Shared by every download, each possibly on its own event loop.
+_cache_lock = CrossLoopLock()
 
 
 def _is_public(address: str) -> bool:

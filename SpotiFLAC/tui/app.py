@@ -56,6 +56,7 @@ from .queue_view import QueuePanel
 from .search_view import SearchPanel
 from .tracklist_view import TracklistPanel
 from .session_view import SessionPanel
+from .signed_sessions_view import SignedSessionsPanel
 from .runner import FAILED, FINISHED, OUTPUT, STATS, DownloadRunner
 
 #: Sidebar entries: (id, label), in the order the work is usually done.
@@ -67,6 +68,7 @@ MODES: tuple[tuple[str, str], ...] = (
     ("session", "Session"),
     ("extensions", "Extensions"),
     ("health", "Health"),
+    ("signed", "Signed"),
     ("command", "Command"),
 )
 
@@ -95,6 +97,7 @@ PANEL_TITLES: dict[str, tuple[str, str]] = {
     "session": ("Session", "history · profiles"),
     "extensions": ("Extensions", "registries"),
     "health": ("Health", "providers"),
+    "signed": ("Signed sessions", "--signed-sessions"),
     "command": ("Equivalent command", "Ctrl+Y to copy"),
 }
 
@@ -186,6 +189,7 @@ class SpotiFLACTui(App[None]):
                     yield SessionPanel(lambda: self.state, id="session")
                     yield ExtensionsPanel(self._min_trust_tier, id="extensions")
                     yield HealthPanel(id="health")
+                    yield SignedSessionsPanel(id="signed")
                     yield Static(id="command", classes="command-panel")
                 yield Container(
                     # `min_width` is not a minimum for the widget, it is the
