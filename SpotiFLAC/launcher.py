@@ -741,6 +741,27 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         help="Probe direct lyrics-provider servers for reachability and exit "
         "(no download). Optionally narrow the check with --lyrics-providers.",
     )
+    parser.add_argument(
+        "--signed-sessions",
+        action="store_true",
+        default=False,
+        help="List the stored signed sessions (gateway, Community, Monochrome): "
+        "which extension each belongs to, its state and when it expires, then exit.",
+    )
+    parser.add_argument(
+        "--signed-sessions-clear",
+        metavar="KEY",
+        default=None,
+        help="Drop the credentials of one signed session (KEY as shown by "
+        "--signed-sessions), so the next request verifies again, then exit.",
+    )
+    parser.add_argument(
+        "--signed-sessions-prune",
+        action="store_true",
+        default=False,
+        help="Delete signed-session files no installed extension uses any more "
+        "(left behind by extension updates), then exit.",
+    )
 
     # ── Profile ─────────────────────────────────────────────────────────────
     trust_grp = parser.add_argument_group("Extension trust")
@@ -2226,6 +2247,42 @@ async def amain() -> None:
             print(
                 f"{user['username']}  [{user['role']}]  {tracks} tracks/day, {size}/day"
             )
+        return
+
+    if any(
+        arg == flag or arg.startswith(flag + "=")
+        for arg in sys.argv[1:]
+        for flag in (
+            "--signed-sessions",
+            "--signed-sessions-clear",
+            "--signed-sessions-prune",
+        )
+    ):
+        # allow_abbrev=False: otherwise a bare --signed-sessions is an
+        # "ambiguous option" between the other two.
+        ss_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        ss_parser.add_argument("--signed-sessions-clear", default=None)
+        ss_parser.add_argument("--signed-sessions-prune", action="store_true")
+        ss_args, _ = ss_parser.parse_known_args(sys.argv[1:])
+
+        from .core import signed_session_status as sss
+
+        if ss_args.signed_sessions_clear:
+            if not sss.clear_signed_session(ss_args.signed_sessions_clear):
+                print(
+                    f"No signed session with key '{ss_args.signed_sessions_clear}'."
+                )
+                sys.exit(1)
+            print(f"Cleared {ss_args.signed_sessions_clear}.")
+        if ss_args.signed_sessions_prune:
+            removed = sss.prune_orphaned_sessions()
+            print(
+                f"Removed {len(removed)} orphaned session file(s)"
+                + (": " + ", ".join(removed) if removed else ".")
+            )
+        if ss_args.signed_sessions_clear or ss_args.signed_sessions_prune:
+            print()
+        sss.print_signed_sessions_report(sss.list_signed_sessions())
         return
 
     if "--health-check" in sys.argv:

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from . import get_amazon_endpoint
+from .cross_loop_lock import CrossLoopLock
 from .http import NetworkManager
 from .response_cache import get as get_cached_response
 from .response_cache import put as put_cached_response
@@ -183,15 +184,12 @@ _LYRICS_MISS_CACHE_TTL = 6 * 60 * 60
 # ---------------------------------------------------------------------------
 
 _spotify_session_cache: dict[str, object] = {}
-_spotify_token_lock: asyncio.Lock | None = None
+#: Every track's lyrics lookup goes through here, from whichever event loop
+#: that download runs on — an asyncio.Lock would bind to the first one.
+_spotify_token_lock = CrossLoopLock()
 
 
-async def _get_spotify_lock() -> asyncio.Lock:
-    global _spotify_token_lock
-
-    if _spotify_token_lock is None:
-        _spotify_token_lock = asyncio.Lock()
-
+async def _get_spotify_lock() -> CrossLoopLock:
     return _spotify_token_lock
 
 

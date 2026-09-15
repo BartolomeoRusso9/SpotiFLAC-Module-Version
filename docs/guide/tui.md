@@ -225,6 +225,23 @@ opening the panel does not start any network traffic on its own.
 
 `--health-check` does the same thing from the command line.
 
+## The Signed panel
+
+The signed sessions extensions use to talk to their gateway, one row each:
+which extension it belongs to, whether it is active, due for a refresh,
+expired or never verified, and how long until it expires. Nothing here touches
+the network; the table re-reads the files every 30 seconds.
+
+**Clear selected** drops that session's credentials, so the next request that
+needs it verifies again. **Remove orphaned** deletes session files no
+installed extension uses any more. An extension update starts a new session,
+so the old file is never read again.
+
+From the command line: `--signed-sessions` lists them,
+`--signed-sessions-clear KEY` clears one, and `--signed-sessions-prune`
+removes the orphaned ones. The desktop and web GUI show the same list under
+**Extensions → Signed Sessions**.
+
 ## The Command panel
 
 The `spotiflac …` invocation that would do exactly what the form is set up to

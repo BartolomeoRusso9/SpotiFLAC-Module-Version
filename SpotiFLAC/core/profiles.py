@@ -16,12 +16,14 @@ import time
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from .cross_loop_lock import CrossLoopLock
 from .paths import adopt_legacy_cache_file, cache_path
 
 logger = logging.getLogger(__name__)
 
-# Using asyncio.Lock instead of threading.Lock so it doesn't block the event loop
-_io_lock = asyncio.Lock()
+# Doesn't block the event loop, and — unlike an asyncio.Lock — works from
+# every loop this process runs. See core/cross_loop_lock.py.
+_io_lock = CrossLoopLock()
 _PROFILES_FILE = cache_path("profiles.json")
 
 

@@ -24,6 +24,7 @@ from .api_mixins.extension_health import ExtensionHealthMixin
 from .api_mixins.failed_tracks import FailedTracksMixin
 from .api_mixins.local_tagging import LocalTaggingMixin
 from .api_mixins.search import SearchMixin
+from .api_mixins.signed_sessions import SignedSessionsMixin
 from .api_mixins.stats import StatsMixin
 from .api_mixins.subscriptions import SubscriptionsMixin
 from .api_mixins.trust import TrustMixin
@@ -176,6 +177,7 @@ class SpotiFLAC_API(
     CsvImportMixin,
     StatsMixin,
     FailedTracksMixin,
+    SignedSessionsMixin,
 ):
     """pywebview/`--web` bridge — every method here (plus the two mixins
     above) becomes a callable the frontend invokes as `pywebview.api.<name>`

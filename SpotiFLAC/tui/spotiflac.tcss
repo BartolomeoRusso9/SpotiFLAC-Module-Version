@@ -434,6 +434,7 @@ ProgressBar > Bar > .bar--indeterminate {
 #search-query { margin-bottom: 1; }
 #search-status,
 #health-status,
+#signed-status,
 #registry-status,
 #session-status {
     padding: 1 0;
@@ -442,6 +443,7 @@ ProgressBar > Bar > .bar--indeterminate {
 
 #search-results,
 #health-table,
+#signed-table,
 #registry-table {
     height: auto;
     max-height: 20;

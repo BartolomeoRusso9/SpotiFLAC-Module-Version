@@ -17,7 +17,7 @@
        tells itself apart from --web. Harmless to load in the desktop
        pywebview window too: manifest/theme-color are simply unused there,
        and the registration script below no-ops without that flag. -->
-  <link rel="manifest" href="manifest.json?v=20260924">
+  <link rel="manifest" href="manifest.json?v=20260925">
   <meta name="theme-color" content="#0a0a0c">
   <!-- apple-mobile-web-app-capable is the legacy spelling Safari still reads;
        mobile-web-app-capable is the standard one everything else reads. Both,
@@ -37,7 +37,7 @@
   <link rel="icon" type="image/svg+xml" href="assets/icons/logo.svg">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/logo-192.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260924">
+  <link rel="stylesheet" href="styles.css?v=20260925">
   <script>
     // Theme, applied before the first paint. app.js used to do this only from
     // its 'pywebviewready' handler, which meant the window painted light and
@@ -1001,6 +1001,23 @@
           </div>
 
           <div class="s-section">
+            <div class="s-title">Signed Sessions</div>
+            <p style="font-size:12px;color:var(--muted);margin:-4px 0 12px;line-height:1.6;">
+              The verified sessions extensions use to talk to their gateway, and when
+              each one expires. An expired session is renewed with a new verification
+              the next time it is needed. <em>Orphaned</em> ones were left behind by an
+              extension update and are never used again.
+            </p>
+            <div class="s-row" style="align-items:stretch;gap:8px;">
+              <button class="act-btn secondary" type="button" onclick="loadSignedSessions()" style="padding:8px 16px;font-size:12px;">Refresh</button>
+              <button class="act-btn secondary" type="button" onclick="pruneSignedSessions()" style="padding:8px 16px;font-size:12px;" title="Delete session files no installed extension uses any more.">Remove orphaned</button>
+            </div>
+            <div id="signed-sessions-list" class="sort-list" style="margin-top:12px;">
+              <div class="s-label" style="font-size:11.5px;">Loading signed sessions…</div>
+            </div>
+          </div>
+
+          <div class="s-section">
             <div class="s-title">Extension Registries</div>
             <p style="font-size:12px;color:var(--muted);margin:-4px 0 12px;line-height:1.6;">
               Registry URLs tell SpotiFLAC where to look for installable extensions. Sources
@@ -1214,8 +1231,8 @@
           <div id="queue-counter"><span id="q-count">0 tracks</span><span id="q-done"></span></div>
         </div>
       </div>
-  <script src="toast-system.js?v=20260924"></script>
-  <script src="app.js?v=20260924"></script>
+  <script src="toast-system.js?v=20260925"></script>
+  <script src="app.js?v=20260925"></script>
   <script>
     // --web mode only (see sw.js's own comment for what the service worker
     // actually does — installability, not offline caching of live data).

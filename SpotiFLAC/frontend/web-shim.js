@@ -176,6 +176,7 @@
     'set_subscription_enabled', 'set_subscription_interval',
     'reset_subscription', 'check_subscriptions',
     'get_extension_health', 'reset_extension_health',
+    'get_signed_sessions', 'clear_signed_session', 'prune_signed_sessions',
     'get_stats',
     'get_failed_tracks', 'retry_failed_tracks', 'clear_failed_tracks',
     // CSV import sends the file's text, read in the browser — never a path.

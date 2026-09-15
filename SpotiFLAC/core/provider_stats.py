@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .atomic_io import write_json_atomic
+from .cross_loop_lock import CrossLoopLock
 from .paths import cache_path
 
 #: Key prefix used by the download path (see downloader.download_one_async),
@@ -145,9 +146,11 @@ class ProviderScorer:
 
     def __init__(self) -> None:
         self._stats: dict[str, _ProviderStats] = {}
-        self._stats_lock = asyncio.Lock()
+        # Cross-loop, not asyncio.Lock: `_scorer` is a process-wide singleton
+        # every download records into, each from its own event loop.
+        self._stats_lock = CrossLoopLock()
         self._initialized = False
-        self._init_lock = asyncio.Lock()
+        self._init_lock = CrossLoopLock()
 
     async def _ensure_initialized(self) -> None:
         """Loads the database only the first time it's requested."""

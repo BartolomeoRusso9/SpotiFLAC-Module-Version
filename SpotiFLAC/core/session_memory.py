@@ -5,11 +5,13 @@ import json
 import logging
 import time
 
+from .cross_loop_lock import CrossLoopLock
 from .paths import adopt_legacy_cache_file, cache_path
 
 logger = logging.getLogger(__name__)
 
-_io_lock = asyncio.Lock()
+#: Called from the GUI's shared loop and from each batch's own asyncio.run().
+_io_lock = CrossLoopLock()
 _SESSION_FILE = cache_path("session.json")
 _MAX_HISTORY = 20
 
