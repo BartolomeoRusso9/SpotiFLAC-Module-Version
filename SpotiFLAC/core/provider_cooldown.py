@@ -36,6 +36,16 @@ _CACHE_FILE_NAME = "provider_cooldowns.json"
 #: extensions/python_provider._module_name.
 _PLUGIN_PREFIX = "SpotiFLAC.extensions_plugins."
 
+#: Logger prefix of the JS `.sflx` extensions. They have no module of their
+#: own — the bridge relays their log lines from Node — so JSRuntime sends
+#: them out under a child logger named for the extension, which is what
+#: makes one extension's 503 tellable from another's.
+_JS_LOG_PREFIX = "SpotiFLAC.extensions.runtime."
+
+#: How a JS extension provider is named in PROVIDER_REGISTRY — see
+#: extensions/provider.JSExtensionProvider.
+_EXT_NAME_PREFIX = "ext:"
+
 _UNAVAILABLE = re.compile(r"\b503\b")
 _WAIT = re.compile(r"try again in (?:about )?(\d+)\s*(minute|min|hour|h)", re.I)
 
@@ -77,20 +87,47 @@ def pause_seconds(message: str) -> int:
     return min(seconds, _MAX_PAUSE_S)
 
 
-def extension_key(module_name: str) -> str:
-    """ "SpotiFLAC.extensions_plugins.tidal_py" → "tidal-py"; "" otherwise."""
-    if not module_name.startswith(_PLUGIN_PREFIX):
-        return ""
-    return module_name[len(_PLUGIN_PREFIX) :].split(".", 1)[0].replace("_", "-")
+def extension_key(logger_name: str) -> str:
+    """The pause key of the extension that logger belongs to; "" for the host.
+
+    Both kinds of extension are keyed by the name they are installed under:
+
+      "SpotiFLAC.extensions_plugins.tidal_py"  → "tidal-py"   (Python)
+      "SpotiFLAC.extensions.runtime.tidal-web" → "tidal-web"  (JS)
+
+    A Python extension is a module, so its underscores are the ones a module
+    name is obliged to have; a JS extension's logger is named for the
+    extension directly and is left alone.
+    """
+    if logger_name.startswith(_PLUGIN_PREFIX):
+        return logger_name[len(_PLUGIN_PREFIX) :].split(".", 1)[0].replace("_", "-")
+    if logger_name.startswith(_JS_LOG_PREFIX):
+        return logger_name[len(_JS_LOG_PREFIX) :].split(".", 1)[0]
+    return ""
 
 
 def provider_key(provider: Any) -> str:
-    """The pause key of a provider object: its extension, if it is a Python one.
+    """The pause key of a provider object, or "" if it is not an extension.
 
-    PythonExtensionProvider returns the extension's own provider instance, so
-    the class's module is the extension module whose logger reported the 503.
+    Two ways to the same key, because the two kinds of extension carry their
+    identity in different places. PythonExtensionProvider returns the
+    extension's own provider instance, so the class's module is the
+    extension module whose logger reported the 503. A JS extension is a
+    JSExtensionProvider whatever the extension is, so its module says
+    nothing about which one — its registry name does: "ext:tidal-web" is the
+    extension "tidal-web", the key its log lines already arrive under.
+
+    Keying both from the installed name is what lets pause() and
+    usable_providers() agree: a pause started from a JS extension's log has
+    to name the provider object that gets skipped for it.
     """
-    return extension_key(type(provider).__module__)
+    key = extension_key(type(provider).__module__)
+    if key:
+        return key
+    name = str(getattr(provider, "name", "") or "")
+    if name.startswith(_EXT_NAME_PREFIX):
+        return name[len(_EXT_NAME_PREFIX) :]
+    return ""
 
 
 def pause(key: str, seconds: float, reason: str = "", now: float | None = None) -> None:

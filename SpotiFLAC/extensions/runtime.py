@@ -88,6 +88,7 @@ class JSRuntime:
         startup_timeout: float = 20.0,
         session_handler: Callable[[str, str, Any, dict], Awaitable[dict]] | None = None,
         cancelled_probe: Callable[[], bool] | None = None,
+        ext_name: str = "",
     ) -> None:
         self.ext_path = Path(ext_path)
         self.settings = settings or {}
@@ -98,6 +99,16 @@ class JSRuntime:
         # never cached here: the point of the probe is that the answer
         # changes underneath a call that is already running.
         self.cancelled_probe = cancelled_probe
+        # The extension's own log lines go out under a logger named for the
+        # extension. A JS extension has no module of its own to be known by,
+        # and the host needs to know *which* one said "503 … try again in
+        # about 51 minute(s)" to keep that one out of the rotation until
+        # then (core/provider_cooldown.py). Unnamed — a bare JSRuntime in a
+        # test — they stay on this module's logger, as they always were.
+        self.ext_name = ext_name
+        self._ext_logger = (
+            logging.getLogger(f"{__name__}.{ext_name}") if ext_name else logger
+        )
 
         self._proc: subprocess.Popen | None = None
         self._seq = 0
@@ -410,7 +421,8 @@ class JSRuntime:
             return
         if msg.get("type") == "log":
             level = msg.get("level", "info")
-            getattr(logger, level, logger.info)("[EXT] %s", msg.get("msg", ""))
+            log = self._ext_logger
+            getattr(log, level, log.info)("[EXT] %s", msg.get("msg", ""))
             return
         if msg.get("type") == "session_signed_fetch":
             self._handle_session_signed_fetch(msg)

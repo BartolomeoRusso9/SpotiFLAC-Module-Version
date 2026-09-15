@@ -20,12 +20,16 @@ import pytest
 from SpotiFLAC import downloader as dl
 from SpotiFLAC.core import provider_cooldown as pc
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from SpotiFLAC.extensions.runtime import JSRuntime
 
 OVERLOADED = (
     'HTTP 503 - {"detail":"The server is overloaded and taking a short break. '
     'Please try again in about 51 minute(s)."}'
 )
 TIDAL_PY = "SpotiFLAC.extensions_plugins.tidal_py"
+#: A JS extension has no module of its own: the bridge relays its log lines
+#: under a child of the runtime logger named for the extension.
+TIDAL_WEB = "SpotiFLAC.extensions.runtime.tidal-web"
 
 
 @pytest.fixture(autouse=True)
@@ -66,6 +70,20 @@ def test_the_key_is_the_python_extension() -> None:
     assert pc.extension_key("SpotiFLAC.extensions.provider") == ""
 
 
+def test_the_key_is_the_js_extension_too() -> None:
+    assert pc.extension_key(TIDAL_WEB) == "tidal-web"
+    # The runtime's own lines name no extension and pause nothing.
+    assert pc.extension_key("SpotiFLAC.extensions.runtime") == ""
+
+
+def test_a_js_runtime_logs_under_the_extension_s_name() -> None:
+    """The other half of the key: what JSRuntime actually names the logger."""
+    rt = JSRuntime(ext_path="index.js", ext_name="tidal-web")
+    assert pc.extension_key(rt._ext_logger.name) == "tidal-web"
+    # Unnamed, it stays on the runtime's own logger and pauses nothing.
+    assert pc.extension_key(JSRuntime(ext_path="index.js")._ext_logger.name) == ""
+
+
 # ---------------------------------------------------------------------------
 # the log watcher
 # ---------------------------------------------------------------------------
@@ -79,6 +97,13 @@ def test_the_extension_s_log_line_starts_the_pause() -> None:
 
     assert 50 * 60 < pc.remaining("tidal-py") <= 51 * 60
     assert (Path(pc._cache_file())).exists()
+
+
+def test_a_js_extension_s_log_line_starts_the_pause() -> None:
+    pc.watch_extension_logs()
+    logging.getLogger(TIDAL_WEB).warning("[EXT] [tidal-web] %s", OVERLOADED)
+
+    assert 50 * 60 < pc.remaining("tidal-web") <= 51 * 60
 
 
 def test_the_same_message_from_the_host_pauses_nothing() -> None:
@@ -112,6 +137,32 @@ class _TidalPy:
 
 class _TidalWeb:
     name = "ext:tidal-web"
+
+
+def test_a_js_provider_is_keyed_by_its_registry_name() -> None:
+    """The key a JS extension's log line carries has to name its provider.
+
+    JSExtensionProvider is the class for every JS extension, so its module
+    says nothing about which one this is; "ext:tidal-web" does.
+    """
+    assert pc.provider_key(_TidalWeb()) == pc.extension_key(TIDAL_WEB) == "tidal-web"
+    assert pc.provider_key(_TidalPy()) == "tidal-py"
+
+
+def test_a_paused_js_provider_is_skipped_too() -> None:
+    tidal_py, tidal_web = _TidalPy(), _TidalWeb()
+    pc.pause("tidal-web", 600)
+
+    assert pc.usable_providers([tidal_py, tidal_web]) == [tidal_py]
+
+
+def test_a_native_provider_is_never_keyed() -> None:
+    """Only extensions have pauses; a built-in provider is not one."""
+
+    class _Qobuz:
+        name = "qobuz"
+
+    assert pc.provider_key(_Qobuz()) == ""
 
 
 def test_a_paused_provider_is_skipped_and_the_order_kept() -> None:
