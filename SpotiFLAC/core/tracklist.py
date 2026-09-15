@@ -48,6 +48,10 @@ def metadata_client_for(url: str):
     Anything unrecognised goes to Spotify, which is both the common case and
     the one that understands `spotify:` URIs and bare search text.
     """
+    from .extension_metadata import ExtensionMetadataClient, parse_catalogue_url
+
+    if parse_catalogue_url(url):
+        return ExtensionMetadataClient.for_url(url)
     if url_host_matches(url, "tidal.com"):
         from .tidal_metadata import TidalMetadataClient
 
@@ -79,12 +83,11 @@ async def resolve_tracklist(url: str, *, include_featuring: bool = True) -> Trac
 
     # Imported here rather than at module scope: this pulls in the downloader,
     # and resolving a link should not cost that until someone resolves one.
-    from ..downloader import _call_metadata_get_url
+    from .metadata_fallback import get_url_with_fallback
 
-    client = metadata_client_for(stripped)
-    result = await _call_metadata_get_url(
-        client,
+    result = await get_url_with_fallback(
         stripped,
+        lambda: metadata_client_for(stripped),
         include_featuring=include_featuring,
     )
 

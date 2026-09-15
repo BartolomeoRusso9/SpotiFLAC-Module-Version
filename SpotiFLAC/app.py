@@ -1047,19 +1047,21 @@ class SpotiFLAC_API(
             # setup — for every search typed into the box.
             from .core.tracklist import metadata_client_for
 
-            client = metadata_client_for(url)
-
             # ── Universal call ──────────────────────────────────────────────────
             # get_url() is sync on SpotifyMetadataClient but async on
             # TidalMetadataClient/AppleMusicMetadataClient — calling it directly
             # here would hand back an un-awaited coroutine for the latter two
             # (crashing on the very next line, `result[0]`). Reuse the same
             # sync/async dispatch helper the real download path already relies
-            # on instead of duplicating (and re-diverging from) that logic.
+            # on instead of duplicating (and re-diverging from) that logic —
+            # through the fallback that asks an installed metadata extension
+            # when the built-in Spotify or Apple Music client fails.
             # Returns (name, tracks) OR (name, tracks, cover) OR (name, tracks, cover, meta).
-            from .downloader import _call_metadata_get_url
+            from .core.metadata_fallback import get_url_with_fallback
 
-            result = await _call_metadata_get_url(client, stripped)
+            result = await get_url_with_fallback(
+                stripped, lambda: metadata_client_for(url)
+            )
             collection_name = result[0]
             tracks = result[1]
             collection_cover = result[2] if len(result) > 2 else ""

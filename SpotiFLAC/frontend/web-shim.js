@@ -160,7 +160,7 @@
     'get_version', 'get_latest_version', 'get_artist_images', 'get_ffmpeg_status', 'get_node_status',
     'save_settings', 'save_theme', 'load_settings', 'get_registries', 'add_registry', 'remove_registry',
     'get_history', 'get_profiles', 'load_profile_data', 'cache_image', 'get_spotify_home_feed',
-    'search_provider', 'search_provider_async', 'remove_history_item',
+    'search_provider', 'search_provider_async', 'get_metadata_sources', 'remove_history_item',
     'get_network_status', 'save_profile_data', 'delete_profile_data', 'check_qobuz_api',
     'check_tidal_api', 'open_config_folder', 'open_url', 'download_track_lyrics',
     'download_track_cover', 'download_cover', 'download_album_cover', 'download_all_covers',

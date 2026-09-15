@@ -2895,7 +2895,8 @@ function toggleSearchMode() {
         toggle.classList.add('active');
         label.textContent = 'Search';
         toggle.title = 'Switch to Fetch Mode';
-        
+        syncSearchSourceVisibility();
+
         fetchBtn.style.display = 'none';
         renderRecentSearches();
         
@@ -2908,7 +2909,8 @@ function toggleSearchMode() {
         toggle.classList.remove('active');
         label.textContent = 'Fetch';
         toggle.title = 'Switch to Search Mode';
-        
+        syncSearchSourceVisibility();
+
         fetchBtn.style.display = 'inline-flex';
         
         const rl = $('recent-wrap').querySelector('.recent-label');
@@ -2920,16 +2922,67 @@ function toggleSearchMode() {
     runTypewriter();
 }
 
+// ── Search source (Spotify or a catalogue extension) ─────────────────────────
+function currentSearchSource() {
+  return $('searchSource')?.value || 'spotify';
+}
+
+function currentSearchSourceLabel() {
+  const sel = $('searchSource');
+  return sel?.selectedOptions?.[0]?.textContent || 'Spotify';
+}
+
+function syncSearchSourceVisibility() {
+  const sel = $('searchSource');
+  if (!sel) return;
+  const show = $('searchMode')?.value === 'search' && sel.options.length > 1;
+  sel.classList.toggle('hidden', !show);
+}
+
+async function loadSearchSources() {
+  const sel = $('searchSource');
+  if (!sel || !window.pywebview?.api?.get_metadata_sources) return;
+  let sources = [];
+  try {
+    sources = await window.pywebview.api.get_metadata_sources();
+  } catch (e) {
+    return;
+  }
+  if (!Array.isArray(sources) || !sources.length) return;
+  let saved = 'spotify';
+  try { saved = localStorage.getItem('searchSource') || 'spotify'; } catch (e) {}
+  sel.innerHTML = '';
+  sources.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.label;
+    sel.appendChild(opt);
+  });
+  sel.value = sources.some(s => s.id === saved) ? saved : 'spotify';
+  syncSearchSourceVisibility();
+  if ($('searchMode')?.value === 'search') updateSearchMode();
+}
+
+function onSearchSourceChange() {
+  try { localStorage.setItem('searchSource', currentSearchSource()); } catch (e) {}
+  if ($('searchMode')?.value !== 'search') return;
+  $('urlInput').placeholder = `Search ${currentSearchSourceLabel()} with keywords, artist or track name…`;
+  // Re-run the query already typed, against the new source.
+  _lastSearchQuery = '';
+  $('urlInput').dispatchEvent(new Event('input'));
+}
+
 function updateSearchMode() {
   const mode = $('searchMode').value;
   const input = $('urlInput');
   const toggle = $('searchModeToggle');
   const label = $('searchModeText');
-  
+  syncSearchSourceVisibility();
+
   if (mode === 'search') {
     // Text mode: stop the animation and set the fixed text
     clearTimeout(phTimeout);
-    input.placeholder = 'Search Spotify with keywords, artist or track name…';
+    input.placeholder = `Search ${currentSearchSourceLabel()} with keywords, artist or track name…`;
     toggle.classList.add('active');
     label.textContent = 'Search';
     toggle.title = 'Switch to Fetch Mode';
@@ -4102,7 +4155,7 @@ async function onFetch() {
     currentUrl = url;
 
     if (window.pywebview?.api) {
-      window.pywebview.api.search_provider_async(url, 50)
+      window.pywebview.api.search_provider_async(url, 50, currentSearchSource())
         .then(() => {
           setStatus(`Searching "${url}"...`, true);
         })
@@ -5335,6 +5388,7 @@ window.addEventListener('pywebviewready', async () => {
   initSettingsTracking();
   updateSearchMode();
   initPasteButton();
+  loadSearchSources();
 });
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncSystemTheme);
@@ -5394,7 +5448,7 @@ $('urlInput').addEventListener('input', function() {
     // END CHANGE
 
     if (window.pywebview?.api) {
-      window.pywebview.api.search_provider_async(query, 50).catch(e => {
+      window.pywebview.api.search_provider_async(query, 50, currentSearchSource()).catch(e => {
         logMessage('Real-time search error: ' + e, 'error');
       });
     }

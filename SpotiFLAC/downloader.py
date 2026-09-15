@@ -326,7 +326,24 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
                     )
 
         # Pair the JavaScript extension automatically unless Python was requested explicitly.
-        if not wants_explicit_py:
+        # Not when the extension under that id declares it downloads nothing:
+        # "apple" is an alias of "apple-music", which is also the id of the
+        # mobile registry's Apple Music *metadata* extension. Installed, it
+        # would have been paired here as a download fallback with no download
+        # function at all.
+        installed_js = manager.get_installed(original_ext_id)
+        not_a_downloader = (
+            installed_js is not None
+            and bool(installed_js.types)
+            and not installed_js.is_download_provider
+        )
+        if not_a_downloader:
+            logger.debug(
+                "'%s' is installed but is not a download provider (%s); not using it to download",
+                original_ext_id,
+                ", ".join(installed_js.types),
+            )
+        elif not wants_explicit_py:
             try:
                 js_prov = JSExtensionProvider(
                     original_ext_id,
@@ -2533,8 +2550,24 @@ class SpotiflacDownloader:
                 "Amazon links cannot be inserted.",
             )
 
+        from .core.extension_metadata import (
+            ExtensionMetadataClient,
+            parse_catalogue_url,
+        )
+
+        catalogue = parse_catalogue_url(url)
+
         try:
-            if is_tidal:
+            if catalogue:
+                client = ExtensionMetadataClient.for_url(url)
+                (
+                    collection_name,
+                    tracks,
+                    *collection_cover,
+                ) = await client.get_url_async(
+                    url, include_featuring=self._opts.include_featuring
+                )
+            elif is_tidal:
                 from .core.tidal_metadata import TidalMetadataClient
 
                 client = TidalMetadataClient()
@@ -2547,14 +2580,16 @@ class SpotiflacDownloader:
                 )
             elif is_apple:
                 from .core.apple_music_metadata import AppleMusicMetadataClient
+                from .core.metadata_fallback import get_url_with_fallback
 
-                client = AppleMusicMetadataClient()
                 (
                     collection_name,
                     tracks,
                     *collection_cover,
-                ) = await _call_metadata_get_url(
-                    client, url, include_featuring=self._opts.include_featuring
+                ) = await get_url_with_fallback(
+                    url,
+                    AppleMusicMetadataClient,
+                    include_featuring=self._opts.include_featuring,
                 )
             elif is_soundcloud:
                 sc_providers = _build_providers_for_name("soundcloud", self._opts)
@@ -2587,13 +2622,15 @@ class SpotiflacDownloader:
                     _adapt_js_metadata_response(response)
                 )
             else:
+                from .core.metadata_fallback import get_url_with_fallback
+
                 (
                     collection_name,
                     tracks,
                     *_collection_cover,
-                ) = await _call_metadata_get_url(
-                    self._metadata_client(),
+                ) = await get_url_with_fallback(
                     url,
+                    self._metadata_client,
                     include_featuring=self._opts.include_featuring,
                 )
         except SpotiflacError:
@@ -2606,7 +2643,9 @@ class SpotiflacDownloader:
         if not tracks:
             return collection_name, [], {}
 
-        if is_tidal:
+        if catalogue:
+            info = {"type": catalogue.kind, "id": catalogue.item_id}
+        elif is_tidal:
             info = parse_tidal_url(url)
         elif is_apple:
             info = parse_apple_music_url(url)

@@ -293,7 +293,9 @@ class ExtensionManager:
         self, registry_url: str | list[str] | None = None
     ) -> None:
         """Checks the remote registry and automatically installs (or updates)
-        all extensions classified as download providers AND utilities.
+        every extension it lists — download providers, utilities, and the
+        metadata and lyrics extensions (spotify-web, apple-music, catalogue
+        extensions) that link resolution and search now use too.
 
         Every download builds a fresh manager with auto-install on, so this
         runs far more often than it does any work: for the same registry
@@ -337,9 +339,7 @@ class ExtensionManager:
                     floor = previous_floor
                 logger.info("[ExtMgr] Periodic check for extension updates...")
             else:
-                logger.info(
-                    "[ExtMgr] Automatic check for download extensions on startup..."
-                )
+                logger.info("[ExtMgr] Automatic check for extensions on startup...")
             self._bootstrap_from_registry(urls, registry_key, floor)
 
     def _bootstrap_from_registry(
@@ -363,18 +363,11 @@ class ExtensionManager:
         )
 
         for entry in entries:
-            # FIX: add 'utility' and 'runtime_utility' to the allowed categories
-            is_target = (
-                entry.category
-                in {"download", "download_provider", "utility", "runtime_utility"}
-                or "download" in entry.tags
-                or "download_provider" in entry.tags
-                or "utility" in entry.tags
-            )
-
-            if not is_target:
-                continue
-
+            # Every category, not only download providers and utilities: a
+            # metadata extension that is never installed is one the metadata
+            # fallback (core/metadata_fallback.py) and the catalogue links
+            # (core/extension_metadata.py) can never use. The trust floor
+            # below still applies to all of them alike.
             existing = self.get_installed(entry.id)
 
             # Skip only when both registry version and package checksum match.

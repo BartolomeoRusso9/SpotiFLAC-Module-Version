@@ -42,7 +42,9 @@ def empty_results() -> dict[str, list]:
     return {"tracks": [], "albums": [], "artists": [], "playlists": []}
 
 
-def shape_search_results(results: dict, limit: int = 50) -> dict[str, list]:
+def shape_search_results(
+    results: dict, limit: int = 50, provider: str = "spotify"
+) -> dict[str, list]:
     """Turns the client's objects into the dicts every frontend reads.
 
     `getattr` with a default throughout: a provider that stops returning one
@@ -72,7 +74,7 @@ def shape_search_results(results: dict, limit: int = 50) -> dict[str, list]:
                 "is_explicit": getattr(t, "is_explicit", False),
                 "explicit": getattr(t, "is_explicit", False),
                 "isrc": getattr(t, "isrc", ""),
-                "provider": "spotify",
+                "provider": provider,
             },
         )
 
@@ -91,7 +93,7 @@ def shape_search_results(results: dict, limit: int = 50) -> dict[str, list]:
                 "release_date": a.get("release_date", ""),
                 "external_urls": a.get("external_url", ""),
                 "external_url": a.get("external_url", ""),
-                "provider": "spotify",
+                "provider": provider,
             },
         )
 
@@ -107,7 +109,7 @@ def shape_search_results(results: dict, limit: int = 50) -> dict[str, list]:
                 "cover": art.get("cover_url", ""),
                 "external_urls": art.get("external_url", ""),
                 "external_url": art.get("external_url", ""),
-                "provider": "spotify",
+                "provider": provider,
             },
         )
 
@@ -124,13 +126,31 @@ def shape_search_results(results: dict, limit: int = 50) -> dict[str, list]:
                 "cover": p.get("cover_url", ""),
                 "external_urls": p.get("external_url", ""),
                 "external_url": p.get("external_url", ""),
-                "provider": "spotify",
+                "provider": provider,
             },
         )
     return out
 
 
-async def search_metadata_async(query: str, limit: int = 50) -> dict[str, list]:
+def _is_spotify(source: str | None) -> bool:
+    return not source or source == "spotify"
+
+
+def _search_client(source: str | None):
+    """Spotify, or the catalogue extension named `source` (see
+    core/extension_metadata.py — Melon, Bugs, Genie)."""
+    if _is_spotify(source):
+        from ..core.spotify_metadata import SpotifyMetadataClient
+
+        return SpotifyMetadataClient()
+    from ..core.extension_metadata import ExtensionMetadataClient
+
+    return ExtensionMetadataClient.for_source(source)
+
+
+async def search_metadata_async(
+    query: str, limit: int = 50, source: str | None = None
+) -> dict[str, list]:
     """Searches and shapes, on the caller's event loop.
 
     The client has an async search; the sync `search()` next to it only
@@ -140,48 +160,57 @@ async def search_metadata_async(query: str, limit: int = 50) -> dict[str, list]:
     if not query:
         return empty_results()
 
-    from ..core.spotify_metadata import SpotifyMetadataClient
-
-    client = SpotifyMetadataClient()
+    client = _search_client(source)
     results = await client.search_async(query, limit=limit)
-    return shape_search_results(results, limit)
+    return shape_search_results(results, limit, source or "spotify")
 
 
 class SearchMixin:
     """The two blocking entry points the desktop GUI needs."""
 
-    def search_provider(self, query, limit=50):
+    def get_metadata_sources(self):
+        """What the search box can search: Spotify, then every installed
+        catalogue extension."""
+        try:
+            from ..core.extension_metadata import metadata_sources
+
+            return metadata_sources()
+        except Exception as exc:
+            self.log(f"get_metadata_sources error: {exc}", "error")
+            return [{"id": "spotify", "label": "Spotify"}]
+
+    def search_provider(self, query, limit=50, source=None):
         """Search music providers (Spotify) for metadata matching `query`.
 
         Returns a dictionary with 4 sections: tracks, albums, artists,
         playlists (max `limit` results each).
         """
         try:
-            from ..core.spotify_metadata import SpotifyMetadataClient
-
-            client = SpotifyMetadataClient()
-            return shape_search_results(client.search(query, limit=limit), limit)
+            client = _search_client(source)
+            return shape_search_results(
+                client.search(query, limit=limit), limit, source or "spotify"
+            )
         except Exception as exc:
             self.log(f"search_provider error: {exc}", "error")
             return empty_results()
 
-    def search_provider_async(self, query, limit=50):
+    def search_provider_async(self, query, limit=50, source=None):
         """Starts the search in a thread and pushes the result to the window."""
         if not query:
             return {"status": "empty"}
         threading.Thread(
             target=self._search_provider_thread,
-            args=(query, limit),
+            args=(query, limit, source),
             daemon=True,
         ).start()
         return {"status": "started"}
 
-    def _search_provider_thread(self, query, limit) -> None:
+    def _search_provider_thread(self, query, limit, source=None) -> None:
         try:
-            from ..core.spotify_metadata import SpotifyMetadataClient
-
-            client = SpotifyMetadataClient()
-            out = shape_search_results(client.search(query, limit=limit), limit)
+            client = _search_client(source)
+            out = shape_search_results(
+                client.search(query, limit=limit), limit, source or "spotify"
+            )
         except Exception as exc:
             self._push_quietly("app_handle_provider_search_error", str(exc))
             return
