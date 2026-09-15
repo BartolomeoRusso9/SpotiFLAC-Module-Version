@@ -216,6 +216,7 @@ class JSExtensionProvider(BaseProvider):
                 else None
             ),
             cancelled_probe=self._stop_requested,
+            ext_name=self._ext.name,
         )
         rt.start()
         return rt

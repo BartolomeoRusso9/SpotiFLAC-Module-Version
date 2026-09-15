@@ -1043,10 +1043,15 @@ async def _download_one_pass_async(
     download_one_async(), when a Hi-Res file turns out to be upsampled and
     is fetched again at LOSSLESS.
     """
+    from .core import provider_cooldown
+
     stop_event = asyncio.Event()
     DownloadManager()
     errors: dict[str, str] = {}
     started_at = time.monotonic()
+    # A provider that answered "503 … try again in about N minutes" is kept
+    # out of the rotation until then (see core/provider_cooldown.py).
+    provider_cooldown.watch_extension_logs()
 
     # What was asked for, before any provider gets to write its own findings
     # onto the shared TrackMetadata. Taken once for the whole track, not once
@@ -1095,7 +1100,9 @@ async def _download_one_pass_async(
             await asyncio.sleep(wait)
             errors.clear()
 
-        for idx, provider in enumerate(providers):
+        # Per attempt, not per track: a pause that starts on the first
+        # attempt already applies to the retries.
+        for idx, provider in enumerate(provider_cooldown.usable_providers(providers)):
             if idx > 0:
                 is_ext = provider.name.startswith("ext:")
                 target_type = "extension" if is_ext else "provider"

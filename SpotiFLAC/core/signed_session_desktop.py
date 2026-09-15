@@ -18,8 +18,29 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
 
 from SpotiFLAC.core import get_community_url
+from SpotiFLAC.core.signed_session_errors import (
+    parse_session_error,
+    retry_after_header_seconds,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _refusal_message(what: str, resp) -> str:
+    """ "<what> returned HTTP <code>", with the wait the service asked for.
+
+    The exception raised from it is all a caller ever sees of the response,
+    and a bare "returned HTTP 429" dropped the one thing that says how long
+    the address is limited for. Read from the Retry-After header, else from
+    the gateway's error envelope (see signed_session_errors).
+    """
+    msg = f"{what} returned HTTP {resp.status_code}"
+    wait = retry_after_header_seconds(resp.headers.get("Retry-After"))
+    if not wait:
+        with contextlib.suppress(Exception):
+            wait = parse_session_error(resp.content).retry_after_seconds
+    return f"{msg}, retry after {wait}s" if wait else msg
+
 
 # Costanti
 COMMUNITY_SESSION_SKEW = timedelta(minutes=5)
@@ -309,7 +330,7 @@ def run_community_verification(record: CommunitySessionRecord) -> str:
 
         resp = requests.get(bootstrap_url, params=params, timeout=15)
         if resp.status_code != 200:
-            msg = f"verification bootstrap returned HTTP {resp.status_code}"
+            msg = _refusal_message("verification bootstrap", resp)
             raise Exception(msg)
 
         result = resp.json()
@@ -515,7 +536,7 @@ def exchange_community_grant(
     resp = requests.post(url, json=payload, timeout=15)
 
     if resp.status_code != 200:
-        msg = f"session exchange returned HTTP {resp.status_code}"
+        msg = _refusal_message("session exchange", resp)
         raise Exception(msg)
 
     data = resp.json()
