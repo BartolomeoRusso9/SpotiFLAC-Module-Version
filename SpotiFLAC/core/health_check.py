@@ -21,6 +21,13 @@ _SERVERS = {
     "qq": "https://lyrics.paxsenix.org/qq/search?q=Bohemian%20Rhapsody%20Queen",
     "youtube": "https://lyrics.paxsenix.org/youtube/search?q=Bohemian%20Rhapsody%20Queen",
     "kugou": "https://lyrics.paxsenix.org/kugou/search?q=Bohemian%20Rhapsody%20Queen",
+    "binilyrics": "https://lyrics-api.binimum.org/?track=Bohemian%20Rhapsody&artist=Queen&duration=355",
+    # Unison answers 404 for anything it has no lyrics for, and it has few:
+    # this is a track it does have.
+    "unison": "https://unison.boidu.dev/lyrics?song=Someone%20Like%20You&artist=Adele&duration=285",
+    # "Tum Hi Ho" (id aRZbUYD7): one of the has_lyrics:true results, so this
+    # actually exercises the lyrics.getLyrics call, not just search.
+    "jiosaavn": "https://www.jiosaavn.com/api.php?__call=lyrics.getLyrics&_format=json&_marker=0&api_version=4&ctx=web6dot0&lyrics_id=aRZbUYD7",
 }
 
 

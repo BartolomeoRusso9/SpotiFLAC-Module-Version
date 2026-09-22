@@ -45,12 +45,15 @@ LYRICS_PROVIDERS: tuple[str, ...] = (
     "musixmatch",
     "lrclib",
     "amazon",
+    "binilyrics",
+    "unison",
+    "jiosaavn",
 )
 
 #: Enrichment providers. SoundCloud is selectable but not on by default.
 ENRICH_PROVIDERS: tuple[str, ...] = ("deezer", "apple", "qobuz", "tidal", "soundcloud")
 
-DEFAULT_LYRICS_PROVIDERS: tuple[str, ...] = ("apple", "lrclib")
+DEFAULT_LYRICS_PROVIDERS: tuple[str, ...] = ("apple", "lrclib", "binilyrics", "unison")
 
 #: Where a Spotify Canvas can be looked up, in the order they are tried.
 CANVAS_PROVIDERS: tuple[str, ...] = ("spotify", "paxsenix")

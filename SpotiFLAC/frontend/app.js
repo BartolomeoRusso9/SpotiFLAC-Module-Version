@@ -603,6 +603,9 @@ const ALL_LYRICS = [
   { id:'qq',         label:'QQ Music',   on:false, icon:'QQ', iconClass:'qq' },
   { id:'youtube',    label:'YouTube',    on:false, icon:'YT', iconClass:'youtube' },
   { id:'kugou',      label:'Kugou',      on:false, icon:'KG', iconClass:'kugou' },
+  { id:'binilyrics', label:'BiniLyrics', on:true, icon:'BL', iconClass:'binilyrics' },
+  { id:'unison',     label:'Unison',     on:true, icon:'UN', iconClass:'unison' },
+  { id:'jiosaavn',   label:'JioSaavn',   on:false, icon:'JS', iconClass:'jiosaavn' },
   { id:'musixmatch', label:'Musixmatch', on:false, iconFile:'musixmatch.svg', iconClass:'musixmatch' },
   { id:'spotify',    label:'Spotify',    on:false, iconFile:'spotify.svg', iconClass:'spotify' },
 ];
@@ -647,7 +650,7 @@ const DEFAULT_SETTINGS = {
   log_level: 'INFO',
   max_concurrent_downloads: 2,
   services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
-  lyrics_providers: ['apple', 'lrclib'],
+  lyrics_providers: ['apple', 'lrclib', 'binilyrics', 'unison'],
   apple_lyrics_word_by_word: true,
   enrich_providers: ['deezer','apple','qobuz','tidal'],
 };
@@ -847,6 +850,9 @@ const API_SOURCES = [
   { id:'qq',         type:'qq',         name:'QQ Music Lyrics',    url:'' },
   { id:'youtube',    type:'youtube',    name:'YouTube Lyrics',    url:'' },
   { id:'kugou',      type:'kugou',      name:'Kugou Lyrics',      url:'' },
+  { id:'binilyrics', type:'binilyrics', name:'BiniLyrics',        url:'' },
+  { id:'unison',     type:'unison',     name:'Unison',            url:'' },
+  { id:'jiosaavn',   type:'jiosaavn',   name:'JioSaavn',          url:'' },
 ];
 let apiStatusState = {
   checkingSources: {},

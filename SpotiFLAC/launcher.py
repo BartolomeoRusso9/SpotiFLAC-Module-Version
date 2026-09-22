@@ -805,7 +805,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     lyrics_grp.add_argument(
         "--lyrics-providers",
         nargs="+",
-        default=pd.get("lyrics_providers", ["apple", "lrclib"]),
+        default=pd.get("lyrics_providers", ["apple", "lrclib", "binilyrics", "unison"]),
         dest="lyrics_providers",
         choices=[
             "spotify",
@@ -819,6 +819,9 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
             "musixmatch",
             "amazon",
             "lrclib",
+            "binilyrics",
+            "unison",
+            "jiosaavn",
         ],
     )
     lyrics_grp.add_argument(

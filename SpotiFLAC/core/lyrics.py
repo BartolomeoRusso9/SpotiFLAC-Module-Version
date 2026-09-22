@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 import re
@@ -42,7 +43,7 @@ class LyricsContext:
         return get_primary_artist(self.artist_name)
 
 
-DEFAULT_LYRICS_PROVIDERS = ["apple", "lrclib"]
+DEFAULT_LYRICS_PROVIDERS = ["apple", "lrclib", "binilyrics", "unison"]
 DEFAULT_ENRICH_PROVIDERS = ["deezer", "apple", "qobuz", "tidal"]
 
 
@@ -214,7 +215,13 @@ async def _get_spotify_anon_token(timeout: int = 7) -> str:
         try:
             client = await NetworkManager.get_async_client_safe()
 
-            totp_headers: dict[str, str] = {}
+            # Spotify wants the TOTP as query parameters, the way
+            # spotfetch.py sends it. Sent as headers the endpoint answers
+            # 400 "Unauthorized request" and there is no token at all.
+            params = {
+                "reason": "init",
+                "productType": "web-player",
+            }
 
             try:
                 from .spotify_totp import generate_spotify_totp
@@ -222,8 +229,9 @@ async def _get_spotify_anon_token(timeout: int = 7) -> str:
                 code, version = generate_spotify_totp()
 
                 if code:
-                    totp_headers["Spotify-TOTP"] = code
-                    totp_headers["Spotify-TOTP-V2"] = f"{code}:{version}"
+                    params["totp"] = code
+                    params["totpVer"] = str(version)
+                    params["totpServer"] = code
 
             except Exception:
                 pass
@@ -236,14 +244,8 @@ async def _get_spotify_anon_token(timeout: int = 7) -> str:
 
             r = await client.get(
                 "https://open.spotify.com/api/token",
-                params={
-                    "reason": "init",
-                    "productType": "web-player",
-                },
-                headers={
-                    "User-Agent": _UA,
-                    **totp_headers,
-                },
+                params=params,
+                headers={"User-Agent": _UA},
                 timeout=timeout,
             )
 
@@ -933,6 +935,275 @@ async def _fetch_lrclib_async(
 
 
 # ---------------------------------------------------------------------------
+# Apple-TTML catalogues: BiniLyrics, Unison
+# ---------------------------------------------------------------------------
+
+_BINI_API = "https://lyrics-api.binimum.org/"
+_UNISON_API = "https://unison.boidu.dev/lyrics"
+
+#: A recording is only taken when its length is this close to the track's, so
+#: the words fall on the same beat. Both catalogues search by name, and a live
+#: or sped-up cut of the same song is a different take.
+_TTML_LENGTH_SLACK_S = 4
+
+#: Providers whose text depends on `apple_word_by_word`, and so cannot share a
+#: cache entry between the two renderings.
+_TTML_PROVIDERS = frozenset({"binilyrics", "unison"})
+
+
+def _bini_lyrics_url(value: object) -> str:
+    """`value` if it is an https link on Bini's own storage, else "".
+
+    The search answers with the address of the TTML to fetch next. That
+    address comes from a third party's response, so it is only followed
+    when it stays on the host that serves the lyrics.
+    """
+    if not isinstance(value, str):
+        return ""
+    parsed = urllib.parse.urlparse(value)
+    host = parsed.hostname or ""
+    if parsed.scheme != "https" or not (
+        host == "binimum.org" or host.endswith(".binimum.org")
+    ):
+        return ""
+    return value
+
+
+def _best_bini_result(
+    results: object,
+    duration_s: int,
+    isrc: str,
+) -> dict | None:
+    """The best of what Bini's search found for the track.
+
+    A result is taken when its ISRC is the track's own, or its length is
+    within `_TTML_LENGTH_SLACK_S` of it. Among those, word timing beats line
+    timing, then an ISRC match, then the closest length.
+    """
+    best: dict | None = None
+    best_rank: tuple[bool, bool, int] | None = None
+    for item in results if isinstance(results, list) else []:
+        if not isinstance(item, dict) or not _bini_lyrics_url(item.get("lyricsUrl")):
+            continue
+        same_isrc = bool(isrc) and str(item.get("isrc") or "").upper() == isrc.upper()
+        length = item.get("duration")
+        has_length = duration_s > 0 and isinstance(length, (int, float)) and length > 0
+        off = abs(int(length) - duration_s) if has_length else 0
+        if not same_isrc and not (has_length and off <= _TTML_LENGTH_SLACK_S):
+            continue
+        rank = (item.get("timing_type") != "word", not same_isrc, off)
+        if best_rank is None or rank < best_rank:
+            best, best_rank = item, rank
+    return best
+
+
+async def _fetch_bini_async(
+    track_name: str,
+    artist_name: str,
+    album_name: str = "",
+    duration_s: int = 0,
+    isrc: str = "",
+    word_by_word: bool = True,
+    timeout: int = 7,
+) -> str:
+    """BiniLyrics: Apple Music's own TTML for over a million recordings.
+
+    No key. The search answers with metadata and a link; the TTML itself is a
+    second request, to a plain file host.
+    """
+    if not track_name or not artist_name:
+        return ""
+    params = {"track": track_name, "artist": artist_name}
+    if duration_s > 0:
+        params["duration"] = str(duration_s)
+    if album_name:
+        params["album"] = album_name
+    try:
+        from .apple_ttml import ttml_to_lrc
+
+        client = await NetworkManager.get_async_client_safe()
+        r = await client.get(_BINI_API, params=params, timeout=timeout)
+        if r.status_code != 200:
+            return ""
+        payload = r.json()
+        found = _best_bini_result(
+            payload.get("results") if isinstance(payload, dict) else None,
+            duration_s,
+            isrc,
+        )
+        if not found:
+            return ""
+        ttml = await client.get(_bini_lyrics_url(found["lyricsUrl"]), timeout=timeout)
+        if ttml.status_code != 200 or not ttml.text:
+            return ""
+        return ttml_to_lrc(ttml.text, word_by_word=word_by_word)
+    except Exception as exc:
+        logger.debug("[lyrics/binilyrics] async: %s", exc)
+        return ""
+
+
+async def _fetch_unison_async(
+    track_name: str,
+    artist_name: str,
+    album_name: str = "",
+    duration_s: int = 0,
+    isrc: str = "",
+    word_by_word: bool = True,
+    timeout: int = 7,
+) -> str:
+    """Unison: lyrics people write by hand for Better Lyrics.
+
+    A small corpus next to the rest, but what is in it is Apple Music's TTML
+    at its best. Reads need no key; the signed write half of its API (submit,
+    vote, report) is not touched. Only TTML and LRC are taken: its plain text
+    carries nothing the other providers do not.
+    """
+    if not track_name or not artist_name:
+        return ""
+    params = {"song": track_name, "artist": artist_name}
+    if duration_s > 0:
+        params["duration"] = str(duration_s)
+    if album_name:
+        params["album"] = album_name
+    try:
+        from .apple_ttml import ttml_to_lrc
+
+        client = await NetworkManager.get_async_client_safe()
+        r = await client.get(_UNISON_API, params=params, timeout=timeout)
+        if r.status_code != 200:
+            return ""
+        payload = r.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict) or not isinstance(data.get("lyrics"), str):
+            return ""
+
+        same_isrc = bool(isrc) and str(data.get("isrc") or "").upper() == isrc.upper()
+        length = data.get("duration")
+        length_ok = (
+            duration_s > 0
+            and isinstance(length, (int, float))
+            and length > 0
+            and abs(length - duration_s) <= _TTML_LENGTH_SLACK_S
+        )
+        if not same_isrc and not length_ok:
+            return ""
+
+        if data.get("format") == "ttml":
+            return ttml_to_lrc(data["lyrics"], word_by_word=word_by_word)
+        if data.get("format") == "lrc":
+            return data["lyrics"]
+        return ""
+    except Exception as exc:
+        logger.debug("[lyrics/unison] async: %s", exc)
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# JioSaavn: Hindi and regional-Indian catalogue (Bollywood and beyond)
+# ---------------------------------------------------------------------------
+
+#: JioSaavn's own web player calls this same endpoint. The various
+#: "unofficial JioSaavn API" projects on GitHub are just thin proxies in
+#: front of it, meant to be self-hosted rather than shared publicly, so
+#: going straight to the source avoids depending on someone else's uptime
+#: for data JioSaavn already serves without a key.
+_JIOSAAVN_API = "https://www.jiosaavn.com/api.php"
+_JIOSAAVN_PARAMS = {
+    "_format": "json",
+    "_marker": "0",
+    "api_version": "4",
+    "ctx": "web6dot0",
+}
+_JIOSAAVN_LENGTH_SLACK_S = 4
+
+
+def _best_jiosaavn_result(results: object, duration_s: int) -> dict | None:
+    """The closest-length search hit that JioSaavn actually has lyrics for.
+
+    Most of its catalogue has `has_lyrics: false` — a licensing flag, not a
+    missing-data one — so that is filtered before length is even compared.
+    """
+    best: dict | None = None
+    best_off = 0
+    for item in results if isinstance(results, list) else []:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        more = item.get("more_info")
+        if not isinstance(more, dict) or more.get("has_lyrics") != "true":
+            continue
+        try:
+            length = int(more.get("duration") or 0)
+        except (TypeError, ValueError):
+            length = 0
+        off = abs(length - duration_s) if duration_s > 0 and length > 0 else 0
+        if duration_s > 0 and length > 0 and off > _JIOSAAVN_LENGTH_SLACK_S:
+            continue
+        if best is None or off < best_off:
+            best, best_off = item, off
+    return best
+
+
+async def _fetch_jiosaavn_async(
+    track_name: str,
+    artist_name: str,
+    duration_s: int = 0,
+    timeout: int = 7,
+) -> str:
+    """JioSaavn: plain (unsynced) lyrics, strongest for Hindi and regional
+    Indian languages — a catalogue the other providers barely cover.
+    """
+    if not track_name or not artist_name:
+        return ""
+    try:
+        client = await NetworkManager.get_async_client_safe()
+        search = await client.get(
+            _JIOSAAVN_API,
+            params={
+                **_JIOSAAVN_PARAMS,
+                "__call": "search.getResults",
+                "q": f"{track_name} {artist_name}",
+                "p": "1",
+                "n": "10",
+            },
+            headers={"User-Agent": _UA},
+            timeout=timeout,
+        )
+        if not search.is_success:
+            return ""
+        payload = search.json()
+        found = _best_jiosaavn_result(
+            payload.get("results") if isinstance(payload, dict) else None,
+            duration_s,
+        )
+        if not found:
+            return ""
+        lyrics = await client.get(
+            _JIOSAAVN_API,
+            params={
+                **_JIOSAAVN_PARAMS,
+                "__call": "lyrics.getLyrics",
+                "lyrics_id": str(found["id"]),
+            },
+            headers={"User-Agent": _UA},
+            timeout=timeout,
+        )
+        if not lyrics.is_success:
+            return ""
+        data = lyrics.json()
+        text = data.get("lyrics") if isinstance(data, dict) else None
+        if not isinstance(text, str) or not text.strip():
+            return ""
+        # Some JioSaavn responses carry line breaks as literal `<br>` tags
+        # rather than `\n`; the other providers' output never does, so this
+        # is normalized before it reaches the rest of the pipeline.
+        text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+        return html.unescape(text).strip()
+    except Exception as exc:
+        logger.debug("[lyrics/jiosaavn] async: %s", exc)
+        return ""
+
+
+# ---------------------------------------------------------------------------
 # Async fetch_lyrics — Phase 2 (parallel, as_completed)
 # ---------------------------------------------------------------------------
 
@@ -993,6 +1264,27 @@ _PROVIDER_MAP = {
         ctx.album_name,
         ctx.duration_s,
     ),
+    "binilyrics": lambda ctx: _fetch_bini_async(
+        ctx.clean_track,
+        ctx.clean_artist,
+        ctx.album_name,
+        ctx.duration_s,
+        ctx.isrc,
+        word_by_word=ctx.apple_word_by_word,
+    ),
+    "unison": lambda ctx: _fetch_unison_async(
+        ctx.clean_track,
+        ctx.clean_artist,
+        ctx.album_name,
+        ctx.duration_s,
+        ctx.isrc,
+        word_by_word=ctx.apple_word_by_word,
+    ),
+    "jiosaavn": lambda ctx: _fetch_jiosaavn_async(
+        ctx.clean_track,
+        ctx.clean_artist,
+        ctx.duration_s,
+    ),
 }
 
 
@@ -1025,12 +1317,15 @@ async def fetch_lyrics_async(
     )
 
     # Apple's word-by-word and line-synced renderings are different text from
-    # the same fetch, so they cannot share a cache entry — but only Apple's
-    # key needs splitting; every other provider ignores the setting.
+    # the same fetch, so they cannot share a cache entry — but only the
+    # providers that read the setting need their key splitting (Apple, and the
+    # TTML catalogues); every other provider ignores it.
     def _provider_track_key(provider_name: str) -> str:
+        mode = "wbw" if apple_word_by_word else "line"
         if provider_name == "apple":
-            mode = "wbw" if apple_word_by_word else "line"
             return f"{track_key}|{mode}|{_APPLE_CACHE_GENERATION}"
+        if provider_name in _TTML_PROVIDERS:
+            return f"{track_key}|{mode}"
         return track_key
 
     def _cached_for(provider_name: str) -> str | None:
