@@ -423,7 +423,7 @@ class ConfigPanel(VerticalScroll):
                 id=_field_id("lyrics_providers"),
             )
             yield Row(
-                "Apple lyrics word-by-word",
+                "Word-by-word sync (Apple, BiniLyrics, Unison)",
                 Switch(
                     value=state.apple_lyrics_word_by_word,
                     id=_field_id("apple_lyrics_word_by_word"),
