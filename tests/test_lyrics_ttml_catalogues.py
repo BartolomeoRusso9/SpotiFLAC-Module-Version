@@ -190,8 +190,7 @@ def test_unison_lrc_is_passed_through(monkeypatch) -> None:
 
 def test_unison_plain_text_is_left_to_the_other_providers(monkeypatch) -> None:
     assert (
-        _unison(monkeypatch, _hit(format="plain", lyrics="hello", duration=285))
-        == ""
+        _unison(monkeypatch, _hit(format="plain", lyrics="hello", duration=285)) == ""
     )
 
 

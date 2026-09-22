@@ -786,8 +786,7 @@ class ConfigPanel(VerticalScroll):
             "apple_lyrics_word_by_word",
             state.embed_lyrics
             and any(
-                p in state.lyrics_providers
-                for p in ("apple", "binilyrics", "unison")
+                p in state.lyrics_providers for p in ("apple", "binilyrics", "unison")
             ),
         )
         # Nothing is looked up unless one of the two destinations is on,
