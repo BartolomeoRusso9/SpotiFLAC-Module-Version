@@ -987,12 +987,9 @@ def _best_bini_result(
             continue
         same_isrc = bool(isrc) and str(item.get("isrc") or "").upper() == isrc.upper()
         length = item.get("duration")
-        off = (
-            abs(int(length) - duration_s)
-            if duration_s > 0 and isinstance(length, (int, float)) and length > 0
-            else 0
-        )
-        if not same_isrc and off > _TTML_LENGTH_SLACK_S:
+        has_length = duration_s > 0 and isinstance(length, (int, float)) and length > 0
+        off = abs(int(length) - duration_s) if has_length else 0
+        if not same_isrc and not (has_length and off <= _TTML_LENGTH_SLACK_S):
             continue
         rank = (item.get("timing_type") != "word", not same_isrc, off)
         if best_rank is None or rank < best_rank:
@@ -1082,13 +1079,13 @@ async def _fetch_unison_async(
 
         same_isrc = bool(isrc) and str(data.get("isrc") or "").upper() == isrc.upper()
         length = data.get("duration")
-        if (
-            not same_isrc
-            and duration_s > 0
+        length_ok = (
+            duration_s > 0
             and isinstance(length, (int, float))
             and length > 0
-            and abs(length - duration_s) > _TTML_LENGTH_SLACK_S
-        ):
+            and abs(length - duration_s) <= _TTML_LENGTH_SLACK_S
+        )
+        if not same_isrc and not length_ok:
             return ""
 
         if data.get("format") == "ttml":
@@ -1196,6 +1193,10 @@ async def _fetch_jiosaavn_async(
         text = data.get("lyrics") if isinstance(data, dict) else None
         if not isinstance(text, str) or not text.strip():
             return ""
+        # Some JioSaavn responses carry line breaks as literal `<br>` tags
+        # rather than `\n`; the other providers' output never does, so this
+        # is normalized before it reaches the rest of the pipeline.
+        text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
         return html.unescape(text).strip()
     except Exception as exc:
         logger.debug("[lyrics/jiosaavn] async: %s", exc)

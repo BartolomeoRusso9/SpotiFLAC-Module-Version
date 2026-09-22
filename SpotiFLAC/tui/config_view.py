@@ -784,7 +784,11 @@ class ConfigPanel(VerticalScroll):
             self._set_enabled(name, state.embed_lyrics)
         self._set_enabled(
             "apple_lyrics_word_by_word",
-            state.embed_lyrics and "apple" in state.lyrics_providers,
+            state.embed_lyrics
+            and any(
+                p in state.lyrics_providers
+                for p in ("apple", "binilyrics", "unison")
+            ),
         )
         # Nothing is looked up unless one of the two destinations is on,
         # so the provider order is a question with no answer until then.

@@ -176,20 +176,23 @@ def _hit(**data):
 
 
 def test_unison_gives_the_word_timed_lrc(monkeypatch) -> None:
-    assert _unison(monkeypatch, _hit()) == WORD_LRC
+    assert _unison(monkeypatch, _hit(duration=285)) == WORD_LRC
 
 
 def test_unison_gives_plain_lines_when_words_are_not_wanted(monkeypatch) -> None:
-    assert _unison(monkeypatch, _hit(), word_by_word=False) == LINE_LRC
+    assert _unison(monkeypatch, _hit(duration=285), word_by_word=False) == LINE_LRC
 
 
 def test_unison_lrc_is_passed_through(monkeypatch) -> None:
-    hit = _hit(format="lrc", lyrics="[00:01.00]hello")
+    hit = _hit(format="lrc", lyrics="[00:01.00]hello", duration=285)
     assert _unison(monkeypatch, hit) == "[00:01.00]hello"
 
 
 def test_unison_plain_text_is_left_to_the_other_providers(monkeypatch) -> None:
-    assert _unison(monkeypatch, _hit(format="plain", lyrics="hello")) == ""
+    assert (
+        _unison(monkeypatch, _hit(format="plain", lyrics="hello", duration=285))
+        == ""
+    )
 
 
 def test_unison_not_found_is_nothing(monkeypatch) -> None:
@@ -205,8 +208,8 @@ def test_unison_a_matching_isrc_outweighs_the_length(monkeypatch) -> None:
     assert _unison(monkeypatch, hit, isrc="GB0000000001") == WORD_LRC
 
 
-def test_unison_without_a_length_of_its_own_is_taken(monkeypatch) -> None:
-    assert _unison(monkeypatch, _hit()) == WORD_LRC
+def test_unison_without_a_length_of_its_own_is_not_taken(monkeypatch) -> None:
+    assert _unison(monkeypatch, _hit()) == ""
 
 
 # --- the setting is part of the cache key ---------------------------------
