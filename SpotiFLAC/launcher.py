@@ -979,8 +979,9 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         action="store_true",
         dest="redownload_fake_hires",
         default=pd.get("redownload_fake_hires", False),
-        help="Act on a --verify-hires finding instead of only logging it: a "
-        "flagged file is set aside and the track is downloaded again at "
+        help="Act on a certain or likely --verify-hires finding instead of "
+        "only logging it (a suspect, which may be a genuine filtered master, "
+        "is only reported): the flagged file is set aside and the track is downloaded again at "
         "LOSSLESS (the resolution it really had), and the flagged file is "
         "deleted only once the replacement is on disk — if every provider "
         "fails, the original is put back. Implies --verify-hires, and only "

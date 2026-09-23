@@ -94,6 +94,12 @@ def test_an_upsampled_cd_signal_is_flagged(tmp_path) -> None:
     assert result.is_suspicious
     # Well below the file's own 88.2 kHz Nyquist, and above 22.05 kHz.
     assert 22_000 < result.cutoff_frequency_hz < 28_000
+    # Loud from start to end: the floor cannot be read, so a genuine master
+    # filtered at 22 kHz would look the same. Flagged, never replaced.
+    assert result.brickwall_hz == 22050
+    assert result.noise_floor_class == "masked"
+    assert result.confidence == "suspect"
+    assert not result.redownload_safe
 
 
 def test_a_cd_file_claims_nothing_and_is_not_flagged(tmp_path) -> None:
@@ -121,6 +127,8 @@ def test_a_padded_24_bit_cd_master_is_flagged(tmp_path) -> None:
     assert "24-bit" in result.reason and "16 bits" in result.reason
     # The spectral half made no finding, so it must not appear in the reason.
     assert "content stops" not in result.reason
+    assert result.confidence == "certain"
+    assert result.redownload_safe
 
 
 def test_a_real_24_bit_cd_rate_file_is_not_flagged(tmp_path) -> None:
@@ -170,6 +178,187 @@ def test_a_lower_noise_floor_still_measures_the_spectrum(tmp_path) -> None:
     assert (
         result.cutoff_frequency_hz < HIRES_SR / 2
     ), "a floor below -80 dB reported the full Nyquist as content"
+
+
+# ── Telling a fake from a filtered master ─────────────────────────────────
+#
+# Above 22 kHz an upsampled CD and a master low-pass filtered in mastering
+# are the same signal. What separates them — and decides whether a LOSSLESS
+# copy would lose anything — is how the file was made: exact upsampling
+# fingerprints, a resampler's cliff, and whether the in-band noise floor ever
+# drops below 16-bit quantization noise. Mirrors go_backend/hires_check_test.go.
+
+CD_SOURCE_FRAMES = 2**17  # ~3 s at 44.1 kHz, x4 = 176.4 kHz
+
+
+def _ideal_upsample(x, ratio: int):
+    """Band-limited interpolation: nothing at all above the source Nyquist."""
+    return np.fft.irfft(np.fft.rfft(x), n=len(x) * ratio) * ratio
+
+
+def _source_with_quiet_half(quiet_noise: float):
+    """Loud noise, then a half holding only `quiet_noise`: the gaps real
+    music leaves, where a noise floor shows through."""
+    rng = np.random.default_rng(3)
+    y = rng.standard_normal(CD_SOURCE_FRAMES)
+    y[: CD_SOURCE_FRAMES // 2] *= 0.2
+    y[CD_SOURCE_FRAMES // 2 :] *= quiet_noise
+    return y
+
+
+def _dither_to_16_bit(y):
+    """What a CD master is: TPDF-dithered 16-bit, as floats."""
+    rng = np.random.default_rng(4)
+    dither = (rng.random(len(y)) - rng.random(len(y))) / 32768
+    return np.round((y + dither) * 32768) / 32768
+
+
+def _write_float24(path, y, sample_rate: int) -> str:
+    return _write(path, np.clip(y, -1, 1 - 2**-23).astype(np.float64), sample_rate)
+
+
+def test_an_upsampled_16_bit_master_is_likely_and_replaceable(tmp_path) -> None:
+    """The cliff sits at 22.05 kHz and the quiet half shows 16-bit dither
+    noise: a LOSSLESS copy holds everything this file does."""
+    signal = _ideal_upsample(_dither_to_16_bit(_source_with_quiet_half(0.0)), 4)
+    result = check_file(_write_float24(tmp_path / "cd16.flac", signal, HIRES_SR))
+
+    assert result.verdict == "fake_hires"
+    assert result.brickwall_hz == 22050
+    assert result.noise_floor_class == "at_16bit"
+    assert result.confidence == "likely"
+    assert result.redownload_safe
+
+
+def test_a_24_bit_master_made_at_44k_is_only_suspect(tmp_path) -> None:
+    """The same cliff, but the quiet half holds detail far below 16-bit
+    noise: LOSSLESS would lose that depth, so it is never replaced."""
+    signal = _ideal_upsample(_source_with_quiet_half(1e-6), 4)
+    result = check_file(_write_float24(tmp_path / "master24.flac", signal, HIRES_SR))
+
+    assert result.verdict == "fake_hires"
+    assert result.noise_floor_class == "below_16bit"
+    assert result.confidence == "suspect"
+    assert not result.redownload_safe
+    assert "genuine master" in result.reason
+
+
+def test_a_gradual_mastering_roll_off_is_only_suspect(tmp_path) -> None:
+    """Ends below 28 kHz, but with no resampler's cliff anywhere.
+
+    Faded in and out: an abrupt start inside the analyzed window is a step,
+    and a step's broadband splatter would be measured as content.
+    """
+    y = _noise(HIRES_SR)
+    spectrum = np.fft.rfft(y)
+    freqs = np.fft.rfftfreq(len(y), 1.0 / HIRES_SR)
+    gain_db = np.where(freqs > 16000, -10.0 * (freqs - 16000) / 1000, 0.0)
+    signal = np.fft.irfft(spectrum * 10 ** (gain_db / 20), n=len(y))
+    fade = np.hanning(4096)
+    signal[:2048] *= fade[:2048]
+    signal[-2048:] *= fade[2048:]
+    result = check_file(_write_float24(tmp_path / "lpf.flac", signal, HIRES_SR))
+
+    assert result.verdict == "fake_hires"
+    assert result.brickwall_hz == 0
+    assert result.confidence == "suspect"
+
+
+def _cheap_upsamples():
+    """24-bit source samples (so the depth test passes) taken to 176.4 kHz
+    by the cheap upsamplers whose output is an exact, checkable pattern."""
+    rng = np.random.default_rng(1)
+    source = rng.integers(-(2**23), 2**23, CD_SOURCE_FRAMES + 1).astype(np.int64)
+    a, b = source[:-1], source[1:]
+    steps = np.arange(4)[None, :] / 4
+    hold = np.repeat(a, 4)
+    line = np.round(a[:, None] + (b - a)[:, None] * steps).ravel().astype(np.int64)
+    zero_stuffed = np.zeros(len(a) * 4, dtype=np.int64)
+    zero_stuffed[::4] = a // 2
+    return {"sample_hold": hold, "linear_interpolation": line, "imaging": zero_stuffed}
+
+
+@pytest.mark.parametrize("artifact", ["sample_hold", "linear_interpolation", "imaging"])
+def test_integer_upsampling_artifacts_are_certain(tmp_path, artifact) -> None:
+    samples = (_cheap_upsamples()[artifact] << 8).astype(np.int32)
+    result = check_file(_write(tmp_path / f"{artifact}.flac", samples, HIRES_SR))
+
+    assert result.upsampling_artifact == artifact
+    assert result.verdict == "fake_hires"
+    assert result.confidence == "certain"
+    assert result.redownload_safe
+
+
+def test_genuine_audio_shows_no_evidence_at_all(tmp_path) -> None:
+    rng = np.random.default_rng(0)
+    stereo = (rng.standard_normal((HIRES_SR * SECONDS, 2)) * 0.2).astype(np.float32)
+    result = check_file(_write(tmp_path / "genuine.flac", stereo, HIRES_SR))
+
+    assert result.verdict == "genuine_hires"
+    assert result.upsampling_artifact == ""
+    assert result.brickwall_hz == 0
+    assert result.confidence == ""
+
+
+# A real resampler rather than an ideal one: ffmpeg's leaves a transition
+# band and, by default, a stopband plateau ~50 dB down that the cutoff test
+# alone reads as content up to Nyquist.
+_QUIET_EVERY_8S = "gt(mod(t\\,8)\\,6)"
+
+
+def _ffmpeg_upsampled(tmp_path, name: str, source_chain: str) -> str:
+    dest = tmp_path / name
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"anoisesrc=r=44100:c=pink:a=0.3:d=16,"
+            f"aformat=channel_layouts=stereo,{source_chain}",
+            "-af",
+            "aresample=96000",
+            "-c:a",
+            "flac",
+            "-sample_fmt",
+            "s32",
+            "-bits_per_raw_sample",
+            "24",
+            str(dest),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    return str(dest)
+
+
+@needs_ffmpeg
+def test_ffmpeg_upsampled_cd_with_quiet_passages_is_likely(tmp_path) -> None:
+    path = _ffmpeg_upsampled(
+        tmp_path,
+        "cd16.flac",
+        f"volume=0:enable='{_QUIET_EVERY_8S}',"
+        "aresample=osf=s16:dither_method=triangular",
+    )
+    result = check_file(path)
+    assert result.confidence == "likely"
+    assert result.brickwall_hz == 22050
+
+
+@needs_ffmpeg
+def test_ffmpeg_upsampled_24_bit_master_is_only_suspect(tmp_path) -> None:
+    path = _ffmpeg_upsampled(
+        tmp_path,
+        "master24.flac",
+        f"volume=0.00001:enable='{_QUIET_EVERY_8S}',aresample=osf=s32",
+    )
+    result = check_file(path)
+    assert result.confidence == "suspect"
+    assert result.noise_floor_class == "below_16bit"
 
 
 # ── Formats libsndfile cannot open ────────────────────────────────────────
