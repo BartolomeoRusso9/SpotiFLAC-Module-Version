@@ -116,6 +116,21 @@ _ARTIFACT_MIN_MOVING_ANCHORS = 1000
 _ARTIFACT_MAX_VIOLATION_RATE = 0.001
 #: Frames per rfft batch: bounds memory at ~8 MB per batch for n_fft=4096.
 _STFT_BATCH_FRAMES = 256
+#: Music bandwidth: 1 kHz bands from _MUSIC_BAND_START_HZ up are music while
+#: their level swings with it across frames (p95-p5 at least
+#: _MUSIC_MIN_SPREAD_DB). Steady noise, such as the ultrasonic hump a DSD or
+#: tape transfer carries up to Nyquist, averages out to a few dB.
+_MUSIC_BAND_START_HZ = 16000.0
+_MUSIC_BAND_WIDTH_HZ = 1000.0
+_MUSIC_MIN_SPREAD_DB = 10.0
+#: Active content this far past the music bandwidth is reported as steady
+#: noise rather than content.
+_ULTRASONIC_NOISE_MARGIN_HZ = 8000.0
+#: Standard rate families; a file's useful rate is looked up in its own.
+_RATE_FAMILIES = (
+    (44100, 88200, 176400, 352800),
+    (48000, 96000, 192000, 384000),
+)
 
 
 class HiResCheckError(Exception):
@@ -162,6 +177,18 @@ class HiResCheckResult:
     #: noise: "below_16bit", "at_16bit", "masked", or empty when not measured.
     noise_floor_class: str = ""
     noise_floor_vs_16bit_db: float = 0.0
+    #: Highest frequency whose level still moves with the music, for a file
+    #: claiming Hi-Res by rate; 0 when not measured. Informational: the
+    #: verdict rests on the tests above.
+    music_cutoff_hz: float = 0.0
+    #: True when the active content past music_cutoff_hz is steady noise,
+    #: like the ultrasonic hump of a DSD or analog tape transfer, so
+    #: cutoff_frequency_hz marks where that noise ends rather than the music.
+    ultrasonic_noise_only: bool = False
+    #: With ultrasonic_noise_only: the lowest standard rate of the same
+    #: family that holds all the music (e.g. 88200 for a 176.4 kHz file whose
+    #: music stops at 34 kHz). Otherwise the declared rate; 0 if not set.
+    useful_sample_rate: int = 0
 
     @property
     def is_suspicious(self) -> bool:
@@ -515,8 +542,8 @@ def _read_mono_window(
 
 def _analyze_stft(
     y: "np.ndarray", n_fft: int, sample_rate: int
-) -> tuple["np.ndarray", float]:
-    """(mean magnitude spectrum, quiet-frame floor variance) in one pass.
+) -> tuple["np.ndarray", float, list[float]]:
+    """(mean magnitude spectrum, quiet-frame floor, music band spreads).
 
     The spectrum matches `np.abs(librosa.stft(y, n_fft)).mean(axis=1)`: a
     periodic Hann window, a hop of n_fft/4, and centred frames (the signal
@@ -528,6 +555,10 @@ def _analyze_stft(
     of the quietest tenth of the frames that lie fully inside the signal,
     or NaN when none qualified. Frames overlapping the zero padding would
     read as quiet for the wrong reason, and digital silence has no floor.
+
+    The spreads are the p95-p5 swing, across those same frames, of each
+    1 kHz band's level from 16 kHz up (see _music_cutoff); empty for files
+    at or below 48 kHz, where the question does not arise.
     """
     hop = n_fft // 4
     half = n_fft // 2
@@ -538,7 +569,7 @@ def _analyze_stft(
     padded: Any = np.pad(signal, half, mode="constant")
     frame_count = 1 + (len(padded) - n_fft) // hop
     if frame_count < 1:
-        return avg, math.nan
+        return avg, math.nan, []
 
     window: Any = np.hanning(n_fft + 1)[:-1]
     window_power = float(np.sum(window * window))
@@ -547,8 +578,19 @@ def _analyze_stft(
     band_high = min(int(_FLOOR_BAND_HIGH_HZ / bin_hz), half)
     offsets: Any = np.arange(n_fft)
 
+    music_bands: list[tuple[int, int]] = []
+    if sample_rate / 2 > _SOURCE_RATES[1] / 2:
+        lo = _MUSIC_BAND_START_HZ
+        while lo + _MUSIC_BAND_WIDTH_HZ <= sample_rate / 2:
+            first_bin = math.ceil(lo / bin_hz)
+            last_bin = min(math.ceil((lo + _MUSIC_BAND_WIDTH_HZ) / bin_hz), half + 1)
+            if last_bin > first_bin:
+                music_bands.append((first_bin, last_bin))
+            lo += _MUSIC_BAND_WIDTH_HZ
+
     frame_means: list[Any] = []
     frame_medians: list[Any] = []
+    music_levels: list[Any] = []
     # Batched rather than one strided view over every frame: a 30s window
     # at 176.4 kHz is ~5000 frames, and their spectra all at once run to
     # hundreds of megabytes.
@@ -563,14 +605,31 @@ def _analyze_stft(
             continue
         inside = (starts - half >= 0) & (starts - half + n_fft <= len(signal))
         power = magnitude[inside, band_low : band_high + 1] ** 2
-        power = power[power.sum(axis=1) > 0]
+        keep = power.sum(axis=1) > 0
+        power = power[keep]
         if power.size:
             frame_means.append(power.mean(axis=1))
             frame_medians.append(np.median(power, axis=1))
+            if music_bands:
+                full: Any = magnitude[inside][keep] ** 2
+                music_levels.append(
+                    np.stack(
+                        [full[:, a:b].mean(axis=1) for a, b in music_bands], axis=1
+                    )
+                )
 
     avg /= frame_count
     if not frame_means:
-        return avg, math.nan
+        return avg, math.nan, []
+
+    spreads: list[float] = []
+    if music_levels:
+        levels: Any = 10 * np.log10(np.maximum(np.concatenate(music_levels), 1e-30))
+        if levels.shape[0] >= 2:
+            spreads = [
+                float(np.percentile(col, 95) - np.percentile(col, 5))
+                for col in levels.T
+            ]
 
     means: Any = np.concatenate(frame_means)
     medians: Any = np.concatenate(frame_medians)
@@ -579,7 +638,47 @@ def _analyze_stft(
     # |X|^2 of white noise is exponential with mean sigma^2 * sum(w^2), so
     # its median is ln 2 times that. The median ignores tonal peaks.
     floor_var = float(np.median(quietest / math.log(2) / window_power))
-    return avg, floor_var
+    return avg, floor_var, spreads
+
+
+def _music_cutoff(
+    spreads: list[float],
+    spec_db: "np.ndarray",
+    sample_rate: int,
+    n_fft: int,
+    noise_floor_db: float,
+) -> float:
+    """Upper edge of the last contiguous 1 kHz band, from 16 kHz up, that
+    both carries active content (its level in the averaged spectrum above
+    noise_floor_db) and moves with the music.
+
+    The level test keeps a resampler's leakage, which swings with the music
+    too but sits far below it, from counting. 0 when even the first fails.
+    """
+    cutoff = 0.0
+    for index, spread in enumerate(spreads):
+        lo = _MUSIC_BAND_START_HZ + index * _MUSIC_BAND_WIDTH_HZ
+        band = _band(spec_db, sample_rate, n_fft, lo, lo + _MUSIC_BAND_WIDTH_HZ)
+        if not band.size or spread < _MUSIC_MIN_SPREAD_DB:
+            break
+        if float(np.mean(band)) <= noise_floor_db:
+            break
+        cutoff = lo + _MUSIC_BAND_WIDTH_HZ
+    return cutoff
+
+
+def _useful_sample_rate(declared: int, music_cutoff_hz: float) -> int:
+    """Lowest standard rate in the declared rate's family whose Nyquist still
+    holds music_cutoff_hz; the declared rate when none below it does."""
+    for family in _RATE_FAMILIES:
+        if declared % family[0]:
+            continue
+        for rate in family:
+            if rate >= declared:
+                break
+            if rate / 2 >= music_cutoff_hz:
+                return rate
+    return declared
 
 
 def _classify_noise_floor(floor_var: float, channels: int) -> tuple[str, float]:
@@ -876,7 +975,9 @@ def check_file(
         effective_n_fft //= 2
 
     try:
-        avg_spectrum, quiet_floor_var = _analyze_stft(y, effective_n_fft, sr)
+        avg_spectrum, quiet_floor_var, music_spreads = _analyze_stft(
+            y, effective_n_fft, sr
+        )
         if avg_spectrum.size == 0:
             raise HiResCheckError("Spectral analysis produced no bins")
         peak = float(np.max(avg_spectrum))
@@ -911,6 +1012,19 @@ def check_file(
     # master used to pass without being looked at.
     claims_by_rate = sr > hires_sample_rate_threshold
     claims_by_depth = declared_bits > 16
+    music_cutoff_hz = 0.0
+    ultrasonic_noise_only = False
+    useful_sample_rate = int(sr)
+    if claims_by_rate:
+        music_cutoff_hz = _music_cutoff(
+            music_spreads, spectrum_db, sr, effective_n_fft, noise_floor_db
+        )
+        if (
+            music_cutoff_hz > 0
+            and cutoff - music_cutoff_hz >= _ULTRASONIC_NOISE_MARGIN_HZ
+        ):
+            ultrasonic_noise_only = True
+            useful_sample_rate = _useful_sample_rate(int(sr), music_cutoff_hz)
     # A resampler's cliff at 22.05/24 kHz betrays a 44.1/48 kHz chain even
     # when a weak stopband leaves a flat plateau above it that reads as
     # "content" to the cutoff test (ffmpeg's default resampler does this).
@@ -991,6 +1105,9 @@ def check_file(
         brickwall_hz=brickwall_hz,
         noise_floor_class=floor_class,
         noise_floor_vs_16bit_db=floor_vs_16bit_db,
+        music_cutoff_hz=music_cutoff_hz,
+        ultrasonic_noise_only=ultrasonic_noise_only,
+        useful_sample_rate=useful_sample_rate,
     )
 
 

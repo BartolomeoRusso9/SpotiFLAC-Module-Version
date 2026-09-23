@@ -300,6 +300,35 @@ def test_genuine_audio_shows_no_evidence_at_all(tmp_path) -> None:
     assert result.confidence == ""
 
 
+def test_music_is_told_apart_from_ultrasonic_noise(tmp_path) -> None:
+    """A DSD or analog-tape transfer: music that stops around 30 kHz, and a
+    steady ultrasonic noise hump running on to ~80 kHz. The active-content
+    cutoff marks the end of the hump; the music bandwidth must not, and the
+    useful rate is the 88.2 kHz that holds all the music."""
+    n = HIRES_SR * SECONDS
+    freqs = np.fft.rfftfreq(n, 1.0 / HIRES_SR)
+
+    def band(seed: int, low: float, high: float):
+        spectrum = np.fft.rfft(np.random.default_rng(seed).standard_normal(n))
+        spectrum[(freqs < low) | (freqs > high)] = 0
+        return np.fft.irfft(spectrum, n=n)
+
+    music, hump = band(5, 20, 30000), band(6, 40000, 80000)
+    # A 3 Hz swell swings the music ~20 dB; the hump never moves.
+    swell = 0.55 + 0.45 * np.cos(2 * np.pi * 3 * np.arange(n) / HIRES_SR)
+    signal = 0.2 * music * swell + 0.004 * hump
+    fade = np.hanning(4096)
+    signal[:2048] *= fade[:2048]
+    signal[-2048:] *= fade[2048:]
+    result = check_file(_write_float24(tmp_path / "dsd.flac", signal, HIRES_SR))
+
+    assert result.verdict == "genuine_hires"
+    assert result.cutoff_frequency_hz > 70000
+    assert 28000 <= result.music_cutoff_hz <= 33000
+    assert result.ultrasonic_noise_only
+    assert result.useful_sample_rate == 88200
+
+
 # A real resampler rather than an ideal one: ffmpeg's leaves a transition
 # band and, by default, a stopband plateau ~50 dB down that the cutoff test
 # alone reads as content up to Nyquist.

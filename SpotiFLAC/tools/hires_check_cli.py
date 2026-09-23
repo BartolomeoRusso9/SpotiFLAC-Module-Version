@@ -54,6 +54,12 @@ def _analyze_one(file_path: str, sample_seconds: int) -> tuple[bool, bool]:
         f"(of {result.total_duration_s:.1f}s total)"
     )
     print(f"  Active cutoff freq.  : ~{result.cutoff_frequency_hz:.0f} Hz")
+    if result.ultrasonic_noise_only:
+        print(
+            f"  Music bandwidth      : ~{result.music_cutoff_hz:.0f} Hz; above it "
+            "only steady noise (DSD/tape transfer), so "
+            f"{result.useful_sample_rate} Hz would hold all the music"
+        )
     if result.brickwall_hz:
         print(f"  Resampler cliff      : at {result.brickwall_hz:.0f} Hz")
     if result.noise_floor_class:
