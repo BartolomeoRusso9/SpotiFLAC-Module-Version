@@ -35,7 +35,10 @@ def _track() -> TrackMetadata:
     )
 
 
-def _verdict(verdict: str, sample_rate: int) -> HiResCheckResult:
+def _verdict(
+    verdict: str, sample_rate: int, confidence: str = "likely"
+) -> HiResCheckResult:
+    """A canned check result. Fakes default to "likely": replaceable."""
     return HiResCheckResult(
         file_path=TRACK_FILE,
         declared_sample_rate=sample_rate,
@@ -49,6 +52,7 @@ def _verdict(verdict: str, sample_rate: int) -> HiResCheckResult:
             if verdict == "fake_hires"
             else ""
         ),
+        confidence=confidence if verdict == "fake_hires" else "",
     )
 
 
@@ -146,6 +150,23 @@ def test_an_unverifiable_file_is_left_alone(_offline, monkeypatch, tmp_path) -> 
     assert result.success
     assert provider.qualities == ["HI_RES_LOSSLESS"]
     assert (tmp_path / TRACK_FILE).exists()
+
+
+def test_a_suspect_is_reported_but_never_replaced(
+    _offline, monkeypatch, tmp_path
+) -> None:
+    """A suspect may be a genuine master low-pass filtered in mastering. A
+    LOSSLESS copy of it would cost real bit depth, so it is only reported."""
+    seen = _stub_analysis(monkeypatch, _verdict("fake_hires", 96000, "suspect"))
+    provider = _Provider(tmp_path)
+
+    result = _run([provider], tmp_path, _track(), redownload_fake_hires=True)
+
+    assert result.success
+    assert seen, "the file was never checked"
+    assert provider.qualities == ["HI_RES_LOSSLESS"]
+    assert (tmp_path / TRACK_FILE).read_bytes() == b"audio-HI_RES_LOSSLESS"
+    assert not (tmp_path / QUARANTINED).exists()
 
 
 def test_a_failed_replacement_puts_the_flagged_file_back(

@@ -364,7 +364,15 @@ The bit-depth test is the only one that says anything about a **24-bit / 44.1 kH
 
 - **Off by default, but nothing to install.** The analysis runs on `numpy` and `soundfile`, which ship with SpotiFLAC — it used to sit behind a `SpotiFLAC[hires]` extra that pulled `librosa` and, with it, numba, llvmlite, scipy and scikit-learn (~346 MB, for six functions). That extra is gone; pip treats a request for an extra that no longer exists as a warning, so an old `pip install 'SpotiFLAC[hires]'` still produces a working install.
 - **Never blocks or fails a download.** The check runs as a background task *after* the file has already been saved successfully — a track download is never delayed, retried, or marked as failed because of it, and analysis errors (corrupt segment, unreadable file, etc.) are swallowed and logged at debug level, not surfaced as errors.
-- **The spectral half is a hint, not a certification.** It cannot tell an upsampled CD from a genuine Hi-Res master that was deliberately low-pass filtered during mastering (not rare in pop/rock) — in the signal the two are the same. Treat a "content stops at…" warning as something worth a closer listen, not definitive proof. The bit-depth half carries no such caveat: bits are either used or they are not.
+- **Every finding is graded.** Above 22 kHz an upsampled CD and a genuine master low-pass filtered in mastering (not rare in pop/rock) are the same signal, so the cutoff alone proves nothing. Each `fake_hires` verdict therefore carries a `confidence`, from evidence that *can* separate them:
+
+  | Confidence | Evidence | Replaced by `--redownload-fake-hires` |
+  |---|---|---|
+  | `certain` | An exact fingerprint: padded bit depth, every sample repeated (sample-and-hold), in-between samples on a straight line (linear interpolation), or the band above 22 kHz mirroring the audible one (imaging). | Yes |
+  | `likely` | A resampler's cliff right at 22.05 / 24 kHz (flat passband, then 40+ dB down within a few kHz) **and** an in-band noise floor, read in the quietest passages, no lower than 16-bit quantization noise. Nothing in the file exceeds what a 16-bit `LOSSLESS` copy holds. | Yes |
+  | `suspect` | Anything else that fails the cutoff test: a gradual roll-off, a floor below the 16-bit level (real resolution a 16-bit copy would lose), or music that never goes quiet enough for the floor to be read. May be a genuine master. | No — reported only |
+
+  The cliff test also catches upsamples the cutoff test used to miss: ffmpeg's default resampler leaves a flat plateau ~50 dB down above 22 kHz, which reads as "content" all the way to Nyquist.
 - **Skipped automatically for lossy output.** If `transcode_to="mp3"` (or `--mp3`) is set, the already-lossy result is never analyzed — checking an MP3 for ultrasonic content would be meaningless. The lossless targets keep the check, since they preserve the spectrum of the source exactly.
 - **Standalone tool.** The underlying checker also ships as a CLI you can point at any file(s) you already have, independent of a download run:
 
@@ -374,7 +382,7 @@ The bit-depth test is the only one that says anything about a **24-bit / 44.1 kH
 
 #### Replacing a fake Hi-Res file automatically
 
-By default a finding is only a warning: the file stays where it is. Add `redownload_fake_hires=True` (Python), `--redownload-fake-hires` (CLI), or switch on **Replace fake Hi-Res** under the GUI toggle above, to act on it — a flagged file is set aside, the track is downloaded again at `LOSSLESS`, and the flagged file is deleted only once the replacement is on disk.
+By default a finding is only a warning: the file stays where it is. Add `redownload_fake_hires=True` (Python), `--redownload-fake-hires` (CLI), or switch on **Replace fake Hi-Res** under the GUI toggle above, to act on it — a `certain` or `likely` fake is set aside, the track is downloaded again at `LOSSLESS`, and the flagged file is deleted only once the replacement is on disk. A `suspect` is only reported: it may be a genuine master, and a 16-bit copy would cost it real bit depth.
 
 ```bash
 spotiflac https://open.spotify.com/album/... ./out --service ext:tidal-web \
@@ -392,7 +400,7 @@ SpotiFLAC(
 )
 ```
 
-**Why LOSSLESS is the replacement, not a downgrade.** An upsampled 24/96 file carries no more information than the CD-rate master it was made from — the extra bandwidth is empty. The `LOSSLESS` copy is the same audio, honestly labelled, and a good deal smaller.
+**Why LOSSLESS is the replacement, not a downgrade.** An upsampled 24/96 file carries no more information than the CD-rate master it was made from — the extra bandwidth is empty. For a `certain` or `likely` fake the extra bit depth is empty too (padding, or a floor no lower than 16-bit noise), so the `LOSSLESS` copy is the same audio, honestly labelled, and a good deal smaller.
 
 **What to know:**
 
@@ -401,7 +409,7 @@ SpotiFLAC(
 - **The check runs inline here, not in the background.** The verdict decides what happens to the file, so the track is only reported as finished once it has been settled. Expect a few CPU-bound seconds per Hi-Res track.
 - **It can never leave you with nothing.** The flagged file is *renamed* (`<name>.fake-hires.bak`), not deleted, while the replacement is fetched. If every extension fails at `LOSSLESS`, the original name is restored and the run reports that the flagged file was kept.
 - **One replacement, never a chain.** The `LOSSLESS` pass is not itself eligible for replacement, so an extension that ignores the quality request cannot put the track in a loop.
-- **A false positive costs bit depth.** Since the *spectral* half cannot distinguish an upsample from a deliberately low-passed genuine master, switching this on will occasionally replace a real 24-bit Hi-Res file with a 16-bit `LOSSLESS` one. A finding that names the bit depth instead ("declares 24-bit but only 16 bits carry data") is not a judgement call, and replacing that file loses nothing at all. Nothing audible is lost in that case, but it is a real trade — leave the option off and read the warnings if you would rather decide track by track.
+- **A false positive costs bit depth.** Suspect findings are reported and kept. Certain or likely findings are eligible for replacement, but can still be wrong: a real 24-bit Hi-Res file can be replaced with a 16-bit `LOSSLESS` one if the spectral evidence is misgraded, an artifact-only finding is called certain, or a likely finding is based on a misread noise floor. A finding that names the bit depth instead ("declares 24-bit but only 16 bits carry data") is not a judgement call, and replacing that file loses nothing at all. Nothing audible is lost in that case, but it is a real trade — leave the option off and read the warnings if you would rather decide track by track.
 - **`transcode_keep_original` is handled too.** With that option on, the converted file *and* the provider source kept beside it are both set aside, and both are replaced or both put back. Setting aside only the converted one would leave the source where the next provider's "already downloaded" check finds it, and the track would never actually be replaced.
 
 ### Multiple Playlists in One Folder

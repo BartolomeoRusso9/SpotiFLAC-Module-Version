@@ -16,15 +16,29 @@ independent axes, and each is checked on its own terms:
     that says anything about a 24-bit/44.1 kHz file, which claims Hi-Res
     purely by depth and which the spectral test cannot judge at all.
 
-This is a best-effort heuristic, not a certification, and the thing it
-measures cannot distinguish between the two ways a spectrum ends at 22 kHz:
+The cutoff alone cannot tell the two ways a spectrum ends at 22 kHz apart:
 an upsampled CD, and a genuine hi-res master that was deliberately low-pass
-filtered during mastering (not rare in pop/rock). Both read as "fake_hires"
-here, because in the signal they are the same. Treat the verdict as a hint
-worth a closer listen, not proof — and note that acting on it automatically
-(SpotiFLAC's --redownload-fake-hires) will replace such a master with a
-LOSSLESS copy, which costs its bit depth even though no audible content is
-lost.
+filtered during mastering. Above 22 kHz they are the same signal. So every
+"fake_hires" verdict is graded by evidence that can separate them, and that
+answers the question that actually matters before replacing a file: would a
+LOSSLESS copy lose anything this one holds?
+
+  certain — an exact fingerprint: padded bit depth, every sample repeated
+    (sample-and-hold), in-between samples on a straight line (linear
+    interpolation), or the band above 22 kHz mirroring the audible one
+    (imaging).
+  likely  — a resampler's cliff right at 22.05/24 kHz (flat passband, then
+    40+ dB down within a few kHz), over an in-band noise floor no lower
+    than 16-bit quantization noise: nothing in the file exceeds what a
+    16-bit LOSSLESS copy holds.
+  suspect — anything else that fails the cutoff test: a gradual roll-off,
+    a floor below the 16-bit level (real resolution a 16-bit copy would
+    lose), or a floor the music never leaves quiet enough to read. It may
+    be a genuine master and is never replaced automatically
+    (`redownload_safe` is False).
+
+This is kept in lockstep with SpotiFLAC-Mobile's go_backend/hires_check.go
+and hires_check_evidence.go: same thresholds, same verdicts.
 
 Public API:
     - is_available() -> bool
@@ -38,6 +52,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -59,6 +74,63 @@ except Exception as exc:  # pragma: no cover - both are install dependencies
     np = None  # type: ignore[assignment]
     sf = None  # type: ignore[assignment]
     _AUDIO_IMPORT_ERROR = exc
+
+
+CONFIDENCE_CERTAIN = "certain"
+CONFIDENCE_LIKELY = "likely"
+CONFIDENCE_SUSPECT = "suspect"
+
+ARTIFACT_SAMPLE_HOLD = "sample_hold"
+ARTIFACT_INTERPOLATION = "linear_interpolation"
+ARTIFACT_IMAGING = "imaging"
+
+FLOOR_BELOW_16BIT = "below_16bit"
+FLOOR_AT_16BIT = "at_16bit"
+FLOOR_MASKED = "masked"
+
+#: Standard-definition rates a fake is made from; their Nyquist is where a
+#: resampler's anti-imaging filter leaves its cliff.
+_SOURCE_RATES = (44100, 48000)
+
+#: Band the in-band noise floor is measured over. Noise-shaped dither lowers
+#: the floor in the mid-band only by raising it above ~15 kHz, so averaging
+#: over the whole band keeps a shaped 16-bit floor at or above the flat one.
+_FLOOR_BAND_LOW_HZ = 500.0
+_FLOOR_BAND_HIGH_HZ = 20000.0
+#: Fraction of fully-inside STFT frames, quietest first, the floor is read in.
+_QUIET_FRAME_FRACTION = 0.1
+#: Floor against flat 16-bit quantization noise: below this there is
+#: resolution a 16-bit copy would lose; above _FLOOR_MASKED_DB the quietest
+#: frames still carry music and the floor cannot be read.
+_FLOOR_BELOW_16BIT_DB = -6.0
+_FLOOR_MASKED_DB = 20.0
+#: Brickwall: flat passband before the source Nyquist, a cliff after it.
+_BRICKWALL_MAX_PASSBAND_DROP_DB = 20.0
+_BRICKWALL_MIN_CLIFF_DB = 40.0
+_BRICKWALL_FLAT_PASSBAND_DB = 6.0
+#: Imaging: the band above the source Nyquist mirrors the one below.
+_IMAGING_MIN_CORRELATION = 0.9
+#: Integer-upsampling artifacts: the signal must move at enough original
+#: samples, and (almost) never between them.
+_ARTIFACT_MIN_MOVING_ANCHORS = 1000
+_ARTIFACT_MAX_VIOLATION_RATE = 0.001
+#: Frames per rfft batch: bounds memory at ~8 MB per batch for n_fft=4096.
+_STFT_BATCH_FRAMES = 256
+#: Music bandwidth: 1 kHz bands from _MUSIC_BAND_START_HZ up are music while
+#: their level swings with it across frames (p95-p5 at least
+#: _MUSIC_MIN_SPREAD_DB). Steady noise, such as the ultrasonic hump a DSD or
+#: tape transfer carries up to Nyquist, averages out to a few dB.
+_MUSIC_BAND_START_HZ = 16000.0
+_MUSIC_BAND_WIDTH_HZ = 1000.0
+_MUSIC_MIN_SPREAD_DB = 10.0
+#: Active content this far past the music bandwidth is reported as steady
+#: noise rather than content.
+_ULTRASONIC_NOISE_MARGIN_HZ = 8000.0
+#: Standard rate families; a file's useful rate is looked up in its own.
+_RATE_FAMILIES = (
+    (44100, 88200, 176400, 352800),
+    (48000, 96000, 192000, 384000),
+)
 
 
 class HiResCheckError(Exception):
@@ -93,11 +165,47 @@ class HiResCheckResult:
     #: CD-range cutoff by definition, and reading that back off the numbers
     #: alone would report a spectral finding nobody made.
     reason: str = ""
+    #: How sure a "fake_hires" verdict is: "certain", "likely" or "suspect"
+    #: (see the module docstring). Empty for every other verdict.
+    confidence: str = ""
+    #: Exact upsampling fingerprint found, if any: "sample_hold",
+    #: "linear_interpolation" or "imaging".
+    upsampling_artifact: str = ""
+    #: Source Nyquist (22050 / 24000) with a resampler-style cliff; 0 if none.
+    brickwall_hz: float = 0.0
+    #: In-band floor of the quietest frames against flat 16-bit quantization
+    #: noise: "below_16bit", "at_16bit", "masked", or empty when not measured.
+    noise_floor_class: str = ""
+    noise_floor_vs_16bit_db: float = 0.0
+    #: Highest frequency whose level still moves with the music, for a file
+    #: claiming Hi-Res by rate; 0 when not measured. Informational: the
+    #: verdict rests on the tests above.
+    music_cutoff_hz: float = 0.0
+    #: True when the active content past music_cutoff_hz is steady noise,
+    #: like the ultrasonic hump of a DSD or analog tape transfer, so
+    #: cutoff_frequency_hz marks where that noise ends rather than the music.
+    ultrasonic_noise_only: bool = False
+    #: With ultrasonic_noise_only: the lowest standard rate of the same
+    #: family that holds all the music (e.g. 88200 for a 176.4 kHz file whose
+    #: music stops at 34 kHz). Otherwise the declared rate; 0 if not set.
+    useful_sample_rate: int = 0
 
     @property
     def is_suspicious(self) -> bool:
-        """True only for a clear, high-confidence "fake hi-res" verdict."""
+        """True for any "fake hi-res" verdict, whatever its confidence."""
         return self.verdict == "fake_hires"
+
+    @property
+    def redownload_safe(self) -> bool:
+        """True when a LOSSLESS copy would lose nothing this file holds.
+
+        A certain or likely fake. A suspect may be a genuine master that a
+        16-bit copy would strip of real bit depth, so it is only reported.
+        """
+        return self.is_suspicious and self.confidence in (
+            CONFIDENCE_CERTAIN,
+            CONFIDENCE_LIKELY,
+        )
 
     @property
     def padded_bit_depth(self) -> bool:
@@ -105,11 +213,15 @@ class HiResCheckResult:
         return self.declared_bit_depth > 16 and 0 < self.effective_bit_depth <= 16
 
     def summary(self) -> str:
+        fake_labels = {
+            CONFIDENCE_CERTAIN: "FAKE HI-RES",
+            CONFIDENCE_LIKELY: "LIKELY FAKE HI-RES",
+            CONFIDENCE_SUSPECT: "POSSIBLY FAKE HI-RES",
+        }
+        fake_label = fake_labels.get(self.confidence, "LIKELY FAKE HI-RES")
         labels = {
             "fake_hires": (
-                f"LIKELY FAKE HI-RES — {self.reason}"
-                if self.reason
-                else "LIKELY FAKE HI-RES"
+                f"{fake_label} — {self.reason}" if self.reason else fake_label
             ),
             "standard_definition": (
                 "Standard-definition file — nothing to flag "
@@ -152,12 +264,20 @@ _PCM_SUBTYPE_BITS = {
 }
 
 
-def _measure_bit_depth(
-    path: Path,
-    start_frame: int,
-    frames: int,
-) -> tuple[int, int]:
-    """(declared, effective) bits per sample over one window of `path`.
+@dataclass(frozen=True)
+class _IntWindow:
+    """The integer-sample view of one window: depth, plus channel 0."""
+
+    declared_bits: int = 0
+    effective_bits: int = 0
+    #: Channel 0, right-justified at the declared depth; None when unread.
+    first_channel: Any = None
+    #: Low bits of the declared depth no sample in the window ever uses.
+    unused_bits: int = 0
+
+
+def _read_int_window(path: Path, start_frame: int, frames: int) -> _IntWindow:
+    """Declared/effective depth over one window, plus channel 0's samples.
 
     Effective depth is counted, not estimated: soundfile hands back every
     PCM subtype left-justified in an int32, so OR-ing the whole window
@@ -167,9 +287,9 @@ def _measure_bit_depth(
     caught with certainty — there is no threshold here to tune or to argue
     with.
 
-    Returns (0, 0) for anything with no fixed-point depth to check, and for
-    any read failure: an unmeasurable depth must leave the spectral verdict
-    exactly as it was, never turn into a finding of its own.
+    Returns an empty window for anything with no fixed-point depth to check,
+    and for any read failure: an unmeasurable depth must leave the spectral
+    verdict exactly as it was, never turn into a finding of its own.
     """
     via_ffmpeg = False
     try:
@@ -177,17 +297,17 @@ def _measure_bit_depth(
     except Exception as exc:
         if not _ffmpeg_available():
             logger.debug("[hires-check] could not read subtype of '%s': %s", path, exc)
-            return 0, 0
+            return _IntWindow()
         try:
             _sr, _frames, declared = _ffprobe_info(path)
         except Exception as probe_exc:
             logger.debug(
                 "[hires-check] ffprobe could not read '%s': %s", path, probe_exc
             )
-            return 0, 0
+            return _IntWindow()
         via_ffmpeg = True
     if not declared:
-        return 0, 0
+        return _IntWindow()
 
     try:
         if via_ffmpeg:
@@ -199,20 +319,26 @@ def _measure_bit_depth(
                 window = handle.read(frames, dtype="int32", always_2d=True)
     except Exception as exc:
         logger.debug("[hires-check] could not read samples of '%s': %s", path, exc)
-        return declared, 0
+        return _IntWindow(declared_bits=declared)
 
     if window.size == 0:
-        return declared, 0
+        return _IntWindow(declared_bits=declared)
 
     accumulated = int(np.bitwise_or.reduce(window.astype(np.uint32).ravel()))
     if accumulated == 0:
         # Digital silence carries no bits at all. Reporting 0 keeps it out
         # of the padded-depth test rather than making every silent passage
         # look like a 16-bit fake.
-        return declared, 0
+        return _IntWindow(declared_bits=declared)
 
     unused_low_bits = int((accumulated & -accumulated).bit_length() - 1)
-    return declared, 32 - unused_low_bits
+    justify = 32 - declared
+    return _IntWindow(
+        declared_bits=declared,
+        effective_bits=32 - unused_low_bits,
+        first_channel=window[:, 0].astype(np.int64) >> justify,
+        unused_bits=max(unused_low_bits - justify, 0),
+    )
 
 
 def is_available() -> bool:
@@ -261,7 +387,7 @@ def _ffprobe_info(path: Path) -> tuple[int, int, int]:
 
     `bits_per_raw_sample` is what the codec actually stores; ffprobe leaves
     it empty for formats that have no fixed depth, which is the same "0
-    means no claim to check" convention _measure_bit_depth() already uses.
+    means no claim to check" convention _read_int_window() already uses.
     """
     out = subprocess.run(  # noqa: S603 - fixed argv, path passed as one arg
         [
@@ -379,19 +505,19 @@ def _read_mono_window(
     path: Path,
     start_frame: int,
     frames: int,
-) -> tuple["np.ndarray", int]:
-    """The requested window of `path`, downmixed to mono, as float32.
+) -> tuple["np.ndarray", int, int]:
+    """(mono float32 in full-scale units, sample rate, channel count).
 
-    soundfile first — it is what librosa itself decoded through — and
-    ffmpeg for what libsndfile cannot open (ALAC/MP4, WavPack, TTA). The
-    spectrum is normalised against its own peak downstream, so the integer
-    scale ffmpeg returns needs no conversion to mean the same thing.
+    soundfile first, and ffmpeg for what libsndfile cannot open (ALAC/MP4,
+    WavPack, TTA). Both come back in full-scale units (±1.0): the noise
+    floor test reads absolute levels against 16-bit quantization noise, so
+    the ffmpeg path's left-justified int32 is scaled down to match.
     """
     try:
         with sf.SoundFile(path) as handle:
             handle.seek(start_frame)
             block = handle.read(frames, dtype="float32", always_2d=True)
-            return block.mean(axis=1), int(handle.samplerate)
+            return block.mean(axis=1), int(handle.samplerate), int(block.shape[1])
     except Exception as exc:
         if not _ffmpeg_available():
             raise HiResCheckError(
@@ -407,34 +533,306 @@ def _read_mono_window(
 
     sample_rate, _frames, _bits = _ffprobe_info(path)
     window = _ffmpeg_read_window(path, start_frame, frames, sample_rate)
-    return window.mean(axis=1).astype(np.float32), sample_rate
+    mono = (window.astype(np.float64) / 2.0**31).mean(axis=1)
+    return mono.astype(np.float32), sample_rate, int(window.shape[1])
 
 
-def _average_magnitude_spectrum(y: "np.ndarray", n_fft: int) -> "np.ndarray":
-    """Mean magnitude across a Hann-windowed STFT of `y`.
+# ── Spectrum and evidence ──────────────────────────────────────────────────
 
-    A hand-rolled equivalent of `np.abs(librosa.stft(y, n_fft)).mean(axis=1)`,
-    matching its defaults exactly: a periodic Hann window, a hop of n_fft/4,
-    and centred frames (the signal zero-padded by n_fft/2 at both ends).
-    Checked against librosa on real and synthetic audio before librosa was
-    dropped: the spectra agree to 1.1e-07 relative — float32 rounding, i.e.
-    the same computation — and every cutoff came out identical.
+
+def _analyze_stft(
+    y: "np.ndarray", n_fft: int, sample_rate: int
+) -> tuple["np.ndarray", float, list[float]]:
+    """(mean magnitude spectrum, quiet-frame floor, music band spreads).
+
+    The spectrum matches `np.abs(librosa.stft(y, n_fft)).mean(axis=1)`: a
+    periodic Hann window, a hop of n_fft/4, and centred frames (the signal
+    zero-padded by n_fft/2 at both ends). Checked against librosa before it
+    was dropped: the spectra agreed to float rounding and every cutoff came
+    out identical.
+
+    The floor is the white-noise-equivalent variance, in full-scale units,
+    of the quietest tenth of the frames that lie fully inside the signal,
+    or NaN when none qualified. Frames overlapping the zero padding would
+    read as quiet for the wrong reason, and digital silence has no floor.
+
+    The spreads are the p95-p5 swing, across those same frames, of each
+    1 kHz band's level from 16 kHz up (see _music_cutoff); empty for files
+    at or below 48 kHz, where the question does not arise.
     """
     hop = n_fft // 4
+    half = n_fft // 2
+    avg = np.zeros(half + 1, dtype=np.float64)
     # Annotated because numpy is `follow_imports = "skip"` for mypy (see
     # pyproject.toml), so everything it returns arrives as untyped Any.
-    window: Any = np.hanning(n_fft + 1)[:-1].astype(np.float32)
-    padded: Any = np.pad(y, n_fft // 2, mode="constant")
+    signal: Any = np.asarray(y, dtype=np.float64)
+    padded: Any = np.pad(signal, half, mode="constant")
     frame_count = 1 + (len(padded) - n_fft) // hop
     if frame_count < 1:
-        return np.zeros(n_fft // 2 + 1, dtype=np.float32)
+        return avg, math.nan, []
 
-    # One strided view rather than a Python loop over frames: a 30s window
-    # at 176.4 kHz is ~5000 frames, and the copy this makes is bounded by
-    # the window length the caller already agreed to hold in memory.
-    starts: Any = hop * np.arange(frame_count)[:, None]
-    frames = padded[starts + np.arange(n_fft)[None, :]] * window
-    return np.abs(np.fft.rfft(frames, n=n_fft, axis=1)).mean(axis=0)
+    window: Any = np.hanning(n_fft + 1)[:-1]
+    window_power = float(np.sum(window * window))
+    bin_hz = sample_rate / n_fft
+    band_low = math.ceil(_FLOOR_BAND_LOW_HZ / bin_hz)
+    band_high = min(int(_FLOOR_BAND_HIGH_HZ / bin_hz), half)
+    offsets: Any = np.arange(n_fft)
+
+    music_bands: list[tuple[int, int]] = []
+    if sample_rate / 2 > _SOURCE_RATES[1] / 2:
+        lo = _MUSIC_BAND_START_HZ
+        while lo + _MUSIC_BAND_WIDTH_HZ <= sample_rate / 2:
+            first_bin = math.ceil(lo / bin_hz)
+            last_bin = min(math.ceil((lo + _MUSIC_BAND_WIDTH_HZ) / bin_hz), half + 1)
+            if last_bin > first_bin:
+                music_bands.append((first_bin, last_bin))
+            lo += _MUSIC_BAND_WIDTH_HZ
+
+    frame_means: list[Any] = []
+    frame_medians: list[Any] = []
+    music_levels: list[Any] = []
+    # Batched rather than one strided view over every frame: a 30s window
+    # at 176.4 kHz is ~5000 frames, and their spectra all at once run to
+    # hundreds of megabytes.
+    for first in range(0, frame_count, _STFT_BATCH_FRAMES):
+        index: Any = np.arange(first, min(first + _STFT_BATCH_FRAMES, frame_count))
+        starts: Any = hop * index
+        frames = padded[starts[:, None] + offsets[None, :]] * window
+        magnitude: Any = np.abs(np.fft.rfft(frames, n=n_fft, axis=1))
+        avg += magnitude.sum(axis=0)
+
+        if band_high <= band_low:
+            continue
+        inside = (starts - half >= 0) & (starts - half + n_fft <= len(signal))
+        power = magnitude[inside, band_low : band_high + 1] ** 2
+        keep = power.sum(axis=1) > 0
+        power = power[keep]
+        if power.size:
+            frame_means.append(power.mean(axis=1))
+            frame_medians.append(np.median(power, axis=1))
+            if music_bands:
+                full: Any = magnitude[inside][keep] ** 2
+                music_levels.append(
+                    np.stack(
+                        [full[:, a:b].mean(axis=1) for a, b in music_bands], axis=1
+                    )
+                )
+
+    avg /= frame_count
+    if not frame_means:
+        return avg, math.nan, []
+
+    spreads: list[float] = []
+    if music_levels:
+        levels: Any = 10 * np.log10(np.maximum(np.concatenate(music_levels), 1e-30))
+        if levels.shape[0] >= 2:
+            spreads = [
+                float(np.percentile(col, 95) - np.percentile(col, 5))
+                for col in levels.T
+            ]
+
+    means: Any = np.concatenate(frame_means)
+    medians: Any = np.concatenate(frame_medians)
+    count = max(1, int(len(means) * _QUIET_FRAME_FRACTION))
+    quietest = medians[np.argsort(means, kind="stable")[:count]]
+    # |X|^2 of white noise is exponential with mean sigma^2 * sum(w^2), so
+    # its median is ln 2 times that. The median ignores tonal peaks.
+    floor_var = float(np.median(quietest / math.log(2) / window_power))
+    return avg, floor_var, spreads
+
+
+def _music_cutoff(
+    spreads: list[float],
+    spec_db: "np.ndarray",
+    sample_rate: int,
+    n_fft: int,
+    noise_floor_db: float,
+) -> float:
+    """Upper edge of the last contiguous 1 kHz band, from 16 kHz up, that
+    both carries active content (its level in the averaged spectrum above
+    noise_floor_db) and moves with the music.
+
+    The level test keeps a resampler's leakage, which swings with the music
+    too but sits far below it, from counting. 0 when even the first fails.
+    """
+    cutoff = 0.0
+    for index, spread in enumerate(spreads):
+        lo = _MUSIC_BAND_START_HZ + index * _MUSIC_BAND_WIDTH_HZ
+        band = _band(spec_db, sample_rate, n_fft, lo, lo + _MUSIC_BAND_WIDTH_HZ)
+        if not band.size or spread < _MUSIC_MIN_SPREAD_DB:
+            break
+        if float(np.mean(band)) <= noise_floor_db:
+            break
+        cutoff = lo + _MUSIC_BAND_WIDTH_HZ
+    return cutoff
+
+
+def _useful_sample_rate(declared: int, music_cutoff_hz: float) -> int:
+    """Lowest standard rate in the declared rate's family whose Nyquist still
+    holds music_cutoff_hz; the declared rate when none below it does."""
+    for family in _RATE_FAMILIES:
+        if declared % family[0]:
+            continue
+        for rate in family:
+            if rate >= declared:
+                break
+            if rate / 2 >= music_cutoff_hz:
+                return rate
+    return declared
+
+
+def _classify_noise_floor(floor_var: float, channels: int) -> tuple[str, float]:
+    """The floor against flat 16-bit quantization noise.
+
+    LSB^2/12 per channel, divided by the channel count for the mono downmix
+    of independent channels: the lowest a 16-bit source's floor can be.
+    """
+    if math.isnan(floor_var) or floor_var <= 0:
+        return "", 0.0
+    lsb = 2.0**-15
+    ref = lsb * lsb / 12 / max(channels, 1)
+    vs_16bit_db = 10 * math.log10(floor_var / ref)
+    if vs_16bit_db < _FLOOR_BELOW_16BIT_DB:
+        return FLOOR_BELOW_16BIT, vs_16bit_db
+    if vs_16bit_db > _FLOOR_MASKED_DB:
+        return FLOOR_MASKED, vs_16bit_db
+    return FLOOR_AT_16BIT, vs_16bit_db
+
+
+def _band(
+    spec_db: "np.ndarray", sample_rate: int, n_fft: int, low_hz: float, high_hz: float
+) -> "np.ndarray":
+    bin_hz = sample_rate / n_fft
+    lo = max(math.ceil(low_hz / bin_hz), 0)
+    hi = min(int(high_hz / bin_hz), len(spec_db) - 1)
+    return spec_db[lo : hi + 1]
+
+
+def _detect_brickwall(
+    spec_db: "np.ndarray", sample_rate: int, n_fft: int, noise_floor_db: float
+) -> float:
+    """The source Nyquist (22050 / 24000 Hz) with a resampler's cliff, or 0.
+
+    A resampler's anti-imaging filter leaves the spectrum flat right up to
+    the edge and then drops it off a cliff. A mastering low-pass rolls off
+    gradually and is already well down before the edge.
+
+    A 48 kHz source passes the test at 22.05 kHz too (its cliff lies beyond
+    that edge as well), so the highest edge the passband still reaches flat
+    wins; a 44.1 kHz source is already sloping into its transition band there.
+    """
+    best, best_drop = 0.0, math.inf
+    for rate in _SOURCE_RATES:
+        edge = rate / 2
+        if edge + 5000 > sample_rate / 2:
+            continue
+        passband = _band(spec_db, sample_rate, n_fft, edge - 8000, edge - 5000)
+        below = _band(spec_db, sample_rate, n_fft, edge - 2500, edge - 500)
+        above = _band(spec_db, sample_rate, n_fft, edge + 2500, edge + 5000)
+        if not (passband.size and below.size and above.size):
+            continue
+        below_level = float(np.median(below))
+        drop = float(np.median(passband)) - below_level
+        cliff = below_level - float(np.median(above))
+        if (
+            below_level <= noise_floor_db
+            or drop > _BRICKWALL_MAX_PASSBAND_DROP_DB
+            or cliff < _BRICKWALL_MIN_CLIFF_DB
+        ):
+            continue
+        flat = drop <= _BRICKWALL_FLAT_PASSBAND_DB
+        best_flat = best_drop <= _BRICKWALL_FLAT_PASSBAND_DB
+        if (
+            best == 0
+            or (flat and (not best_flat or edge > best))
+            or (not flat and not best_flat and drop < best_drop)
+        ):
+            best, best_drop = edge, drop
+    return best
+
+
+def _detect_imaging(
+    spec_db: "np.ndarray", sample_rate: int, n_fft: int, noise_floor_db: float
+) -> bool:
+    """Whether the band above a source Nyquist mirrors the band below it.
+
+    That is what upsampling without (or with a poor) anti-imaging filter
+    leaves. Genuine content keeps falling with frequency, so its mirror
+    correlation is near zero or negative.
+    """
+    bin_hz = sample_rate / n_fft
+    for rate in _SOURCE_RATES:
+        low_hz = rate / 2 + 500
+        high_hz = min(rate - 500, sample_rate / 2 - 500)
+        if high_hz - low_hz < 2000:
+            continue
+        image: list[float] = []
+        mirror: list[float] = []
+        k = math.ceil(low_hz / bin_hz)
+        while k * bin_hz <= high_hz:
+            # Rounded half away from zero, as Go's math.Round does.
+            m = int(math.floor((rate - k * bin_hz) / bin_hz + 0.5))
+            if k < len(spec_db) and 0 <= m < len(spec_db):
+                image.append(float(spec_db[k]))
+                mirror.append(float(spec_db[m]))
+            k += 1
+        if len(image) < 16 or sum(image) / len(image) <= noise_floor_db:
+            continue  # no content above the edge: nothing was mirrored
+        if _pearson(image, mirror) >= _IMAGING_MIN_CORRELATION:
+            return True
+    return False
+
+
+def _detect_integer_upsampling(window: _IntWindow, sample_rate: int) -> str:
+    """Exact fingerprints of upsampling by an integer ratio from 44.1/48 kHz.
+
+    Every sample repeated (sample-and-hold), or the in-between samples on a
+    straight line (linear interpolation). Measured in units of the bits
+    actually used, so a padded source's rounding stays within a couple of
+    its own LSBs.
+    """
+    samples = window.first_channel
+    if samples is None or len(samples) < 4:
+        return ""
+    x: Any = samples >> window.unused_bits
+    d1: Any = x[1:-1] - x[:-2]
+    d2: Any = np.abs(x[:-2] - 2 * x[1:-1] + x[2:])
+    positions: Any = np.arange(1, len(x) - 1)
+    for rate in _SOURCE_RATES:
+        if sample_rate % rate:
+            continue
+        ratio = sample_rate // rate
+        if not 2 <= ratio <= 8:
+            continue
+        for phase in range(ratio):
+            inner = (positions - phase) % ratio != 0  # between original samples
+            max_violations = int(inner.sum()) * _ARTIFACT_MAX_VIOLATION_RATE
+            if (
+                int((d1[~inner] != 0).sum()) >= _ARTIFACT_MIN_MOVING_ANCHORS
+                and int((d1[inner] != 0).sum()) <= max_violations
+            ):
+                return ARTIFACT_SAMPLE_HOLD
+            if (
+                int((d2[~inner] > 2).sum()) >= _ARTIFACT_MIN_MOVING_ANCHORS
+                and int((d2[inner] > 2).sum()) <= max_violations
+            ):
+                return ARTIFACT_INTERPOLATION
+    return ""
+
+
+def _pearson(a: list[float], b: list[float]) -> float:
+    n = len(a)
+    mean_a = sum(a) / n
+    mean_b = sum(b) / n
+    cov = var_a = var_b = 0.0
+    for va, vb in zip(a, b):
+        da, db = va - mean_a, vb - mean_b
+        cov += da * db
+        var_a += da * da
+        var_b += db * db
+    if var_a == 0 or var_b == 0:
+        return 0.0
+    return cov / math.sqrt(var_a * var_b)
 
 
 def check_file(
@@ -543,7 +941,7 @@ def check_file(
     start_frame = int(offset * declared_sr)
     window_frames = int(analyzed_duration * declared_sr)
     try:
-        y, sr = _read_mono_window(path, start_frame, window_frames)
+        y, sr, channels = _read_mono_window(path, start_frame, window_frames)
     except Exception as exc:
         raise HiResCheckError(f"Could not decode audio: {exc}") from exc
 
@@ -552,10 +950,7 @@ def check_file(
     if sr <= 0:
         raise HiResCheckError(f"Decoder returned an invalid sample rate: {sr}")
 
-    # A fully-silent (or near-silent) segment makes spectral analysis
-    # meaningless rather than wrong — report it as inconclusive instead of
-    # guessing.
-    if not np.any(np.abs(y) > 1e-9):
+    def inconclusive() -> HiResCheckResult:
         return HiResCheckResult(
             file_path=str(path),
             declared_sample_rate=int(sr),
@@ -566,6 +961,12 @@ def check_file(
             verdict="inconclusive",
         )
 
+    # A fully-silent (or near-silent) segment makes spectral analysis
+    # meaningless rather than wrong — report it as inconclusive instead of
+    # guessing.
+    if not np.any(np.abs(y) > 1e-9):
+        return inconclusive()
+
     # Shrink n_fft for very short segments so a huge window is not padded
     # over a tiny signal, which would measure the padding as much as the
     # audio.
@@ -574,20 +975,14 @@ def check_file(
         effective_n_fft //= 2
 
     try:
-        avg_spectrum = _average_magnitude_spectrum(y, effective_n_fft)
+        avg_spectrum, quiet_floor_var, music_spreads = _analyze_stft(
+            y, effective_n_fft, sr
+        )
         if avg_spectrum.size == 0:
             raise HiResCheckError("Spectral analysis produced no bins")
         peak = float(np.max(avg_spectrum))
         if peak <= 0.0:
-            return HiResCheckResult(
-                file_path=str(path),
-                declared_sample_rate=int(sr),
-                total_duration_s=total_duration,
-                analyzed_duration_s=analyzed_duration,
-                cutoff_frequency_hz=0.0,
-                noise_floor_db=noise_floor_db,
-                verdict="inconclusive",
-            )
+            return inconclusive()
         # Deliberately unclamped. librosa's amplitude_to_db, which this
         # replaces, floors everything at `peak - 80 dB` by default —
         # exactly where noise_floor_db also sits — so every floored bin
@@ -605,11 +1000,9 @@ def check_file(
     active = frequencies[spectrum_db > noise_floor_db]
     cutoff = float(active[-1]) if active.size else 0.0
 
-    declared_bits, effective_bits = _measure_bit_depth(
-        path,
-        start_frame=start_frame,
-        frames=window_frames,
-    )
+    int_window = _read_int_window(path, start_frame=start_frame, frames=window_frames)
+    declared_bits = int_window.declared_bits
+    effective_bits = int_window.effective_bits
 
     # A file can claim Hi-Res by rate, by depth, or by both, and each claim
     # is answered by the test that can actually judge it. Keeping them
@@ -619,23 +1012,81 @@ def check_file(
     # master used to pass without being looked at.
     claims_by_rate = sr > hires_sample_rate_threshold
     claims_by_depth = declared_bits > 16
-    rate_is_fake = claims_by_rate and cutoff < hires_cutoff_threshold_hz
+    music_cutoff_hz = 0.0
+    ultrasonic_noise_only = False
+    useful_sample_rate = int(sr)
+    if claims_by_rate:
+        music_cutoff_hz = _music_cutoff(
+            music_spreads, spectrum_db, sr, effective_n_fft, noise_floor_db
+        )
+        if (
+            music_cutoff_hz > 0
+            and cutoff - music_cutoff_hz >= _ULTRASONIC_NOISE_MARGIN_HZ
+        ):
+            ultrasonic_noise_only = True
+            useful_sample_rate = _useful_sample_rate(int(sr), music_cutoff_hz)
+    # A resampler's cliff at 22.05/24 kHz betrays a 44.1/48 kHz chain even
+    # when a weak stopband leaves a flat plateau above it that reads as
+    # "content" to the cutoff test (ffmpeg's default resampler does this).
+    brickwall_hz = (
+        _detect_brickwall(spectrum_db, sr, effective_n_fft, noise_floor_db)
+        if claims_by_rate
+        else 0.0
+    )
+    cutoff_is_low = claims_by_rate and cutoff < hires_cutoff_threshold_hz
+    rate_is_fake = cutoff_is_low or brickwall_hz > 0
     depth_is_fake = claims_by_depth and 0 < effective_bits <= 16
+
+    # Exact fingerprints of a conversion. Imaging puts content back above
+    # 22 kHz, so such a file can pass the cutoff test and still be a fake.
+    artifact = ""
+    if claims_by_rate:
+        artifact = _detect_integer_upsampling(int_window, sr)
+        if not artifact and _detect_imaging(
+            spectrum_db, sr, effective_n_fft, noise_floor_db
+        ):
+            artifact = ARTIFACT_IMAGING
+
+    floor_class, floor_vs_16bit_db = (
+        _classify_noise_floor(quiet_floor_var, channels) if rate_is_fake else ("", 0.0)
+    )
 
     if not (claims_by_rate or claims_by_depth):
         verdict = "standard_definition"
-    elif rate_is_fake or depth_is_fake:
+    elif rate_is_fake or depth_is_fake or artifact:
         verdict = "fake_hires"
     else:
         verdict = "genuine_hires"
 
+    confidence = ""
+    if verdict == "fake_hires":
+        if depth_is_fake or (artifact and floor_class == FLOOR_AT_16BIT):
+            confidence = CONFIDENCE_CERTAIN
+        elif brickwall_hz > 0 and floor_class == FLOOR_AT_16BIT:
+            confidence = CONFIDENCE_LIKELY
+        else:
+            confidence = CONFIDENCE_SUSPECT
+
     findings = []
-    if rate_is_fake:
+    if artifact == ARTIFACT_SAMPLE_HOLD:
+        findings.append("every sample is repeated (sample-and-hold upsampling)")
+    elif artifact == ARTIFACT_INTERPOLATION:
+        findings.append("in-between samples are linearly interpolated")
+    elif artifact == ARTIFACT_IMAGING:
+        findings.append("content above the source Nyquist mirrors the audible band")
+    if cutoff_is_low:
         findings.append(f"declares {int(sr)} Hz but content stops at ~{cutoff:.0f} Hz")
+    elif rate_is_fake:
+        findings.append(
+            f"declares {int(sr)} Hz but the spectrum falls off a cliff "
+            f"at {brickwall_hz:.0f} Hz"
+        )
     if depth_is_fake:
         findings.append(
             f"declares {declared_bits}-bit but only {effective_bits} bits carry data"
         )
+    if confidence == CONFIDENCE_SUSPECT:
+        findings.append("may be a genuine master low-pass filtered in mastering")
     reason = "; ".join(findings)
 
     return HiResCheckResult(
@@ -649,6 +1100,14 @@ def check_file(
         declared_bit_depth=declared_bits,
         effective_bit_depth=effective_bits,
         reason=reason,
+        confidence=confidence,
+        upsampling_artifact=artifact,
+        brickwall_hz=brickwall_hz,
+        noise_floor_class=floor_class,
+        noise_floor_vs_16bit_db=floor_vs_16bit_db,
+        music_cutoff_hz=music_cutoff_hz,
+        ultrasonic_noise_only=ultrasonic_noise_only,
+        useful_sample_rate=useful_sample_rate,
     )
 
 

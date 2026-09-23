@@ -477,12 +477,24 @@ def _report_hires_result(file_path: str, result) -> None:
     """Prints/logs one verdict. Warns on the console only for a finding."""
     if result.is_suspicious:
         reason = result.reason or "does not measure as Hi-Res"
+        # A suspect may be a genuine master low-pass filtered in mastering;
+        # saying "fake" about it would overstate what was measured.
+        verdict = (
+            "possibly upsampled / fake Hi-Res"
+            if result.redownload_safe
+            else "may be fake Hi-Res, or a filtered master"
+        )
         safe_tqdm_write(
             f"  \u26a0\ufe0f  Hi-Res check: '{Path(file_path).name}' "
-            f"{reason} — possibly upsampled / fake Hi-Res.",
+            f"{reason} — {verdict}.",
             file=sys.stderr,
         )
-        logger.warning("[hires-check] possible fake Hi-Res: %s (%s)", file_path, reason)
+        logger.warning(
+            "[hires-check] possible fake Hi-Res (%s): %s (%s)",
+            result.confidence or "unknown",
+            file_path,
+            reason,
+        )
     else:
         logger.debug(
             "[hires-check] %s -> verdict=%s (declared %d Hz / %s-bit, "
@@ -1371,7 +1383,9 @@ async def _replace_fake_hires_async(
         return result
 
     _report_hires_result(original_path, check)
-    if not check.is_suspicious:
+    if not check.redownload_safe:
+        # Genuine, or only a suspect: a LOSSLESS copy of a genuine master
+        # filtered in mastering would cost it real bit depth. Report only.
         return result
 
     # The flagged file, plus whatever transcode kept beside it: every one
