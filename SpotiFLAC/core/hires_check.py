@@ -1060,7 +1060,7 @@ def check_file(
 
     confidence = ""
     if verdict == "fake_hires":
-        if depth_is_fake or artifact:
+        if depth_is_fake or (artifact and floor_class == FLOOR_AT_16BIT):
             confidence = CONFIDENCE_CERTAIN
         elif brickwall_hz > 0 and floor_class == FLOOR_AT_16BIT:
             confidence = CONFIDENCE_LIKELY

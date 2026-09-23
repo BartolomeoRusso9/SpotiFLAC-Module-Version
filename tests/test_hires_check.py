@@ -279,14 +279,17 @@ def _cheap_upsamples():
 
 
 @pytest.mark.parametrize("artifact", ["sample_hold", "linear_interpolation", "imaging"])
-def test_integer_upsampling_artifacts_are_certain(tmp_path, artifact) -> None:
+def test_integer_upsampling_artifacts_without_a_measurable_floor_are_suspect(
+    tmp_path, artifact
+) -> None:
     samples = (_cheap_upsamples()[artifact] << 8).astype(np.int32)
     result = check_file(_write(tmp_path / f"{artifact}.flac", samples, HIRES_SR))
 
     assert result.upsampling_artifact == artifact
     assert result.verdict == "fake_hires"
-    assert result.confidence == "certain"
-    assert result.redownload_safe
+    assert result.noise_floor_class == ""
+    assert result.confidence == "suspect"
+    assert not result.redownload_safe
 
 
 def test_genuine_audio_shows_no_evidence_at_all(tmp_path) -> None:
