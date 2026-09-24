@@ -7,7 +7,7 @@
 - Tracked deletions: 1
 - New application and test files are currently untracked.
 - `git diff --check`: passed
-- Focused regression suite: **84 passed**.
+- Focused regression suite: **85 passed**.
 
 ## Modified Files
 
@@ -58,7 +58,8 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
 - `SpotiFLAC/core/retry.py`
   - centralized retry policy.
 - `SpotiFLAC/core/providers/`
-  - provider profiles, capability-aware resolution, and `ProviderCandidate`.
+  - manifest-derived provider profiles, capability-aware resolution, and
+    `ProviderCandidate`.
 - `tests/test_architecture_foundation.py`
   - regression coverage for the new architecture.
 
@@ -96,7 +97,7 @@ PYTHONPATH="$PWD" python3 -m pytest -q \
   tests/test_webapi_integration.py
 ```
 
-Result: **84 passed**.
+Result: **85 passed**.
 
 ## Next Milestone
 
