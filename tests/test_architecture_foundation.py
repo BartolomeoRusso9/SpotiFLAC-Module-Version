@@ -738,6 +738,23 @@ def test_job_service_can_cancel_and_retry_jobs(tmp_path):
     assert asyncio.run(service.retry(job["id"]))["status"] == "QUEUED"
 
 
+def test_job_service_publishes_retrying_event(tmp_path):
+    events = []
+    bus = EventBus()
+    bus.subscribe("job.retrying", lambda payload: events.append(payload["job_id"]))
+    service = JobService(
+        repo=JobRepository(tmp_path / "retrying.db"),
+        event_bus=bus,
+    )
+    request = DownloadRequest(sources=["spotify:track:retry"], config=SpotiFLACConfig())
+    job = asyncio.run(service.enqueue(request))
+    asyncio.run(service.cancel(job["id"]))
+
+    asyncio.run(service.retry(job["id"]))
+
+    assert events == [job["id"]]
+
+
 def test_job_service_reconstructs_persisted_request_after_restart(tmp_path):
     class FakeDownloadService:
         async def download(self, request):

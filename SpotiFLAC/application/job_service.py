@@ -103,6 +103,8 @@ class JobService:
         status = self.get(job_id)["status"]
         if status not in {"FAILED", "CANCELLED"}:
             raise ValueError(f"job {job_id} is not retryable")
+        self._repo.update_status(job_id, "RETRYING")
+        await self._event_bus.publish("job.retrying", {"job_id": job_id})
         return await self._queue.resume(job_id)
 
     def get(self, job_id: str) -> dict:
