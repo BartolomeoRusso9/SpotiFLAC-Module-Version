@@ -42,14 +42,17 @@ class JobService:
         if task is not None:
             self._tasks[job_id] = task
         self._repo.update_status(job_id, "RUNNING")
+        attempt_id = self._repo.create_attempt(job_id)
         await self._event_bus.publish("job.started", {"job_id": job_id})
         try:
             report = await self._download_service.download(request)
         except asyncio.CancelledError:
+            self._repo.finish_attempt(attempt_id, "CANCELLED")
             self._repo.update_status(job_id, "CANCELLED")
             await self._event_bus.publish("job.cancelled", {"job_id": job_id})
             raise
         except Exception:
+            self._repo.finish_attempt(attempt_id, "FAILED")
             self._repo.update_status(job_id, "FAILED")
             await self._event_bus.publish("job.failed", {"job_id": job_id})
             return None
@@ -59,6 +62,7 @@ class JobService:
             job_id,
             getattr(report, "total", len(request.sources)),
         )
+        self._repo.finish_attempt(attempt_id, "COMPLETED")
         self._repo.update_status(job_id, "DONE")
         await self._event_bus.publish("job.completed", {"job_id": job_id})
         return report

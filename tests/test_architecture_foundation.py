@@ -40,6 +40,7 @@ from SpotiFLAC.core.repositories import ExtensionRepository, JobRepository
 from SpotiFLAC.core.providers import ExtensionManifest, ProviderCandidate, ProviderProfile
 from SpotiFLAC.core.retry import RetryPolicy
 from SpotiFLAC.client import AsyncSpotiFLAC
+from tests.fake_providers import FakeProvider
 from SpotiFLAC.webapi import ApiDeps, build_v1_router
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
 from SpotiFLAC.downloader import DownloadOptions
@@ -333,6 +334,29 @@ def test_download_service_falls_back_to_next_provider_candidate():
     assert attempts == ["first", "second"]
     assert report.success_count == 1
     assert report.succeeded[0].provider == "second"
+
+
+def test_fake_provider_framework_models_fallback_without_network():
+    first = FakeProvider("first", failures=1)
+    second = FakeProvider("second")
+
+    async def execute(provider, source):
+        await {"first": first, "second": second}[provider].download(source)
+
+    resolver = ProviderResolver(
+        [ProviderProfile("first", priority=2), ProviderProfile("second", priority=1)]
+    )
+    request = DownloadRequest(sources=["spotify:track:fake"], config=SpotiFLACConfig())
+    report = asyncio.run(
+        DownloadService(
+            provider_resolver=resolver,
+            provider_executor=execute,
+        ).download(request)
+    )
+
+    assert report.success_count == 1
+    assert first.calls == 1
+    assert second.calls == 1
 
 
 def test_download_service_publishes_terminal_events(monkeypatch):
@@ -844,6 +868,24 @@ def test_job_service_cancels_active_download_task(tmp_path):
         return service.get(job["id"])
 
     assert asyncio.run(scenario())["status"] == "CANCELLED"
+
+
+def test_job_service_persists_execution_attempts(tmp_path):
+    class FakeDownloadService:
+        async def download(self, request):
+            return request.sources
+
+    repo = JobRepository(tmp_path / "attempts.db")
+    service = JobService(repo=repo, download_service=FakeDownloadService())
+    request = DownloadRequest(sources=["spotify:track:attempt"], config=SpotiFLACConfig())
+    job = asyncio.run(service.enqueue(request))
+
+    asyncio.run(service.execute(job["id"]))
+
+    attempts = repo.list_attempts(job["id"])
+    assert len(attempts) == 1
+    assert attempts[0]["status"] == "COMPLETED"
+    assert attempts[0]["finished_at"] is not None
 
 
 def test_api_adapter_shares_event_bus_with_job_service(tmp_path):

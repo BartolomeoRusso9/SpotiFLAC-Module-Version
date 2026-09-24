@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from pathlib import Path
 
 
@@ -55,6 +56,18 @@ class JobRepository:
             ):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE application_jobs ADD COLUMN {name} {definition}")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS application_job_attempts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at REAL NOT NULL,
+                    finished_at REAL,
+                    error TEXT
+                )
+                """
+            )
 
     def create(self, payload: dict) -> dict:
         job_id = payload.get("id") or f"job-{abs(hash(json.dumps(payload, sort_keys=True, default=str)))}"
@@ -135,3 +148,29 @@ class JobRepository:
                 (completed_items, job_id),
             )
         return self.get(job_id)
+
+    def create_attempt(self, job_id: str, status: str = "RUNNING") -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO application_job_attempts "
+                "(job_id, status, started_at) VALUES (?, ?, ?)",
+                (job_id, status, time.time()),
+            )
+            return int(cursor.lastrowid)
+
+    def finish_attempt(self, attempt_id: int, status: str, error: str | None = None) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE application_job_attempts SET status = ?, finished_at = ?, error = ? "
+                "WHERE id = ?",
+                (status, time.time(), error, attempt_id),
+            )
+
+    def list_attempts(self, job_id: str) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, job_id, status, started_at, finished_at, error "
+                "FROM application_job_attempts WHERE job_id = ? ORDER BY id",
+                (job_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
