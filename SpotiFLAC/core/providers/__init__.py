@@ -1,3 +1,3 @@
-from .resolver import ProviderProfile, ProviderResolver
+from .resolver import ProviderCandidate, ProviderProfile, ProviderResolver
 
-__all__ = ["ProviderProfile", "ProviderResolver"]
+__all__ = ["ProviderCandidate", "ProviderProfile", "ProviderResolver"]

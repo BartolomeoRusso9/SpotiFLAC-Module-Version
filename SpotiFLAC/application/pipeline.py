@@ -5,7 +5,7 @@ from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from SpotiFLAC.application.provider_resolver import ProviderResolver
+from SpotiFLAC.core.providers import ProviderCandidate, ProviderResolver
 from SpotiFLAC.core.config import DownloadRequest
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
 
@@ -15,6 +15,7 @@ class DownloadContext:
     request: DownloadRequest
     source: str
     provider: str | None = None
+    provider_candidate: ProviderCandidate | None = None
     metadata: TrackMetadata | None = None
     source_file: str | None = None
     output_file: str | None = None
@@ -38,9 +39,10 @@ class ProviderStep:
         self._resolver = resolver
 
     async def execute(self, context: DownloadContext) -> DownloadContext:
-        candidates = self._resolver.resolve(context.request)
+        candidates = self._resolver.resolve_candidates(context.request)
         if candidates:
-            context.provider = candidates[0]
+            context.provider_candidate = candidates[0]
+            context.provider = candidates[0].name
         else:
             context.errors.append("no_provider_available")
         return context

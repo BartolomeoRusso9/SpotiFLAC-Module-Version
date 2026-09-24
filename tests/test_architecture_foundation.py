@@ -36,7 +36,7 @@ from SpotiFLAC.application.pipeline import (
     ValidateStep,
 )
 from SpotiFLAC.core.repositories import ExtensionRepository, JobRepository
-from SpotiFLAC.core.providers import ProviderProfile
+from SpotiFLAC.core.providers import ProviderCandidate, ProviderProfile
 from SpotiFLAC.core.retry import RetryPolicy
 from SpotiFLAC.client import AsyncSpotiFLAC
 from SpotiFLAC.webapi import ApiDeps, build_v1_router
@@ -360,6 +360,8 @@ def test_download_pipeline_prepares_source_and_provider_context():
 
     assert context.errors == []
     assert context.provider == "tidal"
+    assert context.provider_candidate is not None
+    assert context.provider_candidate.name == "tidal"
 
 
 def test_validate_step_rejects_an_invalid_existing_flac(tmp_path):
@@ -474,6 +476,19 @@ def test_provider_resolver_filters_capability_quality_and_health():
     assert resolver.resolve(request) == ["slow"]
     request.config.download.quality = "HI_RES_LOSSLESS"
     assert resolver.resolve(request) == ["hires"]
+
+
+def test_provider_resolver_exposes_structured_candidates():
+    resolver = ProviderResolver(
+        [ProviderProfile("tidal", priority=4, capabilities=frozenset({"download"}))]
+    )
+    request = DownloadRequest(sources=["spotify:track:abc"], config=SpotiFLACConfig())
+
+    candidates = resolver.resolve_candidates(request)
+
+    assert isinstance(candidates[0], ProviderCandidate)
+    assert candidates[0].name == "tidal"
+    assert candidates[0].priority == 4
 
 
 def test_extension_service_tracks_lifecycle_and_trust():

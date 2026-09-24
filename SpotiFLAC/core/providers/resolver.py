@@ -22,6 +22,14 @@ class ProviderProfile:
         )
 
 
+@dataclass(frozen=True)
+class ProviderCandidate:
+    name: str
+    priority: int
+    capabilities: frozenset[str]
+    qualities: frozenset[str]
+
+
 class ProviderResolver:
     """Resolve enabled, healthy providers by capability and priority."""
 
@@ -31,9 +39,20 @@ class ProviderResolver:
         self._profiles = {profile.name: profile for profile in profiles or []}
 
     def resolve(self, request: DownloadRequest) -> list[str]:
+        return [candidate.name for candidate in self.resolve_candidates(request)]
+
+    def resolve_candidates(self, request: DownloadRequest) -> list[ProviderCandidate]:
         quality = request.config.download.quality.upper()
         if not self._profiles:
-            return list(self._provider_priority)
+            return [
+                ProviderCandidate(
+                    name=name,
+                    priority=0,
+                    capabilities=frozenset({"download"}),
+                    qualities=frozenset({"LOSSLESS", "HI_RES_LOSSLESS"}),
+                )
+                for name in self._provider_priority
+            ]
 
         configured_order = {
             name: index for index, name in enumerate(self._provider_priority)
@@ -48,4 +67,12 @@ class ProviderResolver:
                 profile.name,
             )
         )
-        return [profile.name for profile in candidates]
+        return [
+            ProviderCandidate(
+                name=profile.name,
+                priority=profile.priority,
+                capabilities=profile.capabilities,
+                qualities=profile.qualities,
+            )
+            for profile in candidates
+        ]
