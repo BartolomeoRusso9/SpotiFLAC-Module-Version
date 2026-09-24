@@ -7,6 +7,7 @@ a mock of mutagen. Everything that does not need a real file runs regardless.
 
 from __future__ import annotations
 
+from typing import Any
 import asyncio
 import shutil
 import subprocess
@@ -276,7 +277,7 @@ class FakeTrack:
 
 
 def _candidate(**kwargs) -> UpgradeCandidate:
-    base = {
+    base: dict[str, Any] = {
         "file_path": "/music/x.mp3",
         "quality": AudioQuality(file_path="/music/x.mp3"),
         "title": "Song",

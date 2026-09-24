@@ -16,6 +16,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
+from typing import Any, cast
+
+from SpotiFLAC.tui.app import SpotiFLACTui
+
+
+def app_of(pilot: Any) -> SpotiFLACTui:
+    return cast(SpotiFLACTui, pilot.app)
 
 
 def drives_the_ui(test):

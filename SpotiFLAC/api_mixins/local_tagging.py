@@ -11,11 +11,17 @@ from __future__ import annotations
 
 import os
 import threading
+from typing import TYPE_CHECKING, Any
 
 from ..core.loop_runner import run_sync
 
 
 class LocalTaggingMixin:
+    if TYPE_CHECKING:
+        download_dir: str
+        load_settings: Any
+        log: Any
+        _push: Any
     # ── Local Auto-Tagger (Phase 5: GUI/Web) ────────────────────────────────
 
     def _serialize_scan_entry(self, entry) -> dict:

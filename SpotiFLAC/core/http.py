@@ -380,6 +380,7 @@ class AsyncHttpClient:
             if self._limiter:
                 await self._limiter.wait_for_slot()
             client = await self._client()
+            resp: httpx.Response | None = None
             try:
                 resp = await client.request(
                     method,
@@ -396,6 +397,7 @@ class AsyncHttpClient:
                     raise NetworkError(
                         self._provider, f"Request failed: {exc}"
                     ) from exc
+            assert resp is not None
             self._raise_for_status(resp)
             return resp
 

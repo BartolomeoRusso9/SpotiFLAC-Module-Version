@@ -11,6 +11,7 @@ work with: a pool holding one track has nothing to download beside it.
 
 from __future__ import annotations
 
+from typing import Any
 import asyncio
 import threading
 import time
@@ -183,7 +184,7 @@ def test_the_sync_wrapper_routes_a_batch_to_the_single_run_path(monkeypatch) -> 
     it the URLs are tracks and not one collection each."""
     from SpotiFLAC import client as client_mod
 
-    seen: dict[str, list[str]] = {}
+    seen: dict[str, Any] = {}
 
     class _FakeClient:
         def __init__(self, **kwargs) -> None:

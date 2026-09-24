@@ -12,7 +12,7 @@ from SpotiFLAC.extensions import trust
 from SpotiFLAC.tools import registry_signing_cli
 
 
-def _run(monkeypatch, capsys, argv) -> str:
+def _run(monkeypatch, capsys, argv) -> tuple[str, int]:
     monkeypatch.setattr("sys.argv", ["registry_signing_cli", *argv])
     code = registry_signing_cli.main(argv)
     return capsys.readouterr().out, code

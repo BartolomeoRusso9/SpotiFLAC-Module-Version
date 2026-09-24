@@ -18,6 +18,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -343,7 +344,7 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
             if payload.services:
                 download_config.metadata.providers = list(payload.services)
             if payload.output_dir and not deps.multiuser:
-                download_config.output.directory = payload.output_dir
+                download_config.output.directory = Path(payload.output_dir)
             download_request = DownloadRequest(
                 sources=[payload.url],
                 config=download_config,

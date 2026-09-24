@@ -16,6 +16,7 @@ an object wrapping one.
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 
 import pytest
 
@@ -46,7 +47,7 @@ def _resolver(monkeypatch, *, resolve=None, songlink=None) -> LinkResolver:
 
     monkeypatch.setattr(resolver, "_resolve_links_async", fake_resolve)
     monkeypatch.setattr(resolver, "_get_songlink_links_async", fake_songlink)
-    resolver.calls = calls  # type: ignore[attr-defined]
+    cast(Any, resolver).calls = calls
     return resolver
 
 
@@ -54,7 +55,7 @@ def test_the_resolve_api_is_asked_first(monkeypatch) -> None:
     resolver = _resolver(monkeypatch, resolve={"spotify": "https://x"})
     links = asyncio.run(resolver._get_songlink_links_by_url_async("https://y"))
     assert links == {"spotify": "https://x"}
-    assert resolver.calls == ["resolve"], "Songlink must not be asked needlessly"
+    assert cast(Any, resolver).calls == ["resolve"], "Songlink must not be asked needlessly"
 
 
 def test_songlink_is_still_tried_when_resolve_returns_nothing(monkeypatch) -> None:
@@ -64,14 +65,14 @@ def test_songlink_is_still_tried_when_resolve_returns_nothing(monkeypatch) -> No
     resolver = _resolver(monkeypatch, resolve={}, songlink={"deezer": "https://d"})
     links = asyncio.run(resolver._get_songlink_links_by_url_async("https://y"))
     assert links == {"deezer": "https://d"}
-    assert resolver.calls == ["resolve", "songlink"]
+    assert cast(Any, resolver).calls == ["resolve", "songlink"]
 
 
 def test_the_id_based_lookup_uses_the_same_order(monkeypatch) -> None:
     resolver = _resolver(monkeypatch, resolve={"tidal": "https://t"})
     links = asyncio.run(resolver._get_songlink_links_by_id_async("abc", "spotify"))
     assert links == {"tidal": "https://t"}
-    assert resolver.calls == ["resolve"]
+    assert cast(Any, resolver).calls == ["resolve"]
 
 
 # --- reading the endpoint's answer -----------------------------------------

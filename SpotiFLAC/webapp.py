@@ -32,7 +32,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import (
     Body,
@@ -388,7 +388,7 @@ class ApiRegistry:
         #: Set once the multi-user queue exists (create_app builds it after
         #: this registry). Scheduled subscription downloads go through it so
         #: they are quota-checked and persisted like any other download.
-        self.download_queue = None
+        self.download_queue: Any = None
 
     def get(self, username: str | None) -> SpotiFLAC_API:
         key = username or ""
@@ -402,9 +402,9 @@ class ApiRegistry:
 
     def _build(self, username: str | None) -> SpotiFLAC_API:
         api = SpotiFLAC_API()
-        api._ws_broadcast = lambda fn, args: self._manager.broadcast(
+        setattr(api, "_ws_broadcast", lambda fn, args: self._manager.broadcast(
             fn, args, owner=username
-        )
+        ))
         # Everything this instance downloads is written to the log under this
         # name, and the dashboard it serves reads back the same name — one
         # account's numbers, not the machine's.
@@ -416,7 +416,7 @@ class ApiRegistry:
             api.download_dir = os.path.join(self._base, _safe_username(username))
             with contextlib.suppress(OSError):
                 os.makedirs(api.download_dir, exist_ok=True)
-        api._subscription_download_queue = self.download_queue
+        setattr(api, "_subscription_download_queue", self.download_queue)
         return api
 
     def known(self) -> list[str]:
@@ -451,7 +451,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # The shared instance. In single-user mode it is the only one, and its
     # events go to every connected browser (owner=None), exactly as before.
     api = SpotiFLAC_API()
-    api._ws_broadcast = manager.broadcast
+    setattr(api, "_ws_broadcast", manager.broadcast)
 
     registry = ApiRegistry(manager, api.download_dir)
 
@@ -470,8 +470,8 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # observe which instance a request actually reached, rather than having
     # to infer it from a response that would look identical either way.
     app_state_api = api
-    sessions = None
-    job_queue = None
+    sessions: Any = None
+    job_queue: Any = None
     login_limiter = LoginRateLimiter()
     if multiuser:
         from .core.job_queue import JobQueue, QueueFullError
@@ -552,7 +552,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # on disk (see SpotiFLAC_API.download_tracks). Kept apart from
     # `job_queue`: that is multi-user's account-aware queue, and /api/metrics
     # and the v1 API read its presence as "multi-user".
-    download_queue = None
+    download_queue: Any = None
     if not multiuser:
         from .core.job_queue import JobQueue
 
@@ -1150,7 +1150,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     )
     application_events.subscribe(
         "job.completed",
-        lambda payload: manager.broadcast(
+            lambda payload: manager.broadcast(
             "applicationEvent", ["job.completed", payload]
         ),
     )
@@ -1170,11 +1170,14 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         "job.resumed",
         "job.item.updated",
     ):
+        def broadcast_application_event(
+            payload: Any, name: str = event_name
+        ) -> None:
+            manager.broadcast("applicationEvent", [name, payload])
+
         application_events.subscribe(
             event_name,
-            lambda payload, name=event_name: manager.broadcast(
-                "applicationEvent", [name, payload]
-            ),
+            broadcast_application_event,
         )
     application_download_service = DownloadService(event_bus=application_events)
     app.state.application_download_service = application_download_service

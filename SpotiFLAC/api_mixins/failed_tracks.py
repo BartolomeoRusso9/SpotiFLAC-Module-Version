@@ -11,8 +11,13 @@ with its own `owner`, and the list is keyed by owner.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 
 class FailedTracksMixin:
+    if TYPE_CHECKING:
+        _start_download_job: Any
+        log: Any
     def get_failed_tracks(self) -> dict:
         """Every track that failed and has not downloaded since. Never raises."""
         from ..core import failed_tracks

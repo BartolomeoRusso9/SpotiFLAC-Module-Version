@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 from textual.widgets import Input, Select, Static
 
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
@@ -77,7 +77,7 @@ async def _settled(pilot) -> None:
 
 
 def _picker(pilot) -> Select:
-    return pilot.app.query_one("#profile-picker", Select)
+    return app_of(pilot).query_one("#profile-picker", Select)
 
 
 def _offered_profiles(pilot) -> list[str]:
@@ -113,7 +113,7 @@ async def test_it_sits_in_the_configuration_panel(stub_profiles) -> None:
     """Under Destination, not in a panel of its own."""
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
-        panel = pilot.app.query_one("#download")
+        panel = app_of(pilot).query_one("#download")
         assert _picker(pilot) in panel.query(Select)
 
 
@@ -121,7 +121,7 @@ async def test_it_sits_in_the_configuration_panel(stub_profiles) -> None:
 async def test_with_nothing_saved_it_says_where_to_save_one(stub_no_profiles) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
-        said = str(pilot.app.query_one("#profile-status", Static).content)
+        said = str(app_of(pilot).query_one("#profile-status", Static).content)
         assert "No profiles saved yet" in said
 
 
@@ -136,7 +136,7 @@ async def test_picking_one_replaces_every_setting(stub_profiles) -> None:
         _picker(pilot).value = "weekend"
         await _settled(pilot)
 
-        state = pilot.app.state
+        state = app_of(pilot).state
         assert state.profile_loaded == "weekend"
         assert state.output_dir == "/tmp/from-profile"
         assert state.services == ["qobuz"]
@@ -152,7 +152,7 @@ async def test_the_form_is_rebuilt_not_just_the_state(stub_profiles) -> None:
         _picker(pilot).value = "archive"
         await _settled(pilot)
 
-        shown = pilot.app.query_one("#cfg-output_dir", Input).value
+        shown = app_of(pilot).query_one("#cfg-output_dir", Input).value
         assert shown == "/tmp/archive"
 
 
@@ -165,7 +165,7 @@ async def test_the_rebuilt_menu_shows_which_profile_is_loaded(stub_profiles) -> 
         await _settled(pilot)
 
         assert _picker(pilot).value == "weekend"
-        said = str(pilot.app.query_one("#profile-status", Static).content)
+        said = str(app_of(pilot).query_one("#profile-status", Static).content)
         assert "weekend" in said
 
 
@@ -209,12 +209,12 @@ async def test_switching_between_two_profiles_works(stub_profiles) -> None:
 
         _picker(pilot).value = "weekend"
         await _settled(pilot)
-        assert pilot.app.state.output_dir == "/tmp/from-profile"
+        assert app_of(pilot).state.output_dir == "/tmp/from-profile"
 
         _picker(pilot).value = "archive"
         await _settled(pilot)
-        assert pilot.app.state.output_dir == "/tmp/archive"
-        assert pilot.app.state.profile_loaded == "archive"
+        assert app_of(pilot).state.output_dir == "/tmp/archive"
+        assert app_of(pilot).state.profile_loaded == "archive"
 
 
 @drives_the_ui
@@ -229,8 +229,8 @@ async def test_an_unreadable_store_leaves_the_form_alone(monkeypatch) -> None:
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
-        assert pilot.app.query_one("#cfg-output_dir", Input).value == (
+        assert app_of(pilot).query_one("#cfg-output_dir", Input).value == (
             "/tmp/spotiflac-test"
         )
-        said = str(pilot.app.query_one("#profile-status", Static).content)
+        said = str(app_of(pilot).query_one("#profile-status", Static).content)
         assert "unreadable" in said

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any, cast
 
 _ISRC_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}\d{7}$")
 
@@ -33,10 +34,11 @@ async def confirm_isrc_with_qobuz_async(
     if not isrc:
         return False, None
 
-    prov = None
+    prov: Any = None
     try:
         from SpotiFLAC.extensions.manager import ExtensionManager
         from SpotiFLAC.extensions.python_provider import PythonExtensionProvider
+        from typing import Any
 
         manager = ExtensionManager(auto_install_downloads=False)
         # Cerca il provider Python di Qobuz
@@ -49,7 +51,7 @@ async def confirm_isrc_with_qobuz_async(
             None,
         )
         if cand:
-            prov = PythonExtensionProvider(cand, qobuz_token=qobuz_token)
+            prov = cast(Any, PythonExtensionProvider)(cand, qobuz_token=qobuz_token)
     except Exception:
         pass
 

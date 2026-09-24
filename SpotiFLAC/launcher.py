@@ -1330,11 +1330,11 @@ async def _handle_subscriptions() -> None:
         return
 
     if args.reset:
-        sub = subscriptions.get_by_url(args.reset)
-        if sub is None:
+        reset_sub = subscriptions.get_by_url(args.reset)
+        if reset_sub is None:
             print(f"Not following {args.reset}.", file=sys.stderr)
             sys.exit(1)
-        subscriptions.forget_seen(sub.id)
+        subscriptions.forget_seen(reset_sub.id)
         print(
             f"Reset {sub.name or sub.url}. The next check with "
             "--subscribe-backfill will treat the whole catalogue as new."
@@ -2581,7 +2581,7 @@ async def amain() -> None:
             )
             return
 
-        profile_defaults = (
+        upgrade_profile_defaults = (
             await _load_profile_into_defaults(up_args.profile)
             if up_args.profile
             else {}
@@ -2590,10 +2590,10 @@ async def amain() -> None:
         # told otherwise, which is what makes this an *upgrade* rather than a
         # second copy somewhere else.
         destination = (
-            up_args.output_dir or profile_defaults.get("output_dir") or up_args.path
+            up_args.output_dir or upgrade_profile_defaults.get("output_dir") or up_args.path
         )
         downloader = _subscription_downloader(
-            {**profile_defaults, "quality": up_args.target}, destination
+            {**upgrade_profile_defaults, "quality": up_args.target}, destination
         )
 
         async def _download(url: str) -> None:
@@ -2641,14 +2641,14 @@ async def amain() -> None:
 
     print_ffmpeg_warning()
     print_node_warning()
-    profile_defaults: dict = {}
+    cli_profile_defaults: dict = {}
     if "--profile" in sys.argv:
         idx = sys.argv.index("--profile")
         if idx + 1 < len(sys.argv):
-            profile_defaults = await _load_profile_into_defaults(sys.argv[idx + 1])
+            cli_profile_defaults = await _load_profile_into_defaults(sys.argv[idx + 1])
 
     file_cfg = load_config()
-    merged_defaults = {**file_cfg, **profile_defaults}
+    merged_defaults = {**file_cfg, **cli_profile_defaults}
 
     args = parse_args(profile_defaults=merged_defaults)
     playlist_urls, output_dir = _split_positionals(args)

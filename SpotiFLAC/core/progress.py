@@ -11,7 +11,7 @@ import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, IO
+from typing import Any, IO, cast
 
 from tqdm import tqdm
 from typing_extensions import Self
@@ -110,19 +110,15 @@ class _TqdmTextIOProxy(io.TextIOBase):
         self._buf += s
         while "\n" in self._buf:
             line, self._buf = self._buf.split("\n", 1)
-            emit(line, stream=self._stream, file=self._original)
+            emit(line, stream=self._stream, file=cast(IO[str], self._original))
         return written
 
     def flush(self) -> None:
         if self._buf:
-            emit(self._buf, stream=self._stream, file=self._original)
+            emit(self._buf, stream=self._stream, file=cast(IO[str], self._original))
             self._buf = ""
         with contextlib.suppress(Exception):
             self._original.flush()
-
-    @property
-    def encoding(self) -> str:
-        return getattr(self._original, "encoding", "utf-8")
 
     def fileno(self) -> int:
         return self._original.fileno()
@@ -222,10 +218,10 @@ def install_console_interception() -> None:
     # stream to restore, which would leave the wrapper installed for good.
     if not isinstance(sys.stdout, _TqdmTextIOProxy):
         _saved_stdout = sys.stdout
-        sys.stdout = _TqdmTextIOProxy(_saved_stdout, STDOUT)
+        sys.stdout = _TqdmTextIOProxy(cast(io.TextIOBase, _saved_stdout), STDOUT)
     if not isinstance(sys.stderr, _TqdmTextIOProxy):
         _saved_stderr = sys.stderr
-        sys.stderr = _TqdmTextIOProxy(_saved_stderr, STDERR)
+        sys.stderr = _TqdmTextIOProxy(cast(io.TextIOBase, _saved_stderr), STDERR)
 
     if _intercepting:
         return
@@ -395,6 +391,9 @@ class DownloadBroadcaster:
     """
 
     _instance: DownloadBroadcaster | None = None
+    _listeners: set[asyncio.Queue]
+    _lock: CrossLoopLock
+    _last_broadcast_time: float
 
     def __new__(cls) -> Self:
         if cls._instance is None:
@@ -402,7 +401,7 @@ class DownloadBroadcaster:
             cls._instance._listeners = set()
             cls._instance._lock = _CrossLoopLock()
             cls._instance._last_broadcast_time = 0.0
-        return cls._instance
+        return cast(Self, cls._instance)
 
     async def subscribe(self, queue: asyncio.Queue) -> None:
         async with self._lock:
@@ -440,13 +439,15 @@ class DownloadManager:
     """
 
     _instance: DownloadManager | None = None
+    _lock: CrossLoopLock
+    _queue: list[DownloadItem]
 
     def __new__(cls) -> Self:
         if cls._instance is None:
             inst = super().__new__(cls)
             inst._init_state()
             cls._instance = inst
-        return cls._instance
+        return cast(Self, cls._instance)
 
     def _init_state(self) -> None:
         self._lock = _CrossLoopLock()
@@ -636,6 +637,7 @@ class DownloadManager:
                 "queue": queue_items,
                 "latest_completed": latest_completed,
             }
+        return {}
 
     async def reset(self) -> None:
         async with self._lock:
@@ -1004,7 +1006,7 @@ class ProgressCallback:
             return
 
         current_bytes = max(0, current_bytes)
-        total_bytes = total_bytes if total_bytes > 0 else None
+        total_bytes = total_bytes if total_bytes > 0 else 0
 
         ProgressManager.enqueue_progress(
             self._item_id,

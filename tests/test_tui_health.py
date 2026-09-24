@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.core.health_check import HealthResult
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
@@ -57,30 +57,30 @@ async def _settled(pilot) -> None:
 async def test_opening_the_panel_does_not_probe(stub_health) -> None:
     """A panel that starts network traffic on sight is a panel you avoid."""
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _HEALTH_INDEX
+        app_of(pilot).query_one("#sidebar").index = _HEALTH_INDEX
         await _settled(pilot)
 
         assert stub_health == []
         assert "Not checked yet" in str(
-            pilot.app.query_one("#health-status").render(),
+            app_of(pilot).query_one("#health-status").render(),
         )
 
 
 @drives_the_ui
 async def test_checking_lists_a_row_per_provider(stub_health) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _HEALTH_INDEX
+        app_of(pilot).query_one("#sidebar").index = _HEALTH_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button, DataTable
 
-        pilot.app.query_one("#health-check", Button).press()
+        app_of(pilot).query_one("#health-check", Button).press()
         await _settled(pilot)
 
-        table = pilot.app.query_one("#health-table", DataTable)
+        table = app_of(pilot).query_one("#health-table", DataTable)
         assert table.row_count == len(_RESULTS)
 
-        rendered = str(pilot.app.query_one("#health-status").render())
+        rendered = str(app_of(pilot).query_one("#health-status").render())
         assert "2 of 3 reachable" in rendered
         assert "fall back" in rendered
 
@@ -96,15 +96,15 @@ async def test_a_failing_check_is_reported_not_raised(monkeypatch) -> None:
     monkeypatch.setattr(health_module, "run_health_check", _explode)
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _HEALTH_INDEX
+        app_of(pilot).query_one("#sidebar").index = _HEALTH_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button
 
-        pilot.app.query_one("#health-check", Button).press()
+        app_of(pilot).query_one("#health-check", Button).press()
         await _settled(pilot)
 
-        assert "no network" in str(pilot.app.query_one("#health-status").render())
+        assert "no network" in str(app_of(pilot).query_one("#health-status").render())
 
 
 @drives_the_ui
@@ -117,14 +117,14 @@ async def test_all_reachable_says_so_plainly(monkeypatch) -> None:
     monkeypatch.setattr(health_module, "run_health_check", _all_up)
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _HEALTH_INDEX
+        app_of(pilot).query_one("#sidebar").index = _HEALTH_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button
 
-        pilot.app.query_one("#health-check", Button).press()
+        app_of(pilot).query_one("#health-check", Button).press()
         await _settled(pilot)
 
-        rendered = str(pilot.app.query_one("#health-status").render())
+        rendered = str(app_of(pilot).query_one("#health-status").render())
         assert "2 of 2 reachable" in rendered
         assert "fall back" not in rendered

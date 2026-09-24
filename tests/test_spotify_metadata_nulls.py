@@ -12,6 +12,7 @@ connecting the two.
 
 from __future__ import annotations
 
+from typing import Any, cast
 import asyncio
 
 import pytest
@@ -40,7 +41,7 @@ class _FakeWebClient:
 
 def _client(payload: dict, monkeypatch) -> SpotifyMetadataClient:
     client = SpotifyMetadataClient.__new__(SpotifyMetadataClient)
-    client.web_client = _FakeWebClient(payload)  # type: ignore[attr-defined]
+    cast(Any, client).web_client = _FakeWebClient(payload)
 
     async def _to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)

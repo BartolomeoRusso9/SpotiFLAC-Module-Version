@@ -347,7 +347,7 @@ async def _run_ffmpeg(*args: str) -> tuple[int, str]:
         stderr=_subproc.PIPE,
     )
     _, stderr = await proc.communicate()
-    return proc.returncode, stderr.decode(errors="ignore").strip()
+    return proc.returncode or 0, stderr.decode(errors="ignore").strip()
 
 
 def _probe_with_mutagen(src: Path) -> tuple[int, bool | None]:

@@ -1341,7 +1341,7 @@ class SpotifyMetadataClient:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for res in results:
-            if isinstance(res, Exception):
+            if isinstance(res, BaseException):
                 logger.warning("[spotify] Album fetch failed in discography: %s", res)
             else:
                 _, track_list = res
@@ -1535,7 +1535,7 @@ class SpotifyMetadataClient:
 
 
 def _extract_explore_artists(content: dict[str, Any]) -> str:
-    artist_items = []
+    artist_items: list[Any] = []
     raw_artists = content.get("artists")
     if isinstance(raw_artists, dict):
         artist_items = raw_artists.get("items") or []

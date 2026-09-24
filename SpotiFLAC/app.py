@@ -14,6 +14,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any, cast
 
 import webview
 
@@ -1353,7 +1354,10 @@ class SpotiFLAC_API(
         from .core.job_queue import QueueFullError
 
         try:
-            self._download_queue.submit(self.owner, payload)
+            queue = self._download_queue
+            if queue is None:
+                return
+            queue.submit(self.owner, payload)
         except QueueFullError as exc:
             self.log(
                 f"{exc.pending} downloads are already waiting (limit {exc.limit}); "
@@ -1770,7 +1774,7 @@ class SpotiFLAC_API(
                 post_download_action=post_download_action,
                 post_download_command=post_download_command,
                 resume=resume,
-                post_download_hooks=[log_hook, failed_hook],
+                post_download_hooks=cast(Any, [log_hook, failed_hook]),
                 max_concurrent_downloads=max_concurrent,
                 verify_hires=verify_hires,
                 redownload_fake_hires=redownload_fake_hires,
@@ -2045,7 +2049,8 @@ def run_gui() -> None:
         background_color="#0a0a0a",
     )
     api.set_window(window)
-    window.events.loaded += api._on_loaded
+    if window is not None:
+        window.events.loaded += api._on_loaded
 
     # Two defaults conspired to make the theme picker look broken in the
     # desktop window, both of them about *where* the page's localStorage

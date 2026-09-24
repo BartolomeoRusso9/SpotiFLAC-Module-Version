@@ -233,6 +233,8 @@ class ProviderScorer:
 
             return sorted(api_urls, key=_rank, reverse=True)
 
+        return []
+
     async def reset_async(self) -> None:
         """Utile per i test o reset manuale."""
         await self._ensure_initialized()

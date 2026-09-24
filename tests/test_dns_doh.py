@@ -150,6 +150,7 @@ def test_the_resolvers_are_named_by_address() -> None:
 
     for url in dns_doh.DOH_ENDPOINTS:
         host = urlsplit(url).hostname
+        assert host is not None
         ipaddress.ip_address(host)  # raises if it is a name
 
 

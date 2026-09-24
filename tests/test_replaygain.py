@@ -51,16 +51,19 @@ def test_a_loud_master_is_told_to_turn_down() -> None:
     negative — measured from a real modern master.
     """
     result = _parse_loudnorm(_loudnorm("-8.77", "1.28"))
+    assert result is not None
     assert result.track_gain_db == pytest.approx(-9.23, abs=0.01)
 
 
 def test_a_quiet_master_is_told_to_turn_up() -> None:
     result = _parse_loudnorm(_loudnorm("-24.00"))
+    assert result is not None
     assert result.track_gain_db == pytest.approx(6.0, abs=0.01)
 
 
 def test_a_track_already_at_the_reference_needs_no_correction() -> None:
     result = _parse_loudnorm(_loudnorm(f"{REFERENCE_LUFS:.2f}"))
+    assert result is not None
     assert result.track_gain_db == pytest.approx(0.0, abs=0.01)
 
 
@@ -70,6 +73,7 @@ def test_a_peak_above_full_scale_is_reported_not_clamped() -> None:
     is the one thing the peak tag exists to prevent.
     """
     result = _parse_loudnorm(_loudnorm("-8.77", "1.28"))
+    assert result is not None
     assert result.track_peak > 1.0
     assert result.track_peak == pytest.approx(1.1588, abs=0.001)
 
@@ -77,6 +81,7 @@ def test_a_peak_above_full_scale_is_reported_not_clamped() -> None:
 def test_the_peak_is_linear_not_decibels() -> None:
     """-6 dBTP is half of full scale."""
     result = _parse_loudnorm(_loudnorm("-18.00", "-6.02"))
+    assert result is not None
     assert result.track_peak == pytest.approx(0.5, abs=0.001)
 
 

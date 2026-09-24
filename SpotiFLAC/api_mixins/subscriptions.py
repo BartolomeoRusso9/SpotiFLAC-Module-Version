@@ -21,11 +21,17 @@ calls `_run_scheduled_check()` on the owner's instance for the same reason.
 from __future__ import annotations
 
 import threading
+from typing import TYPE_CHECKING, Any
 
 from ..core.loop_runner import run_sync
 
 
 class SubscriptionsMixin:
+    if TYPE_CHECKING:
+        download_dir: str
+        log: Any
+        _push: Any
+        _start_download_job: Any
     def _subscription_owner(self) -> str:
         return getattr(self, "owner", "") or ""
 
@@ -140,7 +146,10 @@ class SubscriptionsMixin:
             if self._owned_subscription(subscription_id) is None:
                 return {"ok": False, "error": "No such subscription."}
             set_schedule(subscription_id, interval_minutes, config)
-            return {"ok": True, "subscription": get(subscription_id).to_dict()}
+            subscription = get(subscription_id)
+            if subscription is None:
+                return {"ok": False, "error": "No such subscription."}
+            return {"ok": True, "subscription": subscription.to_dict()}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 

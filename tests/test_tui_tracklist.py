@@ -15,7 +15,7 @@ import pytest
 import SpotiFLAC.downloader as downloader
 import SpotiFLAC.core.tracklist as tracklist_module
 import SpotiFLAC.launcher as launcher_module
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
@@ -112,9 +112,9 @@ async def _until(pilot, predicate, what: str, tries: int = 300) -> None:
 
 
 async def _loaded(pilot) -> TracklistPanel:
-    pilot.app.query_one("#sidebar").index = _TRACKS_INDEX
+    app_of(pilot).query_one("#sidebar").index = _TRACKS_INDEX
     await _settled(pilot)
-    panel = pilot.app.query_one("#tracks", TracklistPanel)
+    panel = app_of(pilot).query_one("#tracks", TracklistPanel)
     panel.load()
     # `_loading` covers every outcome: _load() clears it on the failure
     # path too, and on the success path it sets self.tracklist before
@@ -137,13 +137,13 @@ async def _loaded(pilot) -> TracklistPanel:
 async def test_nothing_is_fetched_until_you_ask(stub_album) -> None:
     """Opening the panel must not fire a request at a URL you are editing."""
     async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
-        pilot.app.query_one("#sidebar").index = _TRACKS_INDEX
+        app_of(pilot).query_one("#sidebar").index = _TRACKS_INDEX
         await _settled(pilot)
 
-        panel = pilot.app.query_one("#tracks", TracklistPanel)
+        panel = app_of(pilot).query_one("#tracks", TracklistPanel)
         assert len(panel.tracklist) == 0
         assert "Press Load tracks" in str(
-            pilot.app.query_one("#tracks-status").render()
+            app_of(pilot).query_one("#tracks-status").render()
         )
 
 
@@ -155,12 +155,12 @@ async def test_loading_lists_the_tracks_all_selected(stub_album) -> None:
 
         from textual.widgets import DataTable
 
-        table = pilot.app.query_one("#tracks-table", DataTable)
+        table = app_of(pilot).query_one("#tracks-table", DataTable)
         assert table.row_count == 5
         assert panel.selected_indices() == [0, 1, 2, 3, 4]
         assert panel.is_whole_collection
 
-        status = str(pilot.app.query_one("#tracks-status").render())
+        status = str(app_of(pilot).query_one("#tracks-status").render())
         assert "5 track(s) in Kind of Blue" in status
 
 
@@ -171,7 +171,7 @@ async def test_a_track_with_no_link_of_its_own_is_marked(stub_album) -> None:
 
         from textual.widgets import DataTable
 
-        table = pilot.app.query_one("#tracks-table", DataTable)
+        table = app_of(pilot).query_one("#tracks-table", DataTable)
         assert str(table.get_row_at(3)[4]) == "no link"
         assert str(table.get_row_at(0)[4]) == "Kind of Blue"
 
@@ -183,7 +183,7 @@ async def test_space_toggles_the_row_under_the_cursor(stub_album) -> None:
 
         from textual.widgets import DataTable
 
-        table = pilot.app.query_one("#tracks-table", DataTable)
+        table = app_of(pilot).query_one("#tracks-table", DataTable)
         table.move_cursor(row=1)
         panel.action_toggle_row()
         await pilot.pause()
@@ -207,7 +207,7 @@ async def test_all_none_and_invert(stub_album) -> None:
         await pilot.pause()
         assert panel.selected_indices() == []
         assert "nothing would download" in str(
-            pilot.app.query_one("#tracks-status").render(),
+            app_of(pilot).query_one("#tracks-status").render(),
         )
 
         panel.action_invert()
@@ -232,7 +232,7 @@ async def test_a_bad_link_is_reported_not_raised(monkeypatch) -> None:
         panel = await _loaded(pilot)
 
         assert len(panel.tracklist) == 0
-        assert "no such album" in str(pilot.app.query_one("#tracks-status").render())
+        assert "no such album" in str(app_of(pilot).query_one("#tracks-status").render())
 
 
 @drives_the_ui
@@ -241,7 +241,7 @@ async def test_loading_without_a_url_says_where_to_set_one() -> None:
     async with SpotiFLACTui(state).run_test(size=(110, 40)) as pilot:
         await _loaded(pilot)
         assert "Set a URL on the Download panel" in str(
-            pilot.app.query_one("#tracks-status").render(),
+            app_of(pilot).query_one("#tracks-status").render(),
         )
 
 
@@ -259,7 +259,7 @@ async def test_the_whole_album_is_fetched_as_the_album(
 
     async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         await _loaded(pilot)
-        pilot.app.action_start_download()
+        app_of(pilot).action_start_download()
         for _ in range(60):
             await pilot.pause()
             if seen:
@@ -280,13 +280,13 @@ async def test_a_pick_reaches_the_downloader_as_track_links(
         panel.action_select_none()
         from textual.widgets import DataTable
 
-        table = pilot.app.query_one("#tracks-table", DataTable)
+        table = app_of(pilot).query_one("#tracks-table", DataTable)
         for row in (0, 2):
             table.move_cursor(row=row)
             panel.action_toggle_row()
         await pilot.pause()
 
-        pilot.app.action_start_download()
+        app_of(pilot).action_start_download()
         for _ in range(60):
             await pilot.pause()
             if seen:
@@ -311,12 +311,12 @@ async def test_starting_with_nothing_picked_is_refused(
         panel.action_select_none()
         await pilot.pause()
 
-        pilot.app.action_start_download()
+        app_of(pilot).action_start_download()
         await _settled(pilot)
 
         assert seen == []
-        assert "Nothing selected" in str(pilot.app.query_one("#status").content)
-        assert pilot.app.query_one("#panels").current == "tracks"
+        assert "Nothing selected" in str(app_of(pilot).query_one("#status").content)
+        assert app_of(pilot).query_one("#panels").current == "tracks"
 
 
 @drives_the_ui
@@ -325,7 +325,7 @@ async def test_an_unloaded_panel_leaves_the_url_alone(stub_album, capture_runs) 
     seen = capture_runs
 
     async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
-        pilot.app.action_start_download()
+        app_of(pilot).action_start_download()
         for _ in range(60):
             await pilot.pause()
             if seen:
@@ -341,7 +341,7 @@ async def test_the_command_panel_admits_the_cli_cannot_do_this(stub_album) -> No
         panel.action_select_none()
         from textual.widgets import DataTable
 
-        pilot.app.query_one("#tracks-table", DataTable).move_cursor(row=0)
+        app_of(pilot).query_one("#tracks-table", DataTable).move_cursor(row=0)
         panel.action_toggle_row()
 
         # The toggle reaches the command panel as a SelectionChanged
@@ -354,11 +354,11 @@ async def test_the_command_panel_admits_the_cli_cannot_do_this(stub_album) -> No
             pilot,
             lambda: (
                 "1 of 5 tracks are picked"
-                in str(pilot.app.query_one("#command").content)
+                in str(app_of(pilot).query_one("#command").content)
             ),
             "the command panel to report the narrowed selection",
         )
 
-        rendered = str(pilot.app.query_one("#command").content)
+        rendered = str(app_of(pilot).query_one("#command").content)
         assert "1 of 5 tracks are picked" in rendered
         assert "fetches the whole link" in rendered

@@ -17,6 +17,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -102,6 +103,7 @@ class _Manager:
 )
 def test_links_are_read_per_site(url, site, kind, item_id) -> None:
     link = parse_catalogue_url(url)
+    assert link is not None
     assert (link.site.key, link.kind, link.item_id) == (site, kind, item_id)
 
 
@@ -121,7 +123,9 @@ def test_anything_else_is_left_alone(url) -> None:
 def test_the_extension_is_found_by_the_hosts_it_may_reach() -> None:
     """Not by id: a fork of the Melon extension under another name is still
     the Melon extension."""
-    assert site_for_extension(_ext("my-melon-fork", ["www.melon.com"])).key == "melon"
+    site = site_for_extension(_ext("my-melon-fork", ["www.melon.com"]))
+    assert site is not None
+    assert site.key == "melon"
     assert site_for_extension(_ext("x", ["api.song.link"])) is None
     # A download provider that happens to reach the same host is not asked.
     assert (
@@ -153,7 +157,7 @@ def test_sources_list_spotify_first_then_each_catalogue() -> None:
 # The extension's answer
 # ---------------------------------------------------------------------------
 
-ALBUM = {
+ALBUM: dict[str, Any] = {
     "id": "10123637",
     "type": "album",
     "name": "Palette",
@@ -184,6 +188,7 @@ def test_album_tracks_carry_numbering_and_links_back_to_the_site() -> None:
         )
         for i, item in enumerate(ALBUM["tracks"], start=1)
     ]
+    assert tracks[0] is not None
     first = tracks[0]
     assert first.title == "이 지금"
     assert first.album == "Palette"  # filled from the album it came in
@@ -193,7 +198,9 @@ def test_album_tracks_carry_numbering_and_links_back_to_the_site() -> None:
     assert first.album_url == "https://www.melon.com/album/detail.htm?albumId=10123637"
     assert first.cover_url == "https://cdn.melon.co.kr/album.jpg"
     # Links it hands out resolve back to the same item.
-    assert parse_catalogue_url(first.external_url).item_id == "30512671"
+    link = parse_catalogue_url(first.external_url)
+    assert link is not None
+    assert link.item_id == "30512671"
 
 
 def test_a_playlist_position_is_not_a_track_number() -> None:
@@ -204,6 +211,7 @@ def test_a_playlist_position_is_not_a_track_number() -> None:
         total=20,
         collection={"type": "playlist", "name": "DJ mix"},
     )
+    assert track is not None
     assert track.track_number == 0
     # Nor is the playlist's name an album name.
     assert track.album != "DJ mix"
@@ -640,6 +648,7 @@ def test_melon_s_page_title_gives_the_artist_it_left_out() -> None:
         },
         MELON,
     )
+    assert track is not None
     assert (track.title, track.artists) == ("LOVE ATTACK", "RESCENE (리센느)")
     assert track.album != "LOVE ATTACK - RESCENE (리센느)"
 

@@ -11,6 +11,7 @@ import secrets
 import threading
 import time
 import urllib.parse
+from typing import Any, cast
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -239,6 +240,8 @@ def ensure_community_session() -> CommunitySessionRecord:
 
                 raise
 
+        if grant is None:
+            raise RuntimeError("verification did not return a session grant")
         exchanged = exchange_community_grant(record, grant)
 
         record.session_id = exchanged.session_id
@@ -265,7 +268,7 @@ def clear_community_session_credentials() -> None:
 
 
 def run_community_verification(record: CommunitySessionRecord) -> str:
-    grant_queue = queue.Queue(maxsize=1)
+    grant_queue: queue.Queue[str] = queue.Queue(maxsize=1)
     callback_state = community_random_hex(16)
 
     class CallbackHandler(BaseHTTPRequestHandler):
@@ -533,7 +536,7 @@ def exchange_community_grant(
         raise Exception(msg)
 
     url = f"{verify_base_url}/session/exchange"
-    resp = requests.post(url, json=payload, timeout=15)
+    resp = requests.post(url, json=cast(Any, payload), timeout=15)
 
     if resp.status_code != 200:
         msg = _refusal_message("session exchange", resp)

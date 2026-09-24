@@ -250,6 +250,7 @@ def test_external_links_given_as_a_map_still_become_a_link() -> None:
         },
         "spotify",
     )
+    assert track is not None
     assert track.external_url == "https://open.spotify.com/track/1"
 
 

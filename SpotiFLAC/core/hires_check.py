@@ -562,7 +562,7 @@ def _analyze_stft(
     """
     hop = n_fft // 4
     half = n_fft // 2
-    avg = np.zeros(half + 1, dtype=np.float64)
+    avg: Any = np.zeros(half + 1, dtype=np.float64)
     # Annotated because numpy is `follow_imports = "skip"` for mypy (see
     # pyproject.toml), so everything it returns arrives as untyped Any.
     signal: Any = np.asarray(y, dtype=np.float64)

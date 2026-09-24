@@ -61,7 +61,7 @@ class LinkResolver:
             "songlink",
             rate_limiter=async_songlink_rate_limiter,
         )
-        self._deezer_async_cache = {}
+        self._deezer_async_cache: dict[str, str] = {}
 
     async def _safe_get_json(self, url: str, params: dict | None = None) -> dict:
         """Robust helper that adds User-Agent and Accept to avoid Varnish/WAF 406 blocking."""

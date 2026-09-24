@@ -44,7 +44,9 @@ def test_package_manager_picks_first_available_on_linux(monkeypatch) -> None:
 def test_package_manager_prefers_apt_get_over_others_on_linux(monkeypatch) -> None:
     monkeypatch.setattr(ffmpeg_check.platform, "system", lambda: "Linux")
     monkeypatch.setattr(ffmpeg_check.shutil, "which", lambda name: f"/usr/bin/{name}")
-    name, _argv = ffmpeg_check._package_manager_command()
+    picked = ffmpeg_check._package_manager_command()
+    assert picked is not None
+    name, _argv = picked
     assert name == "apt-get"
 
 
@@ -61,7 +63,9 @@ def test_package_manager_macos_uses_brew(monkeypatch) -> None:
         "which",
         lambda name: "/opt/homebrew/bin/brew" if name == "brew" else None,
     )
-    name, argv = ffmpeg_check._package_manager_command()
+    picked = ffmpeg_check._package_manager_command()
+    assert picked is not None
+    name, argv = picked
     assert name == "brew"
     assert argv == ["brew", "install", "ffmpeg"]
 
@@ -69,7 +73,9 @@ def test_package_manager_macos_uses_brew(monkeypatch) -> None:
 def test_package_manager_windows_prefers_winget(monkeypatch) -> None:
     monkeypatch.setattr(ffmpeg_check.platform, "system", lambda: "Windows")
     monkeypatch.setattr(ffmpeg_check.shutil, "which", lambda name: f"C:\\{name}.exe")
-    name, argv = ffmpeg_check._package_manager_command()
+    picked = ffmpeg_check._package_manager_command()
+    assert picked is not None
+    name, argv = picked
     assert name == "winget"
     assert "--accept-package-agreements" in argv
     assert "Gyan.FFmpeg" in argv

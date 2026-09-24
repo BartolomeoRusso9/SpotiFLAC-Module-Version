@@ -315,7 +315,7 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
                 try:
                     from .extensions.python_provider import PythonExtensionProvider
 
-                    py_prov = PythonExtensionProvider(
+                    py_prov = cast(Any, PythonExtensionProvider)(
                         py_candidate_name, ext_dir=opts.ext_dir
                     )
                     providers.append(py_prov)
@@ -336,12 +336,11 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
         # would have been paired here as a download fallback with no download
         # function at all.
         installed_js = manager.get_installed(original_ext_id)
-        not_a_downloader = (
+        if (
             installed_js is not None
             and bool(installed_js.types)
             and not installed_js.is_download_provider
-        )
-        if not_a_downloader:
+        ):
             logger.debug(
                 "'%s' is installed but is not a download provider (%s); not using it to download",
                 original_ext_id,
@@ -1617,6 +1616,7 @@ class LegacyDownloadWorker:
                     close()
 
     async def run_async(self) -> list[tuple[str, str, str, str]]:
+        client: Any
         try:
             if self._opts.transcode_to:
                 # It's better to fail fast than to download a whole album and
@@ -2619,11 +2619,7 @@ class SpotiflacDownloader:
         try:
             from .core.session_memory import add_url_to_history_async
 
-            cover_url = (
-                tracks[0].cover_url
-                if tracks and getattr(tracks[0], "cover_url", "")
-                else ""
-            )
+            cover_url = tracks[0].cover_url if tracks and tracks[0].cover_url else ""
             url_type = info.get("type", "")
             if url_type == "artist_discography":
                 url_type = "artist"
@@ -2673,6 +2669,7 @@ class SpotiflacDownloader:
         catalogue = parse_catalogue_url(url)
 
         try:
+            client: Any
             if catalogue:
                 client = ExtensionMetadataClient.for_url(url)
                 (
@@ -2827,10 +2824,7 @@ class SpotiflacDownloader:
                 async def _resolve_one(i: int, track: TrackMetadata):
                     if track.isrc:
                         return i, track
-                    if hasattr(resolver, "get_isrc_async"):
-                        resolved = await resolver.get_isrc_async(track.id)
-                    else:
-                        resolved = await asyncio.to_thread(resolver.get_isrc, track.id)
+                    resolved = await resolver.get_isrc_async(track.id)
 
                     if resolved:
                         return i, track.model_copy(update={"isrc": resolved})

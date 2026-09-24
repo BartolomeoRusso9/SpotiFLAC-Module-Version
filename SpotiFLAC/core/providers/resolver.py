@@ -103,7 +103,7 @@ class ProviderResolver:
         configured_order = {
             name: index for index, name in enumerate(self._provider_priority)
         }
-        candidates = [
+        profiles: list[ProviderProfile] = [
             profile
             for profile in self._profiles.values()
             if profile.supports(quality)
@@ -115,7 +115,7 @@ class ProviderResolver:
                 in configured_services
             )
         ]
-        candidates.sort(
+        profiles.sort(
             key=lambda profile: (
                 -profile.priority,
                 configured_order.get(profile.name, len(configured_order)),
@@ -129,5 +129,5 @@ class ProviderResolver:
                 capabilities=profile.capabilities,
                 qualities=profile.qualities,
             )
-            for profile in candidates
+            for profile in profiles
         ]

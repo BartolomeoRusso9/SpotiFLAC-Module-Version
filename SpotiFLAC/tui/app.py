@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from typing import Any
+from typing import Any, Literal, cast
 
 from textual import on
 from textual.app import App, ComposeResult
@@ -503,7 +503,11 @@ class SpotiFLACTui(App[None]):
         # toast's first line, and it belongs on the border. Queued instead,
         # to be claimed by the widget once it mounts.
         self._pending_toast_labels.append(title or label)
-        self.notify(text, severity=severity, timeout=6)
+        self.notify(
+            text,
+            severity=cast(Literal["information", "warning", "error"], severity),
+            timeout=6,
+        )
         self.call_after_refresh(self._label_toast_borders)
 
     def _label_toast_borders(self) -> None:

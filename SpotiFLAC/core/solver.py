@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from typing import Any, cast
 from urllib.parse import parse_qsl, urlparse
 
 from pydoll.browser.chromium import Chrome
@@ -335,19 +336,19 @@ def _is_chromium_like(path: str) -> bool:
 
 def _default_browser_path_windows() -> str | None:
     try:
-        import winreg
+        import winreg  # type: ignore[import-not-found]
 
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
+        with winreg.OpenKey(  # type: ignore[attr-defined]
+            winreg.HKEY_CURRENT_USER,  # type: ignore[attr-defined]
             r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice",
         ) as key:
-            prog_id = winreg.QueryValueEx(key, "ProgId")[0]
+            prog_id = winreg.QueryValueEx(key, "ProgId")[0]  # type: ignore[attr-defined]
 
-        with winreg.OpenKey(
-            winreg.HKEY_CLASSES_ROOT,
+        with winreg.OpenKey(  # type: ignore[attr-defined]
+            winreg.HKEY_CLASSES_ROOT,  # type: ignore[attr-defined]
             rf"{prog_id}\shell\open\command",
         ) as key:
-            command = winreg.QueryValueEx(key, "")[0]
+            command = winreg.QueryValueEx(key, "")[0]  # type: ignore[attr-defined]
 
         # command looks like: "C:\Path\To\browser.exe" -- %1
         import shlex
@@ -537,9 +538,9 @@ def _find_chrome() -> str:
         "msedge",
         "brave",
     ]:
-        path = shutil.which(cmd)
-        if path:
-            return path
+        executable_path = shutil.which(cmd)
+        if executable_path:
+            return executable_path
 
     # 3. Fallback: use the system default browser if it is Chromium-based
     # (otherwise pydoll would not be able to drive it via CDP).
@@ -803,7 +804,7 @@ def build_chromium_options(*, hidden: bool = True) -> tuple[ChromiumOptions, str
     return options, profile_dir
 
 
-def _js_value(evaluate_response: dict):
+def _js_value(evaluate_response: Any):
     """Unwrap pydoll's raw CDP ``Runtime.evaluate`` response into the plain
     JS value.
 
@@ -977,7 +978,8 @@ async def _solve_impl(
                 "[solver] cancel requested — force-closing browser (profile_dir=%s)",
                 profile_dir,
             )
-            _kill_by_profile_dir(profile_dir)
+            if profile_dir is not None:
+                _kill_by_profile_dir(profile_dir)
         raise _SolverCancelled
 
     def cancel_watchdog() -> None:
@@ -1184,7 +1186,9 @@ async def _solve_impl(
                     # of falling through to the token-polling loop below,
                     # which would just hang/fail against a browser that no
                     # longer exists.
-                    raise nav_task.exception()
+                    exception = nav_task.exception()
+                    if exception is not None:
+                        raise exception
                 break
 
             # If the network already captured the grant, we can stop waiting for pydoll's click
@@ -1510,6 +1514,8 @@ async def _solve_impl(
             msg,
         )
 
+    if token is None:
+        raise TimeoutError("Turnstile token not obtained")
     return (token, callback_grant) if capture_callback else token
 
 
@@ -1544,9 +1550,9 @@ def solve(
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        token = asyncio.run(
+        token = cast(str, asyncio.run(
             _solve_impl(sitekey, siteurl, timeout, hold_open_seconds=hold_open_seconds),
-        )
+        ))
     if hold_open_seconds <= 0:
         _TURNSTILE_CACHE[cache_key] = (now, token)
     return token

@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import tempfile
+from typing import Any, cast
 from pathlib import Path
 
 import pytest
@@ -399,7 +400,7 @@ def test_the_runtime_hands_the_adapter_its_extra_arguments() -> None:
     runtime = JSRuntime.__new__(JSRuntime)
     seen: list[tuple] = []
     runtime._progress_cbs = {7: lambda *args: seen.append(args)}
-    runtime._ready_event = asyncio.Event()
+    cast(Any, runtime)._ready_event = asyncio.Event()
 
     runtime._dispatch(
         {

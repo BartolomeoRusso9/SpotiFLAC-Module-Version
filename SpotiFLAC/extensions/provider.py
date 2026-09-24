@@ -25,8 +25,9 @@ import logging
 import queue
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from typing_extensions import Self
 
@@ -148,8 +149,8 @@ class JSExtensionProvider(BaseProvider):
         # --- RUNTIME POOL CONFIGURATION ---
         self._max_runtimes = 2
         self._runtimes_created = 0
-        self._idle_runtimes = queue.Queue()
-        self._all_runtimes = []
+        self._idle_runtimes: queue.Queue[Any] = queue.Queue()
+        self._all_runtimes: list[Any] = []
         self._runtime_lock = threading.Lock()
         self._active_calls = 0
         self._active_calls_condition = threading.Condition(self._runtime_lock)
@@ -253,7 +254,7 @@ class JSExtensionProvider(BaseProvider):
             # After work is done (e.g. download finished), put the process back in the pool
             self._idle_runtimes.put(rt)
 
-    def _call(self, method: str, *args, **kw) -> object:
+    def _call(self, method: str, *args, **kw) -> Any:
         if self._stop_requested():
             # Refused rather than queued: this runs in a pool thread, and by
             # the time one is free the run it belongs to may be long gone.
@@ -374,7 +375,7 @@ class JSExtensionProvider(BaseProvider):
         metadata: TrackMetadata,
         output_dir: str,
         *,
-        filename_format: str = "{title} - {artist}",
+        filename_format: str | Callable[..., str] = "{title} - {artist}",
         position: int = 1,
         include_track_num: bool = False,
         use_album_track_num: bool = False,
@@ -382,10 +383,10 @@ class JSExtensionProvider(BaseProvider):
         artist_separator: str | None = None,
         allow_fallback: bool = True,
         embed_lyrics: bool = False,
-        lyrics_providers: list | None = None,
+        lyrics_providers: list[str] | None = None,
         apple_lyrics_word_by_word: bool = True,
         enrich_metadata: bool = False,
-        enrich_providers: list | None = None,
+        enrich_providers: list[str] | None = None,
         qobuz_token: str | None = None,
         is_album: bool = False,
         quality: str = "best",
@@ -393,6 +394,8 @@ class JSExtensionProvider(BaseProvider):
         **kwargs,
     ) -> DownloadResult:
         try:
+            if callable(filename_format):
+                filename_format = filename_format(metadata)
             return await self._do_download_async(
                 metadata,
                 output_dir,
@@ -500,7 +503,7 @@ class JSExtensionProvider(BaseProvider):
                 return DownloadResult.skipped_result(
                     self.name,
                     str(output_path),
-                    fmt=_ext_to_fmt(output_path.suffix),
+                    fmt=cast(Any, _ext_to_fmt(output_path.suffix)),
                 )
 
             # Shared between the bridge's real progress events and the disk
@@ -836,7 +839,7 @@ class JSExtensionProvider(BaseProvider):
             except Exception as exc:
                 logger.warning("[%s] Post-download cleanup failed: %s", self.name, exc)
 
-            return DownloadResult.ok(self.name, actual_path, fmt)
+            return DownloadResult.ok(self.name, actual_path, cast(Any, fmt))
 
     # ─────────────────────── Segment reassembly ────────────────────────
 

@@ -6,6 +6,7 @@ breaking the MRO, when app.py / api_mixins/* are touched again.
 
 from __future__ import annotations
 
+from typing import Any, cast
 from SpotiFLAC.api_mixins.covers_lyrics import CoversLyricsMixin
 from SpotiFLAC.api_mixins.local_tagging import LocalTaggingMixin
 from SpotiFLAC.app import SpotiFLAC_API
@@ -132,8 +133,8 @@ def test_a_nonsense_match_score_is_refused_before_anything_is_matched() -> None:
     )
 
     for bad in (-0.5, 1.5, float("nan"), "close enough"):
-        assert api.preview_csv(content, min_score=bad)["ok"] is False, bad
-        assert api.fetch_csv(content, min_score=bad)["status"] == "error", bad
+        assert api.preview_csv(content, min_score=cast(Any, bad))["ok"] is False, bad
+        assert api.fetch_csv(content, min_score=cast(Any, bad))["status"] == "error", bad
 
     # A valid threshold still gets through, and so does "unset".
     assert api.preview_csv(content, min_score=0.9)["ok"] is True
@@ -148,7 +149,7 @@ def test_a_csv_import_fills_the_track_table_like_a_link_does(monkeypatch) -> Non
 
     api = SpotiFLAC_API()
     pushed: list[tuple] = []
-    api._push = lambda name, *args: pushed.append((name, args))
+    cast(Any, api)._push = lambda name, *args: pushed.append((name, args))
 
     async def _tracks(urls, on_progress=None):
         assert urls == ["https://open.spotify.com/track/aaa"]
@@ -188,7 +189,7 @@ def test_a_repeated_link_is_counted_rather_than_fetched_twice(monkeypatch) -> No
 
     api = SpotiFLAC_API()
     pushed: list[tuple] = []
-    api._push = lambda name, *args: pushed.append((name, args))
+    cast(Any, api)._push = lambda name, *args: pushed.append((name, args))
 
     async def _tracks(urls, on_progress=None):
         assert urls == ["https://open.spotify.com/track/aaa"], "fetched once"
@@ -221,7 +222,7 @@ def test_a_csv_with_no_usable_row_reports_instead_of_loading() -> None:
     """
     api = SpotiFLAC_API()
     pushed: list[tuple] = []
-    api._push = lambda name, *args: pushed.append((name, args))
+    cast(Any, api)._push = lambda name, *args: pushed.append((name, args))
 
     api._fetch_csv_thread("Track Name,Artist Name(s)\n", "wishlist.csv", None, None)
 

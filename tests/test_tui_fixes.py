@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.core.paths import default_download_dir
 from SpotiFLAC.tui.app import SpotiFLACTui
@@ -43,19 +43,19 @@ async def test_closing_the_log_never_leaves_the_focus_nowhere() -> None:
     """
     async with SpotiFLACTui(_ready_state()).run_test(size=(104, 38)) as pilot:
         await _settled(pilot)
-        pane = pilot.app.query_one("#log-pane")
+        pane = app_of(pilot).query_one("#log-pane")
 
-        pilot.app._set_log_visible(True)
-        pilot.app.query_one("#log").focus()
+        app_of(pilot)._set_log_visible(True)
+        app_of(pilot).query_one("#log").focus()
         await pilot.pause()
-        assert type(pilot.app.focused).__name__ == "RichLog"
+        assert type(app_of(pilot).focused).__name__ == "RichLog"
 
         await pilot.press("ctrl+l")
         await pilot.pause()
 
         assert pane.display is False
-        assert pilot.app.focused is not None, "the focus went nowhere"
-        assert pilot.app.focused.id == "sidebar"
+        assert app_of(pilot).focused is not None, "the focus went nowhere"
+        assert app_of(pilot).focused.id == "sidebar"
 
 
 @drives_the_ui
@@ -63,10 +63,10 @@ async def test_the_log_toggles_from_wherever_the_focus_is() -> None:
     """Ctrl+L is priority-bound, so nothing focused can swallow it."""
     async with SpotiFLACTui(_ready_state()).run_test(size=(104, 38)) as pilot:
         await _settled(pilot)
-        pane = pilot.app.query_one("#log-pane")
+        pane = app_of(pilot).query_one("#log-pane")
 
         for widget_id in ("#cfg-url", "#cfg-output_dir", "#sidebar"):
-            pilot.app.query_one(widget_id).focus()
+            app_of(pilot).query_one(widget_id).focus()
             await pilot.pause()
 
             await pilot.press("ctrl+l")
@@ -83,9 +83,9 @@ async def test_escape_closes_the_log() -> None:
     """A second way out, for terminals that keep Ctrl+L for themselves."""
     async with SpotiFLACTui(_ready_state()).run_test(size=(104, 38)) as pilot:
         await _settled(pilot)
-        pane = pilot.app.query_one("#log-pane")
+        pane = app_of(pilot).query_one("#log-pane")
 
-        pilot.app._set_log_visible(True)
+        app_of(pilot)._set_log_visible(True)
         await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
@@ -102,13 +102,13 @@ async def test_a_run_opens_the_log_through_the_same_door() -> None:
     """So the focus rule applies to the run's own opening too."""
     async with SpotiFLACTui(_ready_state()).run_test(size=(104, 38)) as pilot:
         await _settled(pilot)
-        pilot.app.action_start_download()
+        app_of(pilot).action_start_download()
         await _settled(pilot)
 
-        assert pilot.app.query_one("#log-pane").display is True
+        assert app_of(pilot).query_one("#log-pane").display is True
         await pilot.press("ctrl+l")
         await pilot.pause()
-        assert pilot.app.query_one("#log-pane").display is False
+        assert app_of(pilot).query_one("#log-pane").display is False
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +146,7 @@ async def test_the_menu_follows_the_providers(monkeypatch) -> None:
     state = ConfigState(url="https://x/y", services=["deezer"])
     async with SpotiFLACTui(state).run_test(size=(104, 40)) as pilot:
         await _settled(pilot)
-        panel = pilot.app.query_one("#download")
+        panel = app_of(pilot).query_one("#download")
 
         def offered() -> list[str]:
             # The panel's own record of what it put in the menu, rather than
@@ -157,7 +157,7 @@ async def test_the_menu_follows_the_providers(monkeypatch) -> None:
 
         assert "DOLBY_ATMOS" not in offered()
 
-        providers = pilot.app.query_one("#cfg-services", SelectionList)
+        providers = app_of(pilot).query_one("#cfg-services", SelectionList)
         values = [str(option.value) for option in providers.options]
         assert "tidal" in values
         providers.select(providers.get_option_at_index(values.index("tidal")))
@@ -175,13 +175,13 @@ async def test_dropping_tidal_takes_atmos_with_it() -> None:
     )
     async with SpotiFLACTui(state).run_test(size=(104, 40)) as pilot:
         await _settled(pilot)
-        assert pilot.app.state.to_cfg()["quality"] == "DOLBY_ATMOS"
+        assert app_of(pilot).state.to_cfg()["quality"] == "DOLBY_ATMOS"
 
-        pilot.app.state.services = ["deezer"]
-        pilot.app.query_one("#download")._refresh_dependencies()
+        app_of(pilot).state.services = ["deezer"]
+        app_of(pilot).query_one("#download")._refresh_dependencies()
         await _settled(pilot)
 
-        assert pilot.app.state.to_cfg()["quality"] == "HI_RES_LOSSLESS"
+        assert app_of(pilot).state.to_cfg()["quality"] == "HI_RES_LOSSLESS"
 
 
 # ---------------------------------------------------------------------------
@@ -196,9 +196,9 @@ async def test_the_folder_field_opens_on_music_spotiflac() -> None:
     async with SpotiFLACTui().run_test(size=(104, 40)) as pilot:
         await _settled(pilot)
 
-        assert pilot.app.state.output_dir == default_download_dir()
+        assert app_of(pilot).state.output_dir == default_download_dir()
         assert (
-            pilot.app.query_one("#cfg-output_dir", Input).value
+            app_of(pilot).query_one("#cfg-output_dir", Input).value
             == default_download_dir()
         )
 
@@ -216,7 +216,7 @@ async def test_last_run_folder_no_longer_overrides_the_default(monkeypatch) -> N
     async with SpotiFLACTui().run_test(size=(104, 40)) as pilot:
         for _ in range(15):
             await pilot.pause()
-        assert pilot.app.state.output_dir == default_download_dir()
+        assert app_of(pilot).state.output_dir == default_download_dir()
 
 
 @pytest.mark.uses_real_download_dir

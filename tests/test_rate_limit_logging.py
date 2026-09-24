@@ -12,6 +12,7 @@ extensions make their requests through.
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 import json
 import shutil
 import threading
@@ -71,7 +72,7 @@ def _fetch(tmp_path, response: _Response, path: str = "/dl/tid") -> dict:
     async def _respond(*args, **kwargs):
         return response
 
-    client.request = _respond
+    cast(Any, client).request = _respond
     return asyncio.run(ssm.perform_signed_fetch(client, "POST", path, {}, {}))
 
 

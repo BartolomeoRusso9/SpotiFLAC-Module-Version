@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
@@ -84,13 +84,13 @@ async def _settled(pilot) -> None:
 @drives_the_ui
 async def test_history_and_profiles_are_listed(stub_session) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SESSION_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
         from textual.widgets import OptionList
 
-        history = pilot.app.query_one("#history-list", OptionList)
-        profiles = pilot.app.query_one("#profile-list", OptionList)
+        history = app_of(pilot).query_one("#history-list", OptionList)
+        profiles = app_of(pilot).query_one("#profile-list", OptionList)
 
         assert history.option_count == 2
         assert profiles.option_count == 1
@@ -100,7 +100,7 @@ async def test_history_and_profiles_are_listed(stub_session) -> None:
 @drives_the_ui
 async def test_picking_a_url_fills_the_form(stub_session) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        panel = pilot.app.query_one("#session", SessionPanel)
+        panel = app_of(pilot).query_one("#session", SessionPanel)
         panel.post_message(
             SessionPanel.UrlChosen("https://open.spotify.com/track/two"),
         )
@@ -109,28 +109,28 @@ async def test_picking_a_url_fills_the_form(stub_session) -> None:
         from textual.widgets import Input
 
         assert (
-            pilot.app.query_one("#cfg-url", Input).value
+            app_of(pilot).query_one("#cfg-url", Input).value
             == "https://open.spotify.com/track/two"
         )
-        assert pilot.app.state.url == "https://open.spotify.com/track/two"
+        assert app_of(pilot).state.url == "https://open.spotify.com/track/two"
         # Adopting a URL is a configuration act, so it lands you on the form.
-        assert pilot.app.query_one("#panels").current == "download"
+        assert app_of(pilot).query_one("#panels").current == "download"
 
 
 @drives_the_ui
 async def test_loading_a_profile_replaces_every_setting(stub_session) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SESSION_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
         from textual.widgets import OptionList
 
-        profiles = pilot.app.query_one("#profile-list", OptionList)
+        profiles = app_of(pilot).query_one("#profile-list", OptionList)
         profiles.highlighted = 0
         profiles.action_select()
         await _settled(pilot)
 
-        state = pilot.app.state
+        state = app_of(pilot).state
         assert state.profile_loaded == "weekend"
         assert state.output_dir == "/tmp/from-profile"
         assert state.services == ["qobuz"]
@@ -145,9 +145,9 @@ async def test_loading_a_profile_replaces_every_setting(stub_session) -> None:
         from textual.widgets import Input
 
         assert (
-            pilot.app.query_one("#cfg-output_dir", Input).value == "/tmp/from-profile"
+            app_of(pilot).query_one("#cfg-output_dir", Input).value == "/tmp/from-profile"
         )
-        assert pilot.app.query_one("#panels").current == "download"
+        assert app_of(pilot).query_one("#panels").current == "download"
 
 
 @drives_the_ui
@@ -155,13 +155,13 @@ async def test_saving_a_profile_stores_the_current_configuration(
     stub_session,
 ) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SESSION_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button, Input
 
-        pilot.app.query_one("#profile-name", Input).value = "nightly"
-        pilot.app.query_one("#profile-save", Button).press()
+        app_of(pilot).query_one("#profile-name", Input).value = "nightly"
+        app_of(pilot).query_one("#profile-save", Button).press()
         await _settled(pilot)
 
         assert "nightly" in stub_session
@@ -172,17 +172,17 @@ async def test_saving_a_profile_stores_the_current_configuration(
 @drives_the_ui
 async def test_deleting_a_profile_removes_it(stub_session) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SESSION_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button, Input
 
-        pilot.app.query_one("#profile-name", Input).value = "weekend"
-        pilot.app.query_one("#profile-delete", Button).press()
+        app_of(pilot).query_one("#profile-name", Input).value = "weekend"
+        app_of(pilot).query_one("#profile-delete", Button).press()
         await _settled(pilot)
 
         assert "weekend" not in stub_session
-        assert "Deleted" in str(pilot.app.query_one("#session-status").content)
+        assert "Deleted" in str(app_of(pilot).query_one("#session-status").content)
 
 
 @drives_the_ui
@@ -203,18 +203,18 @@ async def test_an_unreadable_store_is_reported_not_raised(monkeypatch) -> None:
     monkeypatch.setattr(profiles_module, "list_profiles_async", _explode_async)
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SESSION_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
         from textual.widgets import OptionList
 
-        history = pilot.app.query_one("#history-list", OptionList)
+        history = app_of(pilot).query_one("#history-list", OptionList)
         assert history.option_count == 1
         assert "Nothing fetched yet" in str(history.get_option_at_index(0).prompt)
 
         # Reported, not just survived: an unreadable profile store used to
         # look exactly like an empty one.
-        status = str(pilot.app.query_one("#session-status").content)
+        status = str(app_of(pilot).query_one("#session-status").content)
         assert "Could not read the saved profiles" in status
         assert "profiles are corrupt" in status
 
@@ -236,12 +236,12 @@ async def test_the_same_link_fetched_twice_is_listed_once(monkeypatch) -> None:
     )
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SESSION_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
         from textual.widgets import OptionList
 
-        history = pilot.app.query_one("#history-list", OptionList)
+        history = app_of(pilot).query_one("#history-list", OptionList)
         # Two, not one: the duplicate is dropped and the entry *after* it
         # still makes it in, which is what DuplicateID cost before.
         assert history.option_count == 2
@@ -250,14 +250,14 @@ async def test_the_same_link_fetched_twice_is_listed_once(monkeypatch) -> None:
 @drives_the_ui
 async def test_saving_without_a_name_says_so(stub_session) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SESSION_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button
 
-        pilot.app.query_one("#profile-save", Button).press()
+        app_of(pilot).query_one("#profile-save", Button).press()
         await _settled(pilot)
 
         assert "Name the profile" in str(
-            pilot.app.query_one("#session-status").content,
+            app_of(pilot).query_one("#session-status").content,
         )

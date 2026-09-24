@@ -179,6 +179,12 @@ def test_the_index_gives_the_same_answer_with_and_without_the_cache(library) -> 
     index_audio_files(music)  # populate
     cached = index_audio_files(music)
 
+    assert isinstance(cached, dict)
+    assert isinstance(uncached, dict)
+    assert isinstance(cached["__isrc__"], dict)
+    assert isinstance(uncached["__isrc__"], dict)
+    assert isinstance(cached["__identity__"], dict)
+    assert isinstance(uncached["__identity__"], dict)
     assert cached["__isrc__"].keys() == uncached["__isrc__"].keys()
     assert cached["__identity__"].keys() == uncached["__identity__"].keys()
 
