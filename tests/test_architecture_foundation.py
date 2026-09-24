@@ -675,6 +675,18 @@ def test_job_service_publishes_lifecycle_events(tmp_path):
     assert events == ["job.created", "job.started", "job.completed"]
 
 
+def test_api_adapter_shares_event_bus_with_job_service(tmp_path):
+    events = []
+    bus = EventBus()
+    bus.subscribe("job.created", lambda payload: events.append(payload["job_id"]))
+    service = JobService(repo=JobRepository(tmp_path / "adapter-events.db"), event_bus=bus)
+    adapter = ApiAdapter(job_service=service, event_bus=bus)
+
+    response = asyncio.run(adapter.submit_download({"sources": ["spotify:track:event"]}))
+
+    assert events == [response["id"]]
+
+
 def test_v1_router_uses_application_adapter_for_download_submission():
     app = FastAPI()
     app.include_router(

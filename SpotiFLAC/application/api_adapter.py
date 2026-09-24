@@ -4,6 +4,7 @@ import asyncio
 import time
 
 from SpotiFLAC.application.job_service import JobService
+from SpotiFLAC.application.event_bus import EventBus
 from SpotiFLAC.core.config import SpotiFLACConfig, DownloadRequest
 
 
@@ -18,8 +19,10 @@ class ApiAdapter:
         self,
         job_service: JobService | None = None,
         start_background: bool = False,
+        event_bus: EventBus | None = None,
     ) -> None:
-        self._job_service = job_service or JobService()
+        self._event_bus = event_bus or EventBus()
+        self._job_service = job_service or JobService(event_bus=self._event_bus)
         self._start_background = start_background
         self._tasks: set[asyncio.Task] = set()
 

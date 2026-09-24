@@ -1121,7 +1121,29 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # Mounted after the middleware that gates /api/*, so it inherits the same
     # token and session auth rather than reimplementing either.
     from .application import ApiAdapter
+    from .application import EventBus
     from .webapi import ApiDeps, build_v1_router
+    application_events = EventBus()
+    application_events.subscribe(
+        "job.created",
+        lambda payload: manager.broadcast("applicationEvent", ["job.created", payload]),
+    )
+    application_events.subscribe(
+        "job.started",
+        lambda payload: manager.broadcast("applicationEvent", ["job.started", payload]),
+    )
+    application_events.subscribe(
+        "job.completed",
+        lambda payload: manager.broadcast("applicationEvent", ["job.completed", payload]),
+    )
+    application_events.subscribe(
+        "job.failed",
+        lambda payload: manager.broadcast("applicationEvent", ["job.failed", payload]),
+    )
+    application_events.subscribe(
+        "job.cancelled",
+        lambda payload: manager.broadcast("applicationEvent", ["job.cancelled", payload]),
+    )
 
     app.include_router(
         build_v1_router(
@@ -1130,7 +1152,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                 multiuser=multiuser,
                 token_required=bool(token),
                 job_queue=job_queue or download_queue,
-                adapter=ApiAdapter(),
+                adapter=ApiAdapter(event_bus=application_events),
                 username_for=lambda request: getattr(request.state, "username", None),
             )
         )
