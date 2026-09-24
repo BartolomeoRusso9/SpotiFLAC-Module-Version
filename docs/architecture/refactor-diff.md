@@ -5,7 +5,7 @@
 - Foundation and incremental refactor changes are committed on branch `4.0.0`.
 - Local test output `.spotiflac/` remains intentionally untracked.
 - `git diff --check`: passed
-- Focused regression suite: **94 passed**.
+- Focused regression suite: **95 passed**.
 
 ## Modified Files
 
@@ -60,6 +60,8 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   with additive schema migration for existing job databases.
 - Cancelling an active application job now cancels its asyncio task, persists
   `CANCELLED`, and publishes the corresponding lifecycle event.
+- Retrying a failed or cancelled job now emits `job.retrying` and records the
+  intermediate `RETRYING` state before re-queueing it.
 - `JobService` publishes lifecycle events through `EventBus`: created, started,
   completed, failed, and cancelled.
 - The REST adapter shares the application bus with the WebSocket bridge, which
@@ -115,7 +117,7 @@ PYTHONPATH="$PWD" python3 -m pytest -q \
   tests/test_webapi_integration.py
 ```
 
-Result: **94 passed**.
+Result: **95 passed**.
 
 ## Next Milestone
 
