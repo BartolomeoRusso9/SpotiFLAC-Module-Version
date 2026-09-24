@@ -7,7 +7,7 @@
 - Tracked deletions: 1
 - New application and test files are currently untracked.
 - `git diff --check`: passed
-- Focused regression suite: **82 passed**.
+- Focused regression suite: **83 passed**.
 
 ## Modified Files
 
@@ -62,6 +62,12 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
 - `tests/test_architecture_foundation.py`
   - regression coverage for the new architecture.
 
+### Client Entry Point
+
+`AsyncSpotiFLAC.download_request()` now delegates directly to
+`DownloadService`, while the existing `download_track()`, `download_batch()`,
+and `download_tracks()` methods remain unchanged for compatibility.
+
 ## Pipeline
 
 ```text
@@ -90,7 +96,7 @@ PYTHONPATH="$PWD" python3 -m pytest -q \
   tests/test_webapi_integration.py
 ```
 
-Result: **82 passed**.
+Result: **83 passed**.
 
 ## Next Milestone
 
