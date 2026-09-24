@@ -4,6 +4,7 @@ from typing import Any
 from pathlib import Path
 
 from SpotiFLAC.application.download_service import DownloadService
+from SpotiFLAC.application.event_bus import EventBus
 from SpotiFLAC.application.queue_service import QueueService
 from SpotiFLAC.core.config import DownloadRequest, SpotiFLACConfig
 from SpotiFLAC.core.repositories import JobRepository
@@ -16,15 +17,18 @@ class JobService:
         self,
         repo: JobRepository | None = None,
         download_service: DownloadService | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._repo = repo or JobRepository()
         self._queue = QueueService(repo=self._repo)
         self._download_service = download_service or DownloadService()
+        self._event_bus = event_bus or EventBus()
         self._requests: dict[str, DownloadRequest] = {}
 
     async def enqueue(self, request: DownloadRequest) -> dict[str, Any]:
         job = await self._queue.enqueue(request)
         self._requests[job["id"]] = request
+        await self._event_bus.publish("job.created", {"job_id": job["id"]})
         return job
 
     async def execute(self, job_id: str) -> Any:
@@ -33,12 +37,15 @@ class JobService:
         if self.get(job_id)["status"] == "CANCELLED":
             return None
         self._repo.update_status(job_id, "RUNNING")
+        await self._event_bus.publish("job.started", {"job_id": job_id})
         try:
             report = await self._download_service.download(request)
         except Exception:
             self._repo.update_status(job_id, "FAILED")
+            await self._event_bus.publish("job.failed", {"job_id": job_id})
             return None
         self._repo.update_status(job_id, "DONE")
+        await self._event_bus.publish("job.completed", {"job_id": job_id})
         return report
 
     def _request_from_job(self, job_id: str) -> DownloadRequest:
@@ -69,7 +76,9 @@ class JobService:
         )
 
     async def cancel(self, job_id: str) -> dict[str, Any]:
-        return await self._queue.cancel(job_id)
+        job = await self._queue.cancel(job_id)
+        await self._event_bus.publish("job.cancelled", {"job_id": job_id})
+        return job
 
     async def retry(self, job_id: str) -> dict[str, Any]:
         status = self.get(job_id)["status"]

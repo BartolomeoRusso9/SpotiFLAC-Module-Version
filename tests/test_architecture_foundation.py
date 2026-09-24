@@ -653,6 +653,28 @@ def test_job_service_reconstructs_persisted_request_after_restart(tmp_path):
     assert restarted.get(job["id"])["status"] == "DONE"
 
 
+def test_job_service_publishes_lifecycle_events(tmp_path):
+    events = []
+    bus = EventBus()
+    for event_name in ("job.created", "job.started", "job.completed"):
+        bus.subscribe(event_name, lambda payload, name=event_name: events.append(name))
+
+    class FakeDownloadService:
+        async def download(self, request):
+            return request.sources
+
+    service = JobService(
+        repo=JobRepository(tmp_path / "events.db"),
+        download_service=FakeDownloadService(),
+        event_bus=bus,
+    )
+    request = DownloadRequest(sources=["spotify:track:event"], config=SpotiFLACConfig())
+    job = asyncio.run(service.enqueue(request))
+    asyncio.run(service.execute(job["id"]))
+
+    assert events == ["job.created", "job.started", "job.completed"]
+
+
 def test_v1_router_uses_application_adapter_for_download_submission():
     app = FastAPI()
     app.include_router(
