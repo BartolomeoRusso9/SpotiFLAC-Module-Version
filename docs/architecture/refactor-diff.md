@@ -7,7 +7,7 @@
 - Tracked deletions: 1
 - New application and test files are currently untracked.
 - `git diff --check`: passed
-- Focused regression suite: **87 passed**.
+- Focused regression suite: **88 passed**.
 
 ## Modified Files
 
@@ -59,6 +59,8 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   restart, and job IDs are independent of in-memory queue length.
 - `JobService` publishes lifecycle events through `EventBus`: created, started,
   completed, failed, and cancelled.
+- The REST adapter shares the application bus with the WebSocket bridge, which
+  forwards job lifecycle events as `applicationEvent` messages.
 - `SpotiFLAC/core/retry.py`
   - centralized retry policy.
 - `SpotiFLAC/core/providers/`
@@ -101,7 +103,7 @@ PYTHONPATH="$PWD" python3 -m pytest -q \
   tests/test_webapi_integration.py
 ```
 
-Result: **87 passed**.
+Result: **88 passed**.
 
 ## Next Milestone
 
