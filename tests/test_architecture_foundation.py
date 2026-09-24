@@ -540,6 +540,20 @@ def test_provider_profile_can_be_built_from_extension_manifest():
     assert profile.priority == 7
 
 
+def test_provider_resolver_can_load_installed_extension_manifests():
+    extension = SimpleNamespace(
+        name="tidal-web",
+        manifest={
+            "capabilities": {"download": True},
+            "qualities": ["LOSSLESS"],
+        },
+    )
+    resolver = ProviderResolver.from_extensions([extension])
+    request = DownloadRequest(sources=["spotify:track:abc"], config=SpotiFLACConfig())
+
+    assert resolver.resolve(request) == ["tidal-web"]
+
+
 def test_extension_service_tracks_lifecycle_and_trust():
     service = ExtensionService()
     installed = service.install("my-provider", version="3.1.0")

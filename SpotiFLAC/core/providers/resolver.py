@@ -63,6 +63,20 @@ class ProviderResolver:
     def __init__(self, profiles: list[ProviderProfile] | None = None) -> None:
         self._profiles = {profile.name: profile for profile in profiles or []}
 
+    @classmethod
+    def from_extensions(cls, extensions: list[object]) -> "ProviderResolver":
+        profiles = []
+        for extension in extensions:
+            manifest = getattr(extension, "manifest", None)
+            if isinstance(manifest, dict):
+                profiles.append(
+                    ProviderProfile.from_manifest(
+                        manifest,
+                        name=getattr(extension, "name", None),
+                    )
+                )
+        return cls(profiles)
+
     def resolve(self, request: DownloadRequest) -> list[str]:
         return [candidate.name for candidate in self.resolve_candidates(request)]
 
