@@ -5,7 +5,7 @@
 - Foundation and incremental refactor changes are committed on branch `4.0.0`.
 - Local test output `.spotiflac/` remains intentionally untracked.
 - `git diff --check`: passed
-- Focused regression suite: **104 passed**.
+- Focused regression suite: **92 passed**.
 
 ## Modified Files
 
@@ -107,7 +107,7 @@ PYTHONPATH="$PWD" python3 -m pytest -q \
   tests/test_webapi_integration.py
 ```
 
-Result: **104 passed**.
+Result: **92 passed**.
 
 ## Next Milestone
 
