@@ -32,7 +32,7 @@ class _FakeTrack:
 
 
 @pytest.fixture()
-def captured_calls(tmp_path, monkeypatch):
+def captured_calls(tmp_path, monkeypatch) -> Any:
     """Runs _download_task and returns every call the wrapper received."""
     seen: list[dict] = []
 
@@ -222,7 +222,7 @@ def _meta(track_id: str) -> TrackMetadata:
 
 
 @pytest.fixture()
-def batching_downloader(tmp_path, monkeypatch):
+def batching_downloader(tmp_path, monkeypatch) -> Any:
     """A downloader whose metadata/worker layers are recorded, not run."""
     downloader = SpotiflacDownloader(DownloadOptions(output_dir=str(tmp_path)))
     runs: list[dict] = []

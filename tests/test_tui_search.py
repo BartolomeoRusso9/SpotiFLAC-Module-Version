@@ -8,6 +8,8 @@ would drift.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 import pytest
 
@@ -49,7 +51,7 @@ _RESULTS = {
 
 
 @pytest.fixture
-def stub_search(monkeypatch):
+def stub_search(monkeypatch) -> Any:
     queries: list[str] = []
 
     async def _search(query, limit=50):

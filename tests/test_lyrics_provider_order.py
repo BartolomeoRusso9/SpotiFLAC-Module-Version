@@ -10,6 +10,8 @@ where the whole point of putting Apple first is its word-by-word timing.
 
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 
 import pytest
@@ -29,7 +31,7 @@ def _no_cache(monkeypatch):
 
 
 @pytest.fixture
-def cache(monkeypatch):
+def cache(monkeypatch) -> Any:
     """A fake response cache that honours the TTL it is asked for.
 
     Entries are (namespace, key) → (value, age_in_seconds), so a test can
@@ -66,7 +68,6 @@ def _providers(monkeypatch, answers: dict[str, tuple[float, str]]):
         "_PROVIDER_MAP",
         {name: make(*spec) for name, spec in answers.items()},
     )
-
 
 def _fetch(order):
     return asyncio.run(

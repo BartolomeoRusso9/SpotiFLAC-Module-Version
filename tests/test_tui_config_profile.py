@@ -11,6 +11,8 @@ of ConfigState, and this one replaces the state wholesale, so it announces
 
 from __future__ import annotations
 
+from typing import Any
+
 
 import pytest
 from textual.widgets import Input, Select, Static
@@ -33,7 +35,7 @@ _SAVED_PROFILE = {
 
 
 @pytest.fixture
-def stub_profiles(monkeypatch):
+def stub_profiles(monkeypatch) -> Any:
     import SpotiFLAC.core.profiles as profiles_module
 
     saved: dict[str, dict] = {
@@ -53,7 +55,7 @@ def stub_profiles(monkeypatch):
 
 
 @pytest.fixture
-def stub_no_profiles(monkeypatch):
+def stub_no_profiles(monkeypatch) -> Any:
     import SpotiFLAC.core.profiles as profiles_module
 
     async def _list():

@@ -169,7 +169,7 @@ async def test_cancelling_the_iteration_restores_the_terminal(
         await task
     except asyncio.CancelledError:
         pass
-    await events.aclose()
+    await events.aclose()  # type: ignore[attr-defined]
 
     assert not output_sink.sink_active()
     capfd.readouterr()

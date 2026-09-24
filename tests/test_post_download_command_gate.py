@@ -16,6 +16,8 @@ it into ours.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from SpotiFLAC.app import POST_COMMAND_ENV, SpotiFLAC_API
@@ -29,7 +31,7 @@ class _FakeTrack:
 
 
 @pytest.fixture
-def captured_options(tmp_path, monkeypatch):
+def captured_options(tmp_path, monkeypatch) -> Any:
     """Runs _download_task and returns the kwargs the download wrapper got."""
     seen: list[dict] = []
 

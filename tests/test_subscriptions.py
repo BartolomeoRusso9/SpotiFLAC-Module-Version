@@ -178,7 +178,7 @@ def test_check_records_the_error_and_does_not_raise():
     assert subs.get(sub.id).last_error
 
 
-def test_a_failing_release_does_not_stop_the_rest():
+def test_a_failing_release_does_not_stop_the_rest() -> None:
     sub = subs.add(ARTIST_URL, output_dir="/music")
     result = subs.CheckResult(
         subscription=sub,

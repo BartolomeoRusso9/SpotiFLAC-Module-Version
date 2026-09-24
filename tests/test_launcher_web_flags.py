@@ -14,6 +14,8 @@ still hold if the option list grows another --web-something flag.
 
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 
 import pytest
@@ -25,7 +27,7 @@ from SpotiFLAC import launcher
 
 
 @pytest.fixture
-def run_web_calls(monkeypatch):
+def run_web_calls(monkeypatch) -> Any:
     """Runs launcher.amain() with the given argv, capturing run_async kwargs
     instead of actually binding a socket.
     """

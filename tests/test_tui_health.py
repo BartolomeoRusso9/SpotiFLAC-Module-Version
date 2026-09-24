@@ -7,6 +7,8 @@ not whether a lyrics server happens to be up while the suite runs.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 import pytest
 
@@ -26,7 +28,7 @@ _RESULTS = [
 
 
 @pytest.fixture
-def stub_health(monkeypatch):
+def stub_health(monkeypatch) -> Any:
     """Replaces the probe, and counts how often it was called."""
     calls: list[int] = []
 

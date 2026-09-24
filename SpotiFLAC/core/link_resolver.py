@@ -6,6 +6,7 @@ import logging
 import random
 import re
 import urllib.parse
+from typing import Any
 
 import httpx
 
@@ -113,7 +114,7 @@ class LinkResolver:
             lambda: self.http.get(url, headers=headers, follow_redirects=True),
         )
 
-    async def _request_with_retry(self, request_callable):
+    async def _request_with_retry(self, request_callable: Any) -> Any:
         last_error: Exception | None = None
         for attempt in range(1, self.MAX_RETRIES + 1):
             try:

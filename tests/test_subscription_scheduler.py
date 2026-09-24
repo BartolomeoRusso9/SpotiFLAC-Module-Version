@@ -24,7 +24,7 @@ def _checking(seen: list):
     return run_check
 
 
-def test_tick_checks_what_is_due_and_nothing_else():
+def test_tick_checks_what_is_due_and_nothing_else() -> None:
     scheduled = subs.add(PLAYLIST_URL, interval_minutes=15)
     subs.add(ARTIST_URL)  # manual
     seen: list[str] = []
@@ -49,7 +49,7 @@ def test_a_check_that_raises_is_stamped_not_retried_every_poll():
     assert scheduler.tick() == 0
 
 
-def test_it_runs_on_its_own_thread_until_stopped():
+def test_it_runs_on_its_own_thread_until_stopped() -> None:
     subs.add(PLAYLIST_URL, interval_minutes=15)
     ran = threading.Event()
     seen: list[str] = []

@@ -40,7 +40,7 @@ def _track(n: int, **extra) -> TrackMetadata:
 
 
 @pytest.fixture()
-def download(tmp_path, monkeypatch):
+def download(tmp_path, monkeypatch) -> Any:
     seen: list[dict] = []
     capture_service(monkeypatch, seen)
 

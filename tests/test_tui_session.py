@@ -9,6 +9,8 @@ which has its own tests.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 import pytest
 
@@ -32,7 +34,7 @@ _SAVED_PROFILE = {
 
 
 @pytest.fixture
-def stub_session(monkeypatch):
+def stub_session(monkeypatch) -> Any:
     """Stands in for the history and profile stores."""
     import SpotiFLAC.core.history as history_module
     import SpotiFLAC.core.profiles as profiles_module

@@ -9,6 +9,8 @@ the `cfg` the launcher is handed.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 import pytest
 
@@ -70,7 +72,7 @@ def stub_album(monkeypatch):
 
 
 @pytest.fixture
-def capture_runs(monkeypatch):
+def capture_runs(monkeypatch) -> Any:
     """Collects the cfg a run would have been given, instead of running it.
 
     Through monkeypatch, not a bare assignment: `run_download_from_cfg` is a

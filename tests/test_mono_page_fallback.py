@@ -8,6 +8,9 @@ candidate is loaded, and its failure handled, inside the fallback loop.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import Any
+
 import asyncio
 
 import pytest
@@ -18,12 +21,12 @@ PRIMARY, FALLBACK = mono.MONOCHROME_PAGE_URLS
 
 
 class FakeTab:
-    def __init__(self, unreachable=()):
+    def __init__(self, unreachable: Iterable[str] = ()) -> None:
         self.unreachable = set(unreachable)
         self.visited: list[str] = []
         self.url = "about:blank"
 
-    async def go_to(self, url):
+    async def go_to(self, url: str) -> None:
         self.visited.append(url)
         if url in self.unreachable:
             raise TimeoutError(f"{url} timed out")
@@ -31,13 +34,13 @@ class FakeTab:
 
 
 @pytest.fixture
-def session(monkeypatch):
+def session(monkeypatch) -> Any:
     monkeypatch.setattr(mono, "load_monochrome_session", mono.MonochromeSessionRecord)
     monkeypatch.setattr(mono, "save_monochrome_session", lambda record: None)
     return mono._MonochromeBrowserSession()
 
 
-def _solves_on(session, monkeypatch, *pages):
+def _solves_on(session, monkeypatch, *pages) -> Any:
     solved_on: list[str] = []
 
     async def solve(timeout):

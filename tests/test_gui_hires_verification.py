@@ -9,6 +9,8 @@ silently turning the toggles into settings that save and do nothing.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pathlib import Path
 
 import pytest
@@ -27,7 +29,7 @@ class _FakeTrack:
 
 
 @pytest.fixture()
-def download_kwargs(tmp_path, monkeypatch):
+def download_kwargs(tmp_path, monkeypatch) -> Any:
     """Runs one GUI download and returns the kwargs the client received."""
     seen: list[dict] = []
 
