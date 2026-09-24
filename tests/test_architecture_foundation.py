@@ -418,6 +418,13 @@ def test_download_pipeline_prepares_source_and_provider_context():
     assert context.provider == "tidal"
     assert context.provider_candidate is not None
     assert context.provider_candidate.name == "tidal"
+    assert [candidate.name for candidate in context.provider_candidates] == [
+        "tidal",
+        "qobuz",
+        "deezer",
+        "apple",
+        "amazon",
+    ]
 
 
 def test_validate_step_rejects_an_invalid_existing_flac(tmp_path):

@@ -16,6 +16,7 @@ class DownloadContext:
     source: str
     provider: str | None = None
     provider_candidate: ProviderCandidate | None = None
+    provider_candidates: list[ProviderCandidate] = field(default_factory=list)
     metadata: TrackMetadata | None = None
     source_file: str | None = None
     output_file: str | None = None
@@ -41,6 +42,7 @@ class ProviderStep:
     async def execute(self, context: DownloadContext) -> DownloadContext:
         candidates = self._resolver.resolve_candidates(context.request)
         if candidates:
+            context.provider_candidates = candidates
             context.provider_candidate = candidates[0]
             context.provider = candidates[0].name
         else:

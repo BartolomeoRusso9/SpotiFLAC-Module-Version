@@ -142,7 +142,11 @@ class DownloadService:
             provider = context.provider or self._provider_resolver.resolve(request)[0]
             await self._event_bus.publish(
                 "provider.started",
-                {"source": source, "provider": provider},
+                {
+                    "source": source,
+                    "provider": provider,
+                    "candidates": [candidate.name for candidate in context.provider_candidates],
+                },
             )
             policy = RetryPolicy(request.config.download.retries + 1)
             last_error: Exception | None = None
