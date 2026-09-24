@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from typing import Any
+
 from .output_sink import STDERR, emit
 
 _BANNER_WIDTH = 60
 _MAX_API_FAILURES_PER_PROVIDER = 20
-_api_failure_state: dict[str, dict[str, object]] = {}
+_api_failure_state: dict[str, dict[str, Any]] = {}
 
 
 def _write(line: str) -> None:

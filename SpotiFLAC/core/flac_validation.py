@@ -137,8 +137,11 @@ def repair_flac_file(
 
         si = None
         if os.name == "nt":
-            si = subprocess.STARTUPINFO()
-            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startup_info = getattr(subprocess, "STARTUPINFO", None)
+            show_window = getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+            if startup_info is not None:
+                si = startup_info()
+                si.dwFlags |= show_window
 
         # Use ffmpeg to re-encode the FLAC file
         # This will skip corrupted frames and reconstruct the stream

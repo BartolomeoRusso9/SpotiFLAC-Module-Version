@@ -113,7 +113,7 @@ class JSRuntime:
         self._proc: subprocess.Popen | None = None
         self._seq = 0
         self._pending: dict[int, queue.Queue] = {}
-        self._progress_cbs: dict[int, Callable[[float], None]] = {}
+        self._progress_cbs: dict[int, Callable[..., None]] = {}
         self._lock = threading.Lock()
         self._reader: threading.Thread | None = None
         self._ready_event = threading.Event()
@@ -268,12 +268,14 @@ class JSRuntime:
         return ExtensionRuntimeError(" ".join(parts))
 
     def stop(self) -> None:
-        if self._proc and self._proc.poll() is None:
+        proc = self._proc
+        if proc and proc.poll() is None:
             try:
-                self._proc.stdin.close()
-                self._proc.wait(timeout=5)
+                if proc.stdin is not None:
+                    proc.stdin.close()
+                proc.wait(timeout=5)
             except Exception:
-                self._proc.kill()
+                proc.kill()
         self._proc = None
 
     def __enter__(self) -> Self:
@@ -300,6 +302,8 @@ class JSRuntime:
         if not self._proc or self._proc.poll() is not None:
             msg = "JSRuntime not started or already terminated."
             raise ExtensionRuntimeError(msg)
+        proc = self._proc
+        assert proc.stdin is not None
 
         with self._lock:
             self._seq += 1
@@ -331,8 +335,8 @@ class JSRuntime:
             + "\n"
         )
         try:
-            self._proc.stdin.write(msg.encode())
-            self._proc.stdin.flush()
+            proc.stdin.write(msg.encode())
+            proc.stdin.flush()
         except OSError as e:
             self._pending.pop(seq, None)
             msg_0 = f"Error writing to Node stdin: {e}"
@@ -357,10 +361,13 @@ class JSRuntime:
 
     def _read_loop(self) -> None:
         """Reads Node.js stdout line by line and routes responses."""
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            return
         buf = b""
-        while self._proc and self._proc.poll() is None:
+        while proc.poll() is None:
             try:
-                chunk = self._proc.stdout.read(1)
+                chunk = proc.stdout.read(1)
             except Exception:
                 break
             if not chunk:
@@ -392,6 +399,8 @@ class JSRuntime:
             return
         if msg.get("type") == "progress":
             call_id = msg.get("callId")
+            if not isinstance(call_id, int):
+                return
             cb = self._progress_cbs.get(call_id)
             if cb is not None:
                 try:
@@ -452,6 +461,12 @@ class JSRuntime:
         by construction, completely independent of how
         JSExtensionProvider is used (sync or async) in the rest of the program.
         """
+        proc = self._proc
+        if proc is None or proc.stdin is None:
+            return
+        stdin = proc.stdin
+        session_handler = self.session_handler
+
         request_id = msg.get("requestId")
         method = msg.get("method", "GET")
         path = msg.get("path", "")
@@ -470,21 +485,21 @@ class JSRuntime:
                     )
                     + "\n"
                 )
-                self._proc.stdin.write(line.encode())
-                self._proc.stdin.flush()
+                stdin.write(line.encode())
+                stdin.flush()
             except Exception as e:
                 logger.debug(
                     "[JSRuntime] unable to respond to session.signedFetch: %s",
                     e,
                 )
 
-        if self.session_handler is None:
+        if session_handler is None:
             _respond({"error": "session.signedFetch: no session_handler configured"})
             return
 
         async def _run() -> dict:
             try:
-                return await self.session_handler(method, path, body, headers)
+                return await session_handler(method, path, body, headers)
             except Exception as e:
                 return {"error": str(e)}
 
@@ -504,6 +519,10 @@ class JSRuntime:
         No probe configured means "not cancelled" — the same answer the
         extension assumed for as long as this function did not exist.
         """
+        proc = self._proc
+        if proc is None or proc.stdin is None:
+            return
+
         cancelled = False
         if self.cancelled_probe is not None:
             try:
@@ -521,8 +540,8 @@ class JSRuntime:
                 )
                 + "\n"
             )
-            self._proc.stdin.write(line.encode())
-            self._proc.stdin.flush()
+            proc.stdin.write(line.encode())
+            proc.stdin.flush()
         except Exception as e:
             logger.debug(
                 "[JSRuntime] unable to respond to utils.isDownloadCancelled: %s",
@@ -530,8 +549,11 @@ class JSRuntime:
             )
 
     def _drain_stderr(self) -> None:
+        proc = self._proc
+        if proc is None or proc.stderr is None:
+            return
         try:
-            for raw in self._proc.stderr:
+            for raw in proc.stderr:
                 line = raw.rstrip(b"\n").decode("utf-8", errors="replace").rstrip()
                 if line:
                     self._stderr_tail.append(line)

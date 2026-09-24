@@ -179,7 +179,8 @@ class ExtensionUrlClient:
             name = track.title if track else ""
             cover = track.cover_url if track else ""
         else:
-            node = response.get(kind) if isinstance(response.get(kind), dict) else {}
+            node_value = response.get(kind)
+            node: dict[str, Any] = node_value if isinstance(node_value, dict) else {}
             collection = {
                 **node,
                 "type": kind,
@@ -241,7 +242,7 @@ async def get_url_with_fallback(
 
     service = native_service_for(url)
     ext_name = fallback_extension_for(url, manager) if service else None
-    if not ext_name:
+    if not ext_name or service is None:
         if failure is not None:
             raise failure
         return result

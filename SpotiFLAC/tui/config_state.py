@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, cast
 
 from ..core.cli_preview import format_command, is_playlist_url
 from ..core.paths import default_download_dir
@@ -160,15 +160,9 @@ class ConfigState:
     # The wizard never asked about these; the launcher reads them all with a
     # default, and a loaded profile can carry them. Keeping them here is what
     # makes `to_cfg()` a complete answer rather than a partial one.
-    json_report: bool = False
     verify_hires: bool = False
     redownload_fake_hires: bool = False
-    write_m3u: str | None = None
     m3u_format: str = "m3u8"
-    library_type: str | None = None
-    library_url: str | None = None
-    library_token: str | None = None
-    library_user: str | None = None
 
     # ── Scheduling ──────────────────────────────────────────────────────
     loop: int | None = None
@@ -414,15 +408,9 @@ class ConfigState:
             "post_download_hooks": list(state.post_download_hooks),
             "qobuz_local_api_url": state.qobuz_local_api_url,
             "tidal_custom_api": state.tidal_custom_api,
-            "json_report": state.json_report,
             "verify_hires": state.verify_hires,
             "redownload_fake_hires": state.redownload_fake_hires,
-            "write_m3u": state.write_m3u,
             "m3u_format": state.m3u_format,
-            "library_type": state.library_type,
-            "library_url": state.library_url,
-            "library_token": state.library_token,
-            "library_user": state.library_user,
             "loop": state.loop,
             "watch": state.watch,
             "verbose": state.verbose,
@@ -489,7 +477,7 @@ class ConfigState:
             gaps["services"] = ["<PROVIDER>"]
         if self.post_download_action == "command" and not self.post_download_command:
             gaps["post_download_command"] = "<COMMAND>"
-        return replace(self, **gaps) if gaps else self
+        return replace(self, **cast("dict[str, Any]", gaps)) if gaps else self
 
     def cli_command(self) -> str:
         """The equivalent `spotiflac ...` invocation, for the live panel.

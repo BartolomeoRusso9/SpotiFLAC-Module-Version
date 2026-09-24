@@ -28,7 +28,7 @@ import re
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from mutagen.flac import FLAC
@@ -112,7 +112,7 @@ def fit_cover(cover_data: bytes) -> bytes | None:
         return None
 
     try:
-        image = Image.open(io.BytesIO(cover_data))
+        image: Any = Image.open(io.BytesIO(cover_data))
         image.load()
         if image.mode not in ("RGB", "L"):
             image = image.convert("RGB")
@@ -134,11 +134,12 @@ def fit_cover(cover_data: bytes) -> bytes | None:
 
     # Still too big at q60: the picture is enormous rather than badly
     # compressed, so halve the dimensions until it fits.
-    working = image
+    working: Any = image
+    resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
     for _ in range(4):
         working = working.resize(
             (max(1, working.width // 2), max(1, working.height // 2)),
-            Image.LANCZOS,
+            resampling,
         )
         buffer = io.BytesIO()
         working.save(buffer, format="JPEG", quality=85, optimize=True)
@@ -609,6 +610,7 @@ def _embed_wav(
     audio = WAVE(str(path))
     if audio.tags is None:
         audio.add_tags()
+    assert audio.tags is not None
     audio.tags.clear()
 
     _apply_id3_frames(audio.tags, tags, cover_data, lyrics, lyrics_prov, cover_mime)
@@ -636,6 +638,7 @@ def _embed_aiff(
     audio = AIFF(str(path))
     if audio.tags is None:
         audio.add_tags()
+    assert audio.tags is not None
     audio.tags.clear()
 
     _apply_id3_frames(audio.tags, tags, cover_data, lyrics, lyrics_prov, cover_mime)
@@ -663,6 +666,7 @@ def _embed_tta(
     audio = TrueAudio(str(path))
     if audio.tags is None:
         audio.add_tags()
+    assert audio.tags is not None
     audio.tags.clear()
 
     _apply_id3_frames(audio.tags, tags, cover_data, lyrics, lyrics_prov, cover_mime)
@@ -880,6 +884,7 @@ def _embed_asf(
     from mutagen.asf import ASF, ASFByteArrayAttribute
 
     audio = ASF(str(path))
+    assert audio.tags is not None
     audio.tags.clear()
 
     track_num = tags.get("TRACKNUMBER")
@@ -923,7 +928,7 @@ def _read_asf_tags(path: Path) -> EmbeddedTags:
     result = EmbeddedTags()
     reverse = {v: k for k, v in _ASF_MAP.items()}
 
-    for key, values in (audio.tags or {}).items():
+    for key, values in cast("dict[str, Any]", audio.tags or {}).items():
         if not values:
             continue
 
@@ -1304,7 +1309,7 @@ def _read_m4a_tags(path: Path, *, include_cover: bool = True) -> EmbeddedTags:
     # LABEL and ORGANIZATION share the same atom: ORGANIZATION wins on read
     reverse_map = {v: k for k, v in _M4A_MAP.items() if k != "LABEL"}
 
-    for key, value in (audio.tags or {}).items():
+    for key, value in cast("dict[str, Any]", audio.tags or {}).items():
         if not value:
             continue
 

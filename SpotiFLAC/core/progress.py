@@ -11,7 +11,7 @@ import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, IO
 
 from tqdm import tqdm
 from typing_extensions import Self
@@ -53,8 +53,9 @@ def progress_bars_enabled() -> bool:
     forced = os.getenv("SPOTIFLAC_PROGRESS_BARS")
     if forced is not None:
         return forced.strip().lower() in {"1", "true", "yes", "on"}
+    stderr = sys.__stderr__
     try:
-        return bool(sys.__stderr__) and sys.__stderr__.isatty()
+        return bool(stderr) and stderr.isatty() if stderr is not None else False
     except Exception:
         return False
 
@@ -64,7 +65,7 @@ def safe_print(*args: object, **kwargs: Any) -> None:
     emit(content, stream=STDOUT, file=kwargs.get("file"))
 
 
-def safe_tqdm_write(msg: str, file: io.TextIOBase | None = None) -> None:
+def safe_tqdm_write(msg: str, file: IO[str] | None = None) -> None:
     emit(msg, stream=STDOUT, file=file)
 
 
