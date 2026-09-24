@@ -5,7 +5,7 @@
 - Foundation and incremental refactor changes are committed on branch `4.0.0`.
 - Local test output `.spotiflac/` remains intentionally untracked.
 - `git diff --check`: passed
-- Focused regression suite: **95 passed**.
+- Focused regression suite: **96 passed**.
 
 ## Modified Files
 
@@ -70,6 +70,8 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   and failed.
 - `ProviderResolver.from_extensions()` can load profiles from installed
   extension manifests without coupling the core resolver to `ExtensionManager`.
+- `ExtensionManifest` now provides a validated, serializable capability contract;
+  legacy partial manifests remain supported through compatibility adapters.
 - `DownloadContext` now carries the full ordered provider candidate chain;
   provider lifecycle events expose that chain to adapters.
 - `DownloadService` can execute candidates in order through an injected provider
@@ -117,7 +119,23 @@ PYTHONPATH="$PWD" python3 -m pytest -q \
   tests/test_webapi_integration.py
 ```
 
-Result: **95 passed**.
+Result: **96 passed**.
+
+## Foundation Status
+
+The foundation and P0 contracts are complete for the incremental refactor:
+
+- structured configuration and download contracts;
+- application download entry points;
+- provider profiles, candidates, capabilities, and fallback;
+- extension manifest contract;
+- persistent jobs, progress, retry, cancellation, and lifecycle events;
+- REST and WebSocket adapters;
+- focused architecture regression coverage.
+
+The remaining work is P1/P2 integration: migrating the full GUI/TUI paths,
+expanding persistence entities, and completing the testing and distribution
+layers.
 
 ## Next Milestone
 
