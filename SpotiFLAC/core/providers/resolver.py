@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from SpotiFLAC.core.config import DownloadRequest
+from SpotiFLAC.core.providers.manifest import ExtensionManifest
 
 
 @dataclass(frozen=True)
@@ -18,27 +19,18 @@ class ProviderProfile:
 
     @classmethod
     def from_manifest(cls, manifest: dict, *, name: str | None = None) -> "ProviderProfile":
-        declared = manifest.get("capabilities", {})
-        if isinstance(declared, dict):
-            capabilities = frozenset(
-                key for key, enabled in declared.items() if enabled
-            )
-        else:
-            capabilities = frozenset(declared or ())
-        if not capabilities and "download_provider" in manifest.get("type", []):
-            capabilities = frozenset({"download"})
-
-        qualities = frozenset(
-            str(value).upper()
-            for value in manifest.get("qualities", ("LOSSLESS", "HI_RES_LOSSLESS"))
-        )
+        compatible = dict(manifest)
+        if name and not compatible.get("id") and not compatible.get("name"):
+            compatible["id"] = name
+        compatible.setdefault("version", "0.0.0")
+        parsed = ExtensionManifest.from_dict(compatible)
         return cls(
-            name=name or manifest.get("id") or manifest.get("name", "unknown"),
-            capabilities=capabilities,
-            qualities=qualities,
-            priority=int(manifest.get("priority", 0)),
-            healthy=bool(manifest.get("healthy", True)),
-            enabled=bool(manifest.get("enabled", True)),
+            name=name or parsed.id,
+            capabilities=parsed.capabilities,
+            qualities=parsed.qualities,
+            priority=parsed.priority,
+            healthy=parsed.healthy,
+            enabled=parsed.enabled,
         )
 
     def supports(self, quality: str) -> bool:

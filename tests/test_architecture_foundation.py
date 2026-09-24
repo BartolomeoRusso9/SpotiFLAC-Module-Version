@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -36,7 +37,7 @@ from SpotiFLAC.application.pipeline import (
     ValidateStep,
 )
 from SpotiFLAC.core.repositories import ExtensionRepository, JobRepository
-from SpotiFLAC.core.providers import ProviderCandidate, ProviderProfile
+from SpotiFLAC.core.providers import ExtensionManifest, ProviderCandidate, ProviderProfile
 from SpotiFLAC.core.retry import RetryPolicy
 from SpotiFLAC.client import AsyncSpotiFLAC
 from SpotiFLAC.webapi import ApiDeps, build_v1_router
@@ -610,6 +611,24 @@ def test_provider_resolver_can_load_installed_extension_manifests():
     request = DownloadRequest(sources=["spotify:track:abc"], config=SpotiFLACConfig())
 
     assert resolver.resolve(request) == ["tidal-web"]
+
+
+def test_extension_manifest_is_validated_and_serializable():
+    manifest = ExtensionManifest.from_dict(
+        {
+            "id": "tidal-web",
+            "version": "2.1.0",
+            "capabilities": {"download": True, "search": False},
+            "qualities": ["lossless"],
+        }
+    )
+
+    assert manifest.id == "tidal-web"
+    assert manifest.version == "2.1.0"
+    assert manifest.as_dict()["capabilities"] == {"download": True}
+
+    with pytest.raises(ValueError, match="version"):
+        ExtensionManifest.from_dict({"id": "broken"})
 
 
 def test_extension_service_tracks_lifecycle_and_trust():
