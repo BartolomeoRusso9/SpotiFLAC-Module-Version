@@ -42,6 +42,7 @@ from .core.http import AsyncHttpClient
 from .core.isrc_helper import IsrcHelper
 from .core.models import DownloadResult, TrackMetadata, build_filename, sanitize
 from .core.playlist_sync import (
+    AudioIndex,
     PlaylistSource,
     SyncPlan,
     build_plan,
@@ -76,6 +77,8 @@ from .core.transcode import (
     transcoded_file_exists,
 )
 from .core.url_utils import url_host_has_label, url_host_matches
+from .application.post_processing import PostProcessingService
+from .application.download_worker import ApplicationDownloadWorker
 
 if TYPE_CHECKING:
     from .core.base import BaseProvider
@@ -958,6 +961,28 @@ async def _write_canvas_sidecars_async(
         logger.warning("[canvas] could not save one for %s: %s", metadata.title, exc)
 
 
+async def _apply_post_processing_async(
+    result: DownloadResult,
+    metadata: TrackMetadata,
+    opts: DownloadOptions,
+) -> DownloadResult:
+    """Apply output transforms after provider execution.
+
+    The ordering lives behind the application post-processing boundary; the
+    legacy helpers remain implementation details until their extraction is
+    complete.
+    """
+    if opts.transcode_to and not result.skipped:
+        result = await _transcode_result_async(result, opts)
+        if not result.success:
+            return result
+    if result.success and not result.skipped:
+        await _write_lrc_sidecars_async(result, metadata, opts)
+    if result.success:
+        await _write_canvas_sidecars_async(result, metadata, opts)
+    return result
+
+
 def _restore_identity(metadata: TrackMetadata, requested: TrackMetadata) -> None:
     """Undo any change a provider made to what names the recording.
 
@@ -1270,13 +1295,6 @@ async def _download_one_pass_async(
                 )
 
             if result.success:
-                if opts.transcode_to:
-                    # A file already existing in another format is also converted:
-                    # on the next pass the skip logic finds it in the target format.
-                    result = await _transcode_result_async(result, opts)
-                    if not result.success:
-                        return result
-
                 if result.skipped:
                     print_track_skipped(metadata.title, "already in the output folder")
                     logger.info(
@@ -1291,7 +1309,6 @@ async def _download_one_pass_async(
                     # would make a re-run of an already-complete album look
                     # like the provider had got dramatically faster.
                     await _record_provider_outcome(provider.name, True, 0.0)
-                    await _write_canvas_sidecars_async(result, metadata, opts)
                     return result
                 if opts.output_path and result.file_path:
                     _, ext = os.path.splitext(result.file_path)
@@ -1304,9 +1321,6 @@ async def _download_one_pass_async(
                         target,
                         result.format or "flac",
                     )
-
-                await _write_lrc_sidecars_async(result, metadata, opts)
-                await _write_canvas_sidecars_async(result, metadata, opts)
 
                 print_track_done(
                     result.provider or provider.name,
@@ -1605,7 +1619,7 @@ async def _close_shared_browser_sessions() -> None:
         await asyncio.wait_for(mono.close_mono_browser_session(), timeout=20.0)
 
 
-class DownloadWorker:
+class LegacyDownloadWorker:
     def __init__(
         self,
         tracks: list[TrackMetadata],
@@ -1615,6 +1629,7 @@ class DownloadWorker:
         is_playlist: bool = False,
         positions: list[int] | None = None,
         existing_paths: dict[str, Path] | None = None,
+        post_processing: PostProcessingService | None = None,
     ) -> None:
         self._tracks = tracks
         self._opts = opts
@@ -1627,9 +1642,13 @@ class DownloadWorker:
         # file names do not change between runs.
         self._positions = positions or list(range(1, len(tracks) + 1))
         self._existing_paths = existing_paths or {}
+        self._post_processing = post_processing or PostProcessingService(
+            _apply_post_processing_async
+        )
         self._failed: list[tuple[str, str, str, str]] = []
         self._skipped: list[tuple[str, str]] = []
         self._completed: dict[str, str] = {}
+        self._results: dict[str, DownloadResult] = {}
         self._providers: list[BaseProvider] = self._build_providers()
 
     @property
@@ -1641,6 +1660,11 @@ class DownloadWorker:
         way.
         """
         return dict(self._completed)
+
+    @property
+    def results(self) -> dict[str, DownloadResult]:
+        """Return the typed result for every track processed by this worker."""
+        return dict(self._results)
 
     def _build_providers(self) -> list[BaseProvider]:
         result = []
@@ -1657,7 +1681,7 @@ class DownloadWorker:
                 with contextlib.suppress(Exception):
                     close()
 
-    async def run_async(self) -> list[tuple[str, str, str]]:
+    async def run_async(self) -> list[tuple[str, str, str, str]]:
         try:
             if self._opts.transcode_to:
                 # It's better to fail fast than to download a whole album and
@@ -1716,7 +1740,107 @@ class DownloadWorker:
         total: int,
         base_out: str,
         start: float,
-    ) -> list[tuple[str, str, str]]:
+    ) -> list[tuple[str, str, str, str]]:
+        return await self._run_downloads_application_async(
+            manager, total, base_out, start
+        )
+
+    async def _run_downloads_application_async(
+        self,
+        manager: DownloadManager,
+        total: int,
+        base_out: str,
+        start: float,
+    ) -> list[tuple[str, str, str, str]]:
+        """Run the batch through the application worker boundary."""
+        track_hooks = load_hooks(getattr(self._opts, "post_download_hooks", None))
+
+        async def run_hook(result: DownloadResult, track: TrackMetadata) -> None:
+            if track_hooks:
+                await run_hooks(track_hooks, result, track)
+
+        self._post_processing = PostProcessingService(
+            _apply_post_processing_async,
+            hooks=[run_hook],
+        )
+
+        async def execute(
+            track: TrackMetadata, output_dir: str, position: int
+        ) -> DownloadResult:
+            try:
+                return await download_one_async(
+                    track,
+                    output_dir,
+                    self._providers,
+                    self._opts,
+                    position,
+                    self._is_album,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "[worker] Unexpected exception downloading '%s'", track.title
+                )
+                return DownloadResult.fail("none", f"Unexpected error: {exc}")
+
+        async def output_directory(track: TrackMetadata) -> str:
+            return await self._track_output_dir_async(base_out, track)
+
+        async def on_start(track: TrackMetadata, index: int) -> None:
+            print_track_header(
+                index + 1,
+                total,
+                track.title,
+                track.artists,
+                track.album,
+            )
+            await manager.start_download(track.id)
+
+        async def on_result(track: TrackMetadata, result: DownloadResult) -> None:
+            if result.success and result.file_path:
+                self._completed[track.id] = result.file_path
+            if result.success and result.skipped:
+                await manager.skip_download(track.id)
+                self._skipped.append((track.id, track.title))
+            elif result.success:
+                await manager.complete_download(
+                    track.id,
+                    result.file_path or "",
+                    await _get_file_size_mb_async(result.file_path or ""),
+                )
+            else:
+                error = result.error or "unknown"
+                self._failed.append((track.id, track.title, track.artists, error))
+                await manager.fail_download(track.id, error)
+                ProgressCallback.clear_item(track.id)
+            ProgressManager.increment_master()
+
+        worker = ApplicationDownloadWorker(
+            self._tracks,
+            max_concurrent=self._opts.max_concurrent_downloads,
+            executor=execute,
+            output_directory=output_directory,
+            post_processing=self._post_processing,
+            existing_paths=self._existing_paths,
+            skipped_provider=self._providers[0].name,
+            positions=self._positions,
+            on_result=on_result,
+            on_start=on_start,
+        )
+        report = await worker.run(self._opts)
+        self._completed.update(report.completed)
+        self._results.update(report.results)
+        await self._remove_partial_files_async(base_out)
+        self._print_summary(time.perf_counter() - start)
+        await self._execute_post_action_async(base_out)
+        return self._failed
+
+    async def _run_downloads_legacy_async(
+        self,
+        manager: DownloadManager,
+        total: int,
+        base_out: str,
+        start: float,
+    ) -> list[tuple[str, str, str, str]]:
         """Fase 2 — concorrenza nativa asyncio.
 
         Before: a list of asyncio.Task consumed with asyncio.as_completed().
@@ -1738,10 +1862,19 @@ class DownloadWorker:
         # Resolved once, before the first track: a typo in a hook name should
         # fail the run immediately rather than after an hour of downloading.
         track_hooks = load_hooks(getattr(self._opts, "post_download_hooks", None))
+
+        async def run_hook(result: DownloadResult, track: TrackMetadata) -> None:
+            if track_hooks:
+                await run_hooks(track_hooks, result, track)
+
+        self._post_processing = PostProcessingService(
+            _apply_post_processing_async,
+            hooks=[run_hook],
+        )
         initial_m4a = await asyncio.to_thread(
             lambda: {p.resolve() for p in Path(base_out).rglob("*.m4a") if p.is_file()}
         )
-        results_queue: asyncio.Queue[tuple[TrackMetadata, object] | None] = (
+        results_queue: asyncio.Queue[tuple[TrackMetadata, DownloadResult]] = (
             asyncio.Queue()
         )
 
@@ -1766,7 +1899,6 @@ class DownloadWorker:
                     result = DownloadResult.skipped_result(
                         self._providers[0].name,
                         str(existing_path),
-                        fmt=existing_path.suffix.lstrip("."),
                     )
                     await _write_canvas_sidecars_async(result, track, self._opts)
                 else:
@@ -1787,27 +1919,25 @@ class DownloadWorker:
                         )
                         result = DownloadResult.fail("none", f"Unexpected error: {exc}")
 
+                result = await self._post_processing.process(result, track, self._opts)
+
             await results_queue.put((track, result))
 
         async def consume_results() -> None:
             for _ in range(total):
                 track, result = await results_queue.get()
+                self._results[track.id] = result.model_copy(
+                    update={"source": track.external_url or f"spotify:track:{track.id}"}
+                )
 
                 if result.success and result.file_path:
                     self._completed[track.id] = result.file_path
-
-                # After the file is in its final place (the rename already
-                # happened), and for failures too — a hook that reports
-                # what went wrong is as reasonable as one that reports
-                # success. Never raises; see core/hooks.run_hooks.
-                if track_hooks:
-                    await run_hooks(track_hooks, result, track)
 
                 if result.success and result.skipped:
                     await manager.skip_download(track.id)
                     self._skipped.append((track.id, track.title))
                 elif result.success:
-                    size_mb = await _get_file_size_mb_async(result.file_path)
+                    size_mb = await _get_file_size_mb_async(result.file_path or "")
                     await manager.complete_download(
                         track.id,
                         result.file_path or "",
@@ -2040,6 +2170,11 @@ class DownloadWorker:
             logger.warning("[post-action] unknown action: %s", action)
 
 
+# Public compatibility name. Batch orchestration lives in the application
+# worker; this wrapper remains only for legacy imports and option wiring.
+DownloadWorker = LegacyDownloadWorker
+
+
 # ---------------------------------------------------------------------------
 # SpotiflacDownloader
 # ---------------------------------------------------------------------------
@@ -2052,6 +2187,7 @@ class SpotiflacDownloader:
         # construction from performing network work for extension URLs, tests,
         # and playlist operations that inject their own metadata source.
         self._client: SpotifyMetadataClient | None = None
+        self._last_results: dict[str, DownloadResult] = {}
 
     def _metadata_client(self) -> SpotifyMetadataClient:
         if self._client is None:
@@ -2225,7 +2361,9 @@ class SpotiflacDownloader:
         print_sync_plan(len(plan.tracks), len(plan.present), len(plan.pending))
 
         located: dict[str, Path] = {
-            planned.key: planned.existing_path for planned in plan.present
+            planned.key: planned.existing_path
+            for planned in plan.present
+            if planned.existing_path is not None
         }
         located.update(await self._download_pending_async(plan, opts))
         await self._write_playlist_files_async(plan, located, output_dir, m3u_format)
@@ -2333,7 +2471,9 @@ class SpotiflacDownloader:
         print_sync_plan(len(plan.tracks), len(plan.present), len(plan.pending))
 
         located: dict[str, Path] = {
-            planned.key: planned.existing_path for planned in plan.present
+            planned.key: planned.existing_path
+            for planned in plan.present
+            if planned.existing_path is not None
         }
         downloaded = await self._download_pending_async(plan, opts)
         located.update(downloaded)
@@ -2413,7 +2553,7 @@ class SpotiflacDownloader:
         self,
         urls: list[str],
         *,
-        index: dict[str, list[Path]] | None = None,
+        index: AudioIndex | None = None,
     ) -> list[PlaylistSource]:
         """Fetches every playlist, keeping the run alive when one fails."""
         sources: list[PlaylistSource] = []
@@ -3033,6 +3173,7 @@ class SpotiflacDownloader:
         )
 
         failed_tuples = await worker.run_async()
+        self._last_results = worker.results
         failed_ids = {f[0] for f in failed_tuples}
         return [t for t in updated_tracks if t.id in failed_ids]
 
