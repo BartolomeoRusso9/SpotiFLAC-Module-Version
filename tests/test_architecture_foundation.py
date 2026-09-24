@@ -491,6 +491,22 @@ def test_provider_resolver_exposes_structured_candidates():
     assert candidates[0].priority == 4
 
 
+def test_provider_profile_can_be_built_from_extension_manifest():
+    profile = ProviderProfile.from_manifest(
+        {
+            "id": "tidal-web",
+            "capabilities": {"download": True, "search": True, "metadata": False},
+            "qualities": ["lossless", "hi_res_lossless"],
+            "priority": 7,
+        }
+    )
+
+    assert profile.name == "tidal-web"
+    assert profile.capabilities == frozenset({"download", "search"})
+    assert profile.qualities == frozenset({"LOSSLESS", "HI_RES_LOSSLESS"})
+    assert profile.priority == 7
+
+
 def test_extension_service_tracks_lifecycle_and_trust():
     service = ExtensionService()
     installed = service.install("my-provider", version="3.1.0")

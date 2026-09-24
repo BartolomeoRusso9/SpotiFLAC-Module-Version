@@ -16,6 +16,31 @@ class ProviderProfile:
     healthy: bool = True
     enabled: bool = True
 
+    @classmethod
+    def from_manifest(cls, manifest: dict, *, name: str | None = None) -> "ProviderProfile":
+        declared = manifest.get("capabilities", {})
+        if isinstance(declared, dict):
+            capabilities = frozenset(
+                key for key, enabled in declared.items() if enabled
+            )
+        else:
+            capabilities = frozenset(declared or ())
+        if not capabilities and "download_provider" in manifest.get("type", []):
+            capabilities = frozenset({"download"})
+
+        qualities = frozenset(
+            str(value).upper()
+            for value in manifest.get("qualities", ("LOSSLESS", "HI_RES_LOSSLESS"))
+        )
+        return cls(
+            name=name or manifest.get("id") or manifest.get("name", "unknown"),
+            capabilities=capabilities,
+            qualities=qualities,
+            priority=int(manifest.get("priority", 0)),
+            healthy=bool(manifest.get("healthy", True)),
+            enabled=bool(manifest.get("enabled", True)),
+        )
+
     def supports(self, quality: str) -> bool:
         return self.enabled and self.healthy and "download" in self.capabilities and (
             quality in self.qualities or "*" in self.qualities
