@@ -37,23 +37,45 @@ class JobRepository:
                     id TEXT PRIMARY KEY,
                     source TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    payload TEXT NOT NULL DEFAULT '{}'
+                    payload TEXT NOT NULL DEFAULT '{}',
+                    priority INTEGER NOT NULL DEFAULT 0,
+                    total_items INTEGER NOT NULL DEFAULT 0,
+                    completed_items INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(application_jobs)").fetchall()
+            }
+            for name, definition in (
+                ("priority", "INTEGER NOT NULL DEFAULT 0"),
+                ("total_items", "INTEGER NOT NULL DEFAULT 0"),
+                ("completed_items", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE application_jobs ADD COLUMN {name} {definition}")
 
     def create(self, payload: dict) -> dict:
         job_id = payload.get("id") or f"job-{abs(hash(json.dumps(payload, sort_keys=True, default=str)))}"
         stored_payload = payload.get("payload", payload)
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO application_jobs (id, source, status, payload) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET source = excluded.source, status = excluded.status, payload = excluded.payload",
+                "INSERT INTO application_jobs "
+                "(id, source, status, payload, priority, total_items, completed_items) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET source = excluded.source, "
+                "status = excluded.status, payload = excluded.payload, "
+                "priority = excluded.priority, total_items = excluded.total_items, "
+                "completed_items = excluded.completed_items",
                 (
                     job_id,
                     payload.get("source", ""),
                     payload.get("status", "QUEUED"),
                     json.dumps(stored_payload, default=str),
+                    payload.get("priority", 0),
+                    payload.get("total_items", 0),
+                    payload.get("completed_items", 0),
                 ),
             )
         return {"id": job_id, **payload}
@@ -61,24 +83,40 @@ class JobRepository:
     def get(self, job_id: str) -> dict:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, source, status, payload FROM application_jobs WHERE id = ?",
+                "SELECT id, source, status, payload, priority, total_items, completed_items "
+                "FROM application_jobs WHERE id = ?",
                 (job_id,),
             ).fetchone()
         if row is None:
             raise KeyError(job_id)
         payload = json.loads(row["payload"])
-        payload.update({"id": row["id"], "source": row["source"], "status": row["status"]})
+        payload.update({
+            "id": row["id"],
+            "source": row["source"],
+            "status": row["status"],
+            "priority": row["priority"],
+            "total_items": row["total_items"],
+            "completed_items": row["completed_items"],
+        })
         return payload
 
     def list(self) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, source, status, payload FROM application_jobs ORDER BY rowid"
+                "SELECT id, source, status, payload, priority, total_items, completed_items "
+                "FROM application_jobs ORDER BY rowid"
             ).fetchall()
         jobs = []
         for row in rows:
             payload = json.loads(row["payload"])
-            payload.update({"id": row["id"], "source": row["source"], "status": row["status"]})
+            payload.update({
+                "id": row["id"],
+                "source": row["source"],
+                "status": row["status"],
+                "priority": row["priority"],
+                "total_items": row["total_items"],
+                "completed_items": row["completed_items"],
+            })
             jobs.append(payload)
         return jobs
 
@@ -87,5 +125,13 @@ class JobRepository:
             conn.execute(
                 "UPDATE application_jobs SET status = ? WHERE id = ?",
                 (status, job_id),
+            )
+        return self.get(job_id)
+
+    def update_progress(self, job_id: str, completed_items: int) -> dict:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE application_jobs SET completed_items = ? WHERE id = ?",
+                (completed_items, job_id),
             )
         return self.get(job_id)

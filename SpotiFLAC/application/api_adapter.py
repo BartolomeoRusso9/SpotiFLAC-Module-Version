@@ -73,5 +73,7 @@ class ApiAdapter:
             "payload": {
                 "url": job.get("source", ""),
                 "items": job.get("total_items", len(request.get("sources", []))),
+                "completed_items": job.get("completed_items", 0),
+                "priority": job.get("priority", 0),
             },
         }

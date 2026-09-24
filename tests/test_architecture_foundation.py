@@ -756,6 +756,8 @@ def test_job_service_reconstructs_persisted_request_after_restart(tmp_path):
 
     assert result == ["spotify:track:restart"]
     assert restarted.get(job["id"])["status"] == "DONE"
+    assert restarted.get(job["id"])["total_items"] == 1
+    assert restarted.get(job["id"])["completed_items"] == 1
 
 
 def test_job_service_publishes_lifecycle_events(tmp_path):

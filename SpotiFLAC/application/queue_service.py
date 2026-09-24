@@ -27,6 +27,8 @@ class QueueService:
             "status": "QUEUED",
             "request": asdict(request),
             "total_items": len(request.sources),
+            "completed_items": 0,
+            "priority": 0,
             "source": request.sources[0] if request.sources else "",
         }
         self._jobs[job_id] = job
@@ -36,6 +38,9 @@ class QueueService:
                 "source": job["source"],
                 "status": job["status"],
                 "payload": {"request": asdict(request), "total_items": len(request.sources)},
+                "total_items": len(request.sources),
+                "completed_items": 0,
+                "priority": 0,
             })
         return self._jobs[job_id].copy()
 

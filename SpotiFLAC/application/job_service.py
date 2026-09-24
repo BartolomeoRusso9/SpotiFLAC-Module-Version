@@ -44,6 +44,10 @@ class JobService:
             self._repo.update_status(job_id, "FAILED")
             await self._event_bus.publish("job.failed", {"job_id": job_id})
             return None
+        self._repo.update_progress(
+            job_id,
+            getattr(report, "total", len(request.sources)),
+        )
         self._repo.update_status(job_id, "DONE")
         await self._event_bus.publish("job.completed", {"job_id": job_id})
         return report
