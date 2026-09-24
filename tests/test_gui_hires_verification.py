@@ -13,10 +13,11 @@ from pathlib import Path
 
 import pytest
 
-import SpotiFLAC as spotiflac_pkg
 from SpotiFLAC.app import SpotiFLAC_API
+from SpotiFLAC import __file__ as spotiflac_file
+from tests.application_download_capture import capture_service
 
-FRONTEND = Path(spotiflac_pkg.__file__).parent / "frontend"
+FRONTEND = Path(spotiflac_file).parent / "frontend"
 
 
 class _FakeTrack:
@@ -30,10 +31,7 @@ def download_kwargs(tmp_path, monkeypatch):
     """Runs one GUI download and returns the kwargs the client received."""
     seen: list[dict] = []
 
-    def _fake_spotiflac(**kwargs):
-        seen.append(kwargs)
-
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", _fake_spotiflac)
+    capture_service(monkeypatch, seen)
 
     def _run(config: dict | None = None) -> dict:
         api = SpotiFLAC_API()

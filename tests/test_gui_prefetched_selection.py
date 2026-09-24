@@ -14,11 +14,11 @@ import asyncio
 
 import pytest
 
-import SpotiFLAC as spotiflac_pkg
 from SpotiFLAC.app import SpotiFLAC_API
 from SpotiFLAC.core import spotfetch
 from SpotiFLAC.core.models import TrackMetadata
 from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
+from tests.application_download_capture import capture_service
 
 PLAYLIST = "https://open.spotify.com/playlist/abc"
 
@@ -41,7 +41,7 @@ def _track(n: int, **extra) -> TrackMetadata:
 @pytest.fixture()
 def download(tmp_path, monkeypatch):
     seen: list[dict] = []
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", lambda **kw: seen.append(kw))
+    capture_service(monkeypatch, seen)
 
     def _run(indices, url=PLAYLIST, tracks=None):
         api = SpotiFLAC_API()

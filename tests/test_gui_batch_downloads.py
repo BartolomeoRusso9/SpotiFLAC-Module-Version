@@ -17,10 +17,10 @@ import time
 
 import pytest
 
-import SpotiFLAC as spotiflac_pkg
 from SpotiFLAC.app import SpotiFLAC_API
 from SpotiFLAC.core.models import TrackMetadata
 from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
+from tests.application_download_capture import capture_service
 
 
 class _FakeTrack:
@@ -35,10 +35,7 @@ def captured_calls(tmp_path, monkeypatch):
     """Runs _download_task and returns every call the wrapper received."""
     seen: list[dict] = []
 
-    def _fake_spotiflac(**kwargs):
-        seen.append(kwargs)
-
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", _fake_spotiflac)
+    capture_service(monkeypatch, seen)
 
     def _run(indices, config=None, tracks=3, url=""):
         before = len(seen)
@@ -131,14 +128,18 @@ def test_two_batches_never_run_at_the_same_time(tmp_path, monkeypatch) -> None:
     running = 0
     overlapped = False
 
-    def _fake_spotiflac(**kwargs):
-        nonlocal running, overlapped
-        running += 1
-        overlapped = overlapped or running > 1
-        time.sleep(0.15)
-        running -= 1
+    class BlockingService:
+        def __init__(self, **_kwargs):
+            pass
 
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", _fake_spotiflac)
+        async def download(self, _request):
+            nonlocal running, overlapped
+            running += 1
+            overlapped = overlapped or running > 1
+            time.sleep(0.15)
+            running -= 1
+
+    monkeypatch.setattr("SpotiFLAC.application.DownloadService", BlockingService)
 
     api = SpotiFLAC_API()
     api.download_dir = str(tmp_path)
@@ -163,7 +164,7 @@ def test_the_finished_event_names_the_batch_it_closes(tmp_path, monkeypatch) -> 
     with a batch waiting its turn meant reporting tracks done before they
     had started."""
     pushed: list[tuple] = []
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", lambda **kwargs: None)
+    capture_service(monkeypatch, [])
 
     api = SpotiFLAC_API()
     api.download_dir = str(tmp_path)

@@ -11,10 +11,10 @@ gone after a restart), and failures stay listed until they download.
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import pytest
 
-import SpotiFLAC as spotiflac_pkg
 from SpotiFLAC.app import SpotiFLAC_API
 from SpotiFLAC.core import db, failed_tracks
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
@@ -47,7 +47,21 @@ class _RecordingQueue:
 @pytest.fixture()
 def calls(monkeypatch):
     seen: list[dict] = []
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", lambda **kw: seen.append(kw))
+
+    class FakeDownloadService:
+        def __init__(self, *, provider_executor=None, **_kwargs):
+            self.provider_executor = provider_executor
+
+        async def download(self, request):
+            seen.append(
+                {
+                    "url": list(request.sources),
+                    "prefetched_tracks": dict(request.prefetched or {}),
+                }
+            )
+            return SimpleNamespace()
+
+    monkeypatch.setattr("SpotiFLAC.application.DownloadService", FakeDownloadService)
     return seen
 
 
@@ -160,7 +174,7 @@ def test_a_whole_playlist_resumes_as_the_playlist(tmp_path, calls):
     fresh = SpotiFLAC_API()
     fresh.download_dir = str(tmp_path)
     fresh.run_download_job(payload)
-    assert calls[-1]["url"] == PLAYLIST
+    assert calls[-1]["url"] == [PLAYLIST]
 
 
 def test_this_sessions_job_still_closes_its_own_batch(tmp_path, calls):
@@ -185,11 +199,17 @@ def test_the_desktop_window_still_downloads_straight_away(tmp_path, calls):
 
 
 def test_a_batchs_failures_are_listed_with_their_source(tmp_path, monkeypatch):
-    def _fake_download(**kw):
-        for hook in kw["post_download_hooks"]:
-            hook(DownloadResult.fail("tidal", "no stream"), _track(1))
+    class FailingDownloadService:
+        def __init__(self, *, provider_executor=None, **_kwargs):
+            self.provider_executor = provider_executor
 
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", _fake_download)
+        async def download(self, _request):
+            options = self.provider_executor.downloader._opts
+            for hook in options.post_download_hooks:
+                hook(DownloadResult.fail("tidal", "no stream"), _track(1))
+            return SimpleNamespace()
+
+    monkeypatch.setattr("SpotiFLAC.application.DownloadService", FailingDownloadService)
     _api(tmp_path)._download_task([1], {"services": ["tidal"]})
 
     [item] = failed_tracks.list_for()

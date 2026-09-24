@@ -127,6 +127,54 @@ def test_single_user_mode_keeps_one_shared_instance() -> None:
     assert client.post("/api/get_version", json=[]).status_code == 200
 
 
+def test_queued_bare_url_uses_application_download_service(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def download(self, request):
+            seen["sources"] = list(request.sources)
+            seen["quality"] = request.config.download.quality
+            seen["output_dir"] = str(request.config.output.directory)
+            return object()
+
+    monkeypatch.setattr("SpotiFLAC.application.DownloadService", FakeService)
+    app = webapp.create_app(multiuser=True)
+
+    result = app.state.job_queue._handler(
+        {
+            "owner": "alice",
+            "url": "https://open.spotify.com/track/x",
+            "config": {"quality": "HI_RES_LOSSLESS", "output_dir": "/music"},
+        }
+    )
+
+    assert result == {"status": "dispatched"}
+    assert seen["sources"] == ["https://open.spotify.com/track/x"]
+    assert seen["quality"] == "HI_RES_LOSSLESS"
+    assert seen["output_dir"] == "/music"
+
+
+def test_web_app_builds_one_shared_application_download_service(monkeypatch) -> None:
+    instances = []
+
+    class FakeService:
+        def __init__(self, *args, **kwargs):
+            instances.append(self)
+
+        async def download(self, request):
+            return object()
+
+    monkeypatch.setattr("SpotiFLAC.application.DownloadService", FakeService)
+
+    app = webapp.create_app(multiuser=True)
+
+    assert len(instances) == 1
+    assert app.state.application_download_service is instances[0]
+
+
 # ── event routing ──────────────────────────────────────────────────────────
 
 
@@ -166,6 +214,33 @@ def test_events_are_addressed_to_one_account() -> None:
     asyncio.run(manager._send_all({"fn": "log", "args": ["secret"]}, "alice"))
 
     assert [name for name, _ in sent] == ["alice-ws"]
+
+
+def test_application_item_events_are_broadcast_to_websockets() -> None:
+    import asyncio
+
+    manager = webapp.ConnectionManager()
+    sent = []
+
+    class _Ws:
+        async def send_json(self, message):
+            sent.append(message)
+
+    async def scenario():
+        manager.bind_loop(asyncio.get_running_loop())
+        manager._connections = {_Ws(): None}
+        manager.broadcast("applicationEvent", ["job.item.updated", {"job_id": "j1"}])
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+    assert sent == [
+        {
+            "fn": "applicationEvent",
+            "args": ["job.item.updated", {"job_id": "j1"}],
+        }
+    ]
 
 
 def test_a_dead_socket_is_dropped_and_does_not_block_the_others() -> None:
