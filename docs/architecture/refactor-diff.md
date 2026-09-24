@@ -64,6 +64,8 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   and failed.
 - `ProviderResolver.from_extensions()` can load profiles from installed
   extension manifests without coupling the core resolver to `ExtensionManager`.
+- `DownloadContext` now carries the full ordered provider candidate chain;
+  provider lifecycle events expose that chain to adapters.
 - `SpotiFLAC/core/retry.py`
   - centralized retry policy.
 - `tests/test_architecture_foundation.py`
