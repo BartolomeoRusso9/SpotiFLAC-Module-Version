@@ -56,6 +56,8 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   - SQLite repositories for application jobs and extensions.
 - Application jobs reconstruct persisted `DownloadRequest` objects after a
   restart, and job IDs are independent of in-memory queue length.
+- Application jobs persist `priority`, `total_items`, and `completed_items`,
+  with additive schema migration for existing job databases.
 - `JobService` publishes lifecycle events through `EventBus`: created, started,
   completed, failed, and cancelled.
 - The REST adapter shares the application bus with the WebSocket bridge, which
