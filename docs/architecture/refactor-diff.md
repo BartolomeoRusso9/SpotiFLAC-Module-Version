@@ -2,12 +2,10 @@
 
 ## Summary
 
-- Tracked files modified: 4
-- Tracked insertions: 58
-- Tracked deletions: 1
-- New application and test files are currently untracked.
+- Foundation and incremental refactor changes are committed on branch `4.0.0`.
+- Local test output `.spotiflac/` remains intentionally untracked.
 - `git diff --check`: passed
-- Focused regression suite: **88 passed**.
+- Focused regression suite: **102 passed**.
 
 ## Modified Files
 
@@ -51,11 +49,12 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   - structured configuration;
   - request, report, failure, and skip contracts.
 - `SpotiFLAC/core/providers/`
-  - provider profiles;
-  - capability, quality, health, and priority filtering.
+  - manifest-derived provider profiles;
+  - capability, quality, health, and priority filtering;
+  - structured `ProviderCandidate` results.
 - `SpotiFLAC/core/repositories/`
   - SQLite repositories for application jobs and extensions.
-- Application jobs now reconstruct persisted `DownloadRequest` objects after a
+- Application jobs reconstruct persisted `DownloadRequest` objects after a
   restart, and job IDs are independent of in-memory queue length.
 - `JobService` publishes lifecycle events through `EventBus`: created, started,
   completed, failed, and cancelled.
@@ -63,9 +62,6 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   forwards job lifecycle events as `applicationEvent` messages.
 - `SpotiFLAC/core/retry.py`
   - centralized retry policy.
-- `SpotiFLAC/core/providers/`
-  - manifest-derived provider profiles, capability-aware resolution, and
-    `ProviderCandidate`.
 - `tests/test_architecture_foundation.py`
   - regression coverage for the new architecture.
 
@@ -74,6 +70,10 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
 `AsyncSpotiFLAC.download_request()` now delegates directly to
 `DownloadService`, while the existing `download_track()`, `download_batch()`,
 and `download_tracks()` methods remain unchanged for compatibility.
+
+The CLI simple-URL path without `--loop` also delegates to `DownloadService`
+using the already configured legacy downloader instance. CSV, playlist, and
+loop modes remain on their existing paths for compatibility.
 
 ## Pipeline
 
@@ -103,7 +103,7 @@ PYTHONPATH="$PWD" python3 -m pytest -q \
   tests/test_webapi_integration.py
 ```
 
-Result: **88 passed**.
+Result: **102 passed**.
 
 ## Next Milestone
 
