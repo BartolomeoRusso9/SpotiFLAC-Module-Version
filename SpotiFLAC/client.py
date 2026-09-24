@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
+from .application import DownloadService
+from .core.config import DownloadReport, DownloadRequest, SpotiFLACConfig
 from .core.http import NetworkManager
 from .core.spotify_metadata import SpotifyMetadataClient, parse_spotify_url
 from .downloader import DownloadOptions, SpotiflacDownloader
@@ -192,6 +194,7 @@ class AsyncSpotiFLAC:
         )
 
         self._downloader = SpotiflacDownloader(self._opts)
+        self._download_service = DownloadService()
         self._metadata_client: SpotifyMetadataClient | None = None
 
     # ------------------------------------------------------------------
@@ -260,6 +263,20 @@ class AsyncSpotiFLAC:
         """Downloads several *collections* (or single links), one run each."""
         self._ensure_entered()
         await self._downloader.run_async(urls, loop_minutes=loop_minutes)
+
+    async def download_request(self, request: DownloadRequest) -> DownloadReport:
+        """Execute an application-layer request through the shared service.
+
+        This additive entry point lets new interfaces converge on
+        ``DownloadService`` while the established convenience methods retain
+        their legacy return values and collection-specific behavior.
+        """
+        self._ensure_entered()
+        return await self._download_service.download(request)
+
+    def application_config(self) -> SpotiFLACConfig:
+        """Return the structured config represented by this client's options."""
+        return SpotiFLACConfig.from_legacy_options(self._opts)
 
     async def download_tracks(
         self,

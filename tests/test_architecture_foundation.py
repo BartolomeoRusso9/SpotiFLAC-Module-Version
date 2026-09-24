@@ -38,6 +38,7 @@ from SpotiFLAC.application.pipeline import (
 from SpotiFLAC.core.repositories import ExtensionRepository, JobRepository
 from SpotiFLAC.core.providers import ProviderProfile
 from SpotiFLAC.core.retry import RetryPolicy
+from SpotiFLAC.client import AsyncSpotiFLAC
 from SpotiFLAC.webapi import ApiDeps, build_v1_router
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
 from SpotiFLAC.downloader import DownloadOptions
@@ -244,6 +245,26 @@ def test_download_service_applies_retry_policy(monkeypatch):
 
     assert attempts == 3
     assert report.success_count == 1
+
+
+def test_async_client_exposes_application_download_entrypoint(monkeypatch):
+    class FakeDownloadService:
+        async def download(self, request):
+            return DownloadReport(
+                succeeded=[DownloadResult.ok("tidal", "/tmp/track.flac")],
+                failed=[],
+                started_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(timezone.utc),
+            )
+
+    client = AsyncSpotiFLAC(output_dir="./downloads", sync_extensions=False)
+    client._download_service = FakeDownloadService()
+    request = DownloadRequest(sources=["spotify:track:abc123"], config=SpotiFLACConfig())
+
+    report = asyncio.run(client.download_request(request))
+
+    assert report.success_count == 1
+    assert client.application_config().output.directory == Path("downloads")
 
 
 def test_download_service_publishes_terminal_events(monkeypatch):
