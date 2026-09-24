@@ -166,8 +166,9 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
 - `DownloadWorker` exposes typed per-track results, allowing the application
   adapter to consume the actual output path after a legacy run.
 - `PostProcessingService` now owns the post-download phase boundary, including
-  transcode, lyric/canvas sidecars, and post-download hooks; legacy helpers are
-  injected behind that boundary while their lower-level extraction continues.
+  transcode, lyric/canvas sidecars, and post-download hooks. Concrete output
+  transforms live in `SpotiFLAC.application.post_processing`; the downloader
+  retains only compatibility delegates for older callers.
 - `ApplicationDownloadWorker` now owns batch concurrency, result collection,
   queue callbacks, skips, and failures; `LegacyDownloadWorker` remains only
   as the compatibility wrapper for provider and filesystem helpers.

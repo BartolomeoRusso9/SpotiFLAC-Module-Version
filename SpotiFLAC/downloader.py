@@ -23,7 +23,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .core.console import (
     print_csv_resolved,
@@ -77,7 +77,7 @@ from .core.transcode import (
     transcoded_file_exists,
 )
 from .core.url_utils import url_host_has_label, url_host_matches
-from .application.post_processing import PostProcessingService
+from .application.post_processing import PostProcessingService, apply_post_processing
 from .application.download_worker import ApplicationDownloadWorker
 
 if TYPE_CHECKING:
@@ -564,8 +564,11 @@ def _schedule_hires_check(opts: DownloadOptions, result: DownloadResult) -> None
     if _fake_hires_redownload_applies(opts, result):
         return
 
+    file_path = result.file_path
+    if not file_path:
+        return
     try:
-        task = asyncio.create_task(_run_hires_check_background(result.file_path))
+        task = asyncio.create_task(_run_hires_check_background(file_path))
     except RuntimeError:
         # No running event loop (shouldn't happen in practice here) — skip
         # rather than raise, consistent with this check's non-fatal contract.
@@ -760,43 +763,10 @@ async def _transcode_result_async(
     result: DownloadResult,
     opts: DownloadOptions,
 ) -> DownloadResult:
-    """Converts a finished download to `opts.transcode_to`.
+    """Compatibility wrapper for the application post-processing service."""
+    from .application.post_processing import _transcode_result
 
-    A result whose file is already in the target format is returned untouched,
-    which also covers providers that natively deliver MP3.
-
-    "Already in the target format" is asked of transcode.py rather than
-    answered here by comparing extensions. `.m4a` is a container, not a
-    codec: the FLAC-in-MP4 some providers serve matched `.m4a` on the
-    extension and was handed back unconverted, so `--transcode alac`
-    produced a file that was not ALAC.
-    """
-    if not result.file_path:
-        return result
-
-    source = Path(result.file_path)
-    if await asyncio.to_thread(already_in_target_format, source, opts.transcode_to):
-        return result
-
-    try:
-        dest = await transcode_file_async(
-            source,
-            fmt=opts.transcode_to,
-            bitrate=opts.transcode_bitrate,
-            keep_original=opts.transcode_keep_original,
-        )
-    except Exception as exc:
-        logger.warning("[transcode] %s: %s", source.name, exc)
-        return DownloadResult.fail(
-            result.provider,
-            f"Downloaded, but transcode to {opts.transcode_to.upper()} failed: {exc}",
-        )
-
-    # Even a "skipped" result (file already existing in another format) is
-    # rewritten: it should be reported as a successful download, not as a skip.
-    return DownloadResult.ok(
-        result.provider, str(dest), result_format_for(opts.transcode_to)
-    )
+    return await _transcode_result(result, opts)
 
 
 #: The fields that say *which recording* this is, as opposed to the ones a
@@ -809,54 +779,9 @@ async def _write_lrc_sidecars_async(
     metadata: TrackMetadata,
     opts: DownloadOptions,
 ) -> None:
-    """Write the track's lyrics out as .lrc file(s), if asked for.
+    from .application.post_processing import _write_lrc_sidecars
 
-    Reads them back out of the finished file rather than fetching them
-    again: the tagger has already resolved the provider order and written
-    the result, so the tag is both the cheapest source and the one that is
-    guaranteed to match what the track actually carries. Runs after
-    transcoding and after any move, so the sidecar lands beside the file the
-    user ends up with.
-
-    Never raises. A missing lyric or an unwritable folder must not turn a
-    finished download into a failure.
-    """
-    if not (opts.save_lrc or opts.lrc_library_dir) or not result.file_path:
-        return
-
-    def _write() -> list[str]:
-        from .core.tagger import read_embedded_tags
-
-        audio = Path(result.file_path)
-        lyrics = (read_embedded_tags(audio, include_cover=False).lyrics or "").strip()
-        if not lyrics:
-            return []
-
-        written: list[str] = []
-        if opts.save_lrc:
-            beside = audio.with_suffix(".lrc")
-            beside.write_text(lyrics + "\n", encoding="utf-8")
-            written.append(str(beside))
-
-        if opts.lrc_library_dir:
-            # "Artist - Title", the order the overlay apps match on — the
-            # reverse of this project's default filename format, which is
-            # why this cannot simply reuse the audio file's stem.
-            artist = (
-                metadata.first_artist if opts.first_artist_only else metadata.artists
-            )
-            library = Path(opts.lrc_library_dir).expanduser()
-            library.mkdir(parents=True, exist_ok=True)
-            collected = library / f"{sanitize(artist)} - {sanitize(metadata.title)}.lrc"
-            collected.write_text(lyrics + "\n", encoding="utf-8")
-            written.append(str(collected))
-        return written
-
-    try:
-        for written in await asyncio.to_thread(_write):
-            logger.info("[lrc] wrote %s", written)
-    except Exception as exc:
-        logger.warning("[lrc] could not write sidecar for %s: %s", metadata.title, exc)
+    await _write_lrc_sidecars(result, metadata, opts)
 
 
 async def _write_canvas_sidecars_async(
@@ -864,6 +789,11 @@ async def _write_canvas_sidecars_async(
     metadata: TrackMetadata,
     opts: DownloadOptions,
 ) -> None:
+    from .application.post_processing import _write_canvas_sidecars
+
+    await _write_canvas_sidecars(result, metadata, opts)
+    return
+
     """Save the track's Spotify Canvas beside it, if asked for.
 
     Runs after transcoding and after any move, so the clip lands next to
@@ -966,6 +896,8 @@ async def _apply_post_processing_async(
     metadata: TrackMetadata,
     opts: DownloadOptions,
 ) -> DownloadResult:
+    return await apply_post_processing(result, metadata, opts)
+
     """Apply output transforms after provider execution.
 
     The ordering lives behind the application post-processing boundary; the
@@ -1104,20 +1036,23 @@ async def _download_one_pass_async(
 
     transcode_target = transcode_target_path(metadata, output_dir, opts, position)
     if transcode_target and transcoded_file_exists(transcode_target):
+        target_format = opts.transcode_to
+        if not target_format:
+            return DownloadResult.fail("none", "Missing transcode target format")
         print_track_skipped(
             metadata.title,
-            f"already downloaded as {opts.transcode_to.upper()}",
+            f"already downloaded as {target_format.upper()}",
         )
         logger.info(
             "[transcode] ⏭ already downloaded as %s: %s — %s",
-            opts.transcode_to.upper(),
+            target_format.upper(),
             metadata.artists,
             metadata.title,
         )
         skipped = DownloadResult.skipped_result(
             providers[0].name if providers else "none",
             str(transcode_target),
-            fmt=result_format_for(opts.transcode_to),
+            fmt=cast(Any, result_format_for(target_format)),
         )
         await _write_canvas_sidecars_async(skipped, metadata, opts)
         return skipped
@@ -1759,10 +1694,7 @@ class LegacyDownloadWorker:
             if track_hooks:
                 await run_hooks(track_hooks, result, track)
 
-        self._post_processing = PostProcessingService(
-            _apply_post_processing_async,
-            hooks=[run_hook],
-        )
+        self._post_processing = PostProcessingService(apply_post_processing, hooks=[run_hook])
 
         async def execute(
             track: TrackMetadata, output_dir: str, position: int
@@ -1867,10 +1799,7 @@ class LegacyDownloadWorker:
             if track_hooks:
                 await run_hooks(track_hooks, result, track)
 
-        self._post_processing = PostProcessingService(
-            _apply_post_processing_async,
-            hooks=[run_hook],
-        )
+        self._post_processing = PostProcessingService(apply_post_processing, hooks=[run_hook])
         initial_m4a = await asyncio.to_thread(
             lambda: {p.resolve() for p in Path(base_out).rglob("*.m4a") if p.is_file()}
         )
