@@ -303,6 +303,23 @@ def test_download_service_publishes_terminal_events(monkeypatch):
     assert [kind for kind, _payload in events] == ["done", "failed"]
 
 
+def test_download_service_publishes_provider_events(monkeypatch):
+    events = []
+
+    async def fake_run(self, input_url, loop_minutes=None):
+        return None
+
+    monkeypatch.setattr("SpotiFLAC.downloader.SpotiflacDownloader.run_async", fake_run)
+    bus = EventBus()
+    for event_name in ("provider.started", "provider.succeeded"):
+        bus.subscribe(event_name, lambda payload, name=event_name: events.append(name))
+    request = DownloadRequest(sources=["spotify:track:provider"], config=SpotiFLACConfig())
+
+    asyncio.run(DownloadService(event_bus=bus).download(request))
+
+    assert events == ["provider.started", "provider.succeeded"]
+
+
 def test_queue_service_tracks_job_state():
     service = QueueService()
     request = DownloadRequest(

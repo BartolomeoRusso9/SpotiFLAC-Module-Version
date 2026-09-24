@@ -139,6 +139,10 @@ class DownloadService:
                 continue
 
             provider = context.provider or self._provider_resolver.resolve(request)[0]
+            await self._event_bus.publish(
+                "provider.started",
+                {"source": source, "provider": provider},
+            )
             policy = RetryPolicy(request.config.download.retries + 1)
             last_error: Exception | None = None
             for _attempt in range(policy.attempts):
@@ -151,6 +155,14 @@ class DownloadService:
                     if not policy.is_retryable(exc):
                         break
             if last_error is not None:
+                await self._event_bus.publish(
+                    "provider.failed",
+                    {
+                        "source": source,
+                        "provider": provider,
+                        "attempts": policy.attempts,
+                    },
+                )
                 await self._event_bus.publish(
                     "download.failed",
                     {
@@ -190,6 +202,10 @@ class DownloadService:
                     )
                 )
             else:
+                await self._event_bus.publish(
+                    "provider.succeeded",
+                    {"source": source, "provider": provider},
+                )
                 await self._event_bus.publish(
                     "download.completed",
                     {"source": source, "provider": provider},
