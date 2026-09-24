@@ -633,6 +633,26 @@ def test_job_service_can_cancel_and_retry_jobs(tmp_path):
     assert asyncio.run(service.retry(job["id"]))["status"] == "QUEUED"
 
 
+def test_job_service_reconstructs_persisted_request_after_restart(tmp_path):
+    class FakeDownloadService:
+        async def download(self, request):
+            return request.sources
+
+    repo = JobRepository(tmp_path / "restart.db")
+    request = DownloadRequest(
+        sources=["spotify:track:restart"],
+        config=SpotiFLACConfig(),
+    )
+    first = JobService(repo=repo, download_service=FakeDownloadService())
+    job = asyncio.run(first.enqueue(request))
+
+    restarted = JobService(repo=repo, download_service=FakeDownloadService())
+    result = asyncio.run(restarted.execute(job["id"]))
+
+    assert result == ["spotify:track:restart"]
+    assert restarted.get(job["id"])["status"] == "DONE"
+
+
 def test_v1_router_uses_application_adapter_for_download_submission():
     app = FastAPI()
     app.include_router(

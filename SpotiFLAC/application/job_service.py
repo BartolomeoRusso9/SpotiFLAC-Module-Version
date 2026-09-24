@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
+from pathlib import Path
 
 from SpotiFLAC.application.download_service import DownloadService
 from SpotiFLAC.application.queue_service import QueueService
-from SpotiFLAC.core.config import DownloadRequest
+from SpotiFLAC.core.config import DownloadRequest, SpotiFLACConfig
 from SpotiFLAC.core.repositories import JobRepository
 
 
@@ -27,7 +28,8 @@ class JobService:
         return job
 
     async def execute(self, job_id: str) -> Any:
-        request = self._requests[job_id]
+        request = self._requests.get(job_id) or self._request_from_job(job_id)
+        self._requests[job_id] = request
         if self.get(job_id)["status"] == "CANCELLED":
             return None
         self._repo.update_status(job_id, "RUNNING")
@@ -38,6 +40,33 @@ class JobService:
             return None
         self._repo.update_status(job_id, "DONE")
         return report
+
+    def _request_from_job(self, job_id: str) -> DownloadRequest:
+        payload = self._repo.get(job_id).get("request", {})
+        config_data = payload.get("config", {})
+        config = SpotiFLACConfig()
+        for section_name in (
+            "download",
+            "metadata",
+            "lyrics",
+            "extensions",
+            "queue",
+            "security",
+        ):
+            section = config_data.get(section_name, {})
+            target = getattr(config, section_name)
+            for key, value in section.items():
+                if hasattr(target, key):
+                    setattr(target, key, value)
+        output = config_data.get("output", {})
+        for key, value in output.items():
+            if hasattr(config.output, key):
+                setattr(config.output, key, Path(value) if key == "directory" else value)
+        return DownloadRequest(
+            sources=list(payload.get("sources", [])),
+            config=config,
+            prefetched=None,
+        )
 
     async def cancel(self, job_id: str) -> dict[str, Any]:
         return await self._queue.cancel(job_id)

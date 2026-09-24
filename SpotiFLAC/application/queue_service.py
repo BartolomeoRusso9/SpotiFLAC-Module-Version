@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import MutableMapping
 from dataclasses import asdict
 from typing import Any
+from uuid import uuid4
 
 from SpotiFLAC.core.config import DownloadRequest
 from SpotiFLAC.core.repositories import JobRepository
@@ -20,7 +21,7 @@ class QueueService:
         self._jobs: MutableMapping[str, dict[str, Any]] = {}
 
     async def enqueue(self, request: DownloadRequest) -> dict[str, Any]:
-        job_id = f"job-{len(self._jobs) + 1}"
+        job_id = f"job-{uuid4().hex}"
         job = {
             "id": job_id,
             "status": "QUEUED",
