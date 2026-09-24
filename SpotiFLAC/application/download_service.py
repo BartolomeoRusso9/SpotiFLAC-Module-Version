@@ -37,6 +37,7 @@ class DownloadService:
         self,
         event_bus: EventBus | None = None,
         *,
+        downloader: SpotiflacDownloader | None = None,
         metadata_service: MetadataService | None = None,
         tagger: Callable[[str, object], Awaitable[None]] | None = None,
         lyrics_writer: Callable[[str, object], Awaitable[None]] | None = None,
@@ -45,6 +46,7 @@ class DownloadService:
         indexer: Callable[[str, object], Awaitable[None]] | None = None,
     ) -> None:
         self._event_bus = event_bus or EventBus()
+        self._downloader = downloader
         self._metadata_service = metadata_service or MetadataService()
         self._provider_resolver = ProviderResolver()
         self._pipeline = DownloadPipeline(
@@ -85,7 +87,7 @@ class DownloadService:
         started_at = datetime.now(timezone.utc)
         succeeded: list[DownloadResult] = []
         failed: list[DownloadFailure] = []
-        downloader = SpotiflacDownloader(self.legacy_options_for(request))
+        downloader = self._downloader or SpotiflacDownloader(self.legacy_options_for(request))
         resolved_metadata = dict(request.prefetched or {})
         if request.prefetched is None:
             for metadata in await self._metadata_service.resolve(request):

@@ -267,6 +267,22 @@ def test_async_client_exposes_application_download_entrypoint(monkeypatch):
     assert client.application_config().output.directory == Path("downloads")
 
 
+def test_download_service_can_reuse_configured_legacy_downloader(monkeypatch):
+    calls = []
+
+    class FakeDownloader:
+        async def run_async(self, source):
+            calls.append(source)
+
+    request = DownloadRequest(sources=["spotify:track:configured"], config=SpotiFLACConfig())
+    report = asyncio.run(
+        DownloadService(downloader=FakeDownloader()).download(request)
+    )
+
+    assert calls == ["spotify:track:configured"]
+    assert report.success_count == 1
+
+
 def test_download_service_publishes_terminal_events(monkeypatch):
     events = []
 

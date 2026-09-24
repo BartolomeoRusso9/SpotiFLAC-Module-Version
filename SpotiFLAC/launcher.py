@@ -41,6 +41,8 @@ from .core.output_sink import sink_active
 from .core.report import RunReport
 from .core.transcode import LOSSLESS_FORMATS, SUPPORTED_FORMATS
 from .downloader import DownloadOptions, SpotiflacDownloader
+from .application import DownloadService
+from .core.config import DownloadRequest, SpotiFLACConfig
 from .core.web_users import ROLES as WEB_USER_ROLES
 from .extensions.trust import TRUST_TIERS
 
@@ -1781,7 +1783,16 @@ async def _run_download_async(
                 )
             await downloader.run_playlists_async(playlist_urls, m3u_format=m3u_format)
         else:
-            await downloader.run_async(url, loop_minutes=loop)
+            if loop:
+                await downloader.run_async(url, loop_minutes=loop)
+            else:
+                service = DownloadService(downloader=downloader)
+                await service.download(
+                    DownloadRequest(
+                        sources=[url] if isinstance(url, str) else list(url),
+                        config=SpotiFLACConfig.from_legacy_options(opts),
+                    )
+                )
     except KeyboardInterrupt:
         pass
     except Exception as e:
