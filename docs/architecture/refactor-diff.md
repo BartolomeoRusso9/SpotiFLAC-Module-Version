@@ -5,7 +5,7 @@
 - Foundation and incremental refactor changes are committed on branch `4.0.0`.
 - Local test output `.spotiflac/` remains intentionally untracked.
 - `git diff --check`: passed
-- Focused regression suite: **96 passed**.
+- Focused regression suite: **98 passed**.
 
 ## Modified Files
 
@@ -58,6 +58,7 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   restart, and job IDs are independent of in-memory queue length.
 - Application jobs persist `priority`, `total_items`, and `completed_items`,
   with additive schema migration for existing job databases.
+- Application job attempts are persisted with status, timestamps, and errors.
 - Cancelling an active application job now cancels its asyncio task, persists
   `CANCELLED`, and publishes the corresponding lifecycle event.
 - Retrying a failed or cancelled job now emits `job.retrying` and records the
@@ -76,6 +77,7 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   provider lifecycle events expose that chain to adapters.
 - `DownloadService` can execute candidates in order through an injected provider
   executor, falling back to the next candidate after retryable failures.
+- A network-free fake provider fixture covers deterministic fallback behavior.
 - `SpotiFLAC/core/retry.py`
   - centralized retry policy.
 - `tests/test_architecture_foundation.py`
@@ -119,7 +121,7 @@ PYTHONPATH="$PWD" python3 -m pytest -q \
   tests/test_webapi_integration.py
 ```
 
-Result: **96 passed**.
+Result: **98 passed**.
 
 ## Foundation Status
 
@@ -136,6 +138,16 @@ The foundation and P0 contracts are complete for the incremental refactor:
 The remaining work is P1/P2 integration: migrating the full GUI/TUI paths,
 expanding persistence entities, and completing the testing and distribution
 layers.
+
+## Progress Estimate
+
+The incremental refactor is now approximately **50% complete overall**:
+
+- Foundation/P0: complete.
+- Core P1 application and job architecture: substantially complete.
+- Remaining: full interface migration, richer persistence entities, extension
+  SDK/conformance, complete test pyramid, static quality gates, packaging, and
+  release infrastructure.
 
 ## Next Milestone
 
