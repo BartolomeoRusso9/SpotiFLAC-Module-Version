@@ -782,6 +782,34 @@ def test_job_service_publishes_lifecycle_events(tmp_path):
     assert events == ["job.created", "job.started", "job.completed"]
 
 
+def test_job_service_cancels_active_download_task(tmp_path):
+    started = asyncio.Event()
+
+    class SlowDownloadService:
+        async def download(self, request):
+            started.set()
+            await asyncio.Future()
+
+    service = JobService(
+        repo=JobRepository(tmp_path / "cancel-active.db"),
+        download_service=SlowDownloadService(),
+    )
+    request = DownloadRequest(sources=["spotify:track:cancel"], config=SpotiFLACConfig())
+
+    async def scenario():
+        job = await service.enqueue(request)
+        task = asyncio.create_task(service.execute(job["id"]))
+        await started.wait()
+        await service.cancel(job["id"])
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return service.get(job["id"])
+
+    assert asyncio.run(scenario())["status"] == "CANCELLED"
+
+
 def test_api_adapter_shares_event_bus_with_job_service(tmp_path):
     events = []
     bus = EventBus()

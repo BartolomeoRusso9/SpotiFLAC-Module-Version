@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from pathlib import Path
 
@@ -24,6 +25,7 @@ class JobService:
         self._download_service = download_service or DownloadService()
         self._event_bus = event_bus or EventBus()
         self._requests: dict[str, DownloadRequest] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
 
     async def enqueue(self, request: DownloadRequest) -> dict[str, Any]:
         job = await self._queue.enqueue(request)
@@ -36,14 +38,23 @@ class JobService:
         self._requests[job_id] = request
         if self.get(job_id)["status"] == "CANCELLED":
             return None
+        task = asyncio.current_task()
+        if task is not None:
+            self._tasks[job_id] = task
         self._repo.update_status(job_id, "RUNNING")
         await self._event_bus.publish("job.started", {"job_id": job_id})
         try:
             report = await self._download_service.download(request)
+        except asyncio.CancelledError:
+            self._repo.update_status(job_id, "CANCELLED")
+            await self._event_bus.publish("job.cancelled", {"job_id": job_id})
+            raise
         except Exception:
             self._repo.update_status(job_id, "FAILED")
             await self._event_bus.publish("job.failed", {"job_id": job_id})
             return None
+        finally:
+            self._tasks.pop(job_id, None)
         self._repo.update_progress(
             job_id,
             getattr(report, "total", len(request.sources)),
@@ -80,6 +91,10 @@ class JobService:
         )
 
     async def cancel(self, job_id: str) -> dict[str, Any]:
+        task = self._tasks.get(job_id)
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            return self._repo.get(job_id)
         job = await self._queue.cancel(job_id)
         await self._event_bus.publish("job.cancelled", {"job_id": job_id})
         return job
