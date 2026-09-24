@@ -306,6 +306,34 @@ def test_download_service_accepts_extension_aware_provider_resolver(monkeypatch)
     assert report.succeeded[0].provider == "extension-provider"
 
 
+def test_download_service_falls_back_to_next_provider_candidate():
+    attempts = []
+
+    async def execute(provider, source):
+        attempts.append(provider)
+        if provider == "first":
+            raise RuntimeError("provider unavailable")
+
+    resolver = ProviderResolver(
+        [
+            ProviderProfile("first", priority=2),
+            ProviderProfile("second", priority=1),
+        ]
+    )
+    request = DownloadRequest(sources=["spotify:track:fallback"], config=SpotiFLACConfig())
+
+    report = asyncio.run(
+        DownloadService(
+            provider_resolver=resolver,
+            provider_executor=execute,
+        ).download(request)
+    )
+
+    assert attempts == ["first", "second"]
+    assert report.success_count == 1
+    assert report.succeeded[0].provider == "second"
+
+
 def test_download_service_publishes_terminal_events(monkeypatch):
     events = []
 

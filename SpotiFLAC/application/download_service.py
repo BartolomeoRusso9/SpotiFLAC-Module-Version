@@ -38,6 +38,7 @@ class DownloadService:
         event_bus: EventBus | None = None,
         *,
         downloader: SpotiflacDownloader | None = None,
+        provider_executor: Callable[[str, str], Awaitable[None]] | None = None,
         provider_resolver: ProviderResolver | None = None,
         metadata_service: MetadataService | None = None,
         tagger: Callable[[str, object], Awaitable[None]] | None = None,
@@ -48,6 +49,7 @@ class DownloadService:
     ) -> None:
         self._event_bus = event_bus or EventBus()
         self._downloader = downloader
+        self._provider_executor = provider_executor
         self._metadata_service = metadata_service or MetadataService()
         self._provider_resolver = provider_resolver or ProviderResolver()
         self._pipeline = DownloadPipeline(
@@ -139,26 +141,39 @@ class DownloadService:
                 )
                 continue
 
-            provider = context.provider or self._provider_resolver.resolve(request)[0]
-            await self._event_bus.publish(
-                "provider.started",
-                {
-                    "source": source,
-                    "provider": provider,
-                    "candidates": [candidate.name for candidate in context.provider_candidates],
-                },
-            )
             policy = RetryPolicy(request.config.download.retries + 1)
+            candidates = context.provider_candidates or []
+            if not self._provider_executor:
+                candidates = candidates[:1]
+            provider = context.provider or self._provider_resolver.resolve(request)[0]
             last_error: Exception | None = None
-            for _attempt in range(policy.attempts):
-                try:
-                    await downloader.run_async(source)
-                    last_error = None
-                    break
-                except Exception as exc:
-                    last_error = exc
-                    if not policy.is_retryable(exc):
+            for candidate in candidates:
+                provider = candidate.name
+                await self._event_bus.publish(
+                    "provider.started",
+                    {
+                        "source": source,
+                        "provider": provider,
+                        "candidates": [item.name for item in context.provider_candidates],
+                    },
+                )
+                last_error = None
+                for _attempt in range(policy.attempts):
+                    try:
+                        if self._provider_executor:
+                            await self._provider_executor(provider, source)
+                        else:
+                            await downloader.run_async(source)
+                        last_error = None
                         break
+                    except Exception as exc:
+                        last_error = exc
+                        if not policy.is_retryable(exc):
+                            break
+                if last_error is None:
+                    break
+                if not policy.is_retryable(last_error):
+                    break
             if last_error is not None:
                 await self._event_bus.publish(
                     "provider.failed",
