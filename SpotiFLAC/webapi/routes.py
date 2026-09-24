@@ -77,6 +77,7 @@ class ApiDeps:
     multiuser: bool = False
     token_required: bool = False
     job_queue: Any = None
+    adapter: Any = None
     #: Only set in multi-user mode; None means "nobody in particular".
     username_for: Callable[[Request], str | None] = lambda _request: None
 
@@ -265,6 +266,28 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
         owner = _owner(deps, request)
         api = deps.api_for(request)
 
+        if deps.adapter is not None and not deps.multiuser and deps.job_queue is None:
+            response = await deps.adapter.submit_download(
+                {
+                    "url": payload.url,
+                    "sources": [payload.url],
+                    "quality": payload.quality,
+                    "services": payload.services,
+                    "output_dir": payload.output_dir,
+                }
+            )
+            return JobOut(
+                id=str(response.get("id", "adapter-job")),
+                owner=owner,
+                status=str(response.get("status", "QUEUED")).lower(),
+                created_at=time.time(),
+                payload={
+                    "url": payload.url,
+                    "provider_order": response.get("provider_order", []),
+                    "items": response.get("items", 1),
+                },
+            )
+
         config: dict[str, Any] = {"quality": payload.quality}
         if payload.services:
             config["services"] = payload.services
@@ -312,6 +335,9 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
         summary="Jobs belonging to the caller",
     )
     async def list_downloads(request: Request) -> JobListResponse:
+        if deps.adapter is not None and not deps.multiuser and deps.job_queue is None:
+            jobs = await deps.adapter.list_downloads()
+            return JobListResponse(jobs=[JobOut(**job) for job in jobs])
         if deps.job_queue is None:
             return JobListResponse(jobs=[])
         owner = _owner(deps, request)
@@ -329,6 +355,11 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
         summary="One job",
     )
     async def get_download(request: Request, job_id: str) -> JobOut:
+        if deps.adapter is not None and not deps.multiuser and deps.job_queue is None:
+            job = await deps.adapter.get_download(job_id)
+            if job is None:
+                raise _fail(404, "No such job.")
+            return JobOut(**job)
         if deps.job_queue is None:
             raise _fail(404, "This instance has no download queue.")
         job = deps.job_queue.get(job_id)

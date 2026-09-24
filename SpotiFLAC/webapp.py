@@ -1120,6 +1120,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     #
     # Mounted after the middleware that gates /api/*, so it inherits the same
     # token and session auth rather than reimplementing either.
+    from .application import ApiAdapter
     from .webapi import ApiDeps, build_v1_router
 
     app.include_router(
@@ -1128,7 +1129,8 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                 api_for=api_for,
                 multiuser=multiuser,
                 token_required=bool(token),
-                job_queue=job_queue,
+                job_queue=job_queue or download_queue,
+                adapter=ApiAdapter(),
                 username_for=lambda request: getattr(request.state, "username", None),
             )
         )
