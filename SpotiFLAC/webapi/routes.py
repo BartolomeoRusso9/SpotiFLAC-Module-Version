@@ -18,7 +18,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 
 _ERRORS: dict[int | str, dict[str, Any]] = {
     400: {"model": ErrorResponse},
+    409: {"model": ErrorResponse},
     404: {"model": ErrorResponse},
     500: {"model": ErrorResponse},
 }
@@ -78,6 +79,7 @@ class ApiDeps:
     token_required: bool = False
     job_queue: Any = None
     adapter: Any = None
+    download_service: Any = None
     #: Only set in multi-user mode; None means "nobody in particular".
     username_for: Callable[[Request], str | None] = lambda _request: None
 
@@ -279,12 +281,24 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
             return JobOut(
                 id=str(response.get("id", "adapter-job")),
                 owner=owner,
-                status=str(response.get("status", "QUEUED")).lower(),
+                status=cast(
+                    Literal[
+                        "queued",
+                        "running",
+                        "paused",
+                        "retrying",
+                        "done",
+                        "failed",
+                        "cancelled",
+                    ],
+                    str(response.get("status", "QUEUED")).lower(),
+                ),
                 created_at=time.time(),
                 payload={
                     "url": payload.url,
                     "provider_order": response.get("provider_order", []),
                     "items": response.get("items", 1),
+                    "items_detail": response.get("items_detail", []),
                 },
             )
 
@@ -317,9 +331,32 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
                 raise _fail(429, str(exc)) from exc
             return JobOut.from_job(job)
 
-        # Single-user mode has no queue: dispatch onto the same background
-        # thread the GUI uses, and answer with a synthetic job so the response
-        # shape does not change depending on how the server was started.
+        # Single-user mode has no queue: dispatch through the application
+        # download service so the request reaches the same orchestration layer
+        # the CLI/client/GUI use. This keeps the REST boundary aligned with the
+        # refactored app contract rather than doing a legacy side-path call.
+        if deps.download_service is not None:
+            from ..core.config import DownloadRequest, SpotiFLACConfig
+
+            download_config = SpotiFLACConfig()
+            download_config.download.quality = payload.quality
+            if payload.services:
+                download_config.metadata.providers = list(payload.services)
+            if payload.output_dir and not deps.multiuser:
+                download_config.output.directory = payload.output_dir
+            download_request = DownloadRequest(
+                sources=[payload.url],
+                config=download_config,
+            )
+            await deps.download_service.download(download_request)
+            return JobOut(
+                id="direct",
+                owner=owner,
+                status="running",
+                created_at=time.time(),
+                payload={"url": payload.url},
+            )
+
         await run_in_threadpool(api.fetch_metadata, payload.url)
         return JobOut(
             id="direct",
@@ -370,6 +407,58 @@ def build_v1_router(deps: ApiDeps) -> APIRouter:
             # not something an account should be able to probe for.
             raise _fail(404, "No such job.")
         return JobOut.from_job(job)
+
+    async def _mutate_application_job(
+        request: Request,
+        job_id: str,
+        operation: str,
+    ) -> JobOut:
+        if deps.adapter is None or deps.multiuser or deps.job_queue is not None:
+            raise _fail(404, "This instance does not expose application job controls.")
+        method = getattr(deps.adapter, f"{operation}_download")
+        try:
+            job = await method(job_id)
+        except ValueError as exc:
+            raise _fail(409, str(exc)) from exc
+        if job is None:
+            raise _fail(404, "No such job.")
+        return JobOut(**job)
+
+    @router.post(
+        "/downloads/{job_id}/pause",
+        response_model=JobOut,
+        responses=_ERRORS,
+        summary="Pause a queued application job",
+    )
+    async def pause_download(request: Request, job_id: str) -> JobOut:
+        return await _mutate_application_job(request, job_id, "pause")
+
+    @router.post(
+        "/downloads/{job_id}/resume",
+        response_model=JobOut,
+        responses=_ERRORS,
+        summary="Resume a paused application job",
+    )
+    async def resume_download(request: Request, job_id: str) -> JobOut:
+        return await _mutate_application_job(request, job_id, "resume")
+
+    @router.post(
+        "/downloads/{job_id}/cancel",
+        response_model=JobOut,
+        responses=_ERRORS,
+        summary="Cancel an application job",
+    )
+    async def cancel_download(request: Request, job_id: str) -> JobOut:
+        return await _mutate_application_job(request, job_id, "cancel")
+
+    @router.post(
+        "/downloads/{job_id}/retry",
+        response_model=JobOut,
+        responses=_ERRORS,
+        summary="Retry an application job",
+    )
+    async def retry_download(request: Request, job_id: str) -> JobOut:
+        return await _mutate_application_job(request, job_id, "retry")
 
     @router.get(
         "/history",

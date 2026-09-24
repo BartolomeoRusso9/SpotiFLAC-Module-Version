@@ -21,14 +21,12 @@ class ExtensionRepository:
         path = Path(self.db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS extensions (
                     id TEXT PRIMARY KEY,
                     payload TEXT NOT NULL DEFAULT '{}'
                 )
-                """
-            )
+                """)
 
     def upsert(self, payload: dict) -> dict:
         extension_id = payload["id"]

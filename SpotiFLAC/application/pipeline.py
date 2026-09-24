@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Awaitable, Callable
@@ -8,6 +9,9 @@ from typing import Protocol
 from SpotiFLAC.core.providers import ProviderCandidate, ProviderResolver
 from SpotiFLAC.core.config import DownloadRequest
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+
+from SpotiFLAC.application.event_bus import EventBus
+from SpotiFLAC.application.pause import wait_until_resumed
 
 
 @dataclass
@@ -30,7 +34,11 @@ class PipelineStep(Protocol):
 
 class ResolveStep:
     async def execute(self, context: DownloadContext) -> DownloadContext:
-        if not context.source.startswith("spotify:"):
+        is_spotify_urn = context.source.startswith("spotify:")
+        is_spotify_url = context.source.startswith(
+            ("https://open.spotify.com/", "http://open.spotify.com/")
+        )
+        if not (is_spotify_urn or is_spotify_url):
             context.errors.append("source_not_supported")
         return context
 
@@ -130,7 +138,11 @@ class TranscodeStep:
         self._transcoder = transcoder
 
     async def execute(self, context: DownloadContext) -> DownloadContext:
-        if not context.result or not context.result.success or not context.result.file_path:
+        if (
+            not context.result
+            or not context.result.success
+            or not context.result.file_path
+        ):
             return context
         try:
             context.output_file = await self._transcoder(
@@ -149,22 +161,78 @@ class LibraryIndexStep:
         self._indexer = indexer
 
     async def execute(self, context: DownloadContext) -> DownloadContext:
-        if not context.result or not context.result.success or not context.result.file_path:
+        if (
+            not context.result
+            or not context.result.success
+            or not context.result.file_path
+        ):
             return context
         try:
-            await self._indexer(context.output_file or context.result.file_path, context)
+            await self._indexer(
+                context.output_file or context.result.file_path, context
+            )
         except Exception as exc:
             context.errors.append(f"library_index_failed: {exc}")
         return context
 
 
 class DownloadPipeline:
-    def __init__(self, steps: list[PipelineStep]) -> None:
+    def __init__(
+        self,
+        steps: list[PipelineStep],
+        event_bus: EventBus | None = None,
+    ) -> None:
         self._steps = steps
+        self._event_bus = event_bus
 
-    async def prepare(self, context: DownloadContext) -> DownloadContext:
-        for step in self._steps:
+    async def prepare(
+        self,
+        context: DownloadContext,
+        resume_event: asyncio.Event | None = None,
+    ) -> DownloadContext:
+        return await self.execute(context, self._steps, resume_event=resume_event)
+
+    async def execute(
+        self,
+        context: DownloadContext,
+        steps: list[PipelineStep],
+        resume_event: asyncio.Event | None = None,
+    ) -> DownloadContext:
+        base_payload = {
+            "source": context.source,
+            "provider": context.provider,
+        }
+        if self._event_bus:
+            await self._event_bus.publish("pipeline.started", base_payload)
+        for step in steps:
+            await wait_until_resumed(resume_event)
+            step_name = type(step).__name__.removesuffix("Step").lower()
+            payload = {
+                "source": context.source,
+                "step": step_name,
+                "provider": context.provider,
+            }
+            if self._event_bus:
+                await self._event_bus.publish(
+                    "pipeline.phase_changed",
+                    {**payload, "phase": step_name},
+                )
+                await self._event_bus.publish(f"pipeline.{step_name}.started", payload)
             context = await step.execute(context)
+            if self._event_bus:
+                await self._event_bus.publish(
+                    (
+                        f"pipeline.{step_name}.failed"
+                        if context.errors
+                        else f"pipeline.{step_name}.completed"
+                    ),
+                    {**payload, "errors": list(context.errors)},
+                )
             if context.errors:
                 break
+        if self._event_bus:
+            await self._event_bus.publish(
+                "pipeline.failed" if context.errors else "pipeline.completed",
+                {**base_payload, "errors": list(context.errors)},
+            )
         return context

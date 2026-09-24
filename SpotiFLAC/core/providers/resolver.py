@@ -9,7 +9,9 @@ from SpotiFLAC.core.providers.manifest import ExtensionManifest
 @dataclass(frozen=True)
 class ProviderProfile:
     name: str
-    capabilities: frozenset[str] = field(default_factory=lambda: frozenset({"download"}))
+    capabilities: frozenset[str] = field(
+        default_factory=lambda: frozenset({"download"})
+    )
     qualities: frozenset[str] = field(
         default_factory=lambda: frozenset({"LOSSLESS", "HI_RES_LOSSLESS"})
     )
@@ -18,7 +20,9 @@ class ProviderProfile:
     enabled: bool = True
 
     @classmethod
-    def from_manifest(cls, manifest: dict, *, name: str | None = None) -> "ProviderProfile":
+    def from_manifest(
+        cls, manifest: dict, *, name: str | None = None
+    ) -> "ProviderProfile":
         compatible = dict(manifest)
         if name and not compatible.get("id") and not compatible.get("name"):
             compatible["id"] = name
@@ -34,8 +38,11 @@ class ProviderProfile:
         )
 
     def supports(self, quality: str) -> bool:
-        return self.enabled and self.healthy and "download" in self.capabilities and (
-            quality in self.qualities or "*" in self.qualities
+        return (
+            self.enabled
+            and self.healthy
+            and "download" in self.capabilities
+            and (quality in self.qualities or "*" in self.qualities)
         )
 
 
@@ -74,8 +81,12 @@ class ProviderResolver:
 
     def resolve_candidates(self, request: DownloadRequest) -> list[ProviderCandidate]:
         quality = request.config.download.quality.upper()
+        configured_services = {
+            service.removeprefix("ext:").removesuffix("-web").removesuffix("-py")
+            for service in request.config.download.services
+        }
         if not self._profiles:
-            return [
+            candidates = [
                 ProviderCandidate(
                     name=name,
                     priority=0,
@@ -83,13 +94,26 @@ class ProviderResolver:
                     qualities=frozenset({"LOSSLESS", "HI_RES_LOSSLESS"}),
                 )
                 for name in self._provider_priority
+                if not configured_services
+                or name.removeprefix("ext:").removesuffix("-web").removesuffix("-py")
+                in configured_services
             ]
+            return candidates
 
         configured_order = {
             name: index for index, name in enumerate(self._provider_priority)
         }
         candidates = [
-            profile for profile in self._profiles.values() if profile.supports(quality)
+            profile
+            for profile in self._profiles.values()
+            if profile.supports(quality)
+            and (
+                not configured_services
+                or profile.name.removeprefix("ext:")
+                .removesuffix("-web")
+                .removesuffix("-py")
+                in configured_services
+            )
         ]
         candidates.sort(
             key=lambda profile: (

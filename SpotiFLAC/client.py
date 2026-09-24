@@ -194,7 +194,10 @@ class AsyncSpotiFLAC:
         )
 
         self._downloader = SpotiflacDownloader(self._opts)
-        self._download_service = DownloadService()
+        self._download_service = DownloadService.from_legacy_options(
+            self._opts,
+            downloader=self._downloader,
+        )
         self._metadata_client: SpotifyMetadataClient | None = None
 
     # ------------------------------------------------------------------
@@ -262,7 +265,12 @@ class AsyncSpotiFLAC:
     ) -> None:
         """Downloads several *collections* (or single links), one run each."""
         self._ensure_entered()
-        await self._downloader.run_async(urls, loop_minutes=loop_minutes)
+        _ = await self._download_service.download(
+            DownloadRequest(
+                sources=list(urls),
+                config=self.application_config(),
+            )
+        )
 
     async def download_request(self, request: DownloadRequest) -> DownloadReport:
         """Execute an application-layer request through the shared service.
@@ -299,8 +307,12 @@ class AsyncSpotiFLAC:
         not looked up again.
         """
         self._ensure_entered()
-        await self._downloader.run_tracks_async(
-            urls, loop_minutes=loop_minutes, prefetched=prefetched
+        _ = await self._download_service.download(
+            DownloadRequest(
+                sources=list(urls),
+                config=self.application_config(),
+                prefetched=dict(prefetched or {}),
+            )
         )
 
     async def get_playlist(self, url: str) -> tuple[dict, list[TrackMetadata]]:

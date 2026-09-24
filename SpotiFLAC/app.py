@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import importlib.metadata
 import json
@@ -1542,11 +1543,13 @@ class SpotiFLAC_API(
             os.makedirs(self.download_dir, exist_ok=True)
 
             quality = config.get("quality", "LOSSLESS")
+            include_featuring = config.get("include_featuring", True)
             allow_fallback = config.get("allow_fallback", True)
             embed_lyrics = config.get("lyrics", True)
             enrich_metadata = config.get("enrich_metadata", True)
             services = config.get("services", ["tidal", "qobuz", "deezer"])
             filename_format = config.get("filename_format", "{title} - {artist}")
+            output_path = config.get("output_path") or None
             use_track_numbers = config.get("use_track_numbers", False)
             use_album_track_numbers = config.get("use_album_track_numbers", False)
             use_artist_subfolders = config.get("use_artist_subfolders", False)
@@ -1618,6 +1621,8 @@ class SpotiFLAC_API(
                 post_download_command = ""
             qobuz_local_api_url = config.get("qobuz_local_api_url") or None
             tidal_custom_api = config.get("tidal_custom_api") or None
+            resume = config.get("resume", True)
+            timeout_s = config.get("timeout_s")
             loop_val = config.get("loop", None)
             loop_minutes = int(loop_val) if loop_val else None
 
@@ -1713,8 +1718,10 @@ class SpotiFLAC_API(
             )
             monitor_thread.start()
 
-            from . import SpotiFLAC
+            from .application import DownloadService, LegacyDownloadAdapter
+            from .core.config import DownloadRequest, SpotiFLACConfig
             from .core.download_log import record_hook
+            from .downloader import DownloadOptions
 
             # The same hook the CLI installs (see launcher._run_download_async).
             # Without it nothing a GUI or `--web` user downloaded was ever
@@ -1729,26 +1736,7 @@ class SpotiFLAC_API(
 
             failed_hook = failed_tracks.hook(self.owner, collection_url)
 
-            # ONE call, not one per URL. client.SpotiFLAC() is a one-shot
-            # entry point: it opens an event loop, an httpx pool, an
-            # ExtensionManager and a set of providers, and closes all of it
-            # on the way out (see core/loop_runner.py's docstring on why the
-            # loop matters — NetworkManager keys its clients by loop, so a
-            # new one is always a cold pool). Calling it per track paid that
-            # bill per track — the repeated "[tidal] API list unavailable"
-            # bootstrap in the console was exactly this — and left
-            # max_concurrent_downloads with nothing to do, since a run
-            # holding a single track has nothing to download beside it.
-            # batch_tracks sends the whole selection through one worker pool
-            # instead; the files land exactly where they did before (see
-            # SpotiflacDownloader.run_tracks_async).
-            # A single pick goes this way too when the GUI has its metadata:
-            # the batch path is the one that uses it, sparing the track a full
-            # lookup and the recent links an entry for it.
-            batch_tracks = len(urls_to_download) > 1 or bool(prefetched)
-            SpotiFLAC(
-                url=urls_to_download if batch_tracks else urls_to_download[0],
-                batch_tracks=batch_tracks,
+            legacy_opts = DownloadOptions(
                 output_dir=self.download_dir,
                 services=services,
                 quality=quality,
@@ -1760,7 +1748,9 @@ class SpotiFLAC_API(
                 use_album_subfolders=use_album_subfolders,
                 create_playlist_subfolders=create_playlist_subfolders,
                 first_artist_only=first_artist_only,
+                include_featuring=include_featuring,
                 artist_separator=artist_separator,
+                output_path=output_path,
                 embed_lyrics=embed_lyrics,
                 lyrics_providers=lyrics_providers,
                 apple_lyrics_word_by_word=apple_lyrics_word_by_word,
@@ -1779,14 +1769,30 @@ class SpotiFLAC_API(
                 track_max_retries=track_max_retries,
                 post_download_action=post_download_action,
                 post_download_command=post_download_command,
-                log_level=current_log_level,
-                loop=loop_minutes,
+                resume=resume,
                 post_download_hooks=[log_hook, failed_hook],
                 max_concurrent_downloads=max_concurrent,
                 verify_hires=verify_hires,
                 redownload_fake_hires=redownload_fake_hires,
-                prefetched_tracks=prefetched or None,
+                timeout_s=timeout_s,
             )
+            service = DownloadService(
+                provider_executor=LegacyDownloadAdapter.from_options(
+                    legacy_opts,
+                    prefetched=prefetched or None,
+                ),
+            )
+            report = asyncio.run(
+                service.download(
+                    DownloadRequest(
+                        sources=list(urls_to_download),
+                        config=SpotiFLACConfig.from_legacy_options(legacy_opts),
+                        prefetched=prefetched or None,
+                    )
+                )
+            )
+            if report is not None:
+                self._push_download_stats()
 
             self._push_download_stats()
             self.set_progress("Complete!")

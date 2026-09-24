@@ -9,9 +9,13 @@ class EventBus:
     """Simple application-level event bus for UI and service notifications."""
 
     def __init__(self) -> None:
-        self._listeners: dict[str, list[Callable[[dict[str, Any]], None]]] = defaultdict(list)
+        self._listeners: dict[str, list[Callable[[dict[str, Any]], None]]] = (
+            defaultdict(list)
+        )
 
-    def subscribe(self, event_name: str, callback: Callable[[dict[str, Any]], None]) -> None:
+    def subscribe(
+        self, event_name: str, callback: Callable[[dict[str, Any]], None]
+    ) -> None:
         self._listeners[event_name].append(callback)
 
     async def publish(self, event_name: str, payload: dict[str, Any]) -> None:

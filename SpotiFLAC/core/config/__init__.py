@@ -20,6 +20,7 @@ class OutputConfig:
 @dataclass
 class DownloadConfig:
     quality: str = "LOSSLESS"
+    services: list[str] = field(default_factory=list)
     allow_fallback: bool = True
     max_concurrent: int = 2
     retries: int = 0
@@ -81,12 +82,19 @@ class SpotiFLACConfig:
         """Build the new config model from the current downloader options."""
         config = cls()
         config.output.directory = Path(getattr(options, "output_dir", "./Downloads"))
-        config.output.filename_format = getattr(options, "filename_format", "{title} - {artist}")
-        config.output.artist_subfolders = getattr(options, "use_artist_subfolders", False)
+        config.output.filename_format = getattr(
+            options, "filename_format", "{title} - {artist}"
+        )
+        config.output.artist_subfolders = getattr(
+            options, "use_artist_subfolders", False
+        )
         config.output.album_subfolders = getattr(options, "use_album_subfolders", False)
-        config.output.playlist_subfolders = getattr(options, "create_playlist_subfolders", True)
+        config.output.playlist_subfolders = getattr(
+            options, "create_playlist_subfolders", True
+        )
 
         config.download.quality = getattr(options, "quality", "LOSSLESS")
+        config.download.services = list(getattr(options, "services", []))
         config.download.allow_fallback = getattr(options, "allow_fallback", True)
         config.download.max_concurrent = getattr(options, "max_concurrent_downloads", 2)
         config.download.retries = getattr(options, "track_max_retries", 0)
@@ -94,10 +102,14 @@ class SpotiFLACConfig:
         config.download.resume = getattr(options, "resume", True)
 
         config.metadata.enrich = getattr(options, "enrich_metadata", True)
-        config.metadata.providers = list(getattr(options, "enrich_providers", config.metadata.providers))
+        config.metadata.providers = list(
+            getattr(options, "enrich_providers", config.metadata.providers)
+        )
 
         config.lyrics.enabled = getattr(options, "embed_lyrics", True)
-        config.lyrics.providers = list(getattr(options, "lyrics_providers", config.lyrics.providers))
+        config.lyrics.providers = list(
+            getattr(options, "lyrics_providers", config.lyrics.providers)
+        )
         config.lyrics.save_lrc = getattr(options, "save_lrc", False)
         config.lyrics.word_by_word = getattr(options, "apple_lyrics_word_by_word", True)
 
@@ -128,6 +140,7 @@ class DownloadSkip:
 @dataclass
 class DownloadFailure:
     track: TrackMetadata | None = None
+    source: str | None = None
     reason: str = ""
     provider: str | None = None
     attempts: int = 0

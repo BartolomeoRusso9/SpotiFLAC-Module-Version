@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Callable
 
 from SpotiFLAC.core.config import OutputConfig
 from SpotiFLAC.core.models import TrackMetadata, build_filename
@@ -24,9 +23,10 @@ class OutputService:
         track: TrackMetadata | None = None,
     ) -> Path:
         directory = self._root
-        if collection_name and ((is_playlist and self._config.playlist_subfolders) or (
-            is_album and not self._config.album_subfolders
-        )):
+        if collection_name and (
+            (is_playlist and self._config.playlist_subfolders)
+            or (is_album and not self._config.album_subfolders)
+        ):
             directory = directory / self._safe_component(collection_name)
         if track is not None:
             if self._config.artist_subfolders:

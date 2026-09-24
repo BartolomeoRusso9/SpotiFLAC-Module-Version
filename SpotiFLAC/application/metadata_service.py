@@ -1,17 +1,36 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import Any
+
 from SpotiFLAC.core.config import DownloadRequest
 from SpotiFLAC.core.models import TrackMetadata
 
 
 class MetadataService:
-    """Metadata resolution boundary for the application layer.
+    """Resolve request sources through an application-owned metadata port."""
 
-    This is intentionally small: resolve a source identifier into a typed
-    `TrackMetadata` object without depending on a concrete provider backend.
-    """
+    def __init__(
+        self,
+        resolver: Callable[[str], Awaitable[Any]] | None = None,
+    ) -> None:
+        self._resolver = resolver
 
     async def resolve(self, request: DownloadRequest) -> list[TrackMetadata]:
+        if self._resolver is not None:
+            resolved: list[TrackMetadata] = []
+            for source in request.sources:
+                value = await self._resolver(source)
+                tracks = value[1] if isinstance(value, tuple) else value
+                if isinstance(tracks, list):
+                    resolved.extend(
+                        track for track in tracks if isinstance(track, TrackMetadata)
+                    )
+            return resolved
+
+        # Keep the dependency-free constructor useful for unit tests and
+        # injected providers. Production entry points install the real resolver
+        # from LegacyDownloadAdapter.from_options().
         items: list[TrackMetadata] = []
         for source in request.sources:
             if source.startswith("spotify:track:"):

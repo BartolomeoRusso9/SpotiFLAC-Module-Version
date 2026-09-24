@@ -13,6 +13,12 @@ class RetryPolicy:
         return max(1, self.max_attempts)
 
     def is_retryable(self, error: BaseException) -> bool:
-        return not isinstance(error, (KeyboardInterrupt, SystemExit, asyncio.CancelledError))
+        if isinstance(error, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+            return False
+        classified = getattr(error, "is_retryable", None)
+        if callable(classified):
+            return bool(classified())
+        return True
+
 
 __all__ = ["RetryPolicy"]

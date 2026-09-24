@@ -33,7 +33,11 @@ class SpotiflacError(Exception):
         return f"{prefix}{self.kind.name}: {self.message}{cause_str}"
 
     def is_retryable(self) -> bool:
-        return self.kind in {ErrorKind.RATE_LIMITED, ErrorKind.NETWORK_ERROR}
+        return self.kind in {
+            ErrorKind.RATE_LIMITED,
+            ErrorKind.NETWORK_ERROR,
+            ErrorKind.UNAVAILABLE,
+        }
 
 
 class AuthError(SpotiflacError):

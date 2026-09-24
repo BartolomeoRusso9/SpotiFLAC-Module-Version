@@ -3,6 +3,7 @@ from .download_service import DownloadService
 from .event_bus import EventBus
 from .extension_service import ExtensionService
 from .job_service import JobService
+from .legacy_download_adapter import LegacyDownloadAdapter
 from .metadata_service import MetadataService
 from .output_service import OutputService
 from .pipeline import (
@@ -17,7 +18,10 @@ from .pipeline import (
     TagStep,
     ValidateStep,
 )
+from .provider_executor import ProviderExecutor
 from .provider_resolver import ProviderResolver
+from .post_processing import PostProcessingService
+from .download_worker import ApplicationDownloadWorker, WorkerReport
 from .queue_service import QueueService
 
 __all__ = [
@@ -26,6 +30,7 @@ __all__ = [
     "EventBus",
     "ExtensionService",
     "JobService",
+    "LegacyDownloadAdapter",
     "MetadataService",
     "OutputService",
     "DownloadContext",
@@ -38,6 +43,10 @@ __all__ = [
     "CanvasStep",
     "TranscodeStep",
     "LibraryIndexStep",
+    "ProviderExecutor",
     "ProviderResolver",
+    "PostProcessingService",
+    "ApplicationDownloadWorker",
+    "WorkerReport",
     "QueueService",
 ]

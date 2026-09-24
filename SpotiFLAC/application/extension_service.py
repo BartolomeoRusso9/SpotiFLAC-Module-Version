@@ -21,8 +21,12 @@ class ExtensionService:
 
     def __init__(self) -> None:
         self._extensions: dict[str, ExtensionRecord] = {
-            "tidal-web": ExtensionRecord(id="tidal-web", enabled=True, version="2.0.0", trust="SIGNED"),
-            "qobuz-web": ExtensionRecord(id="qobuz-web", enabled=True, version="2.0.0", trust="SIGNED"),
+            "tidal-web": ExtensionRecord(
+                id="tidal-web", enabled=True, version="2.0.0", trust="SIGNED"
+            ),
+            "qobuz-web": ExtensionRecord(
+                id="qobuz-web", enabled=True, version="2.0.0", trust="SIGNED"
+            ),
         }
 
     def list(self) -> list[ExtensionRecord]:

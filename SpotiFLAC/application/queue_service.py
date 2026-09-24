@@ -33,34 +33,49 @@ class QueueService:
         }
         self._jobs[job_id] = job
         if self._repo is not None:
-            self._repo.create({
-                "id": job_id,
-                "source": job["source"],
-                "status": job["status"],
-                "payload": {"request": asdict(request), "total_items": len(request.sources)},
-                "total_items": len(request.sources),
-                "completed_items": 0,
-                "priority": 0,
-            })
+            self._repo.create(
+                {
+                    "id": job_id,
+                    "source": job["source"],
+                    "status": job["status"],
+                    "payload": {
+                        "request": asdict(request),
+                        "total_items": len(request.sources),
+                    },
+                    "total_items": len(request.sources),
+                    "completed_items": 0,
+                    "priority": 0,
+                }
+            )
         return self._jobs[job_id].copy()
 
     async def pause(self, job_id: str) -> dict[str, Any]:
-        job = self._jobs[job_id]
+        job = self._job(job_id)
         job["status"] = "PAUSED"
         if self._repo is not None:
             self._repo.update_status(job_id, "PAUSED")
         return job.copy()
 
     async def resume(self, job_id: str) -> dict[str, Any]:
-        job = self._jobs[job_id]
+        job = self._job(job_id)
         job["status"] = "QUEUED"
         if self._repo is not None:
             self._repo.update_status(job_id, "QUEUED")
         return job.copy()
 
     async def cancel(self, job_id: str) -> dict[str, Any]:
-        job = self._jobs[job_id]
+        job = self._job(job_id)
         job["status"] = "CANCELLED"
         if self._repo is not None:
             self._repo.update_status(job_id, "CANCELLED")
         return job.copy()
+
+    def _job(self, job_id: str) -> dict[str, Any]:
+        job = self._jobs.get(job_id)
+        if job is not None:
+            return job
+        if self._repo is not None:
+            job = self._repo.get(job_id)
+            self._jobs[job_id] = job
+            return job
+        raise KeyError(job_id)

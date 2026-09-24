@@ -55,6 +55,7 @@ from .app import SpotiFLAC_API
 
 logger = logging.getLogger(__name__)
 
+
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 
 # ── Optional shared-secret auth (off by default — see --web-token) ─────────
@@ -509,7 +510,21 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                     payload["selected_indices"], payload.get("config", {})
                 )
             else:
-                owner_api.fetch_metadata(payload["url"])
+                from .core.config import DownloadRequest, SpotiFLACConfig
+
+                config = SpotiFLACConfig()
+                queue_config = payload.get("config") or {}
+                if "quality" in queue_config:
+                    config.download.quality = queue_config["quality"]
+                if "output_dir" in queue_config:
+                    config.output.directory = Path(
+                        queue_config["output_dir"]
+                    ).expanduser()
+                request = DownloadRequest(
+                    sources=[payload["url"]],
+                    config=config,
+                )
+                asyncio.run(application_download_service.download(request))
             return {"status": "dispatched"}
 
         job_queue = JobQueue(
@@ -1120,9 +1135,10 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     #
     # Mounted after the middleware that gates /api/*, so it inherits the same
     # token and session auth rather than reimplementing either.
-    from .application import ApiAdapter
+    from .application import ApiAdapter, DownloadService
     from .application import EventBus
     from .webapi import ApiDeps, build_v1_router
+
     application_events = EventBus()
     application_events.subscribe(
         "job.created",
@@ -1134,7 +1150,9 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     )
     application_events.subscribe(
         "job.completed",
-        lambda payload: manager.broadcast("applicationEvent", ["job.completed", payload]),
+        lambda payload: manager.broadcast(
+            "applicationEvent", ["job.completed", payload]
+        ),
     )
     application_events.subscribe(
         "job.failed",
@@ -1142,8 +1160,24 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     )
     application_events.subscribe(
         "job.cancelled",
-        lambda payload: manager.broadcast("applicationEvent", ["job.cancelled", payload]),
+        lambda payload: manager.broadcast(
+            "applicationEvent", ["job.cancelled", payload]
+        ),
     )
+    for event_name in (
+        "job.retrying",
+        "job.paused",
+        "job.resumed",
+        "job.item.updated",
+    ):
+        application_events.subscribe(
+            event_name,
+            lambda payload, name=event_name: manager.broadcast(
+                "applicationEvent", [name, payload]
+            ),
+        )
+    application_download_service = DownloadService(event_bus=application_events)
+    app.state.application_download_service = application_download_service
 
     app.include_router(
         build_v1_router(
@@ -1153,6 +1187,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                 token_required=bool(token),
                 job_queue=job_queue or download_queue,
                 adapter=ApiAdapter(event_bus=application_events),
+                download_service=application_download_service,
                 username_for=lambda request: getattr(request.state, "username", None),
             )
         )
