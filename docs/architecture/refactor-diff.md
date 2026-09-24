@@ -5,7 +5,7 @@
 - Foundation and incremental refactor changes are committed on branch `4.0.0`.
 - Local test output `.spotiflac/` remains intentionally untracked.
 - `git diff --check`: passed
-- Focused regression suite: **92 passed**.
+- Focused regression suite: **93 passed**.
 
 ## Modified Files
 
@@ -66,6 +66,8 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   extension manifests without coupling the core resolver to `ExtensionManager`.
 - `DownloadContext` now carries the full ordered provider candidate chain;
   provider lifecycle events expose that chain to adapters.
+- `DownloadService` can execute candidates in order through an injected provider
+  executor, falling back to the next candidate after retryable failures.
 - `SpotiFLAC/core/retry.py`
   - centralized retry policy.
 - `tests/test_architecture_foundation.py`
@@ -109,7 +111,7 @@ PYTHONPATH="$PWD" python3 -m pytest -q \
   tests/test_webapi_integration.py
 ```
 
-Result: **92 passed**.
+Result: **93 passed**.
 
 ## Next Milestone
 
