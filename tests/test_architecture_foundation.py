@@ -283,6 +283,29 @@ def test_download_service_can_reuse_configured_legacy_downloader(monkeypatch):
     assert report.success_count == 1
 
 
+def test_download_service_accepts_extension_aware_provider_resolver(monkeypatch):
+    selected = []
+
+    async def fake_run(self, source):
+        selected.append(source)
+
+    monkeypatch.setattr("SpotiFLAC.downloader.SpotiflacDownloader.run_async", fake_run)
+    resolver = ProviderResolver(
+        [ProviderProfile("extension-provider", priority=10)]
+    )
+    request = DownloadRequest(
+        sources=["spotify:track:extension"],
+        config=SpotiFLACConfig(),
+    )
+
+    report = asyncio.run(
+        DownloadService(provider_resolver=resolver).download(request)
+    )
+
+    assert selected == ["spotify:track:extension"]
+    assert report.succeeded[0].provider == "extension-provider"
+
+
 def test_download_service_publishes_terminal_events(monkeypatch):
     events = []
 

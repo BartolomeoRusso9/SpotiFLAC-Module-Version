@@ -38,6 +38,7 @@ class DownloadService:
         event_bus: EventBus | None = None,
         *,
         downloader: SpotiflacDownloader | None = None,
+        provider_resolver: ProviderResolver | None = None,
         metadata_service: MetadataService | None = None,
         tagger: Callable[[str, object], Awaitable[None]] | None = None,
         lyrics_writer: Callable[[str, object], Awaitable[None]] | None = None,
@@ -48,7 +49,7 @@ class DownloadService:
         self._event_bus = event_bus or EventBus()
         self._downloader = downloader
         self._metadata_service = metadata_service or MetadataService()
-        self._provider_resolver = ProviderResolver()
+        self._provider_resolver = provider_resolver or ProviderResolver()
         self._pipeline = DownloadPipeline(
             [ResolveStep(), ProviderStep(self._provider_resolver)]
         )
