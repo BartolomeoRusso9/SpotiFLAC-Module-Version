@@ -2601,7 +2601,9 @@ async def amain() -> None:
         # told otherwise, which is what makes this an *upgrade* rather than a
         # second copy somewhere else.
         destination = (
-            up_args.output_dir or upgrade_profile_defaults.get("output_dir") or up_args.path
+            up_args.output_dir
+            or upgrade_profile_defaults.get("output_dir")
+            or up_args.path
         )
         downloader = _subscription_downloader(
             {**upgrade_profile_defaults, "quality": up_args.target}, destination

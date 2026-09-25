@@ -141,7 +141,9 @@ async def test_an_empty_query_is_not_searched(stub_search) -> None:
         await _settled(pilot)
 
         assert stub_search == []
-        assert "Type something" in str(app_of(pilot).query_one("#search-status").render())
+        assert "Type something" in str(
+            app_of(pilot).query_one("#search-status").render()
+        )
 
 
 @drives_the_ui

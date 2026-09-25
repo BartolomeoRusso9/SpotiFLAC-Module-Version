@@ -402,9 +402,11 @@ class ApiRegistry:
 
     def _build(self, username: str | None) -> SpotiFLAC_API:
         api = SpotiFLAC_API()
-        setattr(api, "_ws_broadcast", lambda fn, args: self._manager.broadcast(
-            fn, args, owner=username
-        ))
+        setattr(
+            api,
+            "_ws_broadcast",
+            lambda fn, args: self._manager.broadcast(fn, args, owner=username),
+        )
         # Everything this instance downloads is written to the log under this
         # name, and the dashboard it serves reads back the same name — one
         # account's numbers, not the machine's.
@@ -1150,7 +1152,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     )
     application_events.subscribe(
         "job.completed",
-            lambda payload: manager.broadcast(
+        lambda payload: manager.broadcast(
             "applicationEvent", ["job.completed", payload]
         ),
     )
@@ -1170,9 +1172,8 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         "job.resumed",
         "job.item.updated",
     ):
-        def broadcast_application_event(
-            payload: Any, name: str = event_name
-        ) -> None:
+
+        def broadcast_application_event(payload: Any, name: str = event_name) -> None:
             manager.broadcast("applicationEvent", [name, payload])
 
         application_events.subscribe(

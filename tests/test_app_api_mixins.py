@@ -134,7 +134,9 @@ def test_a_nonsense_match_score_is_refused_before_anything_is_matched() -> None:
 
     for bad in (-0.5, 1.5, float("nan"), "close enough"):
         assert api.preview_csv(content, min_score=cast(Any, bad))["ok"] is False, bad
-        assert api.fetch_csv(content, min_score=cast(Any, bad))["status"] == "error", bad
+        assert (
+            api.fetch_csv(content, min_score=cast(Any, bad))["status"] == "error"
+        ), bad
 
     # A valid threshold still gets through, and so does "unset".
     assert api.preview_csv(content, min_score=0.9)["ok"] is True

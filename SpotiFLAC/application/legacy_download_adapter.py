@@ -53,7 +53,7 @@ class LegacyDownloadAdapter(ProviderExecutor):
         self._prefetched = dict(metadata)
 
     async def resolve_metadata(self, source: str) -> object:
-        """Resolve metadata with the wrapped engine's real catalogue client."""
+        """Compatibility bridge for callers still using legacy metadata APIs."""
         resolver = getattr(self._downloader, "_resolve_metadata_async", None)
         if not callable(resolver):
             raise AttributeError(

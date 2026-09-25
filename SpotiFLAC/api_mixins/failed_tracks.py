@@ -18,6 +18,7 @@ class FailedTracksMixin:
     if TYPE_CHECKING:
         _start_download_job: Any
         log: Any
+
     def get_failed_tracks(self) -> dict:
         """Every track that failed and has not downloaded since. Never raises."""
         from ..core import failed_tracks

@@ -104,7 +104,9 @@ async def test_adding_a_link_installs_from_it_immediately(stub_registries) -> No
 
         from textual.widgets import Button, DataTable, Input
 
-        app_of(pilot).query_one("#registry-url", Input).value = "https://new.test/r.json"
+        app_of(pilot).query_one(
+            "#registry-url", Input
+        ).value = "https://new.test/r.json"
         app_of(pilot).query_one("#registry-add", Button).press()
         await _settled(pilot)
 
@@ -129,7 +131,9 @@ async def test_the_trust_floor_from_the_command_line_is_honoured(
 
         from textual.widgets import Button, Input
 
-        app_of(pilot).query_one("#registry-url", Input).value = "https://new.test/r.json"
+        app_of(pilot).query_one(
+            "#registry-url", Input
+        ).value = "https://new.test/r.json"
         app_of(pilot).query_one("#registry-add", Button).press()
         await _settled(pilot)
 

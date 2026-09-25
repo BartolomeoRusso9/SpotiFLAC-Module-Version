@@ -120,7 +120,9 @@ async def _write_lrc_sidecars(
             beside.write_text(lyrics + "\n", encoding="utf-8")
             written.append(str(beside))
         if options.lrc_library_dir:
-            artist = metadata.first_artist if options.first_artist_only else metadata.artists
+            artist = (
+                metadata.first_artist if options.first_artist_only else metadata.artists
+            )
             library = Path(options.lrc_library_dir).expanduser()
             library.mkdir(parents=True, exist_ok=True)
             collected = library / f"{sanitize(artist)} - {sanitize(metadata.title)}.lrc"
@@ -142,7 +144,11 @@ async def _write_canvas_sidecars(
 ) -> None:
     if not (options.save_canvas or options.canvas_library_dir) or not result.file_path:
         return
-    from SpotiFLAC.core.canvas import CANVAS_SUFFIXES, download_canvas_async, fetch_canvas_async
+    from SpotiFLAC.core.canvas import (
+        CANVAS_SUFFIXES,
+        download_canvas_async,
+        fetch_canvas_async,
+    )
 
     audio = Path(result.file_path)
     artist = metadata.first_artist if options.first_artist_only else metadata.artists
@@ -153,13 +159,20 @@ async def _write_canvas_sidecars(
         if options.save_canvas:
             output.append(audio.with_suffix(suffix))
         if options.canvas_library_dir:
-            output.append(Path(options.canvas_library_dir).expanduser() / f"{stem}{suffix}")
+            output.append(
+                Path(options.canvas_library_dir).expanduser() / f"{stem}{suffix}"
+            )
         return [path for path in output if path != audio]
 
     try:
-        if any(all(path.exists() for path in destinations(suffix)) for suffix in CANVAS_SUFFIXES):
+        if any(
+            all(path.exists() for path in destinations(suffix))
+            for suffix in CANVAS_SUFFIXES
+        ):
             return
-        canvas = await fetch_canvas_async(metadata.id, providers=options.canvas_providers or None)
+        canvas = await fetch_canvas_async(
+            metadata.id, providers=options.canvas_providers or None
+        )
         if not canvas:
             return
         targets = [path for path in destinations(canvas.suffix) if not path.exists()]

@@ -32,6 +32,7 @@ class SubscriptionsMixin:
         log: Any
         _push: Any
         _start_download_job: Any
+
     def _subscription_owner(self) -> str:
         return getattr(self, "owner", "") or ""
 

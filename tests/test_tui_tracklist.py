@@ -234,7 +234,9 @@ async def test_a_bad_link_is_reported_not_raised(monkeypatch) -> None:
         panel = await _loaded(pilot)
 
         assert len(panel.tracklist) == 0
-        assert "no such album" in str(app_of(pilot).query_one("#tracks-status").render())
+        assert "no such album" in str(
+            app_of(pilot).query_one("#tracks-status").render()
+        )
 
 
 @drives_the_ui

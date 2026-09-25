@@ -255,10 +255,14 @@ def test_after_the_503_the_next_track_goes_straight_to_tidal_web(
     opts = dl.DownloadOptions(output_dir=str(tmp_path), embed_lyrics=False)
 
     first = asyncio.run(
-        dl.download_one_async(_track("a"), str(tmp_path), cast(Any, [tidal_py, tidal_web]), opts)
+        dl.download_one_async(
+            _track("a"), str(tmp_path), cast(Any, [tidal_py, tidal_web]), opts
+        )
     )
     second = asyncio.run(
-        dl.download_one_async(_track("b"), str(tmp_path), cast(Any, [tidal_py, tidal_web]), opts)
+        dl.download_one_async(
+            _track("b"), str(tmp_path), cast(Any, [tidal_py, tidal_web]), opts
+        )
     )
 
     assert first.success and second.success

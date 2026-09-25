@@ -100,9 +100,7 @@ class SignedSessionsPanel(VerticalScroll):
         if not table.row_count:
             return None
         try:
-            row_key, _ = cast(Any, table).coordinate_to_cell_key(
-                (table.cursor_row, 0)
-            )
+            row_key, _ = cast(Any, table).coordinate_to_cell_key((table.cursor_row, 0))
         except Exception:
             return None
         return str(row_key.value) if row_key.value is not None else None

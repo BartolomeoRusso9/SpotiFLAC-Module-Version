@@ -69,6 +69,7 @@ def _providers(monkeypatch, answers: dict[str, tuple[float, str]]):
         {name: make(*spec) for name, spec in answers.items()},
     )
 
+
 def _fetch(order):
     return asyncio.run(
         L.fetch_lyrics_async(

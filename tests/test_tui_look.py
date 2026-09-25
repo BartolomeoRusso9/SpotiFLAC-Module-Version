@@ -358,7 +358,9 @@ async def test_a_panes_title_fills_in_when_it_takes_focus() -> None:
         await pilot.pause()
 
         assert str(sidebar.border_title).startswith("●")
-        assert not str(app_of(pilot).query_one("#download").border_title).startswith("●")
+        assert not str(app_of(pilot).query_one("#download").border_title).startswith(
+            "●"
+        )
 
         app_of(pilot).query_one("#cfg-output_dir").focus()
         await pilot.pause()

@@ -1550,9 +1550,14 @@ def solve(
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        token = cast(str, asyncio.run(
-            _solve_impl(sitekey, siteurl, timeout, hold_open_seconds=hold_open_seconds),
-        ))
+        token = cast(
+            str,
+            asyncio.run(
+                _solve_impl(
+                    sitekey, siteurl, timeout, hold_open_seconds=hold_open_seconds
+                ),
+            ),
+        )
     if hold_open_seconds <= 0:
         _TURNSTILE_CACHE[cache_key] = (now, token)
     return token

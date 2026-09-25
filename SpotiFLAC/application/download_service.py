@@ -94,7 +94,6 @@ class DownloadService:
         prefetched: dict[str, TrackMetadata] | None = None,
         downloader: object | None = None,
     ) -> "DownloadService":
-        """Build a service using the legacy downloader only behind the adapter boundary."""
         if downloader is not None:
             legacy_downloader = LegacyDownloadAdapter(
                 downloader,
@@ -107,11 +106,17 @@ class DownloadService:
                 options,
                 prefetched=(prefetched or None),
             )
+
+        timeout_s = getattr(options, "timeout_s", 10) or 10
+
         return cls(
             event_bus=event_bus,
             downloader=legacy_downloader.downloader,
             provider_executor=legacy_downloader,
-            metadata_service=MetadataService(legacy_downloader.resolve_metadata),
+            metadata_service=MetadataService(
+                timeout_s=int(timeout_s),
+                compatibility_fallback=False,
+            ),
         )
 
     def legacy_options_for(self, request: DownloadRequest) -> object:
@@ -136,11 +141,7 @@ class DownloadService:
                 resolved_metadata[f"spotify:track:{metadata.id}"] = metadata
         legacy_adapter: LegacyDownloadAdapter | None = None
 
-        if (
-            isinstance(self._provider_executor, LegacyDownloadAdapter)
-            and self._provider_executor.forwards_metadata
-            and request.prefetched is None
-        ):
+        if isinstance(self._provider_executor, LegacyDownloadAdapter):
             self._provider_executor.set_prefetched(resolved_metadata)
 
         for source in request.sources:
@@ -213,10 +214,11 @@ class DownloadService:
                         if self._downloader is not None
                         else LegacyDownloadAdapter.from_options(
                             self.legacy_options_for(request),
-                            # The generic compatibility path retains the
-                            # single-source runner. Real application clients
-                            # use from_legacy_options(), which forwards the
-                            # prefetched batch through the production adapter.
+                            # Direct DownloadService() construction remains a
+                            # compatibility path for callers that monkeypatch
+                            # the historical run_async() entrypoint. The named
+                            # application factory above is the production path
+                            # that forwards batch metadata into the runtime.
                             prefetched=None,
                             forward_metadata=False,
                         )

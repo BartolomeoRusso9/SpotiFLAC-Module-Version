@@ -410,5 +410,7 @@ async def test_quitting_is_refused_while_a_download_runs() -> None:
         app_of(pilot).action_request_quit()
         await pilot.pause()
 
-        assert "A download is running" in str(app_of(pilot).query_one("#status").content)
+        assert "A download is running" in str(
+            app_of(pilot).query_one("#status").content
+        )
         app_of(pilot)._download_running = False

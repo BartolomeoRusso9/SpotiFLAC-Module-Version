@@ -55,7 +55,9 @@ def test_the_resolve_api_is_asked_first(monkeypatch) -> None:
     resolver = _resolver(monkeypatch, resolve={"spotify": "https://x"})
     links = asyncio.run(resolver._get_songlink_links_by_url_async("https://y"))
     assert links == {"spotify": "https://x"}
-    assert cast(Any, resolver).calls == ["resolve"], "Songlink must not be asked needlessly"
+    assert cast(Any, resolver).calls == [
+        "resolve"
+    ], "Songlink must not be asked needlessly"
 
 
 def test_songlink_is_still_tried_when_resolve_returns_nothing(monkeypatch) -> None:

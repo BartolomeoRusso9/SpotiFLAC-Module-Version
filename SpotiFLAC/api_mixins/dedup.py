@@ -39,6 +39,7 @@ class DedupMixin:
         log: Any
         _push: Any
         _library_dedup_report: Any
+
     def _approved_path(self, path: str) -> tuple[str, str]:
         """(usable path, error). Empty error means the path may be used.
 
