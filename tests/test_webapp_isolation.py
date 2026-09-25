@@ -154,7 +154,7 @@ def test_queued_bare_url_uses_application_download_service(monkeypatch) -> None:
     assert result == {"status": "dispatched"}
     assert seen["sources"] == ["https://open.spotify.com/track/x"]
     assert seen["quality"] == "HI_RES_LOSSLESS"
-    assert seen["output_dir"] == "/music"
+    assert Path(str(seen["output_dir"])).as_posix() == "/music"
 
 
 def test_web_app_builds_one_shared_application_download_service(monkeypatch) -> None:

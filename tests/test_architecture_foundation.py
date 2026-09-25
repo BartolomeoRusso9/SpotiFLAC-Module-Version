@@ -217,7 +217,17 @@ def test_download_service_builds_structured_report_from_request():
     events = []
     bus.subscribe("download.started", lambda payload: events.append(payload))
 
-    service = DownloadService(event_bus=bus)
+    async def fake_executor(provider, source):
+        return DownloadResult.ok(
+            provider,
+            "/music/abc123.flac",
+            source=source,
+        )
+
+    service = DownloadService(
+        event_bus=bus,
+        provider_executor=fake_executor,
+    )
     request = DownloadRequest(
         sources=["spotify:track:abc123", "spotify:track:missing"],
         config=SpotiFLACConfig(),
@@ -310,7 +320,7 @@ def test_v1_download_route_uses_application_service_boundary():
     assert response.status_code == 202
     assert seen["sources"] == ["https://open.spotify.com/track/x"]
     assert seen["quality"] == "LOSSLESS"
-    assert seen["output_dir"] == "/music"
+    assert Path(str(seen["output_dir"])).as_posix() == "/music"
     assert response.json()["id"] == "direct"
 
 
@@ -612,7 +622,7 @@ def test_run_download_from_cfg_uses_application_service_for_guided_downloads(
 
     assert seen["sources"] == ["https://open.spotify.com/track/x"]
     assert seen["quality"] == "LOSSLESS"
-    assert seen["output_dir"] == "/music"
+    assert Path(str(seen["output_dir"])).as_posix() == "/music"
 
 
 def test_provider_executor_executes_candidate_chain_via_application_layer():
