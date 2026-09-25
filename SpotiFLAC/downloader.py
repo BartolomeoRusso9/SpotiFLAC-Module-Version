@@ -67,18 +67,17 @@ from .core.recording_guard import wrong_recording_reason_async
 from .core.spotify_metadata import SpotifyMetadataClient
 from .core.transcode import (
     DEFAULT_MP3_BITRATE,
-    already_in_target_format,
     ensure_ffmpeg_available,
     extension_for,
     normalize_bitrate,
     normalize_transcode_format,
     result_format_for,
-    transcode_file_async,
     transcoded_file_exists,
 )
 from .core.url_utils import url_host_has_label, url_host_matches
 from .application.post_processing import PostProcessingService, apply_post_processing
 from .application.download_worker import ApplicationDownloadWorker
+from .application.batch_finalizer import BatchFinalizer
 
 if TYPE_CHECKING:
     from .core.base import BaseProvider
@@ -87,36 +86,16 @@ logger = logging.getLogger(__name__)
 
 
 async def _call_metadata_get_url(client, url: str, **kwargs):
-    """Calls client.get_url_async(url, **kwargs) if it exists, otherwise
-    client.get_url(url, **kwargs) — awaiting it directly if it's already
-    a coroutine function, or offloading to a thread only if it's truly sync.
-    """
-    fn = getattr(client, "get_url_async", None)
-    if fn is None:
-        fn = client.get_url
-
-    # inspect, not asyncio: asyncio.iscoroutinefunction is deprecated and
-    # slated for removal in 3.16.
+    """Call an async metadata method, or offload its sync counterpart."""
+    fn = getattr(client, "get_url_async", None) or client.get_url
     if inspect.iscoroutinefunction(fn):
         return await fn(url, **kwargs)
     return await asyncio.to_thread(fn, url, **kwargs)
 
 
 def _adapt_js_metadata_response(response):
-    """Adapt JSExtensionProvider dict response to expected tuple format.
-
-    JSExtensionProvider may return a dict with keys like:
-    {'collection_name': str, 'tracks': list, 'collection_cover': str (optional)}
-
-    This adapter converts it to the tuple format expected by the caller:
-    (collection_name, tracks, *optional_cover)
-    """
-
-    # If response is already a tuple/list, return as-is (native Python provider format)
     if isinstance(response, (tuple, list)):
         return response
-
-    # If it's a dict (JS provider format), convert to tuple
     if isinstance(response, dict):
         collection_name = response.get("collection_name", "Unknown")
         tracks = response.get("tracks", [])
@@ -124,8 +103,6 @@ def _adapt_js_metadata_response(response):
         if collection_cover:
             return (collection_name, tracks, collection_cover)
         return (collection_name, tracks)
-
-    # Fallback: return as-is
     return response
 
 
@@ -138,15 +115,8 @@ class DownloadOptions:
     use_album_track_numbers: bool = False
     use_artist_subfolders: bool = False
     use_album_subfolders: bool = False
-    # When True, each playlist download is placed in a subfolder named after
-    # the playlist. Set to False to keep playlist downloads flat in the
-    # `output_dir` (useful for music libraries).
     create_playlist_subfolders: bool = True
     first_artist_only: bool = False
-    # When set (e.g. ", " or " / "), multiple artists are written as one
-    # joined string instead of a multi-value ARTIST/ALBUMARTIST field. See
-    # core/tagger.py EmbedOptions.artist_separator for why — some players
-    # (notably Rekordbox) mangle multi-value fields into unseparated text.
     artist_separator: str | None = None
     include_featuring: bool = True
     quality: str = "LOSSLESS"
@@ -286,86 +256,9 @@ def _build_providers_for_name(name: str, opts: DownloadOptions) -> list[BaseProv
     followed by the JavaScript extension as a fallback.
     Respects explicit requests like 'ext:qobuz-web' or 'ext:qobuz-py'.
     """
-    from .extensions.catalog import extension_id
-    from .extensions.manager import ExtensionManager
-    from .extensions.provider import JSExtensionProvider
+    from .application.provider_factory import build_providers_for_name
 
-    providers: list[BaseProvider] = []
-    try:
-        manager = ExtensionManager(ext_dir=opts.ext_dir, auto_install_downloads=True)
-
-        original_ext_id = extension_id(name, manager)
-        base_name = (
-            original_ext_id.lower()
-            .replace("-web", "")
-            .replace("ext:", "")
-            .replace("-py", "")
-        )
-
-        # Analizza l'intento esplicito dell'utente
-        wants_explicit_js = "-web" in name.lower()
-        wants_explicit_py = "-py" in name.lower()
-
-        # 1. PYTHON ATTEMPT (Priority 1)
-        # If the user did NOT explicitly type "-web", try using Python
-        if not wants_explicit_js:
-            py_candidate_name = manager.find_python_extension(base_name)
-
-            if py_candidate_name:
-                try:
-                    from .extensions.python_provider import PythonExtensionProvider
-
-                    py_prov = cast(Any, PythonExtensionProvider)(
-                        py_candidate_name, ext_dir=opts.ext_dir
-                    )
-                    providers.append(py_prov)
-                    logger.debug(
-                        "Added Python provider candidate: %s", py_candidate_name
-                    )
-                except Exception as e_py:
-                    logger.warning(
-                        "Python extension '%s' failed to initialize: %s",
-                        py_candidate_name,
-                        e_py,
-                    )
-
-        # Pair the JavaScript extension automatically unless Python was requested explicitly.
-        # Not when the extension under that id declares it downloads nothing:
-        # "apple" is an alias of "apple-music", which is also the id of the
-        # mobile registry's Apple Music *metadata* extension. Installed, it
-        # would have been paired here as a download fallback with no download
-        # function at all.
-        installed_js = manager.get_installed(original_ext_id)
-        if (
-            installed_js is not None
-            and bool(installed_js.types)
-            and not installed_js.is_download_provider
-        ):
-            logger.debug(
-                "'%s' is installed but is not a download provider (%s); not using it to download",
-                original_ext_id,
-                ", ".join(installed_js.types),
-            )
-        elif not wants_explicit_py:
-            try:
-                js_prov = JSExtensionProvider(
-                    original_ext_id,
-                    ext_dir=opts.ext_dir,
-                    timeout_s=opts.timeout_s or 180,
-                )
-                providers.append(js_prov)
-                logger.debug("Added JS provider fallback: %s", original_ext_id)
-            except Exception as e_js:
-                logger.debug(
-                    "JS extension fallback not available for '%s': %s",
-                    original_ext_id,
-                    e_js,
-                )
-
-    except Exception as e:
-        logger.warning("Failed to resolve providers for %s: %s", name, e)
-
-    return providers
+    return build_providers_for_name(name, opts)
 
 
 def _no_providers_error_message(services: list[str]) -> str:
@@ -1616,7 +1509,6 @@ class LegacyDownloadWorker:
                     close()
 
     async def run_async(self) -> list[tuple[str, str, str, str]]:
-        client: Any
         try:
             if self._opts.transcode_to:
                 # It's better to fail fast than to download a whole album and
@@ -1761,241 +1653,15 @@ class LegacyDownloadWorker:
         report = await worker.run(self._opts)
         self._completed.update(report.completed)
         self._results.update(report.results)
-        await self._remove_partial_files_async(base_out)
+        await BatchFinalizer(
+            self._opts,
+            self._completed,
+            self._failed,
+            self._skipped,
+            total,
+        ).finalize(base_out)
         self._print_summary(time.perf_counter() - start)
-        await self._execute_post_action_async(base_out)
         return self._failed
-
-    async def _run_downloads_legacy_async(
-        self,
-        manager: DownloadManager,
-        total: int,
-        base_out: str,
-        start: float,
-    ) -> list[tuple[str, str, str, str]]:
-        """Fase 2 — concorrenza nativa asyncio.
-
-        Before: a list of asyncio.Task consumed with asyncio.as_completed().
-        Functionally correct, but without structured error propagation
-        (a task raising an unexpected exception did not cancel the others,
-        and cancellation had to be handled manually).
-
-        Now: asyncio.TaskGroup (structured concurrency, PEP 654/3.11+).
-        Rate limiting remains an asyncio.Semaphore(max_concurrent_downloads)
-        acquired by each worker before performing heavy I/O (network requests /
-        disk writes). Results are processed as they arrive through an internal
-        asyncio.Queue, so progress bar updates remain incremental like the
-        as_completed version, but inside a TaskGroup that ensures: if a worker
-        raises an unexpected exception, all other tasks in the group are
-        cleanly cancelled instead of continuing.
-        """
-        max_concurrent = max(1, getattr(self._opts, "max_concurrent_downloads", 2))
-        semaphore = asyncio.Semaphore(max_concurrent)
-        # Resolved once, before the first track: a typo in a hook name should
-        # fail the run immediately rather than after an hour of downloading.
-        track_hooks = load_hooks(getattr(self._opts, "post_download_hooks", None))
-
-        async def run_hook(result: DownloadResult, track: TrackMetadata) -> None:
-            if track_hooks:
-                await run_hooks(track_hooks, result, track)
-
-        self._post_processing = PostProcessingService(apply_post_processing, hooks=[run_hook])
-        initial_m4a = await asyncio.to_thread(
-            lambda: {p.resolve() for p in Path(base_out).rglob("*.m4a") if p.is_file()}
-        )
-        results_queue: asyncio.Queue[tuple[TrackMetadata, DownloadResult]] = (
-            asyncio.Queue()
-        )
-
-        async def download_worker(i: int, track: TrackMetadata) -> None:
-            position = self._positions[i]
-            async with semaphore:
-                print_track_header(
-                    i + 1,
-                    total,
-                    track.title,
-                    track.artists,
-                    track.album,
-                )
-                await manager.start_download(track.id)
-
-                existing_path = self._existing_paths.get(track.id)
-                if existing_path is not None:
-                    print_track_skipped(
-                        track.title,
-                        "already in the output folder",
-                    )
-                    result = DownloadResult.skipped_result(
-                        self._providers[0].name,
-                        str(existing_path),
-                    )
-                    await _write_canvas_sidecars_async(result, track, self._opts)
-                else:
-                    out_dir = await self._track_output_dir_async(base_out, track)
-                    try:
-                        result = await download_one_async(
-                            track,
-                            out_dir,
-                            self._providers,
-                            self._opts,
-                            position,
-                            self._is_album,
-                        )
-                    except Exception as exc:
-                        logger.exception(
-                            "[worker] Unexpected exception downloading '%s'",
-                            track.title,
-                        )
-                        result = DownloadResult.fail("none", f"Unexpected error: {exc}")
-
-                result = await self._post_processing.process(result, track, self._opts)
-
-            await results_queue.put((track, result))
-
-        async def consume_results() -> None:
-            for _ in range(total):
-                track, result = await results_queue.get()
-                self._results[track.id] = result.model_copy(
-                    update={"source": track.external_url or f"spotify:track:{track.id}"}
-                )
-
-                if result.success and result.file_path:
-                    self._completed[track.id] = result.file_path
-
-                if result.success and result.skipped:
-                    await manager.skip_download(track.id)
-                    self._skipped.append((track.id, track.title))
-                elif result.success:
-                    size_mb = await _get_file_size_mb_async(result.file_path or "")
-                    await manager.complete_download(
-                        track.id,
-                        result.file_path or "",
-                        size_mb,
-                    )
-                else:
-                    err = result.error or "unknown"
-                    self._failed.append((track.id, track.title, track.artists, err))
-                    safe_tqdm_write(
-                        f"\n  ✗  Failed: {track.title} — {track.artists}: {err}",
-                        file=sys.stderr,
-                    )
-                    logger.debug(
-                        "[worker] Failed: %s — %s: %s",
-                        track.title,
-                        track.artists,
-                        err,
-                    )
-                    await manager.fail_download(track.id, err)
-                    ProgressCallback.clear_item(track.id)
-
-                ProgressManager.increment_master()
-
-        consumer_task = asyncio.create_task(consume_results())
-        worker_tasks = [
-            asyncio.create_task(download_worker(i, track))
-            for i, track in enumerate(self._tracks)
-        ]
-
-        try:
-            await asyncio.gather(consumer_task, *worker_tasks)
-        except Exception:
-            consumer_task.cancel()
-            for t in worker_tasks:
-                if not t.done():
-                    t.cancel()
-            await asyncio.gather(consumer_task, *worker_tasks, return_exceptions=True)
-            await self._remove_partial_files_async(base_out, initial_m4a)
-            raise
-
-        await self._remove_partial_files_async(base_out, initial_m4a)
-        elapsed = time.perf_counter() - start
-        self._print_summary(elapsed)
-        await self._execute_post_action_async(base_out)
-        return self._failed
-
-    async def _remove_partial_files_async(
-        self,
-        output_dir: str,
-        initial_m4a: set[Path] | None = None,
-    ) -> None:
-        """Removes leftover `.part` files and invalid temporary M4A files."""
-
-        def _remove() -> int:
-            removed = 0
-            root = Path(output_dir)
-            if not root.exists():
-                return 0
-            preserved_m4a = initial_m4a or set()
-            # Collect completed file paths to avoid deleting them
-            completed_paths = set(
-                Path(p).resolve() for p in self._completed.values() if p
-            )
-
-            # A .part file is either debris or resume state, and which one it
-            # is depends entirely on whether the download it belongs to
-            # finished. With resume on (the default), keep the ones that did
-            # not: deleting them is what used to make an interrupted
-            # discography restart every track from zero on the next run.
-            # See AsyncHttpClient.stream_to_file(resume=...).
-            if self._opts.resume:
-                part_candidates = [
-                    path
-                    for path in root.rglob("*.part")
-                    # `foo.flac.part` belongs to `foo.flac`
-                    if Path(str(path)[: -len(".part")]).resolve() in completed_paths
-                ]
-            else:
-                part_candidates = list(root.rglob("*.part"))
-
-            # For .m4a files, only consider those matching temporary naming patterns
-            # (e.g., containing .tmp, .download, .temp in the stem) or not in the
-            # initial_m4a set AND not in completed downloads
-            m4a_candidates = [
-                path
-                for path in root.rglob("*.m4a")
-                if path.resolve() not in preserved_m4a
-                and path.resolve() not in completed_paths
-                and any(
-                    marker in path.stem.lower()
-                    for marker in (".tmp", ".download", ".temp", ".part")
-                )
-            ]
-
-            candidates = part_candidates + m4a_candidates
-
-            for path in candidates:
-                if not path.is_file() or (
-                    path.suffix.lower() == ".m4a" and self._valid_m4a(path)
-                ):
-                    continue
-                try:
-                    path.unlink()
-                    removed += 1
-                except OSError as exc:
-                    logger.warning(
-                        "[downloader] Could not remove partial file %s: %s",
-                        path,
-                        exc,
-                    )
-            return removed
-
-        removed = await asyncio.to_thread(_remove)
-        if removed:
-            logger.debug(
-                "[downloader] Removed %d leftover partial/invalid audio file(s)",
-                removed,
-            )
-
-    @staticmethod
-    def _valid_m4a(path: Path) -> bool:
-        """Returns whether an M4A has a readable audio container."""
-        try:
-            from mutagen.mp4 import MP4
-
-            audio = MP4(str(path))
-            return bool(audio.info and audio.info.length > 0)
-        except Exception:
-            return False
 
     async def _resolve_output_dir_async(self) -> str:
         """Asynchronously resolves the output directory ensuring it exists."""
@@ -2047,57 +1713,6 @@ class LegacyDownloadWorker:
         skipped_count = len(self._skipped)
         display = [(t, a, e) for _, t, a, e in self._failed]
         print_summary(len(self._tracks), succeeded, skipped_count, display, elapsed)
-
-    async def _execute_post_action_async(self, output_dir: str) -> None:
-        action = self._opts.post_download_action
-        if not action or action == "none":
-            return
-
-        succeeded = len(self._tracks) - len(self._failed) - len(self._skipped)
-        skipped_count = len(self._skipped)
-        failed_count = len(self._failed)
-
-        if action == "open_folder":
-            await _open_folder_async(output_dir)
-
-        elif action == "notify":
-            body = f"{succeeded} tracks downloaded"
-            if skipped_count:
-                body += f", {skipped_count} skipped"
-            if failed_count:
-                body += f", {failed_count} failed"
-            await _send_system_notify_async("SpotiFLAC — Download completed", body)
-
-        elif action == "command":
-            cmd_template = self._opts.post_download_command
-            if not cmd_template:
-                logger.warning(
-                    "[post-action] action=command but post_download_command is empty",
-                )
-                return
-            # Counts are ints rendered by us, so only {folder} can carry
-            # anything hostile — quote every substitution anyway rather than
-            # relying on that staying true. See _quote_for_shell().
-            cmd = (
-                cmd_template.replace("{folder}", _quote_for_shell(output_dir))
-                .replace("{succeeded}", str(succeeded))
-                .replace("{skipped}", str(skipped_count))
-                .replace("{failed}", str(failed_count))
-            )
-            try:
-                process = await asyncio.create_subprocess_shell(cmd)
-                await process.communicate()
-                if process.returncode:
-                    logger.warning(
-                        "[post-action] command exited with status %s",
-                        process.returncode,
-                    )
-            except Exception as exc:
-                logger.warning("[post-action] command failed: %s", exc)
-
-        else:
-            logger.warning("[post-action] unknown action: %s", action)
-
 
 # Public compatibility name. Batch orchestration lives in the application
 # worker; this wrapper remains only for legacy imports and option wiring.

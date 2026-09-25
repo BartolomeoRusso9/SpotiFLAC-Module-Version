@@ -172,6 +172,12 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
 - `ApplicationDownloadWorker` now owns batch concurrency, result collection,
   queue callbacks, skips, and failures; `LegacyDownloadWorker` remains only
   as the compatibility wrapper for provider and filesystem helpers.
+- `BatchFinalizer` now owns partial-output cleanup and configured post-batch
+  actions; the active application worker delegates finalization to it while
+  legacy entry points remain compatibility-only.
+- `application.provider_factory` now owns runtime provider construction; the
+  downloader keeps only a compatibility delegate and no longer contains the
+  extension discovery implementation.
 - `DownloadService` no longer synthesizes a result when a provider returns no
   structured result; the adapter reports the contract violation explicitly.
 - Normal `ProviderExecutor` callbacks must now return an explicit
@@ -278,9 +284,9 @@ The foundation and P0 contracts are complete for the incremental refactor:
 - cooperative active-work pause and deterministic retry/recovery;
 - Docker build, runtime health, and graceful shutdown validation.
 
-The remaining work is broader decomposition of legacy-only implementation
-details and cleanup of the global Mypy backlog outside the refactored
-application boundary.
+The remaining work is broader decomposition of legacy-only provider execution,
+metadata resolution, and playlist/CSV/loop bookkeeping. Global Mypy cleanup is
+complete: the full tree reports no errors or notes.
 
 CI now runs the architecture guard suite, package build, and a blocking Docker
 build/runtime health job as explicit gates, in addition to the existing tests,
@@ -293,8 +299,7 @@ The incremental refactor is now approximately **95% complete overall**:
 - Foundation/P0: complete.
 - Core P1 application and job architecture: complete for the current public
   interfaces.
-- Remaining: broader legacy-engine decomposition and global Mypy cleanup
-  outside the refactored application boundary. Ruff, Black, package build,
+- Remaining: broader legacy-engine decomposition. Ruff, Black, package build,
   wheel smoke validation, Docker validation, and focused architecture tests
   are green.
 
@@ -311,7 +316,8 @@ CLI / TUI / GUI / REST / Python
               -> Legacy Downloader adapter
 ```
 
-The remaining extraction is limited to legacy-only implementation details.
+The remaining extraction is limited to provider execution, collection
+metadata resolution, and playlist/CSV/loop compatibility details.
 Metadata resolution, provider execution, structured reports, job handling,
 active pause propagation, and Docker release validation now have application-
 level ownership. Construction and execution remain behind

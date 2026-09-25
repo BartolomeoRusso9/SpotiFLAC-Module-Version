@@ -9,14 +9,19 @@ Status: read-only audit completed 2026-09-25. No legacy code is removed by this 
 | `run_playlists_async()` / `run_csv_async()` | CLI playlist and CSV modes | Yes | No complete replacement yet; playlist sync, M3U, dedup, and indexing remain legacy-specific | Keep isolated behind compatibility entry points |
 | `DownloadWorker` / `download_one_async()` | Legacy provider execution and post-processing | Yes for current runtime | `ProviderExecutor` plus `DownloadPipeline` | Keep until real provider execution returns structured results for every path |
 | `_resolve_metadata_async()` | Client playlist/CSV and legacy collection flows | Yes for current compatibility paths | A real application `MetadataService` | Do not remove until HTTP Spotify and non-Spotify source coverage exists |
-| `_build_providers_for_name()` | Legacy worker/provider construction | Yes for legacy paths | `ProviderResolver` plus a provider factory | Keep compatibility-only; prevent ranking logic from leaking into application code |
+| `_build_providers_for_name()` | Legacy worker/provider construction | Yes for legacy paths | `ProviderResolver` plus `application.provider_factory` | Compatibility delegate only; ranking remains in `ProviderResolver` |
 | `ProviderResolver` | `DownloadPipeline` and `DownloadService` | Yes | Canonical provider selection | Structured `services` configuration is now preserved and enforced |
 | `ProviderExecutor` | `DownloadService` and injected providers | Yes | Stable execution contract returning `DownloadResult` | Normal execution now consumes explicit results; synthetic success is removed |
 | `LegacyDownloadAdapter` | CLI, GUI, client, and compatibility service construction | Yes, temporary | Real provider executor | Keep as the only application-to-legacy boundary |
-| Legacy worker post-processing | Validation, tagging, lyrics, canvas, transcoding, hooks | Current compatibility requirement | `DownloadPipeline` post steps | Migrate one step at a time with production adapter wiring and regression tests |
+| Legacy worker post-processing | Validation, tagging, lyrics, canvas, transcoding, hooks | Current compatibility requirement | `DownloadPipeline` post steps | Post-processing and batch finalization now have application-owned services; provider/metadata execution remains legacy |
 | Legacy metadata helpers | `_call_metadata_get_url()`, JS response adaptation, enrichment helpers | Yes currently | Shared metadata boundary | Move only after equivalent behavior is covered |
 | Legacy report/result paths | Worker return values and typed adapter results | Done | `DownloadResult` -> `LegacyDownloadAdapter` -> `DownloadReport` | Unstructured results fail explicitly; skipped results preserve source and populate `DownloadReport.skipped` |
 | Legacy collection state | Playlist/CSV/loop bookkeeping and progress | Yes for supported legacy entry points | Application batch/job contracts where available | Preserve until public compatibility paths have replacements |
+
+`BatchFinalizer` now owns cleanup of partial output files and the configured
+post-batch actions. The legacy worker retains compatibility delegates while
+provider execution, collection metadata resolution, and playlist/CSV/loop
+bookkeeping remain the next extraction slices.
 
 ## Entry Points
 

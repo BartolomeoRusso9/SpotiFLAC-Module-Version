@@ -664,7 +664,7 @@ class AsyncHttpClient:
             #
             # What happens next depends on `resume`. With it on, the bytes on
             # disk are exactly what the next attempt needs, so they stay — the
-            # end-of-run sweep in downloader._remove_partial_files_async()
+            # end-of-run sweep in application.BatchFinalizer
             # clears the ones belonging to downloads that did finish. With it
             # off, the old contract holds: leave nothing behind.
             if not resume:

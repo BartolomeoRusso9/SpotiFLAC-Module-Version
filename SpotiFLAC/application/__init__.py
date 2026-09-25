@@ -22,6 +22,8 @@ from .provider_executor import ProviderExecutor
 from .provider_resolver import ProviderResolver
 from .post_processing import PostProcessingService
 from .download_worker import ApplicationDownloadWorker, WorkerReport
+from .batch_finalizer import BatchFinalizer
+from .provider_factory import build_providers_for_name
 from .queue_service import QueueService
 
 __all__ = [
@@ -48,5 +50,7 @@ __all__ = [
     "PostProcessingService",
     "ApplicationDownloadWorker",
     "WorkerReport",
+    "BatchFinalizer",
+    "build_providers_for_name",
     "QueueService",
 ]

@@ -5,7 +5,7 @@ pywebview's `js_api` in desktop mode (so any JS running in the window can
 call it), and — in `--web` mode — as a POST /api/<method> endpoint, where
 the "caller" is whoever can reach the port and `config` is just a JSON
 body. `post_download_action="command"` ends up in
-downloader._execute_post_action_async(), which runs it through a shell, so
+BatchFinalizer.execute_post_action(), which runs it through a shell, so
 taking it from that dict makes the two indistinguishable.
 
 The CLI path is deliberately not covered here: it never goes through this
