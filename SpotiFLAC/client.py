@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
-from .application import DownloadService
+from .application import DownloadService, LegacyDownloadAdapter, MetadataService
 from .core.config import DownloadReport, DownloadRequest, SpotiFLACConfig
 from .core.http import NetworkManager
 from .core.spotify_metadata import SpotifyMetadataClient, parse_spotify_url
-from .downloader import DownloadOptions, SpotiflacDownloader
+from .downloader import DownloadOptions
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -193,7 +193,9 @@ class AsyncSpotiFLAC:
             redownload_fake_hires=redownload_fake_hires,
         )
 
-        self._downloader = SpotiflacDownloader(self._opts)
+        adapter = LegacyDownloadAdapter.from_options(self._opts)
+        self._downloader = adapter.downloader
+        self._metadata_service = MetadataService(resolver=adapter.resolve_metadata)
         self._download_service = DownloadService.from_legacy_options(
             self._opts,
             downloader=self._downloader,
@@ -317,8 +319,8 @@ class AsyncSpotiFLAC:
 
     async def get_playlist(self, url: str) -> tuple[dict, list[TrackMetadata]]:
         self._ensure_entered()
-        collection_name, tracks, info = await self._downloader._resolve_metadata_async(
-            url,
+        collection_name, tracks, info = await self._metadata_service.resolve_collection(
+            url
         )
         return {"name": collection_name, **info}, tracks
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
-from SpotiFLAC.core.config import DownloadRequest
+from SpotiFLAC.core.config import DownloadRequest, SpotiFLACConfig
 from SpotiFLAC.core.models import TrackMetadata
 
 
@@ -23,9 +23,7 @@ class MetadataService:
                 value = await self._resolver(source)
                 tracks = value[1] if isinstance(value, tuple) else value
                 if isinstance(tracks, list):
-                    resolved.extend(
-                        track for track in tracks if isinstance(track, TrackMetadata)
-                    )
+                    resolved.extend(cast(list[TrackMetadata], tracks))
             return resolved
 
         # Keep the dependency-free constructor useful for unit tests and
@@ -46,3 +44,20 @@ class MetadataService:
                     )
                 )
         return items
+
+    async def resolve_collection(
+        self,
+        source: str,
+    ) -> tuple[str, list[TrackMetadata], dict[str, Any]]:
+        """Resolve one collection while preserving its adapter metadata."""
+        if self._resolver is None:
+            return "", await self.resolve(
+                DownloadRequest(sources=[source], config=SpotiFLACConfig())
+            ), {}
+        value = await self._resolver(source)
+        if isinstance(value, tuple):
+            name = value[0] if value and isinstance(value[0], str) else ""
+            tracks = value[1] if len(value) > 1 and isinstance(value[1], list) else []
+            info = value[2] if len(value) > 2 and isinstance(value[2], dict) else {}
+            return name, cast(list[TrackMetadata], tracks), info
+        return "", cast(list[TrackMetadata], value if isinstance(value, list) else []), {}

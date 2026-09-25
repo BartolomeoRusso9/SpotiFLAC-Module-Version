@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from SpotiFLAC.core.config import DownloadRequest
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
@@ -36,7 +36,7 @@ class LegacyDownloadAdapter(ProviderExecutor):
         self._forward_metadata = forward_metadata
 
     @property
-    def downloader(self) -> object:
+    def downloader(self) -> Any:
         """Return the wrapped engine for compatibility lifecycle wiring."""
         return self._downloader
 
@@ -60,6 +60,18 @@ class LegacyDownloadAdapter(ProviderExecutor):
                 "legacy downloader does not implement _resolve_metadata_async()"
             )
         return await resolver(source)
+
+    async def run_async(self, source: str | list[str], **kwargs: Any) -> Any:
+        runner = getattr(self._downloader, "run_async")
+        return await runner(source, **kwargs)
+
+    async def run_csv_async(self, path: str, **kwargs: Any) -> Any:
+        runner = getattr(self._downloader, "run_csv_async")
+        return await runner(path, **kwargs)
+
+    async def run_playlists_async(self, urls: list[str], **kwargs: Any) -> Any:
+        runner = getattr(self._downloader, "run_playlists_async")
+        return await runner(urls, **kwargs)
 
     @staticmethod
     def options_for(request: DownloadRequest) -> object:

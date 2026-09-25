@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import sys
+from typing import Any
 import time
 import warnings
 from collections.abc import Awaitable, Callable
@@ -40,11 +41,21 @@ from .core.notifiers import NOTIFY_TOKEN_ENV, NOTIFY_URL_ENV
 from .core.output_sink import sink_active
 from .core.report import RunReport
 from .core.transcode import LOSSLESS_FORMATS, SUPPORTED_FORMATS
-from .downloader import DownloadOptions, SpotiflacDownloader
+from .downloader import DownloadOptions
 from .application import DownloadService, LegacyDownloadAdapter
 from .core.config import DownloadRequest, SpotiFLACConfig
 from .core.web_users import ROLES as WEB_USER_ROLES
 from .extensions.trust import TRUST_TIERS
+
+# Test and embedding compatibility hook. Normal CLI construction goes through
+# LegacyDownloadAdapter; hosts may still inject the historical factory.
+SpotiflacDownloader: Any | None = None
+
+
+def _legacy_adapter(options: DownloadOptions) -> LegacyDownloadAdapter:
+    if SpotiflacDownloader is not None:
+        return LegacyDownloadAdapter(SpotiflacDownloader(options), options=options)
+    return LegacyDownloadAdapter.from_options(options)
 
 
 def _match_score(value: str) -> float:
@@ -107,7 +118,7 @@ def _argv_has(*flags: str) -> bool:
     )
 
 
-def build_cli_download_service(downloader: SpotiflacDownloader) -> DownloadService:
+def build_cli_download_service(downloader: Any) -> DownloadService:
     """Build the CLI service while keeping the legacy downloader behind the
     application execution boundary.
 
@@ -1760,7 +1771,7 @@ async def _run_download_async(
 
     try:
         if csv_path:
-            downloader = SpotiflacDownloader(opts)
+            adapter = _legacy_adapter(opts)
             # Resolved here rather than inside run_csv_async so the report
             # file (--csv-unresolved) is written even when the download that
             # follows is interrupted: the rows that need fixing are the part
@@ -1782,7 +1793,7 @@ async def _run_download_async(
                     "--playlist is ignored with --csv: run it separately to "
                     "sync those playlists.",
                 )
-            await downloader.run_csv_async(
+            await adapter.run_csv_async(
                 csv_path,
                 resolution=resolution,
                 m3u_format=m3u_format,
@@ -1790,17 +1801,17 @@ async def _run_download_async(
                 resolve_concurrency=csv_concurrency,
             )
         elif playlist_urls:
-            downloader = SpotiflacDownloader(opts)
+            adapter = _legacy_adapter(opts)
             if loop:
                 logger.warning(
                     "--loop is ignored with --playlist: run the command again "
                     "to sync the playlists.",
                 )
-            await downloader.run_playlists_async(playlist_urls, m3u_format=m3u_format)
+            await adapter.run_playlists_async(playlist_urls, m3u_format=m3u_format)
         else:
             if loop:
-                downloader = SpotiflacDownloader(opts)
-                await downloader.run_async(url, loop_minutes=loop)
+                adapter = _legacy_adapter(opts)
+                await adapter.run_async(url, loop_minutes=loop)
             else:
                 service = DownloadService(
                     provider_executor=LegacyDownloadAdapter.from_options(opts)
