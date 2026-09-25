@@ -43,6 +43,8 @@ class ProviderExecutor:
         timeout_s: int | None = None,
         resume_event: asyncio.Event | None = None,
     ) -> Exception | None:
+        last_error: Exception | None = None
+
         for _attempt in range(policy.attempts):
             await wait_until_resumed(resume_event)
             try:
