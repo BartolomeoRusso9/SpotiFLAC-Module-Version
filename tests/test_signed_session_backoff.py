@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from typing import Any, cast
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -199,7 +200,7 @@ def test_refresh_signs_the_bytes_it_actually_sends(tmp_path) -> None:
     http = _RecordingHttp(
         httpx.Response(200, json={"expires_at": new_expiry}, request=request)
     )
-    client._client = http
+    cast(Any, client)._client = http
 
     asyncio.run(client._refresh())
 
@@ -214,7 +215,7 @@ def test_a_refused_refresh_keeps_the_session_and_is_not_repeated(tmp_path) -> No
     client = _session_client(tmp_path)
     request = httpx.Request("POST", "https://gateway.invalid/v2/session/refresh")
     http = _RecordingHttp(httpx.Response(401, text="nope", request=request))
-    client._client = http
+    cast(Any, client)._client = http
 
     asyncio.run(client._refresh())
     asyncio.run(client._refresh())
@@ -225,7 +226,7 @@ def test_a_refused_refresh_keeps_the_session_and_is_not_repeated(tmp_path) -> No
 
 def test_a_refresh_that_cannot_connect_does_not_fail_the_request(tmp_path) -> None:
     client = _session_client(tmp_path)
-    client._client = _RecordingHttp(error=httpx.ConnectError("down"))
+    cast(Any, client)._client = _RecordingHttp(error=httpx.ConnectError("down"))
 
     asyncio.run(client._refresh())  # must not raise
 
@@ -237,7 +238,7 @@ def test_a_200_without_a_session_is_a_failed_refresh(tmp_path, body) -> None:
     client = _session_client(tmp_path)
     request = httpx.Request("POST", "https://gateway.invalid/v2/session/refresh")
     http = _RecordingHttp(httpx.Response(200, text=body, request=request))
-    client._client = http
+    cast(Any, client)._client = http
     expires = client.expires_at
 
     asyncio.run(client._refresh())
@@ -268,7 +269,7 @@ def test_concurrent_refreshes_post_once(tmp_path) -> None:
 
     first, second = _session_client(tmp_path), _session_client(tmp_path)
     assert first._path == second._path
-    first._client, second._client = _SlowHttp(), _SlowHttp()
+    cast(Any, first)._client, cast(Any, second)._client = _SlowHttp(), _SlowHttp()
 
     async def _both():
         await asyncio.gather(first._refresh(), second._refresh())
@@ -323,7 +324,7 @@ def test_a_timed_out_request_says_so_instead_of_returning_an_empty_error(
     async def _timeout(*args, **kwargs):
         raise httpx.ReadTimeout("")
 
-    client.request = _timeout
+    cast(Any, client).request = _timeout
 
     with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
         result = _fetch(client)

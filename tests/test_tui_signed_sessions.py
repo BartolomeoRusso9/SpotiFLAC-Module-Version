@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.core import signed_session_status as sss
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
@@ -77,11 +77,11 @@ async def test_lists_a_row_per_session(stub_sessions) -> None:
     from textual.widgets import DataTable
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SIGNED_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SIGNED_INDEX
         await _settled(pilot)
 
-        assert pilot.app.query_one("#signed-table", DataTable).row_count == 3
-        status = str(pilot.app.query_one("#signed-status").render())
+        assert app_of(pilot).query_one("#signed-table", DataTable).row_count == 3
+        status = str(app_of(pilot).query_one("#signed-status").render())
         assert "1 of 3 active" in status
         assert "1 orphaned" in status
 
@@ -91,11 +91,11 @@ async def test_clear_selected_clears_the_cursor_row(stub_sessions) -> None:
     from textual.widgets import Button, DataTable
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SIGNED_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SIGNED_INDEX
         await _settled(pilot)
 
-        pilot.app.query_one("#signed-table", DataTable).move_cursor(row=1)
-        pilot.app.query_one("#signed-clear", Button).press()
+        app_of(pilot).query_one("#signed-table", DataTable).move_cursor(row=1)
+        app_of(pilot).query_one("#signed-clear", Button).press()
         await _settled(pilot)
 
         assert stub_sessions["cleared"] == ["zarz-v2-b"]
@@ -106,11 +106,11 @@ async def test_prune_removes_orphans(stub_sessions) -> None:
     from textual.widgets import Button, DataTable
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SIGNED_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SIGNED_INDEX
         await _settled(pilot)
 
-        pilot.app.query_one("#signed-prune", Button).press()
+        app_of(pilot).query_one("#signed-prune", Button).press()
         await _settled(pilot)
 
         assert stub_sessions["pruned"] == 1
-        assert pilot.app.query_one("#signed-table", DataTable).row_count == 2
+        assert app_of(pilot).query_one("#signed-table", DataTable).row_count == 2

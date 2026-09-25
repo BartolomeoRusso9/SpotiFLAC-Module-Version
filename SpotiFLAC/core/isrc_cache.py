@@ -82,6 +82,7 @@ async def get_cached_isrc_async(track_id: str) -> str:
         cache = await _load_async()
         entry = cache.get(track_id, {})
         return entry.get("isrc", "").upper().strip()
+    return ""
 
 
 async def put_cached_isrc_async(track_id: str, isrc: str) -> None:

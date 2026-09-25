@@ -148,7 +148,15 @@ class DownloadRequest(BaseModel):
 class JobOut(BaseModel):
     id: str
     owner: str = ""
-    status: Literal["queued", "running", "done", "failed"]
+    status: Literal[
+        "queued",
+        "running",
+        "paused",
+        "retrying",
+        "done",
+        "failed",
+        "cancelled",
+    ]
     created_at: float
     started_at: float | None = None
     finished_at: float | None = None

@@ -188,6 +188,11 @@ class SignedSessionClient:
         self.pending_auth_url: str | None = None
         self.pending_sitekey: str | None = None
         self.pending_challenge_id: str | None = None
+        self.session_id: str | None = None
+        self.session_secret: str | None = None
+        self.expires_at: str | None = None
+        self.refresh_after: str | None = None
+        self.capabilities: list[Any] = []
         self._load()
 
     def set_cf_clearance(self, cf_clearance: str) -> None:
@@ -211,10 +216,14 @@ class SignedSessionClient:
             return
         if self._client is None:
             self._ensure_client()
+        assert self._client is not None
+        hostname = urlparse(self.base_url).hostname
+        if hostname is None:
+            return
         self._client.cookies.set(
             "cf_clearance",
             cf_clearance,
-            domain=urlparse(self.base_url).hostname,
+            domain=hostname,
         )
 
     # ─────────────────────── persistence ──────────────────────
@@ -349,6 +358,7 @@ class SignedSessionClient:
             return self.pending_auth_url
 
         self._ensure_client()
+        assert self._client is not None
         # 30, not 15. When the origin behind Cloudflare is down, the 522 takes
         # about 19.5s to come back — so a 15s read timeout always fired first
         # and turned a diagnosable "Error 522: connection timed out" into a
@@ -391,6 +401,7 @@ class SignedSessionClient:
     async def _scrape_sitekey_from_page(self, page_url: str) -> str | None:
         try:
             self._ensure_client()
+            assert self._client is not None
             resp = await self._client.get(page_url, timeout=10, follow_redirects=True)
         except Exception as exc:
             logger.debug(
@@ -575,6 +586,7 @@ class SignedSessionClient:
         Network tab of DevTools.
         """
         self._ensure_client()
+        assert self._client is not None
         resp = await self._client.post(
             f"{self.base_url}{self.endpoints['challenge']}/verify",
             json={"challenge_id": challenge_id, "turnstile_token": turnstile_token},
@@ -601,6 +613,7 @@ class SignedSessionClient:
             "platform": self.platform,
         }
         self._ensure_client()
+        assert self._client is not None
         resp = await self._client.post(
             f"{self.base_url}{self.endpoints['exchange']}",
             json=payload,
@@ -661,6 +674,7 @@ class SignedSessionClient:
         headers = self._sign_headers("POST", refresh_path, payload)
         headers["Content-Type"] = "application/json"
         self._ensure_client()
+        assert self._client is not None
         try:
             resp = await self._client.post(
                 f"{self.base_url}{refresh_path}",
@@ -752,7 +766,7 @@ class SignedSessionClient:
         window = int(time.time() // self.window_seconds)
 
         rk_bytes = hmac.new(
-            self.session_secret.encode(),
+            self.session_secret.encode() if self.session_secret else b"",
             f"{window}:{self.session_id}".encode(),
             hashlib.sha256,
         ).digest()
@@ -824,6 +838,7 @@ class SignedSessionClient:
             headers.update(extra_headers)
 
         self._ensure_client()
+        assert self._client is not None
         # Log headers and body we're about to send to the server
         try:
             b_preview = body[:1024]

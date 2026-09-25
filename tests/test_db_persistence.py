@@ -64,7 +64,7 @@ def test_submitted_job_is_written_to_the_store():
     assert row["finished_at"] is not None
 
 
-def test_unfinished_jobs_are_restored_and_rerun():
+def test_unfinished_jobs_are_restored_and_rerun() -> None:
     """A queue built over a store with queued work picks it up."""
     # Simulate what a killed process leaves behind: one QUEUED, one RUNNING.
     with db.transaction() as conn:
@@ -84,15 +84,17 @@ def test_unfinished_jobs_are_restored_and_rerun():
     _wait_until(lambda: len(seen) == 2)
     # Submission order, and the finished one is never re-run.
     assert seen == [1, 2]
-    assert q.get("j-done").status is JobStatus.DONE
-    assert q.get("j-running").started_at is not None
+    done_job = q.get("j-done")
+    running_job = q.get("j-running")
+    assert done_job is not None and done_job.status is JobStatus.DONE
+    assert running_job is not None and running_job.started_at is not None
 
 
 @pytest.mark.parametrize(
     ("kind", "expected", "untouched"),
     [("single-user", "s", "m1"), ("multiuser", "m", "s1")],
 )
-def test_a_queue_restores_only_its_own_kind_of_job(kind, expected, untouched):
+def test_a_queue_restores_only_its_own_kind_of_job(kind, expected, untouched) -> None:
     """A process restarted in the other mode must not run the other queue's jobs.
 
     Single-user --web and multi-user persist into the same table with payloads
@@ -121,7 +123,7 @@ def test_a_queue_restores_only_its_own_kind_of_job(kind, expected, untouched):
     assert row["status"] in ("running", "queued"), "left for its own queue"
 
 
-def test_jobs_from_before_queue_kinds_stay_multi_users():
+def test_jobs_from_before_queue_kinds_stay_multi_users() -> None:
     with db.transaction() as conn:
         conn.execute(
             "INSERT INTO jobs (id, owner, payload, status, created_at, kind) "

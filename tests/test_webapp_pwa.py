@@ -17,8 +17,8 @@ TestClient = fastapi_testclient.TestClient
 
 
 def test_manifest_is_served_and_valid() -> None:
-    client = TestClient(webapp.create_app())
-    resp = client.get("/manifest.json")
+    with TestClient(webapp.create_app()) as client:
+        resp = client.get("/manifest.json")
     assert resp.status_code == 200
 
     manifest = resp.json()
@@ -42,8 +42,8 @@ def test_manifest_icons_exist_as_real_files() -> None:
 
 
 def test_service_worker_is_served_with_javascript_content_type() -> None:
-    client = TestClient(webapp.create_app())
-    resp = client.get("/sw.js")
+    with TestClient(webapp.create_app()) as client:
+        resp = client.get("/sw.js")
     assert resp.status_code == 200
     assert "javascript" in resp.headers["content-type"]
     assert "registerExtension" not in resp.text  # sanity: not the wrong file
@@ -57,15 +57,15 @@ def test_service_worker_never_intercepts_api_or_ws_paths() -> None:
 
 
 def test_index_html_declares_the_manifest_and_theme_color() -> None:
-    client = TestClient(webapp.create_app())
-    html = client.get("/").text
+    with TestClient(webapp.create_app()) as client:
+        html = client.get("/").text
     assert 'rel="manifest"' in html
     assert 'name="theme-color"' in html
 
 
 def test_index_html_registers_the_service_worker_gated_on_web_mode() -> None:
-    client = TestClient(webapp.create_app())
-    html = client.get("/").text
+    with TestClient(webapp.create_app()) as client:
+        html = client.get("/").text
     assert "__SPOTIFLAC_WEB_MODE__" in html  # injected by webapp.py's index()
     assert "navigator.serviceWorker.register" in html
     # The registration script must run after the web-mode flag is set, so

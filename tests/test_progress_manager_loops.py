@@ -14,6 +14,7 @@ execution" at the end of a download that had actually succeeded.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Generator
 
 import pytest
 
@@ -21,7 +22,7 @@ from SpotiFLAC.core.progress import ProgressManager
 
 
 @pytest.fixture(autouse=True)
-def _no_bars(monkeypatch: pytest.MonkeyPatch) -> None:
+def _no_bars(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Keep tqdm out of it; this is about the queue, not the drawing."""
     monkeypatch.setenv("SPOTIFLAC_PROGRESS_BARS", "0")
     ProgressManager._event_queue = None

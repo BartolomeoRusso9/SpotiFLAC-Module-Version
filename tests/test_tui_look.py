@@ -10,7 +10,7 @@ make them recognisable.
 from __future__ import annotations
 
 
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.tui import branding
 from SpotiFLAC.tui.app import THEMES, SpotiFLACTui
@@ -171,12 +171,12 @@ async def test_every_panel_tag_actually_draws() -> None:
     async with SpotiFLACTui(_ready_state()).run_test(size=(104, 36)) as pilot:
         keys = [key for key, _label in MODES]
         for key in keys:
-            pilot.app.query_one("#sidebar").index = keys.index(key)
+            app_of(pilot).query_one("#sidebar").index = keys.index(key)
             for _ in range(4):
                 await pilot.pause()
 
-            panel = pilot.app.query_one(f"#{key}")
-            drawn = re.sub(r"<[^>]+>", "", pilot.app.export_screenshot())
+            panel = app_of(pilot).query_one(f"#{key}")
+            drawn = re.sub(r"<[^>]+>", "", app_of(pilot).export_screenshot())
             drawn = drawn.replace("&#160;", " ")
             expected = str(panel.border_subtitle).replace("\\", "").strip()
 
@@ -226,7 +226,7 @@ def test_the_key_is_the_coloured_part_of_a_hint() -> None:
 @drives_the_ui
 async def test_the_default_theme_is_the_one_the_screen_was_drawn_against() -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        assert pilot.app.theme == "catppuccin-mocha"
+        assert app_of(pilot).theme == "catppuccin-mocha"
 
 
 def test_every_offered_theme_exists() -> None:
@@ -240,15 +240,15 @@ def test_every_offered_theme_exists() -> None:
 @drives_the_ui
 async def test_the_banner_and_hint_bar_replace_the_default_chrome() -> None:
     async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
-        assert isinstance(pilot.app.query_one("#banner"), Banner)
-        assert isinstance(pilot.app.query_one("#hints"), HintBar)
+        assert isinstance(app_of(pilot).query_one("#banner"), Banner)
+        assert isinstance(app_of(pilot).query_one("#hints"), HintBar)
 
-        wordmark = str(pilot.app.query_one("#wordmark").content)
+        wordmark = str(app_of(pilot).query_one("#wordmark").content)
         assert wordmark == branding.WORDMARK_FULL
 
         # The version hangs off the wordmark's right edge, as MovieBox tucks
         # its own under the last letter — not centred under the whole block.
-        subtitle = str(pilot.app.query_one("#wordmark-subtitle").content)
+        subtitle = str(app_of(pilot).query_one("#wordmark-subtitle").content)
         assert subtitle.strip().startswith("v")
         assert subtitle.startswith(" "), "the version is positioned by padding"
 
@@ -257,7 +257,7 @@ async def test_the_banner_and_hint_bar_replace_the_default_chrome() -> None:
 async def test_the_banner_leaves_room_for_its_subtitle() -> None:
     """It was sized to the art alone, and the subtitle fell off the bottom."""
     async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
-        banner = pilot.app.query_one("#banner", Banner)
+        banner = app_of(pilot).query_one("#banner", Banner)
         rows = len(branding.WORDMARK_FULL.split("\n"))
         assert banner.size.height >= rows + 1
 
@@ -268,7 +268,7 @@ async def test_every_panel_is_a_titled_card() -> None:
 
     async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         for key, _label in MODES:
-            panel = pilot.app.query_one(f"#{key}")
+            panel = app_of(pilot).query_one(f"#{key}")
             assert str(panel.border_title).strip(), f"#{key} has no title"
             assert panel.border_subtitle, f"#{key} has no tag"
             assert panel.styles.border.top[0] == "round"
@@ -285,13 +285,13 @@ async def test_a_transient_message_becomes_a_toast() -> None:
     """
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         sent: list[dict] = []
-        pilot.app.notify = lambda message, **kwargs: sent.append(
+        app_of(pilot).notify = lambda message, **kwargs: sent.append(
             {"message": message, **kwargs},
         )
 
-        pilot.app._toast("it worked", "success")
-        pilot.app._toast("it did not", "error")
-        pilot.app._toast("careful", "warning")
+        app_of(pilot)._toast("it worked", "success")
+        app_of(pilot)._toast("it did not", "error")
+        app_of(pilot)._toast("careful", "warning")
 
         assert [note["severity"] for note in sent] == [
             "information",
@@ -304,36 +304,36 @@ async def test_a_transient_message_becomes_a_toast() -> None:
         # is where MovieBox has it and where it costs no line inside a box
         # three rows tall. The words are queued for the widget to claim.
         assert all("title" not in note for note in sent)
-        assert pilot.app._pending_toast_labels == ["DONE", "ERROR", "WARNING"]
+        assert app_of(pilot)._pending_toast_labels == ["DONE", "ERROR", "WARNING"]
 
 
 @drives_the_ui
 async def test_a_missing_toast_widget_does_not_leak_labels() -> None:
     """`Toast` is a private Textual class; this must survive it moving."""
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.notify = lambda message, **kwargs: None
-        pilot.app._toast("something happened", "warning")
-        assert pilot.app._pending_toast_labels == ["WARNING"]
+        app_of(pilot).notify = lambda message, **kwargs: None
+        app_of(pilot)._toast("something happened", "warning")
+        assert app_of(pilot)._pending_toast_labels == ["WARNING"]
 
         # Textual mounts no Toast under run_test, so this exercises the same
         # path a future version without `_toast` would take.
-        pilot.app._label_toast_borders()
+        app_of(pilot)._label_toast_borders()
         await pilot.pause()
 
-        assert len(pilot.app._pending_toast_labels) <= 1
+        assert len(app_of(pilot)._pending_toast_labels) <= 1
 
 
 @drives_the_ui
 async def test_announcing_says_it_in_both_places() -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         sent: list[str] = []
-        pilot.app.notify = lambda message, **kwargs: sent.append(message)
+        app_of(pilot).notify = lambda message, **kwargs: sent.append(message)
 
-        pilot.app._announce("the run finished", "success")
+        app_of(pilot)._announce("the run finished", "success")
         await pilot.pause()
 
         assert sent == ["the run finished"]
-        assert "the run finished" in str(pilot.app.query_one("#status").content)
+        assert "the run finished" in str(app_of(pilot).query_one("#status").content)
 
 
 @drives_the_ui
@@ -341,43 +341,45 @@ async def test_progress_ticks_never_toast() -> None:
     """One toast per progress event would bury what you are watching."""
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         sent: list[str] = []
-        pilot.app.notify = lambda message, **kwargs: sent.append(message)
+        app_of(pilot).notify = lambda message, **kwargs: sent.append(message)
 
-        pilot.app._set_status("2 done · 3 queued · 4.1 MB/s")
+        app_of(pilot)._set_status("2 done · 3 queued · 4.1 MB/s")
         await pilot.pause()
 
         assert sent == []
-        assert "2 done" in str(pilot.app.query_one("#status").content)
+        assert "2 done" in str(app_of(pilot).query_one("#status").content)
 
 
 @drives_the_ui
 async def test_a_panes_title_fills_in_when_it_takes_focus() -> None:
     async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
-        sidebar = pilot.app.query_one("#sidebar")
+        sidebar = app_of(pilot).query_one("#sidebar")
         sidebar.focus()
         await pilot.pause()
 
         assert str(sidebar.border_title).startswith("●")
-        assert not str(pilot.app.query_one("#download").border_title).startswith("●")
+        assert not str(app_of(pilot).query_one("#download").border_title).startswith(
+            "●"
+        )
 
-        pilot.app.query_one("#cfg-output_dir").focus()
+        app_of(pilot).query_one("#cfg-output_dir").focus()
         await pilot.pause()
 
-        assert str(pilot.app.query_one("#download").border_title).startswith("●")
+        assert str(app_of(pilot).query_one("#download").border_title).startswith("●")
         assert not str(sidebar.border_title).startswith("●")
 
 
 @drives_the_ui
 async def test_the_status_line_is_marked_by_severity() -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        status = pilot.app.query_one("#status")
+        status = app_of(pilot).query_one("#status")
 
-        pilot.app._set_status("all good", "success")
+        app_of(pilot)._set_status("all good", "success")
         await pilot.pause()
         assert status.has_class("notice-success")
         assert "✔" in str(status.content)
 
-        pilot.app._set_status("careful", "warning")
+        app_of(pilot)._set_status("careful", "warning")
         await pilot.pause()
         assert status.has_class("notice-warning")
         assert not status.has_class("notice-success"), "the old class stuck"
@@ -386,7 +388,7 @@ async def test_the_status_line_is_marked_by_severity() -> None:
 @drives_the_ui
 async def test_the_hint_bar_drops_hints_rather_than_truncating() -> None:
     async with SpotiFLACTui(_ready_state()).run_test(size=(60, 30)) as pilot:
-        bar = pilot.app.query_one("#hints", HintBar)
+        bar = app_of(pilot).query_one("#hints", HintBar)
         await pilot.pause()
         # `content` is the markup; what has to fit is the text it renders to.
         rendered = str(bar.render())
@@ -400,12 +402,12 @@ async def test_the_hint_bar_drops_hints_rather_than_truncating() -> None:
 @drives_the_ui
 async def test_the_quality_badge_follows_the_selected_tier() -> None:
     async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
-        badge = pilot.app.query_one("#quality-badge")
+        badge = app_of(pilot).query_one("#quality-badge")
         assert "LOSSLESS" in str(badge.content)
         assert badge.has_class("badge-sapphire")
 
-        pilot.app.state.quality = "HI_RES_LOSSLESS"
-        pilot.app.query_one("#download")._refresh_dependencies()
+        app_of(pilot).state.quality = "HI_RES_LOSSLESS"
+        app_of(pilot).query_one("#download")._refresh_dependencies()
         await pilot.pause()
 
         assert "HI-RES" in str(badge.content)

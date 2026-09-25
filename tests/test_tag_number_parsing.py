@@ -119,6 +119,7 @@ def test_a_vinyl_track_number_still_leaves_the_file_tagged(m4a: Path) -> None:
     )
 
     tags = MP4(str(m4a)).tags
+    assert tags is not None
     assert tags["\xa9nam"] == ["Uuugly"]
     assert tags["\xa9ART"] == ["Drake"]
     assert tags["\xa9alb"] == ["C,XOXO"]
@@ -135,5 +136,6 @@ def test_an_unparseable_bpm_does_not_take_the_rest_with_it(m4a: Path) -> None:
     _embed_m4a(m4a, {"TITLE": "Uuugly", "BPM": "unknown"}, None, None, "")
 
     tags = MP4(str(m4a)).tags
+    assert tags is not None
     assert tags["\xa9nam"] == ["Uuugly"]
     assert "tmpo" not in tags

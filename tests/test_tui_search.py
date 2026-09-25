@@ -8,10 +8,12 @@ would drift.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 import pytest
 
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
@@ -49,7 +51,7 @@ _RESULTS = {
 
 
 @pytest.fixture
-def stub_search(monkeypatch):
+def stub_search(monkeypatch) -> Any:
     queries: list[str] = []
 
     async def _search(query, limit=50):
@@ -74,42 +76,42 @@ async def _settled(pilot) -> None:
 @drives_the_ui
 async def test_slash_goes_to_the_search_box(stub_search) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").focus()
+        app_of(pilot).query_one("#sidebar").focus()
         await pilot.pause()
 
         await pilot.press("slash")
         await _settled(pilot)
 
-        assert pilot.app.query_one("#panels").current == "search"
-        assert pilot.app.focused is pilot.app.query_one("#search-query")
+        assert app_of(pilot).query_one("#panels").current == "search"
+        assert app_of(pilot).focused is app_of(pilot).query_one("#search-query")
 
 
 @drives_the_ui
 async def test_results_are_listed_and_linkless_ones_dropped(stub_search) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SEARCH_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SEARCH_INDEX
         await _settled(pilot)
 
-        panel = pilot.app.query_one("#search", SearchPanel)
+        panel = app_of(pilot).query_one("#search", SearchPanel)
         panel.search("miles")
         await _settled(pilot)
 
         from textual.widgets import DataTable
 
-        table = pilot.app.query_one("#search-results", DataTable)
+        table = app_of(pilot).query_one("#search-results", DataTable)
         # Two of the three have a link; the third would be a decorative row.
         assert table.row_count == 2
         assert stub_search == ["miles"]
-        assert "2 result(s)" in str(pilot.app.query_one("#search-status").render())
+        assert "2 result(s)" in str(app_of(pilot).query_one("#search-status").render())
 
 
 @drives_the_ui
 async def test_picking_a_result_fills_the_download_url(stub_search) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SEARCH_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SEARCH_INDEX
         await _settled(pilot)
 
-        panel = pilot.app.query_one("#search", SearchPanel)
+        panel = app_of(pilot).query_one("#search", SearchPanel)
         panel.search("miles")
         await _settled(pilot)
 
@@ -121,25 +123,27 @@ async def test_picking_a_result_fills_the_download_url(stub_search) -> None:
         from textual.widgets import Input
 
         assert (
-            pilot.app.query_one("#cfg-url", Input).value
+            app_of(pilot).query_one("#cfg-url", Input).value
             == "https://open.spotify.com/album/a1"
         )
-        assert pilot.app.state.url == "https://open.spotify.com/album/a1"
-        assert pilot.app.query_one("#panels").current == "download"
-        assert "Kind of Blue" in str(pilot.app.query_one("#status").content)
+        assert app_of(pilot).state.url == "https://open.spotify.com/album/a1"
+        assert app_of(pilot).query_one("#panels").current == "download"
+        assert "Kind of Blue" in str(app_of(pilot).query_one("#status").content)
 
 
 @drives_the_ui
 async def test_an_empty_query_is_not_searched(stub_search) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SEARCH_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SEARCH_INDEX
         await _settled(pilot)
 
-        pilot.app.query_one("#search", SearchPanel).search("   ")
+        app_of(pilot).query_one("#search", SearchPanel).search("   ")
         await _settled(pilot)
 
         assert stub_search == []
-        assert "Type something" in str(pilot.app.query_one("#search-status").render())
+        assert "Type something" in str(
+            app_of(pilot).query_one("#search-status").render()
+        )
 
 
 @drives_the_ui
@@ -153,14 +157,14 @@ async def test_a_failing_search_is_reported_not_raised(monkeypatch) -> None:
     monkeypatch.setattr(search_module, "search_metadata_async", _explode)
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SEARCH_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SEARCH_INDEX
         await _settled(pilot)
 
-        pilot.app.query_one("#search", SearchPanel).search("miles")
+        app_of(pilot).query_one("#search", SearchPanel).search("miles")
         await _settled(pilot)
 
         assert "spotify said no" in str(
-            pilot.app.query_one("#search-status").render(),
+            app_of(pilot).query_one("#search-status").render(),
         )
 
 
@@ -174,10 +178,10 @@ async def test_nothing_found_says_so(monkeypatch) -> None:
     monkeypatch.setattr(search_module, "search_metadata_async", _nothing)
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _SEARCH_INDEX
+        app_of(pilot).query_one("#sidebar").index = _SEARCH_INDEX
         await _settled(pilot)
 
-        pilot.app.query_one("#search", SearchPanel).search("zzzz")
+        app_of(pilot).query_one("#search", SearchPanel).search("zzzz")
         await _settled(pilot)
 
-        assert "Nothing for" in str(pilot.app.query_one("#search-status").render())
+        assert "Nothing for" in str(app_of(pilot).query_one("#search-status").render())

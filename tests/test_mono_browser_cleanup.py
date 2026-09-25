@@ -19,6 +19,7 @@ import asyncio
 import sys
 import time
 import types
+from typing import Any, cast
 
 from SpotiFLAC.downloader import _close_shared_browser_sessions
 
@@ -27,7 +28,7 @@ _MONO = "SpotiFLAC.core.signed_session_mono"
 
 def _stub(on_close) -> types.ModuleType:
     module = types.ModuleType(_MONO)
-    module.close_mono_browser_session = on_close
+    cast(Any, module).close_mono_browser_session = on_close
     return module
 
 

@@ -10,11 +10,13 @@ gone after a restart), and failures stay listed until they download.
 
 from __future__ import annotations
 
+from typing import Any
+
 import time
+from types import SimpleNamespace
 
 import pytest
 
-import SpotiFLAC as spotiflac_pkg
 from SpotiFLAC.app import SpotiFLAC_API
 from SpotiFLAC.core import db, failed_tracks
 from SpotiFLAC.core.models import DownloadResult, TrackMetadata
@@ -45,9 +47,23 @@ class _RecordingQueue:
 
 
 @pytest.fixture()
-def calls(monkeypatch):
+def calls(monkeypatch) -> Any:
     seen: list[dict] = []
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", lambda **kw: seen.append(kw))
+
+    class FakeDownloadService:
+        def __init__(self, *, provider_executor=None, **_kwargs):
+            self.provider_executor = provider_executor
+
+        async def download(self, request):
+            seen.append(
+                {
+                    "url": list(request.sources),
+                    "prefetched_tracks": dict(request.prefetched or {}),
+                }
+            )
+            return SimpleNamespace()
+
+    monkeypatch.setattr("SpotiFLAC.application.DownloadService", FakeDownloadService)
     return seen
 
 
@@ -112,7 +128,7 @@ def test_retry_groups_keep_the_source_and_clear_takes_keys():
 
 def test_a_web_download_is_written_down_as_tracks_not_positions(tmp_path, calls):
     api = _api(tmp_path)
-    api._download_queue = _RecordingQueue()
+    setattr(api, "_download_queue", _RecordingQueue())
 
     api.download_tracks([0, 2], {"services": ["tidal"]})
 
@@ -124,17 +140,19 @@ def test_a_web_download_is_written_down_as_tracks_not_positions(tmp_path, calls)
     assert payload["source_url"] == PLAYLIST
 
 
-def test_a_job_resumes_after_a_restart_without_the_tracklist(tmp_path, calls):
+def test_a_job_resumes_after_a_restart_without_the_tracklist(tmp_path, calls) -> None:
     before = _api(tmp_path)
-    before._download_queue = _RecordingQueue()
+    setattr(before, "_download_queue", _RecordingQueue())
     before.download_tracks([0, 2], {"services": ["tidal"]})
     # Exactly what the jobs table hands back to the next process.
-    payload = db.loads(db.dumps(before._download_queue.jobs[0][1]))
+    queue = getattr(before, "_download_queue")
+    assert queue is not None
+    payload = db.loads(db.dumps(queue.jobs[0][1]))
 
     after = SpotiFLAC_API()  # empty tracklist, new session
     after.download_dir = str(tmp_path)
     pushed: list[tuple[str, tuple]] = []
-    after._push = lambda name, *args: pushed.append((name, args))
+    setattr(after, "_push", lambda name, *args: pushed.append((name, args)))
     after.run_download_job(payload)
 
     [call] = calls
@@ -152,7 +170,7 @@ def test_a_job_resumes_after_a_restart_without_the_tracklist(tmp_path, calls):
 
 def test_a_whole_playlist_resumes_as_the_playlist(tmp_path, calls):
     api = _api(tmp_path)
-    api._download_queue = _RecordingQueue()
+    setattr(api, "_download_queue", _RecordingQueue())
     api.download_tracks([0, 1, 2], {"services": ["tidal"]})
     payload = api._download_queue.jobs[0][1]
     assert payload["whole"] is True
@@ -160,22 +178,24 @@ def test_a_whole_playlist_resumes_as_the_playlist(tmp_path, calls):
     fresh = SpotiFLAC_API()
     fresh.download_dir = str(tmp_path)
     fresh.run_download_job(payload)
-    assert calls[-1]["url"] == PLAYLIST
+    assert calls[-1]["url"] == [PLAYLIST]
 
 
-def test_this_sessions_job_still_closes_its_own_batch(tmp_path, calls):
+def test_this_sessions_job_still_closes_its_own_batch(tmp_path, calls) -> None:
     api = _api(tmp_path)
-    api._download_queue = _RecordingQueue()
+    setattr(api, "_download_queue", _RecordingQueue())
     api.download_tracks([1], {"services": ["tidal"]})
     pushed: list[tuple[str, tuple]] = []
-    api._push = lambda name, *args: pushed.append((name, args))
+    setattr(api, "_push", lambda name, *args: pushed.append((name, args)))
 
-    api.run_download_job(api._download_queue.jobs[0][1])
+    queue = getattr(api, "_download_queue")
+    assert queue is not None
+    api.run_download_job(queue.jobs[0][1])
 
     assert ("app_download_finished", (True, [1])) in pushed
 
 
-def test_the_desktop_window_still_downloads_straight_away(tmp_path, calls):
+def test_the_desktop_window_still_downloads_straight_away(tmp_path, calls) -> None:
     api = _api(tmp_path)  # no queue: what the desktop build gets
     api.download_tracks([0], {"services": ["tidal"]})
     deadline = time.time() + 3
@@ -185,11 +205,17 @@ def test_the_desktop_window_still_downloads_straight_away(tmp_path, calls):
 
 
 def test_a_batchs_failures_are_listed_with_their_source(tmp_path, monkeypatch):
-    def _fake_download(**kw):
-        for hook in kw["post_download_hooks"]:
-            hook(DownloadResult.fail("tidal", "no stream"), _track(1))
+    class FailingDownloadService:
+        def __init__(self, *, provider_executor=None, **_kwargs):
+            self.provider_executor = provider_executor
 
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", _fake_download)
+        async def download(self, _request):
+            options = self.provider_executor.downloader._opts
+            for hook in options.post_download_hooks:
+                hook(DownloadResult.fail("tidal", "no stream"), _track(1))
+            return SimpleNamespace()
+
+    monkeypatch.setattr("SpotiFLAC.application.DownloadService", FailingDownloadService)
     _api(tmp_path)._download_task([1], {"services": ["tidal"]})
 
     [item] = failed_tracks.list_for()
@@ -216,7 +242,7 @@ def test_retry_submits_the_missing_tracks_as_a_background_job():
 # ── webapp.py wiring ──────────────────────────────────────────────────────
 
 
-def test_single_user_web_resumes_a_job_the_last_process_left(monkeypatch):
+def test_single_user_web_resumes_a_job_the_last_process_left(monkeypatch) -> None:
     pytest.importorskip("fastapi")
     from SpotiFLAC import webapp
 

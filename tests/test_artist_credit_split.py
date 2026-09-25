@@ -10,10 +10,11 @@ the fix is to keep the list the source actually had.
 from __future__ import annotations
 
 import pytest
+from typing import Any
 
 from SpotiFLAC.core.models import TrackMetadata, build_filename, split_credit
 
-CHROMAKOPIA = {
+CHROMAKOPIA: dict[str, Any] = {
     "id": "6jbYpRPTEFl1HFKHk1IC0m",
     "title": "Like Him (feat. Lola Young)",
     "artists": "Tyler, The Creator, Lola Young",

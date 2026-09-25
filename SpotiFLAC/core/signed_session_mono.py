@@ -22,6 +22,7 @@ import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from pydoll.browser.chromium import Chrome
 from pydoll.protocol.network.events import NetworkEvent
@@ -146,7 +147,7 @@ class _MonochromeBrowserSession:
 
     def __init__(self) -> None:
         self._browser: Chrome | None = None
-        self._tab = None
+        self._tab: Any = None
         self._lock = asyncio.Lock()
         self._record = load_monochrome_session()
         self._ever_solved = False
@@ -159,7 +160,7 @@ class _MonochromeBrowserSession:
         # as long as this persistent browser is alive. Entered/exited
         # manually (not via `async with`) because the slot needs to stay
         # held across many fetch_track() calls, not just one.
-        self._slot_cm = None
+        self._slot_cm: Any = None
 
     async def _ensure_browser(self) -> None:
         if self._browser is not None and self._tab is not None:

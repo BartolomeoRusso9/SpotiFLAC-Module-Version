@@ -43,7 +43,7 @@ def test_job_failure_is_captured_not_raised():
     assert failed.result is None
 
 
-def test_jobs_run_in_submission_order_with_one_worker():
+def test_jobs_run_in_submission_order_with_one_worker() -> None:
     order: list[int] = []
     lock = threading.Lock()
 
@@ -54,7 +54,13 @@ def test_jobs_run_in_submission_order_with_one_worker():
     q = JobQueue(handler=handler, workers=1)
     jobs = [q.submit("alice", {"n": i}) for i in range(10)]
 
-    _wait_until(lambda: all(q.get(j.id).status == JobStatus.DONE for j in jobs))
+    def done() -> bool:
+        return all(
+            (job := q.get(j.id)) is not None and job.status == JobStatus.DONE
+            for j in jobs
+        )
+
+    _wait_until(done)
     assert order == list(range(10))
 
 

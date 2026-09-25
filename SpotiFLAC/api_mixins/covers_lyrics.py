@@ -13,6 +13,7 @@ import asyncio
 import os
 import re
 import threading
+from typing import TYPE_CHECKING, Any
 
 import aiofiles
 import httpx
@@ -22,6 +23,11 @@ from ..core.spotify_metadata import _maximize_cover_url
 
 
 class CoversLyricsMixin:
+    if TYPE_CHECKING:
+        download_dir: str
+        load_settings: Any
+        log: Any
+        _push: Any
     # ── Lyrics download (separate .lrc file) ──────────────────────────────────
 
     def download_track_lyrics(self, track_data) -> None:

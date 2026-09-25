@@ -11,14 +11,15 @@ composer — which that metadata does not carry — costs one credits request.
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 
 import pytest
 
-import SpotiFLAC as spotiflac_pkg
 from SpotiFLAC.app import SpotiFLAC_API
 from SpotiFLAC.core import spotfetch
 from SpotiFLAC.core.models import TrackMetadata
 from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
+from tests.application_download_capture import capture_service
 
 PLAYLIST = "https://open.spotify.com/playlist/abc"
 
@@ -39,9 +40,9 @@ def _track(n: int, **extra) -> TrackMetadata:
 
 
 @pytest.fixture()
-def download(tmp_path, monkeypatch):
+def download(tmp_path, monkeypatch) -> Any:
     seen: list[dict] = []
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", lambda **kw: seen.append(kw))
+    capture_service(monkeypatch, seen)
 
     def _run(indices, url=PLAYLIST, tracks=None):
         api = SpotiFLAC_API()
@@ -178,7 +179,7 @@ class _FakeCredits:
 def _composer_of(track: TrackMetadata, tmp_path) -> tuple[str, list[str]]:
     downloader = SpotiflacDownloader(DownloadOptions(output_dir=str(tmp_path)))
     credits = _FakeCredits()
-    downloader._metadata_client = lambda: credits
+    setattr(downloader, "_metadata_client", cast(Any, lambda: credits))
     result = asyncio.run(downloader._with_composer_async(track, asyncio.Semaphore(1)))
     return result.composer, credits.web_client.asked
 

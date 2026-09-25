@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SpotiFLAC"
-version = "4.3.1"
+version = "5.0.0"
 description = "Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends."
 readme = "README.md"
 # 3.10, not 3.9: core/models.py declares PEP 604 unions (`str | None`) on
@@ -155,6 +155,7 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.mypy]
 python_version = "3.10"
+explicit_package_bases = true
 ignore_missing_imports = true
 # Baseline as of 2026-08: ~177 pre-existing errors across the codebase (most
 # of it predates type checking entirely). Kept intentionally lenient and

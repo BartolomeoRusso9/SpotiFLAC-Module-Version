@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,12 @@ def shape_search_results(
     `getattr` with a default throughout: a provider that stops returning one
     field should cost that field, not the whole search.
     """
-    out = {"tracks": [], "albums": [], "artists": [], "playlists": []}
+    out: dict[str, list] = {
+        "tracks": [],
+        "albums": [],
+        "artists": [],
+        "playlists": [],
+    }
 
     # --- Tracks ---
     for t in results.get("tracks", [])[:limit]:
@@ -145,7 +150,7 @@ def _search_client(source: str | None):
         return SpotifyMetadataClient()
     from ..core.extension_metadata import ExtensionMetadataClient
 
-    return ExtensionMetadataClient.for_source(source)
+    return ExtensionMetadataClient.for_source(source or "")
 
 
 async def search_metadata_async(
@@ -166,6 +171,8 @@ async def search_metadata_async(
 
 
 class SearchMixin:
+    if TYPE_CHECKING:
+        _push: Any
     """The two blocking entry points the desktop GUI needs."""
 
     def get_metadata_sources(self):

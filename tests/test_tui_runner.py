@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any, cast
 
 import pytest
 
 import SpotiFLAC.launcher as launcher_module
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.core import output_sink
 from SpotiFLAC.core.console import print_run_header, print_track_done
@@ -168,7 +169,7 @@ async def test_cancelling_the_iteration_restores_the_terminal(
         await task
     except asyncio.CancelledError:
         pass
-    await events.aclose()
+    await events.aclose()  # type: ignore[attr-defined]
 
     assert not output_sink.sink_active()
     capfd.readouterr()
@@ -244,11 +245,11 @@ def test_a_bar_never_contradicts_its_badge() -> None:
 
     def _applied(status: str, **extra) -> dict:
         row = TrackRow({"id": "t", "track_name": "x", "status": status})
-        row._bar = _Bar()
+        row._bar = cast(Any, _Bar())
         row._label = None
         row._badge = None
         row.apply({"id": "t", "track_name": "x", "status": status, **extra})
-        return row._bar.calls[-1]
+        return cast(_Bar, row._bar).calls[-1]
 
     assert _applied("completed") == {"total": 1.0, "progress": 1.0}
     assert _applied("failed") == {"total": 1.0, "progress": 0.0}
@@ -296,16 +297,16 @@ async def test_the_queue_panel_fills_from_broadcaster_events(monkeypatch) -> Non
     )
 
     async with SpotiFLACTui(state).run_test() as pilot:
-        pilot.app.action_start_download()
+        app_of(pilot).action_start_download()
 
         for _ in range(200):
             await pilot.pause()
-            if not pilot.app._download_running:
+            if not app_of(pilot)._download_running:
                 break
 
         from SpotiFLAC.tui.queue_view import QueuePanel
 
-        queue = pilot.app.query_one("#queue", QueuePanel)
+        queue = app_of(pilot).query_one("#queue", QueuePanel)
         assert len(queue._rows) == 1
 
         row = next(iter(queue._rows.values()))
@@ -318,8 +319,8 @@ async def test_the_queue_panel_fills_from_broadcaster_events(monkeypatch) -> Non
 
         # The run's console output ends up in the log pane, which the run
         # itself reveals — there is nowhere else for it to go.
-        assert pilot.app.query_one("#log-pane").display is True
-        assert "downloaded" in str(pilot.app.query_one("#status").content)
+        assert app_of(pilot).query_one("#log-pane").display is True
+        assert "downloaded" in str(app_of(pilot).query_one("#status").content)
 
 
 # ---------------------------------------------------------------------------
@@ -337,12 +338,12 @@ async def test_the_log_is_a_column_beside_the_panel_when_there_is_room() -> None
     path it prints.
     """
     async with SpotiFLACTui().run_test(size=(170, 62)) as pilot:
-        pilot.app._set_log_visible(True)
+        app_of(pilot)._set_log_visible(True)
         await pilot.pause()
 
-        panels = pilot.app.query_one("#panels")
-        log_pane = pilot.app.query_one("#log-pane")
-        log = pilot.app.query_one("#log")
+        panels = app_of(pilot).query_one("#panels")
+        log_pane = app_of(pilot).query_one("#log-pane")
+        log = app_of(pilot).query_one("#log")
 
         assert log_pane.region.x > panels.region.x, "the log should be to the right"
         assert log_pane.region.y == panels.region.y, "and start at the same line"
@@ -353,11 +354,11 @@ async def test_the_log_is_a_column_beside_the_panel_when_there_is_room() -> None
 async def test_a_narrow_terminal_puts_the_log_back_under_the_panel() -> None:
     """Two columns out of 100 cells is two unreadable ones."""
     async with SpotiFLACTui().run_test(size=(100, 40)) as pilot:
-        pilot.app._set_log_visible(True)
+        app_of(pilot)._set_log_visible(True)
         await pilot.pause()
 
-        panels = pilot.app.query_one("#panels")
-        log_pane = pilot.app.query_one("#log-pane")
+        panels = app_of(pilot).query_one("#panels")
+        log_pane = app_of(pilot).query_one("#log-pane")
 
         assert log_pane.region.y > panels.region.y, "the log should be underneath"
         # `region`, not `size`: the log pane draws its own border and the
@@ -372,12 +373,12 @@ async def test_the_hidden_log_leaves_the_panel_the_whole_width() -> None:
     """It is off until Ctrl+L or a run turns it on; off should cost nothing."""
     async with SpotiFLACTui().run_test(size=(170, 62)) as pilot:
         await pilot.pause()
-        wide = pilot.app.query_one("#panels").size.width
+        wide = app_of(pilot).query_one("#panels").size.width
 
-        pilot.app._set_log_visible(True)
+        app_of(pilot)._set_log_visible(True)
         await pilot.pause()
 
-        assert pilot.app.query_one("#panels").size.width < wide
+        assert app_of(pilot).query_one("#panels").size.width < wide
 
 
 # ---------------------------------------------------------------------------

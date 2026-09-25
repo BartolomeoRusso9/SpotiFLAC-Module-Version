@@ -55,6 +55,7 @@ from .app import SpotiFLAC_API
 
 logger = logging.getLogger(__name__)
 
+
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 
 # ── Optional shared-secret auth (off by default — see --web-token) ─────────
@@ -387,7 +388,7 @@ class ApiRegistry:
         #: Set once the multi-user queue exists (create_app builds it after
         #: this registry). Scheduled subscription downloads go through it so
         #: they are quota-checked and persisted like any other download.
-        self.download_queue = None
+        self.download_queue: Any = None
 
     def get(self, username: str | None) -> SpotiFLAC_API:
         key = username or ""
@@ -401,8 +402,10 @@ class ApiRegistry:
 
     def _build(self, username: str | None) -> SpotiFLAC_API:
         api = SpotiFLAC_API()
-        api._ws_broadcast = lambda fn, args: self._manager.broadcast(
-            fn, args, owner=username
+        setattr(
+            api,
+            "_ws_broadcast",
+            lambda fn, args: self._manager.broadcast(fn, args, owner=username),
         )
         # Everything this instance downloads is written to the log under this
         # name, and the dashboard it serves reads back the same name — one
@@ -415,7 +418,7 @@ class ApiRegistry:
             api.download_dir = os.path.join(self._base, _safe_username(username))
             with contextlib.suppress(OSError):
                 os.makedirs(api.download_dir, exist_ok=True)
-        api._subscription_download_queue = self.download_queue
+        setattr(api, "_subscription_download_queue", self.download_queue)
         return api
 
     def known(self) -> list[str]:
@@ -450,7 +453,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # The shared instance. In single-user mode it is the only one, and its
     # events go to every connected browser (owner=None), exactly as before.
     api = SpotiFLAC_API()
-    api._ws_broadcast = manager.broadcast
+    setattr(api, "_ws_broadcast", manager.broadcast)
 
     registry = ApiRegistry(manager, api.download_dir)
 
@@ -469,8 +472,8 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # observe which instance a request actually reached, rather than having
     # to infer it from a response that would look identical either way.
     app_state_api = api
-    sessions = None
-    job_queue = None
+    sessions: Any = None
+    job_queue: Any = None
     login_limiter = LoginRateLimiter()
     if multiuser:
         from .core.job_queue import JobQueue, QueueFullError
@@ -509,7 +512,21 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                     payload["selected_indices"], payload.get("config", {})
                 )
             else:
-                owner_api.fetch_metadata(payload["url"])
+                from .core.config import DownloadRequest, SpotiFLACConfig
+
+                config = SpotiFLACConfig()
+                queue_config = payload.get("config") or {}
+                if "quality" in queue_config:
+                    config.download.quality = queue_config["quality"]
+                if "output_dir" in queue_config:
+                    config.output.directory = Path(
+                        queue_config["output_dir"]
+                    ).expanduser()
+                request = DownloadRequest(
+                    sources=[payload["url"]],
+                    config=config,
+                )
+                asyncio.run(application_download_service.download(request))
             return {"status": "dispatched"}
 
         job_queue = JobQueue(
@@ -537,7 +554,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     # on disk (see SpotiFLAC_API.download_tracks). Kept apart from
     # `job_queue`: that is multi-user's account-aware queue, and /api/metrics
     # and the v1 API read its presence as "multi-user".
-    download_queue = None
+    download_queue: Any = None
     if not multiuser:
         from .core.job_queue import JobQueue
 
@@ -1120,7 +1137,51 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
     #
     # Mounted after the middleware that gates /api/*, so it inherits the same
     # token and session auth rather than reimplementing either.
+    from .application import ApiAdapter, DownloadService
+    from .application import EventBus
     from .webapi import ApiDeps, build_v1_router
+
+    application_events = EventBus()
+    application_events.subscribe(
+        "job.created",
+        lambda payload: manager.broadcast("applicationEvent", ["job.created", payload]),
+    )
+    application_events.subscribe(
+        "job.started",
+        lambda payload: manager.broadcast("applicationEvent", ["job.started", payload]),
+    )
+    application_events.subscribe(
+        "job.completed",
+        lambda payload: manager.broadcast(
+            "applicationEvent", ["job.completed", payload]
+        ),
+    )
+    application_events.subscribe(
+        "job.failed",
+        lambda payload: manager.broadcast("applicationEvent", ["job.failed", payload]),
+    )
+    application_events.subscribe(
+        "job.cancelled",
+        lambda payload: manager.broadcast(
+            "applicationEvent", ["job.cancelled", payload]
+        ),
+    )
+    for event_name in (
+        "job.retrying",
+        "job.paused",
+        "job.resumed",
+        "job.item.updated",
+    ):
+
+        def broadcast_application_event(payload: Any, name: str = event_name) -> None:
+            manager.broadcast("applicationEvent", [name, payload])
+
+        application_events.subscribe(
+            event_name,
+            broadcast_application_event,
+        )
+    application_download_service = DownloadService(event_bus=application_events)
+    app.state.application_download_service = application_download_service
 
     app.include_router(
         build_v1_router(
@@ -1128,7 +1189,9 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                 api_for=api_for,
                 multiuser=multiuser,
                 token_required=bool(token),
-                job_queue=job_queue,
+                job_queue=job_queue or download_queue,
+                adapter=ApiAdapter(event_bus=application_events),
+                download_service=application_download_service,
                 username_for=lambda request: getattr(request.state, "username", None),
             )
         )

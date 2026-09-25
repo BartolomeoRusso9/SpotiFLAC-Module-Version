@@ -59,6 +59,7 @@ def test_resolution_is_kept_when_quality_alone_is_enough() -> None:
     from PIL import Image
 
     fitted = fit_cover(_oversized_png(3000))
+    assert fitted is not None
     assert Image.open(io.BytesIO(fitted)).size == (3000, 3000)
 
 

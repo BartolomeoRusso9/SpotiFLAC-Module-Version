@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import sys
+from typing import Any
 import time
 import warnings
 from collections.abc import Awaitable, Callable
@@ -40,9 +41,21 @@ from .core.notifiers import NOTIFY_TOKEN_ENV, NOTIFY_URL_ENV
 from .core.output_sink import sink_active
 from .core.report import RunReport
 from .core.transcode import LOSSLESS_FORMATS, SUPPORTED_FORMATS
-from .downloader import DownloadOptions, SpotiflacDownloader
+from .downloader import DownloadOptions
+from .application import DownloadService, LegacyDownloadAdapter
+from .core.config import DownloadRequest, SpotiFLACConfig
 from .core.web_users import ROLES as WEB_USER_ROLES
 from .extensions.trust import TRUST_TIERS
+
+# Test and embedding compatibility hook. Normal CLI construction goes through
+# LegacyDownloadAdapter; hosts may still inject the historical factory.
+SpotiflacDownloader: Any | None = None
+
+
+def _legacy_adapter(options: DownloadOptions) -> LegacyDownloadAdapter:
+    if SpotiflacDownloader is not None:
+        return LegacyDownloadAdapter(SpotiflacDownloader(options), options=options)
+    return LegacyDownloadAdapter.from_options(options)
 
 
 def _match_score(value: str) -> float:
@@ -102,6 +115,20 @@ def _argv_has(*flags: str) -> bool:
         arg == flag or arg.startswith(f"{flag}=")
         for arg in sys.argv[1:]
         for flag in flags
+    )
+
+
+def build_cli_download_service(downloader: Any) -> DownloadService:
+    """Build the CLI service while keeping the legacy downloader behind the
+    application execution boundary.
+
+    This is the CLI’s compatibility bridge: the public entry point still uses
+    the same legacy engine, but all work runs through the app-layer service and
+    the explicit legacy adapter contract.
+    """
+    return DownloadService(
+        downloader=downloader,
+        provider_executor=LegacyDownloadAdapter(downloader),
     )
 
 
@@ -1314,11 +1341,11 @@ async def _handle_subscriptions() -> None:
         return
 
     if args.reset:
-        sub = subscriptions.get_by_url(args.reset)
-        if sub is None:
+        reset_sub = subscriptions.get_by_url(args.reset)
+        if reset_sub is None:
             print(f"Not following {args.reset}.", file=sys.stderr)
             sys.exit(1)
-        subscriptions.forget_seen(sub.id)
+        subscriptions.forget_seen(reset_sub.id)
         print(
             f"Reset {sub.name or sub.url}. The next check with "
             "--subscribe-backfill will treat the whole catalogue as new."
@@ -1743,8 +1770,8 @@ async def _run_download_async(
     )
 
     try:
-        downloader = SpotiflacDownloader(opts)
         if csv_path:
+            adapter = _legacy_adapter(opts)
             # Resolved here rather than inside run_csv_async so the report
             # file (--csv-unresolved) is written even when the download that
             # follows is interrupted: the rows that need fixing are the part
@@ -1766,7 +1793,7 @@ async def _run_download_async(
                     "--playlist is ignored with --csv: run it separately to "
                     "sync those playlists.",
                 )
-            await downloader.run_csv_async(
+            await adapter.run_csv_async(
                 csv_path,
                 resolution=resolution,
                 m3u_format=m3u_format,
@@ -1774,14 +1801,27 @@ async def _run_download_async(
                 resolve_concurrency=csv_concurrency,
             )
         elif playlist_urls:
+            adapter = _legacy_adapter(opts)
             if loop:
                 logger.warning(
                     "--loop is ignored with --playlist: run the command again "
                     "to sync the playlists.",
                 )
-            await downloader.run_playlists_async(playlist_urls, m3u_format=m3u_format)
+            await adapter.run_playlists_async(playlist_urls, m3u_format=m3u_format)
         else:
-            await downloader.run_async(url, loop_minutes=loop)
+            if loop:
+                adapter = _legacy_adapter(opts)
+                await adapter.run_async(url, loop_minutes=loop)
+            else:
+                service = DownloadService(
+                    provider_executor=LegacyDownloadAdapter.from_options(opts)
+                )
+                await service.download(
+                    DownloadRequest(
+                        sources=[url] if isinstance(url, str) else list(url),
+                        config=SpotiFLACConfig.from_legacy_options(opts),
+                    )
+                )
     except KeyboardInterrupt:
         pass
     except Exception as e:
@@ -1836,37 +1876,42 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
     of a forty-argument call, and the second copy is the one that stops
     getting new flags. `tests/test_tui_config_state.py` reads the keys out of
     this function to check the TUI still produces all of them.
+
+    Guided mode continues to flow through the application-layer service and the
+    legacy adapter boundary so the actual provider execution remains behind the
+    same compatibility seam used by the CLI and client entry points.
     """
 
+    def _as_source_list(value: str | list[str]) -> list[str]:
+        return [value] if isinstance(value, str) else list(value)
+
     async def _run_once() -> None:
-        await _run_download_async(
-            cfg["url"],
+        opts = DownloadOptions(
             output_dir=cfg["output_dir"],
-            services=cfg["services"],
-            filename_format=cfg["filename_format"],
-            use_track_numbers=cfg["use_track_numbers"],
-            use_album_track_numbers=cfg["use_album_track_numbers"],
-            use_artist_subfolders=cfg["use_artist_subfolders"],
-            use_album_subfolders=cfg["use_album_subfolders"],
+            services=cfg.get("services") or ["ext:tidal-web"],
+            filename_format=cfg.get("filename_format", "{title} - {artist}"),
+            use_track_numbers=cfg.get("use_track_numbers", False),
+            use_album_track_numbers=cfg.get("use_album_track_numbers", False),
+            use_artist_subfolders=cfg.get("use_artist_subfolders", False),
+            use_album_subfolders=cfg.get("use_album_subfolders", False),
             create_playlist_subfolders=cfg.get("create_playlist_subfolders", True),
-            loop=cfg.get("loop"),
-            quality=cfg["quality"],
-            first_artist_only=cfg["first_artist_only"],
+            quality=cfg.get("quality", "LOSSLESS"),
+            first_artist_only=cfg.get("first_artist_only", False),
             artist_separator=cfg.get("artist_separator"),
             include_featuring=cfg.get("include_featuring", True),
-            log_level=log_level,
             output_path=cfg.get("output_path"),
             allow_fallback=cfg.get("allow_fallback", True),
-            embed_lyrics=cfg["embed_lyrics"],
-            lyrics_providers=cfg["lyrics_providers"],
+            embed_lyrics=cfg.get("embed_lyrics", True),
+            lyrics_providers=cfg.get("lyrics_providers") or ["spotify", "apple"],
             apple_lyrics_word_by_word=cfg.get("apple_lyrics_word_by_word", True),
             save_lrc=cfg.get("save_lrc", False),
             lrc_library_dir=cfg.get("lrc_library_dir") or None,
             save_canvas=cfg.get("save_canvas", False),
             canvas_library_dir=cfg.get("canvas_library_dir") or None,
             canvas_providers=cfg.get("canvas_providers") or ["spotify", "paxsenix"],
-            enrich_metadata=cfg["enrich_metadata"],
-            enrich_providers=cfg["enrich_providers"],
+            enrich_metadata=cfg.get("enrich_metadata", True),
+            enrich_providers=cfg.get("enrich_providers")
+            or ["deezer", "apple", "qobuz", "tidal"],
             qobuz_local_api_url=cfg.get("qobuz_local_api_url"),
             tidal_custom_api=cfg.get("tidal_custom_api") or None,
             track_max_retries=cfg.get("track_max_retries", 0),
@@ -1874,19 +1919,6 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
             post_download_command=cfg.get("post_download_command", ""),
             resume=cfg.get("resume", True),
             post_download_hooks=cfg.get("post_download_hooks", []),
-            # These are CLI-only flags, and `args` does not exist yet on
-            # this path — it is parsed further down, in the branch this
-            # one returns before reaching, so reading it here raised
-            # NameError as soon as a guided run started downloading.
-            # The guided mode does not ask about any of them, so its
-            # defaults are simply "off"; cfg.get() leaves room for it to
-            # start asking.
-            json_report=cfg.get("json_report", False),
-            library_type=cfg.get("library_type"),
-            library_url=cfg.get("library_url"),
-            library_token=cfg.get("library_token"),
-            library_user=cfg.get("library_user"),
-            write_m3u=cfg.get("write_m3u"),
             timeout_s=cfg.get("timeout_s"),
             transcode_to=cfg.get("transcode_to"),
             transcode_bitrate=cfg.get("transcode_bitrate", "320k"),
@@ -1894,15 +1926,13 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
             max_concurrent_downloads=cfg.get("max_concurrent_downloads", 2),
             verify_hires=cfg.get("verify_hires", False),
             redownload_fake_hires=cfg.get("redownload_fake_hires", False),
-            # The wizard takes a .csv where it takes a link (see
-            # the TUI's Source panel); everything after that point is
-            # the same run.
-            csv_path=cfg.get("csv_path") or None,
-            # Forwarded, not defaulted: the TUI offers "m3u" and "none"
-            # beside "m3u8", and leaving this out meant every guided run
-            # wrote an .m3u8 whatever the form said.
-            m3u_format=cfg.get("m3u_format", "m3u8"),
         )
+        request = DownloadRequest(
+            sources=_as_source_list(cfg["url"]),
+            config=SpotiFLACConfig.from_legacy_options(opts),
+        )
+        service = DownloadService.from_legacy_options(opts)
+        await service.download(request)
 
     await _run_once()
 
@@ -2562,7 +2592,7 @@ async def amain() -> None:
             )
             return
 
-        profile_defaults = (
+        upgrade_profile_defaults = (
             await _load_profile_into_defaults(up_args.profile)
             if up_args.profile
             else {}
@@ -2571,10 +2601,12 @@ async def amain() -> None:
         # told otherwise, which is what makes this an *upgrade* rather than a
         # second copy somewhere else.
         destination = (
-            up_args.output_dir or profile_defaults.get("output_dir") or up_args.path
+            up_args.output_dir
+            or upgrade_profile_defaults.get("output_dir")
+            or up_args.path
         )
         downloader = _subscription_downloader(
-            {**profile_defaults, "quality": up_args.target}, destination
+            {**upgrade_profile_defaults, "quality": up_args.target}, destination
         )
 
         async def _download(url: str) -> None:
@@ -2622,14 +2654,14 @@ async def amain() -> None:
 
     print_ffmpeg_warning()
     print_node_warning()
-    profile_defaults: dict = {}
+    cli_profile_defaults: dict = {}
     if "--profile" in sys.argv:
         idx = sys.argv.index("--profile")
         if idx + 1 < len(sys.argv):
-            profile_defaults = await _load_profile_into_defaults(sys.argv[idx + 1])
+            cli_profile_defaults = await _load_profile_into_defaults(sys.argv[idx + 1])
 
     file_cfg = load_config()
-    merged_defaults = {**file_cfg, **profile_defaults}
+    merged_defaults = {**file_cfg, **cli_profile_defaults}
 
     args = parse_args(profile_defaults=merged_defaults)
     playlist_urls, output_dir = _split_positionals(args)

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.tui.app import SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
@@ -49,14 +49,14 @@ async def test_browsing_opens_the_picker() -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button
 
-        pilot.app.query_one("#csv-browse", Button).press()
+        app_of(pilot).query_one("#csv-browse", Button).press()
         await _settled(pilot)
 
-        assert isinstance(pilot.app.screen, CsvPickerScreen)
+        assert isinstance(app_of(pilot).screen, CsvPickerScreen)
 
         await pilot.press("escape")
         await _settled(pilot)
-        assert not isinstance(pilot.app.screen, CsvPickerScreen)
+        assert not isinstance(app_of(pilot).screen, CsvPickerScreen)
 
 
 @drives_the_ui
@@ -64,19 +64,19 @@ async def test_accepting_a_file_fills_the_form(track_list) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button, Input
 
-        pilot.app.query_one("#csv-browse", Button).press()
+        app_of(pilot).query_one("#csv-browse", Button).press()
         await _settled(pilot)
 
-        screen = pilot.app.screen
+        screen = app_of(pilot).screen
         screen.query_one("#csv-path", Input).value = str(track_list)
         screen.query_one("#csv-accept", Button).press()
         await _settled(pilot)
 
-        assert not isinstance(pilot.app.screen, CsvPickerScreen)
-        assert pilot.app.query_one("#cfg-csv_path", Input).value == str(track_list)
-        assert pilot.app.state.csv_path == str(track_list)
+        assert not isinstance(app_of(pilot).screen, CsvPickerScreen)
+        assert app_of(pilot).query_one("#cfg-csv_path", Input).value == str(track_list)
+        assert app_of(pilot).state.csv_path == str(track_list)
         # A CSV replaces the URL, and the state says so.
-        assert pilot.app.state.to_cfg()["url"] == ""
+        assert app_of(pilot).state.to_cfg()["url"] == ""
 
 
 @drives_the_ui
@@ -85,10 +85,10 @@ async def test_the_preview_says_what_is_in_the_file(track_list) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button, Input
 
-        pilot.app.query_one("#csv-browse", Button).press()
+        app_of(pilot).query_one("#csv-browse", Button).press()
         await _settled(pilot)
 
-        screen = pilot.app.screen
+        screen = app_of(pilot).screen
         screen.query_one("#csv-path", Input).value = str(track_list)
         preview = await screen._preview(str(track_list))
         await _settled(pilot)
@@ -104,17 +104,17 @@ async def test_a_missing_file_is_refused(tmp_path) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button, Input
 
-        pilot.app.query_one("#csv-browse", Button).press()
+        app_of(pilot).query_one("#csv-browse", Button).press()
         await _settled(pilot)
 
-        screen = pilot.app.screen
+        screen = app_of(pilot).screen
         missing = str(tmp_path / "nope.csv")
         screen.query_one("#csv-path", Input).value = missing
         screen.query_one("#csv-accept", Button).press()
         await _settled(pilot)
 
         # Still open: a refusal has to leave you somewhere you can fix it.
-        assert isinstance(pilot.app.screen, CsvPickerScreen)
+        assert isinstance(app_of(pilot).screen, CsvPickerScreen)
         assert "No file at" in str(screen.query_one("#csv-preview").content)
 
 
@@ -132,18 +132,18 @@ async def test_a_track_list_with_no_tracks_is_refused(tmp_path) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button, Input
 
-        pilot.app.query_one("#csv-browse", Button).press()
+        app_of(pilot).query_one("#csv-browse", Button).press()
         await _settled(pilot)
 
-        screen = pilot.app.screen
+        screen = app_of(pilot).screen
         screen.query_one("#csv-path", Input).value = str(empty)
         screen.query_one("#csv-accept", Button).press()
         await _settled(pilot)
 
-        assert isinstance(pilot.app.screen, CsvPickerScreen)
+        assert isinstance(app_of(pilot).screen, CsvPickerScreen)
         shown = str(screen.query_one("#csv-preview").content)
         assert "no track found" in shown
-        assert pilot.app.state.csv_path == ""
+        assert app_of(pilot).state.csv_path == ""
 
 
 @drives_the_ui
@@ -152,12 +152,12 @@ async def test_a_quoted_path_is_understood(track_list) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button, Input
 
-        pilot.app.query_one("#csv-browse", Button).press()
+        app_of(pilot).query_one("#csv-browse", Button).press()
         await _settled(pilot)
 
-        screen = pilot.app.screen
+        screen = app_of(pilot).screen
         screen.query_one("#csv-path", Input).value = f'"{track_list}"'
         screen.query_one("#csv-accept", Button).press()
         await _settled(pilot)
 
-        assert pilot.app.state.csv_path == str(track_list)
+        assert app_of(pilot).state.csv_path == str(track_list)

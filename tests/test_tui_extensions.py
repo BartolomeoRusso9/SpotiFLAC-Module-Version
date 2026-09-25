@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from tui_harness import drives_the_ui
+from tui_harness import app_of, drives_the_ui
 
 from SpotiFLAC.tui.app import MODES, SpotiFLACTui
 from SpotiFLAC.tui.config_state import ConfigState
@@ -81,12 +81,12 @@ async def _settled(pilot) -> None:
 @drives_the_ui
 async def test_links_are_listed_with_where_they_came_from(stub_registries) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _EXT_INDEX
+        app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
         from textual.widgets import DataTable
 
-        table = pilot.app.query_one("#registry-table", DataTable)
+        table = app_of(pilot).query_one("#registry-table", DataTable)
         assert table.row_count == 2
 
         # A link exported in the terminal cannot be edited from here, and
@@ -99,13 +99,15 @@ async def test_links_are_listed_with_where_they_came_from(stub_registries) -> No
 @drives_the_ui
 async def test_adding_a_link_installs_from_it_immediately(stub_registries) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _EXT_INDEX
+        app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button, DataTable, Input
 
-        pilot.app.query_one("#registry-url", Input).value = "https://new.test/r.json"
-        pilot.app.query_one("#registry-add", Button).press()
+        app_of(pilot).query_one(
+            "#registry-url", Input
+        ).value = "https://new.test/r.json"
+        app_of(pilot).query_one("#registry-add", Button).press()
         await _settled(pilot)
 
         assert any(
@@ -113,9 +115,9 @@ async def test_adding_a_link_installs_from_it_immediately(stub_registries) -> No
             for link in stub_registries["links"]
         )
         assert stub_registries["installed"] == 1
-        assert pilot.app.query_one("#registry-table", DataTable).row_count == 3
+        assert app_of(pilot).query_one("#registry-table", DataTable).row_count == 3
         # The field is cleared, so the next paste does not append to it.
-        assert pilot.app.query_one("#registry-url", Input).value == ""
+        assert app_of(pilot).query_one("#registry-url", Input).value == ""
 
 
 @drives_the_ui
@@ -124,13 +126,15 @@ async def test_the_trust_floor_from_the_command_line_is_honoured(
 ) -> None:
     """`--min-trust-tier` has to reach an install started from this panel."""
     async with SpotiFLACTui(_ready_state(), "signed").run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _EXT_INDEX
+        app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button, Input
 
-        pilot.app.query_one("#registry-url", Input).value = "https://new.test/r.json"
-        pilot.app.query_one("#registry-add", Button).press()
+        app_of(pilot).query_one(
+            "#registry-url", Input
+        ).value = "https://new.test/r.json"
+        app_of(pilot).query_one("#registry-add", Button).press()
         await _settled(pilot)
 
         assert stub_registries["trust"] == ["signed"]
@@ -139,14 +143,14 @@ async def test_the_trust_floor_from_the_command_line_is_honoured(
 @drives_the_ui
 async def test_removing_the_selected_link(stub_registries) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _EXT_INDEX
+        app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button, DataTable
 
-        table = pilot.app.query_one("#registry-table", DataTable)
+        table = app_of(pilot).query_one("#registry-table", DataTable)
         table.move_cursor(row=0)
-        pilot.app.query_one("#registry-remove", Button).press()
+        app_of(pilot).query_one("#registry-remove", Button).press()
         await _settled(pilot)
 
         assert [link["url"] for link in stub_registries["links"]] == [
@@ -158,16 +162,16 @@ async def test_removing_the_selected_link(stub_registries) -> None:
 @drives_the_ui
 async def test_adding_nothing_says_so(stub_registries) -> None:
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _EXT_INDEX
+        app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button
 
-        pilot.app.query_one("#registry-add", Button).press()
+        app_of(pilot).query_one("#registry-add", Button).press()
         await _settled(pilot)
 
         assert "Paste a registry link" in str(
-            pilot.app.query_one("#registry-status").render(),
+            app_of(pilot).query_one("#registry-status").render(),
         )
         assert stub_registries["installed"] == 0
 
@@ -185,17 +189,17 @@ async def test_a_failing_add_is_reported_not_raised(monkeypatch) -> None:
     monkeypatch.setattr(registry_config, "add_registry", _explode)
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _EXT_INDEX
+        app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
         from textual.widgets import Button, Input
 
-        pilot.app.query_one("#registry-url", Input).value = "nonsense"
-        pilot.app.query_one("#registry-add", Button).press()
+        app_of(pilot).query_one("#registry-url", Input).value = "nonsense"
+        app_of(pilot).query_one("#registry-add", Button).press()
         await _settled(pilot)
 
         assert "that is not a registry" in str(
-            pilot.app.query_one("#registry-status").render(),
+            app_of(pilot).query_one("#registry-status").render(),
         )
 
 
@@ -206,9 +210,9 @@ async def test_an_empty_list_says_so(monkeypatch) -> None:
     monkeypatch.setattr(registry_config, "list_registries", list)
 
     async with SpotiFLACTui(_ready_state()).run_test() as pilot:
-        pilot.app.query_one("#sidebar").index = _EXT_INDEX
+        app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
         assert "No registry links configured" in str(
-            pilot.app.query_one("#registry-status").render(),
+            app_of(pilot).query_one("#registry-status").render(),
         )

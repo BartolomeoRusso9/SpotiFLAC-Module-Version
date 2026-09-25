@@ -9,14 +9,17 @@ silently turning the toggles into settings that save and do nothing.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pathlib import Path
 
 import pytest
 
-import SpotiFLAC as spotiflac_pkg
 from SpotiFLAC.app import SpotiFLAC_API
+from SpotiFLAC import __file__ as spotiflac_file
+from tests.application_download_capture import capture_service
 
-FRONTEND = Path(spotiflac_pkg.__file__).parent / "frontend"
+FRONTEND = Path(spotiflac_file).parent / "frontend"
 
 
 class _FakeTrack:
@@ -26,14 +29,11 @@ class _FakeTrack:
 
 
 @pytest.fixture()
-def download_kwargs(tmp_path, monkeypatch):
+def download_kwargs(tmp_path, monkeypatch) -> Any:
     """Runs one GUI download and returns the kwargs the client received."""
     seen: list[dict] = []
 
-    def _fake_spotiflac(**kwargs):
-        seen.append(kwargs)
-
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", _fake_spotiflac)
+    capture_service(monkeypatch, seen)
 
     def _run(config: dict | None = None) -> dict:
         api = SpotiFLAC_API()

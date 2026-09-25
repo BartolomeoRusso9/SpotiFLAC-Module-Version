@@ -186,6 +186,13 @@ from .health_check import run_health_check
 from .http import AsyncHttpClient, AsyncRateLimiter, NetworkManager, RetryConfig
 from .lyrics import fetch_lyrics_async
 from .metadata_enrichment import enrich_metadata_async
+from .config import (
+    DownloadFailure,
+    DownloadReport,
+    DownloadRequest,
+    DownloadSkip,
+    SpotiFLACConfig,
+)
 from .models import DownloadResult, TrackMetadata, build_filename, sanitize
 from .progress import DownloadManager, ProgressCallback, RichProgressCallback
 from .provider_stats import (
@@ -202,8 +209,12 @@ __all__ = [
     "AsyncHttpClient",
     "AsyncRateLimiter",
     "AuthError",
+    "DownloadFailure",
     "DownloadManager",
+    "DownloadReport",
+    "DownloadRequest",
     "DownloadResult",
+    "DownloadSkip",
     "ErrorKind",
     "InvalidUrlError",
     "NetworkError",
@@ -214,6 +225,7 @@ __all__ = [
     "RetryConfig",
     "RichProgressCallback",
     "SpotiflacError",
+    "SpotiFLACConfig",
     "TrackMetadata",
     "TrackNotFoundError",
     "build_filename",

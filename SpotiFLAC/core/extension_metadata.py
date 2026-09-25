@@ -351,9 +351,10 @@ def to_track(
     if not raw_id or not title:
         return None
 
-    collection = collection or {}
+    collection = collection if isinstance(collection, dict) else {}
     from_album = collection.get("type") == "album"
-    album_node = item.get("album") if isinstance(item.get("album"), dict) else {}
+    album_value = item.get("album")
+    album_node: dict = album_value if isinstance(album_value, dict) else {}
 
     artists = _text(item.get("artists") or item.get("artist"))
     if not artists and from_album:
@@ -650,11 +651,8 @@ class ExtensionMetadataClient:
                 )
 
             if link.kind == "track":
-                item = (
-                    response.get("track")
-                    if isinstance(response.get("track"), dict)
-                    else response
-                )
+                track_value = response.get("track")
+                item: dict = track_value if isinstance(track_value, dict) else response
                 track = await self._track_from_its_album(item, provider) or to_track(
                     item, self.site
                 )

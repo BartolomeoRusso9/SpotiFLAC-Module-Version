@@ -9,9 +9,11 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
+from .application import DownloadService, LegacyDownloadAdapter, MetadataService
+from .core.config import DownloadReport, DownloadRequest, SpotiFLACConfig
 from .core.http import NetworkManager
 from .core.spotify_metadata import SpotifyMetadataClient, parse_spotify_url
-from .downloader import DownloadOptions, SpotiflacDownloader
+from .downloader import DownloadOptions
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -191,7 +193,13 @@ class AsyncSpotiFLAC:
             redownload_fake_hires=redownload_fake_hires,
         )
 
-        self._downloader = SpotiflacDownloader(self._opts)
+        adapter = LegacyDownloadAdapter.from_options(self._opts)
+        self._downloader = adapter.downloader
+        self._metadata_service = MetadataService(resolver=adapter.resolve_metadata)
+        self._download_service = DownloadService.from_legacy_options(
+            self._opts,
+            downloader=self._downloader,
+        )
         self._metadata_client: SpotifyMetadataClient | None = None
 
     # ------------------------------------------------------------------
@@ -259,7 +267,26 @@ class AsyncSpotiFLAC:
     ) -> None:
         """Downloads several *collections* (or single links), one run each."""
         self._ensure_entered()
-        await self._downloader.run_async(urls, loop_minutes=loop_minutes)
+        _ = await self._download_service.download(
+            DownloadRequest(
+                sources=list(urls),
+                config=self.application_config(),
+            )
+        )
+
+    async def download_request(self, request: DownloadRequest) -> DownloadReport:
+        """Execute an application-layer request through the shared service.
+
+        This additive entry point lets new interfaces converge on
+        ``DownloadService`` while the established convenience methods retain
+        their legacy return values and collection-specific behavior.
+        """
+        self._ensure_entered()
+        return await self._download_service.download(request)
+
+    def application_config(self) -> SpotiFLACConfig:
+        """Return the structured config represented by this client's options."""
+        return SpotiFLACConfig.from_legacy_options(self._opts)
 
     async def download_tracks(
         self,
@@ -282,14 +309,18 @@ class AsyncSpotiFLAC:
         not looked up again.
         """
         self._ensure_entered()
-        await self._downloader.run_tracks_async(
-            urls, loop_minutes=loop_minutes, prefetched=prefetched
+        _ = await self._download_service.download(
+            DownloadRequest(
+                sources=list(urls),
+                config=self.application_config(),
+                prefetched=dict(prefetched or {}),
+            )
         )
 
     async def get_playlist(self, url: str) -> tuple[dict, list[TrackMetadata]]:
         self._ensure_entered()
-        collection_name, tracks, info = await self._downloader._resolve_metadata_async(
-            url,
+        collection_name, tracks, info = await self._metadata_service.resolve_collection(
+            url
         )
         return {"name": collection_name, **info}, tracks
 

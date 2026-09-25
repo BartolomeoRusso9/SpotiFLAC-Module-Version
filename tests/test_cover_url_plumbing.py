@@ -66,7 +66,7 @@ async def test_a_caller_that_names_no_cover_still_works():
     await manager.reset()
 
 
-def test_the_downloader_passes_the_track_cover(monkeypatch):
+def test_the_downloader_passes_the_track_cover(monkeypatch) -> None:
     """The one call site — a cover dropped here is a cover never seen."""
     import SpotiFLAC.downloader as downloader_module
 
@@ -95,6 +95,6 @@ def test_the_downloader_passes_the_track_cover(monkeypatch):
     downloader = downloader_module.SpotiflacDownloader.__new__(
         downloader_module.SpotiflacDownloader
     )
-    asyncio.run(downloader._register_queue_async([_Track()]))
+    asyncio.run(downloader._register_queue_async([_Track()]))  # type: ignore[list-item]
 
     assert seen and seen[0][-1] == "https://example.invalid/cover.jpg"

@@ -84,7 +84,9 @@ def test_m4a_uses_the_atom_names_readers_look_for(m4a: Path) -> None:
     from mutagen.mp4 import MP4
 
     _embed_m4a(m4a, dict(_MB_TAGS), None, None, "")
-    written = set(MP4(str(m4a)).tags)
+    tags = MP4(str(m4a)).tags
+    assert tags is not None
+    written = set(tags)
 
     assert {
         "----:com.apple.iTunes:MusicBrainz Track Id",

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import threading
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
 #: Groups pushed to the frontend in one message. A library can produce
@@ -33,6 +34,12 @@ _MAX_GROUPS_PUSHED = 500
 
 
 class DedupMixin:
+    if TYPE_CHECKING:
+        download_dir: str
+        log: Any
+        _push: Any
+        _library_dedup_report: Any
+
     def _approved_path(self, path: str) -> tuple[str, str]:
         """(usable path, error). Empty error means the path may be used.
 

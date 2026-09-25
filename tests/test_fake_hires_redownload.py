@@ -9,6 +9,7 @@ being that a *heuristic* must never be able to leave the user with no file.
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 from pathlib import Path
 
 import pytest
@@ -240,7 +241,7 @@ def test_the_kept_transcode_source_is_set_aside_as_well(
         transcode_to="flac",
     )
     result = asyncio.run(
-        dl.download_one_async(_track(), str(tmp_path), [provider], opts),
+        dl.download_one_async(_track(), str(tmp_path), cast(Any, [provider]), opts),
     )
 
     assert result.success
@@ -272,7 +273,7 @@ def test_a_kept_source_is_put_back_when_the_replacement_fails(
         transcode_to="flac",
     )
     result = asyncio.run(
-        dl.download_one_async(_track(), str(tmp_path), [provider], opts),
+        dl.download_one_async(_track(), str(tmp_path), cast(Any, [provider]), opts),
     )
 
     assert result.success

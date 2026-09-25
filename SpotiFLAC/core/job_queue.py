@@ -189,6 +189,8 @@ class JobQueue:
         except Exception:
             logger.warning("[JobQueue] Could not restore jobs", exc_info=True)
             return []
+        finally:
+            db.close_thread_connection()
 
         to_run: list[str] = []
         for row in rows:
@@ -218,6 +220,7 @@ class JobQueue:
         if to_run:
             logger.info("[JobQueue] Restored %d unfinished job(s)", len(to_run))
             self._write_many(to_run)
+            db.close_thread_connection()
         return to_run
 
     def _write(self, job: Job) -> None:
@@ -394,3 +397,6 @@ class JobQueue:
                     self._forget(evicted)
             finally:
                 self._queue.task_done()
+                from . import db
+
+                db.close_thread_connection()

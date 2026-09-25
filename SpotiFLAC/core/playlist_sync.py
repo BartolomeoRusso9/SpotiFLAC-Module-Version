@@ -26,6 +26,8 @@ from .models import build_filename
 from .tagger import read_embedded_tags
 from .transcode import extension_for
 
+AudioIndex = dict[str, list[Path] | dict[str, list[Path]]]
+
 if TYPE_CHECKING:
     from ..downloader import DownloadOptions
     from .models import TrackMetadata
@@ -214,9 +216,7 @@ def track_stem(track: TrackMetadata, opts: DownloadOptions, position: int) -> st
     )
 
 
-def index_audio_files(
-    output_dir: Path | str, *, use_cache: bool = True
-) -> dict[str, list[Path]]:
+def index_audio_files(output_dir: Path | str, *, use_cache: bool = True) -> AudioIndex:
     """Maps audio files by filename stem and lightweight identifying tags.
 
     Tag reads are cached per file and reused while its mtime and size are
@@ -227,7 +227,7 @@ def index_audio_files(
     from .library_index_cache import CachedTags, LibraryIndexCache
 
     cache = LibraryIndexCache(output_dir) if use_cache else None
-    index: dict[str, list[Path]] = {}
+    filename_index: dict[str, list[Path]] = {}
     isrc_index: dict[str, list[Path]] = {}
     identity_index: dict[str, list[Path]] = {}
 
@@ -242,7 +242,7 @@ def index_audio_files(
             if extension.lower() not in AUDIO_EXTENSIONS:
                 continue
             path = Path(root) / name
-            add(index, stem.casefold(), path)
+            add(filename_index, stem.casefold(), path)
             cached = cache.get(path) if cache else None
             if cached is not None:
                 isrc, title = cached.isrc, cached.title
@@ -264,11 +264,13 @@ def index_audio_files(
             add(isrc_index, isrc, path)
             add(identity_index, _identity_key(title, artist, album), path)
 
-    index["__isrc__"] = isrc_index
-    index["__identity__"] = identity_index
     if cache:
         cache.save()
-    return index
+    return {
+        **filename_index,
+        "__isrc__": isrc_index,
+        "__identity__": identity_index,
+    }
 
 
 def _identity_key(title: str, artist: str, album: str = "") -> str:
@@ -296,7 +298,7 @@ def _extension_rank(path: Path) -> int:
 
 
 def find_existing(
-    index: dict[str, list[Path]],
+    index: AudioIndex,
     stem: str,
     transcode_to: str | None = None,
 ) -> Path | None:
@@ -306,7 +308,8 @@ def find_existing(
     a leftover FLAC still has to go through ffmpeg, which is what the regular
     download path does for it.
     """
-    candidates = [p for p in index.get(stem.casefold(), ()) if _is_usable(p)]
+    raw_candidates = index.get(stem.casefold(), [])
+    candidates = [p for p in raw_candidates if isinstance(p, Path) and _is_usable(p)]
     if transcode_to:
         target_ext = extension_for(transcode_to)
         candidates = [p for p in candidates if p.suffix.lower() == target_ext]
@@ -316,17 +319,25 @@ def find_existing(
 
 
 def find_existing_track(
-    index: dict[str, list[Path]],
+    index: AudioIndex,
     track: TrackMetadata,
     stem: str,
     transcode_to: str | None = None,
 ) -> Path | None:
     """Finds a local track by ISRC, tags, then filename stem."""
     normalized_isrc = normalize_isrc(track.isrc)
-    buckets = index.get("__isrc__", {}).get(normalized_isrc, ())
+    isrc_index = index.get("__isrc__", {})
+    identity_index = index.get("__identity__", {})
+    buckets = (
+        isrc_index.get(normalized_isrc, ()) if isinstance(isrc_index, dict) else ()
+    )
     if not buckets:
-        buckets = index.get("__identity__", {}).get(
-            _identity_key(track.title, track.first_artist, track.album), ()
+        buckets = (
+            identity_index.get(
+                _identity_key(track.title, track.first_artist, track.album), ()
+            )
+            if isinstance(identity_index, dict)
+            else ()
         )
     if not buckets:
         return find_existing(index, stem, transcode_to)
@@ -342,7 +353,7 @@ def find_existing_track(
 
 def mark_existing(
     plan: SyncPlan,
-    index: dict[str, list[Path]],
+    index: AudioIndex,
     opts: DownloadOptions,
 ) -> SyncPlan:
     """Returns the plan with `existing_path` filled for tracks already on disk."""

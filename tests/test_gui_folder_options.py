@@ -10,10 +10,12 @@ in the download folder.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
-import SpotiFLAC as spotiflac_pkg
 from SpotiFLAC.app import SpotiFLAC_API
+from tests.application_download_capture import capture_service
 
 
 class _FakeTrack:
@@ -23,14 +25,11 @@ class _FakeTrack:
 
 
 @pytest.fixture
-def captured_options(tmp_path, monkeypatch):
+def captured_options(tmp_path, monkeypatch) -> Any:
     """Runs _download_task and returns the kwargs the download wrapper got."""
     seen: list[dict] = []
 
-    def _fake_spotiflac(**kwargs):
-        seen.append(kwargs)
-
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", _fake_spotiflac)
+    capture_service(monkeypatch, seen)
 
     def _run(config: dict) -> dict:
         api = SpotiFLAC_API()

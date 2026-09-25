@@ -221,8 +221,11 @@ class BaseProvider(ABC):
             stderr=_subproc.PIPE,
         )
         stdout, stderr = await proc.communicate()
+        returncode = proc.returncode
+        if returncode is None:
+            returncode = -1
         return (
-            proc.returncode,
+            returncode,
             stdout.decode(errors="ignore"),
             stderr.decode(errors="ignore"),
         )
@@ -235,8 +238,11 @@ class BaseProvider(ABC):
             stderr=_subproc.PIPE,
         )
         stdout, stderr = await proc.communicate()
+        returncode = proc.returncode
+        if returncode is None:
+            returncode = -1
         return (
-            proc.returncode,
+            returncode,
             stdout.decode(errors="ignore"),
             stderr.decode(errors="ignore"),
         )

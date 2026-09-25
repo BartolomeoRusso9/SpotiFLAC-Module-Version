@@ -16,6 +16,7 @@ remote caller cannot name a path on the host to have it opened.
 from __future__ import annotations
 
 import threading
+from typing import TYPE_CHECKING, Any
 import time
 
 from ..core.loop_runner import run_sync
@@ -64,6 +65,14 @@ def _validated_min_score(value: float | None) -> float:
 
 
 class CsvImportMixin:
+    if TYPE_CHECKING:
+        download_dir: str
+        log: Any
+        set_progress: Any
+        set_metadata: Any
+        _fetch_track_playcounts: Any
+        _push: Any
+
     def preview_csv(
         self,
         content: str,
@@ -430,9 +439,14 @@ class CsvImportMixin:
         """
         import asyncio
 
-        from ..downloader import DownloadOptions, SpotiflacDownloader
+        from ..application import LegacyDownloadAdapter, MetadataService
+        from ..core.config import DownloadRequest, SpotiFLACConfig
+        from ..downloader import DownloadOptions
 
-        downloader = SpotiflacDownloader(DownloadOptions(output_dir=self.download_dir))
+        adapter = LegacyDownloadAdapter.from_options(
+            DownloadOptions(output_dir=self.download_dir)
+        )
+        metadata_service = MetadataService(resolver=adapter.resolve_metadata)
         semaphore = asyncio.Semaphore(FETCH_CONCURRENCY)
         total = len(urls)
         done = 0
@@ -443,7 +457,12 @@ class CsvImportMixin:
             nonlocal done, fetched, failed
             async with semaphore:
                 try:
-                    _name, tracks, _info = await downloader._resolve_metadata_async(url)
+                    tracks = await metadata_service.resolve(
+                        DownloadRequest(
+                            sources=[url],
+                            config=SpotiFLACConfig(),
+                        )
+                    )
                 except Exception as e:
                     tracks = []
                     # "error-quiet" for the same reason the unmatched rows

@@ -198,7 +198,10 @@ async def _get_spotify_anon_token(timeout: int = 7) -> str:
     import time
 
     cached = _spotify_session_cache.get("token")
-    cached_at = _spotify_session_cache.get("cached_at", 0)
+    cached_at_value = _spotify_session_cache.get("cached_at", 0)
+    cached_at = (
+        float(cached_at_value) if isinstance(cached_at_value, (int, float)) else 0.0
+    )
 
     if cached and (time.time() - cached_at) < 3000:
         return str(cached)
@@ -207,7 +210,10 @@ async def _get_spotify_anon_token(timeout: int = 7) -> str:
 
     async with lock:
         cached = _spotify_session_cache.get("token")
-        cached_at = _spotify_session_cache.get("cached_at", 0)
+        cached_at_value = _spotify_session_cache.get("cached_at", 0)
+        cached_at = (
+            float(cached_at_value) if isinstance(cached_at_value, (int, float)) else 0.0
+        )
 
         if cached and (time.time() - cached_at) < 3000:
             return str(cached)
@@ -265,6 +271,8 @@ async def _get_spotify_anon_token(timeout: int = 7) -> str:
         except Exception as exc:
             logger.debug("[lyrics/spotify] anon token failed: %s", exc)
             return ""
+
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +454,7 @@ async def _fetch_apple_async(
 ) -> str:
     try:
         client = await NetworkManager.get_async_client_safe()
-        search_params = {
+        search_params: dict[str, str | int] = {
             "term": f"{track_name} {artist_name}",
             "media": "music",
             "entity": "song",
@@ -869,7 +877,7 @@ async def _fetch_lrclib_async(
     client = await NetworkManager.get_async_client_safe()
 
     async def _exact(t: str, a: str, al: str, d: int) -> str:
-        params = {"artist_name": a, "track_name": t}
+        params: dict[str, str | int] = {"artist_name": a, "track_name": t}
         if al:
             params["album_name"] = al
         if d:
@@ -988,7 +996,7 @@ def _best_bini_result(
         same_isrc = bool(isrc) and str(item.get("isrc") or "").upper() == isrc.upper()
         length = item.get("duration")
         has_length = duration_s > 0 and isinstance(length, (int, float)) and length > 0
-        off = abs(int(length) - duration_s) if has_length else 0
+        off = abs(int(length or 0) - duration_s) if has_length else 0
         if not same_isrc and not (has_length and off <= _TTML_LENGTH_SLACK_S):
             continue
         rank = (item.get("timing_type") != "word", not same_isrc, off)

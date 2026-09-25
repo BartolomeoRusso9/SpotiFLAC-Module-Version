@@ -13,7 +13,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from .http import NetworkManager
 from .isrc_utils import normalize_isrc
@@ -287,7 +287,7 @@ def _get_dynamic_python_provider(base_name: str, **kwargs) -> Any:
     manager = ExtensionManager(auto_install_downloads=False)
     cand = manager.find_python_extension(base_name)
     if cand:
-        return PythonExtensionProvider(cand, **kwargs)
+        return cast(Any, PythonExtensionProvider)(cand, **kwargs)
     return None
 
 

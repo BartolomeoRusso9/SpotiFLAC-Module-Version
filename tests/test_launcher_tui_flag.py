@@ -9,6 +9,8 @@ substance of a deprecation.
 
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 import warnings
 
@@ -18,7 +20,7 @@ from SpotiFLAC import launcher
 
 
 @pytest.fixture
-def run_launcher(monkeypatch):
+def run_launcher(monkeypatch) -> Any:
     """Runs amain() with the given argv, capturing whether the TUI opened.
 
     Everything amain() does before this branch — the banner, the update

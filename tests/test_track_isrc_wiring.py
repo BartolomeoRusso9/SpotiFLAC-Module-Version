@@ -16,6 +16,7 @@ catch, so they assert the wiring rather than the network.
 
 from __future__ import annotations
 
+from typing import Any, cast
 import asyncio
 
 import pytest
@@ -48,7 +49,7 @@ class _FakeWebClient:
 
 def _client(web: _FakeWebClient) -> SpotifyMetadataClient:
     client = SpotifyMetadataClient.__new__(SpotifyMetadataClient)
-    client.web_client = web  # type: ignore[attr-defined]
+    cast(Any, client).web_client = web
     return client
 
 

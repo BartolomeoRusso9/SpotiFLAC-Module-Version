@@ -17,6 +17,13 @@ import warnings
 # Single canonical client implementation (both sync and async)
 from .client import AsyncSpotiFLAC, SpotiFLAC
 from .core import DownloadResult, TrackMetadata
+from .core.config import (
+    DownloadFailure,
+    DownloadReport,
+    DownloadRequest,
+    DownloadSkip,
+    SpotiFLACConfig,
+)
 from .downloader import DownloadOptions, SpotiflacDownloader
 
 # Legacy provider classes stay importable for one release, but are lazy so an
@@ -63,9 +70,14 @@ except importlib.metadata.PackageNotFoundError:
 
 __all__ = [
     "AsyncSpotiFLAC",
+    "DownloadFailure",
     "DownloadOptions",
+    "DownloadReport",
+    "DownloadRequest",
     "DownloadResult",
+    "DownloadSkip",
     "SpotiFLAC",
+    "SpotiFLACConfig",
     "SpotiflacDownloader",
     "SpotifyMetadataClient",
     "TrackMetadata",

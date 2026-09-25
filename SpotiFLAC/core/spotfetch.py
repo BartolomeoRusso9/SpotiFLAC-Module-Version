@@ -4,7 +4,7 @@ import logging
 import re
 import threading
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -159,17 +159,21 @@ class SpotifyWebClient:
         if not self.client_version:
             fallback = re.search(r'"clientVersion"\s*:\s*"([^"]+)"', resp.text)
             if fallback:
-                self.client_version = fallback.group(1)
+                fallback_version = cast(str, fallback.group(1))
+                if fallback_version:
+                    self.client_version = fallback_version
                 logger.debug(
                     f"[spotfetch] clientVersion fallback extracted: {self.client_version}",
                 )
 
-        self.device_id = self._session.cookies.get("sp_t", "")
+        self.device_id = cast(str, self._session.cookies.get("sp_t", ""))
         if not self.device_id:
             cookie_header = resp.headers.get("set-cookie", "")
             cookie_match = re.search(r"sp_t=([^;]+)", cookie_header)
             if cookie_match:
-                self.device_id = cookie_match.group(1)
+                cookie_device_id = cast(str, cookie_match.group(1))
+                if cookie_device_id:
+                    self.device_id = cookie_device_id
         logger.debug(f"[spotfetch] _get_session_info: device_id={self.device_id}")
 
     def _get_access_token(self) -> None:
@@ -208,7 +212,7 @@ class SpotifyWebClient:
 
             # Extract sp_t cookie
             if not self.device_id:
-                self.device_id = self._session.cookies.get("sp_t", "")
+                self.device_id = cast(str, self._session.cookies.get("sp_t", ""))
 
         except Exception as e:
             logger.exception(f"[spotfetch] Failed to get access token: {e}")

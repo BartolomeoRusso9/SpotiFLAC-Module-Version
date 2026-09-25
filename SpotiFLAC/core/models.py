@@ -226,6 +226,7 @@ class DownloadResult(BaseModel):
 
     success: bool
     provider: str
+    source: str | None = None
     file_path: str | None = None
     format: AudioFormat | None = None
     error: str | None = None
@@ -245,8 +246,15 @@ class DownloadResult(BaseModel):
         provider: str,
         file_path: str,
         fmt: AudioFormat = "flac",
+        source: str | None = None,
     ) -> DownloadResult:
-        return cls(success=True, provider=provider, file_path=file_path, format=fmt)
+        return cls(
+            success=True,
+            provider=provider,
+            source=source,
+            file_path=file_path,
+            format=fmt,
+        )
 
     @classmethod
     def skipped_result(
@@ -254,10 +262,12 @@ class DownloadResult(BaseModel):
         provider: str,
         file_path: str,
         fmt: AudioFormat | None = None,
+        source: str | None = None,
     ) -> DownloadResult:
         return cls(
             success=True,
             provider=provider,
+            source=source,
             file_path=file_path,
             format=fmt,
             skipped=True,

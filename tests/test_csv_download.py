@@ -10,6 +10,8 @@ is under test is the plan, not the download.
 
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 
 import pytest
@@ -32,7 +34,7 @@ def _track(track_id: str, title: str, artist: str = "Foo Fighters") -> TrackMeta
 
 
 @pytest.fixture
-def downloader(tmp_path, monkeypatch):
+def downloader(tmp_path, monkeypatch) -> Any:
     """A downloader whose catalogue and providers are replaced by fakes."""
     opts = DownloadOptions(
         output_dir=str(tmp_path / "music"),

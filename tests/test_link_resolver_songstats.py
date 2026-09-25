@@ -120,7 +120,7 @@ def test_the_track_link_is_taken_not_the_artist_link():
         "https://music.amazon.com/albums/B0157E3W76",
     ],
 )
-def test_a_page_of_only_artist_links_yields_nothing(link):
+def test_a_page_of_only_artist_links_yields_nothing(link: str) -> None:
     results: dict[str, str] = {"amazonMusic": "", "tidal": "", "deezer": ""}
 
     LinkResolver()._assign_songstats_link(link, results)
@@ -128,7 +128,7 @@ def test_a_page_of_only_artist_links_yields_nothing(link):
     assert not any(results.values()), f"{link} was taken for a track"
 
 
-def test_the_canonical_amazon_track_shape_still_works():
+def test_the_canonical_amazon_track_shape_still_works() -> None:
     """The shape the old test used — it must not be a casualty of the fix."""
     results: dict[str, str] = {"amazonMusic": "", "tidal": "", "deezer": ""}
 

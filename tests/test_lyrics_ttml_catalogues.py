@@ -78,7 +78,9 @@ def _result(**over):
 def test_word_timing_beats_line_timing() -> None:
     line = _result(timing_type="line", lyricsUrl="https://x.binimum.org/line.ttml")
     word = _result(lyricsUrl="https://x.binimum.org/word.ttml")
-    assert L._best_bini_result([line, word], 355, "")["lyricsUrl"].endswith("word.ttml")
+    result = L._best_bini_result([line, word], 355, "")
+    assert result is not None
+    assert result["lyricsUrl"].endswith("word.ttml")
 
 
 def test_a_different_length_is_a_different_take() -> None:
@@ -96,7 +98,9 @@ def test_a_matching_isrc_is_taken_whatever_the_length() -> None:
 def test_the_closest_length_wins_among_equals() -> None:
     far = _result(duration=358, lyricsUrl="https://x.binimum.org/far.ttml")
     near = _result(duration=356, lyricsUrl="https://x.binimum.org/near.ttml")
-    assert L._best_bini_result([far, near], 355, "")["lyricsUrl"].endswith("near.ttml")
+    result = L._best_bini_result([far, near], 355, "")
+    assert result is not None
+    assert result["lyricsUrl"].endswith("near.ttml")
 
 
 def test_a_link_off_binis_own_host_is_never_taken() -> None:

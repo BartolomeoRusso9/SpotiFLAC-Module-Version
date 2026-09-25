@@ -11,6 +11,7 @@ JavaScript reads `name`/`artists`/`images`; older callers read
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 
@@ -113,7 +114,7 @@ def test_search_metadata_async_shapes_what_the_client_returns(monkeypatch) -> No
 class _Api(SearchMixin):
     def __init__(self) -> None:
         self.logs: list[tuple[str, str]] = []
-        self.pushed: list[tuple[str, object]] = []
+        self.pushed: list[tuple[str, Any]] = []
 
     def log(self, message, level="info") -> None:
         self.logs.append((message, level))

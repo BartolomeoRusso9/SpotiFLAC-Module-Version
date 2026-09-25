@@ -5,7 +5,7 @@ pywebview's `js_api` in desktop mode (so any JS running in the window can
 call it), and — in `--web` mode — as a POST /api/<method> endpoint, where
 the "caller" is whoever can reach the port and `config` is just a JSON
 body. `post_download_action="command"` ends up in
-downloader._execute_post_action_async(), which runs it through a shell, so
+BatchFinalizer.execute_post_action(), which runs it through a shell, so
 taking it from that dict makes the two indistinguishable.
 
 The CLI path is deliberately not covered here: it never goes through this
@@ -16,10 +16,12 @@ it into ours.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
-import SpotiFLAC as spotiflac_pkg
 from SpotiFLAC.app import POST_COMMAND_ENV, SpotiFLAC_API
+from tests.application_download_capture import capture_service
 
 
 class _FakeTrack:
@@ -29,16 +31,11 @@ class _FakeTrack:
 
 
 @pytest.fixture
-def captured_options(tmp_path, monkeypatch):
+def captured_options(tmp_path, monkeypatch) -> Any:
     """Runs _download_task and returns the kwargs the download wrapper got."""
     seen: list[dict] = []
 
-    def _fake_spotiflac(**kwargs):
-        seen.append(kwargs)
-
-    # _download_task does `from . import SpotiFLAC` at call time, so the
-    # name to patch lives on the package, not on SpotiFLAC.app.
-    monkeypatch.setattr(spotiflac_pkg, "SpotiFLAC", _fake_spotiflac)
+    capture_service(monkeypatch, seen)
 
     def _run(config: dict) -> dict:
         api = SpotiFLAC_API()
