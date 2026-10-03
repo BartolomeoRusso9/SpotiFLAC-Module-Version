@@ -724,6 +724,7 @@ def build_chromium_options(*, hidden: bool = True) -> tuple[ChromiumOptions, str
 
     options = ChromiumOptions()
     options.binary_location = _find_chrome()
+    options.add_argument("--password-store=basic")
     options.headless = False
 
     # pydoll uses a 10s default to verify the browser is alive after
