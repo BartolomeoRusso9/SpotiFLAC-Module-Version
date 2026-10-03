@@ -98,14 +98,27 @@ async def test_escape_closes_the_log() -> None:
 
 
 @drives_the_ui
-async def test_a_run_opens_the_log_through_the_same_door() -> None:
+async def test_a_run_opens_the_log_through_the_same_door(monkeypatch) -> None:
     """So the focus rule applies to the run's own opening too."""
+
+    class _StubRunner:
+        def __init__(self, cfg, log_level=0) -> None: ...
+
+        async def events(self):
+            yield ("output", "stub line", "info")
+
+    async def _no_memory(self) -> None: ...
+
+    monkeypatch.setattr("SpotiFLAC.tui.app.DownloadRunner", _StubRunner)
+    monkeypatch.setattr(SpotiFLACTui, "_remember_folder", _no_memory)
+
     async with SpotiFLACTui(_ready_state()).run_test(size=(104, 38)) as pilot:
         await _settled(pilot)
         app_of(pilot).action_start_download()
         await _settled(pilot)
 
         assert app_of(pilot).query_one("#log-pane").display is True
+        assert "stub line" in app_of(pilot)._log_lines
         await pilot.press("ctrl+l")
         await pilot.pause()
         assert app_of(pilot).query_one("#log-pane").display is False

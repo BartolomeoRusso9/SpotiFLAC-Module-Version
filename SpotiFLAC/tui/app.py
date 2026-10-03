@@ -25,6 +25,8 @@ those lines would land on the terminal underneath and tear the layout.
 from __future__ import annotations
 
 import logging
+from contextlib import aclosing
+from textual.css.query import NoMatches
 from collections import deque
 from typing import Any, Literal, cast
 
@@ -732,17 +734,21 @@ class SpotiFLACTui(App[None]):
 
         queue = self.query_one("#queue", QueuePanel)
         try:
-            async for kind, payload, severity in runner.events():
-                if kind == OUTPUT:
-                    self._write_log(str(payload), severity)
-                elif kind == STATS:
-                    queue.apply_stats(payload)
-                    self._set_status(_status_for(payload))
-                elif kind in (FINISHED, FAILED):
-                    self._announce(
-                        _outcome_line(payload),
-                        "error" if kind == FAILED else "success",
-                    )
+            async with aclosing(runner.events()) as events:
+                async for kind, payload, severity in events:
+                    try:
+                        if kind == OUTPUT:
+                            self._write_log(str(payload), severity)
+                        elif kind == STATS:
+                            queue.apply_stats(payload)
+                            self._set_status(_status_for(payload))
+                        elif kind in (FINISHED, FAILED):
+                            self._announce(
+                                _outcome_line(payload),
+                                "error" if kind == FAILED else "success",
+                            )
+                    except NoMatches:
+                        break
         finally:
             self._download_running = False
             self._runner = None
