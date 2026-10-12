@@ -29,8 +29,10 @@ from pydoll.protocol.network.events import NetworkEvent
 
 from SpotiFLAC.core import get_amazon_endpoint
 from SpotiFLAC.core.solver import (
+    _cleanup_browser_temp_files,
     _ensure_xvfb,
     _kill_by_profile_dir,
+    _start_browser_with_temp_tracking,
     _try_minimize_window,
     acquire_browser_slot,
     build_chromium_options,
@@ -178,12 +180,17 @@ class _MonochromeBrowserSession:
         # push the real number of live Chrome processes past the configured
         # cap, reintroducing the OOM risk the semaphore exists to prevent.
         slot_cm = acquire_browser_slot()
-        await slot_cm.__aenter__()
+        try:
+            await slot_cm.__aenter__()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(_cleanup_browser_temp_files, None, profile_dir)
+            raise
         try:
             self._browser = Chrome(options=options)
             # Bounded: a hang here must not hold the slot forever.
             self._tab = await asyncio.wait_for(
-                self._browser.start(),
+                _start_browser_with_temp_tracking(self._browser),
                 timeout=MONOCHROME_BROWSER_START_TIMEOUT,
             )
             # No navigation here: which Monochrome page to load is decided
@@ -196,6 +203,10 @@ class _MonochromeBrowserSession:
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(self._browser.stop(), timeout=15.0)
             _kill_by_profile_dir(profile_dir)
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(
+                    _cleanup_browser_temp_files, self._browser, profile_dir
+                )
             self._browser = None
             self._tab = None
             with contextlib.suppress(Exception):
@@ -456,6 +467,11 @@ class _MonochromeBrowserSession:
                 pass
             if not stopped_cleanly and self._profile_dir:
                 _kill_by_profile_dir(self._profile_dir)
+        if self._profile_dir:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(
+                    _cleanup_browser_temp_files, self._browser, self._profile_dir
+                )
         self._browser = None
         self._tab = None
         self._on_page = False
