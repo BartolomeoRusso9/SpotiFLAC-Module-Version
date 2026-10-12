@@ -45,7 +45,9 @@ jobs:
         run: ruff check .
 
       - name: Black (format check)
-        run: black --check .
+        run: |
+          black --diff SpotiFLAC/core/solver.py tests/test_solver_browser_temp_cleanup.py
+          black --check .
 
       - name: Mypy (advisory — see [tool.mypy] in pyproject.toml)
         # Not blocking yet: the codebase predates type checking and carries a
