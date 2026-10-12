@@ -1271,7 +1271,12 @@ async def _solve_impl(
             "See the logs for the configured binary/profile/display details.",
         ) from exc
     slot_cm = acquire_browser_slot()
-    await slot_cm.__aenter__()
+    try:
+        await slot_cm.__aenter__()
+    except BaseException:
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(_cleanup_browser_temp_files, None, profile_dir)
+        raise
     try:
         logger.info(
             "[solver] launching browser through pydoll: binary=%s start_timeout=%ss",
