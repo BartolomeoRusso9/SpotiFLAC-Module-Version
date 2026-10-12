@@ -70,16 +70,9 @@ _browser_slot_semaphore_lock = threading.Lock()
 _CHROME_LAUNCH_LOCK = threading.Lock()
 _CHROME_TEMP_DIR_MAX_AGE_SECONDS = 60 * 60
 _CHROME_TEMP_NAME_RE = re.compile(
-    rb"\\.?com\\.google\\.Chrome\\.[^/\\\\\\s\\x00]+|"
-    rb"\\.?org\\.chromium\\.Chromium\\.[^/\\\\\\s\\x00]+"
+    rb"\.?com\.google\.Chrome\.[^/\\\s\x00]+|"
+    rb"\.?org\.chromium\.Chromium\.[^/\\\s\x00]+"
 )
-_CHROME_TEMP_PREFIXES = (
-    ".com.google.Chrome.",
-    "com.google.Chrome.",
-    ".org.chromium.Chromium.",
-    "org.chromium.Chromium.",
-)
-
 # How long a caller is willing to wait for a free Chrome concurrency slot
 # before giving up. Without a bound, a caller stuck behind a wedged/hung
 # browser session that never releases its slot (see arm_hard_watchdog for
