@@ -678,7 +678,11 @@ async def _start_browser_with_temp_tracking(browser):
         if created:
             try:
                 previous = set(getattr(browser, "_spotiflac_chrome_temp_dirs", ()))
-                setattr(browser, "_spotiflac_chrome_temp_dirs", tuple(previous | set(created)))
+                setattr(
+                    browser,
+                    "_spotiflac_chrome_temp_dirs",
+                    tuple(previous | set(created)),
+                )
             except Exception:
                 logger.debug("[solver] could not attach temp-dir ownership to browser")
         _CHROME_LAUNCH_LOCK.release()
@@ -741,7 +745,7 @@ def _active_chrome_temp_dir_names() -> set[str]:
 
 
 def _is_safe_chrome_temp_dir(path: str) -> bool:
-    """Only allow removal of matching, non-symlink directories directly in temp roots."""
+    """Allow only matching, non-symlink folders directly inside temp roots."""
     if os.path.islink(path) or not _is_chrome_temp_name(os.path.basename(path)):
         return False
     parent = os.path.realpath(os.path.dirname(os.path.abspath(path)))
@@ -777,6 +781,7 @@ def _cleanup_stale_chrome_temp_dirs() -> None:
         return
 
     active = _active_chrome_temp_dir_names()
+    removed = 0
     for path in candidates:
         if not _is_safe_chrome_temp_dir(path):
             continue
@@ -784,7 +789,7 @@ def _cleanup_stale_chrome_temp_dirs() -> None:
             continue
         try:
             shutil.rmtree(path)
-            logger.info("[solver] removed stale Chromium temp directory: %s", path)
+            removed += 1
         except FileNotFoundError:
             continue
         except OSError as exc:
@@ -793,6 +798,8 @@ def _cleanup_stale_chrome_temp_dirs() -> None:
                 path,
                 exc,
             )
+    if removed:
+        logger.info("[solver] removed %d stale Chromium temp directories", removed)
 
 
 def _cleanup_browser_temp_files(browser, profile_dir: str | None = None) -> None:
@@ -804,7 +811,7 @@ def _cleanup_browser_temp_files(browser, profile_dir: str | None = None) -> None
             continue
         if os.path.basename(path) in active:
             logger.debug(
-                "[solver] keeping Chromium temp directory still referenced by a live process: %s",
+                "[solver] keeping active Chromium temp directory: %s",
                 path,
             )
             continue
