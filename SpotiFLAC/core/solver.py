@@ -7,6 +7,7 @@ import logging
 import os
 import platform
 import random
+import re
 import shutil
 import signal
 import socket
@@ -60,6 +61,24 @@ _MAX_CONCURRENT_BROWSERS_ENV = "TS_MAX_CONCURRENT_BROWSERS"
 _DEFAULT_MAX_CONCURRENT_BROWSERS = 3
 _browser_slot_semaphore: threading.Semaphore | None = None
 _browser_slot_semaphore_lock = threading.Lock()
+
+# Chromium creates hidden temporary directories such as .com.google.Chrome.*
+# when using --disable-dev-shm-usage. They should disappear on a clean exit,
+# but hard-killing a wedged browser can leave gigabytes behind. Track the
+# directories created during each launch and remove stale leftovers once they
+# are old and no live browser process appears to be using them.
+_CHROME_LAUNCH_LOCK = threading.Lock()
+_CHROME_TEMP_DIR_MAX_AGE_SECONDS = 60 * 60
+_CHROME_TEMP_NAME_RE = re.compile(
+    rb"\\.?com\\.google\\.Chrome\\.[^/\\\\\\s\\x00]+|"
+    rb"\\.?org\\.chromium\\.Chromium\\.[^/\\\\\\s\\x00]+"
+)
+_CHROME_TEMP_PREFIXES = (
+    ".com.google.Chrome.",
+    "com.google.Chrome.",
+    ".org.chromium.Chromium.",
+    "org.chromium.Chromium.",
+)
 
 # How long a caller is willing to wait for a free Chrome concurrency slot
 # before giving up. Without a bound, a caller stuck behind a wedged/hung
@@ -584,6 +603,262 @@ def _get_profile_dir() -> str:
     return tempfile.mkdtemp(prefix="ts_profile_", dir=base)
 
 
+
+def _chrome_temp_roots() -> tuple[str, ...]:
+    """Return temp roots where Chromium/Snap Chromium leaves scoped folders."""
+    candidates = [
+        tempfile.gettempdir(),
+        os.environ.get("TMPDIR", ""),
+        os.environ.get("TEMP", ""),
+        os.environ.get("TMP", ""),
+        "/tmp",
+    ]
+    # Snap confines Chromium's temp files to a nested host-visible directory.
+    for root in ("/tmp", tempfile.gettempdir()):
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if entry.name.startswith("snap.") and entry.is_dir(
+                        follow_symlinks=False
+                    ):
+                        candidates.append(os.path.join(entry.path, "tmp"))
+        except OSError:
+            continue
+
+    roots: list[str] = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = os.path.abspath(os.path.expanduser(candidate))
+        if os.path.isdir(path) and path not in roots:
+            roots.append(path)
+    return tuple(roots)
+
+
+def _is_chrome_temp_name(name: str) -> bool:
+    normalized = name.lstrip(".")
+    return normalized.startswith(("com.google.Chrome.", "org.chromium.Chromium."))
+
+
+def _snapshot_chrome_temp_dirs() -> dict[str, tuple[int, int]]:
+    """Snapshot scoped Chromium temp directories without following symlinks."""
+    snapshot: dict[str, tuple[int, int]] = {}
+    for root in _chrome_temp_roots():
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if not _is_chrome_temp_name(entry.name):
+                        continue
+                    try:
+                        if not entry.is_dir(follow_symlinks=False):
+                            continue
+                        info = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    snapshot[os.path.abspath(entry.path)] = (info.st_dev, info.st_ino)
+        except OSError:
+            continue
+    return snapshot
+
+
+async def _start_browser_with_temp_tracking(browser):
+    """Start one browser while attributing newly-created Chromium temp dirs to it.
+
+    Launches are serialized only for the startup/snapshot window. Polling the
+    lock asynchronously avoids blocking an event loop when another worker is
+    starting a browser on a separate loop.
+    """
+    while not _CHROME_LAUNCH_LOCK.acquire(blocking=False):
+        await asyncio.sleep(0.01)
+
+    before: dict[str, tuple[int, int]] = {}
+    try:
+        before = _snapshot_chrome_temp_dirs()
+        return await browser.start()
+    finally:
+        after = _snapshot_chrome_temp_dirs()
+        created = [
+            path
+            for path, identity in after.items()
+            if before.get(path) != identity
+        ]
+        if created:
+            try:
+                previous = set(getattr(browser, "_spotiflac_chrome_temp_dirs", ()))
+                setattr(browser, "_spotiflac_chrome_temp_dirs", tuple(previous | set(created)))
+            except Exception:
+                logger.debug("[solver] could not attach temp-dir ownership to browser")
+        _CHROME_LAUNCH_LOCK.release()
+
+
+def _active_chrome_temp_dir_names() -> set[str]:
+    """Find Chromium temp-dir names referenced by live processes or open fds."""
+    active: set[str] = set()
+    proc_root = "/proc"
+    if os.path.isdir(proc_root):
+        try:
+            processes = list(os.scandir(proc_root))
+        except OSError:
+            processes = []
+        for process in processes:
+            if not process.name.isdigit():
+                continue
+            proc_path = process.path
+            sources: list[bytes] = []
+            for relative in ("cmdline", "maps"):
+                try:
+                    with open(os.path.join(proc_path, relative), "rb") as handle:
+                        sources.append(handle.read())
+                except OSError:
+                    pass
+            try:
+                with os.scandir(os.path.join(proc_path, "fd")) as descriptors:
+                    for descriptor in descriptors:
+                        try:
+                            sources.append(os.fsencode(os.readlink(descriptor.path)))
+                        except OSError:
+                            continue
+            except OSError:
+                pass
+            for source in sources:
+                active.update(
+                    os.fsdecode(match.group(0))
+                    for match in _CHROME_TEMP_NAME_RE.finditer(source)
+                )
+        return active
+
+    # On macOS, process arguments normally include the scoped temp profile
+    # path. This is a lightweight fallback; the directory deletion itself is
+    # still best-effort if a file is locked by a live process.
+    if platform.system() == "Darwin":
+        try:
+            result = subprocess.run(
+                ["ps", "-axo", "command"],
+                check=False,
+                capture_output=True,
+                timeout=5,
+            )
+            active.update(
+                os.fsdecode(match.group(0))
+                for match in _CHROME_TEMP_NAME_RE.finditer(result.stdout)
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return active
+
+
+def _is_safe_chrome_temp_dir(path: str) -> bool:
+    """Only allow removal of matching, non-symlink directories directly in temp roots."""
+    if os.path.islink(path) or not _is_chrome_temp_name(os.path.basename(path)):
+        return False
+    parent = os.path.realpath(os.path.dirname(os.path.abspath(path)))
+    return parent in {os.path.realpath(root) for root in _chrome_temp_roots()}
+
+
+def _cleanup_stale_chrome_temp_dirs() -> None:
+    """Remove old, inactive Chrome temporary directories left by crashed/killed runs."""
+    roots = _chrome_temp_roots()
+    now = time.time()
+    candidates: list[str] = []
+    for root in roots:
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if not _is_chrome_temp_name(entry.name):
+                        continue
+                    try:
+                        if not entry.is_dir(follow_symlinks=False):
+                            continue
+                        if now - entry.stat(follow_symlinks=False).st_mtime < (
+                            _CHROME_TEMP_DIR_MAX_AGE_SECONDS
+                        ):
+                            continue
+                    except OSError:
+                        continue
+                    candidates.append(os.path.abspath(entry.path))
+
+        except OSError:
+            continue
+
+    if not candidates:
+        return
+
+    active = _active_chrome_temp_dir_names()
+    for path in candidates:
+        if not _is_safe_chrome_temp_dir(path):
+            continue
+        if os.path.basename(path) in active:
+            continue
+        try:
+            shutil.rmtree(path)
+            logger.info("[solver] removed stale Chromium temp directory: %s", path)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            logger.debug(
+                "[solver] could not remove stale Chromium temp directory %s: %s",
+                path,
+                exc,
+            )
+
+
+def _cleanup_browser_temp_files(browser, profile_dir: str | None = None) -> None:
+    """Remove this browser's scoped temp dirs/profile and old inactive leftovers."""
+    owned_dirs = tuple(getattr(browser, "_spotiflac_chrome_temp_dirs", ()))
+    active = _active_chrome_temp_dir_names() if owned_dirs else set()
+    for path in owned_dirs:
+        if not _is_safe_chrome_temp_dir(path):
+            continue
+        if os.path.basename(path) in active:
+            logger.debug(
+                "[solver] keeping Chromium temp directory still referenced by a live process: %s",
+                path,
+            )
+            continue
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.debug(
+                "[solver] could not remove Chromium temp directory %s: %s",
+                path,
+                exc,
+            )
+    if browser is not None:
+        with contextlib.suppress(Exception):
+            setattr(browser, "_spotiflac_chrome_temp_dirs", ())
+
+    # TS_PROFILE_DIR is an explicit user override, so treat it as persistent
+    # data. Only remove profiles created by _get_profile_dir() itself.
+    if (
+        profile_dir
+        and not os.environ.get("TS_PROFILE_DIR")
+        and os.path.basename(profile_dir).startswith("ts_profile_")
+        and _is_safe_temp_child(profile_dir)
+    ):
+        try:
+            shutil.rmtree(profile_dir)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.debug(
+                "[solver] could not remove temporary browser profile %s: %s",
+                profile_dir,
+                exc,
+            )
+
+    _cleanup_stale_chrome_temp_dirs()
+
+
+def _is_safe_temp_child(path: str) -> bool:
+    """Ensure a generated temporary profile is a direct child of a temp root."""
+    if os.path.islink(path):
+        return False
+    parent = os.path.realpath(os.path.dirname(os.path.abspath(path)))
+    return parent in {os.path.realpath(root) for root in _chrome_temp_roots()}
+
+
 #: How long to wait for a freshly started Xvfb to accept connections.
 _XVFB_READY_TIMEOUT_SECONDS = 10.0
 
@@ -744,13 +1019,9 @@ def build_chromium_options(*, hidden: bool = True) -> tuple[ChromiumOptions, str
     options.start_timeout = start_timeout_seconds
 
     profile_dir = _get_profile_dir()
-    if os.path.exists(profile_dir):
-        try:
-            shutil.rmtree(profile_dir)
-        except Exception:
-            # FIX: If deletion fails because a zombie Chrome process
-            # is holding the files locked, create a new folder on the fly to work around the lock (Errno 13).
-            profile_dir = f"{profile_dir}_{int(time.time() * 1000)}"
+    # A TS_PROFILE_DIR override may be an intentional persistent profile. The
+    # default path is already a newly-created empty directory from mkdtemp().
+    os.makedirs(profile_dir, exist_ok=True)
 
     # A persistent profile dir. pydoll doesn't have a first-class...
     options.add_argument(f"--user-data-dir={profile_dir}")
@@ -1015,7 +1286,7 @@ async def _solve_impl(
             getattr(options, "start_timeout", "n/a"),
         )
         browser = Chrome(options=options)
-        tab = await browser.start()
+        tab = await _start_browser_with_temp_tracking(browser)
 
         # Hard ceiling on the whole solve (all reload attempts + cleanup),
         # armed the moment we have a real PID to kill. Sized generously
@@ -1051,6 +1322,10 @@ async def _solve_impl(
         if browser is not None:
             with contextlib.suppress(Exception):
                 await browser.stop()
+        if profile_dir:
+            _kill_by_profile_dir(profile_dir)
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(_cleanup_browser_temp_files, browser, profile_dir)
         with contextlib.suppress(Exception):
             await slot_cm.__aexit__(None, None, None)
         raise RuntimeError(
@@ -1509,6 +1784,8 @@ async def _solve_impl(
             # it doesn't touch unrelated Chrome windows the user has open.
             _kill_by_profile_dir(profile_dir)
         cancel_watchdog()
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(_cleanup_browser_temp_files, browser, profile_dir)
         with contextlib.suppress(Exception):
             await slot_cm.__aexit__(None, None, None)
 
