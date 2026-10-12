@@ -598,7 +598,10 @@ def _cleanup_profile_dir(profile_dir: str | None) -> None:
     try:
         configured_profile_dir = os.environ.get("TS_PROFILE_DIR")
         resolved = os.path.realpath(profile_dir)
-        if configured_profile_dir and resolved == os.path.realpath(configured_profile_dir):
+        if (
+            configured_profile_dir
+            and resolved == os.path.realpath(configured_profile_dir)
+        ):
             return
         if platform.system() == "Windows":
             base = os.environ.get("TEMP") or os.environ.get("TMP") or r"C:\Temp"
@@ -606,10 +609,16 @@ def _cleanup_profile_dir(profile_dir: str | None) -> None:
             base = "/tmp"
         resolved_base = os.path.realpath(base)
         if os.path.commonpath((resolved_base, resolved)) != resolved_base:
-            logger.warning("[solver] refusing to remove profile outside temp dir: %s", profile_dir)
+            logger.warning(
+                "[solver] refusing to remove profile outside temp dir: %s",
+                profile_dir,
+            )
             return
         if not os.path.basename(resolved).startswith("ts_profile_"):
-            logger.warning("[solver] refusing to remove non-temporary browser profile: %s", profile_dir)
+            logger.warning(
+                "[solver] refusing to remove non-temporary browser profile: %s",
+                profile_dir,
+            )
             return
 
         shutil.rmtree(resolved)
@@ -619,7 +628,11 @@ def _cleanup_profile_dir(profile_dir: str | None) -> None:
     except Exception as exc:
         # Cleanup is best-effort: report a leftover rather than hiding the
         # solver's actual result or masking a more useful exception.
-        logger.warning("[solver] could not remove temporary browser profile %s: %s", profile_dir, exc)
+        logger.warning(
+            "[solver] could not remove temporary browser profile %s: %s",
+            profile_dir,
+            exc,
+        )
 
 
 def _cleanup_pydoll_temp_dirs(browser: Any) -> None:
@@ -636,7 +649,10 @@ def _cleanup_pydoll_temp_dirs(browser: Any) -> None:
     try:
         cleanup()
     except Exception as exc:
-        logger.warning("[solver] could not remove Pydoll temporary browser data: %s", exc)
+        logger.warning(
+            "[solver] could not remove Pydoll temporary browser data: %s",
+            exc,
+        )
 
 
 #: How long to wait for a freshly started Xvfb to accept connections.
