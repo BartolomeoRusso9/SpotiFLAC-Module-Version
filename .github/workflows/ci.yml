@@ -44,6 +44,9 @@ jobs:
       - name: Ruff (lint)
         run: ruff check .
 
+      - name: Black diff (temporary debug)
+        run: black --diff SpotiFLAC/core/solver.py || true
+
       - name: Black (format check)
         run: black --check .
 
