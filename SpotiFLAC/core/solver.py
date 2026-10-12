@@ -598,9 +598,8 @@ def _cleanup_profile_dir(profile_dir: str | None) -> None:
     try:
         configured_profile_dir = os.environ.get("TS_PROFILE_DIR")
         resolved = os.path.realpath(profile_dir)
-        if (
+        if configured_profile_dir and resolved == os.path.realpath(
             configured_profile_dir
-            and resolved == os.path.realpath(configured_profile_dir)
         ):
             return
         if platform.system() == "Windows":
