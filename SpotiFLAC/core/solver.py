@@ -570,18 +570,88 @@ def _find_chrome() -> str:
 
 
 def _get_profile_dir() -> str:
-    """Return a persistent Chrome profile directory for the current OS, isolated per thread."""
-    if os.environ.get("TS_PROFILE_DIR"):
-        return os.environ["TS_PROFILE_DIR"]
+    """Return a temporary, isolated Chrome profile directory."""
+    configured_profile_dir = os.environ.get("TS_PROFILE_DIR")
+    if configured_profile_dir:
+        # Explicitly configured profiles are user-managed and must survive
+        # solver runs; only auto-created profiles are eligible for cleanup.
+        return configured_profile_dir
 
     if platform.system() == "Windows":
         base = os.environ.get("TEMP") or os.environ.get("TMP") or r"C:\Temp"
     else:
         base = "/tmp"
 
-    # Use tempfile.mkdtemp to create a collision-resistant, unpredictable,
-    # per-process/thread directory with restrictive permissions by default
     return tempfile.mkdtemp(prefix="ts_profile_", dir=base)
+
+
+def _cleanup_profile_dir(profile_dir: str | None) -> None:
+    """Remove an auto-created solver profile, including Chromium's disk cache.
+
+    Never remove TS_PROFILE_DIR (which may contain state the operator wants
+    to persist), and only remove a path that matches our unique temp-profile
+    naming convention under the system temporary directory.
+    """
+    if not profile_dir:
+        return
+
+    try:
+        configured_profile_dir = os.environ.get("TS_PROFILE_DIR")
+        resolved = os.path.realpath(profile_dir)
+        if configured_profile_dir and resolved == os.path.realpath(
+            configured_profile_dir
+        ):
+            return
+        if platform.system() == "Windows":
+            base = os.environ.get("TEMP") or os.environ.get("TMP") or r"C:\Temp"
+        else:
+            base = "/tmp"
+        resolved_base = os.path.realpath(base)
+        if os.path.commonpath((resolved_base, resolved)) != resolved_base:
+            logger.warning(
+                "[solver] refusing to remove profile outside temp dir: %s",
+                profile_dir,
+            )
+            return
+        if not os.path.basename(resolved).startswith("ts_profile_"):
+            logger.warning(
+                "[solver] refusing to remove non-temporary browser profile: %s",
+                profile_dir,
+            )
+            return
+
+        shutil.rmtree(resolved)
+        logger.debug("[solver] removed temporary browser profile: %s", resolved)
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        # Cleanup is best-effort: report a leftover rather than hiding the
+        # solver's actual result or masking a more useful exception.
+        logger.warning(
+            "[solver] could not remove temporary browser profile %s: %s",
+            profile_dir,
+            exc,
+        )
+
+
+def _cleanup_pydoll_temp_dirs(browser: Any) -> None:
+    """Clean the temporary profile Pydoll created internally for this browser.
+
+    Pydoll normally invokes this during ``browser.stop()``. Our hard-kill
+    fallback bypasses that code path, so explicitly run the manager cleanup
+    after shutdown as well. The manager only deletes directories it owns.
+    """
+    manager = getattr(browser, "_temp_directory_manager", None)
+    cleanup = getattr(manager, "cleanup", None)
+    if not callable(cleanup):
+        return
+    try:
+        cleanup()
+    except Exception as exc:
+        logger.warning(
+            "[solver] could not remove Pydoll temporary browser data: %s",
+            exc,
+        )
 
 
 #: How long to wait for a freshly started Xvfb to accept connections.
@@ -744,13 +814,11 @@ def build_chromium_options(*, hidden: bool = True) -> tuple[ChromiumOptions, str
     options.start_timeout = start_timeout_seconds
 
     profile_dir = _get_profile_dir()
-    if os.path.exists(profile_dir):
-        try:
-            shutil.rmtree(profile_dir)
-        except Exception:
-            # FIX: If deletion fails because a zombie Chrome process
-            # is holding the files locked, create a new folder on the fly to work around the lock (Errno 13).
-            profile_dir = f"{profile_dir}_{int(time.time() * 1000)}"
+    # _get_profile_dir() already creates a unique empty temporary directory.
+    # Keep it in place: deleting it here defeats our ownership of the temp
+    # profile and can make Chromium fall back to its own anonymous profile.
+    # TS_PROFILE_DIR is explicitly user-managed, so preserve its contents.
+    os.makedirs(profile_dir, mode=0o700, exist_ok=True)
 
     # A persistent profile dir. pydoll doesn't have a first-class...
     options.add_argument(f"--user-data-dir={profile_dir}")
@@ -1007,7 +1075,11 @@ async def _solve_impl(
             "See the logs for the configured binary/profile/display details.",
         ) from exc
     slot_cm = acquire_browser_slot()
-    await slot_cm.__aenter__()
+    try:
+        await slot_cm.__aenter__()
+    except BaseException:
+        _cleanup_profile_dir(profile_dir)
+        raise
     try:
         logger.info(
             "[solver] launching browser through pydoll: binary=%s start_timeout=%ss",
@@ -1051,6 +1123,11 @@ async def _solve_impl(
         if browser is not None:
             with contextlib.suppress(Exception):
                 await browser.stop()
+            # A failed start can still leave a populated profile/cache.
+            if profile_dir:
+                _kill_by_profile_dir(profile_dir)
+            _cleanup_pydoll_temp_dirs(browser)
+        _cleanup_profile_dir(profile_dir)
         with contextlib.suppress(Exception):
             await slot_cm.__aexit__(None, None, None)
         raise RuntimeError(
@@ -1509,6 +1586,12 @@ async def _solve_impl(
             # it doesn't touch unrelated Chrome windows the user has open.
             _kill_by_profile_dir(profile_dir)
         cancel_watchdog()
+        # Browser must be stopped/killed before its profiles are deleted,
+        # otherwise Chromium can recreate cache files or keep files locked.
+        # Pydoll's own manager must also run because a force-kill skips its
+        # normal stop() cleanup path.
+        _cleanup_pydoll_temp_dirs(browser)
+        _cleanup_profile_dir(profile_dir)
         with contextlib.suppress(Exception):
             await slot_cm.__aexit__(None, None, None)
 
