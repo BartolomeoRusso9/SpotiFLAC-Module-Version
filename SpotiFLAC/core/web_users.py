@@ -50,10 +50,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .atomic_io import write_private_json
+from .paths import data_path
 
 logger = logging.getLogger(__name__)
 
-USERS_FILE = Path.home() / ".spotiflac" / "web_users.json"
+USERS_FILE = data_path("web_users.json")
 
 _PBKDF2_ITERATIONS = 600_000  # OWASP's 2023 recommendation for PBKDF2-SHA256
 _SESSION_TTL_S = 7 * 24 * 3600  # 7 days

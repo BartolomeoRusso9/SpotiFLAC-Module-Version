@@ -28,6 +28,7 @@ from pydoll.browser.chromium import Chrome
 from pydoll.protocol.network.events import NetworkEvent
 
 from SpotiFLAC.core import get_amazon_endpoint
+from SpotiFLAC.core.paths import data_dir
 from SpotiFLAC.core.solver import (
     _cleanup_profile_dir,
     _cleanup_pydoll_temp_dirs,
@@ -36,6 +37,7 @@ from SpotiFLAC.core.solver import (
     _try_minimize_window,
     acquire_browser_slot,
     build_chromium_options,
+    isolate_browser_temp_dir,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,7 +66,7 @@ class MonochromeSessionRecord:
 
 
 def ensure_app_dir() -> str:
-    app_dir = os.path.expanduser("~/.spotiflac")
+    app_dir = str(data_dir())
     os.makedirs(app_dir, exist_ok=True)
     return app_dir
 
@@ -187,6 +189,7 @@ class _MonochromeBrowserSession:
             raise
         try:
             self._browser = Chrome(options=options)
+            isolate_browser_temp_dir(self._browser, profile_dir)
             # Bounded: a hang here must not hold the slot forever.
             self._tab = await asyncio.wait_for(
                 self._browser.start(),

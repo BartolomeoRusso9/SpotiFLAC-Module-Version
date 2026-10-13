@@ -27,6 +27,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from ..core.paths import data_path
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ REGISTRY_ENV_KEY = "SPOTIFLAC_REGISTRIES"
 ENV_FILES_TO_CHECK = (Path.cwd() / ".env", Path.home() / ".spotiflac_env")
 
 # Where GUI-managed additions/removals are persisted.
-CONFIG_FILE = Path.home() / ".spotiflac" / "registry_settings.json"
+CONFIG_FILE = data_path("registry_settings.json")
 
 SOURCE_ENVIRONMENT = "environment"
 SOURCE_ENV_FILE = "env_file"

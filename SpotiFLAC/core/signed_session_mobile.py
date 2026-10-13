@@ -23,6 +23,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
+from .paths import data_path
 from .signed_session_errors import (
     parse_session_error,
     retry_after_header_seconds,
@@ -153,7 +154,7 @@ class SignedSessionClient:
         header_prefix: str = "X-Sig-",
         window_seconds: int = 300,
         endpoints: dict[str, str] | None = None,
-        data_dir: str = "~/.spotiflac/signed_sessions",
+        data_dir: str | None = None,
         refresh_skew_seconds: int = 3600,
         request_timeout: float = _DEFAULT_REQUEST_TIMEOUT_S,
     ) -> None:
@@ -167,7 +168,11 @@ class SignedSessionClient:
         self.endpoints = {**_DEFAULT_ENDPOINTS, **(endpoints or {})}
         self.refresh_skew_seconds = refresh_skew_seconds
         self.request_timeout = max(1.0, float(request_timeout))
-        self.data_dir = Path(os.path.expanduser(data_dir))
+        self.data_dir = (
+            Path(os.path.expanduser(data_dir))
+            if data_dir
+            else data_path("signed_sessions")
+        )
         self.data_dir.mkdir(parents=True, exist_ok=True)
         # Unlike the previous suppress(OSError), a failure to lock this
         # directory down to owner-only access must not be swallowed: the
@@ -1573,7 +1578,7 @@ async def perform_signed_fetch(
 
 def client_from_manifest(
     manifest_block: dict,
-    data_dir: str = "~/.spotiflac/signed_sessions",
+    data_dir: str | None = None,
 ) -> SignedSessionClient:
     """Builds a SignedSessionClient from an extension manifest's `signedSession` block."""
     try:

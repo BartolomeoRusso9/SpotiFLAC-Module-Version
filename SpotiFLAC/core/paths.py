@@ -1,6 +1,7 @@
 """Single source of truth for SpotiFLAC's on-disk locations.
 
-Everything SpotiFLAC writes lives under one directory, ``~/.spotiflac``:
+Everything SpotiFLAC writes lives under one directory, ``~/.spotiflac``
+(override: ``$SPOTIFLAC_DATA_DIR``):
 
     ~/.spotiflac/               durable data — losing it loses something real
       spotiflac.db
@@ -35,13 +36,27 @@ def default_download_dir() -> str:
     a GUI that defaults somewhere the terminal UI does not is two libraries
     on one machine. Returned as a string: it is handed straight to the
     downloader and shown in a text field, and neither wants a Path.
+
+    ``$SPOTIFLAC_DOWNLOAD_DIR``, when set, replaces it: a container has no
+    meaningful ``~/Music``, and the web GUI's folder picker cannot leave
+    ``$HOME`` to choose a mounted library on its own.
     """
+    override = os.getenv("SPOTIFLAC_DOWNLOAD_DIR", "").strip()
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
     return os.path.join(os.path.expanduser("~"), "Music", "SpotiFLAC")
 
 
 def data_dir() -> Path:
-    """The one directory everything SpotiFLAC writes lives under."""
-    return Path.home() / ".spotiflac"
+    """The one directory everything SpotiFLAC writes lives under.
+
+    ``$SPOTIFLAC_DATA_DIR``, when set, is used verbatim instead of
+    ``~/.spotiflac`` — the way to keep the data somewhere that does not
+    depend on ``$HOME`` (a container run as an arbitrary UID, a read-only
+    root filesystem).
+    """
+    override = os.getenv("SPOTIFLAC_DATA_DIR", "").strip()
+    return Path(override).expanduser() if override else Path.home() / ".spotiflac"
 
 
 def data_path(*parts: str) -> Path:

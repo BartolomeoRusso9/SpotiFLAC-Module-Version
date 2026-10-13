@@ -23,6 +23,15 @@ services:
     # For per-user logins instead of one shared token, use:
     # command: ["--web", "--host", "0.0.0.0", "--port", "8000", "--web-multiuser"]
     # (create users first: docker exec spotiflac spotiflac --web-user-add NAME PASS)
+
+    # Who the container runs as: set PUID / PGID in the stack's environment
+    # variables. No root is involved. With the named volumes below this only
+    # works for the default 1000:1000 (that is who owns a fresh volume); for
+    # any other UID — or a bind mount that UID cannot write yet — use the
+    # root-assisted variant: `user: "0:0"` here, plus the PUID/PGID lines
+    # under `environment`. The entrypoint then chowns the data directories
+    # and drops to PUID:PGID before anything else runs.
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       # Host side is 8080, not 8000: on a Portainer host 8000 is taken by
       # Portainer itself (the Edge agent tunnel server). Container side stays
@@ -69,11 +78,32 @@ services:
       # enabling this does not make the container report itself unhealthy.
       SPOTIFLAC_WEB_TOKEN: "${SPOTIFLAC_WEB_TOKEN:?set a long random shared secret — the web GUI has no other authentication}"
 
+      # --- Identity (root-assisted variant only, see `user:` above) --------
+      # PUID: "${PUID:-1000}"
+      # PGID: "${PGID:-1000}"
+
       # --- Storage ---------------------------------------------------------
-      # Both default under /home/spotiflac/.spotiflac, which is the volume
-      # mounted below — override only if you want them somewhere else.
+      # All container paths; each must be (inside) a volume mounted below.
+      #
+      # Where --web saves music. Unset, that is ~/Music/SpotiFLAC — inside
+      # the container's writable layer, gone at the next recreate.
+      SPOTIFLAC_DOWNLOAD_DIR: "${SPOTIFLAC_DOWNLOAD_DIR:-/app/downloads}"
+      # Database, extensions, signed sessions, web users, trusted keys,
+      # settings. Independent of $HOME, so it holds for any `user:`.
+      SPOTIFLAC_DATA_DIR: "${SPOTIFLAC_DATA_DIR:-/home/spotiflac/.spotiflac}"
+      # Both default inside SPOTIFLAC_DATA_DIR — override only if you want
+      # the database or the (regenerable) cache somewhere else.
       SPOTIFLAC_DB_PATH: "${SPOTIFLAC_DB_PATH:-}"
       SPOTIFLAC_CACHE_DIR: "${SPOTIFLAC_CACHE_DIR:-}"
+
+      # --- Browser (Turnstile solver) --------------------------------------
+      # How many Chromium instances may run at once (default 3). Each is a
+      # few hundred MB of RAM while it lives; lower it on a small host.
+      TS_MAX_CONCURRENT_BROWSERS: "${TS_MAX_CONCURRENT_BROWSERS:-}"
+      # Seconds to wait for Chromium to come up (default 45) and for a free
+      # slot when all of the above are busy (default 120).
+      TS_BROWSER_START_TIMEOUT: "${TS_BROWSER_START_TIMEOUT:-}"
+      TS_BROWSER_SLOT_TIMEOUT: "${TS_BROWSER_SLOT_TIMEOUT:-}"
 
       # --- Automation / notifications --------------------------------------
       SPOTIFLAC_NOTIFY_URL: "${SPOTIFLAC_NOTIFY_URL:-}"
@@ -123,28 +153,15 @@ services:
       TZ: "${TZ:-Europe/Rome}"
 
     volumes:
-      # Finished audio, mounted at BOTH paths that matter — one named volume,
-      # two mount points, same content.
+      # Finished audio. /app/downloads is what the image declares as its
+      # downloads VOLUME, what the CLI examples pass explicitly, and — through
+      # SPOTIFLAC_DOWNLOAD_DIR above — where --web saves too.
       #
-      # /app/downloads is what the image declares as its downloads VOLUME and
-      # what the CLI examples pass explicitly; without a mount here Docker
-      # invents an anonymous volume for it.
-      #
-      # ~/Music/SpotiFLAC is where --web actually writes: app.py sets
-      # download_dir from core.paths.default_download_dir(), and nothing on
-      # the web path ever overrides it. Left unmounted, every download lands
-      # in the container's writable layer and dies with the next recreate —
-      # which is what Watchtower does on every update.
-      #
-      # Changing it from the GUI instead is not an option: webapp.py's
-      # _is_path_safe confines the folder picker to $HOME and the current
-      # download_dir, so /app/downloads cannot be selected from there.
-      #
-      # For a NAS share, point both at the same host path, e.g.
+      # For a NAS share, replace the named volume with a host path, e.g.
       #   - /mnt/media/music:/app/downloads
-      #   - /mnt/media/music:/home/spotiflac/Music/SpotiFLAC
+      # To use another container path, change it here and in
+      # SPOTIFLAC_DOWNLOAD_DIR together.
       - spotiflac-downloads:/app/downloads
-      - spotiflac-downloads:/home/spotiflac/Music/SpotiFLAC
       # Everything durable *and* the cache: the database, installed
       # extensions, signed sessions, web users, trusted keys, settings — and
       # ~/.spotiflac/.cache, which is where the cache lives now. One volume

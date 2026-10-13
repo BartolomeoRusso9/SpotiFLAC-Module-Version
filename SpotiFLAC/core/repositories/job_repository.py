@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Iterator
 from typing import Any, List
+from ..paths import data_path
 
 
 class JobRepository:
@@ -22,9 +23,7 @@ class JobRepository:
     def __init__(self, db_path: str | Path | None = None) -> None:
         configured_path = os.getenv("SPOTIFLAC_DB_PATH")
         self.db_path = str(
-            db_path
-            or configured_path
-            or Path.home() / ".spotiflac" / "repository-jobs.db"
+            db_path or configured_path or data_path("repository-jobs.db")
         )
         self._ensure_schema()
 

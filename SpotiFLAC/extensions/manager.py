@@ -39,6 +39,7 @@ from .trust import (
     meets_min_trust,
     resolve_min_trust,
 )
+from ..core.paths import data_path
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ REGISTRY_URL = None
 REGISTRY_ENV_KEY = "SPOTIFLAC_REGISTRIES"
 ENV_FILES_TO_CHECK = (Path.cwd() / ".env", Path.home() / ".spotiflac_env")
 
-DEFAULT_EXT_DIR = Path.home() / ".spotiflac" / "extensions"
+DEFAULT_EXT_DIR = data_path("extensions")
 
 # How often a long-running process re-checks the registry for new extension
 # versions. Checking only once per process meant a --web container, which

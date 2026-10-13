@@ -13,10 +13,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # - xvfb: to create the virtual display (MANDATORY for Chromium even without VNC)
 # - chromium and fonts-liberation: browser for Pydoll and web fonts
 # - tini: PID 1 that reaps orphaned processes (see ENTRYPOINT below)
+# - procps: pkill, which core/solver.py uses to force-kill a browser that
+#   will not stop — without it that kill silently does nothing
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tini \
+        procps \
         ca-certificates \
         ffmpeg \
         flac \
@@ -46,7 +49,11 @@ RUN python3 -m pip install --no-cache-dir .
 # makes bind-mounted downloads come out owned by root on the host.
 #
 # UID 1000 matches the first non-system user on most Linux hosts, so mounted
-# volumes line up without a chown. Override at build time if yours differs:
+# volumes line up without a chown. If yours differs there is no need to
+# rebuild: run the container with `user: "UID:GID"`, or with `user: "0:0"` and
+# PUID/PGID to have the volumes chowned for you before privileges are dropped
+# (see docker-entrypoint.sh and docs/guide/docker.md). The build args remain
+# for anyone who wants the image's own default changed:
 #   docker build --build-arg APP_UID=1234 --build-arg APP_GID=1234 .
 ARG APP_UID=1000
 ARG APP_GID=1000

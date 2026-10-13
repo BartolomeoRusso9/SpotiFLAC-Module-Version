@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
 
 from SpotiFLAC.core import get_community_url
+from SpotiFLAC.core.paths import data_dir
 from SpotiFLAC.core.signed_session_errors import (
     parse_session_error,
     retry_after_header_seconds,
@@ -120,7 +121,7 @@ class CommunitySessionExchange:
 
 def ensure_app_dir() -> str:
     """Returns the application folder."""
-    app_dir = os.path.expanduser("~/.spotiflac")
+    app_dir = str(data_dir())
     os.makedirs(app_dir, exist_ok=True)
     return app_dir
 

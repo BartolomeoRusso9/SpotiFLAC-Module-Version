@@ -11,14 +11,32 @@
 # No registry is bundled by design (see README > Extensions): set
 # SPOTIFLAC_REGISTRIES yourself, either below or in a sibling .env file
 # compose picks up automatically.
+#
+# Every variable the container understands is listed, with its default, in
+# docs/guide/docker.md ("Environment variables"). This file sets the ones a
+# first run needs; docker-compose.portainer.yml carries the full set.
 services:
   spotiflac-web:
     # Swap for the published image if you don't want to build locally:
     # image: ghcr.io/bartolomeorusso9/spotiflac:latest
     build: .
     command: ["--web", "--host", "0.0.0.0", "--port", "8000"]
+    # Who the container runs as. Set PUID/PGID (here, in .env, or in your
+    # shell) to the owner of the directories mounted below — `id -u` / `id -g`
+    # on the host. No root is involved; the directories must already be
+    # writable by that user.
+    #
+    # If they are not (a named volume, a directory Docker created for you),
+    # use the root-assisted variant instead: replace this line with
+    # `user: "0:0"` and uncomment PUID/PGID under `environment`. The
+    # entrypoint then chowns the data directories and drops to PUID:PGID
+    # before anything else runs.
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "8000:8000"
+    # A download can hit a Turnstile challenge, which launches a real
+    # Chromium; it crashes on Docker's default 64 MB /dev/shm.
+    shm_size: "1gb"
     environment:
       # Comma-separated registry JSON URLs — required, nothing is bundled.
       SPOTIFLAC_REGISTRIES: "${SPOTIFLAC_REGISTRIES:-}"
@@ -26,10 +44,24 @@ services:
       # Leave unset only if this port is never reachable from outside a
       # network you fully trust.
       SPOTIFLAC_WEB_TOKEN: "${SPOTIFLAC_WEB_TOKEN:-}"
+      # Where --web saves music, and where the database / extensions /
+      # settings live. Both are container paths and must match the right-hand
+      # side of a volume below — change the two together. Without the first,
+      # --web saves to ~/Music/SpotiFLAC, which is not mounted here.
+      SPOTIFLAC_DOWNLOAD_DIR: /app/downloads
+      SPOTIFLAC_DATA_DIR: /home/spotiflac/.spotiflac
+      # Root-assisted variant only (see `user:` above):
+      # PUID: "${PUID:-1000}"
+      # PGID: "${PGID:-1000}"
+      # Plain lines instead of animated bars, which `docker logs` mangles.
+      SPOTIFLAC_PROGRESS_BARS: "0"
     volumes:
+      # host path : container path. The host side is yours to choose, e.g.
+      #   - /mnt/media/music:/app/downloads
       - ./downloads:/app/downloads
+      # Database, installed extensions, signed sessions, web users, settings
+      # and the cache (in .cache/ inside it) — one directory holds all of it.
       - ./.spotiflac_docker:/home/spotiflac/.spotiflac
-      - ./.cache_docker:/home/spotiflac/.cache/spotiflac
     restart: unless-stopped
     healthcheck:
       # --web is the one run mode this compose file commits to, so (unlike

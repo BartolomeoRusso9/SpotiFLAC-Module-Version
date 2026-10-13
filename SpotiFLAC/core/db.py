@@ -50,6 +50,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from .paths import data_path
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ logger = logging.getLogger(__name__)
 #: then gets its *own* empty database — useful only for single-threaded tests.
 DB_PATH_ENV = "SPOTIFLAC_DB_PATH"
 
-DEFAULT_DB_PATH = Path.home() / ".spotiflac" / "spotiflac.db"
+DEFAULT_DB_PATH = data_path("spotiflac.db")
 
 _local = threading.local()
 _init_lock = threading.Lock()

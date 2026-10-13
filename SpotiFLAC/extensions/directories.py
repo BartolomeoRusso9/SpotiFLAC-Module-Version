@@ -35,12 +35,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
+from ..core.paths import data_path
 
 logger = logging.getLogger(__name__)
 
 DIRECTORY_ENV_KEY = "SPOTIFLAC_REGISTRY_DIRECTORIES"
 ENV_FILES_TO_CHECK = (Path.cwd() / ".env", Path.home() / ".spotiflac_env")
-CONFIG_FILE = Path.home() / ".spotiflac" / "directory_settings.json"
+CONFIG_FILE = data_path("directory_settings.json")
 
 _TIMEOUT_S = 10.0
 

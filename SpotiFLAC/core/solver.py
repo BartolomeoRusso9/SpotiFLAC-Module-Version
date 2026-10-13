@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ from typing import Any, cast
 from urllib.parse import parse_qsl, urlparse
 
 from pydoll.browser.chromium import Chrome
+from pydoll.browser.managers.browser_process_manager import BrowserProcessManager
 from pydoll.browser.options import ChromiumOptions
 from pydoll.protocol.network.events import NetworkEvent
 
@@ -269,6 +271,9 @@ def arm_hard_watchdog(browser, profile_dir: str | None, timeout_seconds: float):
                 os.kill(pid, sig)
         if profile_dir:
             _kill_by_profile_dir(profile_dir)
+            # Whoever was awaiting this browser may be wedged for good, in
+            # which case its own cleanup never runs — reclaim the disk here.
+            _cleanup_profile_dir(profile_dir)
 
     timer = threading.Timer(timeout_seconds, _kill)
     timer.daemon = True
@@ -569,6 +574,23 @@ def _find_chrome() -> str:
     )
 
 
+_PROFILE_PREFIX = "ts_profile_"
+_BROWSER_TMP_PREFIX = "ts_tmp_"
+_BROWSER_TMP_SUBDIR = "ts_tmp"
+
+#: Auto-created profiles this process still has a browser on (or is about to).
+#: The stale sweep below must never take one of these, however old it looks.
+_LIVE_PROFILE_DIRS: set[str] = set()
+_LIVE_PROFILE_DIRS_LOCK = threading.Lock()
+
+
+def _profile_base_dir() -> str:
+    """The directory auto-created browser profiles are made in."""
+    if platform.system() == "Windows":
+        return os.environ.get("TEMP") or os.environ.get("TMP") or r"C:\Temp"
+    return "/tmp"  # noqa: S108 — unique, 0700 mkdtemp() dirs are created in it
+
+
 def _get_profile_dir() -> str:
     """Return a temporary, isolated Chrome profile directory."""
     configured_profile_dir = os.environ.get("TS_PROFILE_DIR")
@@ -577,16 +599,105 @@ def _get_profile_dir() -> str:
         # solver runs; only auto-created profiles are eligible for cleanup.
         return configured_profile_dir
 
-    if platform.system() == "Windows":
-        base = os.environ.get("TEMP") or os.environ.get("TMP") or r"C:\Temp"
-    else:
-        base = "/tmp"
+    profile_dir = tempfile.mkdtemp(prefix=_PROFILE_PREFIX, dir=_profile_base_dir())
+    with _LIVE_PROFILE_DIRS_LOCK:
+        _LIVE_PROFILE_DIRS.add(os.path.realpath(profile_dir))
+    return profile_dir
 
-    return tempfile.mkdtemp(prefix="ts_profile_", dir=base)
+
+def _is_owned_profile_dir(profile_dir: str) -> bool:
+    """Is this one of the throwaway profiles ``_get_profile_dir()`` creates?
+
+    False for TS_PROFILE_DIR (which may contain state the operator wants to
+    persist) and for anything that does not match our unique temp-profile
+    naming convention under the system temporary directory.
+    """
+    configured_profile_dir = os.environ.get("TS_PROFILE_DIR")
+    resolved = os.path.realpath(profile_dir)
+    if configured_profile_dir and resolved == os.path.realpath(configured_profile_dir):
+        return False
+    resolved_base = os.path.realpath(_profile_base_dir())
+    try:
+        if os.path.commonpath((resolved_base, resolved)) != resolved_base:
+            return False
+    except ValueError:
+        # Different drives on Windows: not under the temp dir.
+        return False
+    return os.path.basename(resolved).startswith(_PROFILE_PREFIX)
+
+
+def _browser_tmp_dir(profile_dir: str) -> str:
+    """Where the browser launched on ``profile_dir`` keeps its temp files.
+
+    Chromium creates directories of its own in the system temp dir — on
+    Linux ``/tmp/com.google.Chrome.XXXXXX`` or
+    ``/tmp/.org.chromium.Chromium.XXXXXX`` — and only removes them on a clean
+    exit. Every force-kill here (cancel path, failed stop(), hard watchdog)
+    therefore left one behind for good, outside the profile and so outside
+    anything ``_cleanup_profile_dir()`` could reach. Pointing the browser's
+    temp dir at a directory we own puts all of it back in reach.
+
+    Inside the profile when the profile is ours, so removing the profile
+    removes it. Next to it, under a name derived from the path, when the
+    profile is a user-managed TS_PROFILE_DIR we must not write into.
+    """
+    if _is_owned_profile_dir(profile_dir):
+        return os.path.join(profile_dir, _BROWSER_TMP_SUBDIR)
+    digest = hashlib.sha256(os.path.realpath(profile_dir).encode()).hexdigest()[:12]
+    return os.path.join(_profile_base_dir(), f"{_BROWSER_TMP_PREFIX}{digest}")
+
+
+def isolate_browser_temp_dir(browser: Any, profile_dir: str | None) -> None:
+    """Make ``browser`` (not yet started) use a temp dir tied to its profile.
+
+    See ``_browser_tmp_dir()`` for why. Shared by every module that launches
+    its own pydoll browser on a ``build_chromium_options()`` profile; the
+    matching cleanup is ``_cleanup_profile_dir()``.
+    """
+    if not profile_dir:
+        return
+    tmp_dir = _browser_tmp_dir(profile_dir)
+    try:
+        os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
+    except OSError as exc:
+        logger.warning(
+            "[solver] could not create browser temp dir %s, using the system one: %s",
+            tmp_dir,
+            exc,
+        )
+        return
+
+    def _spawn(command: list[str]) -> subprocess.Popen:
+        env = os.environ.copy()
+        # TMPDIR is what Chromium reads on POSIX, TMP/TEMP on Windows.
+        env.update(TMPDIR=tmp_dir, TMP=tmp_dir, TEMP=tmp_dir)
+        # Same pipes as pydoll's own default process creator.
+        return subprocess.Popen(  # noqa: S603 — pydoll's own browser command
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env
+        )
+
+    browser._browser_process_manager = BrowserProcessManager(process_creator=_spawn)
+
+
+def _rmtree_with_retries(path: str, attempts: int = 3) -> bool:
+    """Remove ``path``; True once it is gone.
+
+    Retried because a browser that was just force-killed can still have a
+    child process writing one last file, which makes a single rmtree fail
+    with "Directory not empty" and leave the whole profile behind.
+    """
+    for attempt in range(attempts):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.lexists(path):
+            return True
+        if attempt < attempts - 1:
+            time.sleep(0.3)
+    return False
 
 
 def _cleanup_profile_dir(profile_dir: str | None) -> None:
-    """Remove an auto-created solver profile, including Chromium's disk cache.
+    """Remove an auto-created solver profile, including Chromium's disk cache
+    and the browser's own temp files (see ``_browser_tmp_dir()``).
 
     Never remove TS_PROFILE_DIR (which may contain state the operator wants
     to persist), and only remove a path that matches our unique temp-profile
@@ -596,34 +707,33 @@ def _cleanup_profile_dir(profile_dir: str | None) -> None:
         return
 
     try:
-        configured_profile_dir = os.environ.get("TS_PROFILE_DIR")
         resolved = os.path.realpath(profile_dir)
-        if configured_profile_dir and resolved == os.path.realpath(
-            configured_profile_dir
-        ):
-            return
-        if platform.system() == "Windows":
-            base = os.environ.get("TEMP") or os.environ.get("TMP") or r"C:\Temp"
-        else:
-            base = "/tmp"
-        resolved_base = os.path.realpath(base)
-        if os.path.commonpath((resolved_base, resolved)) != resolved_base:
+        if not _is_owned_profile_dir(profile_dir):
+            configured_profile_dir = os.environ.get("TS_PROFILE_DIR")
+            if configured_profile_dir and resolved == os.path.realpath(
+                configured_profile_dir
+            ):
+                # The profile stays; the temp dir we made beside it does not.
+                _rmtree_with_retries(_browser_tmp_dir(profile_dir))
+                return
             logger.warning(
-                "[solver] refusing to remove profile outside temp dir: %s",
-                profile_dir,
-            )
-            return
-        if not os.path.basename(resolved).startswith("ts_profile_"):
-            logger.warning(
-                "[solver] refusing to remove non-temporary browser profile: %s",
+                "[solver] refusing to remove a browser profile SpotiFLAC "
+                "did not create: %s",
                 profile_dir,
             )
             return
 
-        shutil.rmtree(resolved)
-        logger.debug("[solver] removed temporary browser profile: %s", resolved)
-    except FileNotFoundError:
-        pass
+        removed = _rmtree_with_retries(resolved)
+        with _LIVE_PROFILE_DIRS_LOCK:
+            _LIVE_PROFILE_DIRS.discard(resolved)
+        if removed:
+            logger.debug("[solver] removed temporary browser profile: %s", resolved)
+        else:
+            logger.warning(
+                "[solver] could not fully remove temporary browser profile %s; "
+                "it will be retried at the next start",
+                profile_dir,
+            )
     except Exception as exc:
         # Cleanup is best-effort: report a leftover rather than hiding the
         # solver's actual result or masking a more useful exception.
@@ -632,6 +742,115 @@ def _cleanup_profile_dir(profile_dir: str | None) -> None:
             profile_dir,
             exc,
         )
+
+
+#: A leftover younger than this is never swept: another SpotiFLAC process may
+#: have created it and still be waiting for a browser slot to launch on it.
+_STALE_PROFILE_MIN_AGE_SECONDS = 60 * 60
+#: Used instead where we cannot tell whether a browser still runs on it.
+_STALE_PROFILE_BLIND_AGE_SECONDS = 24 * 60 * 60
+
+_stale_sweep_started = False
+_stale_sweep_lock = threading.Lock()
+
+
+def _profile_in_use(profile_dir: str) -> bool | None:
+    """Is any running process launched on ``profile_dir``? None if unknown."""
+    system = platform.system()
+    if system == "Linux":
+        try:
+            pids = [name for name in os.listdir("/proc") if name.isdigit()]
+        except OSError:
+            return None
+        needle = profile_dir.encode()
+        for pid in pids:
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as handle:
+                    if needle in handle.read():
+                        return True
+            except OSError:
+                continue
+        return False
+    if system == "Windows":
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603 — fixed argv, path as one arg
+            ["pgrep", "-f", profile_dir],  # noqa: S607
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except Exception:
+        return None
+    if result.returncode == 0:
+        return True
+    return False if result.returncode == 1 else None
+
+
+def _sweep_stale_browser_dirs() -> int:
+    """Remove browser profiles an earlier run left behind; returns how many.
+
+    Per-solve cleanup cannot cover a process that died mid-solve (OOM kill,
+    ``docker stop``, a crash), and releases before the cleanup existed left
+    every profile behind — tens of MB each, which is how a busy server ends
+    up with a full ``/tmp``. Only directories carrying our own prefixes,
+    owned by this user, old enough, and with no browser still running on
+    them are touched; Chromium's own ``com.google.Chrome.*`` leftovers are
+    not ours to judge and are left alone.
+    """
+    base = _profile_base_dir()
+    with _LIVE_PROFILE_DIRS_LOCK:
+        live = set(_LIVE_PROFILE_DIRS)
+    removed = 0
+    now = time.time()
+    try:
+        entries = list(os.scandir(base))
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if not entry.name.startswith((_PROFILE_PREFIX, _BROWSER_TMP_PREFIX)):
+                continue
+            if not entry.is_dir(follow_symlinks=False):
+                continue
+            if os.path.realpath(entry.path) in live:
+                continue
+            stat = entry.stat(follow_symlinks=False)
+            if hasattr(os, "getuid") and stat.st_uid != os.getuid():
+                continue
+            age = now - stat.st_mtime
+            if age < _STALE_PROFILE_MIN_AGE_SECONDS:
+                continue
+            in_use = _profile_in_use(entry.path)
+            if in_use or (in_use is None and age < _STALE_PROFILE_BLIND_AGE_SECONDS):
+                continue
+            if _rmtree_with_retries(entry.path, attempts=1):
+                removed += 1
+        except OSError:
+            continue
+    if removed:
+        logger.info(
+            "[solver] removed %d leftover browser profile(s) from %s", removed, base
+        )
+    return removed
+
+
+def _sweep_stale_browser_dirs_once() -> None:
+    """Kick off the stale sweep in the background, once per process."""
+    global _stale_sweep_started
+    with _stale_sweep_lock:
+        if _stale_sweep_started:
+            return
+        _stale_sweep_started = True
+
+    def _run() -> None:
+        with contextlib.suppress(Exception):
+            _sweep_stale_browser_dirs()
+
+    threading.Thread(
+        target=_run, name="spotiflac-browser-profile-sweep", daemon=True
+    ).start()
 
 
 def _cleanup_pydoll_temp_dirs(browser: Any) -> None:
@@ -813,6 +1032,7 @@ def build_chromium_options(*, hidden: bool = True) -> tuple[ChromiumOptions, str
         start_timeout_seconds = _DEFAULT_BROWSER_START_TIMEOUT_SECONDS
     options.start_timeout = start_timeout_seconds
 
+    _sweep_stale_browser_dirs_once()
     profile_dir = _get_profile_dir()
     # _get_profile_dir() already creates a unique empty temporary directory.
     # Keep it in place: deleting it here defeats our ownership of the temp
@@ -978,6 +1198,7 @@ async def _try_minimize_window(browser: Chrome) -> None:
 def _describe_browser_start_error(
     exc: Exception,
     options: ChromiumOptions | None,
+    profile_dir: str | None = None,
 ) -> str:
     binary = (
         getattr(options, "binary_location", None)
@@ -993,7 +1214,10 @@ def _describe_browser_start_error(
         os.environ.get("CHROME_PATH") or os.environ.get("BRAVE_PATH") or "<unset>"
     )
     display = os.environ.get("DISPLAY") or "<unset>"
-    profile_dir = _get_profile_dir()
+    # The profile the failed launch actually used. This used to call
+    # _get_profile_dir() instead, which reported a directory the browser
+    # never saw — and created it, leaving one more behind per failed start.
+    profile_dir = profile_dir or "<unset>"
     start_timeout = (
         getattr(options, "start_timeout", "n/a") if options is not None else "n/a"
     )
@@ -1067,7 +1291,7 @@ async def _solve_impl(
             # this profile dir) if the cooperative cancel path can't run.
             browser_info["profile_dir"] = profile_dir
     except Exception as exc:
-        message = _describe_browser_start_error(exc, options)
+        message = _describe_browser_start_error(exc, options, profile_dir)
         logger.error("[solver] %s", message)
         raise RuntimeError(
             "Browser failed to start. Verify the Chromium binary and Docker/host runtime; "
@@ -1087,6 +1311,7 @@ async def _solve_impl(
             getattr(options, "start_timeout", "n/a"),
         )
         browser = Chrome(options=options)
+        isolate_browser_temp_dir(browser, profile_dir)
         tab = await browser.start()
 
         # Hard ceiling on the whole solve (all reload attempts + cleanup),
@@ -1113,7 +1338,7 @@ async def _solve_impl(
         )
         cancel_watchdog = arm_hard_watchdog(browser, profile_dir, _watchdog_budget)
     except Exception as exc:
-        message = _describe_browser_start_error(exc, options)
+        message = _describe_browser_start_error(exc, options, profile_dir)
         logger.error("[solver] %s", message)
         # `browser` may already have a live subprocess behind it even though
         # `.start()` raised (e.g. the process spawned but pydoll's startup
