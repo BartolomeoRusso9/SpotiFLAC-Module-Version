@@ -47,7 +47,6 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, replace
-from pathlib import Path
 
 from .atomic_io import write_private_json
 from .paths import data_path
