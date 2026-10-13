@@ -1567,6 +1567,7 @@ class SpotiFLAC_API(
             artist_separator = config.get("artist_separator") or None
             lyrics_providers = config.get("lyrics_providers") or [
                 "apple",
+                "binilyrics",
                 "lrclib",
             ]
             apple_lyrics_word_by_word = config.get("apple_lyrics_word_by_word", True)

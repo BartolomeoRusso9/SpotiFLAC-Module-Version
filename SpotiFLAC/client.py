@@ -166,8 +166,7 @@ class AsyncSpotiFLAC:
             artist_separator=artist_separator,
             output_path=output_path,
             embed_lyrics=embed_lyrics,
-            lyrics_providers=lyrics_providers
-            or ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
+            lyrics_providers=lyrics_providers or ["apple", "binilyrics", "lrclib"],
             apple_lyrics_word_by_word=apple_lyrics_word_by_word,
             save_lrc=save_lrc,
             lrc_library_dir=lrc_library_dir,

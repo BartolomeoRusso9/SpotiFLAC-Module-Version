@@ -127,7 +127,7 @@ class DownloadOptions:
 
     embed_lyrics: bool = True
     lyrics_providers: list[str] = field(
-        default_factory=lambda: ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
+        default_factory=lambda: ["apple", "binilyrics", "lrclib"],
     )
     # Apple times every syllable, so its lyrics are written word-by-word
     # (enhanced LRC with inline <mm:ss.xx> tags) by default. Set False to get

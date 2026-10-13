@@ -41,7 +41,7 @@ class ProfileConfig(BaseModel):
     quality: str = "LOSSLESS"
     embed_lyrics: bool = True
     lyrics_providers: list[str] = Field(
-        default_factory=lambda: ["apple", "lrclib"],
+        default_factory=lambda: ["apple", "binilyrics", "lrclib"],
     )
     #: Apple lyrics as word-by-word (per-syllable) enhanced LRC when True,
     #: plain line-synced LRC when False.

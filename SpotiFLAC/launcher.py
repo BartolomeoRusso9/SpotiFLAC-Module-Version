@@ -832,7 +832,7 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
     lyrics_grp.add_argument(
         "--lyrics-providers",
         nargs="+",
-        default=pd.get("lyrics_providers", ["apple", "lrclib", "binilyrics", "unison"]),
+        default=pd.get("lyrics_providers", ["apple", "binilyrics", "lrclib"]),
         dest="lyrics_providers",
         choices=[
             "spotify",
@@ -1434,7 +1434,8 @@ def _subscription_downloader(profile_defaults: dict, output_dir_override: str | 
             output_path=None,
             allow_fallback=pd.get("allow_fallback", True),
             embed_lyrics=pd.get("embed_lyrics", True),
-            lyrics_providers=pd.get("lyrics_providers") or ["apple", "lrclib"],
+            lyrics_providers=pd.get("lyrics_providers")
+            or ["apple", "binilyrics", "lrclib"],
             apple_lyrics_word_by_word=pd.get("apple_lyrics_word_by_word", True),
             save_lrc=pd.get("save_lrc", False),
             lrc_library_dir=pd.get("lrc_library_dir") or None,

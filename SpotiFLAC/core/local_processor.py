@@ -414,6 +414,7 @@ def default_embed_options(
         embed_lyrics=embed_lyrics,
         lyrics_providers=[
             "apple",
+            "binilyrics",
             "lrclib",
         ],
         enrich=enrich,

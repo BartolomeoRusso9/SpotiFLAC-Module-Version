@@ -40,7 +40,7 @@ class MetadataConfig:
 class LyricsConfig:
     enabled: bool = True
     providers: list[str] = field(
-        default_factory=lambda: ["spotify", "apple", "musixmatch", "lrclib", "amazon"],
+        default_factory=lambda: ["apple", "binilyrics", "lrclib"],
     )
     save_lrc: bool = False
     word_by_word: bool = True

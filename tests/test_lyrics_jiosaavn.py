@@ -12,9 +12,9 @@ def _hit(track_id: str, duration: str, has_lyrics: str = "true") -> dict:
     }
 
 
-def test_jiosaavn_is_enabled_by_default() -> None:
-    """Verify the default lyrics provider chain includes JioSaavn."""
-    assert "jiosaavn" in DEFAULT_LYRICS_PROVIDERS
+def test_jiosaavn_is_opt_in() -> None:
+    """JioSaavn is selectable but not part of the default chain."""
+    assert DEFAULT_LYRICS_PROVIDERS == ["apple", "binilyrics", "lrclib"]
 
 
 def test_jiosaavn_picks_closest_lyric_match() -> None:

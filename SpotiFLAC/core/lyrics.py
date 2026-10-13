@@ -43,17 +43,14 @@ class LyricsContext:
         return get_primary_artist(self.artist_name)
 
 
-# JioSaavn is intentionally part of the default chain: it covers Hindi and
-# regional-Indian releases that are often absent from the western lyric
-# catalogues.  Keep Apple first so synced lyrics remain preferred whenever
-# they are available; JioSaavn then fills the catalogue gap before the other
-# plain-text fallbacks.
+# The one default every interface agrees on, in ranking order. Apple and
+# BiniLyrics both carry word-by-word timing, so they come before LRCLIB's
+# line-level lyrics; LRCLIB is the broad fallback. Everything else (Unison,
+# JioSaavn for Hindi and regional-Indian releases, ...) is opt-in.
 DEFAULT_LYRICS_PROVIDERS = [
     "apple",
-    "jiosaavn",
-    "lrclib",
     "binilyrics",
-    "unison",
+    "lrclib",
 ]
 DEFAULT_ENRICH_PROVIDERS = ["deezer", "apple", "qobuz", "tidal"]
 

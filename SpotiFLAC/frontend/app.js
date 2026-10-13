@@ -595,6 +595,7 @@ const ALL_SERVICES = [
 ];
 const ALL_LYRICS = [
   { id:'apple',      label:'Apple Music',on:true, iconFile:'am.png', iconClass:'apple' },
+  { id:'binilyrics', label:'BiniLyrics', on:true, icon:'BL', iconClass:'binilyrics' },
   { id:'lrclib',     label:'LRCLib',     on:true,  iconFile:'lrclib.png', iconClass:'lrclib' },
   { id:'amazon',     label:'Amazon',     on:false, iconFile:'amzn.png', iconClass:'amazon' },
   { id:'deezer',     label:'Deezer',     on:false, icon:'DZ', iconClass:'deezer' },
@@ -603,8 +604,7 @@ const ALL_LYRICS = [
   { id:'qq',         label:'QQ Music',   on:false, icon:'QQ', iconClass:'qq' },
   { id:'youtube',    label:'YouTube',    on:false, icon:'YT', iconClass:'youtube' },
   { id:'kugou',      label:'Kugou',      on:false, icon:'KG', iconClass:'kugou' },
-  { id:'binilyrics', label:'BiniLyrics', on:true, icon:'BL', iconClass:'binilyrics' },
-  { id:'unison',     label:'Unison',     on:true, icon:'UN', iconClass:'unison' },
+  { id:'unison',     label:'Unison',     on:false, icon:'UN', iconClass:'unison' },
   { id:'jiosaavn',   label:'JioSaavn',   on:false, icon:'JS', iconClass:'jiosaavn' },
   { id:'musixmatch', label:'Musixmatch', on:false, iconFile:'musixmatch.svg', iconClass:'musixmatch' },
   { id:'spotify',    label:'Spotify',    on:false, iconFile:'spotify.svg', iconClass:'spotify' },
@@ -650,7 +650,7 @@ const DEFAULT_SETTINGS = {
   log_level: 'INFO',
   max_concurrent_downloads: 2,
   services: ['tidal','qobuz','deezer','amazon','joox','netease','migu','kuwo','apple','soundcloud','youtube','pandora'],
-  lyrics_providers: ['apple', 'lrclib', 'binilyrics', 'unison'],
+  lyrics_providers: ['apple', 'binilyrics', 'lrclib'],
   apple_lyrics_word_by_word: true,
   enrich_providers: ['deezer','apple','qobuz','tidal'],
 };
