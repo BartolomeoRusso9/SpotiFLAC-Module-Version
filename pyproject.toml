@@ -59,6 +59,9 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "requests>=2.33.0",
     "pydoll-python>=2.19.0",
+    # Not imported here: it arrives through pydoll's aiohttp. Pinned because
+    # 6.7.0–6.9.0 leak references in items-view union/subtraction.
+    "multidict>=6.9.1",
     # Base, not an extra: --verify-hires used to be a flag that silently did
     # nothing unless you had also installed SpotiFLAC[hires]. That extra
     # pulled librosa, and with it numba, llvmlite, scipy and scikit-learn —
