@@ -32,13 +32,34 @@ class PipelineStep(Protocol):
     async def execute(self, context: DownloadContext) -> DownloadContext: ...
 
 
+def _is_catalogue_url(source: str) -> bool:
+    """Whether an installed extension reads this link as a catalogue URL.
+
+    `parse_catalogue_url` recognizes the site, but a site is only usable once
+    the extension that reads it is installed — which `for_url` is what asks.
+    """
+    from SpotiFLAC.core.extension_metadata import (
+        ExtensionMetadataClient,
+        parse_catalogue_url,
+    )
+    from SpotiFLAC.core.errors import SpotiflacError
+
+    if parse_catalogue_url(source) is None:
+        return False
+    try:
+        ExtensionMetadataClient.for_url(source)
+    except SpotiflacError:
+        return False
+    return True
+
+
 class ResolveStep:
     async def execute(self, context: DownloadContext) -> DownloadContext:
         is_spotify_urn = context.source.startswith("spotify:")
         is_spotify_url = context.source.startswith(
             ("https://open.spotify.com/", "http://open.spotify.com/")
         )
-        if not (is_spotify_urn or is_spotify_url):
+        if not (is_spotify_urn or is_spotify_url or _is_catalogue_url(context.source)):
             context.errors.append("source_not_supported")
         return context
 
