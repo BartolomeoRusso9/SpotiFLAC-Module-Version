@@ -118,6 +118,17 @@ SITES: tuple[CatalogueSite, ...] = (
         track_url="https://www.genie.co.kr/detail/songInfo?xgnm={id}",
         album_url="https://www.genie.co.kr/detail/albumInfo?axnm={id}",
     ),
+    CatalogueSite(
+        key="deezer",
+        label="Deezer",
+        hosts=("deezer.com", "deezer.page.link"),
+        patterns=(
+            ("album", r"/album/(\d+)"),
+            ("track", r"/(?:[a-z]{2}/)?track/(\d+)"),
+        ),
+        track_url="https://www.deezer.com/track/{id}",
+        album_url="https://www.deezer.com/album/{id}",
+    ),
 )
 
 
@@ -176,6 +187,29 @@ def site_for_extension(ext: Any) -> CatalogueSite | None:
         ):
             return site
     return None
+
+
+def handles_url(ext: Any, url: str) -> bool:
+    """Whether an extension declares `url` in its own urlHandler patterns.
+
+    `site_for_extension` alone cannot pick an extension: several list the
+    same host in `permissions.network` (four of them reach api.deezer.com),
+    so the first alphabetically wins. `urlHandler` is the precise
+    declaration — the handler the manifest says is for these links — so a
+    match there settles the choice.
+
+    Patterns are regexes, as `docs/guide/python-extensions.md` documents
+    them (`soundcloud\\.com`). Comparing them as hostnames could never match
+    a real pattern, which would silently send every link down the fallback.
+    """
+    manifest = getattr(ext, "manifest", None) or {}
+    handler = manifest.get("urlHandler")
+    if not isinstance(handler, dict) or not handler.get("enabled"):
+        return False
+    patterns = handler.get("patterns")
+    if not isinstance(patterns, list):
+        return False
+    return any(re.search(str(p), url) for p in patterns)
 
 
 def catalogue_extensions(manager: Any = None) -> list[tuple[Any, CatalogueSite]]:
@@ -565,14 +599,23 @@ class ExtensionMetadataClient:
         link = parse_catalogue_url(url)
         if link is None:
             raise SpotiflacError(ErrorKind.INVALID_URL, f"Unsupported link: {url}")
-        for ext, site in catalogue_extensions(manager):
-            if site.key == link.site.key:
-                return cls(ext.name, site)
-        raise SpotiflacError(
-            ErrorKind.UNAVAILABLE,
-            f"{link.site.label} links need a {link.site.label} metadata extension. "
-            "Install one from the extension registry first.",
-        )
+        matches = [
+            ext
+            for ext, site in catalogue_extensions(manager)
+            if site.key == link.site.key
+        ]
+        if not matches:
+            raise SpotiflacError(
+                ErrorKind.UNAVAILABLE,
+                f"{link.site.label} links need a {link.site.label} metadata extension. "
+                "Install one from the extension registry first.",
+            )
+        # Several extensions can declare the same site, so pick the one whose
+        # own urlHandler claims these links, and fall back to the first.
+        for ext in matches:
+            if handles_url(ext, url):
+                return cls(ext.name, link.site)
+        return cls(matches[0].name, link.site)
 
     @classmethod
     def for_source(cls, name: str, manager: Any = None) -> ExtensionMetadataClient:

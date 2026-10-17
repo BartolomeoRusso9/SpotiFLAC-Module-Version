@@ -988,6 +988,34 @@ def test_metadata_service_uses_injected_real_resolver():
     assert resolved == [track]
 
 
+def test_metadata_service_swallows_only_best_effort_lookup_failures():
+    """A link no installed extension can read is an answer, not a fault.
+
+    `resolve` loops over every source, so one unresolvable link used to abort
+    the whole run when the catalogue extension reported UNAVAILABLE. Real
+    faults still have to propagate: swallowing them would turn an expired
+    token into a silent zero-track result.
+    """
+
+    async def raises(kind):
+        async def resolve(_source):
+            raise SpotiflacError(kind, "boom")
+
+        return resolve
+
+    def request(source="https://www.deezer.com/ru/album/1102603792"):
+        return DownloadRequest(sources=[source], config=SpotiFLACConfig())
+
+    for kind in (ErrorKind.INVALID_URL, ErrorKind.UNAVAILABLE):
+        service = MetadataService(asyncio.run(raises(kind)))
+        assert asyncio.run(service.resolve(request())) == []
+
+    for kind in (ErrorKind.AUTH_FAILED, ErrorKind.RATE_LIMITED, ErrorKind.FILE_IO):
+        service = MetadataService(asyncio.run(raises(kind)))
+        with pytest.raises(SpotiflacError):
+            asyncio.run(service.resolve(request()))
+
+
 def test_download_service_falls_back_to_next_provider_candidate():
     attempts = []
 

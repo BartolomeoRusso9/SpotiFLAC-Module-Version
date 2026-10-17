@@ -4,11 +4,17 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from SpotiFLAC.core.config import DownloadRequest
-from SpotiFLAC.core.errors import InvalidUrlError
+from SpotiFLAC.core.errors import ErrorKind, InvalidUrlError, SpotiflacError
 from SpotiFLAC.core.models import TrackMetadata
 from SpotiFLAC.core.spotify_metadata import SpotifyMetadataClient
 
 MetadataResolver = Callable[[str], Awaitable[Any]]
+
+# "This link is not mine" and "the extension that would read it is not
+# installed" are both answers, not faults: the per-source loop keeps going and
+# provider resolution still sees the original source. Everything else —
+# auth, rate limits, parse failures — is a real fault and keeps propagating.
+_BEST_EFFORT_KINDS = frozenset({ErrorKind.INVALID_URL, ErrorKind.UNAVAILABLE})
 
 
 class MetadataService:
@@ -35,13 +41,63 @@ class MetadataService:
     def _get_resolver(self) -> MetadataResolver:
         if self._resolver is None:
             if self._client is not None:
-                self._resolver = self._client.get_url_async
+                self._resolver = self._get_chained(self._client.get_url_async)
             elif self._compatibility_fallback:
-                self._resolver = self._resolve_compatibility
+                self._resolver = self._get_chained(self._resolve_compatibility)
             else:
                 self._client = SpotifyMetadataClient(timeout_s=max(1, self._timeout_s))
-                self._resolver = self._client.get_url_async
+                self._resolver = self._get_chained(self._client.get_url_async)
         return self._resolver
+
+    @classmethod
+    def _get_chained(cls, primary: MetadataResolver) -> MetadataResolver:
+        """`primary`, then the catalogue extension that claims the link.
+
+        Neither resolver can say "not mine" the same way: the Spotify client
+        raises `InvalidUrlError` for anything else, while the compatibility
+        resolver answers with an empty tuple. Both are handled below so the
+        next resolver in the chain still gets its turn.
+        """
+
+        async def resolve(source: str) -> Any:
+            try:
+                value = await primary(source)
+            except InvalidUrlError:
+                return await cls._resolve_catalogue(source)
+            if isinstance(value, tuple) and len(value) >= 2 and not value[1]:
+                try:
+                    return await cls._resolve_catalogue(source)
+                except InvalidUrlError:
+                    return value
+            return value
+
+        return resolve
+
+    @staticmethod
+    async def _resolve_catalogue(
+        source: str,
+    ) -> tuple[str, list[TrackMetadata], str, dict[str, Any]]:
+        """Metadata for a link on a site an installed extension reads.
+
+        `SpotifyMetadataClient` only understands Spotify, so a link on one of
+        the catalogue sites resolves to nothing and the run ends silently.
+        The extension that declares the link in its urlHandler reads it.
+        """
+        from SpotiFLAC.core.extension_metadata import (
+            ExtensionMetadataClient,
+            parse_catalogue_url,
+        )
+
+        link = parse_catalogue_url(source)
+        if link is None:
+            raise InvalidUrlError(source)
+        name, tracks, *rest = await ExtensionMetadataClient.for_url(
+            source
+        ).get_url_async(source)
+        info: dict[str, Any] = {}
+        if rest and isinstance(rest[-1], dict):
+            info = rest[-1]
+        return name, tracks, info.get("cover_url", ""), info
 
     @staticmethod
     async def _resolve_compatibility(
@@ -77,7 +133,9 @@ class MetadataService:
         for source in request.sources:
             try:
                 value = await resolver(source)
-            except InvalidUrlError:
+            except SpotiflacError as exc:
+                if exc.kind not in _BEST_EFFORT_KINDS:
+                    raise
                 # Metadata lookup is best-effort. Provider resolution still
                 # gets the original source and can decide whether it supports it.
                 continue

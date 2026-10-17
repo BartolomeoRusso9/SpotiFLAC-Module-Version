@@ -99,6 +99,24 @@ class _Manager:
             "album",
             "81234567",
         ),
+        (
+            "https://www.deezer.com/ru/album/1102603792",
+            "deezer",
+            "album",
+            "1102603792",
+        ),
+        (
+            "https://www.deezer.com/track/4301324572",
+            "deezer",
+            "track",
+            "4301324572",
+        ),
+        (
+            "https://www.deezer.com/ru/track/4301324572",
+            "deezer",
+            "track",
+            "4301324572",
+        ),
     ],
 )
 def test_links_are_read_per_site(url, site, kind, item_id) -> None:
@@ -132,6 +150,64 @@ def test_the_extension_is_found_by_the_hosts_it_may_reach() -> None:
         site_for_extension(_ext("x", ["melon.com"], types=["download_provider"]))
         is None
     )
+
+
+def _ext_with_handler(name, hosts, handler, types=("metadata_provider",)):
+    ext = _ext(name, hosts, types)
+    ext.manifest["urlHandler"] = handler
+    return ext
+
+
+def test_the_extension_claiming_the_link_wins_over_one_that_only_reaches_it() -> None:
+    """Four installed extensions list api.deezer.com in `permissions.network`
+    and only the Deezer one declares a urlHandler for deezer.com links. Picking
+    by reach alone would hand a Deezer album to the Amazon extension."""
+    url = "https://www.deezer.com/ru/album/1102603792"
+    manager = _Manager(
+        _ext("amazon", ["api.deezer.com"]),
+        _ext("deezer", ["api.deezer.com", "www.deezer.com"]),
+        _ext("spotify-web", ["api.deezer.com"]),
+        _ext_with_handler(
+            "deezer-real",
+            ["api.deezer.com", "www.deezer.com"],
+            {"enabled": True, "patterns": ["deezer.com", "www.deezer.com"]},
+        ),
+    )
+    assert ExtensionMetadataClient.for_url(url, manager=manager).ext_name == (
+        "deezer-real"
+    )
+
+
+def test_a_handler_is_not_asked_about_links_it_does_not_declare() -> None:
+    url = "https://www.deezer.com/ru/album/1102603792"
+    manager = _Manager(
+        _ext_with_handler(
+            "deezer",
+            ["api.deezer.com", "www.deezer.com"],
+            {"enabled": True, "patterns": ["deezer.page.link"]},
+        ),
+    )
+    # Falls back to the only candidate rather than sending it elsewhere.
+    assert ExtensionMetadataClient.for_url(url, manager=manager).ext_name == "deezer"
+
+
+def test_a_handler_pattern_is_matched_as_the_regex_it_is() -> None:
+    """`urlHandler.patterns` are regexes (`soundcloud\.com`), not hostnames.
+
+    Compared as hostnames no real pattern could ever match, so every link
+    would fall through to the first candidate — which for a Deezer link is
+    whichever unrelated extension happens to reach api.deezer.com first.
+    """
+    url = "https://www.deezer.com/ru/album/1102603792"
+    manager = _Manager(
+        _ext("aaa-deezer-legacy", ["api.deezer.com"]),
+        _ext_with_handler(
+            "deezer",
+            ["api.deezer.com", "www.deezer.com"],
+            {"enabled": True, "patterns": [r"deezer\.com"]},
+        ),
+    )
+    assert ExtensionMetadataClient.for_url(url, manager=manager).ext_name == "deezer"
 
 
 def test_a_link_without_its_extension_says_what_is_missing() -> None:

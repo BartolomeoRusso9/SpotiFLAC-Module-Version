@@ -2330,13 +2330,6 @@ class SpotiflacDownloader:
         is_youtube = url_host_matches(url, "youtube.com", "youtu.be")
         is_pandora = url_host_matches(url, "pandora.com", "pandora.app.link")
 
-        if url_host_matches(url, "deezer.com", "deezer.page.link"):
-            raise SpotiflacError(
-                ErrorKind.INVALID_URL,
-                "Providing Deezer URLs as primary input is not yet fully supported. "
-                "Use a Spotify link and set 'deezer' as the download provider.",
-            )
-
         if url_host_has_label(url, "amazon"):
             raise SpotiflacError(
                 ErrorKind.INVALID_URL,
