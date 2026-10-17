@@ -4,11 +4,17 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from SpotiFLAC.core.config import DownloadRequest
-from SpotiFLAC.core.errors import InvalidUrlError
+from SpotiFLAC.core.errors import ErrorKind, InvalidUrlError, SpotiflacError
 from SpotiFLAC.core.models import TrackMetadata
 from SpotiFLAC.core.spotify_metadata import SpotifyMetadataClient
 
 MetadataResolver = Callable[[str], Awaitable[Any]]
+
+# "This link is not mine" and "the extension that would read it is not
+# installed" are both answers, not faults: the per-source loop keeps going and
+# provider resolution still sees the original source. Everything else —
+# auth, rate limits, parse failures — is a real fault and keeps propagating.
+_BEST_EFFORT_KINDS = frozenset({ErrorKind.INVALID_URL, ErrorKind.UNAVAILABLE})
 
 
 class MetadataService:
@@ -127,7 +133,9 @@ class MetadataService:
         for source in request.sources:
             try:
                 value = await resolver(source)
-            except InvalidUrlError:
+            except SpotiflacError as exc:
+                if exc.kind not in _BEST_EFFORT_KINDS:
+                    raise
                 # Metadata lookup is best-effort. Provider resolution still
                 # gets the original source and can decide whether it supports it.
                 continue

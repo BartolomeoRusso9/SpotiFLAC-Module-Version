@@ -197,6 +197,10 @@ def handles_url(ext: Any, url: str) -> bool:
     so the first alphabetically wins. `urlHandler` is the precise
     declaration — the handler the manifest says is for these links — so a
     match there settles the choice.
+
+    Patterns are regexes, as `docs/guide/python-extensions.md` documents
+    them (`soundcloud\\.com`). Comparing them as hostnames could never match
+    a real pattern, which would silently send every link down the fallback.
     """
     manifest = getattr(ext, "manifest", None) or {}
     handler = manifest.get("urlHandler")
@@ -205,7 +209,7 @@ def handles_url(ext: Any, url: str) -> bool:
     patterns = handler.get("patterns")
     if not isinstance(patterns, list):
         return False
-    return any(url_host_matches(url, str(p)) for p in patterns)
+    return any(re.search(str(p), url) for p in patterns)
 
 
 def catalogue_extensions(manager: Any = None) -> list[tuple[Any, CatalogueSite]]:

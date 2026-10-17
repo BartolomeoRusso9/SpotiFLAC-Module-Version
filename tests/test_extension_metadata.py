@@ -191,6 +191,25 @@ def test_a_handler_is_not_asked_about_links_it_does_not_declare() -> None:
     assert ExtensionMetadataClient.for_url(url, manager=manager).ext_name == "deezer"
 
 
+def test_a_handler_pattern_is_matched_as_the_regex_it_is() -> None:
+    """`urlHandler.patterns` are regexes (`soundcloud\.com`), not hostnames.
+
+    Compared as hostnames no real pattern could ever match, so every link
+    would fall through to the first candidate — which for a Deezer link is
+    whichever unrelated extension happens to reach api.deezer.com first.
+    """
+    url = "https://www.deezer.com/ru/album/1102603792"
+    manager = _Manager(
+        _ext("aaa-deezer-legacy", ["api.deezer.com"]),
+        _ext_with_handler(
+            "deezer",
+            ["api.deezer.com", "www.deezer.com"],
+            {"enabled": True, "patterns": [r"deezer\.com"]},
+        ),
+    )
+    assert ExtensionMetadataClient.for_url(url, manager=manager).ext_name == "deezer"
+
+
 def test_a_link_without_its_extension_says_what_is_missing() -> None:
     with pytest.raises(SpotiflacError) as err:
         ExtensionMetadataClient.for_url(
