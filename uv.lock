@@ -2861,7 +2861,7 @@ wheels = [
 
 [[package]]
 name = "spotiflac"
-version = "5.0.4"
+version = "5.0.6"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

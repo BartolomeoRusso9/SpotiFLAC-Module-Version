@@ -550,6 +550,23 @@
             <select id="subscription-interval" style="max-width:170px;" title="Check automatically and download what is new"></select>
             <button class="act-btn primary" type="button" onclick="addSubscription()" style="padding:8px 16px;font-size:12px;white-space:nowrap;">Follow</button>
           </div>
+          <div style="margin-top:14px;">
+            <label for="subscription-bulk-input" class="s-title" style="display:block;margin-bottom:8px;">Follow multiple artists</label>
+            <textarea id="subscription-bulk-input" class="full" rows="4"
+              placeholder="Paste artist URLs separated by newlines or commas…"
+              style="width:100%;resize:vertical;box-sizing:border-box;"></textarea>
+            <div class="s-row" style="align-items:center;justify-content:space-between;gap:10px;margin-top:8px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);">
+                <input type="checkbox" id="subscription-bulk-backfill" checked>
+                Reset seen history so the whole back catalogue is found
+              </label>
+              <button class="act-btn secondary" type="button" onclick="addSubscriptionsBulk()" style="padding:8px 16px;font-size:12px;white-space:nowrap;">Follow all</button>
+            </div>
+            <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.5;">
+              Accepts Spotify artist URLs only. Duplicates are ignored. With back catalogue enabled,
+              the next <strong>Check &amp; download</strong> will offer existing releases too.
+            </p>
+          </div>
         </div>
 
         <div class="s-section">

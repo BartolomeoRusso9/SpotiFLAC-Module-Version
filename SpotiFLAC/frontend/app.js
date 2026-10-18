@@ -6192,6 +6192,70 @@ function renderSubscriptions(subs) {
   }).join('');
 }
 
+function parseSubscriptionUrlList(raw) {
+  // Split on newlines and commas; trim whitespace and discard empty/duplicate entries.
+  const values = String(raw || '').split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
+  return [...new Set(values)];
+}
+
+async function addSubscriptionsBulk() {
+  const input = $('subscription-bulk-input');
+  const urls = parseSubscriptionUrlList(input?.value);
+  if (!urls.length) {
+    showToast('Paste at least one Spotify artist URL.', 'error');
+    return;
+  }
+
+  const invalid = urls.filter(url =>
+    !/^https?:\/\/open\.spotify\.com\/(?:intl-[a-z-]+\/)?artist\/[A-Za-z0-9]+(?:[/?#].*)?$/i.test(url)
+  );
+  if (invalid.length) {
+    showToast('Only Spotify artist URLs are accepted in bulk mode. Check the pasted list.', 'error');
+    return;
+  }
+  if (!confirm(`Follow ${urls.length} artist(s)?${$('subscription-bulk-backfill')?.checked ? '\nTheir seen history will be reset so existing releases count as new.' : ''}`)) return;
+
+  const interval = Number($('subscription-interval')?.value || 0);
+  const groups = $('subscription-groups')?.value || 'album,single';
+  const backfill = !!$('subscription-bulk-backfill')?.checked;
+  const results = { added: 0, reset: 0, failed: [] };
+
+  // Sequential calls avoid flooding Spotify/API and make partial failures clear.
+  for (const url of urls) {
+    try {
+      const res = await window.pywebview.api.add_subscription(
+        url, '', groups, '', interval, buildConfig()
+      );
+      if (!res?.ok) {
+        results.failed.push({ url, error: res?.error || 'Could not follow URL.' });
+        continue;
+      }
+      results.added++;
+      if (backfill) {
+        const reset = await window.pywebview.api.reset_subscription(res.subscription.id);
+        if (!reset?.ok) {
+          results.failed.push({ url, error: reset?.error || 'Followed, but could not reset seen history.' });
+        } else {
+          results.reset++;
+        }
+      }
+    } catch (e) {
+      results.failed.push({ url, error: e?.message || 'Request failed.' });
+    }
+  }
+
+  input.value = results.failed.map(({ url }) => url).join('\n');
+  loadSubscriptions();
+  if (results.failed.length) {
+    showToast(`Followed ${results.added}; reset ${results.reset}; ${results.failed.length} failed. See the Logs or retry failed URLs.`, 'error');
+    results.failed.forEach(({ url, error }) => {
+      logMessage(`Could not complete bulk follow for ${url}: ${error}`, 'error-quiet');
+    });
+  } else {
+    showToast(`Followed ${results.added} artist(s)${backfill ? ' with unseen back catalogues' : ''}.`);
+  }
+}
+
 async function addSubscription() {
   const input = $('subscription-url-input');
   const url = (input?.value || '').trim();
@@ -6259,7 +6323,7 @@ async function resetSubscription(id) {
   if (!confirm('Forget what this subscription has seen? The next check with downloading on will treat the whole back catalogue as new.')) return;
   try {
     await window.pywebview.api.reset_subscription(id);
-    showToast('Reset. The next check treats every release as new.');
+    showToast('Reset. The next check with downloading on will treat the whole back catalogue as new.');
     loadSubscriptions();
   } catch (e) {
     showToast('Could not reset that subscription.', 'error');
