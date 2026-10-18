@@ -527,15 +527,18 @@ def mark_seen(subscription_id: str, releases: list[Release]) -> None:
 
 
 def forget_seen(subscription_id: str) -> None:
-    """Empties the seen-set, so the next check treats everything as new.
+    """Empties the seen-set and clears the first-check baseline.
 
-    Backs `--subscribe-reset`: the way to say "actually, do fetch the back
-    catalogue" after having already subscribed.
+    Backs `--subscribe-reset`: the next check treats everything as new,
+    including immediately after following a new artist.
     """
     with db.transaction() as conn:
         conn.execute(
             "DELETE FROM subscription_seen WHERE subscription_id = ?",
             (subscription_id,),
+        )
+        conn.execute(
+            "UPDATE subscriptions SET baselined = 0 WHERE id = ?", (subscription_id,)
         )
 
 
