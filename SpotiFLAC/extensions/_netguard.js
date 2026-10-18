@@ -29,7 +29,6 @@
 
 'use strict';
 
-const net = require('net');
 const dns = require('dns');
 
 if (process.env.SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK === '1') {
@@ -91,7 +90,54 @@ function refuse(address) {
   return err;
 }
 
-// 1. The address the socket is actually about to dial. This is the check
+
+// 1. Check after DNS resolution, so a hostname that resolves to a private
+//    address is caught as well. Without this, `http://localtest.me/`
+//    (which resolves to 127.0.0.1) walks straight past the check above.
+function guardLookup(original) {
+  return function lookup(hostname, options, callback) {
+    const cb = typeof options === 'function' ? options : callback;
+    const opts = typeof options === 'function' ? {} : options;
+    const wrapped = (err, address, family) => {
+      if (!err) {
+        if (Array.isArray(address)) {
+          const allowed = address.filter((entry) => !isBlocked(entry.address));
+          if (allowed.length === 0 && address.length > 0) {
+            return cb(refuse(address[0].address));
+          }
+          return cb(null, allowed, family);
+        }
+        if (isBlocked(address)) return cb(refuse(address));
+      }
+      return cb(err, address, family);
+    };
+    return original.call(dns, hostname, opts, wrapped);
+  };
+}
+
+dns.lookup = guardLookup(dns.lookup);
+if (dns.promises && dns.promises.lookup) {
+  const originalPromisesLookup = dns.promises.lookup.bind(dns.promises);
+  dns.promises.lookup = async function lookup(hostname, options) {
+    const result = await originalPromisesLookup(hostname, options);
+    if (Array.isArray(result)) {
+      const allowed = result.filter((entry) => !isBlocked(entry.address));
+      if (allowed.length === 0 && result.length > 0) throw refuse(result[0].address);
+      return allowed;
+    }
+    const address = typeof result === 'string' ? result : result && result.address;
+    if (isBlocked(address)) throw refuse(address);
+    return result;
+  };
+}
+
+
+// Important: require net only after replacing dns.lookup above. Node's net
+// module captures dns.lookup when it is first loaded; requiring net at the top
+// of this preload would leave socket connections using the unguarded function.
+const net = require('net');
+
+// 2. Check the final socket destination as well (including literal IPs). This is the check
 //    that matters: everything above it in the stack — http, https, fetch,
 //    any third-party client an extension bundles — ends up here.
 // Node normalises connect()'s arguments before calling this, so the real
@@ -126,37 +172,3 @@ net.Socket.prototype.connect = function connect(...args) {
   return originalConnect.apply(this, args);
 };
 
-// 2. And after resolution, so that a hostname that resolves to a private
-//    address is caught as well. Without this, `http://localtest.me/`
-//    (which resolves to 127.0.0.1) walks straight past the check above.
-function guardLookup(original) {
-  return function lookup(hostname, options, callback) {
-    const cb = typeof options === 'function' ? options : callback;
-    const opts = typeof options === 'function' ? {} : options;
-    const wrapped = (err, address, family) => {
-      if (!err) {
-        if (Array.isArray(address)) {
-          const allowed = address.filter((entry) => !isBlocked(entry.address));
-          if (allowed.length === 0 && address.length > 0) {
-            return cb(refuse(address[0].address));
-          }
-          return cb(null, allowed, family);
-        }
-        if (isBlocked(address)) return cb(refuse(address));
-      }
-      return cb(err, address, family);
-    };
-    return original.call(dns, hostname, opts, wrapped);
-  };
-}
-
-dns.lookup = guardLookup(dns.lookup);
-if (dns.promises && dns.promises.lookup) {
-  const originalPromisesLookup = dns.promises.lookup.bind(dns.promises);
-  dns.promises.lookup = async function lookup(hostname, options) {
-    const result = await originalPromisesLookup(hostname, options);
-    const address = typeof result === 'string' ? result : result && result.address;
-    if (isBlocked(address)) throw refuse(address);
-    return result;
-  };
-}
