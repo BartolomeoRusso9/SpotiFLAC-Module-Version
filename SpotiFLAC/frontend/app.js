@@ -6207,7 +6207,7 @@ async function addSubscriptionsBulk() {
   }
 
   const invalid = urls.filter(url =>
-    !/^https?:\/\/(open\.)?spotify\.com\/artist\/[A-Za-z0-9]+(?:[/?#].*)?$/i.test(url)
+    !/^https?:\/\/open\.spotify\.com\/(?:intl-[a-z-]+\/)?artist\/[A-Za-z0-9]+(?:[/?#].*)?$/i.test(url)
   );
   if (invalid.length) {
     showToast('Only Spotify artist URLs are accepted in bulk mode. Check the pasted list.', 'error');
@@ -6244,11 +6244,13 @@ async function addSubscriptionsBulk() {
     }
   }
 
-  input.value = '';
+  input.value = results.failed.map(({ url }) => url).join('\n');
   loadSubscriptions();
   if (results.failed.length) {
     showToast(`Followed ${results.added}; reset ${results.reset}; ${results.failed.length} failed. See the Logs or retry failed URLs.`, 'error');
-    console.warn('Bulk follow failures:', results.failed);
+    results.failed.forEach(({ url, error }) => {
+      logMessage(`Could not complete bulk follow for ${url}: ${error}`, 'error-quiet');
+    });
   } else {
     showToast(`Followed ${results.added} artist(s)${backfill ? ' with unseen back catalogues' : ''}.`);
   }
@@ -6321,7 +6323,7 @@ async function resetSubscription(id) {
   if (!confirm('Forget what this subscription has seen? The next check with downloading on will treat the whole back catalogue as new.')) return;
   try {
     await window.pywebview.api.reset_subscription(id);
-    showToast('Reset. The next check treats every release as new.');
+    showToast('Reset. The next check with downloading on will treat the whole back catalogue as new.');
     loadSubscriptions();
   } catch (e) {
     showToast('Could not reset that subscription.', 'error');
