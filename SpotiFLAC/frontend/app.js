@@ -6194,7 +6194,7 @@ function renderSubscriptions(subs) {
 
 function parseSubscriptionUrlList(raw) {
   // Split on newlines and commas; trim whitespace and discard empty/duplicate entries.
-  const values = String(raw || '').split(/[\\n,]+/).map(value => value.trim()).filter(Boolean);
+  const values = String(raw || '').split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
   return [...new Set(values)];
 }
 
@@ -6207,13 +6207,13 @@ async function addSubscriptionsBulk() {
   }
 
   const invalid = urls.filter(url =>
-    !/^https?:\\/\\/(open\\.)?spotify\\.com\\/artist\\/[A-Za-z0-9]+(?:[/?#].*)?$/i.test(url)
+    !/^https?:\/\/(open\.)?spotify\.com\/artist\/[A-Za-z0-9]+(?:[/?#].*)?$/i.test(url)
   );
   if (invalid.length) {
     showToast('Only Spotify artist URLs are accepted in bulk mode. Check the pasted list.', 'error');
     return;
   }
-  if (!confirm(`Follow ${urls.length} artist(s)?${$('subscription-bulk-backfill')?.checked ? '\\nTheir seen history will be reset so existing releases count as new.' : ''}`)) return;
+  if (!confirm(`Follow ${urls.length} artist(s)?${$('subscription-bulk-backfill')?.checked ? '\nTheir seen history will be reset so existing releases count as new.' : ''}`)) return;
 
   const interval = Number($('subscription-interval')?.value || 0);
   const groups = $('subscription-groups')?.value || 'album,single';
