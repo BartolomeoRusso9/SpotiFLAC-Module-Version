@@ -28,7 +28,9 @@ def test_a_21_character_id_is_rejected() -> None:
 
 
 def test_a_valid_22_character_id_still_parses() -> None:
-    assert parse_spotify_url("https://open.spotify.com/track/2NHkwSwm6C6eAX3z6xm7Uy") == {
+    assert parse_spotify_url(
+        "https://open.spotify.com/track/2NHkwSwm6C6eAX3z6xm7Uy"
+    ) == {
         "type": "track",
         "id": "2NHkwSwm6C6eAX3z6xm7Uy",
     }
