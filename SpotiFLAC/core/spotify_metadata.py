@@ -489,7 +489,13 @@ def parse_spotify_url(uri: str, _resolved: bool = False) -> dict[str, str]:
         raise InvalidUrlError(uri)
 
     if len(parts) == 3 and parts[1] in ("album", "track", "playlist", "artist"):
-        return {"type": parts[1], "id": parts[2].split("?")[0]}
+        entity_id = parts[2].split("?")[0]
+        if not re.fullmatch(r"[A-Za-z0-9]{22}", entity_id):
+            # A 23-character "id" (or any other wrong shape) can only fail
+            # downstream — GraphQL answers GenericError, the native metadata
+            # endpoint overflows. Reject the shape at the gate instead.
+            raise InvalidUrlError(uri)
+        return {"type": parts[1], "id": entity_id}
 
     # Playlist nested (/user/<uid>/playlist/<id>)
     if len(parts) == 5 and parts[3] == "playlist":
@@ -647,6 +653,17 @@ class SpotifyMetadataClient:
         }
         data = await asyncio.to_thread(self.web_client.query, payload)
         track_union = _dig(data, "data", "trackUnion")
+        typename = track_union.get("__typename")
+        if typename and typename != "Track":
+            # `NotFound` ("Object with uri ... not found" — a dead or removed
+            # id) and `GenericError` arrive as a non-empty union node, so the
+            # empty check above passes; without this the helpers below
+            # quietly assemble TrackMetadata(title="Unknown") and the caller
+            # cannot tell a dead id from a track.
+            raise SpotiflacError(
+                ErrorKind.TRACK_NOT_FOUND,
+                f"Spotify reports track {track_id} as {typename}.",
+            )
         if not track_union:
             raise SpotiflacError(
                 ErrorKind.TRACK_NOT_FOUND,
