@@ -156,7 +156,7 @@ def fit_cover(cover_data: bytes) -> bytes | None:
     return None
 
 
-SOURCE_TAG = "https://github.com/BartolomeoRusso9/Mornye-Python"
+SOURCE_TAG = "https://github.com/mornyeapp/Mornye-Python"
 
 # ---------------------------------------------------------------------------
 # Supported extensions, grouped by tagging system

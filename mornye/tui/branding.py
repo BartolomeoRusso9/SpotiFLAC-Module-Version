@@ -337,11 +337,11 @@ def notice(kind: str, message: str, *, plain: bool | None = None) -> tuple[str, 
 
 def version() -> str:
     try:
-        from importlib.metadata import version as _version
+        from importlib.metadata import PackageNotFoundError, version as _version
 
-        return _version("mornye-python")
-    except Exception:
-        return ""
+        return _version("mornye")
+    except PackageNotFoundError:
+        return "dev"
 
 
 def subtitle() -> str:

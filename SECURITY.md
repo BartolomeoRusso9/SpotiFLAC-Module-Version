@@ -4,7 +4,7 @@
 
 Please report security issues **privately**, not as a public GitHub issue.
 
-- Preferred: [GitHub private vulnerability reporting](https://github.com/BartolomeoRusso9/Mornye-Python/security/advisories/new)
+- Preferred: [GitHub private vulnerability reporting](https://github.com/mornyeapp/Mornye-Python/security/advisories/new)
 - If private reporting is unavailable, contact the maintainer through an
   already-established private channel. Do not publish sensitive details in a
   public issue.

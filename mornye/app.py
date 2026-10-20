@@ -321,7 +321,7 @@ class MornyeAPI(
             try:
                 client = AsyncHttpClient("github", timeout_s=10)
                 resp = await client.get(
-                    "https://api.github.com/repos/BartolomeoRusso9/Mornye-Python/releases/latest",
+                    "https://api.github.com/repos/mornyeapp/Mornye-Python/releases/latest",
                     headers={
                         "Accept": "application/vnd.github.v3+json",
                         "User-Agent": "Mornye-Desktop",

@@ -65,7 +65,7 @@ def __getattr__(name: str) -> Any:
 
 
 try:
-    __version__ = importlib.metadata.version("mornye-python")
+    __version__ = importlib.metadata.version("mornye")
 except importlib.metadata.PackageNotFoundError:
     __version__ = "unknown"
 

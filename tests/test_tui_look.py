@@ -72,6 +72,32 @@ def test_a_plain_terminal_gets_no_block_art() -> None:
     assert art.isascii()
 
 
+def test_banner_version_uses_the_project_distribution_name(monkeypatch) -> None:
+    from importlib import metadata
+
+    def installed_version(package_name: str) -> str:
+        assert package_name == "mornye"
+        return "1.0.1"
+
+    monkeypatch.setattr(metadata, "version", installed_version)
+
+    assert branding.version() == "1.0.1"
+
+
+def test_banner_version_has_a_visible_fallback_when_distribution_is_missing(
+    monkeypatch,
+) -> None:
+    from importlib import metadata
+
+    def missing_distribution(package_name: str) -> str:
+        raise metadata.PackageNotFoundError(package_name)
+
+    monkeypatch.setattr(metadata, "version", missing_distribution)
+
+    assert branding.version() == "dev"
+    assert branding.subtitle().startswith("vdev")
+
+
 def test_plain_terminal_follows_no_color(monkeypatch) -> None:
     monkeypatch.delenv("MORNYE_PLAIN_TUI", raising=False)
     monkeypatch.setenv("TERM", "xterm-256color")

@@ -104,6 +104,33 @@ def test_the_welcome_banner_is_suppressed_under_json(capsys) -> None:
         sys.argv = original
 
 
+def test_the_welcome_banner_uses_the_mornye_wordmark_color(monkeypatch) -> None:
+    from io import StringIO
+
+    import mornye.launcher as launcher
+
+    class TTYBuffer(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    output = TTYBuffer()
+    monkeypatch.setattr(launcher.sys, "stdout", output)
+    monkeypatch.setattr(launcher.sys, "argv", ["mornye"])
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    launcher._print_welcome_banner()
+
+    logo_lines = [
+        line
+        for line in output.getvalue().splitlines()
+        if line.startswith("\033[38;2;128;201;197m")
+    ]
+    assert len(logo_lines) == 5
+    assert all(line.endswith("\033[0m") for line in logo_lines)
+    assert any("/" in line for line in logo_lines)
+    assert all("_" in line for line in logo_lines)
+
+
 # --- --help must not reach the network -------------------------------------
 
 

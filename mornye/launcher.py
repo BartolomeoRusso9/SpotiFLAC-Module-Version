@@ -218,11 +218,11 @@ def _register_cli_registry_directories(urls: list[str]) -> None:
 
 
 def _print_welcome_banner() -> None:
-    """Prints a one-time ASCII banner with project/community links on startup.
+    """Print Mornye branding and project/community links once on startup.
 
     Suppressed entirely under --json: it goes to stdout, which in that mode
     carries the report document and nothing else. `mornye ... --json | jq`
-    would otherwise be fed an ASCII logo before the JSON. Console output from
+    would otherwise be fed branding before the JSON. Console output from
     core/console._write already goes to stderr; this was the one thing that
     didn't.
 
@@ -245,52 +245,18 @@ def _print_welcome_banner() -> None:
         return url if no_color else f"\033]8;;{url}\033\\{styled_url}\033]8;;\033\\"
 
     try:
-        version = importlib.metadata.version("mornye-python")
+        version = importlib.metadata.version("mornye")
     except importlib.metadata.PackageNotFoundError:
         version = "dev"
-
-    # Logo esteso "Mornye Python Module" in font Slant, verde brillante (1;92)
-    ascii_logo = [
-        c(
-            "1;92",
-            r"   _____             __  _ ________    ___  ______   ____        __  __                  __  ___          __      __     ",
-        ),
-        c(
-            "1;92",
-            r"  / ___/____  ____  / /_(_) ____/ /   /   |/ ____/  / __ \__  __/ / / /_  ____  ____    /  |/  /___  ____/ /_  __/ /___  ",
-        ),
-        c(
-            "1;92",
-            r"  \__ \/ __ \/ __ \/ __/ / /_  / /   / /| / /      / /_/ / / / / /_/ __ \/ __ \/ __ \  / /|_/ / __ \/ __  / / / / / __ \ ",
-        ),
-        c(
-            "1;92",
-            r" ___/ / /_/ / /_/ / /_/ / __/ / /___/ ___ / /___  / ____/ /_/ / __/ / / / /_/ / / / / / /  / / /_/ / /_/ / /_/ / /  __/  ",
-        ),
-        c(
-            "1;92",
-            r"/____/ .___/\____/\__/_/_/   /_____/_/  |_\____/ /_/    \__, /_/ /_/ /_/\____/_/ /_/ /_/  /_/\____/\__,_/\__,_/_/\___/   ",
-        ),
-        c(
-            "1;92",
-            r"    /_/                                                 /____/                                                           ",
-        ),
-    ]
-
-    print()
-    for line in ascii_logo:
-        print(line)
 
     # Crea un "Badge" con sfondo ciano (46), testo nero (30) e grassetto (1)
     version_badge = c("1;30;46", f" v{version} ")
 
     print()
     print(f"  {c('1;90', '▪')} {c('1;37', 'Version')}   {version_badge}")
+    print(f"  {c('1;90', '▪')} {c('1;37', 'Author')}    {c('1;93', 'Mornye')}")
     print(
-        f"  {c('1;90', '▪')} {c('1;37', 'Author')}    {c('1;93', 'BartolomeoRusso9')}"
-    )
-    print(
-        f"  {c('1;90', '▪')} {c('1;37', 'GitHub')}    {format_link('https://github.com/BartolomeoRusso9/Mornye-Python')}"
+        f"  {c('1;90', '▪')} {c('1;37', 'GitHub')}    {format_link('https://github.com/mornyeapp/Mornye-Python')}"
     )
     print(
         f"  {c('1;90', '▪')} {c('1;37', 'Support')}   {format_link('https://ko-fi.com/bartolomeorusso9')}"
