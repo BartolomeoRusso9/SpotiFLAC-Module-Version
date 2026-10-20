@@ -673,10 +673,9 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             # that the process is answering.
             if request.url.path == HEALTH_PATH:
                 return await call_next(request)
-            supplied = (
-                request.query_params.get(WEB_TOKEN_QUERY_PARAM)
-                or request.cookies.get(WEB_TOKEN_COOKIE)
-            )
+            supplied = request.query_params.get(
+                WEB_TOKEN_QUERY_PARAM
+            ) or request.cookies.get(WEB_TOKEN_COOKIE)
             if not _token_matches(supplied, token):
                 return PlainTextResponse(
                     "Missing or invalid ?token= — this Mornye web instance "
@@ -711,9 +710,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             path = request.url.path
             if not path.startswith("/api/") or path in _EXEMPT_PATHS:
                 return await call_next(request)
-            username = sessions.username_for(
-                request.cookies.get(SESSION_COOKIE)
-            )
+            username = sessions.username_for(request.cookies.get(SESSION_COOKIE))
             if username is None:
                 return JSONResponse({"error": "Not logged in"}, status_code=401)
             request.state.username = username
@@ -752,9 +749,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
 
         @app.post("/api/auth/logout")
         async def auth_logout(request: Request) -> JSONResponse:
-            sessions.revoke(
-                request.cookies.get(SESSION_COOKIE)
-            )
+            sessions.revoke(request.cookies.get(SESSION_COOKIE))
             response = JSONResponse({"status": "ok"})
             response.delete_cookie(SESSION_COOKIE)
             return response
@@ -972,9 +967,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         """
         if not multiuser:
             return JSONResponse({"multiuser": False, "logged_in": True})
-        username = sessions.username_for(
-            request.cookies.get(SESSION_COOKIE)
-        )
+        username = sessions.username_for(request.cookies.get(SESSION_COOKIE))
         return JSONResponse({"multiuser": True, "logged_in": username is not None})
 
     # ── Dynamic dispatcher for every whitelisted Api method ────────────────
@@ -1144,9 +1137,8 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         # (logs, progress, metadata, on-disk paths), so leaving either one out
         # means an unauthenticated client can watch everything the instance does.
         if token:
-            supplied = (
-                ws.query_params.get(WEB_TOKEN_QUERY_PARAM)
-                or ws.cookies.get(WEB_TOKEN_COOKIE)
+            supplied = ws.query_params.get(WEB_TOKEN_QUERY_PARAM) or ws.cookies.get(
+                WEB_TOKEN_COOKIE
             )
             if not _token_matches(supplied, token):
                 await ws.close(code=1008)  # 1008 = Policy Violation

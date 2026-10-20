@@ -32,9 +32,7 @@ def test_download_directory_uses_the_current_default(tmp_path, monkeypatch):
 def test_database_path_uses_current_filename_and_environment_override(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(
-        db_module, "DEFAULT_DB_PATH", tmp_path / "state" / "mornye.db"
-    )
+    monkeypatch.setattr(db_module, "DEFAULT_DB_PATH", tmp_path / "state" / "mornye.db")
     monkeypatch.delenv("MORNYE_DB_PATH", raising=False)
 
     assert db_module.db_path() == tmp_path / "state" / "mornye.db"

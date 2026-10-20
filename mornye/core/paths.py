@@ -20,6 +20,7 @@ from pathlib import Path
 
 from .env import env_value
 
+
 def default_download_dir() -> str:
     """Where downloads go unless told otherwise: ``~/Music/Mornye``.
 

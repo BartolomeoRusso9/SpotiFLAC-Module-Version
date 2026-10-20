@@ -42,6 +42,7 @@ _LEGACY_PROVIDER_EXPORTS = {
     "TidalProvider",
 }
 
+
 def __getattr__(name: str) -> Any:
     if name == "SpotifyMetadataClient":
         from .core.spotify_metadata import SpotifyMetadataClient
