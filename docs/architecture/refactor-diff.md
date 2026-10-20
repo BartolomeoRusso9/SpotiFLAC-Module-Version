@@ -207,7 +207,7 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
     replacements, and the next safe extraction slice.
 - `DownloadConfig.services` now preserves legacy provider configuration and
   `ProviderResolver` enforces it when selecting candidates.
-- `ResolveStep` accepts public Spotify track URLs in addition to Spotify URNs.
+- `ResolveStep` accepts public track URLs in addition to URNs.
 
 ### Client Entry Point
 

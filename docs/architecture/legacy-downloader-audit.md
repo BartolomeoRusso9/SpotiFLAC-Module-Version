@@ -34,7 +34,7 @@ bookkeeping remain the next extraction slices.
 
 ## Findings
 
-1. The application `MetadataService` is not yet a full replacement: it currently handles only synthetic Spotify track metadata for URN sources.
+1. The application `MetadataService` is not yet a full replacement: it currently handles only synthetic track metadata for URN sources.
 2. The application resolve boundary now accepts both Spotify URNs and public `open.spotify.com` URLs, but URL metadata extraction still needs a real resolver implementation.
 3. Provider configuration was previously lost during `DownloadOptions` conversion; `DownloadConfig.services` now preserves it and `ProviderResolver` filters candidates accordingly.
 4. Legacy provider execution still owns real network/provider matching and several post-processing operations. Removing `DownloadWorker` before migrating those contracts would break supported compatibility flows.

@@ -129,9 +129,9 @@ Mornye(
 
 Both are off by default. The lyrics are read back out of the finished file rather than fetched again, so there is no extra network request, it works with every provider, and the `.lrc` is by construction identical to what the track carries — including after transcoding, where the sidecar follows the converted file. A track with no lyrics produces no empty file, and a destination that cannot be written is logged as a warning rather than failing the download.
 
-### Spotify Canvas
+### Canvas
 
-A Canvas is the 3-to-8 second silent loop Spotify's mobile app plays behind the player instead of the cover art. It belongs to the track, not the album, and most of the catalogue has none.
+A Canvas is the 3-to-8 second silent loop that plays behind the player instead of the cover art. It belongs to the track, not the album, and most of the catalogue has none.
 
 It is saved **beside** the audio, never inside it: FLAC has no video stream to embed one in, and muxing it into an `.m4a` produces files several players refuse to open. The two switches split the same way the `.lrc` ones do:
 

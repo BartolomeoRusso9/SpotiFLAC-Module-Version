@@ -39,7 +39,7 @@
 | `apple_lyrics_word_by_word` | `bool` | `True` | Keep Apple's lyrics in their native word-by-word (per-syllable) form. Set `False` to get plain line-synced LRC from Apple instead. Only affects the `apple` provider. |
 | `save_lrc` | `bool` | `False` | Also write the lyrics as `<audio file's name>.lrc`, next to the track. |
 | `lrc_library_dir` | `str` | `None` | Also collect every lyric into this folder as `Artist - Title.lrc`, the layout overlay players (LyricsX and similar) look lyrics up by. |
-| `save_canvas` | `bool` | `False` | Also save the track's Spotify Canvas (the short looping visual) next to the track, under the audio file's own name. The extension follows the media Spotify actually serves — usually `.mp4`, `.jpg` for the canvases that are a still image. Never embedded — see [Spotify Canvas](configuration.md#spotify-canvas). |
+| `save_canvas` | `bool` | `False` | Also save the track's Canvas (the short looping visual) next to the track, under the audio file's own name. The extension follows the media actually serves — usually `.mp4`, `.jpg` for the canvases that are a still image. Never embedded — see [Canvas](configuration.md#canvas). |
 | `canvas_library_dir` | `str` | `None` | Also collect every canvas into this folder as `Artist - Title`, with the same extension `save_canvas` would give it. |
 | `canvas_providers` | `list` | `["spotify", "paxsenix"]` | Where a canvas is looked up, in order: `spotify` asks Spotify's own `canvaz-cache` endpoint, `paxsenix` goes through the public JSON wrapper. |
 | `enrich_metadata` | `bool` | `True` | Enables multi-provider metadata enrichment (HD covers, BPM, labels, etc.). |

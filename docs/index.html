@@ -4,11 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mornye — metadata core and extension platform</title>
-<meta name="description" content="A Python module that resolves Spotify metadata and, through extensions you choose and install yourself, retrieves matching audio. No bundled providers, no default source.">
+<meta name="description" content="A Python module that resolves metadata and, through extensions you choose and install yourself, retrieves matching audio. No bundled providers, no default source.">
 <meta name="theme-color" content="#101819">
 <link rel="icon" type="image/png" sizes="192x192" href="assets/images/logo.png">
 <meta property="og:title" content="Mornye">
-<meta property="og:description" content="A Python module that resolves Spotify metadata. No bundled providers, no default source — you supply the extensions.">
+<meta property="og:description" content="A Python module that resolves metadata. No bundled providers, no default source — you supply the extensions.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -236,7 +236,7 @@
   <section class="hero">
     <img class="hero-brand-mark" src="assets/images/logo-transparent.png" alt="Mornye logo">
     <h1>A focused core.<br><span>Your choice of extensions.</span></h1>
-    <p class="lede">Mornye resolves Spotify track, album and playlist metadata. It ships with no bundled provider and no default extension source — every audio backend is a module you find, review, and plug in yourself.</p>
+    <p class="lede">Mornye resolves track, album and playlist metadata. It ships with no bundled provider and no default extension source — every audio backend is a module you find, review, and plug in yourself.</p>
 
     <div class="hero-badges">
       <span class="badge"><span class="bd"></span>Python module</span>
@@ -300,7 +300,7 @@
         <div class="flow-card">
           <div class="num">01</div>
           <h3>Resolve the URL</h3>
-          <p>Paste a Spotify track, album, playlist or artist link. The core resolves title, artist, album, and other metadata. No audio yet.</p>
+          <p>Paste a track, album, playlist or artist link. The core resolves title, artist, album, and other metadata. No audio yet.</p>
         </div>
         <div class="flow-card you">
           <div class="num">02</div>
@@ -389,7 +389,7 @@ Mornye(
       <div class="faq-list">
         <details class="faq-item">
           <summary>Why doesn't anything download right after I install it?</summary>
-          <div class="faq-answer">By design. The core resolves Spotify metadata only — it has no built-in provider and no default extension source. You need to point <code class="mono">MORNYE_REGISTRIES</code> at a registry of your choosing and install at least one extension before it can retrieve audio.</div>
+          <div class="faq-answer">By design. The core resolves metadata only — it has no built-in provider and no default extension source. You need to point <code class="mono">MORNYE_REGISTRIES</code> at a registry of your choosing and install at least one extension before it can retrieve audio.</div>
         </details>
         <details class="faq-item">
           <summary>Can I write my own extension?</summary>
