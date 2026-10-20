@@ -1039,7 +1039,9 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             approved_roots = [Path(target_api.download_dir).resolve()]
             if not multiuser:
                 approved_roots.append(Path.home().resolve())
-            if not any(base.is_relative_to(approved_root) for approved_root in approved_roots):
+            if not any(
+                base.is_relative_to(approved_root) for approved_root in approved_roots
+            ):
                 return JSONResponse(
                     {"error": "Access denied: path is outside approved directories"},
                     status_code=403,
