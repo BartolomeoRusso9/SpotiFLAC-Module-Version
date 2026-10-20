@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mornye"
-version = "1.0.1"
+version = "1.0.2"
 description = "A Python module for metadata and user-configured music-provider extensions."
 readme = "README.md"
 # 3.10, not 3.9: core/models.py declares PEP 604 unions (`str | None`) on
