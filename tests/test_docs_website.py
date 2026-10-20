@@ -4,7 +4,6 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-
 DOCS_DIR = Path(__file__).resolve().parents[1] / "docs"
 SITE_PAGES = ("index.html", "downloads.html", "partners.html")
 
