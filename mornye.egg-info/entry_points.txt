@@ -1,2 +1,0 @@
-[console_scripts]
-mornye = mornye.launcher:main
