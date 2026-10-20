@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mornye-python"
+name = "mornye"
 version = "1.0.0"
 description = "A Python module for Spotify metadata and user-configured music-provider extensions."
 readme = "README.md"

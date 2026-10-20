@@ -1,24 +1,55 @@
 # Mornye Python
 
-Fetch Spotify track metadata and retrieve matching lossless audio through provider backends supplied entirely by extensions you choose and configure. Integrate Mornye into Python projects, automation tools, or bulk downloaders.
+Fetch track metadata and retrieve matching lossless audio through Tidal, Qobuz, Amazon Music and other provider backends — supplied entirely via extensions you choose and configure yourself. Integrate directly into your Python projects, build custom Telegram bots, automation tools, or bulk downloaders.
 
-[Canonical repository](https://github.com/BartolomeoRusso9/Mornye-Python) (private; access required)
+[![GitHub stars](https://img.shields.io/github/stars/mornyeapp/Mornye-Python?color=ffcb47&labelColor=black&logo=github&label=Stars)](https://github.com/mornyeapp/Mornye-Python/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/mornyeapp/Mornye-Python?color=8b5cf6&labelColor=black&logo=github&label=Latest%20Release)](https://github.com/mornyeapp/Mornye-Python/releases/latest)
+[![PyPI version](https://img.shields.io/pypi/v/mornye?logo=pypi&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/mornye/)
+[![Python versions](https://img.shields.io/pypi/pyversions/mornye?logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/mornye/)
+[![GitHub downloads](https://img.shields.io/github/downloads/mornyeapp/Mornye-Python/total?color=22c55e&labelColor=black&logo=github&label=Downloads)](https://github.com/mornyeapp/Mornye-Python/releases)
+[![PyPI downloads](https://img.shields.io/pepy/dt/mornye?logo=pypi&logoColor=ffffff&labelColor=000000)](https://pypi.org/project/mornye/)
+[![Telegram community](https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white)](https://t.me/mornyecommunity)
 
 ## Disclaimer
 
-The project is licensed under the [MIT License](LICENSE). See the [configuration and state guide](docs/guide/migration.md) for environment variables and storage locations.
+This project is intended for **educational and personal use only**. The developer does not condone or encourage copyright infringement. The software is licensed under the [MIT License](https://github.com/mornyeapp/Mornye-Python//blob/main/LICENSE).
 
-Mornye Python is an independent project. It is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service. It is also not affiliated with any separate project or app that uses the name “Mornye.”
+**Mornye-Python** is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service. It is also not affiliated with, and has no control over or responsibility for, any other project sharing a similar name on other platforms.
 
-The core application does not bundle or default to any third-party extension, registry, or provider. Extensions are installed only if a user explicitly configures and requests them from a source of their own choosing; the maintainer has no control over, does not review, and assumes no responsibility for third-party extensions or registries.
+No copyrighted content is hosted, stored, mirrored, or distributed by this repository. The core application does not bundle, ship, or default to any third-party extension, registry, or provider. Extensions are installed only if a user explicitly configures and requests them from a source of their own choosing; the maintainer has no control over, does not review, and assumes no responsibility for the content or behavior of third-party extensions or registries a user may choose to install.
 
-Use the software only in ways that comply with applicable laws and the terms of services you access. The software is provided "as is," without warranty; users are responsible for its use and for any extensions or registries they install.
+You are solely responsible for:
+
+1. Ensuring your use of this software, and any extension or registry you choose to install, complies with your local laws.
+2. Reading and adhering to the Terms of Service of any platform or provider you access, directly or through an extension.
+3. Any legal consequences resulting from the use or misuse of this tool.
+
+This software is provided free of charge by the maintainer. If you paid a third party for access to it, you may have been misled or scammed.
+
+The software is provided "as is", without warranty of any kind, express or implied. The author assumes no liability for any bans, damages, or legal issues arising from its use or misuse. Users assume all risk associated with its use.
+
+If you are a copyright holder or an authorized representative and believe this repository infringes upon your rights, please contact the maintainer with sufficient detail (including relevant URLs and proof of ownership); the matter will be promptly investigated.
 
 ---
 
-## Why Mornye Python
+> **Looking for a standalone app?**
+>
+> - [Mornye (Mobile)](https://github.com/mornyeapp/Mornye) — Mornye for Android & iOS, maintained by [@zarzet](https://github.com/zarzet)
+---
 
-Use Mornye when integrating synchronous or asynchronous metadata and download workflows into Python services, automations, bulk jobs, or headless deployments. You choose which extensions to install and which registries to trust.
+## Why Python (instead of the standalone app)
+
+The Mobile app is built for direct, immediate use: open it, paste a link, download. Python exists for a different case — **integrating** this logic into something else.
+
+It makes sense to start here if:
+
+- **You're building a bot** (Telegram, Discord) or a service that needs to handle requests from many users automatically, not a single manual download.
+- **You need the async API** (`AsyncMornye`) inside an existing FastAPI/Quart/Sanic app, with shared connection pooling.
+- **You want to orchestrate bulk downloads** via scripts — multiple playlists, full discographies, local library retagging — with custom logic (filenames via a Python function, post-download actions, saved profiles).
+- **You need to run headless**, on a server, a NAS, or inside Docker, possibly as part of a larger pipeline.
+- **You want full control over which extensions get loaded** and from which registry, instead of relying on a fixed set baked into an app.
+
+If you just want a GUI for personal use, with no code involved, the [Mobile](https://github.com/mornyeapp/Mornye) app remain the simpler choice — this module is the building block those (and similar projects) can be built on top of.
 
 ---
 
@@ -58,13 +89,10 @@ Use Mornye when integrating synchronous or asynchronous metadata and download wo
 ## Installation
 
 ```bash
-git clone https://github.com/BartolomeoRusso9/Mornye-Python.git
-cd Mornye-Python
-python -m pip install .
+pip install mornye
 ```
 
-The repository is private, so you need access to clone it. Mornye has no built-in provider or default extension source. Before downloading, configure a registry you trust and install an extension; see [Extensions](docs/guide/extensions.md#extensions).
-
+> **Important:** out of the box, Mornye does nothing but resolve metadata — it ships with **no built-in provider and no default extension source**. Before you can download anything, you need to point it at an extension registry of your own choosing and install at least one extension. See [Extensions](docs/guide/extensions.md#extensions) below.
 ---
 
 ## Documentation
@@ -109,4 +137,4 @@ If this software is useful and brings you value, consider supporting the project
 
 > Provider-specific credits (Tidal, Qobuz, Amazon Music, Deezer, SoundCloud, Apple Music, Pandora, and any third-party API used to reach them) now belong to whichever extension you install — see that extension's own documentation for its credits and terms.
 >
-> The repository is private; release notifications are available to users with repository access.
+> **[!TIP]** Star the repo to show support, and click **Watch → Custom → Releases** on GitHub if you want to be notified as soon as a new release goes out.
