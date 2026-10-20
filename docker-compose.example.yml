@@ -18,7 +18,7 @@
 services:
   mornye-web:
     # Swap for the published image if you don't want to build locally:
-    # image: ghcr.io/bartolomeorusso9/mornye-python:latest
+    # image: ghcr.io/mornyeapp/mornye-python:latest
     build: .
     command: ["--web", "--host", "0.0.0.0", "--port", "8000"]
     # Who the container runs as. Set PUID/PGID (here, in .env, or in your

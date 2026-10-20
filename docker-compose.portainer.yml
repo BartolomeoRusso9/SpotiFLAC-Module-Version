@@ -20,7 +20,7 @@ name: ${COMPOSE_PROJECT_NAME:-mornye-module-version}
 
 services:
   mornye:
-    image: ghcr.io/bartolomeorusso9/mornye-python:${MORNYE_TAG:-latest}
+    image: ghcr.io/mornyeapp/mornye-python:${MORNYE_TAG:-latest}
     container_name: mornye
     # --host 0.0.0.0 is mandatory in a container: the CLI default 127.0.0.1
     # only accepts connections from inside the container itself.

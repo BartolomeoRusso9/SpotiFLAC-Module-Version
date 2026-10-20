@@ -117,7 +117,7 @@ available inside the container.
 Build a small derived image with the optional SMB dependency:
 
 ```dockerfile
-FROM ghcr.io/bartolomeorusso9/mornye-python:latest
+FROM ghcr.io/mornyeapp/mornye-python:latest
 RUN python -m pip install --no-cache-dir 'smbprotocol>=1.15.0' 'keyring>=25.0.0'
 ```
 

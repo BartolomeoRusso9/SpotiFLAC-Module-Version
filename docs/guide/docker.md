@@ -17,7 +17,7 @@ The usual way to run Mornye on a server is `--web` mode: the GUI served over HTT
 ```yaml
 services:
   mornye:
-    image: ghcr.io/bartolomeorusso9/mornye-python:latest
+    image: ghcr.io/mornyeapp/mornye-python:latest
     command: ["--web", "--host", "0.0.0.0", "--port", "8000"]
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
@@ -211,7 +211,7 @@ Everything is optional except `MORNYE_REGISTRIES`. An empty value is the same as
 The repository workflow is configured to publish images to GitHub Container Registry. Use the image after it has been published and is accessible to your account:
 
 ```bash
-docker pull ghcr.io/bartolomeorusso9/mornye-python:latest
+docker pull ghcr.io/mornyeapp/mornye-python:latest
 ```
 
 To build from source instead:
@@ -236,7 +236,7 @@ docker run -d --name mornye \
   -e MORNYE_DOWNLOAD_DIR=/app/downloads \
   -v "$(pwd)/downloads:/app/downloads" \
   -v "$(pwd)/mornye-data:/home/mornye/.mornye" \
-  ghcr.io/bartolomeorusso9/mornye-python:latest --web --host 0.0.0.0 --port 8000
+  ghcr.io/mornyeapp/mornye-python:latest --web --host 0.0.0.0 --port 8000
 ```
 
 **One-shot CLI download.** Without `--web` the container starts a virtual display (Xvfb) for the browser and runs a single command, then exits:
@@ -248,7 +248,7 @@ docker run --rm -it \
   -e MORNYE_REGISTRIES="https://example.com/my-registry.json" \
   -v "$(pwd)/downloads:/app/downloads" \
   -v "$(pwd)/mornye-data:/home/mornye/.mornye" \
-  ghcr.io/bartolomeorusso9/mornye-python:latest \
+  ghcr.io/mornyeapp/mornye-python:latest \
   "https://open.spotify.com/track/TRACK_ID" \
   /app/downloads -s ext:deezer-web -q LOSSLESS
 ```
