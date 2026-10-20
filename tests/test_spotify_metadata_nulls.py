@@ -120,3 +120,66 @@ def test_a_failed_query_is_reported_as_a_missing_track(monkeypatch) -> None:
         asyncio.run(client.get_track_async("0" * 22))
 
     assert excinfo.value.kind is ErrorKind.TRACK_NOT_FOUND
+
+
+def test_a_notfound_union_raises_instead_of_arriving_untitled(monkeypatch) -> None:
+    """A dead or catalogue-removed id answers `{"__typename": "NotFound",
+    "message": "Object with uri ... not found"}` — a non-empty union node,
+    so the empty check passes. The observed field shape (live probe,
+    2026-10-20): without this the helpers assemble title="Unknown" and the
+    caller cannot tell a dead id from a track.
+    """
+    client = _client(
+        {
+            "data": {
+                "trackUnion": {
+                    "__typename": "NotFound",
+                    "message": "Object with uri 'spotify:track:0000000000000000000000' not found",
+                }
+            }
+        },
+        monkeypatch,
+    )
+
+    with pytest.raises(SpotiflacError) as excinfo:
+        asyncio.run(client.get_track_async("0" * 22))
+
+    assert excinfo.value.kind is ErrorKind.TRACK_NOT_FOUND
+
+
+def test_a_genericerror_union_raises_instead_of_arriving_untitled(monkeypatch) -> None:
+    client = _client(
+        {"data": {"trackUnion": {"__typename": "GenericError"}}},
+        monkeypatch,
+    )
+
+    with pytest.raises(SpotiflacError) as excinfo:
+        asyncio.run(client.get_track_async("0" * 22))
+
+    assert excinfo.value.kind is ErrorKind.TRACK_NOT_FOUND
+
+
+def test_an_untyped_union_still_goes_through_the_legacy_guards(monkeypatch) -> None:
+    """A union without __typename is the legacy field shape (the persisted
+    query always sends one; old test doubles do not). It must NOT be
+    rejected as TRACK_NOT_FOUND — the emptied-shape UNAVAILABLE semantics
+    below it still apply.
+    """
+    client = _client(
+        {
+            "data": {
+                "trackUnion": {
+                    "name": "",
+                    "playability": {"playable": False, "reason": "COUNTRY_RESTRICTED"},
+                    "albumOfTrack": {"name": "", "date": None},
+                    "duration": {"totalMilliseconds": 0},
+                }
+            }
+        },
+        monkeypatch,
+    )
+
+    with pytest.raises(SpotiflacError) as excinfo:
+        asyncio.run(client.get_track_async("0NfjJ4sWSQJl2SOIQiEQId"))
+
+    assert excinfo.value.kind is ErrorKind.UNAVAILABLE

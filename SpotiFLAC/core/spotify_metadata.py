@@ -449,6 +449,18 @@ def resolve_short_link(uri: str) -> str:
     return ""
 
 
+def _checked_id(uri: str, raw_id: str) -> str:
+    """A Spotify id is exactly 22 base-62 characters.
+
+    A 23-character "id" (or any other wrong shape) can only fail downstream
+    — GraphQL answers GenericError, the native metadata endpoint overflows.
+    Every branch of parse_spotify_url funnels ids through this gate.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9]{22}", raw_id):
+        raise InvalidUrlError(uri)
+    return raw_id
+
+
 def parse_spotify_url(uri: str, _resolved: bool = False) -> dict[str, str]:
     u = urlparse(uri)
 
@@ -489,14 +501,14 @@ def parse_spotify_url(uri: str, _resolved: bool = False) -> dict[str, str]:
         raise InvalidUrlError(uri)
 
     if len(parts) == 3 and parts[1] in ("album", "track", "playlist", "artist"):
-        return {"type": parts[1], "id": parts[2].split("?")[0]}
+        return {"type": parts[1], "id": _checked_id(uri, parts[2].split("?")[0])}
 
     # Playlist nested (/user/<uid>/playlist/<id>)
     if len(parts) == 5 and parts[3] == "playlist":
-        return {"type": "playlist", "id": parts[4].split("?")[0]}
+        return {"type": "playlist", "id": _checked_id(uri, parts[4].split("?")[0])}
 
     if len(parts) >= 4 and parts[1] == "artist":
-        artist_id = parts[2].split("?")[0]
+        artist_id = _checked_id(uri, parts[2].split("?")[0])
         if parts[3] == "discography":
             # Supporto sub-type: all / album / single / compilation / appears_on
             sub = parts[4].split("?")[0] if len(parts) >= 5 else "all"
@@ -647,6 +659,19 @@ class SpotifyMetadataClient:
         }
         data = await asyncio.to_thread(self.web_client.query, payload)
         track_union = _dig(data, "data", "trackUnion")
+        typename = track_union.get("__typename")
+        if track_union and typename not in (None, "Track"):
+            # `NotFound` ("Object with uri ... not found") and `GenericError`
+            # arrive as a NONEMPTY union node, so the empty check below
+            # passes; without this the field readers quietly assemble
+            # TrackMetadata(title="Unknown") and the caller cannot tell a
+            # dead id from a track. A union WITHOUT a `__typename` is left
+            # to the legacy guards underneath: the field record predates the
+            # field and old test doubles omit it.
+            raise SpotiflacError(
+                ErrorKind.TRACK_NOT_FOUND,
+                f"Spotify reports track {track_id} as {typename}.",
+            )
         if not track_union:
             raise SpotiflacError(
                 ErrorKind.TRACK_NOT_FOUND,
