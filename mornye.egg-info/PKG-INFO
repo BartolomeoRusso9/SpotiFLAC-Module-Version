@@ -1,8 +1,8 @@
 Metadata-Version: 2.4
 Name: mornye
-Version: 1.0.1
+Version: 1.0.2
 Summary: A Python module for metadata and user-configured music-provider extensions.
-Author:  BartolomeoRusso9
+Author: Mornye
 License: MIT
 Project-URL: Homepage, https://github.com/mornyeapp/Mornye-Python
 Project-URL: Repository, https://github.com/mornyeapp/Mornye-Python
@@ -71,7 +71,7 @@ Fetch track metadata and retrieve matching lossless audio through Tidal, Qobuz, 
 
 ## Disclaimer
 
-This project is intended for **educational and personal use only**. The developer does not condone or encourage copyright infringement. The software is licensed under the [MIT License](https://github.com/mornyeapp/Mornye-Python//blob/main/LICENSE).
+This project is intended for **educational and personal use only**. The developer does not condone or encourage copyright infringement. The software is licensed under the [MIT License](https://github.com/mornyeapp/Mornye-Python/blob/main/LICENSE).
 
 **Mornye-Python** is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service. It is also not affiliated with, and has no control over or responsibility for, any other project sharing a similar name on other platforms.
 
