@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Downloads — Mornye Module Version</title>
-<meta name="theme-color" content="#0f1115">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='7' y='7' width='10' height='10' rx='2.4' fill='%237c5cff' transform='rotate(45 12 12)'/%3E%3C/svg%3E">
+<title>Downloads — Mornye</title>
+<meta name="description" content="Browse Mornye source and release assets published on GitHub.">
+<meta name="theme-color" content="#101819">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/images/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -121,12 +122,14 @@
   .footer-links a:hover { color: var(--text); }
   .footer-copy { color: var(--text-faint); font-size: .78rem; }
 </style>
+<link rel="stylesheet" href="site.css?v=20261020-mornye-brand">
 </head>
 <body>
 
+<a class="skip-link" href="#main-content">Skip to content</a>
 <nav>
   <div class="nav-inner">
-    <a class="nav-brand" href="index.html"><span class="dot"></span>Mornye Module Version</a>
+    <a class="nav-brand" href="index.html"><img class="brand-icon" src="assets/images/logo.png" alt="">Mornye</a>
     <button class="nav-toggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
       <span></span><span></span><span></span>
     </button>
@@ -135,24 +138,25 @@
       <li><a href="index.html#features">Features</a></li>
       <li><a href="index.html#start">Quick start</a></li>
       <li><a href="index.html#faq">FAQ</a></li>
-      <li><a href="downloads.html" class="active">Downloads</a></li>
-      <li><a href="partners.html">Partners</a></li>
+      <li><a href="downloads.html" class="active" aria-current="page">Downloads</a></li>
+      <li><a href="partners.html">Extensions</a></li>
       <li class="nav-divider"></li>
       <li><a class="nav-gh" href="https://github.com/BartolomeoRusso9/Mornye-Python" target="_blank" rel="noopener">GitHub →</a></li>
     </ul>
   </div>
 </nav>
 
+<main id="main-content">
 <div class="page-header">
   <div class="page-header-inner">
     <div class="eyebrow">Releases</div>
     <h1>Downloads</h1>
-    <p>Standalone builds for Windows, macOS and Linux — pulled live from GitHub Releases.</p>
+    <p>Release assets and source packages, loaded directly from the project’s GitHub releases.</p>
   </div>
 </div>
 
 <div class="section-inner">
-  <div id="latest-hero">
+  <div id="latest-hero" role="status" aria-live="polite">
     <div class="loading"><div class="loading-spinner"></div>Loading latest release…</div>
   </div>
   <div class="older-section" id="older-section" style="display:none">
@@ -163,14 +167,13 @@
     </a>
   </div>
 </div>
+</main>
 
 <footer>
   <div class="footer-links">
     <a href="https://github.com/BartolomeoRusso9/Mornye-Python" target="_blank" rel="noopener">GitHub</a>
-    <a href="https://pypi.org/project/mornye/" target="_blank" rel="noopener">PyPI</a>
-    <a href="https://t.me/Mornye_Module_Version" target="_blank" rel="noopener">Telegram</a>
     <a href="index.html">Home</a>
-    <a href="partners.html">Partners</a>
+    <a href="partners.html">Extensions</a>
   </div>
   <div class="footer-copy">MIT Licensed · not affiliated with any streaming service</div>
 </footer>

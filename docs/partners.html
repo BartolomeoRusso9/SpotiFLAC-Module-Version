@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Partners & ecosystem — Mornye Module Version</title>
-<meta name="description" content="Projects, extension authors and resources around the Mornye Module Version ecosystem.">
-<meta name="theme-color" content="#0f1115">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='7' y='7' width='10' height='10' rx='2.4' fill='%237c5cff' transform='rotate(45 12 12)'/%3E%3C/svg%3E">
+<title>Extensions — Mornye</title>
+<meta name="description" content="Build JavaScript and Python extensions for Mornye, and choose trusted registries for your own workflow.">
+<meta name="theme-color" content="#101819">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/images/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -70,23 +70,25 @@
 	.notice{display:grid;grid-template-columns:auto 1fr;gap:15px;background:var(--panel);border:1px solid rgba(124,92,255,.25);border-radius:14px;padding:21px 22px}.notice-icon{color:var(--accent-bright);font:700 1.1rem var(--mono)}.notice h3{font-size:.98rem;margin-bottom:5px}.notice p{color:var(--text-dim);font-size:.86rem}.notice code{color:var(--text);background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;font-size:.78rem}
 	footer{background:var(--surface);padding:40px 24px;text-align:center;border-top:1px solid var(--hairline)}.footer-links{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;margin-bottom:16px}.footer-links a{color:var(--text-dim);font-size:.88rem}.footer-links a:hover{color:var(--text)}.footer-copy{color:var(--text-faint);font-size:.78rem}
 </style>
+<link rel="stylesheet" href="site.css?v=20261020-mornye-brand">
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <nav><div class="nav-inner">
-	<a class="nav-brand" href="index.html"><span class="dot"></span>Mornye Module Version</a>
+	<a class="nav-brand" href="index.html"><img class="brand-icon" src="assets/images/logo.png" alt="">Mornye</a>
 	<button class="nav-toggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
 		<span></span><span></span><span></span>
 	</button>
 	<ul class="nav-links" id="nav-links">
-		<li><a href="index.html#how">How it works</a></li><li><a href="index.html#features">Features</a></li><li><a href="index.html#start">Quick start</a></li><li><a href="index.html#faq">FAQ</a></li><li><a href="downloads.html">Downloads</a></li><li><a class="active" href="partners.html">Partners</a></li><li class="nav-divider"></li>
+		<li><a href="index.html#how">How it works</a></li><li><a href="index.html#features">Features</a></li><li><a href="index.html#start">Quick start</a></li><li><a href="index.html#faq">FAQ</a></li><li><a href="downloads.html">Downloads</a></li><li><a class="active" aria-current="page" href="partners.html">Extensions</a></li><li class="nav-divider"></li>
 		<li><a class="nav-gh" href="https://github.com/BartolomeoRusso9/Mornye-Python" target="_blank" rel="noopener">GitHub →</a></li>
 	</ul>
 </div></nav>
 
-<main>
+<main id="main-content">
 	<header class="hero"><div class="hero-inner">
-		<div class="eyebrow">The ecosystem around the core</div>
-		<h1>Built to connect.<br><span>Open by default.</span></h1>
+		<div class="eyebrow">Extend the core</div>
+		<h1>Choose what connects.<br><span>Keep control of the source.</span></h1>
 		<p class="lede">Mornye stays deliberately small: it resolves metadata, while extensions bring the services and workflows you choose to run.</p>
 		<div class="hero-meta"><span class="badge"><b>●</b> no bundled providers</span><span class="badge"><b>●</b> JavaScript + Python</span><span class="badge"><b>●</b> bring your own registry</span></div>
 	</div></header>
@@ -110,7 +112,7 @@
 	</div></section>
 </main>
 
-<footer><div class="footer-links"><a href="https://github.com/BartolomeoRusso9/Mornye-Python" target="_blank" rel="noopener">GitHub</a><a href="https://pypi.org/project/mornye/" target="_blank" rel="noopener">PyPI</a><a href="https://t.me/Mornye_Module_Version" target="_blank" rel="noopener">Telegram</a><a href="index.html">Home</a><a href="downloads.html">Downloads</a></div><div class="footer-copy">MIT Licensed · not affiliated with any streaming service</div></footer>
+<footer><div class="footer-links"><a href="https://github.com/BartolomeoRusso9/Mornye-Python" target="_blank" rel="noopener">GitHub</a><a href="index.html">Home</a><a href="downloads.html">Downloads</a><a href="guide/extensions.md">Extension guide</a></div><div class="footer-copy">MIT Licensed · not affiliated with any streaming service</div></footer>
 <script>
   const navToggle = document.querySelector('.nav-toggle');
   const navLinks = document.getElementById('nav-links');

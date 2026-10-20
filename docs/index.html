@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mornye Module Version — a core, and the sockets you fill</title>
+<title>Mornye — metadata core and extension platform</title>
 <meta name="description" content="A Python module that resolves Spotify metadata and, through extensions you choose and install yourself, retrieves matching audio. No bundled providers, no default source.">
-<meta name="theme-color" content="#0f1115">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='7' y='7' width='10' height='10' rx='2.4' fill='%237c5cff' transform='rotate(45 12 12)'/%3E%3C/svg%3E">
-<meta property="og:title" content="Mornye Module Version">
+<meta name="theme-color" content="#101819">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/images/logo.png">
+<meta property="og:title" content="Mornye">
 <meta property="og:description" content="A Python module that resolves Spotify metadata. No bundled providers, no default source — you supply the extensions.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -207,37 +207,40 @@
   .footer-links a:hover { color: var(--text); }
   .footer-copy { color: var(--text-faint); font-size: .78rem; }
 </style>
+<link rel="stylesheet" href="site.css?v=20261020-mornye-brand">
 </head>
 <body>
 
+<a class="skip-link" href="#main-content">Skip to content</a>
 <nav>
   <div class="nav-inner">
-    <a class="nav-brand" href="index.html"><span class="dot"></span>Mornye Module Version</a>
+    <a class="nav-brand" href="index.html"><img class="brand-icon" src="assets/images/logo.png" alt="">Mornye</a>
     <button class="nav-toggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links" id="nav-links">
-      <li><a href="index.html#how" class="active">How it works</a></li>
+      <li><a href="index.html#how">How it works</a></li>
       <li><a href="index.html#features">Features</a></li>
       <li><a href="index.html#start">Quick start</a></li>
       <li><a href="index.html#faq">FAQ</a></li>
       <li><a href="downloads.html">Downloads</a></li>
-      <li><a href="partners.html">Partners</a></li>
+      <li><a href="partners.html">Extensions</a></li>
       <li class="nav-divider"></li>
       <li><a class="nav-gh" href="https://github.com/BartolomeoRusso9/Mornye-Python" target="_blank" rel="noopener">GitHub →</a></li>
     </ul>
   </div>
 </nav>
 
-<main id="top">
+<main id="main-content">
 
   <section class="hero">
-    <h1>An empty core.<br><span>You supply the modules.</span></h1>
+    <img class="hero-brand-mark" src="assets/images/logo-transparent.png" alt="Mornye logo">
+    <h1>A focused core.<br><span>Your choice of extensions.</span></h1>
     <p class="lede">Mornye resolves Spotify track, album and playlist metadata. It ships with no bundled provider and no default extension source — every audio backend is a module you find, review, and plug in yourself.</p>
 
     <div class="hero-badges">
       <span class="badge"><span class="bd"></span>Python module</span>
-      <span class="badge"><span class="bd"></span>v3.0</span>
+      <span class="badge"><span class="bd"></span>Python 3.10+</span>
       <span class="badge"><span class="bd"></span>MIT licensed</span>
     </div>
 
@@ -248,8 +251,8 @@
 
     <div class="install-line">
       <span class="prompt">$</span>
-      <code>pip install Mornye</code>
-      <button type="button" data-copy="pip install Mornye">copy</button>
+      <code>python -m pip install .</code>
+      <button type="button" data-copy="python -m pip install .">copy</button>
     </div>
 
     <div class="hero-visual">
@@ -345,8 +348,10 @@
         <div class="tab" role="tab" data-tab="py">Python</div>
       </div>
       <div class="tab-panels">
-        <div class="tab-panel active" data-panel="cli"><pre><span class="c"># install</span>
-pip install Mornye
+        <div class="tab-panel active" data-panel="cli"><pre><span class="c"># clone and install</span>
+git clone https://github.com/BartolomeoRusso9/Mornye-Python.git
+cd Mornye-Python
+python -m pip install .
 
 <span class="c"># point at a registry you've chosen, then install an extension</span>
 <span class="k">export</span> MORNYE_REGISTRIES=<span class="s">"https://example.com/my-registry.json"</span>
@@ -357,7 +362,7 @@ mornye https://open.spotify.com/track/TRACK_ID ./downloads --service ext:tidal-w
 mornye --gui</pre></div>
         <div class="tab-panel" data-panel="web"><pre><span class="c"># same interface, served locally — open http://127.0.0.1:8000</span>
 mornye --web</pre></div>
-        <div class="tab-panel" data-panel="py"><pre><span class="k">from</span> Mornye <span class="k">import</span> Mornye
+        <div class="tab-panel" data-panel="py"><pre><span class="k">from</span> mornye <span class="k">import</span> Mornye
 
 Mornye(
     url=<span class="s">"https://open.spotify.com/track/TRACK_ID"</span>,
@@ -410,7 +415,7 @@ Mornye(
     <div class="section-inner">
       <div class="disclaimer">
         <h2>Disclaimer</h2>
-        <p>This project is intended for educational and personal use only. Mornye Module Version is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service.</p>
+        <p>This project is an independent tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service.</p>
         <ul>
           <li>No copyrighted content is hosted, stored, mirrored, or distributed by this project. The core does not bundle, ship, or default to any third-party extension, registry, or provider.</li>
           <li>You are responsible for ensuring your use of this software, and any extension or registry you choose to install, complies with your local laws and the terms of service of any platform you access.</li>
@@ -427,11 +432,9 @@ Mornye(
   <div class="footer-inner">
     <div class="footer-links">
       <a href="https://github.com/BartolomeoRusso9/Mornye-Python" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://pypi.org/project/mornye/" target="_blank" rel="noopener">PyPI</a>
-      <a href="https://t.me/Mornye_Module_Version" target="_blank" rel="noopener">Telegram</a>
       <a href="https://ko-fi.com/bartolomeorusso9" target="_blank" rel="noopener">Ko-fi</a>
       <a href="downloads.html">Downloads</a>
-      <a href="partners.html">Partners</a>
+      <a href="partners.html">Extensions</a>
       <a href="https://github.com/BartolomeoRusso9/Mornye-Python/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
       <a href="https://github.com/BartolomeoRusso9/Mornye-Python/issues" target="_blank" rel="noopener">Issues</a>
     </div>

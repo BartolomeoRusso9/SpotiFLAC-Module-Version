@@ -183,7 +183,8 @@ mornye/frontend/assets/icons/joox.svg
 mornye/frontend/assets/icons/kuwo.png
 mornye/frontend/assets/icons/logo-192.png
 mornye/frontend/assets/icons/logo-512.png
-mornye/frontend/assets/icons/logo.svg
+mornye/frontend/assets/icons/logo-transparent.png
+mornye/frontend/assets/icons/logo.png
 mornye/frontend/assets/icons/lrclib.png
 mornye/frontend/assets/icons/migu.jpeg
 mornye/frontend/assets/icons/musicbrainz_d.png
@@ -268,6 +269,7 @@ tests/test_directories.py
 tests/test_disc_number_from_album.py
 tests/test_discovery_mixin.py
 tests/test_dns_doh.py
+tests/test_docs_website.py
 tests/test_download_queue_reporting.py
 tests/test_download_recording_guard_wiring.py
 tests/test_download_resume.py

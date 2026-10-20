@@ -4,9 +4,9 @@ Version: 1.0.0
 Summary: A Python module for Spotify metadata and user-configured music-provider extensions.
 Author:  BartolomeoRusso9
 License: MIT
-Project-URL: Homepage, https://github.com/BartolomeoRusso9/Mornye-Python
-Project-URL: Repository, https://github.com/BartolomeoRusso9/Mornye-Python
-Project-URL: Bug Tracker, https://github.com/BartolomeoRusso9/Mornye-Python/issues
+Project-URL: Homepage, https://github.com/mornyeapp/Mornye-Python
+Project-URL: Repository, https://github.com/mornyeapp/Mornye-Python
+Project-URL: Bug Tracker, https://github.com/mornyeapp/Mornye-Python/issues
 Keywords: spotify,flac,downloader,music,lossless,lossless-music,tidal,qobuz,amazon-music,audio,mornye,spotify-metadata,no-account,hi-res
 Classifier: Development Status :: 4 - Beta
 Classifier: Intended Audience :: End Users/Desktop
