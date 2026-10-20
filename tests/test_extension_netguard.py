@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-GUARD = Path(__file__).resolve().parents[1] / "Mornye" / "extensions" / "_netguard.js"
+GUARD = Path(__file__).resolve().parents[1] / "mornye" / "extensions" / "_netguard.js"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="needs Node to exercise the real preload"

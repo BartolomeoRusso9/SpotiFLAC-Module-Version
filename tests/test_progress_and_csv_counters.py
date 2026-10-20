@@ -525,7 +525,7 @@ run('one-then-two', 5, [1, 2]);
 def _normalizer_source() -> str:
     """The real function out of the shipped bridge, not a copy of it."""
     source = (
-        Path(__file__).resolve().parents[1] / "Mornye" / "extensions" / "_bridge.js"
+        Path(__file__).resolve().parents[1] / "mornye" / "extensions" / "_bridge.js"
     ).read_text()
     start = source.index("const progressScale = new Map()")
     end = source.index("};", source.index("const normalizeProgress")) + 2

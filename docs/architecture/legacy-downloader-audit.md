@@ -4,8 +4,8 @@ Status: read-only audit completed 2026-09-25. No legacy code is removed by this 
 
 | Component | Used by | Required? | Replacement | Action |
 | --- | --- | --- | --- | --- |
-| `SpotiflacDownloader.run_async()` | CLI loop mode and compatibility client flows | Yes, compatibility-only | `DownloadService.download()` for single structured requests | Preserve until loop mode is migrated |
-| `SpotiflacDownloader.run_tracks_async()` | GUI batch selection and `AsyncSpotiFLAC.download_tracks()` | Yes, compatibility-only | Application batch service with complete metadata support | Preserve short term; migrate with batch regression coverage |
+| `MornyeDownloader.run_async()` | CLI loop mode and compatibility client flows | Yes, compatibility-only | `DownloadService.download()` for single structured requests | Preserve until loop mode is migrated |
+| `MornyeDownloader.run_tracks_async()` | GUI batch selection and `AsyncMornye.download_tracks()` | Yes, compatibility-only | Application batch service with complete metadata support | Preserve short term; migrate with batch regression coverage |
 | `run_playlists_async()` / `run_csv_async()` | CLI playlist and CSV modes | Yes | No complete replacement yet; playlist sync, M3U, dedup, and indexing remain legacy-specific | Keep isolated behind compatibility entry points |
 | `DownloadWorker` / `download_one_async()` | Legacy provider execution and post-processing | Yes for current runtime | `ProviderExecutor` plus `DownloadPipeline` | Keep until real provider execution returns structured results for every path |
 | `_resolve_metadata_async()` | Client playlist/CSV and legacy collection flows | Yes for current compatibility paths | A real application `MetadataService` | Do not remove until HTTP Spotify and non-Spotify source coverage exists |
@@ -25,8 +25,8 @@ bookkeeping remain the next extraction slices.
 
 ## Entry Points
 
-- Public exports: `DownloadOptions`, `SpotiflacDownloader` in `SpotiFLAC/__init__.py`.
-- Core execution: `download_one_async()` and `DownloadWorker.run_async()` in `SpotiFLAC/downloader.py`.
+- Public exports: `DownloadOptions`, `MornyeDownloader` in `mornye/__init__.py`.
+- Core execution: `download_one_async()` and `DownloadWorker.run_async()` in `mornye/downloader.py`.
 - Collection execution: `run_async()`, `run_tracks_async()`, `run_playlists_async()`, and `run_csv_async()`.
 - Compatibility metadata: `_resolve_metadata_async()` and `_resolve_isrc_bulk_async()`.
 - Application boundary: `ApiAdapter` -> `JobService` -> `DownloadService` -> `LegacyDownloadAdapter`.

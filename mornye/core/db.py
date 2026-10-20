@@ -61,8 +61,6 @@ logger = logging.getLogger(__name__)
 DB_PATH_ENV = "MORNYE_DB_PATH"
 
 DEFAULT_DB_PATH = data_path("mornye.db")
-LEGACY_DB_PATH = data_path("spotiflac.db")
-_warned_legacy_db = False
 
 _local = threading.local()
 _init_lock = threading.Lock()
@@ -73,26 +71,9 @@ _migrated: set[str] = set()
 
 
 def db_path() -> Path:
-    global _warned_legacy_db
     override = env_value(DB_PATH_ENV)
     if override:
         return Path(override)
-    if LEGACY_DB_PATH.exists():
-        if DEFAULT_DB_PATH.exists():
-            if not _warned_legacy_db:
-                logger.warning(
-                    "Both Mornye and legacy database files exist; using the "
-                    "Mornye database and leaving the legacy file untouched."
-                )
-                _warned_legacy_db = True
-        else:
-            if not _warned_legacy_db:
-                logger.warning(
-                    "Using the existing legacy database filename to preserve "
-                    "user data. See the migration guide to rename it safely."
-                )
-                _warned_legacy_db = True
-            return LEGACY_DB_PATH
     return DEFAULT_DB_PATH
 
 

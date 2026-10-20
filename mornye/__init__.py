@@ -42,22 +42,7 @@ _LEGACY_PROVIDER_EXPORTS = {
     "TidalProvider",
 }
 
-_DEPRECATED_EXPORTS: dict[str, Any] = {
-    "AsyncSpotiFLAC": AsyncMornye,
-    "SpotiFLAC": Mornye,
-    "SpotiFLACConfig": MornyeConfig,
-    "SpotiflacDownloader": MornyeDownloader,
-}
-
-
 def __getattr__(name: str) -> Any:
-    if name in _DEPRECATED_EXPORTS:
-        warnings.warn(
-            f"mornye.{name} is deprecated; use the corresponding Mornye name.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return _DEPRECATED_EXPORTS[name]
     if name == "SpotifyMetadataClient":
         from .core.spotify_metadata import SpotifyMetadataClient
 

@@ -13,14 +13,14 @@
 # bundled by design, and without one there are no providers to download with.
 # ==============================================================================
 
-# Keep the old default project name so Compose resolves the existing named
-# volumes. Set COMPOSE_PROJECT_NAME to your previous custom stack name if it
-# differs.
-name: ${COMPOSE_PROJECT_NAME:-spotiflac-module-version}
+# Keep the established project name so Compose resolves this deployment's
+# existing named volumes. Set COMPOSE_PROJECT_NAME to the value used by your
+# current stack if you customized it.
+name: ${COMPOSE_PROJECT_NAME:-mornye-module-version}
 
 services:
   mornye:
-    image: ghcr.io/bartolomeorusso9/mornye-python:${MORNYE_TAG:-${SPOTIFLAC_TAG:-latest}}
+    image: ghcr.io/bartolomeorusso9/mornye-python:${MORNYE_TAG:-latest}
     container_name: mornye
     # --host 0.0.0.0 is mandatory in a container: the CLI default 127.0.0.1
     # only accepts connections from inside the container itself.
@@ -41,7 +41,7 @@ services:
       # Host side is 8080, not 8000: on a Portainer host 8000 is taken by
       # Portainer itself (the Edge agent tunnel server). Container side stays
       # 8000 and must match --port in `command` and the healthcheck below.
-      - "${MORNYE_PORT:-${SPOTIFLAC_PORT:-8080}}:8000"
+      - "${MORNYE_PORT:-8080}:8000"
 
     # The web path skips Xvfb/VNC, but a download can still hit a Turnstile
     # challenge, and the solver then launches a real Chromium on its own
@@ -59,19 +59,19 @@ services:
     environment:
       # --- Extensions ------------------------------------------------------
       # REQUIRED. Comma-separated registry JSON URLs. Nothing is bundled.
-      MORNYE_REGISTRIES: "${MORNYE_REGISTRIES:-${SPOTIFLAC_REGISTRIES:-}}"
+      MORNYE_REGISTRIES: "${MORNYE_REGISTRIES:-}"
       # Optional: directory JSONs that *list* registries for you to review and
       # add yourself (GUI > Discover). Not a source of extensions on its own.
-      MORNYE_REGISTRY_DIRECTORIES: "${MORNYE_REGISTRY_DIRECTORIES:-${SPOTIFLAC_REGISTRY_DIRECTORIES:-}}"
+      MORNYE_REGISTRY_DIRECTORIES: "${MORNYE_REGISTRY_DIRECTORIES:-}"
       # Optional: path to a file of extension download URLs, one per line.
-      MORNYE_EXT_LINKS: "${MORNYE_EXT_LINKS:-${SPOTIFLAC_EXT_LINKS:-}}"
+      MORNYE_EXT_LINKS: "${MORNYE_EXT_LINKS:-}"
       # Minimum trust tier accepted on install: unverified | checksum-only | signed
-      MORNYE_MIN_TRUST: "${MORNYE_MIN_TRUST:-${SPOTIFLAC_MIN_TRUST:-}}"
+      MORNYE_MIN_TRUST: "${MORNYE_MIN_TRUST:-}"
       # Seconds between checks for newer extension versions while the
       # container keeps running (default 3600; 0 = only at container start).
       # Watchtower only recreates the container for a new image, so this is
       # what brings extension updates in between.
-      MORNYE_EXT_UPDATE_INTERVAL: "${MORNYE_EXT_UPDATE_INTERVAL:-${SPOTIFLAC_EXT_UPDATE_INTERVAL:-}}"
+      MORNYE_EXT_UPDATE_INTERVAL: "${MORNYE_EXT_UPDATE_INTERVAL:-}"
 
       # --- Web GUI authentication -----------------------------------------
       # Required, not optional: `:?` makes the deploy fail with this message
@@ -81,7 +81,7 @@ services:
       #
       # /healthz stays exempt from the check inside the app (webapp.py), so
       # enabling this does not make the container report itself unhealthy.
-      MORNYE_WEB_TOKEN: "${MORNYE_WEB_TOKEN:-${SPOTIFLAC_WEB_TOKEN:?set a long random shared secret — the web GUI has no other authentication}}"
+      MORNYE_WEB_TOKEN: "${MORNYE_WEB_TOKEN:?set a long random shared secret — the web GUI has no other authentication}"
 
       # --- Identity (root-assisted variant only, see `user:` above) --------
       # PUID: "${PUID:-1000}"
@@ -92,15 +92,15 @@ services:
       #
       # Where --web saves music. Unset, that is ~/Music/Mornye — inside
       # the container's writable layer, gone at the next recreate.
-      MORNYE_DOWNLOAD_DIR: "${MORNYE_DOWNLOAD_DIR:-${SPOTIFLAC_DOWNLOAD_DIR:-/app/downloads}}"
+      MORNYE_DOWNLOAD_DIR: "${MORNYE_DOWNLOAD_DIR:-/app/downloads}"
       # Database, extensions, signed sessions, web users, trusted keys,
       # settings. Independent of $HOME, so it holds for any `user:`.
-      MORNYE_DATA_DIR: "${MORNYE_DATA_DIR:-${SPOTIFLAC_DATA_DIR:-/home/mornye/.mornye}}"
-      MORNYE_EXT_DIR: "${MORNYE_EXT_DIR:-${SPOTIFLAC_EXT_DIR:-}}"
+      MORNYE_DATA_DIR: "${MORNYE_DATA_DIR:-/home/mornye/.mornye}"
+      MORNYE_EXT_DIR: "${MORNYE_EXT_DIR:-}"
       # Both default inside MORNYE_DATA_DIR — override only if you want
       # the database or the (regenerable) cache somewhere else.
-      MORNYE_DB_PATH: "${MORNYE_DB_PATH:-${SPOTIFLAC_DB_PATH:-}}"
-      MORNYE_CACHE_DIR: "${MORNYE_CACHE_DIR:-${SPOTIFLAC_CACHE_DIR:-}}"
+      MORNYE_DB_PATH: "${MORNYE_DB_PATH:-}"
+      MORNYE_CACHE_DIR: "${MORNYE_CACHE_DIR:-}"
 
       # --- Browser (Turnstile solver) --------------------------------------
       # How many Chromium instances may run at once (default 3). Each is a
@@ -112,16 +112,16 @@ services:
       TS_BROWSER_SLOT_TIMEOUT: "${TS_BROWSER_SLOT_TIMEOUT:-}"
 
       # --- Automation / notifications --------------------------------------
-      MORNYE_NOTIFY_URL: "${MORNYE_NOTIFY_URL:-${SPOTIFLAC_NOTIFY_URL:-}}"
-      MORNYE_NOTIFY_TOKEN: "${MORNYE_NOTIFY_TOKEN:-${SPOTIFLAC_NOTIFY_TOKEN:-}}"
-      MORNYE_LIBRARY_USER: "${MORNYE_LIBRARY_USER:-${SPOTIFLAC_LIBRARY_USER:-}}"
-      MORNYE_LIBRARY_TOKEN: "${MORNYE_LIBRARY_TOKEN:-${SPOTIFLAC_LIBRARY_TOKEN:-}}"
+      MORNYE_NOTIFY_URL: "${MORNYE_NOTIFY_URL:-}"
+      MORNYE_NOTIFY_TOKEN: "${MORNYE_NOTIFY_TOKEN:-}"
+      MORNYE_LIBRARY_USER: "${MORNYE_LIBRARY_USER:-}"
+      MORNYE_LIBRARY_TOKEN: "${MORNYE_LIBRARY_TOKEN:-}"
 
       # --- Apple Music metadata / lyrics (optional) ------------------------
-      MORNYE_APPLE_MEDIA_USER_TOKEN: "${MORNYE_APPLE_MEDIA_USER_TOKEN:-${SPOTIFLAC_APPLE_MEDIA_USER_TOKEN:-}}"
-      MORNYE_APPLE_STOREFRONT: "${MORNYE_APPLE_STOREFRONT:-${SPOTIFLAC_APPLE_STOREFRONT:-}}"
-      MORNYE_APPLE_LYRICS_TRANSLATION: "${MORNYE_APPLE_LYRICS_TRANSLATION:-${SPOTIFLAC_APPLE_LYRICS_TRANSLATION:-}}"
-      MORNYE_APPLE_LYRICS_PRONUNCIATION: "${MORNYE_APPLE_LYRICS_PRONUNCIATION:-${SPOTIFLAC_APPLE_LYRICS_PRONUNCIATION:-}}"
+      MORNYE_APPLE_MEDIA_USER_TOKEN: "${MORNYE_APPLE_MEDIA_USER_TOKEN:-}"
+      MORNYE_APPLE_STOREFRONT: "${MORNYE_APPLE_STOREFRONT:-}"
+      MORNYE_APPLE_LYRICS_TRANSLATION: "${MORNYE_APPLE_LYRICS_TRANSLATION:-}"
+      MORNYE_APPLE_LYRICS_PRONUNCIATION: "${MORNYE_APPLE_LYRICS_PRONUNCIATION:-}"
 
       # Jellyfin cuts word-by-word lyrics into one cue per word and trims each
       # one, which deletes the space before the next word: "Nuij simm doije"
@@ -130,31 +130,31 @@ services:
       # but is not whitespace, so the trim leaves it alone. Only affects new
       # downloads; for tracks already on disk run
       # `python -m mornye.tools.jellyfin_lyrics_gap <folder> --apply`.
-      MORNYE_LYRICS_JELLYFIN_COMPAT: "${MORNYE_LYRICS_JELLYFIN_COMPAT:-${SPOTIFLAC_LYRICS_JELLYFIN_COMPAT:-}}"
+      MORNYE_LYRICS_JELLYFIN_COMPAT: "${MORNYE_LYRICS_JELLYFIN_COMPAT:-}"
 
       # --- Logging ----------------------------------------------------------
       # 0 = plain lines instead of animated bars. Correct for `docker logs`,
       # which otherwise collapses every bar refresh into "[285B blob data]".
-      MORNYE_PROGRESS_BARS: "${MORNYE_PROGRESS_BARS:-${SPOTIFLAC_PROGRESS_BARS:-0}}"
+      MORNYE_PROGRESS_BARS: "${MORNYE_PROGRESS_BARS:-0}"
 
       # --- Escape hatches: every one of these weakens a security control. ---
       # All are off unless set to 1/true/yes, so leave them empty.
       # Names an extension may read from this environment (comma-separated);
       # the sandbox strips everything else, tokens included.
-      MORNYE_EXT_ENV_PASSTHROUGH: "${MORNYE_EXT_ENV_PASSTHROUGH:-${SPOTIFLAC_EXT_ENV_PASSTHROUGH:-}}"
+      MORNYE_EXT_ENV_PASSTHROUGH: "${MORNYE_EXT_ENV_PASSTHROUGH:-}"
       # Lets extensions reach RFC1918 / localhost addresses.
-      MORNYE_EXT_ALLOW_PRIVATE_NETWORK: "${MORNYE_EXT_ALLOW_PRIVATE_NETWORK:-${SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK:-}}"
+      MORNYE_EXT_ALLOW_PRIVATE_NETWORK: "${MORNYE_EXT_ALLOW_PRIVATE_NETWORK:-}"
       # Lets extensions write outside their own directories.
-      MORNYE_EXT_ALLOW_ANY_WRITE: "${MORNYE_EXT_ALLOW_ANY_WRITE:-${SPOTIFLAC_EXT_ALLOW_ANY_WRITE:-}}"
-      MORNYE_EXT_WRITABLE_DIRS: "${MORNYE_EXT_WRITABLE_DIRS:-${SPOTIFLAC_EXT_WRITABLE_DIRS:-}}"
+      MORNYE_EXT_ALLOW_ANY_WRITE: "${MORNYE_EXT_ALLOW_ANY_WRITE:-}"
+      MORNYE_EXT_WRITABLE_DIRS: "${MORNYE_EXT_WRITABLE_DIRS:-}"
       # Disables the extension sandbox entirely. Debugging only.
-      MORNYE_EXT_NO_SANDBOX: "${MORNYE_EXT_NO_SANDBOX:-${SPOTIFLAC_EXT_NO_SANDBOX:-}}"
+      MORNYE_EXT_NO_SANDBOX: "${MORNYE_EXT_NO_SANDBOX:-}"
       # Installs an extension whose checksum does not match the registry.
-      MORNYE_ALLOW_CHECKSUM_MISMATCH: "${MORNYE_ALLOW_CHECKSUM_MISMATCH:-${SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH:-}}"
+      MORNYE_ALLOW_CHECKSUM_MISMATCH: "${MORNYE_ALLOW_CHECKSUM_MISMATCH:-}"
       # Lets the web/GUI bridge run a post-download shell command.
-      MORNYE_ALLOW_POST_COMMAND: "${MORNYE_ALLOW_POST_COMMAND:-${SPOTIFLAC_ALLOW_POST_COMMAND:-}}"
+      MORNYE_ALLOW_POST_COMMAND: "${MORNYE_ALLOW_POST_COMMAND:-}"
       # Stops redacting provider tokens out of httpx logs.
-      MORNYE_NO_LOG_REDACTION: "${MORNYE_NO_LOG_REDACTION:-${SPOTIFLAC_NO_LOG_REDACTION:-}}"
+      MORNYE_NO_LOG_REDACTION: "${MORNYE_NO_LOG_REDACTION:-}"
 
       TZ: "${TZ:-Europe/Rome}"
 
@@ -167,15 +167,13 @@ services:
       #   - /mnt/media/music:/app/downloads
       # To use another container path, change it here and in
       # MORNYE_DOWNLOAD_DIR together.
-      # Legacy volume IDs are intentional: replacing them would create empty
-      # volumes and hide existing downloads and application state.
-      - spotiflac-downloads:/app/downloads
+      - mornye-downloads:/app/downloads
       # Everything durable *and* the cache: the database, installed
       # extensions, signed sessions, web users, trusted keys, settings — and
       # ~/.mornye/.cache, which is where the cache lives now. One volume
       # is all this needs; older docs mounting /home/mornye/.cache/mornye
       # separately are pointing at a path nothing writes to any more.
-      - spotiflac-data:/home/mornye/.mornye
+      - mornye-data:/home/mornye/.mornye
 
     restart: unless-stopped
 
@@ -255,5 +253,5 @@ services:
         max-file: "3"
 
 volumes:
-  spotiflac-downloads:
-  spotiflac-data:
+  mornye-downloads:
+  mornye-data:

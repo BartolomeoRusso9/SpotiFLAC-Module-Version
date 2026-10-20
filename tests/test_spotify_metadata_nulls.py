@@ -141,7 +141,7 @@ def test_a_notfound_union_raises_instead_of_arriving_untitled(monkeypatch) -> No
         monkeypatch,
     )
 
-    with pytest.raises(SpotiflacError) as excinfo:
+    with pytest.raises(MornyeError) as excinfo:
         asyncio.run(client.get_track_async("0" * 22))
 
     assert excinfo.value.kind is ErrorKind.TRACK_NOT_FOUND
@@ -153,7 +153,7 @@ def test_a_genericerror_union_raises_instead_of_arriving_untitled(monkeypatch) -
         monkeypatch,
     )
 
-    with pytest.raises(SpotiflacError) as excinfo:
+    with pytest.raises(MornyeError) as excinfo:
         asyncio.run(client.get_track_async("0" * 22))
 
     assert excinfo.value.kind is ErrorKind.TRACK_NOT_FOUND
@@ -179,7 +179,7 @@ def test_an_untyped_union_still_goes_through_the_legacy_guards(monkeypatch) -> N
         monkeypatch,
     )
 
-    with pytest.raises(SpotiflacError) as excinfo:
+    with pytest.raises(MornyeError) as excinfo:
         asyncio.run(client.get_track_async("0NfjJ4sWSQJl2SOIQiEQId"))
 
     assert excinfo.value.kind is ErrorKind.UNAVAILABLE

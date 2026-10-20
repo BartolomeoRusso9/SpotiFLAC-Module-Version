@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-import warnings
 
 from mornye.core.models import DownloadResult, TrackMetadata
 
@@ -182,14 +181,3 @@ __all__ = [
     "SecurityConfig",
     "MornyeConfig",
 ]
-
-
-def __getattr__(name: str) -> Any:
-    if name != "SpotiFLACConfig":
-        raise AttributeError(name)
-    warnings.warn(
-        "mornye.core.config.SpotiFLACConfig is deprecated; use MornyeConfig.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return MornyeConfig

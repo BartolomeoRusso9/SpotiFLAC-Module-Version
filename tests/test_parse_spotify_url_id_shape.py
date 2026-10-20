@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import pytest
 
-from SpotiFLAC.core.errors import InvalidUrlError
-from SpotiFLAC.core.spotify_metadata import parse_spotify_url
+from mornye.core.errors import InvalidUrlError
+from mornye.core.spotify_metadata import parse_spotify_url
 
 
 def test_a_23_character_id_is_rejected() -> None:

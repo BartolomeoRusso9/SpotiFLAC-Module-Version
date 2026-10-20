@@ -63,7 +63,6 @@ FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 # ── Optional shared-secret auth (off by default — see --web-token) ─────────
 WEB_TOKEN_ENV = "MORNYE_WEB_TOKEN"
 WEB_TOKEN_COOKIE = "mornye_web_token"
-LEGACY_WEB_TOKEN_COOKIE = "spotiflac_web_token"
 WEB_TOKEN_QUERY_PARAM = "token"
 
 # ── Optional multi-user accounts (off by default — see --web-multiuser) ────
@@ -82,7 +81,6 @@ WEB_TOKEN_QUERY_PARAM = "token"
 # still run in one process, as one OS user, and anyone who can install an
 # extension can affect everyone.
 SESSION_COOKIE = "mornye_session"
-LEGACY_SESSION_COOKIE = "spotiflac_session"
 
 #: Unauthenticated liveness probe — see the endpoint for why.
 HEALTH_PATH = "/healthz"
@@ -678,7 +676,6 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             supplied = (
                 request.query_params.get(WEB_TOKEN_QUERY_PARAM)
                 or request.cookies.get(WEB_TOKEN_COOKIE)
-                or request.cookies.get(LEGACY_WEB_TOKEN_COOKIE)
             )
             if not _token_matches(supplied, token):
                 return PlainTextResponse(
@@ -716,7 +713,6 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                 return await call_next(request)
             username = sessions.username_for(
                 request.cookies.get(SESSION_COOKIE)
-                or request.cookies.get(LEGACY_SESSION_COOKIE)
             )
             if username is None:
                 return JSONResponse({"error": "Not logged in"}, status_code=401)
@@ -758,11 +754,9 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         async def auth_logout(request: Request) -> JSONResponse:
             sessions.revoke(
                 request.cookies.get(SESSION_COOKIE)
-                or request.cookies.get(LEGACY_SESSION_COOKIE)
             )
             response = JSONResponse({"status": "ok"})
             response.delete_cookie(SESSION_COOKIE)
-            response.delete_cookie(LEGACY_SESSION_COOKIE)
             return response
 
         @app.post("/api/queue/submit-download")
@@ -980,7 +974,6 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             return JSONResponse({"multiuser": False, "logged_in": True})
         username = sessions.username_for(
             request.cookies.get(SESSION_COOKIE)
-            or request.cookies.get(LEGACY_SESSION_COOKIE)
         )
         return JSONResponse({"multiuser": True, "logged_in": username is not None})
 
@@ -1154,7 +1147,6 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             supplied = (
                 ws.query_params.get(WEB_TOKEN_QUERY_PARAM)
                 or ws.cookies.get(WEB_TOKEN_COOKIE)
-                or ws.cookies.get(LEGACY_WEB_TOKEN_COOKIE)
             )
             if not _token_matches(supplied, token):
                 await ws.close(code=1008)  # 1008 = Policy Violation
@@ -1162,9 +1154,7 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         ws_owner: str | None = None
         if multiuser:
             assert sessions is not None  # always set together with multiuser=True
-            ws_owner = sessions.username_for(
-                ws.cookies.get(SESSION_COOKIE) or ws.cookies.get(LEGACY_SESSION_COOKIE)
-            )
+            ws_owner = sessions.username_for(ws.cookies.get(SESSION_COOKIE))
             if ws_owner is None:
                 await ws.close(code=1008)
                 return

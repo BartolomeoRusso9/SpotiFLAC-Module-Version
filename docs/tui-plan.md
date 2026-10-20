@@ -1,4 +1,4 @@
-# Piano: `spotiflac --tui` sostituisce `--interactive`
+# Piano: `mornye --tui` sostituisce `--interactive`
 
 Documento di lavoro. Riferimento visivo: [MovieBox-Tui](https://github.com/mesamirh/MovieBox-Tui)
 (Rust + Ratatui) — l'equivalente Python è [Textual](https://textual.textualize.io/).
@@ -15,7 +15,7 @@ Righe di codice citate: verificate sul branch `3.9.1`.
 | Fase | Stato |
 | --- | --- |
 | 0 · Disaccoppiare l'output | **fatta** — `core/output_sink.py` |
-| 1 · Scheletro `--tui` | **fatta** — `SpotiFLAC/tui/`, dipendenza base |
+| 1 · Scheletro `--tui` | **fatta** — `mornye/tui/`, dipendenza base |
 | 2 · Config → `cfg` | **fatta** — `tui/config_state.py` + test golden |
 | 3 · Coda live | **fatta** — `tui/runner.py`, `tui/queue_view.py` |
 | 4 · Parità con la GUI | **fatta** — Ricerca, Health, Profili, History, Estensioni |
@@ -54,19 +54,19 @@ fondo pieno, hint `[key] action`, i 9 temi con Mocha di default.
 Il progetto ha già quasi tutta l'infrastruttura che una TUI richiede, perché è
 stata costruita per la GUI pywebview e per il frontend web.
 
-**Il contratto è già pulito.** `run_interactive()` (`SpotiFLAC/interactive.py:972`)
-è async e restituisce un dict `cfg`. Il launcher (`SpotiFLAC/launcher.py:2330`)
+**Il contratto è già pulito.** `run_interactive()` (`mornye/interactive.py:972`)
+è async e restituisce un dict `cfg`. Il launcher (`mornye/launcher.py:2330`)
 prende quel dict e lo spalma su `_run_download_async(...)`. La TUI deve solo
 produrre **lo stesso dict**: zero refactoring del motore di download.
 
 **Il canale progressi strutturato esiste già.** `DownloadBroadcaster().subscribe(queue)`
-(`SpotiFLAC/core/progress.py:239`) emette eventi dict con `downloads`, `queue`,
+(`mornye/core/progress.py:239`) emette eventi dict con `downloads`, `queue`,
 `latest_completed`, `total_downloaded`. Oggi lo consuma la GUI. La TUI si
 iscrive alla stessa coda asyncio — **non serve parsare l'output di tqdm**.
 Questo è il punto che di solito uccide i porting a TUI, e qui è già risolto.
 
 **La superficie funzionale è già Python-callable.** Gli `api_mixins` più
-`SpotiFLAC_API` (`SpotiFLAC/app.py:165`) espongono `search_provider`,
+`MornyeAPI` (`mornye/app.py:165`) espongono `search_provider`,
 `get_history`, `get_profiles`, `browse_folder`, health check, registries —
 tutti metodi che tornano dict.
 
@@ -100,8 +100,8 @@ gente dal wizard alla CLI.
 
 ### Vincolo architetturale
 
-**La TUI non deve importare `SpotiFLAC.app`.** Quel modulo fa `import webview`
-a livello modulo (`SpotiFLAC/app.py:16`) e `SpotiFLAC_API` è sincrono e pieno di
+**La TUI non deve importare `mornye.app`.** Quel modulo fa `import webview`
+a livello modulo (`mornye/app.py:16`) e `MornyeAPI` è sincrono e pieno di
 `threading`. La TUI riusa invece gli `api_mixins/*` (verificato: nessuno importa
 pywebview) e le funzioni `core/*`.
 
@@ -118,7 +118,7 @@ alternate screen corrompono il rendering.
 
 **Lavoro:**
 
-1. Nuovo `SpotiFLAC/core/output_sink.py`: sink pluggable a livello modulo,
+1. Nuovo `mornye/core/output_sink.py`: sink pluggable a livello modulo,
    default = comportamento attuale (`tqdm.write`).
 2. `safe_print`, `safe_tqdm_write` (`core/progress.py:52-60`) e `console._write`
    passano dal sink invece di chiamare `tqdm` direttamente.
@@ -144,13 +144,13 @@ simulato. Più i test esistenti che devono restare verdi:
    versione corrente al momento dell'install), non in un extra: la TUI diventerà
    l'unica modalità guidata, quindi non può essere opzionale. Tenere
    `requirements.txt` allineato.
-2. Nuovo package `SpotiFLAC/tui/` — `__init__.py`, `app.py` con
-   `class SpotiFLACTui(App)`.
+2. Nuovo package `mornye/tui/` — `__init__.py`, `app.py` con
+   `class MornyeTui(App)`.
 3. Dispatch in `launcher.py` accanto a `--gui` (`launcher.py:1745`). Non serve
    il pattern try/`ImportError` di `--web` (`launcher.py:1769-1784`): quello
    esiste perché FastAPI sta in un extra, e qui non è il caso.
 
-**Deliverable:** `spotiflac --tui` apre una schermata vuota con sidebar, temi
+**Deliverable:** `mornye --tui` apre una schermata vuota con sidebar, temi
 commutabili, e si chiude pulita.
 
 ---
@@ -211,7 +211,7 @@ Pannelli aggiuntivi, in ordine di valore:
 | Estensioni | `api_mixins/discovery.py` + `_manage_registries_section` (`interactive.py:698`) |
 
 **Nota di rischio:** i metodi in `app.py` sono sincroni. Vanno estratti in mixin
-(il docstring di `SpotiFLAC_API` dice già che è la direzione voluta) oppure
+(il docstring di `MornyeAPI` dice già che è la direzione voluta) oppure
 chiamati con `run_worker(thread=True)`. Estrarli è meglio: ne beneficia anche
 il web.
 
@@ -240,8 +240,8 @@ spostata in un modulo condiviso **prima** di poter cancellare il file.
 | Picker CSV: `_clean_path_input`, `_looks_like_csv_path`, `_scan_csv_files`, `_csv_scan_dirs`, `_read_csv_document`, `_accept_csv_path`, `_pick_csv_file` | 395-652 | `tests/test_interactive_csv_picker.py` |
 | `_pick_from_history` | 294 | — (ma serve al pannello History) |
 
-Destinazione: `SpotiFLAC/core/` per quelli senza I/O da terminale (scan CSV,
-scelte transcode, lista servizi), `SpotiFLAC/tui/` per quelli che diventano
+Destinazione: `mornye/core/` per quelli senza I/O da terminale (scan CSV,
+scelte transcode, lista servizi), `mornye/tui/` per quelli che diventano
 widget (picker, history).
 
 ### 9.2 Ripuntare i test
@@ -270,7 +270,7 @@ Al rilascio dell'MVP (fine Fase 3):
 
 ### 9.4 Rimuovere
 
-Una release dopo: eliminare `SpotiFLAC/interactive.py` e l'import a
+Una release dopo: eliminare `mornye/interactive.py` e l'import a
 `launcher.py:38`. Il progetto torna a quattro frontend invece di cinque.
 
 ---

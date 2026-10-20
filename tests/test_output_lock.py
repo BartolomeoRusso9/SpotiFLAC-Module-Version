@@ -154,7 +154,7 @@ def test_the_provider_holds_it_across_the_whole_write() -> None:
     from pathlib import Path
 
     source = (
-        Path(__file__).resolve().parents[1] / "Mornye" / "extensions" / "provider.py"
+        Path(__file__).resolve().parents[1] / "mornye" / "extensions" / "provider.py"
     ).read_text()
 
     guarded = [

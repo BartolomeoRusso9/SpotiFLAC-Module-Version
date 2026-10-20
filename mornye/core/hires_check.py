@@ -37,8 +37,7 @@ LOSSLESS copy lose anything this one holds?
     be a genuine master and is never replaced automatically
     (`redownload_safe` is False).
 
-This is kept in lockstep with SpotiFLAC-Mobile's go_backend/hires_check.go
-and hires_check_evidence.go: same thresholds, same verdicts.
+These thresholds and verdicts are aligned with the companion mobile backend.
 
 Public API:
     - is_available() -> bool

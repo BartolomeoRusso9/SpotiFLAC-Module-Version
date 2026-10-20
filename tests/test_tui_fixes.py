@@ -203,7 +203,7 @@ async def test_dropping_tidal_takes_atmos_with_it() -> None:
 
 
 @drives_the_ui
-async def test_the_folder_field_opens_on_music_spotiflac() -> None:
+async def test_the_folder_field_opens_on_music_mornye() -> None:
     from textual.widgets import Input
 
     async with MornyeTui().run_test(size=(104, 40)) as pilot:

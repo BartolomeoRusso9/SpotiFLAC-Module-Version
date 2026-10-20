@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import warnings
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
@@ -510,21 +509,6 @@ def Mornye(
         pass
     except Exception as e:
         logger.exception("Critical error during execution: %s", e)
-
-
-def __getattr__(name: str) -> Any:
-    legacy_exports = {
-        "AsyncSpotiFLAC": AsyncMornye,
-        "SpotiFLAC": Mornye,
-    }
-    if name not in legacy_exports:
-        raise AttributeError(name)
-    warnings.warn(
-        f"mornye.client.{name} is deprecated; use the corresponding Mornye name.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return legacy_exports[name]
 
 
 __all__ = ["AsyncMornye", "Mornye"]

@@ -312,7 +312,7 @@ tests/test_m4a_no_roundtrip.py
 tests/test_metadata_fallback.py
 tests/test_mono_browser_cleanup.py
 tests/test_mono_page_fallback.py
-tests/test_mornye_migration.py
+tests/test_mornye_configuration.py
 tests/test_musicbrainz_fallback.py
 tests/test_musicbrainz_release_pick.py
 tests/test_musicbrainz_tag_names.py
@@ -322,6 +322,7 @@ tests/test_node_options_quoting.py
 tests/test_notifiers.py
 tests/test_output_lock.py
 tests/test_output_sink.py
+tests/test_parse_spotify_url_id_shape.py
 tests/test_paths_overrides.py
 tests/test_playcount_throttle.py
 tests/test_post_download_command_gate.py

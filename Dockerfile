@@ -67,12 +67,8 @@ RUN groupadd --gid "${APP_GID}" mornye \
                 "${HOME}/.mornye/signed_sessions" \
     && chown -R mornye:mornye /app "${HOME}"
 
-# ~/.cache/spotiflac is deliberately absent from both the mkdir above and the
-# VOLUME below. The cache moved under ~/.mornye/.cache (see core/paths.py),
-# so nothing writes to the old path any more; core.paths.adopt_legacy_cache_file
-# still *reads* it, but that needs no directory to exist and no volume. Leaving
-# it declared here cost a stray anonymous volume on every container that did
-# not explicitly mount over it.
+# Cache data is stored under ~/.mornye/.cache (see core/paths.py), inside the
+# durable state volume, so it does not need a separate Docker volume.
 VOLUME ["/app/downloads", "/home/mornye/.mornye"]
 
 # ==============================================================================

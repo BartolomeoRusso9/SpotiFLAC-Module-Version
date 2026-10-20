@@ -3,28 +3,28 @@
 ## Summary
 
 - Foundation and incremental refactor changes are committed on branch `4.0.0`.
-- Local test output `.spotiflac/` remains intentionally untracked.
+- Local test output `.mornye/` remains intentionally untracked.
 - `git diff --check`: passed
 - Focused regression suite: **151 passed** across the architecture and web
   boundary suites.
 
 ## Modified Files
 
-### `SpotiFLAC/__init__.py`
+### `mornye/__init__.py`
 
 Exports the new public contracts:
 
-- `SpotiFLACConfig`
+- `MornyeConfig`
 - `DownloadRequest`
 - `DownloadReport`
 - `DownloadFailure`
 - `DownloadSkip`
 
-### `SpotiFLAC/core/__init__.py`
+### `mornye/core/__init__.py`
 
 Re-exports the configuration and download contracts from the core namespace.
 
-### `SpotiFLAC/webapi/routes.py`
+### `mornye/webapi/routes.py`
 
 Adds application-adapter support for:
 
@@ -33,27 +33,27 @@ Adds application-adapter support for:
 - retrieving jobs by ID;
 - preserving the legacy multi-user queue and quota checks.
 
-### `SpotiFLAC/webapp.py`
+### `mornye/webapp.py`
 
 Connects the versioned REST API to `ApiAdapter` and the persistent download queue.
 
 ## New Modules
 
-- `SpotiFLAC/application/`
+- `mornye/application/`
   - application services;
   - download pipeline;
   - job lifecycle;
   - output handling;
   - retry policy;
   - provider resolver.
-- `SpotiFLAC/core/config/`
+- `mornye/core/config/`
   - structured configuration;
   - request, report, failure, and skip contracts.
-- `SpotiFLAC/core/providers/`
+- `mornye/core/providers/`
   - manifest-derived provider profiles;
   - capability, quality, health, and priority filtering;
   - structured `ProviderCandidate` results.
-- `SpotiFLAC/core/repositories/`
+- `mornye/core/repositories/`
   - SQLite repositories for application jobs and extensions.
 - Application jobs reconstruct persisted `DownloadRequest` objects after a
   restart, and job IDs are independent of in-memory queue length.
@@ -167,7 +167,7 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   adapter to consume the actual output path after a legacy run.
 - `PostProcessingService` now owns the post-download phase boundary, including
   transcode, lyric/canvas sidecars, and post-download hooks. Concrete output
-  transforms live in `SpotiFLAC.application.post_processing`; the downloader
+  transforms live in `mornye.application.post_processing`; the downloader
   retains only compatibility delegates for older callers.
 - `ApplicationDownloadWorker` now owns batch concurrency, result collection,
   queue callbacks, skips, and failures; `LegacyDownloadWorker` remains only
@@ -192,13 +192,13 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
   `.failed`, and `.cancelled` events alongside the existing update event.
 - Architecture guards now prevent TUI legacy-downloader access and application
   imports of UI/web implementation modules.
-- `SpotiFLAC.extensions.conformance` provides a network-free manifest/provider
+- `mornye.extensions.conformance` provides a network-free manifest/provider
   contract validator with a reference-provider regression test.
 - `JobRepository` now commits and closes each SQLite connection explicitly,
   eliminating leaked database handles in web tests.
 - PWA tests close `TestClient` instances explicitly and pass with
   `ResourceWarning` treated as an error.
-- `SpotiFLAC/core/retry.py`
+- `mornye/core/retry.py`
   - centralized retry policy.
 - `tests/test_architecture_foundation.py`
   - regression coverage for the new architecture.
@@ -211,7 +211,7 @@ Connects the versioned REST API to `ApiAdapter` and the persistent download queu
 
 ### Client Entry Point
 
-`AsyncSpotiFLAC.download_request()` now delegates directly to
+`AsyncMornye.download_request()` now delegates directly to
 `DownloadService`, while the existing `download_track()`, `download_batch()`,
 and `download_tracks()` methods remain unchanged for compatibility.
 

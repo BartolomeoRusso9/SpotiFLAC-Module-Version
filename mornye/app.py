@@ -37,7 +37,6 @@ from .core.http import AsyncHttpClient
 from .core.loop_runner import run_sync
 from .core.output_sink import CallbackLogHandler
 from .core.paths import (
-    adopt_legacy_cache_file,
     cache_dir,
     cache_path,
     default_download_dir,
@@ -614,7 +613,6 @@ class MornyeAPI(
     def load_settings(self) -> dict:
         try:
             settings_file = cache_path("gui-settings.json")
-            adopt_legacy_cache_file(settings_file)
             if settings_file.exists():
                 return json.loads(settings_file.read_text(encoding="utf-8"))
         except Exception as e:

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: mornye-python
-Version: 5.0.6
+Version: 1.0.0
 Summary: A Python module for Spotify metadata and user-configured music-provider extensions.
 Author:  BartolomeoRusso9
 License: MIT
@@ -65,7 +65,7 @@ Fetch Spotify track metadata and retrieve matching lossless audio through provid
 
 ## Disclaimer
 
-Mornye Python is the renamed continuation of the SpotiFLAC Python module maintained by the same author. The import package, distribution, command, and project identity have changed; see the [migration guide](docs/guide/migration.md). The project is licensed under the [MIT License](LICENSE).
+The project is licensed under the [MIT License](LICENSE). See the [configuration and state guide](docs/guide/migration.md) for environment variables and storage locations.
 
 Mornye Python is an independent project. It is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service. It is also not affiliated with any separate project or app that uses the name “Mornye.”
 
@@ -122,7 +122,7 @@ cd Mornye-Python
 python -m pip install .
 ```
 
-The repository is private, so you need access to clone it. Do not install the old `SpotiFLAC` distribution alongside Mornye; follow the [migration guide](docs/guide/migration.md) first. Mornye has no built-in provider or default extension source. Before downloading, configure a registry you trust and install an extension; see [Extensions](docs/guide/extensions.md#extensions).
+The repository is private, so you need access to clone it. Mornye has no built-in provider or default extension source. Before downloading, configure a registry you trust and install an extension; see [Extensions](docs/guide/extensions.md#extensions).
 
 ---
 

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from mornye.webapp import ALLOWED_METHODS
 
-_WEB_SHIM = Path(__file__).resolve().parents[1] / "Mornye" / "frontend" / "web-shim.js"
+_WEB_SHIM = Path(__file__).resolve().parents[1] / "mornye" / "frontend" / "web-shim.js"
 
 
 def _remote_methods_from_web_shim() -> set[str]:
@@ -49,7 +49,7 @@ def test_web_shim_and_allowed_methods_match_exactly() -> None:
 
 def _pushed_event_names() -> set[str]:
     """Every `self._push("name", …)` in the Python source."""
-    package = Path(__file__).resolve().parents[1] / "Mornye"
+    package = Path(__file__).resolve().parents[1] / "mornye"
     names: set[str] = set()
     for source in package.rglob("*.py"):
         for match in re.finditer(

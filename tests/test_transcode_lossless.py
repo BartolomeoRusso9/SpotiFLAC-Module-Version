@@ -524,7 +524,7 @@ def test_tta_gets_id3_tags_rather_than_failing_on_apev2(tone):
 # The three UIs must offer exactly what the core can produce
 # ---------------------------------------------------------------------------
 
-_FRONTEND = Path(__file__).resolve().parent.parent / "Mornye" / "frontend"
+_FRONTEND = Path(__file__).resolve().parent.parent / "mornye" / "frontend"
 
 
 def test_web_ui_offers_every_supported_format():
@@ -744,7 +744,7 @@ def test_profile_model_keeps_every_key_save_profile_writes():
 
     from mornye.core.profiles import ProfileConfig
 
-    launcher = Path(__file__).resolve().parent.parent / "Mornye" / "launcher.py"
+    launcher = Path(__file__).resolve().parent.parent / "mornye" / "launcher.py"
     src = launcher.read_text(encoding="utf-8")
     block = src[src.index("profile_cfg = {") :]
     block = block[: block.index("}\n")]
@@ -957,7 +957,7 @@ def test_signed_session_names_the_audio_fetch_at_info():
 
     src = (
         Path(__file__).resolve().parent.parent
-        / "Mornye"
+        / "mornye"
         / "core"
         / "signed_session_mobile.py"
     ).read_text(encoding="utf-8")

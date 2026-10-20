@@ -30,7 +30,7 @@ from mornye.tui.config_state import (
     ConfigState,
 )
 
-_ROOT = pathlib.Path(__file__).resolve().parent.parent / "Mornye"
+_ROOT = pathlib.Path(__file__).resolve().parent.parent / "mornye"
 
 
 def _cfg_keys_in(path: pathlib.Path, *, within: range | None = None) -> set[str]:
@@ -256,7 +256,7 @@ def test_a_fresh_state_says_exactly_what_it_is_missing() -> None:
     ]
 
 
-def test_downloads_land_in_music_spotiflac_unless_told_otherwise() -> None:
+def test_downloads_land_in_music_mornye_unless_told_otherwise() -> None:
     from mornye.core.paths import default_download_dir
 
     assert ConfigState().output_dir == default_download_dir()

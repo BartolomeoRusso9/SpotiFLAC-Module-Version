@@ -10,7 +10,7 @@
 
 Mornye has **no built-in download provider and no default extension source**. Every provider — Tidal, Qobuz, Amazon Music, Deezer, or anything else — is supplied entirely by extensions that you find, review, and choose to install yourself. Two extension runtimes are supported:
 
-- **JavaScript** — sharing the same extension format used by [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile), executed via a Node.js bridge.
+- **JavaScript** — executed through a Node.js bridge using the runtime contract documented by this project.
 - **Python** — packaged as `.mornye-ext` / `.sflx` files (a ZIP containing a manifest and a Python entry point), loaded directly in-process.
 
 Extensions are never fetched or installed automatically. You must explicitly configure a registry before Mornye will contact anything. There are several equivalent ways to do it — pick whichever fits your workflow:
@@ -153,7 +153,7 @@ python -m mornye.tools.registry_signing_cli sign \
 
 ### Developing Extensions
 
-- **JavaScript extensions** reuse the format built for [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile). Its [Extension Development Guide](https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/main/docs/EXTENSION_DEVELOPMENT.md) is the closest available reference, but it was written for Mobile — some details (packaging, available runtime capabilities) may not match this project exactly. Verify against this repository's own loader (`mornye/extensions/runtime.py`) before relying on it.
+- **JavaScript extensions** must follow the manifest and runtime contract implemented by this repository's loader (`mornye/extensions/runtime.py`).
 - **Python extensions** are ZIP packages (`.mornye-ext` / `.sflx`) containing a manifest and a Python module, loaded directly by `mornye/extensions/python_provider.py`. See **[Writing a Python Extension](python-extensions.md)** for a full walkthrough — the `BaseProvider` contract, the `core` toolbox (`http`, `errors`, `models`, `tagger`, validation, ISRC/link helpers), a complete example provider, and packaging/registry steps.
 
 **Scaffolding a new extension** generates a starting point that already satisfies this repo's own loader, instead of reverse-engineering the shape from an existing extension:

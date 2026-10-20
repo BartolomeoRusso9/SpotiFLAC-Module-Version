@@ -61,7 +61,6 @@ REGISTRY_ENV_KEY = "MORNYE_REGISTRIES"
 ENV_FILES_TO_CHECK = (
     Path.cwd() / ".env",
     Path.home() / ".mornye_env",
-    Path.home() / ".spotiflac_env",
 )
 
 DEFAULT_EXT_DIR = data_path("extensions")
@@ -451,31 +450,10 @@ class ExtensionManager:
                         ln = ln.strip()
                         if not ln or ln.startswith("#"):
                             continue
-                        if ln.startswith(
-                            (f"{REGISTRY_ENV_KEY}=", "SPOTIFLAC_REGISTRIES=")
-                        ):
-                            key, val = ln.split("=", 1)
-                            file_values[key] = val.strip().strip("'\"")
-                    if REGISTRY_ENV_KEY in file_values:
-                        if (
-                            "SPOTIFLAC_REGISTRIES" in file_values
-                            and file_values[REGISTRY_ENV_KEY]
-                            != file_values["SPOTIFLAC_REGISTRIES"]
-                        ):
-                            logger.warning(
-                                "[ExtMgr] Ignoring conflicting legacy registry "
-                                "configuration in %s.",
-                                p.name,
-                            )
-                        val = file_values[REGISTRY_ENV_KEY]
-                    else:
-                        val = file_values.get("SPOTIFLAC_REGISTRIES", "")
-                        if val:
-                            logger.warning(
-                                "[ExtMgr] SPOTIFLAC_REGISTRIES in %s is "
-                                "deprecated; use MORNYE_REGISTRIES.",
-                                p.name,
-                            )
+                        if ln.startswith(f"{REGISTRY_ENV_KEY}="):
+                            _, val = ln.split("=", 1)
+                            file_values[REGISTRY_ENV_KEY] = val.strip().strip("'\"")
+                    val = file_values.get(REGISTRY_ENV_KEY, "")
                     if val:
                         return [u.strip() for u in val.split(",") if u.strip()]
             except (OSError, UnicodeError) as exc:

@@ -34,13 +34,10 @@ from ..core.paths import data_path
 logger = logging.getLogger(__name__)
 
 REGISTRY_ENV_KEY = "MORNYE_REGISTRIES"
-LEGACY_REGISTRY_ENV_KEY = "SPOTIFLAC_REGISTRIES"
 
-# Same set of files the extension manager falls back to.
 ENV_FILES_TO_CHECK = (
     Path.cwd() / ".env",
     Path.home() / ".mornye_env",
-    Path.home() / ".spotiflac_env",
 )
 
 # Where GUI-managed additions/removals are persisted.
@@ -129,31 +126,10 @@ def _env_file_urls() -> dict[str, list[Path]]:
                 # Accept optional "export" prefix
                 if stripped.startswith("export "):
                     stripped = stripped[7:].strip()
-                if stripped.startswith(
-                    (f"{REGISTRY_ENV_KEY}=", f"{LEGACY_REGISTRY_ENV_KEY}=")
-                ):
+                if stripped.startswith(f"{REGISTRY_ENV_KEY}="):
                     key, val = stripped.split("=", 1)
                     file_values[key] = _parse_env_value(val)
-            if REGISTRY_ENV_KEY in file_values:
-                val = file_values[REGISTRY_ENV_KEY]
-                if (
-                    LEGACY_REGISTRY_ENV_KEY in file_values
-                    and file_values[LEGACY_REGISTRY_ENV_KEY] != val
-                ):
-                    logger.warning(
-                        "[RegistryConfig] Ignoring conflicting legacy registry "
-                        "configuration in %s.",
-                        p.name,
-                    )
-            else:
-                val = file_values.get(LEGACY_REGISTRY_ENV_KEY, "")
-                if val:
-                    logger.warning(
-                        "[RegistryConfig] %s in %s is deprecated; use %s.",
-                        LEGACY_REGISTRY_ENV_KEY,
-                        p.name,
-                        REGISTRY_ENV_KEY,
-                    )
+            val = file_values.get(REGISTRY_ENV_KEY, "")
             for url in val.split(","):
                 normalized = url.strip()
                 if normalized:
@@ -247,9 +223,7 @@ def _strip_from_env_file(url: str, path: Path) -> None:
             if stripped.startswith("export "):
                 export_prefix = "export "
                 stripped = stripped[7:].strip()
-            if stripped.startswith(
-                (f"{REGISTRY_ENV_KEY}=", f"{LEGACY_REGISTRY_ENV_KEY}=")
-            ):
+            if stripped.startswith(f"{REGISTRY_ENV_KEY}="):
                 prefix_len = len(ln) - len(ln.lstrip())
                 indent = ln[:prefix_len]
                 key, val = stripped.split("=", 1)
@@ -296,7 +270,6 @@ def remove_registry(url: str) -> list[dict]:
             os.environ[REGISTRY_ENV_KEY] = ",".join(remaining)
         else:
             os.environ.pop(REGISTRY_ENV_KEY, None)
-        os.environ.pop(LEGACY_REGISTRY_ENV_KEY, None)
         disabled.add(url)
 
     file_hits = _env_file_urls()

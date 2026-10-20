@@ -38,8 +38,8 @@ downloads/
 output/
 out/
 
-# SpotiFLAC local data and caches
-.spotiflac_docker/
+# Mornye local data and caches
+.mornye_docker/
 .cache_docker/
 
 # Docker-related

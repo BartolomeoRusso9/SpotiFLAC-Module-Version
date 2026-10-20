@@ -27,6 +27,10 @@ def test_manifest_is_served_and_valid() -> None:
     assert len(manifest["icons"]) >= 1
     for icon in manifest["icons"]:
         assert {"src", "sizes", "type"} <= icon.keys()
+    assert {icon["src"] for icon in manifest["icons"]} == {
+        "assets/icons/logo-192.png",
+        "assets/icons/logo-512.png",
+    }
 
 
 def test_manifest_icons_exist_as_real_files() -> None:
@@ -61,6 +65,7 @@ def test_index_html_declares_the_manifest_and_theme_color() -> None:
         html = client.get("/").text
     assert 'rel="manifest"' in html
     assert 'name="theme-color"' in html
+    assert 'src="assets/icons/logo-transparent.png"' in html
 
 
 def test_index_html_registers_the_service_worker_gated_on_web_mode() -> None:

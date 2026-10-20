@@ -17,7 +17,7 @@
        tells itself apart from --web. Harmless to load in the desktop
        pywebview window too: manifest/theme-color are simply unused there,
        and the registration script below no-ops without that flag. -->
-  <link rel="manifest" href="manifest.json?v=20261013-mornye">
+  <link rel="manifest" href="manifest.json?v=20261020-mornye-logo">
   <meta name="theme-color" content="#000000">
   <!-- apple-mobile-web-app-capable is the legacy spelling Safari still reads;
        mobile-web-app-capable is the standard one everything else reads. Both,
@@ -34,10 +34,9 @@
   <!-- Without these the browser asks for /favicon.ico on every load and
        gets a 404 in the server log for a file that was never going to
        be there. The artwork already ships. -->
-  <link rel="icon" type="image/svg+xml" href="assets/icons/logo.svg">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/logo-192.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261013-mornye">
+  <link rel="stylesheet" href="styles.css?v=20261020-mornye-logo">
   <script>
     // Theme, applied before the first paint. app.js used to do this only from
     // its 'pywebviewready' handler, which meant the window painted light and
@@ -166,7 +165,7 @@
         <div class="hero-text">
           <div class="hero-headline">
             <div class="hero-logo">
-              <img src="assets/icons/logo.svg" alt="Mornye logo" class="hero-icon">
+              <img src="assets/icons/logo-transparent.png" alt="Mornye logo" class="hero-icon">
             </div>
             <div class="hero-main">
               <div class="hero-title">Mornye</div>

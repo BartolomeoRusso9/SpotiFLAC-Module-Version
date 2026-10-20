@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import sys
 import types
-import warnings
 
 from .application import download_engine as _engine
 
@@ -21,14 +20,6 @@ class _DownloaderCompatModule(types.ModuleType):
     """Proxy reads and writes to the application-owned download engine."""
 
     def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
-        if name == "SpotiflacDownloader":
-            warnings.warn(
-                "mornye.downloader.SpotiflacDownloader is deprecated; "
-                "use MornyeDownloader.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            name = "MornyeDownloader"
         return getattr(_engine, name)
 
     def __setattr__(self, name: str, value) -> None:  # type: ignore[no-untyped-def]

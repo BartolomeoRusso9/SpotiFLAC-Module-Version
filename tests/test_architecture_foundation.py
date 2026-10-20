@@ -69,7 +69,7 @@ from mornye.core.retry import RetryPolicy
 from mornye.downloader import DownloadOptions
 
 
-def test_spotiflac_config_can_be_built_from_legacy_options():
+def test_mornye_config_can_be_built_from_legacy_options():
     cfg = MornyeConfig.from_legacy_options(
         DownloadOptions(
             output_dir="./downloads",
@@ -86,7 +86,7 @@ def test_spotiflac_config_can_be_built_from_legacy_options():
 
 
 def test_application_imports_legacy_downloader_only_through_adapter():
-    application_dir = Path(__file__).parents[1] / "Mornye" / "application"
+    application_dir = Path(__file__).parents[1] / "mornye" / "application"
 
     for path in application_dir.glob("*.py"):
         if path.name in {"legacy_download_adapter.py", "__init__.py"}:
@@ -101,7 +101,7 @@ def test_application_imports_legacy_downloader_only_through_adapter():
 
 
 def test_tui_does_not_import_or_construct_legacy_downloader():
-    tui_dir = Path(__file__).parents[1] / "Mornye" / "tui"
+    tui_dir = Path(__file__).parents[1] / "mornye" / "tui"
 
     for path in tui_dir.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -120,7 +120,7 @@ def test_tui_does_not_import_or_construct_legacy_downloader():
 
 
 def test_application_core_does_not_import_ui_or_web_implementation():
-    application_dir = Path(__file__).parents[1] / "Mornye" / "application"
+    application_dir = Path(__file__).parents[1] / "mornye" / "application"
     forbidden = {
         "mornye.app",
         "mornye.tui",
@@ -143,7 +143,7 @@ def test_post_processing_is_exposed_as_application_boundary():
     assert (
         "PostProcessingService"
         in (
-            Path(__file__).parents[1] / "Mornye" / "application" / "__init__.py"
+            Path(__file__).parents[1] / "mornye" / "application" / "__init__.py"
         ).read_text()
     )
 
@@ -152,7 +152,7 @@ def test_download_worker_orchestration_is_application_owned():
     assert ApplicationDownloadWorker.__module__ == "mornye.application.download_worker"
     assert (
         "class LegacyDownloadWorker"
-        in (Path(__file__).parents[1] / "Mornye" / "downloader.py").read_text()
+        in (Path(__file__).parents[1] / "mornye" / "downloader.py").read_text()
     )
 
 
@@ -791,7 +791,7 @@ def test_production_legacy_adapter_rejects_unstructured_results():
 def test_legacy_adapter_has_no_synthetic_tmp_result_path():
     adapter_source = (
         Path(__file__).parents[1]
-        / "Mornye"
+        / "mornye"
         / "application"
         / "legacy_download_adapter.py"
     ).read_text()

@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-EXTENSIONS = Path(__file__).resolve().parents[1] / "Mornye" / "extensions"
+EXTENSIONS = Path(__file__).resolve().parents[1] / "mornye" / "extensions"
 FSGUARD = EXTENSIONS / "_fsguard.js"
 NETGUARD = EXTENSIONS / "_netguard.js"
 
@@ -104,7 +104,7 @@ def test_the_trust_store_cannot_be_written(extdir, scratch) -> None:
 
 @pytest.mark.parametrize(
     "relative",
-    [".ssh/authorized_keys", ".bashrc", ".zshrc", ".config/spotiflac_probe"],
+    [".ssh/authorized_keys", ".bashrc", ".zshrc", ".config/mornye_probe"],
 )
 def test_the_home_directory_is_off_limits(extdir, scratch, relative) -> None:
     assert _write(Path.home() / relative, cwd=extdir, tmpdir=scratch) == "blocked"

@@ -40,11 +40,9 @@ from ..core.paths import data_path
 logger = logging.getLogger(__name__)
 
 DIRECTORY_ENV_KEY = "MORNYE_REGISTRY_DIRECTORIES"
-LEGACY_DIRECTORY_ENV_KEY = "SPOTIFLAC_REGISTRY_DIRECTORIES"
 ENV_FILES_TO_CHECK = (
     Path.cwd() / ".env",
     Path.home() / ".mornye_env",
-    Path.home() / ".spotiflac_env",
 )
 CONFIG_FILE = data_path("directory_settings.json")
 
@@ -134,34 +132,10 @@ def _env_file_urls() -> list[str]:
                     continue
                 if stripped.startswith("export "):
                     stripped = stripped[7:].strip()
-                if stripped.startswith(
-                    (
-                        f"{DIRECTORY_ENV_KEY}=",
-                        f"{LEGACY_DIRECTORY_ENV_KEY}=",
-                    )
-                ):
+                if stripped.startswith(f"{DIRECTORY_ENV_KEY}="):
                     key, val = stripped.split("=", 1)
                     file_values[key] = val.strip().strip("'\"")
-            if DIRECTORY_ENV_KEY in file_values:
-                val = file_values[DIRECTORY_ENV_KEY]
-                if (
-                    LEGACY_DIRECTORY_ENV_KEY in file_values
-                    and file_values[LEGACY_DIRECTORY_ENV_KEY] != val
-                ):
-                    logger.warning(
-                        "[Directories] Ignoring conflicting legacy directory "
-                        "configuration in %s.",
-                        p.name,
-                    )
-            else:
-                val = file_values.get(LEGACY_DIRECTORY_ENV_KEY, "")
-                if val:
-                    logger.warning(
-                        "[Directories] %s in %s is deprecated; use %s.",
-                        LEGACY_DIRECTORY_ENV_KEY,
-                        p.name,
-                        DIRECTORY_ENV_KEY,
-                    )
+            val = file_values.get(DIRECTORY_ENV_KEY, "")
             found.extend(u.strip() for u in val.split(",") if u.strip())
         except (OSError, UnicodeError) as exc:
             logger.warning(

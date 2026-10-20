@@ -448,6 +448,7 @@ def resolve_short_link(uri: str) -> str:
         logger.debug("[spotify] short link %s could not be resolved: %s", uri, exc)
     return ""
 
+
 def _checked_id(uri: str, raw_id: str) -> str:
     """A Spotify id is exactly 22 base-62 characters.
 

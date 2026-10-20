@@ -24,18 +24,6 @@ set -e
 #   MORNYE_CACHE_DIR     regenerable cache (default $MORNYE_DATA_DIR/.cache)
 #   MORNYE_DOWNLOAD_DIR  where --web saves music (default ~/Music/Mornye)
 # ==============================================================================
-if [ -z "${MORNYE_DATA_DIR:-}" ] && [ -n "${SPOTIFLAC_DATA_DIR:-}" ]; then
-  MORNYE_DATA_DIR="$SPOTIFLAC_DATA_DIR"
-fi
-if [ -z "${MORNYE_CACHE_DIR:-}" ] && [ -n "${SPOTIFLAC_CACHE_DIR:-}" ]; then
-  MORNYE_CACHE_DIR="$SPOTIFLAC_CACHE_DIR"
-fi
-if [ -z "${MORNYE_EXT_DIR:-}" ] && [ -n "${SPOTIFLAC_EXT_DIR:-}" ]; then
-  MORNYE_EXT_DIR="$SPOTIFLAC_EXT_DIR"
-fi
-if [ -z "${MORNYE_DOWNLOAD_DIR:-}" ] && [ -n "${SPOTIFLAC_DOWNLOAD_DIR:-}" ]; then
-  MORNYE_DOWNLOAD_DIR="$SPOTIFLAC_DOWNLOAD_DIR"
-fi
 : "${MORNYE_DATA_DIR:=${HOME:-/home/mornye}/.mornye}"
 export MORNYE_DATA_DIR
 
@@ -101,7 +89,7 @@ fi
 #   -p 8000:8000 \
 #   -e MORNYE_REGISTRIES=https://example.com/my-registry.json \
 #   -v "$(pwd)/downloads:/app/downloads" \
-#   -v "$(pwd)/.spotiflac_docker:/home/mornye/.mornye" \
+#   -v "$(pwd)/.mornye_docker:/home/mornye/.mornye" \
 #   mornye --web --host 0.0.0.0 --port 8000
 #
 # Note: --host 0.0.0.0 is required here (not the CLI default 127.0.0.1),
@@ -131,7 +119,7 @@ sleep 1
 # docker run --rm -it \
 #   -p 6080:6080 \
 #   -v "$(pwd)/downloads:/app/downloads" \
-#   -v "$(pwd)/.spotiflac_docker:/home/mornye/.mornye" \
+#   -v "$(pwd)/.mornye_docker:/home/mornye/.mornye" \
 #   --shm-size=1g \
 #   mornye "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" \
 #   /app/downloads -s amazon -v
@@ -162,7 +150,7 @@ if [ "$#" -eq 0 ]; then
   echo "  docker run --rm -it \\"
   echo "    -p 6080:6080 \\"
   echo "    -v \"\$(pwd)/downloads:/app/downloads\" \\"
-  echo "    -v \"\$(pwd)/.spotiflac_docker:/home/mornye/.mornye\" \\"
+  echo "    -v \"\$(pwd)/.mornye_docker:/home/mornye/.mornye\" \\"
   echo "    --shm-size=1g \\"
   echo "    mornye \"https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT\" \\"
   echo "    /app/downloads -s amazon -v"

@@ -289,7 +289,7 @@ def _no_providers_error_message(services: list[str]) -> str:
             "exclusively through installed extensions, and no extension "
             "registry is currently configured, so none were ever installed.\n"
             "Fix: export a registry URL with MORNYE_REGISTRIES, or add it "
-            "to a .env file (in the project folder or ~/.spotiflac_env), e.g.:\n"
+            "to a .env file (in the project folder or ~/.mornye_env), e.g.:\n"
             '  export MORNYE_REGISTRIES="https://your-registry-url/registry.json"\n'
             "or in .env:\n"
             "  MORNYE_REGISTRIES=https://your-registry-url/registry.json\n"

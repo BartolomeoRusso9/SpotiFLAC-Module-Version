@@ -53,15 +53,6 @@ def test_correct_query_token_grants_a_cookie_for_later_requests() -> None:
     assert resp2.status_code == 200
 
 
-def test_legacy_token_cookie_remains_valid_during_migration() -> None:
-    app = webapp.create_app(token="s3cret")
-    client = TestClient(app)
-    client.cookies.set(webapp.LEGACY_WEB_TOKEN_COOKIE, "s3cret")
-
-    assert client.get("/").status_code == 200
-    assert client.post("/api/get_version").status_code == 200
-
-
 def test_websocket_rejects_missing_or_wrong_token() -> None:
     app = webapp.create_app(token="s3cret")
     client = TestClient(app)

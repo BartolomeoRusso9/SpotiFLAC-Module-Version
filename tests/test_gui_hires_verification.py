@@ -16,10 +16,10 @@ from pathlib import Path
 import pytest
 
 from mornye.app import MornyeAPI
-from mornye import __file__ as spotiflac_file
+from mornye import __file__ as mornye_file
 from tests.application_download_capture import capture_service
 
-FRONTEND = Path(spotiflac_file).parent / "frontend"
+FRONTEND = Path(mornye_file).parent / "frontend"
 
 
 class _FakeTrack:

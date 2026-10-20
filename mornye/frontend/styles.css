@@ -532,7 +532,7 @@
     }
     .hero-icon {
       width: 72px; height: 72px; border-radius: var(--radius-lg);
-      background: var(--surface2);
+      background: #204d4e;
       display: block;
       box-shadow: var(--elev-1);
       object-fit: contain; padding: var(--sp-3); box-sizing: border-box;
