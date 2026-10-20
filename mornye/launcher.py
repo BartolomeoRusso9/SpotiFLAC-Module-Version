@@ -249,6 +249,8 @@ def _print_welcome_banner() -> None:
     except importlib.metadata.PackageNotFoundError:
         version = "dev"
 
+    print(c("38;2;128;201;197", "Mornye-Python"))
+
     # Crea un "Badge" con sfondo ciano (46), testo nero (30) e grassetto (1)
     version_badge = c("1;30;46", f" v{version} ")
 

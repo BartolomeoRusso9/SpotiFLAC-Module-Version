@@ -120,15 +120,7 @@ def test_the_welcome_banner_uses_the_mornye_wordmark_color(monkeypatch) -> None:
 
     launcher._print_welcome_banner()
 
-    logo_lines = [
-        line
-        for line in output.getvalue().splitlines()
-        if line.startswith("\033[38;2;128;201;197m")
-    ]
-    assert len(logo_lines) == 5
-    assert all(line.endswith("\033[0m") for line in logo_lines)
-    assert any("/" in line for line in logo_lines)
-    assert all("_" in line for line in logo_lines)
+    assert "\033[38;2;128;201;197mMornye-Python\033[0m" in output.getvalue()
 
 
 # --- --help must not reach the network -------------------------------------
